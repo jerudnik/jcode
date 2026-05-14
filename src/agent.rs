@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 mod compaction;
+mod context_pruning;
 mod environment;
 mod interrupts;
 mod messages;
@@ -592,6 +593,15 @@ impl Agent {
                             }
                         }
                         let mut messages = manager.messages_for_api_with(all_messages);
+                        let prune_stats = context_pruning::prune_provider_messages(&mut messages);
+                        if prune_stats != context_pruning::PruneStats::default() {
+                            logging::info(&format!(
+                                "[context_pruning] provider payload pruned: duplicate_tool_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
+                                prune_stats.duplicate_tool_results,
+                                prune_stats.stale_error_inputs,
+                                prune_stats.chars_saved,
+                            ));
+                        }
                         let before_count = messages.len();
                         let before_tokens = estimate_message_tokens(&messages);
                         let before_json_chars = stable_json_len(&messages);
@@ -646,7 +656,16 @@ impl Agent {
         }
 
         let all_messages = self.session.provider_messages();
-        let messages = all_messages.to_vec();
+        let mut messages = all_messages.to_vec();
+        let prune_stats = context_pruning::prune_provider_messages(&mut messages);
+        if prune_stats != context_pruning::PruneStats::default() {
+            logging::info(&format!(
+                "[context_pruning] provider payload pruned: duplicate_tool_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
+                prune_stats.duplicate_tool_results,
+                prune_stats.stale_error_inputs,
+                prune_stats.chars_saved,
+            ));
+        }
         let user_count = messages
             .iter()
             .filter(|message| matches!(message.role, Role::User))
