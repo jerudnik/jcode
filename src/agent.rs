@@ -596,8 +596,9 @@ impl Agent {
                         let prune_stats = context_pruning::prune_provider_messages(&mut messages);
                         if prune_stats != context_pruning::PruneStats::default() {
                             logging::info(&format!(
-                                "[context_pruning] provider payload pruned: duplicate_tool_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
+                                "[context_pruning] provider payload pruned: duplicate_tool_results={}, superseded_failed_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
                                 prune_stats.duplicate_tool_results,
+                                prune_stats.superseded_failed_results,
                                 prune_stats.stale_error_inputs,
                                 prune_stats.chars_saved,
                             ));
@@ -660,8 +661,9 @@ impl Agent {
         let prune_stats = context_pruning::prune_provider_messages(&mut messages);
         if prune_stats != context_pruning::PruneStats::default() {
             logging::info(&format!(
-                "[context_pruning] provider payload pruned: duplicate_tool_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
+                "[context_pruning] provider payload pruned: duplicate_tool_results={}, superseded_failed_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
                 prune_stats.duplicate_tool_results,
+                prune_stats.superseded_failed_results,
                 prune_stats.stale_error_inputs,
                 prune_stats.chars_saved,
             ));
