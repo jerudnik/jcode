@@ -375,6 +375,49 @@ fn test_hard_compact_preserves_recent_turns() {
     );
 }
 
+#[tokio::test]
+async fn test_blocking_threshold_hard_compacts_before_critical() {
+    let mut manager = CompactionManager::new().with_budget(1_000);
+    let mut messages = Vec::new();
+    for i in 0..25 {
+        messages.push(make_text_message(
+            Role::User,
+            &format!("turn {} content {}", i, "z".repeat(80)),
+        ));
+        manager.notify_message_added();
+    }
+    manager.update_observed_input_tokens(750);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
+    let action = manager.ensure_context_fits(&messages, provider);
+    assert!(
+        matches!(action, CompactionAction::HardCompacted(_)),
+        "should synchronously compact at the blocking threshold before the critical threshold"
+    );
+}
+
+#[test]
+fn test_hard_compact_retention_ratchets_up_under_pressure() {
+    let mut manager = CompactionManager::new().with_budget(1_000);
+    let mut messages = Vec::new();
+    for i in 0..30 {
+        messages.push(make_text_message(Role::User, &format!("turn {}", i)));
+        manager.notify_message_added();
+    }
+    manager.update_observed_input_tokens(950);
+
+    manager
+        .hard_compact_with(&messages)
+        .expect("should compact under pressure");
+
+    let api_messages = manager.messages_for_api_with(&messages);
+    assert_eq!(
+        api_messages.len(),
+        MIN_TURNS_TO_KEEP + 1,
+        "critical pressure should keep only the minimum recent turns plus summary"
+    );
+}
+
 // ── safe_compaction_cutoff: tool call/result pair integrity ─────────
 
 #[test]
