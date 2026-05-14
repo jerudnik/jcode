@@ -416,9 +416,9 @@ impl RemoteConnection {
         if let Err(error) = result {
             let kind = error.kind();
             let disconnect_hint = match kind {
-                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => {
-                    "peer disconnected"
-                }
+                ErrorKind::BrokenPipe
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted => "peer disconnected",
                 _ => "io error",
             };
             crate::logging::warn(&format!(

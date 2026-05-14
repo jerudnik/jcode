@@ -94,7 +94,11 @@ fn message_hashes(messages: &[Message]) -> Vec<u64> {
 }
 
 fn estimate_message_tokens(messages: &[Message]) -> usize {
-    messages.iter().map(crate::compaction::message_char_count).sum::<usize>() / 4
+    messages
+        .iter()
+        .map(crate::compaction::message_char_count)
+        .sum::<usize>()
+        / 4
 }
 
 fn kv_cache_request_event(
@@ -254,7 +258,10 @@ impl Agent {
         }
         logging::info(&format!(
             "Provider request budget: messages={}, estimated_tokens={}, context_window={}, request_json_chars={}",
-            messages.len(), estimated_tokens, context_window, request_json_chars
+            messages.len(),
+            estimated_tokens,
+            context_window,
+            request_json_chars
         ));
         Ok(())
     }
@@ -589,7 +596,8 @@ impl Agent {
                         let before_tokens = estimate_message_tokens(&messages);
                         let before_json_chars = stable_json_len(&messages);
                         if before_json_chars > MAX_PROVIDER_REQUEST_JSON_CHARS
-                            || before_tokens > self.provider.context_window().saturating_mul(11) / 10
+                            || before_tokens
+                                > self.provider.context_window().saturating_mul(11) / 10
                         {
                             let truncated = crate::compaction::emergency_truncate_tool_results(
                                 &mut messages,
