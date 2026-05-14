@@ -564,6 +564,58 @@ impl Agent {
                                 prune_stats.chars_saved,
                             ));
                         }
+
+                        // Token estimates can undercount provider-specific tokenizers, especially
+                        // for local OpenAI-compatible backends. If the JSON payload itself is already
+                        // too large relative to the advertised context window, force a synchronous
+                        // hard compaction before making the provider call instead of hoping the
+                        // background compactor wins the race.
+                        let payload_risk_json_chars = self
+                            .provider
+                            .context_window()
+                            .saturating_mul(2)
+                            .max(64 * 1024);
+                        let pre_guard_tokens = estimate_message_tokens(&messages);
+                        let pre_guard_json_chars = stable_json_len(&messages);
+                        if pre_guard_json_chars > payload_risk_json_chars {
+                            logging::warn(&format!(
+                                "[compaction] Provider payload char budget exceeded before request: request_json_chars={}, max_safe_json_chars={}, estimated_tokens={}, context_window={} — performing synchronous hard compact",
+                                pre_guard_json_chars,
+                                payload_risk_json_chars,
+                                pre_guard_tokens,
+                                self.provider.context_window(),
+                            ));
+                            match manager.hard_compact_with(all_messages) {
+                                Ok(dropped) => {
+                                    messages = manager.messages_for_api_with(all_messages);
+                                    let prune_stats =
+                                        context_pruning::prune_provider_messages(&mut messages);
+                                    if prune_stats != context_pruning::PruneStats::default() {
+                                        logging::info(&format!(
+                                            "[context_pruning] provider payload pruned after hard compact: duplicate_tool_results={}, superseded_failed_results={}, stale_error_inputs={}, chars_saved={}, persisted=false",
+                                            prune_stats.duplicate_tool_results,
+                                            prune_stats.superseded_failed_results,
+                                            prune_stats.stale_error_inputs,
+                                            prune_stats.chars_saved,
+                                        ));
+                                    }
+                                    logging::warn(&format!(
+                                        "[compaction] Provider payload hard compact dropped {} messages: request_json_chars {}->{}, estimated_tokens {}->{}",
+                                        dropped,
+                                        pre_guard_json_chars,
+                                        stable_json_len(&messages),
+                                        pre_guard_tokens,
+                                        estimate_message_tokens(&messages),
+                                    ));
+                                }
+                                Err(reason) => {
+                                    logging::error(&format!(
+                                        "[compaction] Provider payload hard compact failed: {}",
+                                        reason
+                                    ));
+                                }
+                            }
+                        }
                         let before_count = messages.len();
                         let before_tokens = estimate_message_tokens(&messages);
                         let before_json_chars = stable_json_len(&messages);
