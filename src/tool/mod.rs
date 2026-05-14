@@ -31,6 +31,7 @@ mod task;
 mod todo;
 mod webfetch;
 mod websearch;
+mod wm;
 mod write;
 
 use crate::compaction::CompactionManager;
@@ -169,6 +170,7 @@ impl Registry {
             Self::insert_tool_timed(&mut m, &mut timings, "lsp", lsp::LspTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "todo", todo::TodoTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "bg", bg::BgTool::new);
+            Self::insert_tool_timed(&mut m, &mut timings, "wm", wm::WmTool::new);
             Self::insert_tool_timed(
                 &mut m,
                 &mut timings,
