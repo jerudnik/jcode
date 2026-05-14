@@ -359,12 +359,24 @@ pub fn build_emergency_summary_text(
     token_budget: usize,
     dropped_messages: &[Message],
 ) -> String {
+    const MAX_EXISTING_SUMMARY_CHARS_IN_EMERGENCY: usize = 24_000;
     let mut summary_parts: Vec<String> = Vec::new();
 
     if let Some(existing) = existing_summary
         && !existing.is_empty()
     {
-        summary_parts.push(existing.to_string());
+        if existing.len() > MAX_EXISTING_SUMMARY_CHARS_IN_EMERGENCY {
+            summary_parts.push(format!(
+                "{}\n\n[Previous summary truncated from {} chars during emergency compaction]",
+                existing
+                    .chars()
+                    .take(MAX_EXISTING_SUMMARY_CHARS_IN_EMERGENCY)
+                    .collect::<String>(),
+                existing.len()
+            ));
+        } else {
+            summary_parts.push(existing.to_string());
+        }
     }
 
     summary_parts.push(format!(

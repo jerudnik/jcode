@@ -112,6 +112,7 @@ impl Agent {
             } else {
                 &messages_with_memory
             };
+            self.check_provider_request_budget(send_messages)?;
             let provider = Arc::clone(&self.provider);
             let resume_session_id = self.provider_session_id.clone();
             self.last_status_detail = None;

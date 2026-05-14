@@ -12,6 +12,7 @@ use crate::transport::{Stream, WriteHalf};
 use crate::tui::remote_diff::RemoteDiffTracker;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::io::ErrorKind;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -343,7 +344,24 @@ impl RemoteConnection {
     async fn send_request(&self, request: Request) -> Result<()> {
         let json = serde_json::to_string(&request)? + "\n";
         let mut w = self.writer.lock().await;
-        w.write_all(json.as_bytes()).await?;
+        if let Err(error) = w.write_all(json.as_bytes()).await {
+            let kind = error.kind();
+            let disconnect_hint = match kind {
+                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => {
+                    "peer disconnected"
+                }
+                _ => "io error",
+            };
+            crate::logging::warn(&format!(
+                "RemoteConnection::send_request failed: {} ({:?}); session_id={:?}, client_instance_id={:?}, request_json_chars={}",
+                disconnect_hint,
+                kind,
+                self.session_id,
+                self.client_instance_id,
+                json.len(),
+            ));
+            return Err(error.into());
+        }
         Ok(())
     }
 

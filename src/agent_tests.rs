@@ -5,6 +5,7 @@ use crate::provider::{EventStream, Provider};
 use crate::tool::Registry;
 use crate::tool::ToolOutput;
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -14,6 +15,13 @@ struct DelayedProvider {
 }
 
 struct NativeAutoCompactionProvider;
+
+struct JcodeCompactionProvider;
+
+#[derive(Default)]
+struct AlwaysContextLimitProvider {
+    calls: Arc<AtomicUsize>,
+}
 
 #[async_trait]
 impl Provider for DelayedProvider {
@@ -90,6 +98,84 @@ impl Provider for NativeAutoCompactionProvider {
 
     async fn complete_simple(&self, _prompt: &str, _system: &str) -> Result<String> {
         Ok("manual summary from native-auto provider".to_string())
+    }
+}
+
+#[async_trait]
+impl Provider for JcodeCompactionProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let (_tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(1);
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+
+    fn name(&self) -> &str {
+        "test-jcode-compaction"
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn uses_jcode_compaction(&self) -> bool {
+        true
+    }
+
+    fn context_window(&self) -> usize {
+        1_000
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self)
+    }
+
+    async fn complete_simple(&self, _prompt: &str, _system: &str) -> Result<String> {
+        Ok("summary".to_string())
+    }
+}
+
+#[async_trait]
+impl Provider for AlwaysContextLimitProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(anyhow::anyhow!("context length exceeded"))
+    }
+
+    fn name(&self) -> &str {
+        "always-context-limit"
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn uses_jcode_compaction(&self) -> bool {
+        true
+    }
+
+    fn context_window(&self) -> usize {
+        1_000
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self {
+            calls: Arc::clone(&self.calls),
+        })
+    }
+
+    async fn complete_simple(&self, _prompt: &str, _system: &str) -> Result<String> {
+        Ok("summary".to_string())
     }
 }
 
@@ -357,6 +443,132 @@ async fn messages_for_provider_applies_manual_compaction_in_native_auto_mode() {
         }
         other => panic!("expected text summary block, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn hard_compaction_reduces_provider_payload_with_huge_existing_summary() {
+    let provider: Arc<dyn Provider> = Arc::new(JcodeCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    for i in 0..1_200 {
+        agent.add_message(
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            vec![ContentBlock::Text {
+                text: format!("message {i} {}", "x".repeat(200)),
+                cache_control: None,
+            }],
+        );
+    }
+
+    agent.session.compaction = Some(crate::session::StoredCompactionState {
+        summary_text: "oversized prior summary ".repeat(40_000),
+        openai_encrypted_content: None,
+        covers_up_to_turn: 1,
+        original_turn_count: 1,
+        compacted_count: 1,
+    });
+    agent.seed_compaction_from_session();
+
+    let original_len = agent.session.messages_for_provider_uncached().len();
+    let (messages, event) = agent.messages_for_provider();
+    assert!(event.is_some(), "critical session should hard compact");
+    assert!(
+        messages.len() < original_len / 10,
+        "payload was not reduced: {} >= {original_len}/10",
+        messages.len()
+    );
+    assert!(
+        stable_json_len(&messages) < 1_500_000,
+        "payload guard should keep request below hard JSON cap"
+    );
+    let ContentBlock::Text { text, .. } = &messages[0].content[0] else {
+        panic!("expected text summary");
+    };
+    assert!(text.contains("Previous summary truncated"));
+}
+
+#[tokio::test]
+async fn provider_request_budget_guard_fails_closed() {
+    let provider: Arc<dyn Provider> = Arc::new(JcodeCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    let messages = vec![Message::user(&"x".repeat(1_600_000))];
+    let err = agent
+        .check_provider_request_budget(&messages)
+        .expect_err("oversized request should be aborted before provider call");
+    assert!(
+        err.to_string()
+            .contains("Provider request aborted by context budget guard")
+    );
+}
+
+#[tokio::test]
+async fn large_tool_outputs_are_truncated_before_provider_retry_payload() {
+    let provider: Arc<dyn Provider> = Arc::new(JcodeCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    for i in 0..30 {
+        agent.add_message(
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            vec![ContentBlock::Text {
+                text: format!("message {i} {}", "x".repeat(100)),
+                cache_control: None,
+            }],
+        );
+    }
+    agent.add_message(
+        Role::User,
+        vec![ContentBlock::ToolResult {
+            tool_use_id: "call_large".to_string(),
+            content: "z".repeat(1_600_000),
+            is_error: None,
+        }],
+    );
+
+    let (messages, _event) = agent.messages_for_provider();
+    assert!(stable_json_len(&messages) < 1_500_000);
+    assert!(messages.iter().any(|message| {
+        message.content.iter().any(|block| {
+            matches!(
+                block,
+                ContentBlock::ToolResult { content, .. }
+                    if content.contains("truncated for context recovery")
+            )
+        })
+    }));
+}
+
+#[tokio::test]
+async fn repeated_context_limit_does_not_loop_indefinitely() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider: Arc<dyn Provider> = Arc::new(AlwaysContextLimitProvider {
+        calls: Arc::clone(&calls),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    for i in 0..40 {
+        agent.add_message(
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            vec![ContentBlock::Text {
+                text: format!("message {i} {}", "x".repeat(100)),
+                cache_control: None,
+            }],
+        );
+    }
+
+    let err = agent
+        .run_turn(false)
+        .await
+        .expect_err("persistent context-limit errors should fail closed");
+    assert!(err.to_string().contains("Context limit exceeded"));
+    assert!(
+        calls.load(Ordering::SeqCst) <= 2,
+        "provider was called too many times: {}",
+        calls.load(Ordering::SeqCst)
+    );
 }
 
 // ── InterruptSignal tests ────────────────────────────────────────────────

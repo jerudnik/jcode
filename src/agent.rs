@@ -55,6 +55,7 @@ pub use jcode_agent_runtime::{
 };
 
 const JCODE_NATIVE_TOOLS: &[&str] = &["selfdev", "communicate"];
+const MAX_PROVIDER_REQUEST_JSON_CHARS: usize = 1_500_000;
 static RECOVERED_TEXT_WRAPPED_TOOL_CALLS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 static JCODE_REPO_SOURCE_STATE: LazyLock<(Option<String>, Option<bool>)> = LazyLock::new(|| {
@@ -90,6 +91,10 @@ fn stable_json_len<T: serde::Serialize + ?Sized>(value: &T) -> usize {
 
 fn message_hashes(messages: &[Message]) -> Vec<u64> {
     messages.iter().map(stable_hash_json).collect()
+}
+
+fn estimate_message_tokens(messages: &[Message]) -> usize {
+    messages.iter().map(crate::compaction::message_char_count).sum::<usize>() / 4
 }
 
 fn kv_cache_request_event(
@@ -190,6 +195,31 @@ pub struct Agent {
 }
 
 impl Agent {
+    pub(super) fn check_provider_request_budget(&self, messages: &[Message]) -> Result<()> {
+        let estimated_tokens = estimate_message_tokens(messages);
+        let request_json_chars = stable_json_len(messages);
+        let context_window = self.provider.context_window();
+        if request_json_chars > MAX_PROVIDER_REQUEST_JSON_CHARS
+            || estimated_tokens > context_window.saturating_mul(11) / 10
+        {
+            let msg = format!(
+                "Provider request aborted by context budget guard: messages={}, estimated_tokens={}, context_window={}, request_json_chars={}, max_request_json_chars={}. Try /compact or start a fresh session.",
+                messages.len(),
+                estimated_tokens,
+                context_window,
+                request_json_chars,
+                MAX_PROVIDER_REQUEST_JSON_CHARS,
+            );
+            logging::error(&msg);
+            return Err(anyhow::anyhow!(msg));
+        }
+        logging::info(&format!(
+            "Provider request budget: messages={}, estimated_tokens={}, context_window={}, request_json_chars={}",
+            messages.len(), estimated_tokens, context_window, request_json_chars
+        ));
+        Ok(())
+    }
+
     fn should_track_client_cache(&self) -> bool {
         match std::env::var("JCODE_TRACK_CLIENT_CACHE") {
             Ok(value) => {
@@ -515,7 +545,31 @@ impl Agent {
                                 crate::compaction::CompactionAction::None => {}
                             }
                         }
-                        manager.messages_for_api_with(all_messages)
+                        let mut messages = manager.messages_for_api_with(all_messages);
+                        let before_count = messages.len();
+                        let before_tokens = estimate_message_tokens(&messages);
+                        let before_json_chars = stable_json_len(&messages);
+                        if before_json_chars > MAX_PROVIDER_REQUEST_JSON_CHARS
+                            || before_tokens > self.provider.context_window().saturating_mul(11) / 10
+                        {
+                            let truncated = crate::compaction::emergency_truncate_tool_results(
+                                &mut messages,
+                                crate::compaction::EMERGENCY_TOOL_RESULT_MAX_CHARS,
+                            );
+                            let after_tokens = estimate_message_tokens(&messages);
+                            let after_json_chars = stable_json_len(&messages);
+                            logging::warn(&format!(
+                                "[compaction] Provider payload guard applied: messages {}->{}, estimated_tokens {}->{}, request_json_chars {}->{}, tool_results_truncated={}, persisted=false",
+                                before_count,
+                                messages.len(),
+                                before_tokens,
+                                after_tokens,
+                                before_json_chars,
+                                after_json_chars,
+                                truncated,
+                            ));
+                        }
+                        messages
                     };
                     let event = manager.take_compaction_event();
                     if event.is_some() || discarded_oversized_native {
