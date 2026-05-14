@@ -208,40 +208,40 @@ async fn test_force_compact_applies_summary() {
 // ── ensure_context_fits tests ──────────────────────────────
 
 #[tokio::test]
-async fn test_guard_below_80_does_nothing() {
+async fn test_guard_below_background_threshold_does_nothing() {
     let mut manager = CompactionManager::new().with_budget(10_000);
     let mut messages = Vec::new();
     for i in 0..15 {
         messages.push(make_text_message(Role::User, &format!("msg {}", i)));
         manager.notify_message_added();
     }
-    // Char estimate is tiny, observed tokens well below 80%
-    manager.update_observed_input_tokens(5_000);
+    // Char estimate is tiny, observed tokens below the 35% background threshold.
+    manager.update_observed_input_tokens(3_000);
 
     let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
     let action = manager.ensure_context_fits(&messages, provider);
     assert_eq!(
         action,
         CompactionAction::None,
-        "should do nothing below 80%"
+        "should do nothing below background threshold"
     );
     assert!(
         !manager.is_compacting(),
-        "should NOT start background compaction below 80%"
+        "should NOT start background compaction below background threshold"
     );
     assert_eq!(manager.compacted_count, 0);
 }
 
 #[tokio::test]
-async fn test_guard_between_80_and_95_starts_background_only() {
+async fn test_guard_between_background_and_critical_starts_background_only() {
     let mut manager = CompactionManager::new().with_budget(1_000);
     let mut messages = Vec::new();
     for i in 0..20 {
         messages.push(make_text_message(Role::User, &format!("msg {}", i)));
         manager.notify_message_added();
     }
-    // 85% usage — above 80% threshold but below 95% critical
-    manager.update_observed_input_tokens(850);
+    // 50% usage — above the 35% background threshold but below 85% critical.
+    manager.update_observed_input_tokens(500);
 
     let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
     let action = manager.ensure_context_fits(&messages, provider);
@@ -250,11 +250,11 @@ async fn test_guard_between_80_and_95_starts_background_only() {
         CompactionAction::BackgroundStarted {
             trigger: "reactive".to_string()
         },
-        "should start background compaction at 85%"
+        "should start background compaction at 50%"
     );
     assert!(
         manager.is_compacting(),
-        "SHOULD start background compaction at 85%"
+        "SHOULD start background compaction at 50%"
     );
     assert_eq!(
         manager.compacted_count, 0,
@@ -263,7 +263,7 @@ async fn test_guard_between_80_and_95_starts_background_only() {
 }
 
 #[tokio::test]
-async fn test_guard_at_95_triggers_hard_compact() {
+async fn test_guard_at_critical_threshold_triggers_hard_compact() {
     let mut manager = CompactionManager::new().with_budget(1_000);
     let mut messages = Vec::new();
     for i in 0..20 {
@@ -273,14 +273,14 @@ async fn test_guard_at_95_triggers_hard_compact() {
         ));
         manager.notify_message_added();
     }
-    // 96% usage — above critical threshold
-    manager.update_observed_input_tokens(960);
+    // 86% usage — above the 85% critical threshold.
+    manager.update_observed_input_tokens(860);
 
     let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
     let action = manager.ensure_context_fits(&messages, provider);
     assert!(
         matches!(action, CompactionAction::HardCompacted(_)),
-        "SHOULD hard-compact at 96%"
+        "SHOULD hard-compact at 86%"
     );
     assert!(
         manager.compacted_count > 0,
