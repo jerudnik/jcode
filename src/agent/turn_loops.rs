@@ -3,7 +3,7 @@ use super::*;
 impl Agent {
     /// Run turns until no more tool calls
     /// Maximum number of context-limit compaction retries before giving up.
-    pub(super) const MAX_CONTEXT_LIMIT_RETRIES: u32 = 5;
+    pub(super) const MAX_CONTEXT_LIMIT_RETRIES: u32 = 1;
     pub(super) const MAX_INCOMPLETE_CONTINUATION_ATTEMPTS: u32 = 3;
 
     pub(super) async fn run_turn(&mut self, print_output: bool) -> Result<String> {
@@ -86,6 +86,7 @@ impl Agent {
             } else {
                 &messages_with_memory
             };
+            self.check_provider_request_budget(send_messages)?;
             self.last_status_detail = None;
             let mut stream = match self
                 .provider

@@ -123,9 +123,9 @@ impl Agent {
         let context_limit = self.provider.context_window() as u64;
         let compaction = self.registry.compaction();
 
-        let (dropped, usage_pct) = match compaction.try_write() {
+        let (dropped, usage_pct, post_usage_pct) = match compaction.try_write() {
             Ok(mut manager) => {
-                let (dropped, usage_pct) = {
+                let (dropped, usage_pct, post_usage_pct) = {
                     let all_messages = self.session.provider_messages();
                     manager.update_observed_input_tokens(context_limit);
                     let usage_pct = manager.context_usage_with(all_messages) * 100.0;
@@ -139,10 +139,11 @@ impl Agent {
                             return false;
                         }
                     };
-                    (dropped, usage_pct)
+                    let post_usage_pct = manager.context_usage_with(all_messages) * 100.0;
+                    (dropped, usage_pct, post_usage_pct)
                 };
                 self.sync_session_compaction_state_from_manager(&manager);
-                (dropped, usage_pct)
+                (dropped, usage_pct, post_usage_pct)
             }
             Err(_) => {
                 logging::warn("Context-limit auto-recovery skipped: compaction manager lock busy");
@@ -155,9 +156,17 @@ impl Agent {
         self.provider_session_id = None;
         self.session.provider_session_id = None;
 
+        if post_usage_pct >= usage_pct || dropped == 0 {
+            logging::error(&format!(
+                "Context-limit auto-recovery stopped: hard compaction did not reduce context usage (dropped={}, before={:.1}%, after={:.1}%)",
+                dropped, usage_pct, post_usage_pct
+            ));
+            return false;
+        }
+
         logging::warn(&format!(
-            "Context limit exceeded; auto-compacted and retrying (dropped {} messages, usage was {:.1}%)",
-            dropped, usage_pct
+            "Context limit exceeded; auto-compacted and retrying (dropped {} messages, usage {:.1}% -> {:.1}%)",
+            dropped, usage_pct, post_usage_pct
         ));
         crate::runtime_memory_log::emit_event(
             crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
