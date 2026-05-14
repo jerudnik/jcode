@@ -5,12 +5,17 @@ use std::hash::{Hash, Hasher};
 /// Default token budget (200k tokens - matches Claude's actual context limit)
 pub const DEFAULT_TOKEN_BUDGET: usize = 200_000;
 
-/// Trigger compaction at this percentage of budget
-pub const COMPACTION_THRESHOLD: f32 = 0.80;
+/// Trigger lightweight background compaction at this percentage of budget.
+///
+/// Keep this intentionally early: background summarization can take tens of
+/// seconds on local models, so waiting until 80% risks sending one or more
+/// over-limit requests before the summary is ready.
+pub const COMPACTION_THRESHOLD: f32 = 0.35;
 
 /// If context is above this threshold when compaction starts, do a synchronous
-/// hard-compact (drop old messages) so the API call doesn't fail.
-pub const CRITICAL_THRESHOLD: f32 = 0.95;
+/// hard-compact (drop old messages into an emergency summary) so the API call
+/// doesn't fail while waiting for background summarization.
+pub const CRITICAL_THRESHOLD: f32 = 0.85;
 
 /// Minimum threshold for manual compaction (can compact at any time above this)
 pub const MANUAL_COMPACT_MIN_THRESHOLD: f32 = 0.10;
