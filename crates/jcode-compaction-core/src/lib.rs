@@ -12,6 +12,12 @@ pub const DEFAULT_TOKEN_BUDGET: usize = 200_000;
 /// over-limit requests before the summary is ready.
 pub const COMPACTION_THRESHOLD: f32 = 0.35;
 
+/// If a request is already this full and no completed background summary is
+/// available, block the provider call with a synchronous hard compact. This is
+/// deliberately below the critical threshold so slow local summarizers cannot
+/// race a large request all the way into provider rejection.
+pub const BLOCKING_COMPACTION_THRESHOLD: f32 = 0.70;
+
 /// If context is above this threshold when compaction starts, do a synchronous
 /// hard-compact (drop old messages into an emergency summary) so the API call
 /// doesn't fail while waiting for background summarization.

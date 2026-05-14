@@ -27,11 +27,12 @@ use std::time::Instant;
 use tokio::task::JoinHandle;
 
 pub use jcode_compaction_core::{
-    CHARS_PER_TOKEN, COMPACTION_THRESHOLD, CRITICAL_THRESHOLD, CompactionAction, CompactionEvent,
-    CompactionStats, DEFAULT_TOKEN_BUDGET, EMBED_MAX_CHARS_PER_MSG, EMBEDDING_HISTORY_WINDOW,
-    EMERGENCY_TOOL_RESULT_MAX_CHARS, MANUAL_COMPACT_MIN_THRESHOLD, MIN_TURNS_TO_KEEP,
-    RECENT_TURNS_TO_KEEP, SEMANTIC_EMBED_CACHE_CAPACITY, SUMMARY_PROMPT, SYSTEM_OVERHEAD_TOKENS,
-    Summary, TOKEN_HISTORY_WINDOW, build_compaction_prompt, build_emergency_summary_text,
+    BLOCKING_COMPACTION_THRESHOLD, CHARS_PER_TOKEN, COMPACTION_THRESHOLD, CRITICAL_THRESHOLD,
+    CompactionAction, CompactionEvent, CompactionStats, DEFAULT_TOKEN_BUDGET,
+    EMBED_MAX_CHARS_PER_MSG, EMBEDDING_HISTORY_WINDOW, EMERGENCY_TOOL_RESULT_MAX_CHARS,
+    MANUAL_COMPACT_MIN_THRESHOLD, MIN_TURNS_TO_KEEP, RECENT_TURNS_TO_KEEP,
+    SEMANTIC_EMBED_CACHE_CAPACITY, SUMMARY_PROMPT, SYSTEM_OVERHEAD_TOKENS, Summary,
+    TOKEN_HISTORY_WINDOW, build_compaction_prompt, build_emergency_summary_text,
     compacted_summary_text_block, content_char_count, emergency_truncate_tool_results,
     estimate_compaction_tokens, mean_embedding, message_char_count, safe_compaction_cutoff,
     semantic_cache_key, semantic_goal_text, semantic_message_text, summary_payload_char_count,
@@ -766,6 +767,16 @@ impl CompactionManager {
         self.effective_token_count() as f32 / self.token_budget as f32
     }
 
+    fn recent_turns_to_keep_for_usage(usage: f32) -> usize {
+        if usage >= CRITICAL_THRESHOLD {
+            MIN_TURNS_TO_KEEP
+        } else if usage >= BLOCKING_COMPACTION_THRESHOLD {
+            (RECENT_TURNS_TO_KEEP / 2).max(MIN_TURNS_TO_KEEP)
+        } else {
+            RECENT_TURNS_TO_KEEP
+        }
+    }
+
     /// Check if we should start compaction
     pub fn should_compact_with(&self, all_messages: &[Message]) -> bool {
         use crate::config::CompactionMode;
@@ -871,11 +882,16 @@ impl CompactionManager {
         let bg_started = !was_compacting && self.is_compacting();
 
         let usage = self.context_usage_with(all_messages);
-        if usage >= CRITICAL_THRESHOLD {
+        if usage >= BLOCKING_COMPACTION_THRESHOLD {
+            let threshold = if usage >= CRITICAL_THRESHOLD {
+                CRITICAL_THRESHOLD
+            } else {
+                BLOCKING_COMPACTION_THRESHOLD
+            };
             crate::logging::warn(&format!(
-                "[compaction] Context at {:.1}% (critical threshold {:.0}%) — performing synchronous hard compact",
+                "[compaction] Context at {:.1}% (blocking threshold {:.0}%) — performing synchronous hard compact",
                 usage * 100.0,
-                CRITICAL_THRESHOLD * 100.0,
+                threshold * 100.0,
             ));
             match self.hard_compact_with(all_messages) {
                 Ok(dropped) => {
@@ -1328,7 +1344,9 @@ impl CompactionManager {
                 remaining_suffix_chars[idx + 1].saturating_add(active_char_counts[idx]);
         }
 
-        let mut turns_to_keep = RECENT_TURNS_TO_KEEP.min(active.len().saturating_sub(1));
+        let usage = self.context_usage_with(all_messages);
+        let target_recent = Self::recent_turns_to_keep_for_usage(usage);
+        let mut turns_to_keep = target_recent.min(active.len().saturating_sub(1));
         let mut cutoff;
         loop {
             cutoff = active.len().saturating_sub(turns_to_keep);

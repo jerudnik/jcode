@@ -807,6 +807,7 @@ async fn run_single_message_command_plain_with_auto_poke(
     let mut turns_completed = 0usize;
     loop {
         agent.run_once(&next_message).await?;
+        agent.poll_compaction_completion_event();
         turns_completed += 1;
         if !run_command_auto_poke_enabled() {
             break;
@@ -843,6 +844,7 @@ async fn run_single_message_command_capture_with_auto_poke(
     let mut turns_completed = 0usize;
     loop {
         outputs.push(agent.run_once_capture(&next_message).await?);
+        agent.poll_compaction_completion_event();
         turns_completed += 1;
         if !run_command_auto_poke_enabled() {
             break;
@@ -936,6 +938,7 @@ async fn run_single_message_command_ndjson(
             result = Err(err);
             break;
         }
+        agent.poll_compaction_completion_event();
         turns_completed += 1;
         if !run_command_auto_poke_enabled() {
             break;
