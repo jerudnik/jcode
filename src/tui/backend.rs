@@ -347,9 +347,9 @@ impl RemoteConnection {
         if let Err(error) = w.write_all(json.as_bytes()).await {
             let kind = error.kind();
             let disconnect_hint = match kind {
-                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => {
-                    "peer disconnected"
-                }
+                ErrorKind::BrokenPipe
+                | ErrorKind::ConnectionReset
+                | ErrorKind::ConnectionAborted => "peer disconnected",
                 _ => "io error",
             };
             crate::logging::warn(&format!(

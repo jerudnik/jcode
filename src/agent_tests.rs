@@ -453,7 +453,11 @@ async fn hard_compaction_reduces_provider_payload_with_huge_existing_summary() {
 
     for i in 0..1_200 {
         agent.add_message(
-            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            },
             vec![ContentBlock::Text {
                 text: format!("message {i} {}", "x".repeat(200)),
                 cache_control: None,
@@ -511,7 +515,11 @@ async fn large_tool_outputs_are_truncated_before_provider_retry_payload() {
 
     for i in 0..30 {
         agent.add_message(
-            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            },
             vec![ContentBlock::Text {
                 text: format!("message {i} {}", "x".repeat(100)),
                 cache_control: None,
@@ -551,7 +559,11 @@ async fn repeated_context_limit_does_not_loop_indefinitely() {
 
     for i in 0..40 {
         agent.add_message(
-            if i % 2 == 0 { Role::User } else { Role::Assistant },
+            if i % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            },
             vec![ContentBlock::Text {
                 text: format!("message {i} {}", "x".repeat(100)),
                 cache_control: None,
