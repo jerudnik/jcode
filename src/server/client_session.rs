@@ -397,6 +397,7 @@ pub(super) async fn handle_subscribe(
     id: u64,
     subscribe_working_dir: Option<String>,
     terminal_env: Option<Vec<(String, String)>>,
+    session_kind: Option<String>,
     selfdev: Option<bool>,
     register_mcp_tools: bool,
     client_selfdev: &mut bool,
@@ -586,6 +587,14 @@ pub(super) async fn handle_subscribe(
     if let Some(env) = terminal_env {
         let mut agent_guard = agent.lock().await;
         agent_guard.set_terminal_env(Some(env));
+    }
+
+    if let Some(kind) = session_kind
+        .as_deref()
+        .and_then(crate::session::SessionKind::from_wire)
+    {
+        let mut agent_guard = agent.lock().await;
+        agent_guard.set_session_kind(kind);
     }
 
     let should_selfdev = *client_selfdev || matches!(selfdev, Some(true));

@@ -1215,7 +1215,12 @@ fn terminal_context_env() -> Option<Vec<(String, String)>> {
     (!values.is_empty()).then_some(values)
 }
 
-pub(crate) fn subscribe_metadata() -> (Option<String>, Option<Vec<(String, String)>>, Option<bool>) {
+pub(crate) fn subscribe_metadata() -> (
+    Option<String>,
+    Option<Vec<(String, String)>>,
+    Option<String>,
+    Option<bool>,
+) {
     let working_dir = std::env::current_dir().ok();
     let working_dir_str = working_dir.as_ref().map(|p| p.display().to_string());
 
@@ -1234,6 +1239,9 @@ pub(crate) fn subscribe_metadata() -> (Option<String>, Option<Vec<(String, Strin
     (
         working_dir_str,
         terminal_context_env(),
+        std::env::var("JCODE_SESSION_KIND")
+            .ok()
+            .filter(|value| !value.trim().is_empty()),
         if selfdev { Some(true) } else { None },
     )
 }

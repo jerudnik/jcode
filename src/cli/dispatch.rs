@@ -62,6 +62,11 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         Some(Command::Connect) => {
             tui_launch::run_client().await?;
         }
+        Some(Command::Meta) => {
+            crate::env::set_var("JCODE_SESSION_KIND", "meta");
+            crate::env::set_var("JCODE_SESSION_TITLE", "jcode-meta");
+            tui_launch::run_client().await?;
+        }
         Some(Command::Run {
             message,
             json,

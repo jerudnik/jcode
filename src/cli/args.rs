@@ -108,6 +108,9 @@ pub(crate) enum Command {
     /// Connect to a running server
     Connect,
 
+    /// Start a persistent conversational workspace co-manager session
+    Meta,
+
     /// Run a single message and exit
     Run {
         /// Emit a machine-readable JSON result instead of streaming text
