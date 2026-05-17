@@ -26,6 +26,61 @@ use std::cell::Cell;
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+/// Ambient environment variables scrubbed once at first
+/// `lock_test_env()` so that dev shells with real credentials cannot
+/// pollute tests that read provider auth via `std::env::var`.
+///
+/// Order matters only insofar as adding a new var here is a "default
+/// deny" — tests that need the var must set + restore it explicitly.
+/// Provider-config env vars (e.g. `JCODE_ACTIVE_PROVIDER`,
+/// `JCODE_SOCKET`, `JCODE_NON_INTERACTIVE`) are scrubbed here too so
+/// the dev shell's ambient `selfdev` / `non_interactive` state doesn't
+/// flip TUI / dispatch code paths under test.
+#[cfg(test)]
+const TEST_ENV_SCRUB_LIST: &[&str] = &[
+    // OpenAI / Codex
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    // Anthropic
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    // OpenRouter
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    // Google / Gemini
+    "GOOGLE_API_KEY",
+    "GOOGLE_GENERATIVE_AI_API_KEY",
+    "GEMINI_API_KEY",
+    // GitHub (Copilot, etc.)
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    // AWS / Bedrock
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_PROFILE",
+    // Azure
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    // DeepSeek / Together / etc. (generic catch)
+    "DEEPSEEK_API_KEY",
+    "TOGETHER_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "FIREWORKS_API_KEY",
+    "XAI_API_KEY",
+    // Jcode runtime/dispatch state that should not leak from a live
+    // self-dev shell into unit tests.
+    "JCODE_SOCKET",
+    "JCODE_NON_INTERACTIVE",
+    "JCODE_ACTIVE_PROVIDER",
+    "JCODE_ACTIVE_MODEL",
+    "JCODE_FORCE_HEADLESS",
+];
+
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static Mutex<()> {
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -46,6 +101,21 @@ pub(crate) fn test_env_lock() -> &'static Mutex<()> {
         // pattern, not by relying on ambient env.
         crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, "1");
         crate::env::set_var(crate::terminal_launch::DISABLE_ENV_VAR, "1");
+
+        // Scrub ambient developer / CI credentials that would otherwise
+        // leak into tests that read them via `std::env::var` (e.g.
+        // `auth::codex::load_credentials`, OpenRouter provider auto-detect,
+        // AWS Bedrock detect, etc.). Tests that need specific provider
+        // credentials must set them explicitly under `lock_test_env()`.
+        //
+        // We scrub at OnceLock-init time so it happens exactly once,
+        // before any test thread races past us. Individual tests that
+        // legitimately need one of these (rare; should use a TestJcodeHome
+        // + EnvVarGuard) can set + restore it within their scope.
+        for var in TEST_ENV_SCRUB_LIST {
+            crate::env::remove_var(var);
+        }
+
         Mutex::new(())
     })
 }
