@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: sync-master-and-rebase-dev
@@ -88,3 +89,44 @@ jobs:
           else
             git push --force-with-lease origin HEAD:dev
           fi
+
+      - name: Open Copilot fix issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Fix failed upstream sync for dev"
+          existing=$(gh issue list --state open --search "repo:${{ github.repository }} in:title \"$title\"" --json number --jq '.[0].number // empty')
+          body_file=$(mktemp)
+          cat > "$body_file" <<EOF
+          The scheduled upstream sync failed.
+
+          Please investigate and fix the failure, then update the appropriate branch.
+
+          Context:
+          - Workflow run: $RUN_URL
+          - Default branch: master
+          - Dev branch: dev
+          - Upstream: https://github.com/1jehuang/jcode master
+          - Validation command: \`nix develop --command cargo build --profile selfdev -p jcode --bin jcode\`
+
+          Desired behavior:
+          1. Keep \`origin/master\` as upstream-compatible plus the flake/workflow support commits.
+          2. Only update \`origin/master\` after the upstream merge builds successfully.
+          3. Rebase \`origin/dev\` onto the validated \`origin/master\`.
+          4. Only force-push \`origin/dev\` after the rebased branch builds successfully.
+
+          If this issue is assigned to GitHub Copilot coding agent, please open a PR with the fix.
+          EOF
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "$body_file"
+            issue="$existing"
+          else
+            issue_url=$(gh issue create --title "$title" --body-file "$body_file")
+            issue="${issue_url##*/}"
+          fi
+
+          # Best-effort: works only when GitHub Copilot coding agent is enabled for this repository/account.
+          gh issue edit "$issue" --add-assignee copilot || true
