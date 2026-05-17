@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   sync-and-rebase:
-    name: Merge upstream into master, then rebase dev
+    name: Validate upstream merge, update master, then rebase dev
     runs-on: ubuntu-latest
 
     steps:
@@ -25,6 +25,11 @@ jobs:
           ref: master
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure git identity
         run: |
@@ -37,18 +42,22 @@ jobs:
           git fetch origin master dev --prune
           git fetch upstream master --prune
 
-      - name: Merge upstream/master into master
+      - name: Merge upstream/master into candidate master
         run: |
-          git checkout -B master origin/master
+          git checkout -B candidate-master origin/master
           if git merge --no-edit upstream/master; then
-            echo "master merge ok"
+            echo "candidate merge ok"
           else
             echo "::error::Conflict while merging upstream/master into origin/master. Resolve master manually, then rerun this workflow."
             git merge --abort || true
             exit 1
           fi
 
-      - name: Push updated master if changed
+      - name: Validate candidate master build
+        run: |
+          nix develop --command cargo build --profile selfdev -p jcode --bin jcode
+
+      - name: Push updated master only after successful build
         run: |
           if git diff --quiet origin/master..HEAD; then
             echo "origin/master already contains upstream/master"
@@ -56,7 +65,7 @@ jobs:
             git push origin HEAD:master
           fi
 
-      - name: Rebase dev onto updated master
+      - name: Rebase dev onto validated master
         run: |
           git fetch origin master dev --prune
           git checkout -B dev origin/dev
@@ -68,7 +77,11 @@ jobs:
             exit 1
           fi
 
-      - name: Push rebased dev if changed
+      - name: Validate rebased dev build
+        run: |
+          nix develop --command cargo build --profile selfdev -p jcode --bin jcode
+
+      - name: Push rebased dev only after successful build
         run: |
           if git diff --quiet origin/dev..HEAD; then
             echo "dev is already based on origin/master"
