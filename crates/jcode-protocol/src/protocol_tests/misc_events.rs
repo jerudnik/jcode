@@ -200,6 +200,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
     let req = Request::Subscribe {
         id: 89,
         working_dir: Some("/tmp/project".to_string()),
+        terminal_env: None,
         selfdev: Some(true),
         target_session_id: Some("sess_target".to_string()),
         client_instance_id: Some("client-123".to_string()),
@@ -212,6 +213,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
     let Request::Subscribe {
         id,
         working_dir,
+        terminal_env: None,
         selfdev,
         target_session_id,
         client_instance_id,
@@ -238,6 +240,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
     let Request::Subscribe {
         id,
         working_dir,
+        terminal_env: None,
         selfdev,
         target_session_id,
         client_instance_id,

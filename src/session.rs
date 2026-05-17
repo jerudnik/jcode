@@ -108,6 +108,9 @@ pub struct Session {
     /// Working directory (for self-dev detection)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// Whitelisted terminal/session env reported by the attached client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_env: Option<Vec<(String, String)>>,
     /// Memorable short name (e.g., "fox", "oak")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub short_name: Option<String>,
@@ -683,6 +686,7 @@ impl Session {
             is_canary: false,
             testing_build: None,
             working_dir: current_working_dir_string(),
+            terminal_env: None,
             short_name,
             status: SessionStatus::Active,
             last_pid: Some(std::process::id()),
@@ -729,6 +733,7 @@ impl Session {
             is_canary: false,
             testing_build: None,
             working_dir: current_working_dir_string(),
+            terminal_env: None,
             short_name: Some(short_name),
             status: SessionStatus::Active,
             last_pid: Some(std::process::id()),

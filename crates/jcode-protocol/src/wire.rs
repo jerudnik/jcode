@@ -81,6 +81,10 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         working_dir: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_env: Option<Vec<(String, String)>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         selfdev: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_session_id: Option<String>,

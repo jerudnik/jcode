@@ -207,6 +207,7 @@ read -r _ || true
 fn open_zellij_task_pane(
     manager: &background::BackgroundTaskManager,
     task: &background::TaskStatusFile,
+    terminal_env: Option<&[(String, String)]>,
     direction: Option<&str>,
     floating: bool,
     close_on_exit: bool,
@@ -222,6 +223,9 @@ fn open_zellij_task_pane(
     let pane_name = format!("jcode-bg-{}", task.task_id);
 
     let mut command = Command::new(zellij);
+    if let Some(env) = terminal_env {
+        command.envs(env.iter().map(|(key, value)| (key, value)));
+    }
     command.args(["action", "new-pane", "--name", &pane_name]);
     if let Some(direction) = direction
         .map(str::trim)
@@ -755,6 +759,7 @@ impl Tool for BgTool {
                 let pane_id = open_zellij_task_pane(
                     manager,
                     &task,
+                    ctx.terminal_env.as_deref(),
                     params.direction.as_deref(),
                     params.floating.unwrap_or(false),
                     params.close_on_exit.unwrap_or(false),

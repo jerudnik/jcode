@@ -57,6 +57,7 @@ fn test_protocol_request_roundtrip_randomized_samples() -> Result<()> {
         let req = Request::Subscribe {
             id,
             working_dir: working_dir.clone(),
+            terminal_env: None,
             selfdev,
             target_session_id: target_session_id.clone(),
             client_instance_id: client_instance_id.clone(),
@@ -67,6 +68,7 @@ fn test_protocol_request_roundtrip_randomized_samples() -> Result<()> {
         let Request::Subscribe {
             id: decoded_id,
             working_dir: decoded_working_dir,
+            terminal_env: None,
             selfdev: decoded_selfdev,
             target_session_id: decoded_target_session_id,
             client_instance_id: decoded_client_instance_id,

@@ -32,6 +32,10 @@ pub struct ToolContext {
     pub message_id: String,
     pub tool_call_id: String,
     pub working_dir: Option<PathBuf>,
+    /// Whitelisted terminal/session environment captured by the attached client.
+    /// This lets server-side tools act in the user's real terminal multiplexer
+    /// context even when the shared server was launched elsewhere.
+    pub terminal_env: Option<Vec<(String, String)>>,
     pub stdin_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StdinInputRequest>>,
     pub graceful_shutdown_signal: Option<InterruptSignal>,
     pub execution_mode: ToolExecutionMode,
@@ -50,6 +54,7 @@ impl ToolContext {
             message_id: self.message_id.clone(),
             tool_call_id,
             working_dir: self.working_dir.clone(),
+            terminal_env: self.terminal_env.clone(),
             stdin_request_tx: self.stdin_request_tx.clone(),
             graceful_shutdown_signal: self.graceful_shutdown_signal.clone(),
             execution_mode: self.execution_mode,
