@@ -102,6 +102,9 @@ fn macos_should_try_app_terminal(term: &str) -> bool {
 
 #[cfg(unix)]
 pub fn detected_resume_terminal() -> Option<String> {
+    if std::env::var("ZELLIJ").is_ok() || std::env::var("ZELLIJ_SESSION_NAME").is_ok() {
+        return Some("zellij".to_string());
+    }
     if std::env::var("HANDTERM_SESSION").is_ok() || std::env::var("HANDTERM_PID").is_ok() {
         return Some("handterm".to_string());
     }
@@ -176,6 +179,7 @@ pub fn resume_terminal_candidates() -> Vec<String> {
     #[cfg(target_os = "macos")]
     {
         for term in [
+            "zellij",
             "ghostty",
             "kitty",
             "wezterm",
@@ -192,6 +196,7 @@ pub fn resume_terminal_candidates() -> Vec<String> {
     #[cfg(not(target_os = "macos"))]
     {
         for term in [
+            "zellij",
             "handterm",
             "kitty",
             "wezterm",
@@ -261,6 +266,48 @@ fn build_spawn_command(term: &str, command: &TerminalCommand, cwd: &Path) -> Opt
     }
 
     match term {
+        #[cfg(target_os = "macos")]
+        "zellij" => {
+            let session = zellij_session_name(command, title);
+            let shell = shell_command(&command_parts(command));
+            let default_shell = format!("/bin/bash -lc {}", sh_escape(&shell));
+            cmd = Command::new("open");
+            cmd.current_dir(cwd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .args([
+                    "-na",
+                    "Ghostty",
+                    "--args",
+                    "-e",
+                    "zellij",
+                    "attach",
+                    "-c",
+                    &session,
+                    "options",
+                    "--default-cwd",
+                ])
+                .arg(cwd)
+                .args(["--default-shell", &default_shell]);
+            if command.fresh_spawn {
+                cmd.env("JCODE_FRESH_SPAWN", "1");
+            }
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        "zellij" => {
+            let session = zellij_session_name(command, title);
+            let shell = shell_command(&command_parts(command));
+            cmd.args([
+                "attach",
+                "-c",
+                &session,
+                "options",
+                "--default-cwd",
+            ])
+            .arg(cwd)
+            .args(["--default-shell", &format!("/bin/sh -lc {}", sh_escape(&shell))]);
+        }
         #[cfg(unix)]
         "handterm" => {
             let shell = shell_command(&command_parts(command));
@@ -348,6 +395,33 @@ fn command_parts(command: &TerminalCommand) -> Vec<String> {
         .collect()
 }
 
+fn zellij_session_name(command: &TerminalCommand, title: &str) -> String {
+    let seed = command
+        .args
+        .windows(2)
+        .find_map(|window| (window[0] == "--resume").then(|| window[1].as_str()))
+        .unwrap_or(title);
+    let mut out = String::with_capacity(seed.len().min(80));
+    for ch in seed.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+        if out.len() >= 80 {
+            break;
+        }
+    }
+    let trimmed = out.trim_matches('-');
+    if trimmed.is_empty() {
+        "jcode-resume".to_string()
+    } else if trimmed.starts_with("jcode-") {
+        trimmed.to_string()
+    } else {
+        format!("jcode-{trimmed}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,6 +434,8 @@ mod tests {
     fn detected_resume_terminal_recognizes_ghostty_env() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
+            std::env::remove_var("ZELLIJ");
+            std::env::remove_var("ZELLIJ_SESSION_NAME");
             std::env::remove_var("HANDTERM_SESSION");
             std::env::remove_var("HANDTERM_PID");
             std::env::remove_var("KITTY_PID");
@@ -373,6 +449,51 @@ mod tests {
         unsafe {
             std::env::remove_var("GHOSTTY_RESOURCES_DIR");
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn detected_resume_terminal_prefers_zellij_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("ZELLIJ", "1");
+            std::env::set_var("GHOSTTY_RESOURCES_DIR", "/tmp/ghostty");
+        }
+        assert_eq!(detected_resume_terminal().as_deref(), Some("zellij"));
+        unsafe {
+            std::env::remove_var("ZELLIJ");
+            std::env::remove_var("GHOSTTY_RESOURCES_DIR");
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn zellij_launch_uses_ghostty_wrapped_attach() {
+        let command = TerminalCommand::new(
+            "/usr/local/bin/jcode",
+            vec![
+                "--fresh-spawn".to_string(),
+                "--resume".to_string(),
+                "session_rat_123".to_string(),
+            ],
+        )
+        .title("rat jcode")
+        .fresh_spawn();
+        let cwd = Path::new("/tmp/project");
+
+        let cmd = build_spawn_command("zellij", &command, cwd).expect("zellij command");
+        assert_eq!(cmd.get_program(), "open");
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.windows(2).any(|window| window == ["-na", "Ghostty"]));
+        assert!(args.iter().any(|arg| arg == "zellij"));
+        assert!(args.iter().any(|arg| arg == "attach"));
+        assert!(args.iter().any(|arg| arg == "jcode-session_rat_123"));
+        assert!(args.iter().any(|arg| arg == "--default-cwd"));
+        assert!(args.iter().any(|arg| arg == "/tmp/project"));
+        assert!(args.iter().any(|arg| arg.contains("--resume")));
     }
 
     #[test]
