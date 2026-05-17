@@ -109,6 +109,7 @@ struct TestJcodeHomeInner {
     _guard: TestEnvLockGuard,
     _temp: tempfile::TempDir,
     prev_home: Option<std::ffi::OsString>,
+    prev_disable_browser: Option<std::ffi::OsString>,
 }
 
 #[cfg(test)]
@@ -117,6 +118,14 @@ impl TestJcodeHome {
     ///
     /// If `JCODE_HOME` is already set (by an outer guard or a closure-based
     /// helper like `with_temp_jcode_home`), this is a no-op passthrough.
+    ///
+    /// Also sets `JCODE_DISABLE_BROWSER_OPEN=1` for the duration of the
+    /// guard so that any code path which would invoke the OS browser
+    /// opener (`crate::browser_open::open_url` / `open_detached`) becomes
+    /// a no-op success. This prevents tests with a pristine `JCODE_HOME`
+    /// (and therefore no cached auth credentials) from popping real
+    /// browser windows for OAuth flows. Tests that genuinely want to
+    /// exercise the open path can clear the var within their scope.
     pub(crate) fn acquire() -> Self {
         if std::env::var_os("JCODE_HOME").is_some() {
             return Self { inner: None };
@@ -133,13 +142,16 @@ impl TestJcodeHome {
 
         let temp = tempfile::tempdir().expect("create test JCODE_HOME tempdir");
         let prev_home = std::env::var_os("JCODE_HOME");
+        let prev_disable_browser = std::env::var_os(crate::browser_open::DISABLE_ENV_VAR);
         crate::env::set_var("JCODE_HOME", temp.path());
+        crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, "1");
 
         Self {
             inner: Some(TestJcodeHomeInner {
                 _guard: guard,
                 _temp: temp,
                 prev_home,
+                prev_disable_browser,
             }),
         }
     }
@@ -161,6 +173,11 @@ impl Drop for TestJcodeHome {
                 crate::env::set_var("JCODE_HOME", prev);
             } else {
                 crate::env::remove_var("JCODE_HOME");
+            }
+            if let Some(prev) = &inner.prev_disable_browser {
+                crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, prev);
+            } else {
+                crate::env::remove_var(crate::browser_open::DISABLE_ENV_VAR);
             }
             // _temp and _guard are dropped here, in that order.
         }

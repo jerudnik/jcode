@@ -354,8 +354,8 @@ async fn open_target(target: &ResolvedTarget) -> Result<String> {
     #[cfg(windows)]
     {
         match target {
-            ResolvedTarget::Local { path, .. } => open::that_detached(path),
-            ResolvedTarget::Url(url) => open::that_detached(url),
+            ResolvedTarget::Local { path, .. } => crate::browser_open::open_detached(path),
+            ResolvedTarget::Url(url) => crate::browser_open::open_detached(url),
         }
         .context("Failed to open with the system opener")?;
         Ok("system opener".to_string())

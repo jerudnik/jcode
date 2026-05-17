@@ -177,7 +177,7 @@ pub async fn login(tier: GmailAccessTier, no_browser: bool) -> Result<GoogleToke
     let browser_opened = if crate::auth::browser_suppressed(no_browser) {
         false
     } else {
-        open::that(&auth_url).is_ok()
+        crate::browser_open::open_url(&auth_url).is_ok()
     };
 
     let code = if browser_opened {
