@@ -9,6 +9,39 @@ fn restore_env_var(key: &str, previous: Option<OsString>) {
     }
 }
 
+/// RAII guard that snapshots a list of env vars on construction and
+/// restores them all on `Drop`, even when the protected scope panics.
+///
+/// Use this instead of the imperative "save these, mutate, restore
+/// these at the end" pattern: an assertion panic in the middle
+/// otherwise strands ambient env vars (e.g. OPENROUTER_API_KEY) for
+/// the rest of the test binary and contaminates downstream tests like
+/// the openrouter autodetect suite.
+struct ScopedEnvSnapshot {
+    saved: Vec<(&'static str, Option<OsString>)>,
+}
+
+impl ScopedEnvSnapshot {
+    fn capture<I>(keys: I) -> Self
+    where
+        I: IntoIterator<Item = &'static str>,
+    {
+        let saved = keys
+            .into_iter()
+            .map(|key| (key, std::env::var_os(key)))
+            .collect();
+        Self { saved }
+    }
+}
+
+impl Drop for ScopedEnvSnapshot {
+    fn drop(&mut self) {
+        for (key, value) in self.saved.drain(..) {
+            restore_env_var(key, value);
+        }
+    }
+}
+
 #[cfg(unix)]
 fn write_mock_cursor_agent(dir: &std::path::Path, script_body: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
@@ -86,7 +119,9 @@ fn full_and_fast_auth_status_match_for_shared_probe_fields() {
     let xdg = temp.path().join("xdg");
     std::fs::create_dir_all(&home).expect("create temp home");
     std::fs::create_dir_all(&xdg).expect("create temp xdg config");
-    let saved = [
+    // RAII so a panic below does not leak any of these env vars to
+    // later tests in the binary (e.g. openrouter autodetect).
+    let _env = ScopedEnvSnapshot::capture([
         "JCODE_HOME",
         "XDG_CONFIG_HOME",
         "HOME",
@@ -116,10 +151,7 @@ fn full_and_fast_auth_status_match_for_shared_probe_fields() {
         "CURSOR_ACCESS_TOKEN",
         "CURSOR_REFRESH_TOKEN",
         "JCODE_CURSOR_CLI_PATH",
-    ]
-    .into_iter()
-    .map(|key| (key, std::env::var_os(key)))
-    .collect::<Vec<_>>();
+    ]);
 
     crate::env::set_var("JCODE_HOME", temp.path().join("jcode-home"));
     crate::env::set_var("XDG_CONFIG_HOME", &xdg);
@@ -178,10 +210,8 @@ fn full_and_fast_auth_status_match_for_shared_probe_fields() {
     assert_eq!(full.copilot, AuthState::Available);
     assert_eq!(full.cursor, AuthState::Available);
 
-    for (key, value) in saved {
-        restore_env_var(key, value);
-    }
     AuthStatus::invalidate_cache();
+    // _env restores all snapshotted vars on drop.
 }
 
 #[cfg(unix)]

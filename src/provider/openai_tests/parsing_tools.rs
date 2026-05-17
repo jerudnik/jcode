@@ -217,8 +217,18 @@ fn test_parse_openai_response_output_item_done_emits_native_compaction() {
 
 #[test]
 fn test_parse_openai_response_image_generation_saves_metadata_and_emits_event() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let original_dir = std::env::current_dir().expect("current dir");
+    // Local RAII so an assertion panic below does not strand cwd at a
+    // deleted tempdir and poison every subsequent test that calls
+    // `current_dir()` (see also `src/session_tests/mod.rs::CwdGuard`).
+    struct CwdGuard(std::path::PathBuf);
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    let _lock = lock_env();
+    let _cwd = CwdGuard(std::env::current_dir().expect("current dir"));
     let temp = tempfile::Builder::new()
         .prefix("jcode-openai-image-test-")
         .tempdir()
@@ -286,7 +296,7 @@ fn test_parse_openai_response_image_generation_saves_metadata_and_emits_event() 
     assert_eq!(metadata["revised_prompt"], serde_json::json!("A polished robot painter prompt"));
     assert!(metadata["response_item"].get("result").is_none());
 
-    std::env::set_current_dir(original_dir).expect("restore cwd");
+    // cwd restored by `_cwd` on drop.
 }
 
 #[test]

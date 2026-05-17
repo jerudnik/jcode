@@ -1340,6 +1340,11 @@ mod tests {
 
     #[test]
     fn picker_switch_target_uses_profile_route_not_matching_label_only_route() {
+        // Sandbox snapshots/restores JCODE_OPENROUTER_* and provider API key env vars
+        // around the activate_auth_change call below, which otherwise leaks
+        // JCODE_OPENROUTER_API_KEY_NAME=CEREBRAS_API_KEY into later tests and breaks
+        // auth::tests::full_and_fast_auth_status_match_for_shared_probe_fields.
+        let _sandbox = AuthTestSandbox::new().expect("sandbox");
         let spec = AuthLifecycleSpec::cerebras_fixture(AuthLifecycleAuthPath::RemoteTuiPasteApiKey);
         let auth = AuthChanged {
             provider: crate::protocol::AuthProviderId::new(spec.provider_id),
