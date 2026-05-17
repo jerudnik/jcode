@@ -125,6 +125,16 @@ fn test_parse_tailscale_dns_name_invalid_json() {
 
 #[test]
 fn configured_auth_test_targets_only_include_configured_supported_providers() {
+    // Generic providers (Openrouter, Jcode) are assessed from env / config files,
+    // not just the AuthStatus struct. Sandbox the env (clears OPENROUTER_API_KEY,
+    // OPENAI_API_KEY, ..., points JCODE_HOME at a temp dir) so the test is
+    // hermetic, then explicitly set OPENROUTER_API_KEY so Openrouter assesses
+    // as "configured" as the assertions below expect.
+    let _sandbox = crate::auth::test_sandbox::AuthTestSandbox::new().expect("sandbox");
+    // The sandbox guard holds the test env lock for the duration of this scope.
+    crate::env::set_var("OPENROUTER_API_KEY", "test-openrouter-key");
+    crate::auth::AuthStatus::invalidate_cache();
+
     let status = AuthStatus {
         anthropic: ProviderAuth {
             state: AuthState::Available,
