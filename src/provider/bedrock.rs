@@ -1375,6 +1375,11 @@ mod tests {
     fn detects_env_credentials_requires_region_and_credential_hint() {
         let _guard = crate::storage::lock_test_env();
         let temp = tempfile::tempdir().unwrap();
+        // crate::storage::app_config_dir() honors JCODE_HOME, not XDG_CONFIG_HOME,
+        // so without this guard configured_bearer_token() falls back to the
+        // developer's real ~/Library/Application Support/jcode/bedrock.env on
+        // macOS and the !has_credentials() assertion below flips to true.
+        let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path().as_os_str());
         let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
         let _removed = [
             "JCODE_BEDROCK_ENABLE",
@@ -1408,6 +1413,10 @@ mod tests {
     fn detects_bedrock_login_env_file_credentials() {
         let _guard = crate::storage::lock_test_env();
         let temp = tempfile::tempdir().unwrap();
+        // See sibling test: app_config_dir() honors JCODE_HOME, not
+        // XDG_CONFIG_HOME, and load_api_key_from_env_or_config will otherwise
+        // read the real developer bedrock.env.
+        let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path().as_os_str());
         let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path().as_os_str());
         for key in [
             "JCODE_BEDROCK_ENABLE",
