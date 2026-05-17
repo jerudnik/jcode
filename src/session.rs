@@ -93,6 +93,9 @@ pub struct Session {
     /// Last requested `/improve` mode for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub improve_mode: Option<SessionImproveMode>,
+    /// Session class. Meta sessions act as long-lived workspace co-manager agents.
+    #[serde(default, skip_serializing_if = "SessionKind::is_regular")]
+    pub kind: SessionKind,
     /// Whether automatic end-of-turn review is enabled for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autoreview_enabled: Option<bool>,
@@ -157,6 +160,34 @@ pub struct Session {
     memory_profile_dirty: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionKind {
+    #[default]
+    Regular,
+    Meta,
+    SubMeta,
+}
+
+impl SessionKind {
+    pub fn is_regular(&self) -> bool {
+        matches!(self, SessionKind::Regular)
+    }
+
+    pub fn is_meta(&self) -> bool {
+        matches!(self, SessionKind::Meta | SessionKind::SubMeta)
+    }
+
+    pub fn from_wire(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "regular" => Some(Self::Regular),
+            "meta" => Some(Self::Meta),
+            "sub_meta" | "sub-meta" | "submeta" => Some(Self::SubMeta),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct SessionStartupStub {
     id: String,
@@ -182,6 +213,8 @@ struct SessionStartupStub {
     subagent_model: Option<String>,
     #[serde(default)]
     improve_mode: Option<SessionImproveMode>,
+    #[serde(default)]
+    kind: SessionKind,
     #[serde(default)]
     autoreview_enabled: Option<bool>,
     #[serde(default)]
@@ -287,6 +320,7 @@ impl Session {
         session.reasoning_effort = stub.reasoning_effort;
         session.subagent_model = stub.subagent_model;
         session.improve_mode = stub.improve_mode;
+        session.kind = stub.kind;
         session.autoreview_enabled = stub.autoreview_enabled;
         session.autojudge_enabled = stub.autojudge_enabled;
         session.is_canary = stub.is_canary;
@@ -321,6 +355,7 @@ impl Session {
         session.reasoning_effort = snapshot.reasoning_effort;
         session.subagent_model = snapshot.subagent_model;
         session.improve_mode = snapshot.improve_mode;
+        session.kind = snapshot.kind;
         session.autoreview_enabled = snapshot.autoreview_enabled;
         session.autojudge_enabled = snapshot.autojudge_enabled;
         session.is_canary = snapshot.is_canary;
@@ -458,6 +493,7 @@ impl Session {
             reasoning_effort: self.reasoning_effort.clone(),
             subagent_model: self.subagent_model.clone(),
             improve_mode: self.improve_mode,
+            kind: self.kind,
             autoreview_enabled: self.autoreview_enabled,
             autojudge_enabled: self.autojudge_enabled,
             is_canary: self.is_canary,
@@ -681,6 +717,7 @@ impl Session {
             reasoning_effort: None,
             subagent_model: None,
             improve_mode: None,
+            kind: SessionKind::Regular,
             autoreview_enabled: None,
             autojudge_enabled: None,
             is_canary: false,
@@ -728,6 +765,7 @@ impl Session {
             reasoning_effort: None,
             subagent_model: None,
             improve_mode: None,
+            kind: SessionKind::Regular,
             autoreview_enabled: None,
             autojudge_enabled: None,
             is_canary: false,
@@ -1400,6 +1438,8 @@ struct RemoteStartupSessionSnapshot {
     subagent_model: Option<String>,
     #[serde(default)]
     improve_mode: Option<SessionImproveMode>,
+    #[serde(default)]
+    kind: SessionKind,
     #[serde(default)]
     autoreview_enabled: Option<bool>,
     #[serde(default)]

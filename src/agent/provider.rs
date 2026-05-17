@@ -184,6 +184,13 @@ impl Agent {
         self.session.terminal_env.clone()
     }
 
+    pub fn set_session_kind(&mut self, kind: crate::session::SessionKind) {
+        if self.session.kind != kind {
+            self.session.kind = kind;
+            self.persist_session_best_effort("session kind update");
+        }
+    }
+
     /// Get the stored messages (for transcript export)
     pub fn messages(&self) -> &[StoredMessage] {
         &self.session.messages

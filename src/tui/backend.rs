@@ -296,7 +296,7 @@ impl RemoteConnection {
 
         // Subscribe to events
         let subscribe_start = Instant::now();
-        let (working_dir, terminal_env, selfdev) = super::subscribe_metadata();
+        let (working_dir, terminal_env, session_kind, selfdev) = super::subscribe_metadata();
         let resume_target = resume_session
             .filter(|session_id| crate::session::session_exists(session_id))
             .map(|session_id| session_id.to_string());
@@ -304,6 +304,7 @@ impl RemoteConnection {
             id: conn.next_request_id,
             working_dir,
             terminal_env,
+            session_kind,
             selfdev,
             target_session_id: resume_target.clone(),
             client_instance_id: conn.client_instance_id.clone(),

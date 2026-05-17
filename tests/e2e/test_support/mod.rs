@@ -324,6 +324,7 @@ impl WsTestClient {
             id,
             working_dir: None,
             terminal_env: None,
+            session_kind: None,
             selfdev: None,
             target_session_id: None,
             client_instance_id: None,

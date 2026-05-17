@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    EnvSnapshot, SessionImproveMode, SessionStatus, StoredCompactionState, StoredMemoryInjection,
-    StoredMessage, StoredReplayEvent,
+    EnvSnapshot, SessionImproveMode, SessionKind, SessionStatus, StoredCompactionState,
+    StoredMemoryInjection, StoredMessage, StoredReplayEvent,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -21,6 +21,8 @@ pub(super) struct SessionJournalMeta {
     pub(super) reasoning_effort: Option<String>,
     pub(super) subagent_model: Option<String>,
     pub(super) improve_mode: Option<SessionImproveMode>,
+    #[serde(default, skip_serializing_if = "SessionKind::is_regular")]
+    pub(super) kind: SessionKind,
     pub(super) autoreview_enabled: Option<bool>,
     pub(super) autojudge_enabled: Option<bool>,
     pub(super) is_canary: bool,
