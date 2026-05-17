@@ -5,6 +5,12 @@ on:
   schedule:
     # Runs from the repository's default branch, expected to be origin/master.
     - cron: "17 * * * *"
+  push:
+    branches: [master]
+    # Retry after a human/Copilot fix lands on master, but do not rerun for
+    # this workflow's own maintenance-only edits.
+    paths-ignore:
+      - ".github/workflows/sync-dev-upstream.yml"
 
 permissions:
   contents: write
@@ -17,6 +23,9 @@ concurrency:
 jobs:
   sync-and-rebase:
     name: Validate upstream merge, update master, then rebase dev
+    # Avoid a recursive run when this workflow pushes to master with the
+    # github-actions bot identity. Human/Copilot PR merges still run.
+    if: github.event_name != 'push' || github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
