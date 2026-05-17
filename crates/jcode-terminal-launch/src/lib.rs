@@ -271,25 +271,24 @@ fn build_spawn_command(term: &str, command: &TerminalCommand, cwd: &Path) -> Opt
             let session = zellij_session_name(command, title);
             let shell = shell_command(&command_parts(command));
             let default_shell = format!("/bin/bash -lc {}", sh_escape(&shell));
+            let zellij_command = shell_command(&[
+                "zellij".to_string(),
+                "attach".to_string(),
+                "-c".to_string(),
+                session.clone(),
+                "options".to_string(),
+                "--default-cwd".to_string(),
+                cwd.to_string_lossy().into_owned(),
+                "--default-shell".to_string(),
+                default_shell,
+            ]);
             cmd = Command::new("open");
             cmd.current_dir(cwd)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .args([
-                    "-na",
-                    "Ghostty",
-                    "--args",
-                    "-e",
-                    "zellij",
-                    "attach",
-                    "-c",
-                    &session,
-                    "options",
-                    "--default-cwd",
-                ])
-                .arg(cwd)
-                .args(["--default-shell", &default_shell]);
+                .args(["-na", "Ghostty", "--args", "-e", "/bin/bash", "-lc"])
+                .arg(zellij_command);
             if command.fresh_spawn {
                 cmd.env("JCODE_FRESH_SPAWN", "1");
             }
@@ -488,12 +487,13 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
         assert!(args.windows(2).any(|window| window == ["-na", "Ghostty"]));
-        assert!(args.iter().any(|arg| arg == "zellij"));
-        assert!(args.iter().any(|arg| arg == "attach"));
-        assert!(args.iter().any(|arg| arg == "jcode-session_rat_123"));
-        assert!(args.iter().any(|arg| arg == "--default-cwd"));
-        assert!(args.iter().any(|arg| arg == "/tmp/project"));
-        assert!(args.iter().any(|arg| arg.contains("--resume")));
+        assert!(args.windows(3).any(|window| window == ["-e", "/bin/bash", "-lc"]));
+        let shell = args.last().expect("shell command");
+        assert!(shell.contains("'zellij' 'attach'"));
+        assert!(shell.contains("'jcode-session_rat_123'"));
+        assert!(shell.contains("'--default-cwd' '/tmp/project'"));
+        assert!(shell.contains("'--default-shell'"));
+        assert!(shell.contains("--resume"));
     }
 
     #[test]
