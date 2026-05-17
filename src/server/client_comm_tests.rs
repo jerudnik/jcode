@@ -407,6 +407,7 @@ async fn comm_list_includes_member_status_and_detail() {
     handle_comm_list(
         1,
         requester_id,
+        None,
         &client_event_tx,
         &swarm_members,
         &swarms_by_id,

@@ -411,6 +411,7 @@ impl RawClient {
         self.send_request(Request::CommList {
             id,
             session_id: session_id.to_string(),
+            swarm_id: None,
         })
         .await?;
         match self
@@ -484,7 +485,6 @@ fn test_ctx(session_id: &str, working_dir: &Path) -> ToolContext {
         tool_call_id: "call-1".to_string(),
         working_dir: Some(working_dir.to_path_buf()),
         terminal_env: None,
-        session_kind: None,
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,

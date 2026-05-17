@@ -7,6 +7,7 @@ use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
 use crate::protocol::{NotificationType, ServerEvent};
 use crate::provider::{EventStream, Provider};
+use crate::server::client_comm::{handle_comm_list, handle_comm_list_swarms};
 use crate::server::{SwarmEventType, SwarmMember, VersionedPlan};
 use crate::tool::Registry;
 use anyhow::Result;
@@ -549,4 +550,134 @@ async fn coordinator_actions_self_promote_when_recorded_coordinator_is_stale() {
         Some("coordinator")
     );
     assert!(client_event_rx.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn handle_comm_list_swarms_summarizes_all_swarms() {
+    let (a_coord, _a_rx) = member("a-coord", Some("swarm-a"), "coordinator");
+    let (mut a_worker, _aw_rx) = member("a-worker", Some("swarm-a"), "agent");
+    a_worker.status = "running".to_string();
+    let (b_coord, _b_rx) = member("b-coord", Some("swarm-b"), "coordinator");
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        ("a-coord".to_string(), a_coord),
+        ("a-worker".to_string(), a_worker),
+        ("b-coord".to_string(), b_coord),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([
+        (
+            "swarm-a".to_string(),
+            HashSet::from(["a-coord".to_string(), "a-worker".to_string()]),
+        ),
+        (
+            "swarm-b".to_string(),
+            HashSet::from(["b-coord".to_string()]),
+        ),
+    ])));
+    let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([
+        ("swarm-a".to_string(), "a-coord".to_string()),
+        ("swarm-b".to_string(), "b-coord".to_string()),
+    ])));
+
+    let mut plan_a = VersionedPlan::new();
+    plan_a.version = 7;
+    let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+        "swarm-a".to_string(),
+        plan_a,
+    )])));
+
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    handle_comm_list_swarms(
+        42,
+        "a-coord".to_string(),
+        &client_event_tx,
+        &swarm_members,
+        &swarms_by_id,
+        &swarm_plans,
+        &swarm_coordinators,
+    )
+    .await;
+
+    match client_event_rx
+        .recv()
+        .await
+        .expect("comm list swarms response")
+    {
+        ServerEvent::CommListSwarmsResponse { id, swarms } => {
+            assert_eq!(id, 42);
+            assert_eq!(swarms.len(), 2);
+            // Sorted by swarm_id.
+            assert_eq!(swarms[0].swarm_id, "swarm-a");
+            assert_eq!(swarms[0].member_count, 2);
+            assert_eq!(swarms[0].coordinator_session.as_deref(), Some("a-coord"));
+            assert_eq!(swarms[0].coordinator_name.as_deref(), Some("a-coord"));
+            assert_eq!(swarms[0].plan_version, Some(7));
+            assert_eq!(swarms[0].status_counts.get("ready"), Some(&1));
+            assert_eq!(swarms[0].status_counts.get("running"), Some(&1));
+
+            assert_eq!(swarms[1].swarm_id, "swarm-b");
+            assert_eq!(swarms[1].member_count, 1);
+            assert_eq!(swarms[1].coordinator_session.as_deref(), Some("b-coord"));
+            assert_eq!(swarms[1].plan_version, None);
+            assert_eq!(swarms[1].status_counts.get("ready"), Some(&1));
+        }
+        other => panic!("unexpected response: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn handle_comm_list_with_explicit_swarm_returns_other_swarm_members() {
+    // Requester is in swarm-self; asks about swarm-other.
+    let (self_member, _self_rx) = member("self-id", Some("swarm-self"), "agent");
+    let (mut other_a, _oa_rx) = member("other-a", Some("swarm-other"), "coordinator");
+    other_a.status = "running".to_string();
+    let (other_b, _ob_rx) = member("other-b", Some("swarm-other"), "agent");
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        ("self-id".to_string(), self_member),
+        ("other-a".to_string(), other_a),
+        ("other-b".to_string(), other_b),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([
+        (
+            "swarm-self".to_string(),
+            HashSet::from(["self-id".to_string()]),
+        ),
+        (
+            "swarm-other".to_string(),
+            HashSet::from(["other-a".to_string(), "other-b".to_string()]),
+        ),
+    ])));
+    let file_touches = Arc::new(RwLock::new(HashMap::new()));
+
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    handle_comm_list(
+        7,
+        "self-id".to_string(),
+        Some("swarm-other".to_string()),
+        &client_event_tx,
+        &swarm_members,
+        &swarms_by_id,
+        &file_touches,
+    )
+    .await;
+
+    match client_event_rx.recv().await.expect("comm list response") {
+        ServerEvent::CommMembers { id, members } => {
+            assert_eq!(id, 7);
+            let names: HashSet<String> = members
+                .iter()
+                .filter_map(|m| m.friendly_name.clone())
+                .collect();
+            assert_eq!(
+                names,
+                HashSet::from(["other-a".to_string(), "other-b".to_string()])
+            );
+            // No self-id leak from caller's swarm.
+            assert!(!members.iter().any(|m| m.session_id == "self-id"));
+        }
+        other => panic!("unexpected response: {other:?}"),
+    }
 }

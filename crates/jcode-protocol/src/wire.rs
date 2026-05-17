@@ -347,11 +347,28 @@ pub enum Request {
 
     /// List agents and their activity
     #[serde(rename = "comm_list")]
-    CommList { id: u64, session_id: String },
+    CommList {
+        id: u64,
+        session_id: String,
+        /// Optional swarm to enumerate instead of the requester's own.
+        /// Used by meta orchestrators for cross-swarm reads.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        swarm_id: Option<String>,
+    },
 
     /// List swarm channels and subscriber counts
     #[serde(rename = "comm_list_channels")]
-    CommListChannels { id: u64, session_id: String },
+    CommListChannels {
+        id: u64,
+        session_id: String,
+        /// Optional swarm to enumerate instead of the requester's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        swarm_id: Option<String>,
+    },
+
+    /// Enumerate every swarm visible on the server (meta orchestrator primitive)
+    #[serde(rename = "comm_list_swarms")]
+    CommListSwarms { id: u64, session_id: String },
 
     /// List members subscribed to a swarm channel
     #[serde(rename = "comm_channel_members")]
@@ -471,7 +488,13 @@ pub enum Request {
 
     /// Get a lightweight summary of the current swarm plan graph
     #[serde(rename = "comm_plan_status")]
-    CommPlanStatus { id: u64, session_id: String },
+    CommPlanStatus {
+        id: u64,
+        session_id: String,
+        /// Optional swarm to read instead of the requester's own.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        swarm_id: Option<String>,
+    },
 
     /// Assign a task from the plan to a specific agent (coordinator only)
     #[serde(rename = "comm_assign_task")]
@@ -1066,6 +1089,8 @@ pub enum ServerEvent {
         id: u64,
         channels: Vec<SwarmChannelInfo>,
     },
+
+    CommListSwarmsResponse { id: u64, swarms: Vec<SwarmSummary> },
 
     /// Response to comm_summary request
     #[serde(rename = "comm_summary_response")]

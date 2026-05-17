@@ -497,7 +497,7 @@ async fn test_subscribe_selfdev_hint_marks_canary() -> Result<()> {
 
     let mut client = wait_for_server_client(&socket_path).await?;
     let subscribe_id = client
-        .subscribe_with_info(None, Some(true), None, false, false)
+        .subscribe_with_info(None, None, None, Some(true), None, false, false)
         .await?;
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -556,6 +556,8 @@ async fn test_subscribe_working_dir_without_selfdev_hint_stays_normal() -> Resul
     let subscribe_id = client
         .subscribe_with_info(
             Some(nested_dir.display().to_string()),
+            None,
+            None,
             None,
             None,
             false,

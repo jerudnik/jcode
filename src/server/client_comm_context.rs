@@ -1,8 +1,8 @@
 use super::{
-    SharedContext, SwarmEvent, SwarmEventType, SwarmMember, fanout_session_event,
+    SharedContext, SwarmEvent, SwarmEventType, SwarmMember, VersionedPlan, fanout_session_event,
     record_swarm_event,
 };
-use crate::protocol::{AgentInfo, ContextEntry, NotificationType, ServerEvent};
+use crate::protocol::{AgentInfo, ContextEntry, NotificationType, ServerEvent, SwarmSummary};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -190,12 +190,16 @@ pub(super) async fn handle_comm_read(
 pub(super) async fn handle_comm_list(
     id: u64,
     req_session_id: String,
+    target_swarm_id: Option<String>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     files_touched_by_session: &Arc<RwLock<HashMap<String, HashSet<PathBuf>>>>,
 ) {
-    let swarm_id = swarm_id_for_session(&req_session_id, swarm_members).await;
+    let swarm_id = match target_swarm_id {
+        Some(explicit) => Some(explicit),
+        None => swarm_id_for_session(&req_session_id, swarm_members).await,
+    };
 
     if let Some(swarm_id) = swarm_id {
         let swarm_session_ids: Vec<String> = {
@@ -249,4 +253,49 @@ pub(super) async fn handle_comm_list(
             retry_after_secs: None,
         });
     }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "list-swarms enumeration requires cross-cutting reads over members, swarms, plans, coordinators"
+)]
+pub(super) async fn handle_comm_list_swarms(
+    id: u64,
+    _req_session_id: String,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
+) {
+    let swarms = swarms_by_id.read().await;
+    let coordinators = swarm_coordinators.read().await;
+    let members = swarm_members.read().await;
+    let plans = swarm_plans.read().await;
+
+    let mut out: Vec<SwarmSummary> = Vec::with_capacity(swarms.len());
+    for (swarm_id, session_ids) in swarms.iter() {
+        let coordinator_session = coordinators.get(swarm_id).cloned();
+        let coordinator_name = coordinator_session
+            .as_ref()
+            .and_then(|cid| members.get(cid).and_then(|m| m.friendly_name.clone()));
+        let plan_version = plans.get(swarm_id).map(|p| p.version);
+        let mut status_counts: HashMap<String, usize> = HashMap::new();
+        for sid in session_ids.iter() {
+            if let Some(member) = members.get(sid) {
+                *status_counts.entry(member.status.clone()).or_default() += 1;
+            }
+        }
+        out.push(SwarmSummary {
+            swarm_id: swarm_id.clone(),
+            member_count: session_ids.len(),
+            coordinator_session,
+            coordinator_name,
+            plan_version,
+            status_counts,
+        });
+    }
+    out.sort_by(|a, b| a.swarm_id.cmp(&b.swarm_id));
+
+    let _ = client_event_tx.send(ServerEvent::CommListSwarmsResponse { id, swarms: out });
 }

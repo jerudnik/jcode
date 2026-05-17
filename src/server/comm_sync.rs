@@ -97,6 +97,32 @@ async fn ensure_same_swarm_access(
     }
 }
 
+/// Verify that `target_session` exists. Unlike `ensure_same_swarm_access`,
+/// this does not require the requester and target to share a swarm — it is
+/// used by cross-swarm read primitives (`comm_summary`, `comm_read_context`)
+/// that meta orchestrators rely on to inspect any session on the server.
+async fn ensure_target_session_exists(
+    id: u64,
+    target_session: &str,
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
+) -> bool {
+    let exists = {
+        let members = swarm_members.read().await;
+        members.contains_key(target_session)
+    };
+    if exists {
+        true
+    } else {
+        let _ = client_event_tx.send(ServerEvent::Error {
+            id,
+            message: format!("Unknown session '{target_session}'"),
+            retry_after_secs: None,
+        });
+        false
+    }
+}
+
 async fn can_read_full_context(
     req_session_id: &str,
     target_session: &str,
@@ -107,30 +133,33 @@ async fn can_read_full_context(
     }
 
     let members = swarm_members.read().await;
-    members
-        .get(req_session_id)
-        .map(|member| member.role == "coordinator" || member.role == "worktree_manager")
-        .unwrap_or(false)
+    if let Some(member) = members.get(req_session_id) {
+        // Coordinator/worktree manager of their own swarm: always allowed.
+        if member.role == "coordinator" || member.role == "worktree_manager" {
+            return true;
+        }
+        // Meta orchestrators (the synthetic `jcode-meta` swarm) may read
+        // any session's full context for cross-swarm observation.
+        if member.swarm_id.as_deref() == Some("jcode-meta") {
+            return true;
+        }
+    }
+    false
 }
 
 pub(super) async fn handle_comm_summary(
     id: u64,
-    req_session_id: String,
+    _req_session_id: String,
     target_session: String,
     limit: Option<usize>,
     sessions: &SessionAgents,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
-    if !ensure_same_swarm_access(
-        id,
-        &req_session_id,
-        &target_session,
-        swarm_members,
-        client_event_tx,
-    )
-    .await
-    {
+    // Cross-swarm reads are intentionally permitted here — the meta
+    // orchestrator targets specific sessions across swarms. We only
+    // require the target session to exist.
+    if !ensure_target_session_exists(id, &target_session, swarm_members, client_event_tx).await {
         return;
     }
 
@@ -260,15 +289,8 @@ pub(super) async fn handle_comm_read_context(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
-    if !ensure_same_swarm_access(
-        id,
-        &req_session_id,
-        &target_session,
-        swarm_members,
-        client_event_tx,
-    )
-    .await
-    {
+    // Cross-swarm reads are permitted; only confirm the target exists.
+    if !ensure_target_session_exists(id, &target_session, swarm_members, client_event_tx).await {
         return;
     }
 
@@ -313,15 +335,19 @@ pub(super) async fn handle_comm_read_context(
 pub(super) async fn handle_comm_plan_status(
     id: u64,
     req_session_id: String,
+    target_swarm_id: Option<String>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
-    let swarm_id = {
-        let members = swarm_members.read().await;
-        members
-            .get(&req_session_id)
-            .and_then(|member| member.swarm_id.clone())
+    let swarm_id = match target_swarm_id {
+        Some(explicit) => Some(explicit),
+        None => {
+            let members = swarm_members.read().await;
+            members
+                .get(&req_session_id)
+                .and_then(|member| member.swarm_id.clone())
+        }
     };
 
     let Some(swarm_id) = swarm_id else {
