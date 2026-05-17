@@ -1885,6 +1885,7 @@ pub(super) async fn handle_client(
             Request::Subscribe {
                 id,
                 working_dir: subscribe_working_dir,
+                terminal_env,
                 selfdev,
                 target_session_id,
                 client_instance_id,
@@ -1948,6 +1949,7 @@ pub(super) async fn handle_client(
                             handle_subscribe(
                                 id,
                                 subscribe_working_dir,
+                                terminal_env.clone(),
                                 selfdev,
                                 false,
                                 &mut client_selfdev,
@@ -1984,6 +1986,7 @@ pub(super) async fn handle_client(
                         handle_subscribe(
                             id,
                             subscribe_working_dir,
+                            terminal_env.clone(),
                             selfdev,
                             true,
                             &mut client_selfdev,
@@ -2011,6 +2014,7 @@ pub(super) async fn handle_client(
                     handle_subscribe(
                         id,
                         subscribe_working_dir,
+                        terminal_env.clone(),
                         selfdev,
                         true,
                         &mut client_selfdev,

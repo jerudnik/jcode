@@ -173,6 +173,17 @@ impl Agent {
         self.session.working_dir.as_deref()
     }
 
+    pub fn set_terminal_env(&mut self, terminal_env: Option<Vec<(String, String)>>) {
+        if terminal_env.is_some() {
+            self.session.terminal_env = terminal_env;
+            self.persist_session_best_effort("terminal env update");
+        }
+    }
+
+    pub fn terminal_env(&self) -> Option<Vec<(String, String)>> {
+        self.session.terminal_env.clone()
+    }
+
     /// Get the stored messages (for transcript export)
     pub fn messages(&self) -> &[StoredMessage] {
         &self.session.messages
