@@ -18,6 +18,20 @@ impl SharedEnvLock {
     }
 }
 
+/// Acquire the test env lock, recovering from poisoning.
+///
+/// Without this, a single panic in any test that holds `ENV_LOCK`
+/// poisons the mutex permanently for the remainder of the test
+/// binary, which then makes every subsequent `ENV_LOCK.lock().unwrap()`
+/// panic on `PoisonError`. That is order-dependent flakiness, not a
+/// real bug, so swallow the poison and move on.
+fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    match ENV_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 struct EnvVarGuard {
     key: &'static str,
     previous: Option<OsString>,
@@ -84,6 +98,14 @@ fn isolate_openrouter_autodetect_env() -> Vec<EnvVarGuard> {
         EnvVarGuard::remove("JCODE_OPENAI_COMPAT_SETUP_URL"),
         EnvVarGuard::remove("JCODE_OPENAI_COMPAT_DEFAULT_MODEL"),
         EnvVarGuard::remove("JCODE_OPENAI_COMPAT_LOCAL_ENABLED"),
+        // `autodetected_openai_compatible_profile()` short-circuits and
+        // returns `None` if `OPENROUTER_API_KEY` is set in the ambient
+        // env (so the default openrouter.ai endpoint wins). Tests in
+        // this file write API keys to a temp HOME and expect autodetect
+        // to pick that up, so we must strip the ambient key. This also
+        // defends against upstream test bugs that panic mid-test and
+        // strand `OPENROUTER_API_KEY` set (e.g. the auth probe suite).
+        EnvVarGuard::remove("OPENROUTER_API_KEY"),
     ];
     guards.extend(
         crate::provider_catalog::openai_compatible_profiles()
@@ -202,7 +224,7 @@ fn openai_compatible_models_endpoint_allows_models_array_with_name_ids() {
 
 #[test]
 fn named_openai_compatible_provider_sets_catalog_cache_namespace() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let _namespace = EnvVarGuard::remove("JCODE_OPENROUTER_CACHE_NAMESPACE");
     let _key = EnvVarGuard::set("TEST_NAMED_COMPAT_KEY", "test-key");
 
@@ -225,7 +247,7 @@ fn named_openai_compatible_provider_sets_catalog_cache_namespace() {
 
 #[test]
 fn named_openai_compatible_provider_exposes_static_models_as_routes() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let _namespace = EnvVarGuard::remove("JCODE_OPENROUTER_CACHE_NAMESPACE");
     let _key = EnvVarGuard::set("TEST_NAMED_COMPAT_KEY", "test-key");
 
@@ -353,7 +375,7 @@ fn openai_compatible_profiles_with_unverified_live_catalogs_have_static_fallback
 
 #[test]
 fn comtegra_profile_uses_endpoint_default_max_tokens() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let _override = EnvVarGuard::remove("JCODE_OPENROUTER_MAX_TOKENS");
 
     assert_eq!(
@@ -368,7 +390,7 @@ fn comtegra_profile_uses_endpoint_default_max_tokens() {
 
 #[test]
 fn max_tokens_env_overrides_profile_default() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let _override = EnvVarGuard::set("JCODE_OPENROUTER_MAX_TOKENS", "4096");
 
     assert_eq!(
@@ -379,7 +401,7 @@ fn max_tokens_env_overrides_profile_default() {
 
 #[test]
 fn test_configured_api_base_accepts_https() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let prev = std::env::var("JCODE_OPENROUTER_API_BASE").ok();
     crate::env::set_var(
         "JCODE_OPENROUTER_API_BASE",
@@ -395,7 +417,7 @@ fn test_configured_api_base_accepts_https() {
 
 #[test]
 fn test_configured_api_base_rejects_insecure_http_remote() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let prev = std::env::var("JCODE_OPENROUTER_API_BASE").ok();
     crate::env::set_var("JCODE_OPENROUTER_API_BASE", "http://example.com/v1");
     assert_eq!(configured_api_base(), DEFAULT_API_BASE);
@@ -408,7 +430,7 @@ fn test_configured_api_base_rejects_insecure_http_remote() {
 
 #[test]
 fn autodetects_single_saved_openai_compatible_profile() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp dir");
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
@@ -433,7 +455,7 @@ fn autodetects_single_saved_openai_compatible_profile() {
 
 #[test]
 fn autodetects_single_saved_local_openai_compatible_profile() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp dir");
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
@@ -463,7 +485,7 @@ fn autodetects_single_saved_local_openai_compatible_profile() {
 
 #[test]
 fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp dir");
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
@@ -497,7 +519,7 @@ fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
 
 #[test]
 fn autodetected_profile_seeds_default_model_and_cache_namespace() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp dir");
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
@@ -768,7 +790,7 @@ fn direct_deepseek_chat_request_sends_reasoning_effort() {
 
 #[test]
 fn openai_compatible_model_catalog_refresh_calls_models_endpoint_and_updates_display() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp home");
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -837,7 +859,7 @@ fn openai_compatible_model_catalog_refresh_calls_models_endpoint_and_updates_dis
 
 #[test]
 fn built_in_openai_compatible_static_models_drop_out_after_live_catalog() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp home");
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -947,7 +969,7 @@ fn cerebras_chat_unavailable_catalog_models_are_rejected_on_explicit_switch() {
 
 #[test]
 fn direct_deepseek_profile_uses_static_1m_context_when_catalog_is_absent() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let _base = EnvVarGuard::set("JCODE_OPENROUTER_API_BASE", "https://api.deepseek.com");
     let _key_name = EnvVarGuard::set("JCODE_OPENROUTER_API_KEY_NAME", "DEEPSEEK_API_KEY");
     let _api_key = EnvVarGuard::set("DEEPSEEK_API_KEY", "test");
@@ -962,7 +984,7 @@ fn direct_deepseek_profile_uses_static_1m_context_when_catalog_is_absent() {
 
 #[test]
 fn named_openai_compatible_model_context_window_overrides_default() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let _namespace = EnvVarGuard::remove("JCODE_OPENROUTER_CACHE_NAMESPACE");
     let mut config = crate::config::NamedProviderConfig {
         base_url: "https://compat.example.test/v1".to_string(),
@@ -985,7 +1007,7 @@ fn named_openai_compatible_model_context_window_overrides_default() {
 
 #[test]
 fn named_openai_compatible_loads_api_key_from_env_file() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = lock_env();
     let temp = TempDir::new().expect("create temp dir");
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
