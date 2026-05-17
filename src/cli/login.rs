@@ -1382,7 +1382,7 @@ fn maybe_open_browser(target: &str, no_browser: bool) -> bool {
     if crate::auth::browser_suppressed(no_browser) {
         false
     } else {
-        open::that(target).is_ok()
+        crate::browser_open::open_url(target).is_ok()
     }
 }
 

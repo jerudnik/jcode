@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 impl App {
     fn open_auth_browser(url: &str) -> bool {
-        open::that_detached(url).is_ok()
+        crate::browser_open::open_detached(url).is_ok()
     }
 
     fn record_oauth_preflight(
@@ -1021,7 +1021,7 @@ impl App {
             }));
 
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let _ = open::that_detached(&verification_uri);
+            let _ = crate::browser_open::open_detached(&verification_uri);
 
             let token = match crate::auth::copilot::poll_for_access_token(
                 &client,
