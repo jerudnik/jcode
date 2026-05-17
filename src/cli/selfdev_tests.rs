@@ -5,7 +5,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+fn lock_env() -> crate::storage::TestEnvLockGuard {
     storage::lock_test_env()
 }
 
@@ -44,7 +44,7 @@ fn set_socket_test_env(socket_path: &Path, runtime_dir: &Path) -> EnvVarGuard {
 }
 
 struct TestEnvGuard {
-    _lock: std::sync::MutexGuard<'static, ()>,
+    _lock: crate::storage::TestEnvLockGuard,
     _env: EnvVarGuard,
     _temp_home: tempfile::TempDir,
 }
@@ -238,7 +238,7 @@ async fn test_wait_for_reloading_server_returns_true_for_live_listener() {
 }
 
 fn isolated_launcher_env() -> (
-    std::sync::MutexGuard<'static, ()>,
+    crate::storage::TestEnvLockGuard,
     EnvVarGuard,
     tempfile::TempDir,
 ) {

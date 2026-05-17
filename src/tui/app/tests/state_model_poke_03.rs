@@ -1691,7 +1691,7 @@ fn test_login_picker_preview_enter_starts_login_flow() {
         .unwrap();
 
     assert!(app.inline_interactive_state.is_none());
-    match app.pending_login {
+    match &app.pending_login {
         Some(crate::tui::app::auth::PendingLogin::ApiKeyProfile {
             provider,
             openai_compatible_profile: Some(profile),
@@ -1700,7 +1700,7 @@ fn test_login_picker_preview_enter_starts_login_flow() {
             assert_eq!(provider, "Z.AI");
             assert_eq!(profile.id, crate::provider_catalog::ZAI_PROFILE.id);
         }
-        ref other => panic!("unexpected pending login state: {other:?}"),
+        other => panic!("unexpected pending login state: {other:?}"),
     }
 }
 
@@ -1833,10 +1833,9 @@ fn test_poke_status_reports_current_state() {
 
         app.auto_poke_incomplete_todos = true;
         app.is_processing = true;
+        let todos = super::commands::incomplete_poke_todos(&app);
         app.queued_messages
-            .push(super::commands::build_poke_message(
-                &super::commands::incomplete_poke_todos(&app),
-            ));
+            .push(super::commands::build_poke_message(&todos));
 
         assert!(super::commands::handle_session_command(
             &mut app,
@@ -1870,10 +1869,9 @@ fn test_poke_off_disarms_and_clears_queued_followup() {
 
         app.auto_poke_incomplete_todos = true;
         app.pending_queued_dispatch = true;
+        let todos = super::commands::incomplete_poke_todos(&app);
         app.queued_messages
-            .push(super::commands::build_poke_message(
-                &super::commands::incomplete_poke_todos(&app),
-            ));
+            .push(super::commands::build_poke_message(&todos));
 
         assert!(super::commands::handle_session_command(
             &mut app,
