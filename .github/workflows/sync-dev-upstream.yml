@@ -1,0 +1,55 @@
+name: Rebase dev onto master
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Runs from the repository's default branch, expected to be origin/master.
+    - cron: "17 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebase-dev-onto-master
+  cancel-in-progress: false
+
+jobs:
+  rebase-dev:
+    name: Rebase dev onto origin/master
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch branches
+        run: |
+          git fetch origin master dev --prune
+
+      - name: Rebase dev onto origin/master
+        run: |
+          git checkout -B dev origin/dev
+          if git rebase origin/master; then
+            echo "rebase_result=ok" >> "$GITHUB_ENV"
+          else
+            echo "::error::Conflict while rebasing dev onto origin/master. Resolve locally, force-push dev with --force-with-lease, then rerun this workflow."
+            git rebase --abort || true
+            exit 1
+          fi
+
+      - name: Push rebased dev
+        run: |
+          if git diff --quiet origin/dev..HEAD; then
+            echo "dev is already based on origin/master"
+          else
+            git push --force-with-lease origin HEAD:dev
+          fi
