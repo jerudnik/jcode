@@ -109,7 +109,19 @@ pub(crate) enum Command {
     Connect,
 
     /// Start a persistent conversational workspace co-manager session
-    Meta,
+    Meta {
+        /// Open the meta co-manager in a stable Zellij tab/session
+        #[arg(long)]
+        zellij: bool,
+
+        /// Zellij session name to create/attach for the meta workspace
+        #[arg(long, default_value = "jcode-meta")]
+        zellij_session: String,
+
+        /// Zellij tab name for the meta co-manager
+        #[arg(long, default_value = "jcode-meta")]
+        tab: String,
+    },
 
     /// Run a single message and exit
     Run {

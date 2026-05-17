@@ -120,7 +120,7 @@ pub(crate) fn initial_title(args: &Args) -> String {
     match &args.command {
         Some(Command::Serve { .. }) => "jcode:server".to_string(),
         Some(Command::Connect) => "jcode:client".to_string(),
-        Some(Command::Meta) => "jcode:meta".to_string(),
+        Some(Command::Meta { .. }) => "jcode:meta".to_string(),
         Some(Command::Run { .. }) => "jcode run".to_string(),
         Some(Command::Login { .. }) => "jcode login".to_string(),
         Some(Command::Repl) => "jcode repl".to_string(),

@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Instant;
 
@@ -62,7 +63,15 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         Some(Command::Connect) => {
             tui_launch::run_client().await?;
         }
-        Some(Command::Meta) => {
+        Some(Command::Meta {
+            zellij,
+            ref zellij_session,
+            ref tab,
+        }) => {
+            if zellij && std::env::var("JCODE_META_ZELLIJ_CHILD").is_err() {
+                launch_meta_in_zellij(&args, &zellij_session, &tab)?;
+                return Ok(());
+            }
             crate::env::set_var("JCODE_SESSION_KIND", "meta");
             crate::env::set_var("JCODE_SESSION_TITLE", "jcode-meta");
             tui_launch::run_client().await?;
@@ -324,6 +333,106 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         None => run_default_command(args).await?,
     }
 
+    Ok(())
+}
+
+fn meta_child_args(args: &Args) -> Vec<String> {
+    let mut child = vec!["meta".to_string()];
+    if let Some(model) = args.model.as_ref().filter(|value| !value.trim().is_empty()) {
+        child.push("--model".to_string());
+        child.push(model.clone());
+    }
+    if let Some(socket) = args.socket.as_ref().filter(|value| !value.trim().is_empty()) {
+        child.push("--socket".to_string());
+        child.push(socket.clone());
+    }
+    if let Some(profile) = args
+        .provider_profile
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        child.push("--provider-profile".to_string());
+        child.push(profile.clone());
+    }
+    if let Some(cwd) = args.cwd.as_ref().filter(|value| !value.trim().is_empty()) {
+        child.push("--cwd".to_string());
+        child.push(cwd.clone());
+    }
+    child
+}
+
+fn launch_meta_in_zellij(args: &Args, zellij_session: &str, tab: &str) -> Result<()> {
+    let exe = std::env::var_os("JCODE_SELFDEV_TARGET_EXE")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_exe().ok())
+        .unwrap_or_else(|| PathBuf::from("jcode"));
+    let cwd = args
+        .cwd
+        .as_deref()
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let mut command_parts = vec![exe.to_string_lossy().to_string()];
+    command_parts.extend(meta_child_args(args));
+    let shell = crate::terminal_launch::shell_command(&command_parts);
+
+    if std::env::var("ZELLIJ").is_ok() || std::env::var("ZELLIJ_SESSION_NAME").is_ok() {
+        let output = ProcessCommand::new("zellij")
+            .args(["action", "new-tab", "--name", tab, "--cwd"])
+            .arg(&cwd)
+            .args(["--", "bash", "-lc", &shell])
+            .env("JCODE_META_ZELLIJ_CHILD", "1")
+            .output()?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "failed to open zellij meta tab: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        return Ok(());
+    }
+
+    let default_shell = format!("/bin/bash -lc {}", crate::terminal_launch::sh_escape(&shell));
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut cmd = ProcessCommand::new("open");
+        cmd.args([
+            "-na",
+            "Ghostty",
+            "--args",
+            "-e",
+            "zellij",
+            "attach",
+            "-c",
+            zellij_session,
+            "options",
+            "--default-cwd",
+        ])
+        .arg(&cwd)
+        .args(["--default-shell", &default_shell]);
+        cmd
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut cmd = ProcessCommand::new("zellij");
+        cmd.args(["attach", "-c", zellij_session, "options", "--default-cwd"])
+            .arg(&cwd)
+            .args(["--default-shell", &default_shell]);
+        cmd
+    };
+    #[cfg(not(unix))]
+    let mut cmd = {
+        let mut cmd = ProcessCommand::new("zellij");
+        cmd.args(["attach", "-c", zellij_session]);
+        cmd
+    };
+
+    cmd.current_dir(Path::new(&cwd))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .env("JCODE_META_ZELLIJ_CHILD", "1");
+    crate::platform::spawn_detached(&mut cmd)?;
     Ok(())
 }
 
