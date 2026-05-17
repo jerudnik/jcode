@@ -29,7 +29,25 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> &'static Mutex<()> {
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    ENV_LOCK.get_or_init(|| Mutex::new(()))
+    ENV_LOCK.get_or_init(|| {
+        // Process-wide default-deny for side-effecting OS interactions
+        // during cargo test runs. Set BEFORE any test can race past us;
+        // the `OnceLock` initializer is guaranteed to run exactly once
+        // before any concurrent test acquires the lock.
+        //
+        // Tests that genuinely want to exercise the real spawn path
+        // (e.g. `cli::tui_launch::tests::spawn_*_uses_handterm_exec_mode`)
+        // opt back in by setting the relevant
+        // `JCODE_TEST_ALLOW_{BROWSER_OPEN,TERMINAL_SPAWN}` var within
+        // their scope while holding `lock_test_env()`.
+        //
+        // Note: we don't gate on whether the var is already set; tests
+        // that want to override must do so explicitly via the opt-out
+        // pattern, not by relying on ambient env.
+        crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, "1");
+        crate::env::set_var(crate::terminal_launch::DISABLE_ENV_VAR, "1");
+        Mutex::new(())
+    })
 }
 
 #[cfg(test)]
@@ -110,6 +128,7 @@ struct TestJcodeHomeInner {
     _temp: tempfile::TempDir,
     prev_home: Option<std::ffi::OsString>,
     prev_disable_browser: Option<std::ffi::OsString>,
+    prev_disable_terminal_spawn: Option<std::ffi::OsString>,
 }
 
 #[cfg(test)]
@@ -119,13 +138,22 @@ impl TestJcodeHome {
     /// If `JCODE_HOME` is already set (by an outer guard or a closure-based
     /// helper like `with_temp_jcode_home`), this is a no-op passthrough.
     ///
-    /// Also sets `JCODE_DISABLE_BROWSER_OPEN=1` for the duration of the
-    /// guard so that any code path which would invoke the OS browser
-    /// opener (`crate::browser_open::open_url` / `open_detached`) becomes
-    /// a no-op success. This prevents tests with a pristine `JCODE_HOME`
-    /// (and therefore no cached auth credentials) from popping real
-    /// browser windows for OAuth flows. Tests that genuinely want to
-    /// exercise the open path can clear the var within their scope.
+    /// Also sets two safety guards for the duration of the guard:
+    ///
+    /// * `JCODE_DISABLE_BROWSER_OPEN=1` makes
+    ///   `crate::browser_open::{open_url,open_detached}` a no-op success,
+    ///   so OAuth flows in a pristine `JCODE_HOME` (no cached creds)
+    ///   cannot pop real browser windows.
+    /// * `JCODE_DISABLE_TERMINAL_SPAWN=1` makes
+    ///   `crate::terminal_launch::spawn_command_in_new_terminal` return
+    ///   `Ok(false)` without spawning, so TUI flows like `/transfer`,
+    ///   `/resume`, or self-dev handoff cannot pop real Ghostty / iTerm
+    ///   / Terminal.app windows during test runs.
+    ///
+    /// Both prior values are saved and restored on drop. Tests that
+    /// genuinely want to exercise either path can clear the relevant
+    /// var within their scope (see `cli::tui_launch::tests` for the
+    /// `spawn_*_in_new_terminal_uses_handterm_exec_mode` pattern).
     pub(crate) fn acquire() -> Self {
         if std::env::var_os("JCODE_HOME").is_some() {
             return Self { inner: None };
@@ -143,8 +171,11 @@ impl TestJcodeHome {
         let temp = tempfile::tempdir().expect("create test JCODE_HOME tempdir");
         let prev_home = std::env::var_os("JCODE_HOME");
         let prev_disable_browser = std::env::var_os(crate::browser_open::DISABLE_ENV_VAR);
+        let prev_disable_terminal_spawn =
+            std::env::var_os(crate::terminal_launch::DISABLE_ENV_VAR);
         crate::env::set_var("JCODE_HOME", temp.path());
         crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, "1");
+        crate::env::set_var(crate::terminal_launch::DISABLE_ENV_VAR, "1");
 
         Self {
             inner: Some(TestJcodeHomeInner {
@@ -152,6 +183,7 @@ impl TestJcodeHome {
                 _temp: temp,
                 prev_home,
                 prev_disable_browser,
+                prev_disable_terminal_spawn,
             }),
         }
     }
@@ -178,6 +210,11 @@ impl Drop for TestJcodeHome {
                 crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, prev);
             } else {
                 crate::env::remove_var(crate::browser_open::DISABLE_ENV_VAR);
+            }
+            if let Some(prev) = &inner.prev_disable_terminal_spawn {
+                crate::env::set_var(crate::terminal_launch::DISABLE_ENV_VAR, prev);
+            } else {
+                crate::env::remove_var(crate::terminal_launch::DISABLE_ENV_VAR);
             }
             // _temp and _guard are dropped here, in that order.
         }

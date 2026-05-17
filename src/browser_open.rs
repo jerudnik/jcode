@@ -23,7 +23,34 @@ use std::io;
 /// pristine `JCODE_HOME` lacks cached credentials.
 pub const DISABLE_ENV_VAR: &str = "JCODE_DISABLE_BROWSER_OPEN";
 
+/// Opt-in escape hatch for tests that need to exercise the real OS opener.
+/// When the binary is built with `#[cfg(test)]`, browser-opening is
+/// **default-deny**: set `JCODE_TEST_ALLOW_BROWSER_OPEN=1` (and only
+/// then) to call `open::that*` for real.
+#[cfg(test)]
+pub const TEST_ALLOW_ENV_VAR: &str = "JCODE_TEST_ALLOW_BROWSER_OPEN";
+
 fn is_disabled() -> bool {
+    // Test builds: default-deny. A test that explicitly wants to
+    // exercise the real opener (very rare) can set
+    // `JCODE_TEST_ALLOW_BROWSER_OPEN=1` within its scope. The opt-in
+    // var also overrides the production `JCODE_DISABLE_BROWSER_OPEN`
+    // var (which the test harness installs at `lock_test_env()` init).
+    // This makes it structurally impossible for any test path
+    // (including helper shims that bypass `TestJcodeHome::acquire`,
+    // OAuth flows in closure-based `with_temp_jcode_home`, or direct
+    // calls from background threads) to pop a real browser window.
+    #[cfg(test)]
+    {
+        let allow = std::env::var_os(TEST_ALLOW_ENV_VAR)
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(false);
+        if allow {
+            return false;
+        }
+        return true;
+    }
+    #[allow(unreachable_code)]
     std::env::var_os(DISABLE_ENV_VAR)
         .map(|v| !v.is_empty() && v != "0")
         .unwrap_or(false)
@@ -98,22 +125,36 @@ mod tests {
 
     #[test]
     fn empty_or_zero_does_not_disable() {
+        // In `#[cfg(test)]` builds, `is_disabled` is hardcoded
+        // default-deny and only the TEST_ALLOW var can flip it.
+        // Verify the empty/zero semantics of THAT var (which is what
+        // production code paths effectively want from DISABLE_ENV_VAR
+        // outside test builds).
         let _guard = crate::storage::lock_test_env();
-        let prev = std::env::var_os(DISABLE_ENV_VAR);
+        let prev = std::env::var_os(TEST_ALLOW_ENV_VAR);
 
-        crate::env::set_var(DISABLE_ENV_VAR, "");
-        assert!(!is_disabled(), "empty value should not disable");
+        crate::env::set_var(TEST_ALLOW_ENV_VAR, "");
+        assert!(
+            is_disabled(),
+            "empty TEST_ALLOW value should not opt in (so default-deny holds)"
+        );
 
-        crate::env::set_var(DISABLE_ENV_VAR, "0");
-        assert!(!is_disabled(), "literal 0 should not disable");
+        crate::env::set_var(TEST_ALLOW_ENV_VAR, "0");
+        assert!(
+            is_disabled(),
+            "literal '0' TEST_ALLOW value should not opt in"
+        );
 
-        crate::env::set_var(DISABLE_ENV_VAR, "1");
-        assert!(is_disabled(), "1 should disable");
+        crate::env::set_var(TEST_ALLOW_ENV_VAR, "1");
+        assert!(
+            !is_disabled(),
+            "TEST_ALLOW=1 should opt back in to the real opener"
+        );
 
         if let Some(prev) = prev {
-            crate::env::set_var(DISABLE_ENV_VAR, prev);
+            crate::env::set_var(TEST_ALLOW_ENV_VAR, prev);
         } else {
-            crate::env::remove_var(DISABLE_ENV_VAR);
+            crate::env::remove_var(TEST_ALLOW_ENV_VAR);
         }
     }
 }

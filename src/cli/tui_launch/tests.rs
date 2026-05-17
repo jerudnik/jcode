@@ -42,6 +42,16 @@ impl EnvVarGuard {
         crate::env::set_var(key, value);
         Self { key, prev }
     }
+
+    /// Remove an env var for the duration of the guard, capturing its
+    /// prior value so Drop can restore it. Used to opt back into code
+    /// paths that the test harness disabled by default (for example
+    /// `JCODE_DISABLE_TERMINAL_SPAWN`).
+    fn remove(key: &'static str) -> Self {
+        let prev = std::env::var_os(key);
+        crate::env::remove_var(key);
+        Self { key, prev }
+    }
 }
 
 #[cfg(unix)]
@@ -89,6 +99,16 @@ fn wait_for_lines(path: &Path, min_lines: usize) -> Vec<String> {
 #[test]
 fn spawn_resume_in_new_terminal_uses_handterm_exec_mode() {
     let _env_lock = ENV_LOCK.lock().expect("env lock");
+    // Also acquire the global test-env lock so we don't race a sibling
+    // TestJcodeHome guard mid-spawn (which would re-set the disable var
+    // while we're inside the spawn loop and starve the fake handterm).
+    let _global_lock = crate::storage::lock_test_env();
+    // The test build is default-deny for terminal spawning (see
+    // `crate::terminal_launch::is_disabled`). This test specifically
+    // wants to exercise the real spawn path with a fake handterm
+    // binary on PATH, so opt back in for our scope.
+    let _spawn_guard =
+        EnvVarGuard::set_value(crate::terminal_launch::TEST_ALLOW_ENV_VAR, "1");
     let temp = tempfile::tempdir().expect("temp dir");
     let output_path = temp.path().join("resume-launch.txt");
     write_fake_handterm(&temp, &output_path);
@@ -160,6 +180,11 @@ fn resumed_window_title_includes_server_name_when_registry_matches_socket() {
 #[test]
 fn spawn_selfdev_in_new_terminal_uses_handterm_exec_mode() {
     let _env_lock = ENV_LOCK.lock().expect("env lock");
+    let _global_lock = crate::storage::lock_test_env();
+    // See spawn_resume_in_new_terminal_uses_handterm_exec_mode above
+    // for the rationale of opting back in to the real spawn here.
+    let _spawn_guard =
+        EnvVarGuard::set_value(crate::terminal_launch::TEST_ALLOW_ENV_VAR, "1");
     let temp = tempfile::tempdir().expect("temp dir");
     let output_path = temp.path().join("selfdev-launch.txt");
     write_fake_handterm(&temp, &output_path);
