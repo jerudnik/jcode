@@ -1,4 +1,4 @@
-name: Rebase dev onto master
+name: Sync master and rebase dev
 
 on:
   workflow_dispatch:
@@ -10,16 +10,16 @@ permissions:
   contents: write
 
 concurrency:
-  group: rebase-dev-onto-master
+  group: sync-master-and-rebase-dev
   cancel-in-progress: false
 
 jobs:
-  rebase-dev:
-    name: Rebase dev onto origin/master
+  sync-and-rebase:
+    name: Merge upstream into master, then rebase dev
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout master
         uses: actions/checkout@v4
         with:
           ref: master
@@ -31,22 +31,44 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch branches
+      - name: Fetch origin and upstream
+        run: |
+          git remote add upstream https://github.com/1jehuang/jcode.git
+          git fetch origin master dev --prune
+          git fetch upstream master --prune
+
+      - name: Merge upstream/master into master
+        run: |
+          git checkout -B master origin/master
+          if git merge --no-edit upstream/master; then
+            echo "master merge ok"
+          else
+            echo "::error::Conflict while merging upstream/master into origin/master. Resolve master manually, then rerun this workflow."
+            git merge --abort || true
+            exit 1
+          fi
+
+      - name: Push updated master if changed
+        run: |
+          if git diff --quiet origin/master..HEAD; then
+            echo "origin/master already contains upstream/master"
+          else
+            git push origin HEAD:master
+          fi
+
+      - name: Rebase dev onto updated master
         run: |
           git fetch origin master dev --prune
-
-      - name: Rebase dev onto origin/master
-        run: |
           git checkout -B dev origin/dev
           if git rebase origin/master; then
-            echo "rebase_result=ok" >> "$GITHUB_ENV"
+            echo "dev rebase ok"
           else
             echo "::error::Conflict while rebasing dev onto origin/master. Resolve locally, force-push dev with --force-with-lease, then rerun this workflow."
             git rebase --abort || true
             exit 1
           fi
 
-      - name: Push rebased dev
+      - name: Push rebased dev if changed
         run: |
           if git diff --quiet origin/dev..HEAD; then
             echo "dev is already based on origin/master"
