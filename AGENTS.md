@@ -10,6 +10,17 @@
 - **Bump version for releases** - Update version in `Cargo.toml` when making releases. When cutting a new release, look at all the changes that happened since the last release and determine what the version bump should be ie patch or minor, etc. 
 - **Remote builds available** - Use `scripts/remote_build.sh` to offload heavy cargo work to another machine. If your build is terminated, likely is because there are not enough resources on this machine to build. use remote build in that case. Try checking the resource avaliablity on the machine before you run a build. 
 
+## Dev Shell
+- The repo ships a Nix dev shell (`flake.nix`) with `cargo`, `rustc`, `clippy`,
+  `rustfmt`, `rust-analyzer`, `sccache`, `pkg-config`, `openssl`, `cmake`, plus
+  the right Darwin frameworks / Linux native deps.
+- A `.envrc` (`use flake`) auto-loads it via `nix-direnv`. Run `direnv allow`
+  once on first checkout; afterwards `cd` into the repo and `cargo` /
+  `rustc` are on `PATH`.
+- For non-interactive shells (CI, agents that bypass direnv), invoke
+  cargo through the shell with `nix develop -c cargo <args>` or
+  `direnv exec . cargo <args>`.
+
 ## Logs
 - Logs are written to `~/.jcode/logs/` (daily files like `jcode-YYYY-MM-DD.log`).
 
