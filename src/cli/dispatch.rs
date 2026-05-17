@@ -72,6 +72,9 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                 launch_meta_in_zellij(&args, &zellij_session, &tab)?;
                 return Ok(());
             }
+            if std::env::var("JCODE_SWARM_ID").is_err() {
+                crate::env::set_var("JCODE_SWARM_ID", "jcode-meta");
+            }
             crate::env::set_var("JCODE_SESSION_KIND", "meta");
             crate::env::set_var("JCODE_SESSION_TITLE", "jcode-meta");
             tui_launch::run_client().await?;
@@ -342,7 +345,11 @@ fn meta_child_args(args: &Args) -> Vec<String> {
         child.push("--model".to_string());
         child.push(model.clone());
     }
-    if let Some(socket) = args.socket.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(socket) = args
+        .socket
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         child.push("--socket".to_string());
         child.push(socket.clone());
     }
@@ -392,7 +399,10 @@ fn launch_meta_in_zellij(args: &Args, zellij_session: &str, tab: &str) -> Result
         return Ok(());
     }
 
-    let default_shell = format!("/bin/bash -lc {}", crate::terminal_launch::sh_escape(&shell));
+    let default_shell = format!(
+        "/bin/bash -lc {}",
+        crate::terminal_launch::sh_escape(&shell)
+    );
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut cmd = ProcessCommand::new("open");

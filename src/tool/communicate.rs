@@ -4,8 +4,8 @@ use super::{Tool, ToolContext, ToolOutput};
 use crate::plan::PlanItem;
 use crate::protocol::{
     AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, ContextEntry,
-    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmChannelInfo, ToolCallSummary,
-    comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
+    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmChannelInfo, SwarmSummary,
+    ToolCallSummary, comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
     default_comm_cleanup_target_statuses, default_comm_run_await_statuses,
     format_comm_awaited_members_with_reports, format_comm_channels, format_comm_context_entries,
     format_comm_context_history, format_comm_members, format_comm_plan_followup,
@@ -47,10 +47,14 @@ fn ensure_success(response: &ServerEvent) -> Result<()> {
     }
 }
 
-async fn fetch_plan_status(session_id: &str) -> Result<PlanGraphStatus> {
+async fn fetch_plan_status(
+    session_id: &str,
+    target_swarm_id: Option<String>,
+) -> Result<PlanGraphStatus> {
     let request = Request::CommPlanStatus {
         id: REQUEST_ID,
         session_id: session_id.to_string(),
+        swarm_id: target_swarm_id,
     };
     match send_request(request).await {
         Ok(ServerEvent::CommPlanStatusResponse { summary, .. }) => Ok(summary),
@@ -102,6 +106,7 @@ async fn fetch_swarm_members(session_id: &str) -> Result<Vec<AgentInfo>> {
     let request = Request::CommList {
         id: REQUEST_ID,
         session_id: session_id.to_string(),
+        swarm_id: None,
     };
     match send_request(request).await {
         Ok(ServerEvent::CommMembers { members, .. }) => Ok(members),
@@ -218,7 +223,7 @@ async fn run_swarm_plan_to_terminal(
             ));
         }
 
-        let summary = fetch_plan_status(&ctx.session_id).await?;
+        let summary = fetch_plan_status(&ctx.session_id, None).await?;
         if summary.item_count == 0 {
             return Ok(ToolOutput::new("No swarm plan items to run."));
         }
@@ -448,6 +453,44 @@ fn format_channels(channels: &[SwarmChannelInfo]) -> ToolOutput {
     ToolOutput::new(format_comm_channels(channels))
 }
 
+fn format_swarms(swarms: &[SwarmSummary]) -> ToolOutput {
+    if swarms.is_empty() {
+        return ToolOutput::new("No swarms found.");
+    }
+    let mut output = String::from("Swarms:\n\n");
+    for s in swarms {
+        let coord_name = s
+            .coordinator_name
+            .clone()
+            .or_else(|| s.coordinator_session.clone())
+            .unwrap_or_else(|| "(none)".to_string());
+        output.push_str(&format!(
+            "  {} - {} member(s), coordinator: {}, plan v{}\n",
+            s.swarm_id,
+            s.member_count,
+            coord_name,
+            s.plan_version
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        ));
+        if !s.status_counts.is_empty() {
+            let mut pairs: Vec<(String, usize)> = s
+                .status_counts
+                .iter()
+                .map(|(k, v)| (k.clone(), *v))
+                .collect();
+            pairs.sort_by(|a, b| a.0.cmp(&b.0));
+            let summary = pairs
+                .into_iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join(", ");
+            output.push_str(&format!("    status: {}\n", summary));
+        }
+    }
+    ToolOutput::new(output)
+}
+
 pub struct CommunicateTool;
 
 impl CommunicateTool {
@@ -519,6 +562,10 @@ struct CommunicateInput {
     follow_up: Option<String>,
     #[serde(default)]
     spawn_mode: Option<String>,
+    /// Optional target swarm id for cross-swarm reads (list, list_channels, plan_status).
+    /// When omitted, the requester's own swarm is used.
+    #[serde(default)]
+    swarm_id: Option<String>,
 }
 
 impl CommunicateInput {
@@ -545,12 +592,12 @@ impl Tool for CommunicateTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["share", "share_append", "read", "message", "broadcast", "dm", "channel", "list", "list_channels", "channel_members",
+                    "enum": ["share", "share_append", "read", "message", "broadcast", "dm", "channel", "list", "list_channels", "list_swarms", "channel_members",
                              "propose_plan", "approve_plan", "reject_plan", "spawn", "stop", "assign_role",
                              "status", "report", "plan_status", "summary", "read_context", "resync_plan", "assign_task", "assign_next", "fill_slots", "run_plan", "cleanup",
                              "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
                              "subscribe_channel", "unsubscribe_channel", "await_members"],
-                    "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately."
+                    "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately. list_swarms enumerates every swarm on the server and is intended for meta orchestrators; list/list_channels/plan_status accept an optional swarm_id to inspect any swarm."
                 },
                 "key": {
                     "type": "string"
@@ -582,6 +629,10 @@ impl Tool for CommunicateTool {
                 "proposer_session": { "type": "string" },
                 "reason": { "type": "string" },
                 "target_session": { "type": "string" },
+                "swarm_id": {
+                    "type": "string",
+                    "description": "Optional target swarm id for cross-swarm reads (list, list_channels, plan_status). Use with action=list_swarms output. Defaults to the requester's own swarm."
+                },
                 "role": {
                     "type": "string",
                     "enum": ["agent", "coordinator", "worktree_manager"]
@@ -816,6 +867,7 @@ impl Tool for CommunicateTool {
                 let request = Request::CommList {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
+                    swarm_id: params.swarm_id.clone(),
                 };
 
                 match send_request(request).await {
@@ -834,6 +886,7 @@ impl Tool for CommunicateTool {
                 let request = Request::CommListChannels {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
+                    swarm_id: params.swarm_id.clone(),
                 };
 
                 match send_request(request).await {
@@ -845,6 +898,24 @@ impl Tool for CommunicateTool {
                         Ok(ToolOutput::new("No channels found."))
                     }
                     Err(e) => Err(anyhow::anyhow!("Failed to list channels: {}", e)),
+                }
+            }
+
+            "list_swarms" => {
+                let request = Request::CommListSwarms {
+                    id: REQUEST_ID,
+                    session_id: ctx.session_id.clone(),
+                };
+
+                match send_request(request).await {
+                    Ok(ServerEvent::CommListSwarmsResponse { swarms, .. }) => {
+                        Ok(format_swarms(&swarms))
+                    }
+                    Ok(response) => {
+                        ensure_success(&response)?;
+                        Ok(ToolOutput::new("No swarms found."))
+                    }
+                    Err(e) => Err(anyhow::anyhow!("Failed to list swarms: {}", e)),
                 }
             }
 
@@ -1098,7 +1169,7 @@ impl Tool for CommunicateTool {
             }
 
             "plan_status" => {
-                let summary = fetch_plan_status(&ctx.session_id).await?;
+                let summary = fetch_plan_status(&ctx.session_id, params.swarm_id.clone()).await?;
                 Ok(format_plan_status(&summary))
             }
 
@@ -1199,7 +1270,7 @@ impl Tool for CommunicateTool {
                     }) => {
                         let mut output =
                             format!("Task '{}' assigned to {}", task_id, target_session);
-                        if let Ok(summary) = fetch_plan_status(&ctx.session_id).await {
+                        if let Ok(summary) = fetch_plan_status(&ctx.session_id, None).await {
                             output.push_str(&format!("\n{}", format_plan_followup(&summary)));
                         }
                         Ok(ToolOutput::new(output))
@@ -1271,7 +1342,7 @@ impl Tool for CommunicateTool {
                     anyhow::anyhow!("'concurrency_limit' is required for fill_slots action")
                 })?;
 
-                let summary = fetch_plan_status(&ctx.session_id).await?;
+                let summary = fetch_plan_status(&ctx.session_id, None).await?;
 
                 let active_count = summary.active_ids.len();
                 if active_count >= concurrency_limit {
@@ -1330,7 +1401,7 @@ impl Tool for CommunicateTool {
                             .collect::<Vec<_>>()
                             .join("\n")
                     );
-                    if let Ok(summary) = fetch_plan_status(&ctx.session_id).await {
+                    if let Ok(summary) = fetch_plan_status(&ctx.session_id, None).await {
                         output.push_str(&format!("\n{}", format_plan_followup(&summary)));
                     }
                     Ok(ToolOutput::new(output))

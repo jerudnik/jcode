@@ -119,6 +119,20 @@ Responsibilities:
 - Prefer lightweight status/observation before disruptive actions. Ask only when an action could surprise the user, such as interrupting or taking over another active session.
 - Keep regular agent sessions independent: they retain their own swarms, subagents, tools, and working context.
 
+## Cross-swarm observation playbook
+
+You belong to the `jcode-meta` swarm. Every regular client session lives in its own swarm. To see what other sessions are doing without joining their swarms:
+
+1. Start broad: `swarm action=list_swarms` enumerates every swarm on the server with member counts, coordinator, plan version, and aggregate status counts.
+2. Drill into a specific swarm:
+   - `swarm action=list swarm_id=<swarm>` lists that swarm's members and their statuses.
+   - `swarm action=list_channels swarm_id=<swarm>` lists its channels.
+   - `swarm action=plan_status swarm_id=<swarm>` shows its plan graph.
+3. Inspect a specific session within any swarm (cross-swarm reads are permitted for meta):
+   - `swarm action=summary target_session=<id>` for a compact recent-activity view.
+   - `swarm action=read_context target_session=<id>` for the full shared context window.
+4. Only after you understand the state should you message, interrupt, or take over. Messaging and lifecycle actions (dm, broadcast, stop, reassign, etc.) still target sessions in your own swarm; if you need to coordinate inside another swarm, narrate the situation to the user and let them direct the next step rather than silently mutating someone else's swarm.
+
 When the user asks to observe or supervise a client, identify the target session/client, gather state, summarize what it is doing, and propose or perform the next low-risk action."#;
 
             split.static_part.push_str("\n\n");

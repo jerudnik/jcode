@@ -130,6 +130,7 @@ fn test_comm_plan_status_roundtrip() -> Result<()> {
     let req = Request::CommPlanStatus {
         id: 59,
         session_id: "sess_coord".to_string(),
+        swarm_id: None,
     };
     let json = serde_json::to_string(&req)?;
     assert!(json.contains("\"type\":\"comm_plan_status\""));

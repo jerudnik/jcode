@@ -5,9 +5,9 @@ use super::client_actions::{
     handle_trigger_memory_extraction,
 };
 use super::client_comm::{
-    handle_comm_channel_members, handle_comm_list, handle_comm_list_channels, handle_comm_message,
-    handle_comm_read, handle_comm_share, handle_comm_subscribe_channel,
-    handle_comm_unsubscribe_channel,
+    handle_comm_channel_members, handle_comm_list, handle_comm_list_channels,
+    handle_comm_list_swarms, handle_comm_message, handle_comm_read, handle_comm_share,
+    handle_comm_subscribe_channel, handle_comm_unsubscribe_channel,
 };
 use super::client_disconnect_cleanup::cleanup_client_connection;
 use super::client_session::{
@@ -424,10 +424,12 @@ async fn handle_lightweight_control_request(
         Request::CommList {
             id,
             session_id: req_session_id,
+            swarm_id: target_swarm_id,
         } => {
             handle_comm_list(
                 id,
                 req_session_id,
+                target_swarm_id,
                 &client_event_tx,
                 swarm_members,
                 swarms_by_id,
@@ -438,13 +440,30 @@ async fn handle_lightweight_control_request(
         Request::CommListChannels {
             id,
             session_id: req_session_id,
+            swarm_id: target_swarm_id,
         } => {
             handle_comm_list_channels(
                 id,
                 req_session_id,
+                target_swarm_id,
                 &client_event_tx,
                 swarm_members,
                 channel_subscriptions,
+            )
+            .await;
+        }
+        Request::CommListSwarms {
+            id,
+            session_id: req_session_id,
+        } => {
+            handle_comm_list_swarms(
+                id,
+                req_session_id,
+                &client_event_tx,
+                swarm_members,
+                swarms_by_id,
+                swarm_plans,
+                swarm_coordinators,
             )
             .await;
         }
@@ -695,10 +714,12 @@ async fn handle_lightweight_control_request(
         Request::CommPlanStatus {
             id,
             session_id: req_session_id,
+            swarm_id: target_swarm_id,
         } => {
             handle_comm_plan_status(
                 id,
                 req_session_id,
+                target_swarm_id,
                 swarm_members,
                 swarm_plans,
                 &client_event_tx,
@@ -2461,10 +2482,12 @@ pub(super) async fn handle_client(
             Request::CommList {
                 id,
                 session_id: req_session_id,
+                swarm_id: target_swarm_id,
             } => {
                 handle_comm_list(
                     id,
                     req_session_id,
+                    target_swarm_id,
                     &client_event_tx,
                     &swarm_members,
                     &swarms_by_id,
@@ -2476,13 +2499,31 @@ pub(super) async fn handle_client(
             Request::CommListChannels {
                 id,
                 session_id: req_session_id,
+                swarm_id: target_swarm_id,
             } => {
                 handle_comm_list_channels(
                     id,
                     req_session_id,
+                    target_swarm_id,
                     &client_event_tx,
                     &swarm_members,
                     &channel_subscriptions,
+                )
+                .await;
+            }
+
+            Request::CommListSwarms {
+                id,
+                session_id: req_session_id,
+            } => {
+                handle_comm_list_swarms(
+                    id,
+                    req_session_id,
+                    &client_event_tx,
+                    &swarm_members,
+                    &swarms_by_id,
+                    &swarm_plans,
+                    &swarm_coordinators,
                 )
                 .await;
             }
@@ -2744,10 +2785,12 @@ pub(super) async fn handle_client(
             Request::CommPlanStatus {
                 id,
                 session_id: req_session_id,
+                swarm_id: target_swarm_id,
             } => {
                 handle_comm_plan_status(
                     id,
                     req_session_id,
+                    target_swarm_id,
                     &swarm_members,
                     &swarm_plans,
                     &client_event_tx,

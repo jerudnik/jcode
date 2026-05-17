@@ -489,6 +489,7 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
     let request = Request::CommList {
         id: 7,
         session_id: "not-in-swarm".to_string(),
+        swarm_id: None,
     };
     let payload = serde_json::to_string(&request).expect("serialize request") + "\n";
     client_writer

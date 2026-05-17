@@ -21,11 +21,15 @@ async fn swarm_id_for_session(
 pub(super) async fn handle_comm_list_channels(
     id: u64,
     req_session_id: String,
+    target_swarm_id: Option<String>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     channel_subscriptions: &ChannelSubscriptions,
 ) {
-    let swarm_id = swarm_id_for_session(&req_session_id, swarm_members).await;
+    let swarm_id = match target_swarm_id {
+        Some(explicit) => Some(explicit),
+        None => swarm_id_for_session(&req_session_id, swarm_members).await,
+    };
 
     if let Some(swarm_id) = swarm_id {
         let channels = {
