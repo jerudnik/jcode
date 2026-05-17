@@ -28,7 +28,7 @@ fn create_scroll_test_app(
     height: u16,
     diagrams: usize,
     padding: usize,
-) -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+) -> (TestApp, ratatui::Terminal<ratatui::backend::TestBackend>) {
     crate::tui::mermaid::clear_active_diagrams();
     crate::tui::mermaid::clear_streaming_preview_diagram();
 
@@ -66,7 +66,7 @@ fn create_scroll_test_app(
     (app, terminal)
 }
 
-fn create_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+fn create_copy_test_app() -> (TestApp, ratatui::Terminal<ratatui::backend::TestBackend>) {
     let mut app = create_test_app();
     app.display_messages = vec![
         DisplayMessage {
@@ -99,7 +99,7 @@ fn create_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend::TestBacke
     (app, terminal)
 }
 
-fn create_error_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+fn create_error_copy_test_app() -> (TestApp, ratatui::Terminal<ratatui::backend::TestBackend>) {
     let mut app = create_test_app();
     app.display_messages = vec![
         DisplayMessage::user("Show me the last error"),
@@ -118,7 +118,7 @@ fn create_error_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend::Tes
     (app, terminal)
 }
 
-fn create_tool_error_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+fn create_tool_error_copy_test_app() -> (TestApp, ratatui::Terminal<ratatui::backend::TestBackend>) {
     let mut app = create_test_app();
     app.display_messages = vec![
         DisplayMessage::user("Run the command"),
@@ -146,7 +146,7 @@ fn create_tool_error_copy_test_app() -> (App, ratatui::Terminal<ratatui::backend
 }
 
 fn create_tool_failed_output_copy_test_app()
--> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+-> (TestApp, ratatui::Terminal<ratatui::backend::TestBackend>) {
     let mut app = create_test_app();
     app.display_messages = vec![
         DisplayMessage::user("Run the command"),

@@ -717,7 +717,6 @@ mod tests {
     use anyhow::Result;
     use async_trait::async_trait;
     use std::sync::Arc;
-    use std::sync::OnceLock;
 
     struct MockProvider;
 
@@ -744,33 +743,19 @@ mod tests {
         }
     }
 
-    fn ensure_test_jcode_home_if_unset() {
-        static TEST_HOME: OnceLock<std::path::PathBuf> = OnceLock::new();
-
-        if std::env::var_os("JCODE_HOME").is_some() {
-            return;
-        }
-
-        let path = TEST_HOME.get_or_init(|| {
-            let path = std::env::temp_dir().join(format!("jcode-test-home-{}", std::process::id()));
-            let _ = std::fs::create_dir_all(&path);
-            path
-        });
-        crate::env::set_var("JCODE_HOME", path);
-    }
-
-    fn create_test_app() -> crate::tui::app::App {
-        ensure_test_jcode_home_if_unset();
+    fn create_test_app() -> (crate::tui::app::App, crate::storage::TestJcodeHome) {
+        let env = crate::storage::TestJcodeHome::acquire();
 
         let provider: Arc<dyn Provider> = Arc::new(MockProvider);
         let rt = tokio::runtime::Runtime::new().expect("test runtime");
         let registry = rt.block_on(Registry::new(provider.clone()));
-        crate::tui::app::App::new_for_test_harness(provider, registry)
+        let app = crate::tui::app::App::new_for_test_harness(provider, registry);
+        (app, env)
     }
 
     #[test]
     fn left_aligned_mode_keeps_persistent_header_centered() {
-        let mut app = create_test_app();
+        let (mut app, _env) = create_test_app();
         app.set_centered(false);
 
         let lines = build_persistent_header(&app, 80);
@@ -790,7 +775,7 @@ mod tests {
 
     #[test]
     fn left_aligned_mode_keeps_secondary_header_centered() {
-        let mut app = create_test_app();
+        let (mut app, _env) = create_test_app();
         app.set_centered(false);
 
         let lines = build_header_lines(&app, 80);

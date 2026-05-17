@@ -550,7 +550,7 @@ fn test_openai_compatible_login_preserves_profile_for_runtime_activation() {
 
     app.start_login_provider(crate::provider_catalog::ZAI_LOGIN_PROVIDER);
 
-    match app.pending_login {
+    match &app.pending_login {
         Some(crate::tui::app::PendingLogin::ApiKeyProfile {
             provider,
             openai_compatible_profile: Some(profile),
@@ -559,7 +559,7 @@ fn test_openai_compatible_login_preserves_profile_for_runtime_activation() {
             assert_eq!(provider, "Z.AI");
             assert_eq!(profile.id, crate::provider_catalog::ZAI_PROFILE.id);
         }
-        ref other => panic!("unexpected pending login state: {other:?}"),
+        other => panic!("unexpected pending login state: {other:?}"),
     }
 }
 

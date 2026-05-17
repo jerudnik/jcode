@@ -107,10 +107,8 @@ impl Provider for SwitchableMockProvider {
     }
 }
 
-fn create_switchable_test_app(initial_provider: &str) -> (App, StdArc<StdMutex<String>>) {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+fn create_switchable_test_app(initial_provider: &str) -> (TestApp, StdArc<StdMutex<String>>) {
+    let env = TestEnvHandle::acquire();
 
     let active_provider = StdArc::new(StdMutex::new(initial_provider.to_string()));
     let provider: Arc<dyn Provider> = Arc::new(SwitchableMockProvider {
@@ -121,7 +119,7 @@ fn create_switchable_test_app(initial_provider: &str) -> (App, StdArc<StdMutex<S
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    (app, active_provider)
+    (TestApp { app, _env: env }, active_provider)
 }
 
 #[derive(Clone)]

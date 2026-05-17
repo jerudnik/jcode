@@ -310,7 +310,7 @@ mod tests {
         ConversationSearchTool::new(manager)
     }
 
-    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    fn env_lock() -> crate::storage::TestEnvLockGuard {
         crate::storage::lock_test_env()
     }
 

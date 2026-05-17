@@ -144,10 +144,8 @@ impl Provider for OpenRouterSpecCaptureProvider {
     }
 }
 
-fn create_test_app() -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+fn create_test_app() -> TestApp {
+    let env = TestEnvHandle::acquire();
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -155,7 +153,7 @@ fn create_test_app() -> App {
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    TestApp { app, _env: env }
 }
 
 fn wait_for_model_picker_load(app: &mut App) {
@@ -170,10 +168,8 @@ fn wait_for_model_picker_load(app: &mut App) {
     }
 }
 
-fn create_refresh_summary_test_app(summary: crate::provider::ModelCatalogRefreshSummary) -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+fn create_refresh_summary_test_app(summary: crate::provider::ModelCatalogRefreshSummary) -> TestApp {
+    let env = TestEnvHandle::acquire();
 
     let provider: Arc<dyn Provider> = Arc::new(RefreshSummaryProvider { summary });
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -181,13 +177,11 @@ fn create_refresh_summary_test_app(summary: crate::provider::ModelCatalogRefresh
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    TestApp { app, _env: env }
 }
 
-fn create_openrouter_spec_capture_test_app() -> (App, StdArc<StdMutex<Vec<String>>>) {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+fn create_openrouter_spec_capture_test_app() -> (TestApp, StdArc<StdMutex<Vec<String>>>) {
+    let env = TestEnvHandle::acquire();
 
     let set_model_calls = StdArc::new(StdMutex::new(Vec::new()));
     let provider: Arc<dyn Provider> = Arc::new(OpenRouterSpecCaptureProvider {
@@ -198,7 +192,7 @@ fn create_openrouter_spec_capture_test_app() -> (App, StdArc<StdMutex<Vec<String
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    (app, set_model_calls)
+    (TestApp { app, _env: env }, set_model_calls)
 }
 
 #[test]
@@ -278,6 +272,178 @@ fn test_side_panel_snapshot(page_id: &str, title: &str) -> crate::side_panel::Si
     }
 }
 
+/// Wrapper around `App` that owns an isolated test environment for its
+/// lifetime. Auto-derefs to `App` so most call sites stay unchanged.
+struct TestApp {
+    app: App,
+    _env: TestEnvHandle,
+}
+
+impl std::ops::Deref for TestApp {
+    type Target = App;
+
+    fn deref(&self) -> &App {
+        &self.app
+    }
+}
+
+impl std::ops::DerefMut for TestApp {
+    fn deref_mut(&mut self) -> &mut App {
+        &mut self.app
+    }
+}
+#[allow(clippy::too_many_lines)]
+impl crate::tui::TuiState for TestApp {
+    fn display_messages(&self) -> &[crate::tui::DisplayMessage]  { <App as crate::tui::TuiState>::display_messages(&self.app) }
+    fn display_user_message_count(&self) -> usize  { <App as crate::tui::TuiState>::display_user_message_count(&self.app) }
+    fn has_display_edit_tool_messages(&self) -> bool  { <App as crate::tui::TuiState>::has_display_edit_tool_messages(&self.app) }
+    fn side_pane_images(&self) -> Vec<crate::session::RenderedImage>  { <App as crate::tui::TuiState>::side_pane_images(&self.app) }
+    fn display_messages_version(&self) -> u64  { <App as crate::tui::TuiState>::display_messages_version(&self.app) }
+    fn streaming_text(&self) -> &str  { <App as crate::tui::TuiState>::streaming_text(&self.app) }
+    fn input(&self) -> &str  { <App as crate::tui::TuiState>::input(&self.app) }
+    fn cursor_pos(&self) -> usize  { <App as crate::tui::TuiState>::cursor_pos(&self.app) }
+    fn is_processing(&self) -> bool  { <App as crate::tui::TuiState>::is_processing(&self.app) }
+    fn queued_messages(&self) -> &[String]  { <App as crate::tui::TuiState>::queued_messages(&self.app) }
+    fn interleave_message(&self) -> Option<&str>  { <App as crate::tui::TuiState>::interleave_message(&self.app) }
+    fn pending_soft_interrupts(&self) -> &[String]  { <App as crate::tui::TuiState>::pending_soft_interrupts(&self.app) }
+    fn scroll_offset(&self) -> usize  { <App as crate::tui::TuiState>::scroll_offset(&self.app) }
+    fn auto_scroll_paused(&self) -> bool  { <App as crate::tui::TuiState>::auto_scroll_paused(&self.app) }
+    fn provider_name(&self) -> String  { <App as crate::tui::TuiState>::provider_name(&self.app) }
+    fn provider_model(&self) -> String  { <App as crate::tui::TuiState>::provider_model(&self.app) }
+    fn upstream_provider(&self) -> Option<String>  { <App as crate::tui::TuiState>::upstream_provider(&self.app) }
+    fn connection_type(&self) -> Option<String>  { <App as crate::tui::TuiState>::connection_type(&self.app) }
+    fn status_detail(&self) -> Option<String>  { <App as crate::tui::TuiState>::status_detail(&self.app) }
+    fn mcp_servers(&self) -> Vec<(String, usize)>  { <App as crate::tui::TuiState>::mcp_servers(&self.app) }
+    fn available_skills(&self) -> Vec<String>  { <App as crate::tui::TuiState>::available_skills(&self.app) }
+    fn streaming_tokens(&self) -> (u64, u64)  { <App as crate::tui::TuiState>::streaming_tokens(&self.app) }
+    fn streaming_cache_tokens(&self) -> (Option<u64>, Option<u64>)  { <App as crate::tui::TuiState>::streaming_cache_tokens(&self.app) }
+    fn output_tps(&self) -> Option<f32>  { <App as crate::tui::TuiState>::output_tps(&self.app) }
+    fn streaming_tool_calls(&self) -> Vec<crate::message::ToolCall>  { <App as crate::tui::TuiState>::streaming_tool_calls(&self.app) }
+    fn elapsed(&self) -> Option<std::time::Duration>  { <App as crate::tui::TuiState>::elapsed(&self.app) }
+    fn status(&self) -> crate::tui::ProcessingStatus  { <App as crate::tui::TuiState>::status(&self.app) }
+    fn command_suggestions(&self) -> Vec<(String, &'static str)>  { <App as crate::tui::TuiState>::command_suggestions(&self.app) }
+    fn active_skill(&self) -> Option<String>  { <App as crate::tui::TuiState>::active_skill(&self.app) }
+    fn subagent_status(&self) -> Option<String>  { <App as crate::tui::TuiState>::subagent_status(&self.app) }
+    fn batch_progress(&self) -> Option<crate::bus::BatchProgress>  { <App as crate::tui::TuiState>::batch_progress(&self.app) }
+    fn time_since_activity(&self) -> Option<std::time::Duration>  { <App as crate::tui::TuiState>::time_since_activity(&self.app) }
+    fn stream_message_ended(&self) -> bool  { <App as crate::tui::TuiState>::stream_message_ended(&self.app) }
+    fn total_session_tokens(&self) -> Option<(u64, u64)>  { <App as crate::tui::TuiState>::total_session_tokens(&self.app) }
+    fn is_remote_mode(&self) -> bool  { <App as crate::tui::TuiState>::is_remote_mode(&self.app) }
+    fn is_canary(&self) -> bool  { <App as crate::tui::TuiState>::is_canary(&self.app) }
+    fn is_replay(&self) -> bool  { <App as crate::tui::TuiState>::is_replay(&self.app) }
+    fn diff_mode(&self) -> crate::config::DiffDisplayMode  { <App as crate::tui::TuiState>::diff_mode(&self.app) }
+    fn current_session_id(&self) -> Option<String>  { <App as crate::tui::TuiState>::current_session_id(&self.app) }
+    fn session_display_name(&self) -> Option<String>  { <App as crate::tui::TuiState>::session_display_name(&self.app) }
+    fn server_display_name(&self) -> Option<String>  { <App as crate::tui::TuiState>::server_display_name(&self.app) }
+    fn server_display_icon(&self) -> Option<String>  { <App as crate::tui::TuiState>::server_display_icon(&self.app) }
+    fn server_sessions(&self) -> Vec<String>  { <App as crate::tui::TuiState>::server_sessions(&self.app) }
+    fn connected_clients(&self) -> Option<usize>  { <App as crate::tui::TuiState>::connected_clients(&self.app) }
+    fn status_notice(&self) -> Option<String>  { <App as crate::tui::TuiState>::status_notice(&self.app) }
+    fn active_experimental_feature_notice(&self) -> Option<String>  { <App as crate::tui::TuiState>::active_experimental_feature_notice(&self.app) }
+    fn remote_startup_phase_active(&self) -> bool  { <App as crate::tui::TuiState>::remote_startup_phase_active(&self.app) }
+    fn has_pending_mouse_scroll_animation(&self) -> bool  { <App as crate::tui::TuiState>::has_pending_mouse_scroll_animation(&self.app) }
+    fn dictation_key_label(&self) -> Option<String>  { <App as crate::tui::TuiState>::dictation_key_label(&self.app) }
+    fn animation_elapsed(&self) -> f32  { <App as crate::tui::TuiState>::animation_elapsed(&self.app) }
+    fn rate_limit_remaining(&self) -> Option<std::time::Duration>  { <App as crate::tui::TuiState>::rate_limit_remaining(&self.app) }
+    fn queue_mode(&self) -> bool  { <App as crate::tui::TuiState>::queue_mode(&self.app) }
+    fn next_prompt_new_session_armed(&self) -> bool  { <App as crate::tui::TuiState>::next_prompt_new_session_armed(&self.app) }
+    fn has_stashed_input(&self) -> bool  { <App as crate::tui::TuiState>::has_stashed_input(&self.app) }
+    fn context_info(&self) -> crate::prompt::ContextInfo  { <App as crate::tui::TuiState>::context_info(&self.app) }
+    fn context_limit(&self) -> Option<usize>  { <App as crate::tui::TuiState>::context_limit(&self.app) }
+    fn client_update_available(&self) -> bool  { <App as crate::tui::TuiState>::client_update_available(&self.app) }
+    fn server_update_available(&self) -> Option<bool>  { <App as crate::tui::TuiState>::server_update_available(&self.app) }
+    fn info_widget_data(&self) -> crate::tui::info_widget::InfoWidgetData  { <App as crate::tui::TuiState>::info_widget_data(&self.app) }
+    fn workspace_mode_enabled(&self) -> bool  { <App as crate::tui::TuiState>::workspace_mode_enabled(&self.app) }
+    fn workspace_map_rows(&self) -> Vec<crate::tui::workspace_map::VisibleWorkspaceRow>  { <App as crate::tui::TuiState>::workspace_map_rows(&self.app) }
+    fn workspace_animation_tick(&self) -> u64  { <App as crate::tui::TuiState>::workspace_animation_tick(&self.app) }
+    fn render_streaming_markdown(&self, width: usize) -> Vec<ratatui::text::Line<'static>>  { <App as crate::tui::TuiState>::render_streaming_markdown(&self.app, width) }
+    fn centered_mode(&self) -> bool  { <App as crate::tui::TuiState>::centered_mode(&self.app) }
+    fn auth_status(&self) -> crate::auth::AuthStatus  { <App as crate::tui::TuiState>::auth_status(&self.app) }
+    fn update_cost(&mut self) { <App as crate::tui::TuiState>::update_cost(&mut self.app) }
+    fn diagram_mode(&self) -> crate::config::DiagramDisplayMode  { <App as crate::tui::TuiState>::diagram_mode(&self.app) }
+    fn diagram_focus(&self) -> bool  { <App as crate::tui::TuiState>::diagram_focus(&self.app) }
+    fn diagram_index(&self) -> usize  { <App as crate::tui::TuiState>::diagram_index(&self.app) }
+    fn diagram_scroll(&self) -> (i32, i32)  { <App as crate::tui::TuiState>::diagram_scroll(&self.app) }
+    fn diagram_pane_ratio(&self) -> u8  { <App as crate::tui::TuiState>::diagram_pane_ratio(&self.app) }
+    fn diagram_pane_animating(&self) -> bool  { <App as crate::tui::TuiState>::diagram_pane_animating(&self.app) }
+    fn diagram_pane_enabled(&self) -> bool  { <App as crate::tui::TuiState>::diagram_pane_enabled(&self.app) }
+    fn diagram_pane_position(&self) -> crate::config::DiagramPanePosition  { <App as crate::tui::TuiState>::diagram_pane_position(&self.app) }
+    fn diagram_zoom(&self) -> u8  { <App as crate::tui::TuiState>::diagram_zoom(&self.app) }
+    fn diff_pane_scroll(&self) -> usize  { <App as crate::tui::TuiState>::diff_pane_scroll(&self.app) }
+    fn diff_pane_scroll_x(&self) -> i32  { <App as crate::tui::TuiState>::diff_pane_scroll_x(&self.app) }
+    fn side_panel_image_zoom_percent(&self) -> u8  { <App as crate::tui::TuiState>::side_panel_image_zoom_percent(&self.app) }
+    fn diff_pane_focus(&self) -> bool  { <App as crate::tui::TuiState>::diff_pane_focus(&self.app) }
+    fn side_panel(&self) -> &crate::side_panel::SidePanelSnapshot  { <App as crate::tui::TuiState>::side_panel(&self.app) }
+    fn pin_images(&self) -> bool  { <App as crate::tui::TuiState>::pin_images(&self.app) }
+    fn chat_native_scrollbar(&self) -> bool  { <App as crate::tui::TuiState>::chat_native_scrollbar(&self.app) }
+    fn side_panel_native_scrollbar(&self) -> bool  { <App as crate::tui::TuiState>::side_panel_native_scrollbar(&self.app) }
+    fn diff_line_wrap(&self) -> bool  { <App as crate::tui::TuiState>::diff_line_wrap(&self.app) }
+    fn inline_interactive_state(&self) -> Option<&crate::tui::InlineInteractiveState>  { <App as crate::tui::TuiState>::inline_interactive_state(&self.app) }
+    fn inline_view_state(&self) -> Option<&crate::tui::InlineViewState>  { <App as crate::tui::TuiState>::inline_view_state(&self.app) }
+    fn inline_ui_state(&self) -> Option<crate::tui::InlineUiStateRef<'_>>  { <App as crate::tui::TuiState>::inline_ui_state(&self.app) }
+    fn changelog_scroll(&self) -> Option<usize>  { <App as crate::tui::TuiState>::changelog_scroll(&self.app) }
+    fn help_scroll(&self) -> Option<usize>  { <App as crate::tui::TuiState>::help_scroll(&self.app) }
+    fn session_picker_overlay(&self) -> Option<&std::cell::RefCell<crate::tui::session_picker::SessionPicker>>  { <App as crate::tui::TuiState>::session_picker_overlay(&self.app) }
+    fn login_picker_overlay(&self) -> Option<&std::cell::RefCell<crate::tui::login_picker::LoginPicker>>  { <App as crate::tui::TuiState>::login_picker_overlay(&self.app) }
+    fn account_picker_overlay(&self) -> Option<&std::cell::RefCell<crate::tui::account_picker::AccountPicker>>  { <App as crate::tui::TuiState>::account_picker_overlay(&self.app) }
+    fn usage_overlay(&self) -> Option<&std::cell::RefCell<crate::tui::usage_overlay::UsageOverlay>>  { <App as crate::tui::TuiState>::usage_overlay(&self.app) }
+    fn working_dir(&self) -> Option<String>  { <App as crate::tui::TuiState>::working_dir(&self.app) }
+    fn now_millis(&self) -> u64  { <App as crate::tui::TuiState>::now_millis(&self.app) }
+    fn copy_badge_ui(&self) -> crate::tui::CopyBadgeUiState  { <App as crate::tui::TuiState>::copy_badge_ui(&self.app) }
+    fn copy_selection_mode(&self) -> bool  { <App as crate::tui::TuiState>::copy_selection_mode(&self.app) }
+    fn copy_selection_range(&self) -> Option<crate::tui::CopySelectionRange>  { <App as crate::tui::TuiState>::copy_selection_range(&self.app) }
+    fn copy_selection_status(&self) -> Option<crate::tui::CopySelectionStatus>  { <App as crate::tui::TuiState>::copy_selection_status(&self.app) }
+    fn suggestion_prompts(&self) -> Vec<(String, String)>  { <App as crate::tui::TuiState>::suggestion_prompts(&self.app) }
+    fn cache_ttl_status(&self) -> Option<crate::tui::CacheTtlInfo>  { <App as crate::tui::TuiState>::cache_ttl_status(&self.app) }
+    fn has_notification(&self) -> bool  { <App as crate::tui::TuiState>::has_notification(&self.app) }
+}
+
+
+
+/// Composite test-environment guard that combines `TestJcodeHome` (isolated
+/// `JCODE_HOME` + global env lock) with TUI/auth cache invalidation.
+///
+/// Acquiring this guard:
+///   1. Acquires `TestJcodeHome` (per-test tempdir + env lock, or passthrough
+///      if `JCODE_HOME` is already set by an outer scope).
+///   2. Clears `tui::ui` render state.
+///   3. Clears ambient-info cache.
+///   4. Resets per-provider auth account overrides.
+///   5. Invalidates the auth-status cache.
+///
+/// Dropping this guard repeats the cache resets (steps 2-5) before releasing
+/// the underlying `TestJcodeHome`, so a test cannot pollute the next test
+/// via static caches even if `JCODE_HOME` is shared.
+struct TestEnvHandle {
+    _home: crate::storage::TestJcodeHome,
+}
+
+impl TestEnvHandle {
+    fn acquire() -> Self {
+        let home = crate::storage::TestJcodeHome::acquire();
+        Self::reset_caches();
+        Self { _home: home }
+    }
+
+    fn reset_caches() {
+        crate::tui::ui::clear_test_render_state_for_tests();
+        crate::tui::app::helpers::clear_ambient_info_cache_for_tests();
+        crate::auth::claude::set_active_account_override(None);
+        crate::auth::codex::set_active_account_override(None);
+        crate::auth::AuthStatus::invalidate_cache();
+    }
+}
+
+impl Drop for TestEnvHandle {
+    fn drop(&mut self) {
+        Self::reset_caches();
+        // _home drops here, restoring JCODE_HOME and releasing the lock.
+    }
+}
+
+/// Legacy shim retained for the inline call sites in `support_failover::part_02`.
+/// Prefer creating a `TestEnvHandle` via `create_test_app()` or constructing
+/// one directly in new tests.
 fn ensure_test_jcode_home_if_unset() {
     use std::sync::OnceLock;
 
@@ -295,6 +461,7 @@ fn ensure_test_jcode_home_if_unset() {
     crate::env::set_var("JCODE_HOME", path);
 }
 
+/// Legacy shim retained for the inline call sites in `support_failover::part_02`.
 fn clear_persisted_test_ui_state() {
     if let Ok(home) = crate::storage::jcode_dir() {
         let ambient_dir = home.join("ambient");
@@ -308,27 +475,8 @@ fn clear_persisted_test_ui_state() {
 }
 
 fn with_temp_jcode_home<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::storage::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
-    crate::auth::claude::set_active_account_override(None);
-    crate::auth::codex::set_active_account_override(None);
-    crate::auth::AuthStatus::invalidate_cache();
-    clear_persisted_test_ui_state();
-
-    let result = f();
-
-    crate::auth::claude::set_active_account_override(None);
-    crate::auth::codex::set_active_account_override(None);
-    crate::auth::AuthStatus::invalidate_cache();
-    crate::tui::app::helpers::clear_ambient_info_cache_for_tests();
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-    result
+    let _env = TestEnvHandle::acquire();
+    f()
 }
 
 fn create_jcode_repo_fixture() -> tempfile::TempDir {

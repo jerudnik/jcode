@@ -5,7 +5,7 @@ use super::{
 use crate::protocol::ServerEvent;
 
 struct RuntimeEnvGuard {
-    _guard: std::sync::MutexGuard<'static, ()>,
+    _guard: crate::storage::TestEnvLockGuard,
     prev_runtime: Option<std::ffi::OsString>,
 }
 
