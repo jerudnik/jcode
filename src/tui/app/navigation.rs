@@ -1225,10 +1225,10 @@ impl App {
                         self.enqueue_mouse_scroll(MouseScrollTarget::SidePane, 1);
                     }
                     MouseEventKind::ScrollLeft if self.side_panel.focused_page().is_some() => {
-                        self.pan_diff_pane_x(-1);
+                        self.pan_diff_pane_x(-3);
                     }
                     MouseEventKind::ScrollRight if self.side_panel.focused_page().is_some() => {
-                        self.pan_diff_pane_x(1);
+                        self.pan_diff_pane_x(3);
                     }
                     _ => {}
                 }

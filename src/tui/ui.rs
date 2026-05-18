@@ -858,6 +858,22 @@ const FULL_PREP_CACHE_MAX_ENTRIES: usize = 4;
 // retain the active large transcript instead of forcing full recomposition.
 const FULL_PREP_CACHE_MAX_BYTES: usize = 24 * 1024 * 1024;
 const FULL_PREP_OVERSIZED_CACHE_MAX_ENTRIES: usize = 2;
+const FULL_PREP_OVERSIZED_ENTRY_BYTES: usize = 10 * 1024 * 1024;
+
+fn full_prep_logical_payload_bytes(prepared: &PreparedChatFrame) -> usize {
+    prepared
+        .sections
+        .iter()
+        .map(|section| {
+            section
+                .prepared
+                .raw_plain_lines
+                .iter()
+                .map(|line| line.len())
+                .sum::<usize>()
+        })
+        .sum()
+}
 
 #[derive(Default)]
 struct FullPrepCacheState {
@@ -904,7 +920,9 @@ impl FullPrepCacheState {
 
     fn insert(&mut self, key: FullPrepCacheKey, prepared: Arc<PreparedChatFrame>) {
         let prepared_bytes = estimate_prepared_chat_frame_bytes(&prepared);
-        if prepared_bytes > FULL_PREP_CACHE_MAX_BYTES {
+        if prepared_bytes > FULL_PREP_CACHE_MAX_BYTES
+            || full_prep_logical_payload_bytes(prepared.as_ref()) >= FULL_PREP_OVERSIZED_ENTRY_BYTES
+        {
             if let Some(pos) = self
                 .oversized_entries
                 .iter()
