@@ -18,6 +18,11 @@ impl App {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn test_provider_messages(&self) -> Vec<Message> {
+        self.materialized_provider_messages()
+    }
+
     pub(super) fn local_transcript_message_count(&self) -> usize {
         if self.is_remote {
             self.messages.len()
