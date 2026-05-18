@@ -211,8 +211,17 @@ fn test_paste_expansion_on_submit() {
     assert_eq!(app.display_messages()[0].content, "A: [pasted 5 lines] B");
 
     // Model receives expanded content (actual pasted text)
-    assert_eq!(app.messages.len(), 1);
-    match &app.messages[0].content[0] {
+    let provider_messages = app.test_provider_messages();
+    let provider_message = provider_messages
+        .iter()
+        .find(|message| {
+            matches!(
+                message.content.first(),
+                Some(crate::message::ContentBlock::Text { text, .. }) if text.starts_with("A: ")
+            )
+        })
+        .expect("provider user message");
+    match &provider_message.content[0] {
         crate::message::ContentBlock::Text { text, .. } => {
             assert_eq!(text, "A: 1\n2\n3\n4\n5 B");
         }
@@ -240,7 +249,17 @@ fn test_multiple_pastes() {
     app.submit_input();
     // Display and model both get the same content (no expansion needed)
     assert_eq!(app.display_messages()[0].content, "first second\nline");
-    match &app.messages[0].content[0] {
+    let provider_messages = app.test_provider_messages();
+    let provider_message = provider_messages
+        .iter()
+        .find(|message| {
+            matches!(
+                message.content.first(),
+                Some(crate::message::ContentBlock::Text { text, .. }) if text == "first second\nline"
+            )
+        })
+        .expect("provider user message");
+    match &provider_message.content[0] {
         crate::message::ContentBlock::Text { text, .. } => {
             assert_eq!(text, "first second\nline");
         }
