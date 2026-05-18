@@ -33,6 +33,11 @@ maybe_enable_sccache() {
     log "keeping existing RUSTC_WRAPPER=${RUSTC_WRAPPER}"
     return
   fi
+  if [[ -n "${CARGO_INCREMENTAL:-}" ]]; then
+    sccache_status="skipped-cargo-incremental-env"
+    log "CARGO_INCREMENTAL is set; using direct rustc because sccache requires it to be unset"
+    return
+  fi
   if command -v sccache >/dev/null 2>&1; then
     sccache --start-server >/dev/null 2>&1 || true
     export RUSTC_WRAPPER=sccache
