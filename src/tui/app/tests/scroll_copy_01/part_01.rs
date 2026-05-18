@@ -470,7 +470,7 @@ fn test_notification_file_activity_repaint_does_not_leave_trailing_digit_artifac
 }
 
 #[test]
-fn test_file_activity_scroll_reproduces_trailing_nines_after_native_scroll_like_mutation() {
+fn test_file_activity_scroll_clears_trailing_nines_after_native_scroll_like_mutation() {
     let _lock = scroll_render_test_lock();
 
     let mut app = create_test_app();
@@ -516,8 +516,8 @@ fn test_file_activity_scroll_reproduces_trailing_nines_after_native_scroll_like_
     let scrolled = render_and_snap(&app, &mut terminal);
 
     assert!(
-        scrolled.contains("9999"),
-        "expected stale trailing nines to remain after scroll-like repaint:\n{scrolled}"
+        !scrolled.contains("9999"),
+        "stale trailing nines should be cleared after scroll-like repaint:\n{scrolled}"
     );
 }
 

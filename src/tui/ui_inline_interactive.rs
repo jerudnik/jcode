@@ -286,7 +286,12 @@ fn picker_render_width(picker: &crate::tui::InlineInteractiveState, max_width: u
         .min(model_cap)
         .min(model_budget.max(min_model_width.min(model_budget)));
 
-    marker_width + provider_width + via_width + model_width
+    let render_width = marker_width + provider_width + via_width + model_width;
+    if picker.kind == crate::tui::PickerKind::Model {
+        render_width.max(40).min(max_width)
+    } else {
+        render_width
+    }
 }
 
 pub(super) fn format_elapsed(secs: f32) -> String {

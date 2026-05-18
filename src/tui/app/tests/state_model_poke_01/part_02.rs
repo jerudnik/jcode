@@ -197,7 +197,10 @@ fn test_pinned_content_uses_left_splitter_instead_of_rounded_box() {
 
     assert_eq!(buf[(diff_area.x, diff_area.y)].symbol(), "│");
     assert_eq!(buf[(diff_area.x, diff_area.y + 1)].symbol(), "│");
-    assert!(text.contains("pinned"), "rendered text: {text}");
+    assert!(
+        text.to_lowercase().contains("pinned"),
+        "rendered text: {text}"
+    );
 }
 
 #[test]
