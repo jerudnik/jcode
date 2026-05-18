@@ -279,15 +279,26 @@ impl Agent {
             self.registry.register_selfdev_tools().await;
         }
 
-        // Return locked tools if available (prevents cache invalidation from
-        // MCP tools arriving asynchronously after the first API request)
-        if let Some(ref locked) = self.locked_tools {
-            return locked.clone();
-        }
-
         let mut tools = self.registry.definitions(self.allowed_tools.as_ref()).await;
         if !self.session.is_canary {
             tools.retain(|tool| tool.name != "selfdev");
+        }
+
+        // Return locked tools if available, unless the visible registry has grown.
+        // MCP server tools register asynchronously after session startup, so the
+        // first API request can otherwise permanently lock a pre-MCP snapshot.
+        // Rebuilding only on growth preserves prompt-cache stability after the
+        // one expected MCP-arrival transition.
+        if let Some(ref locked) = self.locked_tools {
+            if tools.len() <= locked.len() {
+                return locked.clone();
+            }
+            logging::info(&format!(
+                "Tool registry grew from {} to {} tools; refreshing locked tool list",
+                locked.len(),
+                tools.len()
+            ));
+            self.cache_tracker.reset();
         }
 
         // Lock the tool list on first call to prevent cache invalidation

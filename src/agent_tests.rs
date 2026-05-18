@@ -18,6 +18,31 @@ struct NativeAutoCompactionProvider;
 
 struct JcodeCompactionProvider;
 
+struct LateRegisteredTool;
+
+#[async_trait]
+impl crate::tool::Tool for LateRegisteredTool {
+    fn name(&self) -> &str {
+        "mcp__late__tool"
+    }
+
+    fn description(&self) -> &str {
+        "Tool registered after the first provider request."
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object"})
+    }
+
+    async fn execute(
+        &self,
+        _input: serde_json::Value,
+        _ctx: crate::tool::ToolContext,
+    ) -> Result<ToolOutput> {
+        Ok(ToolOutput::new("late tool output"))
+    }
+}
+
 #[derive(Default)]
 struct AlwaysContextLimitProvider {
     calls: Arc<AtomicUsize>,
@@ -744,6 +769,40 @@ async fn clear_resets_runtime_interrupt_and_queue_state() {
     assert_eq!(agent.last_usage.input_tokens, 0);
     assert_eq!(agent.last_usage.output_tokens, 0);
     assert!(agent.locked_tools.is_none());
+}
+
+#[tokio::test]
+async fn tool_definitions_refresh_when_registry_grows_after_lock() {
+    let _guard = crate::storage::lock_test_env();
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry.clone());
+
+    let initial_tools = agent.tool_definitions().await;
+    assert!(agent.locked_tools.is_some(), "first call locks tool list");
+    assert!(
+        !initial_tools.iter().any(|tool| tool.name == "mcp__late__tool"),
+        "late tool should not be present before registration"
+    );
+
+    registry
+        .register(
+            "mcp__late__tool".to_string(),
+            Arc::new(LateRegisteredTool) as Arc<dyn crate::tool::Tool>,
+        )
+        .await;
+
+    let refreshed_tools = agent.tool_definitions().await;
+    assert!(
+        refreshed_tools
+            .iter()
+            .any(|tool| tool.name == "mcp__late__tool"),
+        "registry growth after the lock should refresh the tool snapshot"
+    );
+    assert!(
+        refreshed_tools.len() > initial_tools.len(),
+        "refreshed tool list should include newly registered tools"
+    );
 }
 
 #[tokio::test]
