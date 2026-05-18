@@ -135,6 +135,12 @@ impl Agent {
                         _ = keepalive.tick() => {
                             send_stream_keepalive_mpsc(&event_tx);
                         }
+                        _ = self.graceful_shutdown.notified() => {
+                            logging::info(
+                                "Graceful shutdown/cancel before API stream opened - stopping turn",
+                            );
+                            return Ok(());
+                        }
                         result = &mut complete_future => {
                             match result {
                                 Ok(stream) => break stream,
@@ -206,6 +212,12 @@ impl Agent {
                     _ = keepalive.tick() => {
                         send_stream_keepalive_mpsc(&event_tx);
                         continue;
+                    }
+                    _ = self.graceful_shutdown.notified() => {
+                        logging::info(
+                            "Graceful shutdown/cancel while waiting for API stream event - stopping stream",
+                        );
+                        break;
                     }
                     event = next_event => event,
                 };
@@ -315,8 +327,7 @@ impl Agent {
                     StreamEvent::ToolUseEnd => {
                         if let Some(mut tool) = current_tool.take() {
                             tool.input =
-                                serde_json::from_str::<serde_json::Value>(&current_tool_input)
-                                    .unwrap_or(serde_json::Value::Null);
+                                ToolCall::parse_streamed_input_to_object(&current_tool_input);
                             tool.refresh_intent_from_input();
 
                             let _ = event_tx.send(ServerEvent::ToolExec {
@@ -468,7 +479,10 @@ impl Agent {
                             execution_mode: ToolExecutionMode::AgentTurn,
                         };
                         crate::telemetry::record_tool_call();
-                        let tool_result = self.registry.execute(&tool_name, input, ctx).await;
+                        let tool_result = self
+                            .registry
+                            .execute(&tool_name, ToolCall::normalize_input_to_object(input), ctx)
+                            .await;
                         if tool_result.is_err() {
                             crate::telemetry::record_tool_failure();
                         }
