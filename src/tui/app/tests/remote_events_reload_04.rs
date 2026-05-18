@@ -101,11 +101,11 @@ fn test_remote_error_with_retryable_pending_schedules_retry() {
     assert_eq!(pending.retry_attempts, 1);
     assert!(pending.retry_at.is_some());
     assert!(app.rate_limit_reset.is_some());
-    assert!(
-        app.display_messages()
-            .iter()
-            .any(|m| m.role == "system" && m.content.contains("Auto-retrying"))
-    );
+    assert!(app.display_messages().iter().any(|m| {
+        m.role == "system"
+            && m.title.as_deref() == Some("Connection")
+            && m.content.contains("retrying")
+    }));
 }
 
 #[test]
@@ -405,7 +405,10 @@ fn test_new_for_remote_uses_startup_stub_without_loading_full_transcript() {
         app.display_messages()[0].content,
         "hello from persisted history"
     );
-    assert_eq!(app.session.messages.len(), 1);
+    // Remote startup may render persisted history into the UI, but the client-side
+    // session must stay transcript-light so reconnect does not duplicate or resend
+    // restored messages before the authoritative server history arrives.
+    assert_eq!(app.session.messages.len(), 0);
     assert_eq!(app.remote_session_id.as_deref(), Some(session_id));
     assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
 
@@ -710,7 +713,20 @@ fn test_debug_command_message_respects_queue_mode() {
     assert!(app.pending_turn);
     assert_eq!(app.messages.len(), 0);
     assert_eq!(app.display_messages.len(), 1);
-    assert_eq!(app.session.messages.len(), 1);
+    assert_eq!(
+        app.session
+            .messages
+            .iter()
+            .filter(|m| {
+                m.role == crate::message::Role::User
+                    && m.content.iter().any(|block| matches!(
+                        block,
+                        crate::message::ContentBlock::Text { text, .. } if text == "hello"
+                    ))
+            })
+            .count(),
+        1
+    );
 
     // Reset for next test
     app.pending_turn = false;
