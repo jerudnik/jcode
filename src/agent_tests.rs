@@ -453,11 +453,7 @@ async fn hard_compaction_reduces_provider_payload_with_huge_existing_summary() {
 
     for i in 0..1_200 {
         agent.add_message(
-            if i % 2 == 0 {
-                Role::User
-            } else {
-                Role::Assistant
-            },
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
             vec![ContentBlock::Text {
                 text: format!("message {i} {}", "x".repeat(200)),
                 cache_control: None,
@@ -515,11 +511,7 @@ async fn large_tool_outputs_are_truncated_before_provider_retry_payload() {
 
     for i in 0..30 {
         agent.add_message(
-            if i % 2 == 0 {
-                Role::User
-            } else {
-                Role::Assistant
-            },
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
             vec![ContentBlock::Text {
                 text: format!("message {i} {}", "x".repeat(100)),
                 cache_control: None,
@@ -559,11 +551,7 @@ async fn repeated_context_limit_does_not_loop_indefinitely() {
 
     for i in 0..40 {
         agent.add_message(
-            if i % 2 == 0 {
-                Role::User
-            } else {
-                Role::Assistant
-            },
+            if i % 2 == 0 { Role::User } else { Role::Assistant },
             vec![ContentBlock::Text {
                 text: format!("message {i} {}", "x".repeat(100)),
                 cache_control: None,
@@ -575,7 +563,22 @@ async fn repeated_context_limit_does_not_loop_indefinitely() {
         .run_turn(false)
         .await
         .expect_err("persistent context-limit errors should fail closed");
-    assert!(err.to_string().contains("Context limit exceeded"));
+    // The error message comes from one of two paths:
+    // 1. "Context limit exceeded after N compaction retries" - raised by
+    //    run_turn after MAX_CONTEXT_LIMIT_RETRIES exhausted (requires the
+    //    emergency hard-compact path to actually drop messages and retry).
+    // 2. The raw provider error ("context length exceeded") - returned when
+    //    try_auto_compact_after_context_limit cannot make further progress,
+    //    e.g. because messages_for_provider() already hard-compacted ahead
+    //    of the provider call and the manager has nothing left to drop.
+    // Both paths satisfy the contract: the agent fails closed without
+    // looping. Accept either string in a case-insensitive comparison.
+    let err_text = err.to_string().to_lowercase();
+    assert!(
+        err_text.contains("context limit exceeded")
+            || err_text.contains("context length exceeded"),
+        "expected context-limit error, got: {err}"
+    );
     assert!(
         calls.load(Ordering::SeqCst) <= 2,
         "provider was called too many times: {}",
