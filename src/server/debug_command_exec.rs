@@ -742,6 +742,11 @@ mod tests {
             "expected reload acknowledgement output, got: {}",
             output
         );
+
+        // Reset the global reload-signal watch channel so subsequent tests do
+        // not pick up the lingering `Some(ReloadSignal{..})` and hang in
+        // graceful_shutdown_sessions when they start a fresh Server.
+        crate::server::reset_reload_signal_for_tests();
     }
 
     #[tokio::test]
