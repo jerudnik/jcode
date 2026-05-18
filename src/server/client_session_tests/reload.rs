@@ -390,6 +390,12 @@ fn handle_reload_queues_signal_for_canary_session() -> Result<()> {
     })?;
 
     crate::server::clear_reload_marker();
+    // Reset the global reload-signal watch channel; handle_reload above wrote
+    // `Some(ReloadSignal{..})` into it and a real production server would have
+    // exec'd away by now. Subsequent tests that start a `Server` would pick up
+    // the lingering signal and hang in graceful_shutdown_sessions (or hit
+    // std::process::exit(42) from the reload exec path).
+    crate::server::reset_reload_signal_for_tests();
     if let Some(prev_runtime) = prev_runtime {
         crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
     } else {

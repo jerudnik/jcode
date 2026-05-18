@@ -493,6 +493,19 @@ pub(crate) fn subscribe_reload_signal_for_tests()
     reload_signal().1.clone()
 }
 
+/// Reset the global reload-signal watch channel back to `None`.
+///
+/// Tests that fire `handle_reload` (which writes `Some(ReloadSignal{..})` to
+/// the global channel) must call this on teardown so that subsequent tests do
+/// not pick up the lingering signal. A real production server `exec`s away
+/// after consuming the signal, so it never needs to clear it; only the
+/// in-process test harness does.
+#[cfg(test)]
+pub(crate) fn reset_reload_signal_for_tests() {
+    let (tx, _) = reload_signal();
+    let _ = tx.send(None);
+}
+
 pub(super) fn reload_ack() -> &'static ReloadAckChannel {
     RELOAD_ACK.get_or_init(|| tokio::sync::watch::channel(None))
 }
