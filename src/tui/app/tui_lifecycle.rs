@@ -10,6 +10,7 @@ impl App {
         self.submit_input_on_startup = restored.submit_on_restore
             && (!self.input.is_empty() || !self.pending_images.is_empty());
         self.hidden_queued_system_messages = restored.hidden_queued_system_messages;
+        let had_startup_status_notice = restored.startup_status_notice.is_some();
         if let Some(status_notice) = restored.startup_status_notice {
             self.set_status_notice(status_notice);
         } else if self.submit_input_on_startup {
@@ -29,14 +30,21 @@ impl App {
 
         let mut queued_messages = restored.queued_messages;
         let mut recovered_followups = Vec::new();
-        if let Some(interleave_message) = restored.interleave_message
-            && !interleave_message.trim().is_empty()
-        {
-            recovered_followups.push(interleave_message);
-        }
         let recovered_interrupts = restored
             .pending_soft_interrupt_resend
-            .unwrap_or(restored.pending_soft_interrupts);
+            .clone()
+            .unwrap_or_else(|| restored.pending_soft_interrupts.clone());
+        let should_recover_interleave =
+            restored.pending_soft_interrupts.is_empty() || !recovered_interrupts.is_empty();
+        if should_recover_interleave {
+            if let Some(interleave_message) = restored.interleave_message
+                && !interleave_message.trim().is_empty()
+            {
+                recovered_followups.push(interleave_message);
+            }
+        } else {
+            self.interleave_message = restored.interleave_message;
+        }
         if !recovered_interrupts.is_empty() {
             crate::logging::info(&format!(
                 "Recovered {} pending soft interrupt(s) after reload; re-queueing them as normal follow-ups",
@@ -44,7 +52,8 @@ impl App {
             ));
             recovered_followups.extend(recovered_interrupts);
         }
-        if !recovered_followups.is_empty() {
+        let recovered_followups_for_dispatch = !recovered_followups.is_empty();
+        if recovered_followups_for_dispatch {
             let mut recovered_queue = recovered_followups;
             recovered_queue.append(&mut queued_messages);
             queued_messages = recovered_queue;
@@ -54,12 +63,21 @@ impl App {
         self.queued_messages = queued_messages;
         if self.has_queued_followups() {
             if self.is_remote {
-                // Do not synthesize a processing turn for restored remote follow-ups.
-                // After a reload, the server may still be running the previous turn;
-                // the queue must remain a wait-until-turn-end queue until the history
-                // bootstrap/Done event proves the remote turn is idle. The remote
-                // post-connect/history/tick paths will dispatch once it is safe.
-                self.set_status_notice("Restored queued follow-up after reload");
+                let immediate_startup_dispatch = recovered_followups_for_dispatch
+                    || self.submit_input_on_startup
+                    || (had_startup_status_notice
+                        && !self.hidden_queued_system_messages.is_empty());
+                if immediate_startup_dispatch {
+                    self.pending_queued_dispatch = true;
+                    self.is_processing = true;
+                    self.status = ProcessingStatus::Sending;
+                    if self.processing_started.is_none() {
+                        self.processing_started = Some(Instant::now());
+                    }
+                }
+                if !had_startup_status_notice {
+                    self.set_status_notice("Restored queued follow-up after reload");
+                }
             } else {
                 self.is_processing = true;
                 self.status = ProcessingStatus::Sending;
