@@ -155,7 +155,7 @@ jcode-provider-core = { path = "crates/jcode-provider-core" }
 jcode-provider-openai = { path = "crates/jcode-provider-openai" }
 jcode-provider-openrouter = { path = "crates/jcode-provider-openrouter" }
 jcode-provider-gemini = { path = "crates/jcode-provider-gemini" }
-jcode-tui-markdown = { path = "crates/jcode-tui-markdown" }
+jcode-tui-markdown = { path = "crates/jcode-tui-markdown", features = ["mermaid-renderer"] }
 jcode-tui-messages = { path = "crates/jcode-tui-messages" }
 jcode-tui-core = { path = "crates/jcode-tui-core" }
 jcode-tui-mermaid = { path = "crates/jcode-tui-mermaid" }
