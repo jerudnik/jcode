@@ -432,6 +432,7 @@ impl crate::tui::TuiState for App {
             return self
                 .visible_turn_started
                 .or(self.processing_started)
+                .or(self.pending_split_started_at)
                 .map(|t| t.elapsed());
         }
         self.split_launch_in_flight()

@@ -62,7 +62,8 @@ fn test_usage_report_updates_display_only_card_without_system_message() {
     assert!(msg.content.contains("5h"));
     assert!(msg.content.contains("82%"));
     assert!(msg.content.contains("plan: pro"));
-    assert!(app.materialized_provider_messages().is_empty());
+    assert!(app.messages.is_empty());
+    assert_eq!(app.session.visible_conversation_message_count(), 0);
 }
 
 #[test]
