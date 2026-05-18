@@ -10,36 +10,62 @@ fn desired_nofile_soft_limit_only_raises_when_possible() {
 #[cfg(unix)]
 #[test]
 fn spawn_detached_creates_new_session() {
-    use tempfile::NamedTempFile;
+    use std::io::{BufRead, BufReader};
 
-    let output = NamedTempFile::new().expect("temp file");
-    let output_path = output.path().to_string_lossy().to_string();
     let parent_sid = unsafe { libc::getsid(0) };
 
+    // Have the child block on stdin until the parent has had a chance to
+    // observe its session id with libc::getsid(child_pid). This avoids any
+    // dependency on a portable user-space tool for retrieving SID:
+    // - Linux's procps `ps -o sid=` exists; BSD/macOS `ps` does not.
+    // - POSIX module on macOS does not export getsid; perl/python fallback
+    //   is fragile across distros.
+    // The child prints a single byte to stdout once it is up, so the parent
+    // knows the kernel has installed it in its own session before we sample
+    // getsid() and then write to its stdin to let it exit.
     let mut cmd = std::process::Command::new("sh");
     cmd.arg("-c")
-        .arg("ps -o sid= -p $$ > \"$JCODE_TEST_OUTPUT\"")
-        .env("JCODE_TEST_OUTPUT", &output_path)
-        .stdout(std::process::Stdio::null())
+        .arg("printf 'R\\n'; IFS= read -r _ignored || true")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null());
 
     let mut child = super::spawn_detached(&mut cmd).expect("spawn detached child");
+    let child_pid = child.id();
+
+    // Wait for the child's "R" handshake so we know it has finished
+    // setsid()/detach setup and is parked in the read.
+    let mut reader = BufReader::new(child.stdout.take().expect("child stdout"));
+    let mut handshake = String::new();
+    reader
+        .read_line(&mut handshake)
+        .expect("read child handshake");
+    assert!(
+        handshake.starts_with('R'),
+        "expected child handshake, got {handshake:?}"
+    );
+
+    // Sample the child's session id from the parent before allowing it to
+    // exit. getsid() on a still-live PID is the authoritative answer.
+    let child_sid = unsafe { libc::getsid(child_pid as libc::pid_t) };
+    assert!(
+        child_sid > 0,
+        "getsid({child_pid}) failed (returned {child_sid}); errno={}",
+        std::io::Error::last_os_error()
+    );
+
+    // Release the child so wait() doesn't hang.
+    drop(child.stdin.take());
     let status = child.wait().expect("wait for child");
     assert!(status.success(), "child should exit successfully");
 
-    let child_sid = std::fs::read_to_string(&output_path)
-        .expect("read child sid")
-        .trim()
-        .parse::<u32>()
-        .expect("parse child sid");
-
     assert_eq!(
-        child_sid,
-        child.id(),
+        child_sid as u32,
+        child_pid,
         "detached child should lead its own session"
     );
     assert_ne!(
-        child_sid as i32, parent_sid,
+        child_sid, parent_sid,
         "detached child should not share parent session"
     );
 }
