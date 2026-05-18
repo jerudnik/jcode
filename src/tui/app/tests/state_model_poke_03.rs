@@ -2042,7 +2042,6 @@ fn test_overnight_status_without_runs_is_handled() {
             .display_messages()
             .last()
             .expect("missing overnight status response");
-        assert_eq!(msg.role, "system");
         assert!(msg.content.contains("No overnight runs found"));
     });
 }

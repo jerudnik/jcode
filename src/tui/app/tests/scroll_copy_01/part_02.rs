@@ -9,11 +9,14 @@ fn test_prompt_jump_ctrl_digit_is_recency_rank_in_app() {
     let (prompt_up_code, prompt_up_mods) = prompt_up_key(&app);
     app.handle_key(prompt_up_code, prompt_up_mods).unwrap();
     assert!(app.scroll_offset > 0);
+    let after_prompt_up = app.scroll_offset;
 
-    // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
-    app.handle_key(KeyCode::Char('5'), KeyModifiers::CONTROL)
+    // Ctrl+6 means "6th most-recent prompt" (clamped to oldest). Ctrl+5 is a
+    // legacy Ctrl+] tty fallback on macOS, so use 6 for the portable rank test.
+    app.handle_key(KeyCode::Char('6'), KeyModifiers::CONTROL)
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert!(app.auto_scroll_paused);
+    assert!(app.scroll_offset <= after_prompt_up);
 }
 
 #[test]
@@ -138,11 +141,14 @@ fn test_remote_prompt_jump_ctrl_digit_is_recency_rank() {
     rt.block_on(app.handle_remote_key(prompt_up_code, prompt_up_mods, &mut remote))
         .unwrap();
     assert!(app.scroll_offset > 0);
+    let after_prompt_up = app.scroll_offset;
 
-    // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
-    rt.block_on(app.handle_remote_key(KeyCode::Char('5'), KeyModifiers::CONTROL, &mut remote))
+    // Ctrl+6 means "6th most-recent prompt" (clamped to oldest). Ctrl+5 is a
+    // legacy Ctrl+] tty fallback on macOS, so use 6 for the portable rank test.
+    rt.block_on(app.handle_remote_key(KeyCode::Char('6'), KeyModifiers::CONTROL, &mut remote))
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert!(app.auto_scroll_paused);
+    assert!(app.scroll_offset <= after_prompt_up);
 }
 
 #[test]
