@@ -518,7 +518,7 @@ fn test_git_command_shows_repo_status_for_working_directory() {
     let mut app = create_test_app();
     app.session.working_dir = Some(repo.path().display().to_string());
     app.input = "/git".to_string();
-    app.submit_input();
+    submit_git_command_and_wait(&mut app);
 
     let msg = app.display_messages().last().expect("missing git response");
     assert_eq!(msg.role, "system");
@@ -538,7 +538,7 @@ fn test_git_command_works_in_remote_mode_with_accessible_working_directory() {
     app.remote_session_id = Some("ses_remote_git".to_string());
     app.session.working_dir = Some(repo.path().display().to_string());
     app.input = "/git".to_string();
-    app.submit_input();
+    submit_git_command_and_wait(&mut app);
 
     let msg = app.display_messages().last().expect("missing git response");
     assert_eq!(msg.role, "system");
@@ -550,6 +550,30 @@ fn test_git_command_works_in_remote_mode_with_accessible_working_directory() {
         !msg.content
             .contains("currently only available in a local jcode TUI session")
     );
+}
+
+fn submit_git_command_and_wait(app: &mut App) {
+    let mut rx = crate::bus::Bus::global().subscribe();
+    app.submit_input();
+
+    let rt = tokio::runtime::Runtime::new().expect("git command test runtime");
+    let event = rt
+        .block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    match rx.recv().await {
+                        Ok(event @ crate::bus::BusEvent::GitStatusCompleted(_)) => break event,
+                        Ok(_) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(error) => panic!("git status bus closed: {error}"),
+                    }
+                }
+            })
+            .await
+        })
+        .expect("timed out waiting for git status bus event");
+
+    assert!(super::local::handle_bus_event(app, Ok(event)));
 }
 
 #[test]

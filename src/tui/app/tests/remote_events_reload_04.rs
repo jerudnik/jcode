@@ -421,12 +421,29 @@ fn test_new_for_remote_uses_startup_stub_without_loading_full_transcript() {
 
 #[test]
 fn test_remote_tui_state_shows_connected_after_startup_phase_clears_without_model() {
+    let _guard = crate::storage::lock_test_env();
+    let prev_model = std::env::var_os("JCODE_MODEL");
+    let prev_provider = std::env::var_os("JCODE_PROVIDER");
+    crate::env::set_var("JCODE_MODEL", "unknown");
+    crate::env::remove_var("JCODE_PROVIDER");
+
     let mut app = App::new_for_remote(None);
     app.remote_session_id = Some("session_connected_123".to_string());
     app.clear_remote_startup_phase();
 
     assert_eq!(crate::tui::TuiState::provider_model(&app), "connected");
     assert_eq!(crate::tui::TuiState::provider_name(&app), "");
+
+    if let Some(prev_model) = prev_model {
+        crate::env::set_var("JCODE_MODEL", prev_model);
+    } else {
+        crate::env::remove_var("JCODE_MODEL");
+    }
+    if let Some(prev_provider) = prev_provider {
+        crate::env::set_var("JCODE_PROVIDER", prev_provider);
+    } else {
+        crate::env::remove_var("JCODE_PROVIDER");
+    }
 }
 
 #[test]
@@ -506,6 +523,12 @@ fn test_remote_tui_state_shows_loading_session_phase_in_header() {
 
 #[test]
 fn test_remote_tui_state_shows_startup_elapsed_in_header() {
+    let _guard = crate::storage::lock_test_env();
+    let prev_model = std::env::var_os("JCODE_MODEL");
+    let prev_provider = std::env::var_os("JCODE_PROVIDER");
+    crate::env::set_var("JCODE_MODEL", "unknown");
+    crate::env::remove_var("JCODE_PROVIDER");
+
     let mut app = App::new_for_remote(None);
     app.set_remote_startup_phase(crate::tui::app::RemoteStartupPhase::Connecting);
     app.remote_startup_phase_started =
@@ -515,10 +538,27 @@ fn test_remote_tui_state_shows_startup_elapsed_in_header() {
         crate::tui::TuiState::provider_model(&app),
         "connecting to server… 5s"
     );
+
+    if let Some(prev_model) = prev_model {
+        crate::env::set_var("JCODE_MODEL", prev_model);
+    } else {
+        crate::env::remove_var("JCODE_MODEL");
+    }
+    if let Some(prev_provider) = prev_provider {
+        crate::env::set_var("JCODE_PROVIDER", prev_provider);
+    } else {
+        crate::env::remove_var("JCODE_PROVIDER");
+    }
 }
 
 #[test]
 fn test_remote_startup_phase_does_not_require_duplicate_status_notice() {
+    let _guard = crate::storage::lock_test_env();
+    let prev_model = std::env::var_os("JCODE_MODEL");
+    let prev_provider = std::env::var_os("JCODE_PROVIDER");
+    crate::env::set_var("JCODE_MODEL", "unknown");
+    crate::env::remove_var("JCODE_PROVIDER");
+
     let mut app = App::new_for_remote(None);
     app.set_remote_startup_phase(crate::tui::app::RemoteStartupPhase::Connecting);
 
@@ -534,6 +574,17 @@ fn test_remote_startup_phase_does_not_require_duplicate_status_notice() {
         "loading session…"
     );
     assert_eq!(app.status_notice(), None);
+
+    if let Some(prev_model) = prev_model {
+        crate::env::set_var("JCODE_MODEL", prev_model);
+    } else {
+        crate::env::remove_var("JCODE_MODEL");
+    }
+    if let Some(prev_provider) = prev_provider {
+        crate::env::set_var("JCODE_PROVIDER", prev_provider);
+    } else {
+        crate::env::remove_var("JCODE_PROVIDER");
+    }
 }
 
 #[test]
