@@ -304,8 +304,19 @@ impl App {
                 false,
                 false,
             );
-            if self.inline_interactive_state.is_some() {
-                self.set_status_notice("Updating model routes…");
+            if let Some(picker) = self.inline_interactive_state.as_mut() {
+                for entry in &mut picker.entries {
+                    for option in &mut entry.options {
+                        if !option.detail.contains("updating model list") {
+                            option.detail = if option.detail.trim().is_empty() {
+                                "updating model list…".to_string()
+                            } else {
+                                format!("updating model list… · {}", option.detail)
+                            };
+                        }
+                    }
+                }
+                self.set_status_notice("Updating model list…");
             } else {
                 self.open_loading_model_picker(&current_model);
             }
