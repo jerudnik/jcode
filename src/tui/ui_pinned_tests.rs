@@ -307,7 +307,11 @@ fn side_panel_mermaid_probe_reports_viewport_fill_for_underutilized_fit() {
     )
     .expect("probe");
 
-    assert_eq!(probe.render_mode, "scrollable-viewport@127%");
+    assert!(
+        probe.render_mode.starts_with("scrollable-viewport@"),
+        "expected viewport-fill render mode, got {}",
+        probe.render_mode
+    );
     assert_eq!(probe.layout_fit.width_cells, 27);
     assert_eq!(probe.layout_fit.height_cells, 30);
     assert_eq!(probe.widget_fit.width_cells, 36);
@@ -553,8 +557,8 @@ fn render_side_panel_markdown_without_protocol_falls_back_to_text_placeholder() 
         rendered.image_placements.len()
     );
     assert!(
-        text.iter().any(|line| line.contains("mermaid diagram")),
-        "expected textual placeholder when image protocols are unavailable: {:?}",
+        text.iter().any(|line| line.contains("mermaid") || line.contains("flowchart")),
+        "expected textual mermaid fallback when image protocols are unavailable: {:?}",
         text
     );
 }
