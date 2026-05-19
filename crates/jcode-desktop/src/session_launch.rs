@@ -2,11 +2,66 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::BufReader;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
 const SERVER_START_TIMEOUT: Duration = Duration::from_secs(10);
 const SERVER_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(50);
+const DESKTOP_SESSION_WORKER_LIMIT: usize = 12;
+
+static DESKTOP_SESSION_WORKER_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+struct DesktopSessionWorkerPermit<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl Drop for DesktopSessionWorkerPermit<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+fn try_acquire_desktop_session_worker_slot<'a>(
+    counter: &'a AtomicUsize,
+    limit: usize,
+) -> Result<DesktopSessionWorkerPermit<'a>> {
+    let mut current = counter.load(Ordering::Relaxed);
+    loop {
+        if current >= limit {
+            anyhow::bail!("desktop session worker limit reached ({limit})");
+        }
+        match counter.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return Ok(DesktopSessionWorkerPermit { counter }),
+            Err(next_current) => current = next_current,
+        }
+    }
+}
+
+fn spawn_bounded_desktop_session_worker(
+    name: impl Into<String>,
+    job: impl FnOnce() + Send + 'static,
+) -> Result<()> {
+    let name = name.into();
+    let permit = try_acquire_desktop_session_worker_slot(
+        &DESKTOP_SESSION_WORKER_COUNT,
+        DESKTOP_SESSION_WORKER_LIMIT,
+    )
+    .with_context(|| format!("failed to start {name}"))?;
+    std::thread::Builder::new()
+        .name(name.clone())
+        .spawn(move || {
+            let _permit = permit;
+            job();
+        })
+        .with_context(|| format!("failed to spawn {name}"))?;
+    Ok(())
+}
 
 mod events;
 mod server_io;
@@ -30,9 +85,104 @@ pub struct DesktopModelChoice {
     pub available: bool,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum DesktopSessionStatus {
+    StartingSharedServer,
+    ConnectingSharedServer,
+    SendingMessage,
+    SwitchingModel,
+    LoadingModels,
+    SwitchingReasoningEffort,
+    ServerDisconnectedReconnecting,
+    ServerReloadingReconnecting,
+    Cancelling,
+    Cancelled,
+    SendingInteractiveInput,
+    Interrupted,
+    ReasoningEffort(String),
+    ReasoningEffortFailed(String),
+    External { label: String, in_flight: bool },
+}
+
+impl DesktopSessionStatus {
+    pub fn external(label: impl Into<String>) -> Self {
+        let label = label.into();
+        Self::External {
+            in_flight: desktop_status_label_is_in_flight(&label),
+            label,
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::StartingSharedServer => "starting shared server".to_string(),
+            Self::ConnectingSharedServer => "connecting to shared server".to_string(),
+            Self::SendingMessage => "sending message".to_string(),
+            Self::SwitchingModel => "switching model".to_string(),
+            Self::LoadingModels => "loading models".to_string(),
+            Self::SwitchingReasoningEffort => "switching reasoning effort".to_string(),
+            Self::ServerDisconnectedReconnecting => "server disconnected, reconnecting".to_string(),
+            Self::ServerReloadingReconnecting => "server reloading, reconnecting".to_string(),
+            Self::Cancelling => "cancelling".to_string(),
+            Self::Cancelled => "cancelled".to_string(),
+            Self::SendingInteractiveInput => "sending interactive input".to_string(),
+            Self::Interrupted => "interrupted".to_string(),
+            Self::ReasoningEffort(effort) => format!("effort: {effort}"),
+            Self::ReasoningEffortFailed(error) => format!("effort switch failed: {error}"),
+            Self::External { label, .. } => label.clone(),
+        }
+    }
+
+    pub fn is_in_flight(&self) -> bool {
+        match self {
+            Self::StartingSharedServer
+            | Self::ConnectingSharedServer
+            | Self::SendingMessage
+            | Self::SwitchingModel
+            | Self::LoadingModels
+            | Self::SwitchingReasoningEffort
+            | Self::ServerDisconnectedReconnecting
+            | Self::ServerReloadingReconnecting
+            | Self::Cancelling
+            | Self::SendingInteractiveInput => true,
+            Self::External { in_flight, .. } => *in_flight,
+            Self::Cancelled
+            | Self::Interrupted
+            | Self::ReasoningEffort(_)
+            | Self::ReasoningEffortFailed(_) => false,
+        }
+    }
+
+    pub fn payload_bytes(&self) -> usize {
+        self.label().len()
+    }
+}
+
+fn desktop_status_label_is_in_flight(status: &str) -> bool {
+    matches!(
+        status,
+        "loading models"
+            | "loading recent sessions"
+            | "receiving"
+            | "connected"
+            | "sending"
+            | "sending message"
+            | "sending interactive input"
+            | "switching model"
+            | "switching reasoning effort"
+            | "cancelling"
+            | "starting shared server"
+            | "connecting to shared server"
+            | "server disconnected, reconnecting"
+            | "server reloading, reconnecting"
+    ) || status.starts_with("using tool ")
+        || status.starts_with("preparing tool ")
+        || status.starts_with("attached ")
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DesktopSessionEvent {
-    Status(String),
+    Status(DesktopSessionStatus),
     SessionStarted {
         session_id: String,
     },
@@ -127,19 +277,17 @@ pub fn send_message_to_session(session_id: &str, _title: &str, message: &str) ->
 
     let session_id = session_id.to_string();
     let message = message.to_string();
-    std::thread::Builder::new()
-        .name("jcode-desktop-workspace-message".to_string())
-        .spawn(move || {
-            let (_command_tx, command_rx) = mpsc::channel();
-            if let Err(error) =
-                run_server_session(Some(&session_id), &message, Vec::new(), None, command_rx)
-            {
-                crate::desktop_log::error(format_args!(
-                    "jcode-desktop: workspace server message failed session_id={session_id}: {error:#}"
-                ));
-            }
-        })
-        .context("failed to spawn desktop workspace message worker")?;
+    spawn_bounded_desktop_session_worker("jcode-desktop-workspace-message", move || {
+        let (_command_tx, command_rx) = mpsc::channel();
+        if let Err(error) =
+            run_server_session(Some(&session_id), &message, Vec::new(), None, command_rx)
+        {
+            crate::desktop_log::error(format_args!(
+                "jcode-desktop: workspace server message failed session_id={session_id}: {error:#}"
+            ));
+        }
+    })
+    .context("failed to spawn desktop workspace message worker")?;
 
     Ok(())
 }
@@ -155,22 +303,20 @@ pub fn spawn_fresh_server_session(
 
     let (command_tx, command_rx) = mpsc::channel();
     let handle = DesktopSessionHandle { command_tx };
-    std::thread::Builder::new()
-        .name("jcode-desktop-fresh-session".to_string())
-        .spawn(move || {
-            if let Err(error) =
-                run_server_session(None, &message, images, Some(event_tx.clone()), command_rx)
-            {
-                crate::desktop_log::error(format_args!(
-                    "jcode-desktop: fresh server session failed: {error:#}"
-                ));
-                send_desktop_event_ref(
-                    Some(&event_tx),
-                    DesktopSessionEvent::Error(format!("{error:#}")),
-                );
-            }
-        })
-        .context("failed to spawn desktop session worker")?;
+    spawn_bounded_desktop_session_worker("jcode-desktop-fresh-session", move || {
+        if let Err(error) =
+            run_server_session(None, &message, images, Some(event_tx.clone()), command_rx)
+        {
+            crate::desktop_log::error(format_args!(
+                "jcode-desktop: fresh server session failed: {error:#}"
+            ));
+            send_desktop_event_ref(
+                Some(&event_tx),
+                DesktopSessionEvent::Error(format!("{error:#}")),
+            );
+        }
+    })
+    .context("failed to spawn desktop session worker")?;
     Ok(handle)
 }
 
@@ -187,23 +333,24 @@ pub fn spawn_message_to_session(
 
     let (command_tx, command_rx) = mpsc::channel();
     let handle = DesktopSessionHandle { command_tx };
-    std::thread::Builder::new()
-        .name("jcode-desktop-session-message".to_string())
-        .spawn(move || {
-            if let Err(error) = run_server_session(
-                Some(&session_id),
-                &message,
-                images,
-                Some(event_tx.clone()),
-                command_rx,
-            ) {
-                crate::desktop_log::error(format_args!(
-                    "jcode-desktop: server session message failed session_id={session_id}: {error:#}"
-                ));
-                send_desktop_event_ref(Some(&event_tx), DesktopSessionEvent::Error(format!("{error:#}")));
-            }
-        })
-        .context("failed to spawn desktop session worker")?;
+    spawn_bounded_desktop_session_worker("jcode-desktop-session-message", move || {
+        if let Err(error) = run_server_session(
+            Some(&session_id),
+            &message,
+            images,
+            Some(event_tx.clone()),
+            command_rx,
+        ) {
+            crate::desktop_log::error(format_args!(
+                "jcode-desktop: server session message failed session_id={session_id}: {error:#}"
+            ));
+            send_desktop_event_ref(
+                Some(&event_tx),
+                DesktopSessionEvent::Error(format!("{error:#}")),
+            );
+        }
+    })
+    .context("failed to spawn desktop session worker")?;
     Ok(handle)
 }
 
@@ -213,9 +360,7 @@ pub fn spawn_cycle_model(
     target_session_id: Option<String>,
     event_tx: DesktopSessionEventSender,
 ) -> Result<()> {
-    std::thread::Builder::new()
-        .name("jcode-desktop-cycle-model".to_string())
-        .spawn(move || {
+    spawn_bounded_desktop_session_worker("jcode-desktop-cycle-model", move || {
             if let Err(error) = cycle_model(
                 direction,
                 target_session_id.as_deref(),
@@ -243,9 +388,7 @@ pub fn spawn_cycle_reasoning_effort(
     target_session_id: Option<String>,
     event_tx: DesktopSessionEventSender,
 ) -> Result<()> {
-    std::thread::Builder::new()
-        .name("jcode-desktop-cycle-effort".to_string())
-        .spawn(move || {
+    spawn_bounded_desktop_session_worker("jcode-desktop-cycle-effort", move || {
             if let Err(error) = cycle_reasoning_effort(
                 direction,
                 target_session_id.as_deref(),
@@ -303,25 +446,22 @@ pub fn spawn_load_model_catalog(
     target_session_id: Option<String>,
     event_tx: DesktopSessionEventSender,
 ) -> Result<()> {
-    std::thread::Builder::new()
-        .name("jcode-desktop-load-model-catalog".to_string())
-        .spawn(move || {
-            if let Err(error) =
-                load_model_catalog(target_session_id.as_deref(), Some(event_tx.clone()))
-            {
-                crate::desktop_log::error(format_args!(
-                    "jcode-desktop: model catalog load failed target_session={}: {error:#}",
-                    target_session_id.as_deref().unwrap_or("<current>")
-                ));
-                send_desktop_event_ref(
-                    Some(&event_tx),
-                    DesktopSessionEvent::ModelCatalogError {
-                        error: format!("{error:#}"),
-                    },
-                );
-            }
-        })
-        .context("failed to spawn desktop model catalog worker")?;
+    spawn_bounded_desktop_session_worker("jcode-desktop-load-model-catalog", move || {
+        if let Err(error) = load_model_catalog(target_session_id.as_deref(), Some(event_tx.clone()))
+        {
+            crate::desktop_log::error(format_args!(
+                "jcode-desktop: model catalog load failed target_session={}: {error:#}",
+                target_session_id.as_deref().unwrap_or("<current>")
+            ));
+            send_desktop_event_ref(
+                Some(&event_tx),
+                DesktopSessionEvent::ModelCatalogError {
+                    error: format!("{error:#}"),
+                },
+            );
+        }
+    })
+    .context("failed to spawn desktop model catalog worker")?;
     Ok(())
 }
 
@@ -346,26 +486,23 @@ pub fn spawn_set_model(
     target_session_id: Option<String>,
     event_tx: DesktopSessionEventSender,
 ) -> Result<()> {
-    std::thread::Builder::new()
-        .name("jcode-desktop-set-model".to_string())
-        .spawn(move || {
-            if let Err(error) =
-                set_model(&model, target_session_id.as_deref(), Some(event_tx.clone()))
-            {
-                crate::desktop_log::error(format_args!(
-                    "jcode-desktop: set model failed model={} target_session={}: {error:#}",
-                    crate::desktop_log::truncate_for_log(&model, 256),
-                    target_session_id.as_deref().unwrap_or("<current>")
-                ));
-                send_desktop_event_ref(
-                    Some(&event_tx),
-                    DesktopSessionEvent::ModelCatalogError {
-                        error: format!("{error:#}"),
-                    },
-                );
-            }
-        })
-        .context("failed to spawn desktop set model worker")?;
+    spawn_bounded_desktop_session_worker("jcode-desktop-set-model", move || {
+        if let Err(error) = set_model(&model, target_session_id.as_deref(), Some(event_tx.clone()))
+        {
+            crate::desktop_log::error(format_args!(
+                "jcode-desktop: set model failed model={} target_session={}: {error:#}",
+                crate::desktop_log::truncate_for_log(&model, 256),
+                target_session_id.as_deref().unwrap_or("<current>")
+            ));
+            send_desktop_event_ref(
+                Some(&event_tx),
+                DesktopSessionEvent::ModelCatalogError {
+                    error: format!("{error:#}"),
+                },
+            );
+        }
+    })
+    .context("failed to spawn desktop set model worker")?;
     Ok(())
 }
 
@@ -390,7 +527,7 @@ fn cycle_model(
     target_session_id: Option<&str>,
     event_tx: Option<DesktopSessionEventSender>,
 ) -> Result<()> {
-    send_desktop_status(&event_tx, "switching model");
+    send_desktop_status(&event_tx, DesktopSessionStatus::SwitchingModel);
     ensure_server_running()?;
     let stream = connect_server_with_retry(SERVER_START_TIMEOUT)?;
     let mut writer = stream
@@ -427,7 +564,7 @@ fn load_model_catalog(
     target_session_id: Option<&str>,
     event_tx: Option<DesktopSessionEventSender>,
 ) -> Result<()> {
-    send_desktop_status(&event_tx, "loading models");
+    send_desktop_status(&event_tx, DesktopSessionStatus::LoadingModels);
     ensure_server_running()?;
     let stream = connect_server_with_retry(SERVER_START_TIMEOUT)?;
     let mut writer = stream
@@ -464,7 +601,7 @@ fn set_model(
     target_session_id: Option<&str>,
     event_tx: Option<DesktopSessionEventSender>,
 ) -> Result<()> {
-    send_desktop_status(&event_tx, "switching model");
+    send_desktop_status(&event_tx, DesktopSessionStatus::SwitchingModel);
     ensure_server_running()?;
     let stream = connect_server_with_retry(SERVER_START_TIMEOUT)?;
     let mut writer = stream
@@ -504,7 +641,7 @@ fn cycle_reasoning_effort(
 ) -> Result<()> {
     const EFFORTS: [&str; 5] = ["none", "low", "medium", "high", "xhigh"];
 
-    send_desktop_status(&event_tx, "switching reasoning effort");
+    send_desktop_status(&event_tx, DesktopSessionStatus::SwitchingReasoningEffort);
     ensure_server_running()?;
     let stream = connect_server_with_retry(SERVER_START_TIMEOUT)?;
     let mut writer = stream
@@ -571,9 +708,9 @@ fn run_server_session(
     event_tx: Option<DesktopSessionEventSender>,
     command_rx: Receiver<DesktopSessionCommand>,
 ) -> Result<String> {
-    send_desktop_status(&event_tx, "starting shared server");
+    send_desktop_status(&event_tx, DesktopSessionStatus::StartingSharedServer);
     ensure_server_running()?;
-    send_desktop_status(&event_tx, "connecting to shared server");
+    send_desktop_status(&event_tx, DesktopSessionStatus::ConnectingSharedServer);
     let stream = connect_server_with_retry(SERVER_START_TIMEOUT)?;
     let mut writer = stream
         .try_clone()
@@ -599,7 +736,7 @@ fn run_server_session(
         },
     );
 
-    send_desktop_status(&event_tx, "sending message");
+    send_desktop_status(&event_tx, DesktopSessionStatus::SendingMessage);
     let message_request_id = next_request_id;
     write_json_line(
         &mut writer,
@@ -624,13 +761,16 @@ fn run_server_session(
         )? {
             DrainOutcome::Terminal => break,
             DrainOutcome::Disconnected => {
-                send_desktop_status(&event_tx, "server disconnected, reconnecting");
+                send_desktop_status(
+                    &event_tx,
+                    DesktopSessionStatus::ServerDisconnectedReconnecting,
+                );
             }
             DrainOutcome::Reloading { new_socket } => {
                 if let Some(path) = new_socket {
                     current_socket_path = validate_reload_socket_path(&current_socket_path, &path)?;
                 }
-                send_desktop_status(&event_tx, "server reloading, reconnecting");
+                send_desktop_status(&event_tx, DesktopSessionStatus::ServerReloadingReconnecting);
             }
         }
 
@@ -676,8 +816,8 @@ fn run_server_session(
 }
 
 #[cfg(unix)]
-fn send_desktop_status(event_tx: &Option<DesktopSessionEventSender>, status: &str) {
-    send_desktop_event(event_tx, DesktopSessionEvent::Status(status.to_string()));
+fn send_desktop_status(event_tx: &Option<DesktopSessionEventSender>, status: DesktopSessionStatus) {
+    send_desktop_event(event_tx, DesktopSessionEvent::Status(status));
 }
 
 fn send_desktop_event(event_tx: &Option<DesktopSessionEventSender>, event: DesktopSessionEvent) {

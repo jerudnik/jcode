@@ -3,6 +3,145 @@ use super::single_session::*;
 use super::*;
 
 #[test]
+fn desktop_frame_profile_is_opt_in_and_recognizes_trace_modes() {
+    assert!(!desktop_frame_profile_enabled(None));
+    assert!(!desktop_frame_profile_enabled(Some("")));
+    assert!(!desktop_frame_profile_enabled(Some("off")));
+    assert!(!desktop_frame_profile_enabled(Some("0")));
+    assert!(desktop_frame_profile_enabled(Some("1")));
+    assert!(desktop_frame_profile_enabled(Some("true")));
+    assert!(desktop_frame_profile_enabled(Some("all")));
+    assert!(desktop_frame_profile_enabled(Some("trace")));
+    assert!(!desktop_frame_profile_log_all(None));
+    assert!(!desktop_frame_profile_log_all(Some("1")));
+    assert!(desktop_frame_profile_log_all(Some("all")));
+    assert!(desktop_frame_profile_log_all(Some("TRACE")));
+}
+
+#[test]
+fn desktop_config_parses_positive_millisecond_durations_only() {
+    assert_eq!(
+        parse_positive_duration_millis("8.5"),
+        Some(Duration::from_secs_f64(0.0085))
+    );
+    assert_eq!(
+        parse_positive_duration_millis(" 250 "),
+        Some(Duration::from_millis(250))
+    );
+    assert_eq!(parse_positive_duration_millis("0"), None);
+    assert_eq!(parse_positive_duration_millis("-1"), None);
+    assert_eq!(parse_positive_duration_millis("NaN"), None);
+    assert_eq!(parse_positive_duration_millis("inf"), None);
+    assert_eq!(parse_positive_duration_millis("nope"), None);
+}
+
+#[test]
+fn desktop_platform_warnings_only_fire_for_less_supported_targets() {
+    assert_eq!(
+        desktop_platform_support_warning(DesktopPlatform::Linux),
+        None
+    );
+    assert_eq!(
+        desktop_platform_support_warning(DesktopPlatform::Macos),
+        None
+    );
+    assert!(desktop_platform_support_warning(DesktopPlatform::Windows).is_some());
+    assert!(desktop_platform_support_warning(DesktopPlatform::Other).is_some());
+}
+
+#[test]
+fn primitive_vertex_buffer_capacity_grows_and_shrinks_with_hysteresis() {
+    assert_eq!(primitive_vertex_capacity_for_len(0), 0);
+    assert_eq!(
+        primitive_vertex_capacity_for_len(1),
+        PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY
+    );
+    assert_eq!(
+        primitive_vertex_capacity_for_len(PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY + 1),
+        (PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY + 1).next_power_of_two()
+    );
+    assert!(!primitive_vertex_buffer_should_reallocate(
+        PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY,
+        0,
+    ));
+    assert!(!primitive_vertex_buffer_should_reallocate(
+        PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY,
+        PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY / 2,
+    ));
+    assert!(primitive_vertex_buffer_should_reallocate(128, 129));
+    assert!(!primitive_vertex_buffer_should_reallocate(4096, 1024));
+    assert!(primitive_vertex_buffer_should_reallocate(4096, 1023));
+}
+
+#[test]
+fn streaming_text_renderer_releases_only_after_streaming_buffer_disappears() {
+    assert!(!streaming_text_renderer_should_release(true, true, true));
+    assert!(!streaming_text_renderer_should_release(false, false, false));
+    assert!(streaming_text_renderer_should_release(false, true, false));
+    assert!(streaming_text_renderer_should_release(false, false, true));
+}
+
+#[test]
+fn workspace_vertex_capacity_hint_scales_with_surface_count() {
+    let first_card = workspace::SessionCard {
+        session_id: "a".to_string(),
+        title: "alpha".to_string(),
+        subtitle: "active".to_string(),
+        detail: "1 msg".to_string(),
+        preview_lines: Vec::new(),
+        detail_lines: Vec::new(),
+    };
+    let second_card = workspace::SessionCard {
+        session_id: "b".to_string(),
+        title: "beta".to_string(),
+        subtitle: "idle".to_string(),
+        detail: "2 msgs".to_string(),
+        preview_lines: Vec::new(),
+        detail_lines: Vec::new(),
+    };
+    let mut workspace = Workspace::from_session_cards(vec![first_card.clone()]);
+
+    assert_eq!(
+        workspace_vertex_capacity_hint(&workspace),
+        WORKSPACE_BASE_VERTEX_CAPACITY_HINT + WORKSPACE_SURFACE_VERTEX_CAPACITY_HINT
+    );
+
+    workspace = Workspace::from_session_cards(vec![first_card, second_card]);
+    assert_eq!(
+        workspace_vertex_capacity_hint(&workspace),
+        WORKSPACE_BASE_VERTEX_CAPACITY_HINT + WORKSPACE_SURFACE_VERTEX_CAPACITY_HINT * 2
+    );
+}
+
+#[test]
+fn desktop_background_wake_only_tracks_active_frame_animation() {
+    let now = Instant::now();
+
+    assert_eq!(
+        desktop_background_wake(now, true, true),
+        Some(now + BACKGROUND_POLL_INTERVAL)
+    );
+    assert_eq!(desktop_background_wake(now, true, false), None);
+    assert_eq!(desktop_background_wake(now, false, true), None);
+}
+
+#[test]
+fn desktop_async_job_slots_are_bounded_and_released() -> Result<()> {
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    let first = try_acquire_desktop_async_job_slot(&counter, 2)?;
+    let second = try_acquire_desktop_async_job_slot(&counter, 2)?;
+
+    assert!(try_acquire_desktop_async_job_slot(&counter, 2).is_err());
+    drop(first);
+    let third = try_acquire_desktop_async_job_slot(&counter, 2)?;
+    assert!(try_acquire_desktop_async_job_slot(&counter, 2).is_err());
+    drop(second);
+    drop(third);
+    assert_eq!(counter.load(std::sync::atomic::Ordering::Relaxed), 0);
+    Ok(())
+}
+
+#[test]
 fn quarter_size_preset_follows_quarter_screen_width_steps() {
     let monitor_width = Some(2000);
 
@@ -40,6 +179,44 @@ fn visible_column_count_is_clamped_and_safe_without_monitor() {
     assert_eq!(inferred_visible_column_count(3000, Some(2000), 0.25), 4);
     assert_eq!(inferred_visible_column_count(1000, Some(0), 0.25), 1);
     assert_eq!(inferred_visible_column_count(1000, None, 0.25), 1);
+}
+
+#[test]
+fn desktop_surface_size_renderable_requires_non_zero_dimensions() {
+    assert!(desktop_surface_size_is_renderable(PhysicalSize::new(1, 1)));
+    assert!(!desktop_surface_size_is_renderable(PhysicalSize::new(0, 1)));
+    assert!(!desktop_surface_size_is_renderable(PhysicalSize::new(1, 0)));
+    assert!(!desktop_surface_size_is_renderable(PhysicalSize::new(0, 0)));
+}
+
+#[test]
+fn desktop_canvas_uses_owned_static_surface_lifetime() {
+    fn accepts_concrete_canvas_type<T>() {}
+    fn assert_static_surface(_: Option<wgpu::Surface<'static>>) {}
+
+    accepts_concrete_canvas_type::<Canvas>();
+    assert_static_surface(None);
+}
+
+#[test]
+fn surface_timeout_backoff_doubles_until_cap_and_resets() {
+    let mut backoff = SurfaceTimeoutBackoff::default();
+    let delays = (0..8)
+        .map(|_| backoff.record_timeout().0)
+        .collect::<Vec<_>>();
+
+    assert_eq!(delays[0], SURFACE_TIMEOUT_BACKOFF_MIN);
+    assert_eq!(delays[1], SURFACE_TIMEOUT_BACKOFF_MIN * 2);
+    assert_eq!(delays[2], SURFACE_TIMEOUT_BACKOFF_MIN * 4);
+    assert!(delays.windows(2).all(|pair| pair[1] >= pair[0]));
+    assert!(
+        delays
+            .iter()
+            .all(|delay| *delay <= SURFACE_TIMEOUT_BACKOFF_MAX)
+    );
+
+    backoff.reset();
+    assert_eq!(backoff.record_timeout().0, SURFACE_TIMEOUT_BACKOFF_MIN);
 }
 
 #[test]
@@ -198,6 +375,77 @@ fn single_session_vertices_include_a_draft_caret() {
             .iter()
             .any(|vertex| vertex.color == SINGLE_SESSION_CARET_COLOR)
     );
+}
+
+#[test]
+fn single_session_caret_visibility_follows_overlay_state() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("abc".to_string()));
+
+    assert_eq!(app.active_overlay_state(), SingleSessionOverlay::None);
+    assert!(single_session_caret_visible_for_frame(&app, 0));
+    assert!(!single_session_caret_visible_for_frame(&app, 3));
+
+    assert_eq!(
+        app.handle_key(KeyInput::OpenModelPicker),
+        KeyOutcome::LoadModelCatalog
+    );
+    assert_eq!(
+        app.active_overlay_state(),
+        SingleSessionOverlay::Inline {
+            kind: InlineWidgetKind::ModelPicker,
+            mode: InlineWidgetMode::Interactive,
+        }
+    );
+    assert!(!single_session_caret_visible_for_frame(&app, 0));
+
+    let mut preview_app = SingleSessionApp::new(None);
+    assert_eq!(
+        preview_app.handle_key(KeyInput::Character("/model opus".to_string())),
+        KeyOutcome::LoadModelCatalog
+    );
+    assert_eq!(
+        preview_app.active_overlay_state(),
+        SingleSessionOverlay::Inline {
+            kind: InlineWidgetKind::ModelPicker,
+            mode: InlineWidgetMode::ReadOnly,
+        }
+    );
+    assert!(single_session_caret_visible_for_frame(&preview_app, 0));
+
+    let mut help_app = SingleSessionApp::new(None);
+    assert_eq!(
+        help_app.handle_key(KeyInput::HotkeyHelp),
+        KeyOutcome::Redraw
+    );
+    assert!(!single_session_caret_visible_for_frame(&help_app, 0));
+}
+
+#[test]
+fn stdin_request_closes_conflicting_inline_overlays() {
+    let mut app = SingleSessionApp::new(None);
+
+    assert_eq!(
+        app.handle_key(KeyInput::OpenSessionSwitcher),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert!(app.session_switcher.open);
+    app.apply_session_event(session_launch::DesktopSessionEvent::StdinRequest {
+        request_id: "stdin-1".to_string(),
+        prompt: "Password:".to_string(),
+        is_password: true,
+        tool_call_id: "tool-1".to_string(),
+    });
+
+    assert_eq!(
+        app.active_overlay_state(),
+        SingleSessionOverlay::StdinResponse
+    );
+    assert!(!app.session_switcher.open);
+    assert!(!app.model_picker.open);
+    assert!(!app.show_help);
+    assert!(!app.show_session_info);
+    assert!(!single_session_caret_visible_for_frame(&app, 0));
 }
 
 #[test]
@@ -456,7 +704,7 @@ fn single_session_info_hotkey_toggles_inline_session_stats() {
         .push(SingleSessionMessage::assistant("a useful answer"));
     app.messages.push(SingleSessionMessage::tool("read file"));
     app.streaming_response = "still streaming".to_string();
-    app.status = Some("receiving".to_string());
+    app.set_status_label("receiving");
     app.model_picker.current_model = Some("claude-sonnet-4-5".to_string());
     app.model_picker.provider_name = Some("Claude".to_string());
 
@@ -1074,6 +1322,63 @@ fn single_session_activity_indicator_appears_only_for_active_work() {
         KeyOutcome::LoadModelCatalog
     );
     assert!(app.activity_indicator_active());
+}
+
+#[test]
+fn single_session_status_kind_drives_activity_indicator() {
+    let mut app = SingleSessionApp::new(None);
+
+    app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+        DesktopSessionStatus::SwitchingModel,
+    ));
+
+    assert_eq!(app.status.as_deref(), Some("switching model"));
+    assert_eq!(
+        app.status_kind(),
+        Some(&SingleSessionStatus::Backend(
+            DesktopSessionStatus::SwitchingModel
+        ))
+    );
+    assert!(app.activity_indicator_active());
+
+    app.apply_session_event(session_launch::DesktopSessionEvent::Done);
+
+    assert_eq!(app.status.as_deref(), Some("ready"));
+    assert_eq!(app.status_kind(), Some(&SingleSessionStatus::Ready));
+    assert!(!app.activity_indicator_active());
+}
+
+#[test]
+fn desktop_session_external_status_preserves_legacy_inflight_classification() {
+    let mut app = SingleSessionApp::new(None);
+
+    app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+        DesktopSessionStatus::external("using tool bash"),
+    ));
+
+    assert_eq!(app.status.as_deref(), Some("using tool bash"));
+    assert!(matches!(
+        app.status_kind(),
+        Some(SingleSessionStatus::Backend(DesktopSessionStatus::External {
+            label,
+            in_flight: true,
+        })) if label == "using tool bash"
+    ));
+    assert!(app.activity_indicator_active());
+
+    app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+        DesktopSessionStatus::external("restored 1 crashed session(s)"),
+    ));
+
+    assert_eq!(app.status.as_deref(), Some("restored 1 crashed session(s)"));
+    assert!(matches!(
+        app.status_kind(),
+        Some(SingleSessionStatus::Backend(DesktopSessionStatus::External {
+            label,
+            in_flight: false,
+        })) if label == "restored 1 crashed session(s)"
+    ));
+    assert!(!app.activity_indicator_active());
 }
 
 #[test]

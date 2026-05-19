@@ -1,6 +1,8 @@
 mod animation;
+mod desktop_config;
 mod desktop_log;
 mod desktop_prefs;
+mod desktop_session_events;
 mod power_inhibit;
 mod render_helpers;
 mod session_data;
@@ -14,12 +16,20 @@ use animation::{AnimatedViewport, FocusPulse, VisibleColumnLayout, WorkspaceRend
 use anyhow::{Context, Result};
 use base64::Engine;
 use bytemuck::{Pod, Zeroable};
+use desktop_config::*;
+use desktop_session_events::{
+    BACKEND_EVENT_FORWARD_INTERVAL, BACKEND_EVENT_FORWARD_MAX_PAYLOAD_BYTES,
+    BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS, DesktopSessionEventBatch,
+    coalesce_desktop_session_events, collect_desktop_session_event_batch,
+    spawn_session_event_forwarder,
+};
 use glyphon::{
     Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Wrap,
 };
 use image::RgbaImage;
 use render_helpers::*;
+use session_launch::DesktopSessionStatus;
 use single_session::{
     SINGLE_SESSION_ASSISTANT_FONT_FAMILY, SINGLE_SESSION_FONT_FAMILY,
     SINGLE_SESSION_WELCOME_FONT_FAMILY, SelectionPoint, SingleSessionApp, SingleSessionLineStyle,
@@ -43,7 +53,8 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{OnceLock, mpsc};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -86,9 +97,8 @@ const SINGLE_SESSION_CARET_COLOR: [f32; 4] = [0.130, 0.150, 0.190, 0.92];
 const SESSION_SPAWN_REFRESH_DELAY: Duration = Duration::from_millis(350);
 const BACKGROUND_POLL_INTERVAL: Duration = Duration::from_millis(33);
 const BACKEND_REDRAW_FRAME_INTERVAL: Duration = Duration::from_millis(16);
-const BACKEND_EVENT_FORWARD_INTERVAL: Duration = Duration::from_millis(16);
-const BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS: usize = 512;
-const BACKEND_EVENT_FORWARD_MAX_PAYLOAD_BYTES: usize = 8 * 1024;
+const SURFACE_TIMEOUT_BACKOFF_MIN: Duration = Duration::from_millis(16);
+const SURFACE_TIMEOUT_BACKOFF_MAX: Duration = Duration::from_millis(250);
 const HEADLESS_CHAT_SMOKE_TIMEOUT: Duration = Duration::from_secs(90);
 const DESKTOP_SPINNER_FRAME_MS: u128 = 180;
 const MOUSE_WHEEL_LINES_PER_DETENT: f32 = 3.0;
@@ -106,6 +116,98 @@ const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 2;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_AFTER_LINES: usize = 4;
 const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(120);
 const STREAMING_TEXT_FADE_START_OPACITY: f32 = 0.4;
+const DESKTOP_ASYNC_JOB_LIMIT: usize = 12;
+const PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY: usize = 1024;
+const PRIMITIVE_VERTEX_BUFFER_SHRINK_RATIO: usize = 4;
+const WORKSPACE_BASE_VERTEX_CAPACITY_HINT: usize = 512;
+const WORKSPACE_SURFACE_VERTEX_CAPACITY_HINT: usize = 384;
+
+static DESKTOP_ASYNC_JOB_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+struct DesktopAsyncJobPermit<'a> {
+    counter: &'a AtomicUsize,
+}
+
+impl Drop for DesktopAsyncJobPermit<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+fn try_acquire_desktop_async_job_slot<'a>(
+    counter: &'a AtomicUsize,
+    limit: usize,
+) -> Result<DesktopAsyncJobPermit<'a>> {
+    let mut current = counter.load(Ordering::Relaxed);
+    loop {
+        if current >= limit {
+            anyhow::bail!("desktop async job limit reached ({limit})");
+        }
+        match counter.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::Acquire,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return Ok(DesktopAsyncJobPermit { counter }),
+            Err(next_current) => current = next_current,
+        }
+    }
+}
+
+fn spawn_bounded_desktop_async_job(
+    name: impl Into<String>,
+    job: impl FnOnce() + Send + 'static,
+) -> Result<()> {
+    let name = name.into();
+    let permit =
+        try_acquire_desktop_async_job_slot(&DESKTOP_ASYNC_JOB_COUNT, DESKTOP_ASYNC_JOB_LIMIT)
+            .with_context(|| format!("failed to start {name}"))?;
+    std::thread::Builder::new()
+        .name(name.clone())
+        .spawn(move || {
+            let _permit = permit;
+            job();
+        })
+        .with_context(|| format!("failed to spawn {name}"))?;
+    Ok(())
+}
+
+#[derive(Clone, Debug, Default)]
+struct SurfaceTimeoutBackoff {
+    consecutive_timeouts: u32,
+}
+
+impl SurfaceTimeoutBackoff {
+    fn reset(&mut self) {
+        self.consecutive_timeouts = 0;
+    }
+
+    fn record_timeout(&mut self) -> (Duration, u32) {
+        let exponent = self.consecutive_timeouts.min(4);
+        self.consecutive_timeouts = self.consecutive_timeouts.saturating_add(1);
+        let delay = SURFACE_TIMEOUT_BACKOFF_MIN
+            .saturating_mul(1_u32 << exponent)
+            .min(SURFACE_TIMEOUT_BACKOFF_MAX);
+        (delay, self.consecutive_timeouts)
+    }
+}
+
+fn desktop_surface_size_is_renderable(size: PhysicalSize<u32>) -> bool {
+    size.width > 0 && size.height > 0
+}
+
+fn desktop_background_wake(
+    now: Instant,
+    surface_renderable: bool,
+    frame_animation_active: bool,
+) -> Option<Instant> {
+    if surface_renderable && frame_animation_active {
+        Some(now + BACKGROUND_POLL_INTERVAL)
+    } else {
+        None
+    }
+}
 
 fn streaming_text_fade_opacity_for_elapsed(elapsed: Duration) -> (f32, bool) {
     let progress =
@@ -280,6 +382,7 @@ fn install_desktop_diagnostic_hooks() {
 }
 
 async fn run() -> Result<()> {
+    log_desktop_platform_support_warning();
     let args = std::env::args().collect::<Vec<_>>();
     let startup_benchmark = startup_benchmark_requested(&args);
     let startup_content_benchmark = startup_content_benchmark_requested(&args);
@@ -339,26 +442,29 @@ async fn run() -> Result<()> {
         window_builder = window_builder.with_fullscreen(Some(Fullscreen::Borderless(None)));
     }
 
-    let window: &'static Window = Box::leak(Box::new(
+    let window = Arc::new(
         window_builder
             .build(&event_loop)
             .context("failed to create desktop window")?,
-    ));
+    );
     startup_trace.mark("window created");
 
+    let mut pending_workspace_startup_load = false;
+    let mut pending_workspace_startup_preferences = None;
     let mut app = if desktop_mode == DesktopMode::WorkspacePrototype {
-        let session_cards = load_session_cards_for_desktop();
-        let mut workspace = Workspace::from_session_cards(session_cards);
+        let mut workspace = Workspace::loading_sessions();
         if let Some(preferences) = load_desktop_preferences() {
-            workspace.apply_preferences(preferences);
+            workspace.apply_preferences(preferences.clone());
+            pending_workspace_startup_preferences = Some(preferences);
         }
+        pending_workspace_startup_load = true;
         DesktopApp::Workspace(workspace)
     } else {
         initial_single_session_app(resume_session_id.as_deref())
     };
     startup_trace.mark("app state initialized");
     window.set_title(&app.status_title());
-    let mut canvas = Canvas::new(window, startup_trace).await?;
+    let mut canvas = Canvas::new(window.clone(), startup_trace).await?;
     startup_trace.mark("canvas ready");
     let mut modifiers = ModifiersState::empty();
     let mut cursor_position = winit::dpi::PhysicalPosition::new(0.0, 0.0);
@@ -378,19 +484,30 @@ async fn run() -> Result<()> {
     let mut no_paint_watchdog = DesktopNoPaintWatchdog::new();
     let mut last_backend_redraw_request: Option<Instant> = None;
     let mut pending_backend_redraw_since: Option<Instant> = None;
+    let mut surface_timeout_backoff = SurfaceTimeoutBackoff::default();
+    let mut surface_timeout_redraw_at: Option<Instant> = None;
     let mut pending_resize: Option<PhysicalSize<u32>> = None;
     let mut space_hold_started_at: Option<Instant> = None;
     let mut space_hold_consumed = false;
 
+    if pending_workspace_startup_load {
+        spawn_session_cards_load(
+            DesktopSessionCardsPurpose::WorkspaceInitialLoad,
+            event_loop_proxy.clone(),
+            Duration::ZERO,
+        );
+    }
+
     event_loop.run(move |event, target| {
         let event_loop_now = Instant::now();
+        let surface_renderable = desktop_surface_size_is_renderable(window.inner_size());
         let has_background_work = app.has_background_work();
         power_inhibitor.set_active(has_background_work);
-        let default_wake = if has_background_work || app.has_frame_animation() {
-            Some(event_loop_now + BACKGROUND_POLL_INTERVAL)
-        } else {
-            None
-        };
+        let default_wake = desktop_background_wake(
+            event_loop_now,
+            surface_renderable,
+            app.has_frame_animation(),
+        );
         let backend_wake = pending_backend_redraw_since
             .and(last_backend_redraw_request)
             .map(|last| last + BACKEND_REDRAW_FRAME_INTERVAL);
@@ -400,7 +517,12 @@ async fn run() -> Result<()> {
             }
             _ => None,
         });
-        let wake = [default_wake, backend_wake, space_hold_wake]
+        let wake = [
+            default_wake,
+            backend_wake,
+            space_hold_wake,
+            surface_timeout_redraw_at,
+        ]
             .into_iter()
             .flatten()
             .min();
@@ -413,11 +535,12 @@ async fn run() -> Result<()> {
         let pending_interaction_kind = interaction_latency.pending_kind();
         let frame_animation_active = app.has_frame_animation();
         let pending_backend_redraw = pending_backend_redraw_since.is_some();
-        let no_paint_active = !first_frame_presented
-            || has_background_work
-            || frame_animation_active
-            || pending_backend_redraw
-            || pending_interaction_kind.is_some();
+        let no_paint_active = surface_renderable
+            && (!first_frame_presented
+                || has_background_work
+                || frame_animation_active
+                || pending_backend_redraw
+                || pending_interaction_kind.is_some());
         if no_paint_watchdog.observe_active_tick(
             event_loop_now,
             NoPaintWatchdogContext {
@@ -753,11 +876,9 @@ async fn run() -> Result<()> {
                             ) {
                                 apply_single_session_error(&mut app, error);
                             } else {
-                                app.apply_session_event(
-                                    session_launch::DesktopSessionEvent::Status(
-                                        "switching model".to_string(),
-                                    ),
-                                );
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::SwitchingModel,
+                                ));
                             }
                             window.set_title(&app.status_title());
                             window.request_redraw();
@@ -770,11 +891,9 @@ async fn run() -> Result<()> {
                             ) {
                                 apply_single_session_error(&mut app, error);
                             } else {
-                                app.apply_session_event(
-                                    session_launch::DesktopSessionEvent::Status(
-                                        "switching reasoning effort".to_string(),
-                                    ),
-                                );
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::SwitchingReasoningEffort,
+                                ));
                             }
                             window.set_title(&app.status_title());
                             window.request_redraw();
@@ -811,11 +930,9 @@ async fn run() -> Result<()> {
                             ) {
                                 apply_single_session_error(&mut app, error);
                             } else {
-                                app.apply_session_event(
-                                    session_launch::DesktopSessionEvent::Status(
-                                        "switching model".to_string(),
-                                    ),
-                                );
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::SwitchingModel,
+                                ));
                             }
                             window.set_title(&app.status_title());
                             window.request_redraw();
@@ -857,9 +974,16 @@ async fn run() -> Result<()> {
                     if let Some(size) = pending_resize.take() {
                         canvas.resize(size);
                     }
+                    let window_size = window.inner_size();
+                    if !desktop_surface_size_is_renderable(window_size) {
+                        canvas.suspend_for_zero_size(window_size);
+                        surface_timeout_backoff.reset();
+                        surface_timeout_redraw_at = None;
+                        return;
+                    }
                     let smooth_scroll_lines = app.single_session_smooth_scroll_lines(
                         scroll_accumulator.pending_lines(),
-                        window.inner_size(),
+                        window_size,
                         &mut scroll_metrics_cache,
                     );
                     match canvas.render(
@@ -869,6 +993,8 @@ async fn run() -> Result<()> {
                         workspace_space_hold_progress(&app, space_hold_started_at, space_hold_consumed),
                     ) {
                     Ok(frame) => {
+                        surface_timeout_backoff.reset();
+                        surface_timeout_redraw_at = None;
                         no_paint_watchdog.observe_presented(Instant::now(), &frame);
                         interaction_latency.observe_presented(&frame);
                         if !first_frame_presented {
@@ -899,12 +1025,25 @@ async fn run() -> Result<()> {
                         }
                     }
                     Err(SurfaceError::Lost | SurfaceError::Outdated) => {
+                        surface_timeout_backoff.reset();
+                        surface_timeout_redraw_at = None;
                         canvas.resize(window.inner_size());
                         window.request_redraw();
                     }
                     Err(SurfaceError::OutOfMemory) => target.exit(),
                     Err(SurfaceError::Timeout) => {
-                        window.request_redraw();
+                        let now = Instant::now();
+                        let (delay, consecutive_timeouts) = surface_timeout_backoff.record_timeout();
+                        let redraw_at = now + delay;
+                        surface_timeout_redraw_at = Some(redraw_at);
+                        if consecutive_timeouts == 1 || delay == SURFACE_TIMEOUT_BACKOFF_MAX {
+                            desktop_log::warn(format_args!(
+                                "jcode-desktop: surface acquire timed out, retrying in {}ms after {} consecutive timeout(s)",
+                                delay.as_millis(),
+                                consecutive_timeouts
+                            ));
+                        }
+                        target.set_control_flow(ControlFlow::WaitUntil(redraw_at));
                     }
                     }
                 }
@@ -926,6 +1065,15 @@ async fn run() -> Result<()> {
                 let card_count = cards.len();
                 let mut applied = false;
                 match purpose {
+                    DesktopSessionCardsPurpose::WorkspaceInitialLoad => {
+                        if let DesktopApp::Workspace(workspace) = &mut app {
+                            workspace.replace_session_cards(cards);
+                            if let Some(preferences) = pending_workspace_startup_preferences.take() {
+                                workspace.apply_preferences(preferences);
+                            }
+                            applied = true;
+                        }
+                    }
                     DesktopSessionCardsPurpose::WorkspaceRefresh => {
                         if let DesktopApp::Workspace(workspace) = &mut app {
                             workspace.replace_session_cards(cards);
@@ -988,9 +1136,7 @@ async fn run() -> Result<()> {
                     apply_single_session_error(&mut app, anyhow::anyhow!(message));
                 } else if let DesktopApp::SingleSession(single_session) = &mut app {
                     single_session.set_recovery_session_count(0);
-                    single_session.apply_session_event(session_launch::DesktopSessionEvent::Status(
-                        format!("restored {restored} crashed session(s)"),
-                    ));
+                    single_session.set_status_label(format!("restored {restored} crashed session(s)"));
                 }
                 window.set_title(&app.status_title());
                 interaction_latency.mark("restore_crashed_sessions", Instant::now());
@@ -1062,7 +1208,17 @@ async fn run() -> Result<()> {
                 );
             }
             Event::AboutToWait => {
-                if app.is_single_session() {
+                let surface_renderable = desktop_surface_size_is_renderable(window.inner_size());
+                if let Some(redraw_at) = surface_timeout_redraw_at {
+                    let now = Instant::now();
+                    if now >= redraw_at {
+                        surface_timeout_redraw_at = None;
+                        if surface_renderable {
+                            window.request_redraw();
+                        }
+                    }
+                }
+                if surface_renderable && app.is_single_session() {
                     let about_to_wait_started = Instant::now();
                     let size = window.inner_size();
                     let previous_smooth_scroll = app.single_session_smooth_scroll_lines(
@@ -1102,13 +1258,17 @@ async fn run() -> Result<()> {
                             window.set_title(&app.status_title());
                         }
                     }
-                    window.request_redraw();
+                    if surface_renderable {
+                        window.request_redraw();
+                    }
                 }
                 if let Some(first_pending_backend_redraw) = pending_backend_redraw_since {
                     let now = Instant::now();
-                    if last_backend_redraw_request.is_none_or(|last| {
-                        now.saturating_duration_since(last) >= BACKEND_REDRAW_FRAME_INTERVAL
-                    }) {
+                    if surface_renderable
+                        && last_backend_redraw_request.is_none_or(|last| {
+                            now.saturating_duration_since(last) >= BACKEND_REDRAW_FRAME_INTERVAL
+                        })
+                    {
                         pending_backend_redraw_since = None;
                         interaction_latency.mark("backend_events", first_pending_backend_redraw);
                         last_backend_redraw_request = Some(now);
@@ -1126,10 +1286,10 @@ async fn run() -> Result<()> {
                     }
                 }
 
-                if canvas.needs_initial_frame {
+                if surface_renderable && canvas.needs_initial_frame {
                     canvas.needs_initial_frame = false;
                     window.request_redraw();
-                } else if app.has_frame_animation() {
+                } else if surface_renderable && app.has_frame_animation() {
                     window.request_redraw();
                 }
             }
@@ -1168,24 +1328,21 @@ fn spawn_recovery_session_count_scan(
     event_loop_proxy: EventLoopProxy<DesktopUserEvent>,
     startup_trace: DesktopStartupTrace,
 ) {
-    if let Err(error) = std::thread::Builder::new()
-        .name("jcode-desktop-recovery-scan".to_string())
-        .spawn(move || {
-            startup_trace.mark("recovery scan started");
-            let recovery_count = load_crashed_session_cards_for_desktop().len();
-            startup_trace.mark(&format!(
-                "recovery scan completed ({recovery_count} crashed)"
+    if let Err(error) = spawn_bounded_desktop_async_job("jcode-desktop-recovery-scan", move || {
+        startup_trace.mark("recovery scan started");
+        let recovery_count = load_crashed_session_cards_for_desktop().len();
+        startup_trace.mark(&format!(
+            "recovery scan completed ({recovery_count} crashed)"
+        ));
+        if event_loop_proxy
+            .send_event(DesktopUserEvent::RecoveryCount(recovery_count))
+            .is_err()
+        {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: failed to deliver recovery count, event loop is closed"
             ));
-            if event_loop_proxy
-                .send_event(DesktopUserEvent::RecoveryCount(recovery_count))
-                .is_err()
-            {
-                desktop_log::warn(format_args!(
-                    "jcode-desktop: failed to deliver recovery count, event loop is closed"
-                ));
-            }
-        })
-    {
+        }
+    }) {
         desktop_log::error(format_args!(
             "jcode-desktop: failed to start recovery scan: {error:#}"
         ));
@@ -1196,9 +1353,8 @@ fn spawn_single_session_card_refresh(
     session_id: String,
     event_loop_proxy: EventLoopProxy<DesktopUserEvent>,
 ) {
-    if let Err(error) = std::thread::Builder::new()
-        .name("jcode-desktop-session-card-refresh".to_string())
-        .spawn(move || {
+    if let Err(error) =
+        spawn_bounded_desktop_async_job("jcode-desktop-session-card-refresh", move || {
             let started = Instant::now();
             let card = load_session_cards_for_desktop()
                 .into_iter()
@@ -1229,9 +1385,9 @@ fn spawn_session_cards_load(
     event_loop_proxy: EventLoopProxy<DesktopUserEvent>,
     delay: Duration,
 ) {
-    if let Err(error) = std::thread::Builder::new()
-        .name(format!("jcode-desktop-session-cards-{purpose:?}"))
-        .spawn(move || {
+    if let Err(error) = spawn_bounded_desktop_async_job(
+        format!("jcode-desktop-session-cards-{purpose:?}"),
+        move || {
             if !delay.is_zero() {
                 std::thread::sleep(delay);
             }
@@ -1250,8 +1406,8 @@ fn spawn_session_cards_load(
                     "jcode-desktop: failed to deliver session cards load, event loop is closed"
                 ));
             }
-        })
-    {
+        },
+    ) {
         desktop_log::error(format_args!(
             "jcode-desktop: failed to start session card load: {error:#}"
         ));
@@ -1259,9 +1415,9 @@ fn spawn_session_cards_load(
 }
 
 fn spawn_restore_crashed_sessions(event_loop_proxy: EventLoopProxy<DesktopUserEvent>) {
-    if let Err(error) = std::thread::Builder::new()
-        .name("jcode-desktop-restore-crashed-sessions".to_string())
-        .spawn(move || {
+    if let Err(error) = spawn_bounded_desktop_async_job(
+        "jcode-desktop-restore-crashed-sessions",
+        move || {
             let started = Instant::now();
             let crashed = load_crashed_session_cards_for_desktop();
             let mut restored = 0usize;
@@ -1273,17 +1429,20 @@ fn spawn_restore_crashed_sessions(event_loop_proxy: EventLoopProxy<DesktopUserEv
                     Err(error) => errors.push(format!("{}: {error:#}", card.session_id)),
                 }
             }
-            if event_loop_proxy.send_event(DesktopUserEvent::CrashedSessionsRestoreFinished {
-                restored,
-                errors,
-                elapsed: started.elapsed(),
-            }).is_err() {
+            if event_loop_proxy
+                .send_event(DesktopUserEvent::CrashedSessionsRestoreFinished {
+                    restored,
+                    errors,
+                    elapsed: started.elapsed(),
+                })
+                .is_err()
+            {
                 desktop_log::warn(format_args!(
                     "jcode-desktop: failed to deliver crashed-session restore result, event loop is closed"
                 ));
             }
-        })
-    {
+        },
+    ) {
         desktop_log::error(format_args!(
             "jcode-desktop: failed to start crashed-session restore: {error:#}"
         ));
@@ -1330,9 +1489,8 @@ fn queue_desktop_preferences_save(
         return;
     }
 
-    if let Err(error) = std::thread::Builder::new()
-        .name("jcode-desktop-preferences-save-once".to_string())
-        .spawn(move || {
+    if let Err(error) =
+        spawn_bounded_desktop_async_job("jcode-desktop-preferences-save-once", move || {
             save_desktop_preferences_off_ui_thread(preferences, 1, Duration::ZERO);
         })
     {
@@ -1780,56 +1938,6 @@ async fn render_hero_frame_to_image(
     Ok((image, vertices.len()))
 }
 
-fn stream_e2e_benchmark_raw_events(args: &[String]) -> Option<usize> {
-    args.iter().enumerate().find_map(|(index, arg)| {
-        arg.strip_prefix("--stream-e2e-benchmark=")
-            .and_then(|value| value.parse::<usize>().ok())
-            .or_else(|| {
-                (arg == "--stream-e2e-benchmark").then(|| {
-                    args.get(index + 1)
-                        .and_then(|value| value.parse::<usize>().ok())
-                        .unwrap_or(BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS * 6)
-                })
-            })
-    })
-}
-
-fn env_flag_enabled(value: OsString) -> bool {
-    let value = value.to_string_lossy();
-    !matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "" | "0" | "false" | "off" | "no"
-    )
-}
-
-#[derive(Clone, Copy)]
-struct DesktopStartupTrace {
-    started_at: Instant,
-    enabled: bool,
-}
-
-impl DesktopStartupTrace {
-    fn new(enabled: bool) -> Self {
-        Self {
-            started_at: Instant::now(),
-            enabled,
-        }
-    }
-
-    fn mark(&self, milestone: &str) {
-        if self.enabled {
-            eprintln!(
-                "jcode-desktop startup +{:>7.2} ms  {milestone}",
-                self.started_at.elapsed().as_secs_f64() * 1000.0
-            );
-            desktop_log::info(format_args!(
-                "jcode-desktop: startup +{:>7.2} ms {milestone}",
-                self.started_at.elapsed().as_secs_f64() * 1000.0
-            ));
-        }
-    }
-}
-
 #[derive(Debug)]
 enum DesktopUserEvent {
     SessionEvents(DesktopSessionEventBatch),
@@ -1853,271 +1961,9 @@ enum DesktopUserEvent {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DesktopSessionCardsPurpose {
+    WorkspaceInitialLoad,
     WorkspaceRefresh,
     SingleSessionSwitcher,
-}
-
-#[derive(Debug)]
-struct DesktopSessionEventBatch {
-    events: Vec<session_launch::DesktopSessionEvent>,
-    raw_event_count: usize,
-    raw_payload_bytes: usize,
-    first_received_at: Instant,
-    forwarded_at: Instant,
-}
-
-impl DesktopSessionEventBatch {
-    fn accumulated_for(&self) -> Duration {
-        self.forwarded_at
-            .saturating_duration_since(self.first_received_at)
-    }
-}
-
-fn spawn_session_event_forwarder(
-    session_event_rx: mpsc::Receiver<session_launch::DesktopSessionEvent>,
-    event_loop_proxy: EventLoopProxy<DesktopUserEvent>,
-) {
-    if let Err(error) = std::thread::Builder::new()
-        .name("jcode-desktop-session-event-forwarder".to_string())
-        .spawn(move || {
-            let mut next_forward_at = Instant::now();
-            while let Ok(first_event) = session_event_rx.recv() {
-                let now = Instant::now();
-                if now < next_forward_at {
-                    std::thread::sleep(next_forward_at.saturating_duration_since(now));
-                }
-                let batch = collect_desktop_session_event_batch(first_event, &session_event_rx);
-                if batch.events.is_empty() {
-                    continue;
-                }
-                next_forward_at = Instant::now() + BACKEND_EVENT_FORWARD_INTERVAL;
-                if event_loop_proxy
-                    .send_event(DesktopUserEvent::SessionEvents(batch))
-                    .is_err()
-                {
-                    desktop_log::warn(format_args!(
-                        "jcode-desktop: failed to forward session events, event loop is closed"
-                    ));
-                    break;
-                }
-            }
-        })
-    {
-        desktop_log::error(format_args!(
-            "jcode-desktop: failed to start session event forwarder: {error:#}"
-        ));
-    }
-}
-
-fn collect_desktop_session_event_batch(
-    first_event: session_launch::DesktopSessionEvent,
-    session_event_rx: &mpsc::Receiver<session_launch::DesktopSessionEvent>,
-) -> DesktopSessionEventBatch {
-    let first_received_at = Instant::now();
-    let mut events = vec![first_event];
-    let mut raw_event_count = 1usize;
-    let mut raw_payload_bytes = desktop_session_event_payload_bytes(&events[0]);
-
-    'accumulate: loop {
-        while let Ok(event) = session_event_rx.try_recv() {
-            raw_event_count += 1;
-            raw_payload_bytes += desktop_session_event_payload_bytes(&event);
-            events.push(event);
-            if should_flush_session_event_batch(
-                &events,
-                raw_event_count,
-                raw_payload_bytes,
-                first_received_at.elapsed(),
-            ) {
-                break 'accumulate;
-            }
-        }
-        let elapsed = first_received_at.elapsed();
-        if should_flush_session_event_batch(&events, raw_event_count, raw_payload_bytes, elapsed) {
-            break;
-        }
-        let remaining = BACKEND_EVENT_FORWARD_INTERVAL.saturating_sub(elapsed);
-        if remaining.is_zero() {
-            break;
-        }
-        match session_event_rx.recv_timeout(remaining) {
-            Ok(event) => {
-                raw_event_count += 1;
-                raw_payload_bytes += desktop_session_event_payload_bytes(&event);
-                events.push(event);
-                if should_flush_session_event_batch(
-                    &events,
-                    raw_event_count,
-                    raw_payload_bytes,
-                    first_received_at.elapsed(),
-                ) {
-                    break;
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => break,
-        }
-    }
-
-    let events = coalesce_desktop_session_events(events);
-    let forwarded_at = Instant::now();
-    DesktopSessionEventBatch {
-        events,
-        raw_event_count,
-        raw_payload_bytes,
-        first_received_at,
-        forwarded_at,
-    }
-}
-
-fn should_flush_session_event_batch(
-    events: &[session_launch::DesktopSessionEvent],
-    raw_event_count: usize,
-    raw_payload_bytes: usize,
-    elapsed: Duration,
-) -> bool {
-    raw_event_count >= BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS
-        || raw_payload_bytes >= BACKEND_EVENT_FORWARD_MAX_PAYLOAD_BYTES
-        || elapsed >= BACKEND_EVENT_FORWARD_INTERVAL
-        || events
-            .iter()
-            .any(|event| !desktop_session_event_can_wait_for_frame_tick(event))
-}
-
-fn desktop_session_event_can_wait_for_frame_tick(
-    event: &session_launch::DesktopSessionEvent,
-) -> bool {
-    matches!(
-        event,
-        session_launch::DesktopSessionEvent::TextDelta(_)
-            | session_launch::DesktopSessionEvent::ToolInput { .. }
-            | session_launch::DesktopSessionEvent::ToolExecuting { .. }
-            | session_launch::DesktopSessionEvent::Status(_)
-    )
-}
-
-fn desktop_session_event_payload_bytes(event: &session_launch::DesktopSessionEvent) -> usize {
-    match event {
-        session_launch::DesktopSessionEvent::Status(text)
-        | session_launch::DesktopSessionEvent::TextDelta(text)
-        | session_launch::DesktopSessionEvent::TextReplace(text)
-        | session_launch::DesktopSessionEvent::Error(text) => text.len(),
-        session_launch::DesktopSessionEvent::ToolInput { delta } => delta.len(),
-        session_launch::DesktopSessionEvent::ToolStarted { name }
-        | session_launch::DesktopSessionEvent::ToolExecuting { name } => name.len(),
-        session_launch::DesktopSessionEvent::ToolFinished { name, summary, .. } => {
-            name.len() + summary.len()
-        }
-        session_launch::DesktopSessionEvent::SessionStarted { session_id }
-        | session_launch::DesktopSessionEvent::Reloaded { session_id } => session_id.len(),
-        session_launch::DesktopSessionEvent::ModelChanged {
-            model,
-            provider_name,
-            error,
-        } => {
-            model.len()
-                + provider_name.as_deref().unwrap_or_default().len()
-                + error.as_deref().unwrap_or_default().len()
-        }
-        session_launch::DesktopSessionEvent::ModelCatalog {
-            current_model,
-            provider_name,
-            models,
-        } => {
-            current_model.as_deref().unwrap_or_default().len()
-                + provider_name.as_deref().unwrap_or_default().len()
-                + models
-                    .iter()
-                    .map(|model| {
-                        model.model.len()
-                            + model.provider.as_deref().unwrap_or_default().len()
-                            + model.detail.as_deref().unwrap_or_default().len()
-                    })
-                    .sum::<usize>()
-        }
-        session_launch::DesktopSessionEvent::ModelCatalogError { error } => error.len(),
-        session_launch::DesktopSessionEvent::StdinRequest {
-            request_id,
-            prompt,
-            tool_call_id,
-            ..
-        } => request_id.len() + prompt.len() + tool_call_id.len(),
-        session_launch::DesktopSessionEvent::Reloading { new_socket } => {
-            new_socket.as_deref().unwrap_or_default().len()
-        }
-        session_launch::DesktopSessionEvent::Done => 0,
-    }
-}
-
-#[cfg(test)]
-mod desktop_event_forwarder_tests {
-    use super::*;
-
-    #[test]
-    fn streaming_flood_is_split_before_try_recv_can_starve_ui() {
-        let (tx, rx) = mpsc::channel();
-        for _ in 0..(BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS * 3) {
-            tx.send(session_launch::DesktopSessionEvent::TextDelta(
-                "x".to_string(),
-            ))
-            .unwrap();
-        }
-
-        let batch = collect_desktop_session_event_batch(
-            session_launch::DesktopSessionEvent::TextDelta("x".to_string()),
-            &rx,
-        );
-
-        assert!(batch.raw_event_count <= BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS);
-        assert!(batch.accumulated_for() < Duration::from_millis(100));
-        assert_eq!(batch.events.len(), 1);
-        let session_launch::DesktopSessionEvent::TextDelta(text) = &batch.events[0] else {
-            panic!("streaming flood should coalesce to one text delta");
-        };
-        assert_eq!(text.len(), batch.raw_event_count);
-        assert!(
-            rx.try_recv().is_ok(),
-            "bounded batch collection should leave later stream chunks queued for the next UI wake"
-        );
-    }
-}
-
-fn coalesce_desktop_session_events(
-    events: Vec<session_launch::DesktopSessionEvent>,
-) -> Vec<session_launch::DesktopSessionEvent> {
-    let mut coalesced = Vec::with_capacity(events.len());
-    for event in events {
-        match event {
-            session_launch::DesktopSessionEvent::TextDelta(delta) if !delta.is_empty() => {
-                if let Some(session_launch::DesktopSessionEvent::TextDelta(existing)) =
-                    coalesced.last_mut()
-                {
-                    existing.push_str(&delta);
-                } else {
-                    coalesced.push(session_launch::DesktopSessionEvent::TextDelta(delta));
-                }
-            }
-            session_launch::DesktopSessionEvent::ToolInput { delta } if !delta.is_empty() => {
-                if let Some(session_launch::DesktopSessionEvent::ToolInput { delta: existing }) =
-                    coalesced.last_mut()
-                {
-                    existing.push_str(&delta);
-                } else {
-                    coalesced.push(session_launch::DesktopSessionEvent::ToolInput { delta });
-                }
-            }
-            session_launch::DesktopSessionEvent::Status(status) => {
-                if let Some(session_launch::DesktopSessionEvent::Status(existing)) =
-                    coalesced.last_mut()
-                {
-                    *existing = status;
-                } else {
-                    coalesced.push(session_launch::DesktopSessionEvent::Status(status));
-                }
-            }
-            event => coalesced.push(event),
-        }
-    }
-    coalesced
 }
 
 fn run_headless_chat_smoke(message: String) -> Result<()> {
@@ -2149,6 +1995,7 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
 
         match event {
             session_launch::DesktopSessionEvent::Status(status) => {
+                let status = status.label();
                 last_status = Some(status.clone());
                 println!(
                     "{}",
@@ -3808,11 +3655,11 @@ fn desktop_wgpu_startup_backends() -> Vec<wgpu::Backends> {
     vec![wgpu::Backends::PRIMARY]
 }
 
-async fn request_startup_adapter<'window>(
-    window: &'window Window,
+async fn request_startup_adapter(
+    window: Arc<Window>,
     backend_candidates: Vec<wgpu::Backends>,
     startup_trace: DesktopStartupTrace,
-) -> Result<(wgpu::Surface<'window>, wgpu::Adapter)> {
+) -> Result<(wgpu::Surface<'static>, wgpu::Adapter)> {
     let mut last_error = None;
     for backends in backend_candidates {
         let backend_label = format!("{backends:?}");
@@ -3822,7 +3669,7 @@ async fn request_startup_adapter<'window>(
             ..Default::default()
         });
         startup_trace.mark(&format!("wgpu instance created ({backend_label})"));
-        let surface = match instance.create_surface(window) {
+        let surface = match instance.create_surface(window.clone()) {
             Ok(surface) => surface,
             Err(error) => {
                 last_error = Some(format!(
@@ -3895,7 +3742,7 @@ fn desktop_scroll_benchmark_app_with_turns(turns: usize) -> SingleSessionApp {
             "Assistant response {turn}: The render path includes markdown wrapping, transcript card geometry, scrollbar geometry, text buffer preparation, and GPU primitive upload. This paragraph is intentionally long enough to wrap across several desktop body lines so the benchmark exercises visible-line virtualization and wrapping behavior.\n\n- Check cached text keys.\n- Check smooth scroll fractional offsets.\n- Check whether geometry can update without reshaping text.\n\n```rust\nfn sample_{turn}() {{ println!(\"benchmark\"); }}\n```"
         )));
     }
-    app.status = Some("benchmark fixture".to_string());
+    app.set_status_label("benchmark fixture");
     app
 }
 
@@ -3927,13 +3774,13 @@ fn initial_single_session_app(resume_session_id: Option<&str>) -> DesktopApp {
             app.replace_session(Some(card));
         }
         Ok(None) => {
-            app.status = Some(format!("resumed session {session_id}"));
+            app.set_status_label(format!("resumed session {session_id}"));
         }
         Err(error) => {
             desktop_log::error(format_args!(
                 "jcode-desktop: failed to load resumed session metadata for {session_id}: {error:#}"
             ));
-            app.status = Some(format!("resumed session {session_id}"));
+            app.set_status_label(format!("resumed session {session_id}"));
             app.error = Some(format!("failed to load session metadata: {error:#}"));
         }
     }
@@ -4126,6 +3973,12 @@ impl DesktopApp {
     fn apply_session_event(&mut self, event: session_launch::DesktopSessionEvent) {
         if let Self::SingleSession(app) = self {
             app.apply_session_event(event);
+        }
+    }
+
+    fn set_single_session_status_label(&mut self, label: impl Into<String>) {
+        if let Self::SingleSession(app) = self {
+            app.set_status_label(label);
         }
     }
 
@@ -4924,9 +4777,7 @@ fn apply_single_session_error(app: &mut DesktopApp, error: anyhow::Error) {
 
 fn copy_text_to_clipboard(text: &str, success_notice: &'static str, app: &mut DesktopApp) {
     match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text.to_string())) {
-        Ok(()) => app.apply_session_event(session_launch::DesktopSessionEvent::Status(
-            success_notice.to_string(),
-        )),
+        Ok(()) => app.set_single_session_status_label(success_notice),
         Err(error) => {
             desktop_log::error(format_args!(
                 "jcode-desktop: failed to update clipboard after {success_notice}: {error}"
@@ -5325,15 +5176,11 @@ struct DesktopFrameProfiler {
 
 impl DesktopFrameProfiler {
     fn new() -> Self {
-        let mode = std::env::var("JCODE_DESKTOP_FRAME_PROFILE").ok();
-        let enabled = !matches!(mode.as_deref(), Some("0" | "false" | "off"));
-        let log_all = matches!(mode.as_deref(), Some("all" | "trace"));
-        let budget = std::env::var("JCODE_DESKTOP_FRAME_BUDGET_MS")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .map(|ms| Duration::from_secs_f64(ms / 1000.0))
-            .unwrap_or(DESKTOP_120FPS_FRAME_BUDGET);
+        let mode = desktop_frame_profile_mode();
+        let enabled = desktop_frame_profile_enabled(mode.as_deref());
+        let log_all = desktop_frame_profile_log_all(mode.as_deref());
+        let budget =
+            duration_millis_env("JCODE_DESKTOP_FRAME_BUDGET_MS", DESKTOP_120FPS_FRAME_BUDGET);
         Self {
             enabled,
             log_all,
@@ -5454,15 +5301,13 @@ struct DesktopInteractionLatencyProfiler {
 
 impl DesktopInteractionLatencyProfiler {
     fn new() -> Self {
-        let mode = std::env::var("JCODE_DESKTOP_FRAME_PROFILE").ok();
-        let enabled = !matches!(mode.as_deref(), Some("0" | "false" | "off"));
-        let log_all = matches!(mode.as_deref(), Some("all" | "trace"));
-        let budget = std::env::var("JCODE_DESKTOP_INPUT_LATENCY_BUDGET_MS")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .map(|ms| Duration::from_secs_f64(ms / 1000.0))
-            .unwrap_or(DESKTOP_INPUT_LATENCY_BUDGET);
+        let mode = desktop_frame_profile_mode();
+        let enabled = desktop_frame_profile_enabled(mode.as_deref());
+        let log_all = desktop_frame_profile_log_all(mode.as_deref());
+        let budget = duration_millis_env(
+            "JCODE_DESKTOP_INPUT_LATENCY_BUDGET_MS",
+            DESKTOP_INPUT_LATENCY_BUDGET,
+        );
         Self {
             enabled,
             log_all,
@@ -5556,15 +5401,15 @@ impl DesktopNoPaintWatchdog {
     }
 
     fn new_with_start(now: Instant) -> Self {
-        let mode = std::env::var("JCODE_DESKTOP_FRAME_PROFILE").ok();
-        let enabled = !matches!(mode.as_deref(), Some("0" | "false" | "off"));
-        let log_all = matches!(mode.as_deref(), Some("all" | "trace"));
-        let budget = std::env::var("JCODE_DESKTOP_NO_PAINT_BUDGET_MS")
-            .ok()
-            .and_then(|value| value.parse::<f64>().ok())
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .map(|ms| Duration::from_secs_f64(ms / 1000.0))
-            .unwrap_or(DESKTOP_NO_PAINT_BUDGET);
+        let mode = desktop_frame_profile_mode();
+        Self::new_with_start_and_mode(now, mode.as_deref())
+    }
+
+    fn new_with_start_and_mode(now: Instant, mode: Option<&str>) -> Self {
+        let enabled = desktop_frame_profile_enabled(mode);
+        let log_all = desktop_frame_profile_log_all(mode);
+        let budget =
+            duration_millis_env("JCODE_DESKTOP_NO_PAINT_BUDGET_MS", DESKTOP_NO_PAINT_BUDGET);
         Self {
             enabled,
             log_all,
@@ -5631,7 +5476,7 @@ mod desktop_no_paint_watchdog_tests {
     #[test]
     fn no_paint_watchdog_requests_redraw_after_active_gap_budget() {
         let start = Instant::now();
-        let mut watchdog = DesktopNoPaintWatchdog::new_with_start(start);
+        let mut watchdog = DesktopNoPaintWatchdog::new_with_start_and_mode(start, Some("1"));
         let context = NoPaintWatchdogContext {
             active: true,
             mode: "single_session",
@@ -5656,7 +5501,7 @@ mod desktop_no_paint_watchdog_tests {
     #[test]
     fn no_paint_watchdog_resets_when_idle_or_presented() {
         let start = Instant::now();
-        let mut watchdog = DesktopNoPaintWatchdog::new_with_start(start);
+        let mut watchdog = DesktopNoPaintWatchdog::new_with_start_and_mode(start, Some("1"));
         let active_context = NoPaintWatchdogContext {
             active: true,
             mode: "single_session",
@@ -5675,6 +5520,23 @@ mod desktop_no_paint_watchdog_tests {
             !watchdog.observe_active_tick(start + watchdog.budget + watchdog.budget, idle_context)
         );
         assert!(watchdog.last_redraw_request_at.is_none());
+    }
+
+    #[test]
+    fn no_paint_watchdog_is_off_without_explicit_frame_profile_mode() {
+        let start = Instant::now();
+        let mut watchdog = DesktopNoPaintWatchdog::new_with_start_and_mode(start, None);
+        let context = NoPaintWatchdogContext {
+            active: true,
+            mode: "single_session",
+            has_background_work: true,
+            frame_animation_active: false,
+            pending_backend_redraw: false,
+            pending_interaction_kind: Some("backend_events"),
+        };
+
+        assert!(!watchdog.enabled);
+        assert!(!watchdog.observe_active_tick(start + DESKTOP_NO_PAINT_BUDGET * 4, context));
     }
 }
 
@@ -5826,10 +5688,8 @@ fn log_desktop_slow_interaction(
     if duration < DESKTOP_120FPS_FRAME_BUDGET {
         return;
     }
-    let enabled = std::env::var("JCODE_DESKTOP_FRAME_PROFILE")
-        .ok()
-        .is_none_or(|value| !matches!(value.as_str(), "0" | "false" | "off"));
-    if !enabled {
+    let mode = desktop_frame_profile_mode();
+    if !desktop_frame_profile_enabled(mode.as_deref()) {
         return;
     }
     emit_desktop_profile_event(
@@ -5893,8 +5753,8 @@ fn single_session_streaming_primitive_geometry_cache_key(
     Some(hasher.finish())
 }
 
-struct Canvas<'window> {
-    surface: wgpu::Surface<'window>,
+struct Canvas {
+    surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -5910,6 +5770,7 @@ struct Canvas<'window> {
     streaming_text_renderer: Option<TextRenderer>,
     streaming_text_needs_prepare: bool,
     size: PhysicalSize<u32>,
+    surface_zero_sized: bool,
     viewport_animation: AnimatedViewport,
     focus_pulse: FocusPulse,
     primitive_vertex_buffer: Option<wgpu::Buffer>,
@@ -5917,6 +5778,7 @@ struct Canvas<'window> {
     primitive_vertices_cache_key: Option<u64>,
     primitive_vertices_cache: Vec<Vertex>,
     primitive_frame_vertices: Vec<Vertex>,
+    primitive_workspace_vertices: Vec<Vertex>,
     needs_initial_frame: bool,
     boot_frame_presented: bool,
     first_render_completed: bool,
@@ -5941,13 +5803,18 @@ struct Canvas<'window> {
     frame_profiler: DesktopFrameProfiler,
 }
 
-impl<'window> Canvas<'window> {
-    async fn new(window: &'window Window, startup_trace: DesktopStartupTrace) -> Result<Self> {
-        let size = non_zero_size(window.inner_size());
+impl Canvas {
+    async fn new(window: Arc<Window>, startup_trace: DesktopStartupTrace) -> Result<Self> {
+        let initial_window_size = window.inner_size();
+        let size = non_zero_size(initial_window_size);
         let font_system_loader = Some(spawn_desktop_font_system_loader());
         startup_trace.mark("font loader spawned");
-        let (surface, adapter) =
-            request_startup_adapter(window, desktop_wgpu_startup_backends(), startup_trace).await?;
+        let (surface, adapter) = request_startup_adapter(
+            window.clone(),
+            desktop_wgpu_startup_backends(),
+            startup_trace,
+        )
+        .await?;
         startup_trace.mark("wgpu adapter ready");
         let (device, queue) = adapter
             .request_device(
@@ -6012,6 +5879,7 @@ impl<'window> Canvas<'window> {
             streaming_text_renderer: None,
             streaming_text_needs_prepare: false,
             size,
+            surface_zero_sized: !desktop_surface_size_is_renderable(initial_window_size),
             viewport_animation: AnimatedViewport::default(),
             focus_pulse: FocusPulse::default(),
             primitive_vertex_buffer: None,
@@ -6019,6 +5887,7 @@ impl<'window> Canvas<'window> {
             primitive_vertices_cache_key: None,
             primitive_vertices_cache: Vec::new(),
             primitive_frame_vertices: Vec::new(),
+            primitive_workspace_vertices: Vec::new(),
             needs_initial_frame: true,
             boot_frame_presented: false,
             first_render_completed: false,
@@ -6044,9 +5913,32 @@ impl<'window> Canvas<'window> {
         })
     }
 
+    fn suspend_for_zero_size(&mut self, size: PhysicalSize<u32>) {
+        if !self.surface_zero_sized {
+            desktop_log::info(format_args!(
+                "jcode-desktop: suspending surface rendering while window is zero-sized ({}x{})",
+                size.width, size.height
+            ));
+        }
+        self.surface_zero_sized = true;
+    }
+
     fn resize(&mut self, size: PhysicalSize<u32>) {
-        let size = non_zero_size(size);
-        if self.size == size {
+        if !desktop_surface_size_is_renderable(size) {
+            self.suspend_for_zero_size(size);
+            return;
+        }
+
+        let was_zero_sized = self.surface_zero_sized;
+        self.surface_zero_sized = false;
+        if was_zero_sized {
+            desktop_log::info(format_args!(
+                "jcode-desktop: resuming surface rendering at {}x{}",
+                size.width, size.height
+            ));
+        }
+
+        if self.size == size && !was_zero_sized {
             return;
         }
 
@@ -6455,6 +6347,20 @@ impl<'window> Canvas<'window> {
         self.streaming_text_needs_prepare = true;
     }
 
+    fn release_streaming_text_renderer_if_idle(&mut self, has_streaming_text_buffer: bool) {
+        if !streaming_text_renderer_should_release(
+            has_streaming_text_buffer,
+            self.streaming_text_renderer.is_some(),
+            self.streaming_text_atlas.is_some(),
+        ) {
+            return;
+        }
+
+        self.streaming_text_renderer = None;
+        self.streaming_text_atlas = None;
+        self.streaming_text_needs_prepare = false;
+    }
+
     fn cached_single_session_body_lines(
         &mut self,
         app: &SingleSessionApp,
@@ -6679,9 +6585,10 @@ impl<'window> Canvas<'window> {
         if streaming_text_fade_active && self.single_session_streaming_text_buffer.is_some() {
             self.streaming_text_needs_prepare = true;
         }
+        let has_streaming_text_buffer = self.single_session_streaming_text_buffer.is_some();
+        self.release_streaming_text_renderer_if_idle(has_streaming_text_buffer);
         let text_buffers = &self.single_session_text_buffers;
         let has_text_buffers = !text_buffers.is_empty();
-        let has_streaming_text_buffer = self.single_session_streaming_text_buffer.is_some();
         let mut text_area_count = 0usize;
         let mut text_prepared = false;
         let single_session_viewport = if let DesktopApp::SingleSession(single_session) = app {
@@ -6704,16 +6611,21 @@ impl<'window> Canvas<'window> {
         }
         if self.text_needs_prepare {
             let text_areas = if let DesktopApp::SingleSession(single_session) = app {
-                single_session_text_areas_for_app_with_cached_body_viewport_and_reveal(
-                    single_session,
-                    text_buffers,
-                    self.size,
-                    smooth_scroll_lines,
-                    single_session_viewport
-                        .clone()
-                        .expect("single-session viewport should exist"),
-                    welcome_hero_reveal_progress,
-                )
+                if let Some(viewport) = single_session_viewport.clone() {
+                    single_session_text_areas_for_app_with_cached_body_viewport_and_reveal(
+                        single_session,
+                        text_buffers,
+                        self.size,
+                        smooth_scroll_lines,
+                        viewport,
+                        welcome_hero_reveal_progress,
+                    )
+                } else {
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: missing single-session viewport while preparing text"
+                    ));
+                    Vec::new()
+                }
             } else {
                 single_session_text_areas(text_buffers, self.size)
             };
@@ -6722,36 +6634,43 @@ impl<'window> Canvas<'window> {
             if text_areas.is_empty() {
                 self.text_needs_prepare = false;
             } else {
-                text_prepared = true;
-                let font_system = self
-                    .font_system
-                    .as_mut()
-                    .expect("font system should be initialized before text prepare");
-                let text_atlas = self
-                    .text_atlas
-                    .as_mut()
-                    .expect("text atlas should be initialized before text prepare");
-                let text_renderer = self
-                    .text_renderer
-                    .as_mut()
-                    .expect("text renderer should be initialized before text prepare");
-                if let Err(error) = text_renderer.prepare(
-                    &self.device,
-                    &self.queue,
-                    font_system,
-                    text_atlas,
-                    Resolution {
-                        width: self.config.width,
-                        height: self.config.height,
-                    },
-                    text_areas,
-                    &mut self.swash_cache,
+                match (
+                    self.font_system.as_mut(),
+                    self.text_atlas.as_mut(),
+                    self.text_renderer.as_mut(),
                 ) {
-                    desktop_log::error(format_args!(
-                        "jcode-desktop: failed to prepare text: {error:?}"
-                    ));
-                } else {
-                    self.text_needs_prepare = false;
+                    (Some(font_system), Some(text_atlas), Some(text_renderer)) => {
+                        if let Err(error) = text_renderer.prepare(
+                            &self.device,
+                            &self.queue,
+                            font_system,
+                            text_atlas,
+                            Resolution {
+                                width: self.config.width,
+                                height: self.config.height,
+                            },
+                            text_areas,
+                            &mut self.swash_cache,
+                        ) {
+                            desktop_log::error(format_args!(
+                                "jcode-desktop: failed to prepare text, recreating renderer: {error:?}"
+                            ));
+                            self.text_renderer = None;
+                            self.text_atlas = None;
+                            self.text_needs_prepare = true;
+                        } else {
+                            text_prepared = true;
+                            self.text_needs_prepare = false;
+                        }
+                    }
+                    _ => {
+                        desktop_log::error(format_args!(
+                            "jcode-desktop: text renderer state was incomplete before prepare, recreating renderer"
+                        ));
+                        self.text_renderer = None;
+                        self.text_atlas = None;
+                        self.text_needs_prepare = true;
+                    }
                 }
             }
         } else {
@@ -6785,36 +6704,43 @@ impl<'window> Canvas<'window> {
             if streaming_text_areas.is_empty() {
                 self.streaming_text_needs_prepare = false;
             } else {
-                text_prepared = true;
-                let font_system = self
-                    .font_system
-                    .as_mut()
-                    .expect("font system should be initialized before streaming text prepare");
-                let text_atlas = self
-                    .streaming_text_atlas
-                    .as_mut()
-                    .expect("streaming text atlas should be initialized before text prepare");
-                let text_renderer = self
-                    .streaming_text_renderer
-                    .as_mut()
-                    .expect("streaming text renderer should be initialized before text prepare");
-                if let Err(error) = text_renderer.prepare(
-                    &self.device,
-                    &self.queue,
-                    font_system,
-                    text_atlas,
-                    Resolution {
-                        width: self.config.width,
-                        height: self.config.height,
-                    },
-                    streaming_text_areas,
-                    &mut self.swash_cache,
+                match (
+                    self.font_system.as_mut(),
+                    self.streaming_text_atlas.as_mut(),
+                    self.streaming_text_renderer.as_mut(),
                 ) {
-                    desktop_log::error(format_args!(
-                        "jcode-desktop: failed to prepare streaming text: {error:?}"
-                    ));
-                } else {
-                    self.streaming_text_needs_prepare = false;
+                    (Some(font_system), Some(text_atlas), Some(text_renderer)) => {
+                        if let Err(error) = text_renderer.prepare(
+                            &self.device,
+                            &self.queue,
+                            font_system,
+                            text_atlas,
+                            Resolution {
+                                width: self.config.width,
+                                height: self.config.height,
+                            },
+                            streaming_text_areas,
+                            &mut self.swash_cache,
+                        ) {
+                            desktop_log::error(format_args!(
+                                "jcode-desktop: failed to prepare streaming text, recreating renderer: {error:?}"
+                            ));
+                            self.streaming_text_renderer = None;
+                            self.streaming_text_atlas = None;
+                            self.streaming_text_needs_prepare = true;
+                        } else {
+                            text_prepared = true;
+                            self.streaming_text_needs_prepare = false;
+                        }
+                    }
+                    _ => {
+                        desktop_log::error(format_args!(
+                            "jcode-desktop: streaming text renderer state was incomplete before prepare, recreating renderer"
+                        ));
+                        self.streaming_text_renderer = None;
+                        self.streaming_text_atlas = None;
+                        self.streaming_text_needs_prepare = true;
+                    }
                 }
             }
         }
@@ -6877,21 +6803,27 @@ impl<'window> Canvas<'window> {
                 let focus_pulse = self.focus_pulse.frame(workspace.focused_id, now);
                 let animation_active =
                     self.viewport_animation.is_animating() || self.focus_pulse.is_animating();
+                reserve_workspace_vertex_capacity(
+                    &mut self.primitive_workspace_vertices,
+                    workspace,
+                );
+                build_vertices_into(
+                    workspace,
+                    self.size,
+                    render_layout,
+                    focus_pulse,
+                    workspace_space_hold_progress,
+                    &mut self.primitive_workspace_vertices,
+                );
                 (
-                    Cow::Owned(build_vertices(
-                        workspace,
-                        self.size,
-                        render_layout,
-                        focus_pulse,
-                        workspace_space_hold_progress,
-                    )),
+                    Cow::Borrowed(self.primitive_workspace_vertices.as_slice()),
                     animation_active,
                 )
             }
         };
         frame_profile.checkpoint("vertices");
         if let DesktopApp::SingleSession(single_session) = app
-            && spinner_tick % 6 < 3
+            && single_session_caret_visible_for_frame(single_session, spinner_tick)
         {
             if let Cow::Borrowed(base_vertices) = vertices {
                 self.primitive_frame_vertices.clear();
@@ -6958,6 +6890,8 @@ impl<'window> Canvas<'window> {
         });
         frame_profile.checkpoint("hero_mask_prepare");
 
+        let mut text_render_failed = false;
+        let mut streaming_text_render_failed = false;
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("jcode-desktop-workspace-pass"),
@@ -6990,8 +6924,9 @@ impl<'window> Canvas<'window> {
                 && let Err(error) = text_renderer.render(text_atlas, &mut render_pass)
             {
                 desktop_log::error(format_args!(
-                    "jcode-desktop: failed to render text: {error:?}"
+                    "jcode-desktop: failed to render text, recreating renderer: {error:?}"
                 ));
+                text_render_failed = true;
             }
             if has_streaming_text_buffer
                 && let (Some(text_renderer), Some(text_atlas)) = (
@@ -7001,9 +6936,20 @@ impl<'window> Canvas<'window> {
                 && let Err(error) = text_renderer.render(text_atlas, &mut render_pass)
             {
                 desktop_log::error(format_args!(
-                    "jcode-desktop: failed to render streaming text: {error:?}"
+                    "jcode-desktop: failed to render streaming text, recreating renderer: {error:?}"
                 ));
+                streaming_text_render_failed = true;
             }
+        }
+        if text_render_failed {
+            self.text_renderer = None;
+            self.text_atlas = None;
+            self.text_needs_prepare = true;
+        }
+        if streaming_text_render_failed {
+            self.streaming_text_renderer = None;
+            self.streaming_text_atlas = None;
+            self.streaming_text_needs_prepare = true;
         }
         frame_profile.checkpoint("render_pass");
 
@@ -7057,8 +7003,8 @@ fn upload_primitive_vertices(
         return;
     }
 
-    if *primitive_vertex_capacity < vertices.len() {
-        *primitive_vertex_capacity = vertices.len().next_power_of_two();
+    if primitive_vertex_buffer_should_reallocate(*primitive_vertex_capacity, vertices.len()) {
+        *primitive_vertex_capacity = primitive_vertex_capacity_for_len(vertices.len());
         let size =
             (*primitive_vertex_capacity * std::mem::size_of::<Vertex>()) as wgpu::BufferAddress;
         *primitive_vertex_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
@@ -7072,6 +7018,38 @@ fn upload_primitive_vertices(
     if let Some(vertex_buffer) = primitive_vertex_buffer.as_ref() {
         queue.write_buffer(vertex_buffer, 0, bytemuck::cast_slice(vertices));
     }
+}
+
+fn primitive_vertex_capacity_for_len(len: usize) -> usize {
+    if len == 0 {
+        0
+    } else {
+        len.next_power_of_two()
+            .max(PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY)
+    }
+}
+
+fn primitive_vertex_buffer_should_reallocate(capacity: usize, len: usize) -> bool {
+    if len == 0 {
+        false
+    } else if capacity < len {
+        true
+    } else {
+        capacity > PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY
+            && len.saturating_mul(PRIMITIVE_VERTEX_BUFFER_SHRINK_RATIO) < capacity
+    }
+}
+
+fn streaming_text_renderer_should_release(
+    has_streaming_text_buffer: bool,
+    renderer_live: bool,
+    atlas_live: bool,
+) -> bool {
+    !has_streaming_text_buffer && (renderer_live || atlas_live)
+}
+
+fn single_session_caret_visible_for_frame(app: &SingleSessionApp, spinner_tick: u64) -> bool {
+    spinner_tick % 6 < 3 && app.should_draw_composer_caret()
 }
 
 #[repr(C)]
@@ -7779,12 +7757,47 @@ fn build_vertices(
     focus_pulse: f32,
     space_hold_progress: Option<f32>,
 ) -> Vec<Vertex> {
+    let mut vertices = Vec::with_capacity(workspace_vertex_capacity_hint(workspace));
+    build_vertices_into(
+        workspace,
+        size,
+        render_layout,
+        focus_pulse,
+        space_hold_progress,
+        &mut vertices,
+    );
+    vertices
+}
+
+fn reserve_workspace_vertex_capacity(vertices: &mut Vec<Vertex>, workspace: &Workspace) {
+    let hint = workspace_vertex_capacity_hint(workspace);
+    if vertices.capacity() < hint {
+        vertices.reserve(hint - vertices.capacity());
+    }
+}
+
+fn workspace_vertex_capacity_hint(workspace: &Workspace) -> usize {
+    WORKSPACE_BASE_VERTEX_CAPACITY_HINT
+        + workspace
+            .surfaces
+            .len()
+            .saturating_mul(WORKSPACE_SURFACE_VERTEX_CAPACITY_HINT)
+}
+
+fn build_vertices_into(
+    workspace: &Workspace,
+    size: PhysicalSize<u32>,
+    render_layout: WorkspaceRenderLayout,
+    focus_pulse: f32,
+    space_hold_progress: Option<f32>,
+    vertices: &mut Vec<Vertex>,
+) {
+    vertices.clear();
     let width = size.width as f32;
     let height = size.height as f32;
-    let mut vertices = Vec::new();
 
     push_gradient_rect(
-        &mut vertices,
+        vertices,
         Rect {
             x: 0.0,
             y: 0.0,
@@ -7808,26 +7821,20 @@ fn build_vertices(
         width: (width - OUTER_PADDING * 2.0).max(1.0),
         height: STATUS_BAR_HEIGHT,
     };
-    push_rounded_rect(
-        &mut vertices,
-        status_rect,
-        STATUS_RADIUS,
-        status_color,
-        size,
-    );
+    push_rounded_rect(vertices, status_rect, STATUS_RADIUS, status_color, size);
 
     let active_workspace = workspace.current_workspace();
     let visible_layout = render_layout.visible;
-    push_workspace_number(&mut vertices, active_workspace, status_rect, size);
+    push_workspace_number(vertices, active_workspace, status_rect, size);
     push_status_preview(
-        &mut vertices,
+        vertices,
         workspace,
         active_workspace,
         visible_layout,
         status_rect,
         size,
     );
-    push_status_text(&mut vertices, workspace, status_rect, size);
+    push_status_text(vertices, workspace, status_rect, size);
 
     if workspace.zoomed {
         if let Some(surface) = workspace.focused_surface() {
@@ -7837,17 +7844,10 @@ fn build_vertices(
                 width: (width - OUTER_PADDING * 2.0).max(1.0),
                 height: (height - STATUS_BAR_HEIGHT - OUTER_PADDING * 3.0).max(1.0),
             };
-            push_surface(
-                &mut vertices,
-                rect,
-                surface.color_index,
-                true,
-                focus_pulse,
-                size,
-            );
+            push_surface(vertices, rect, surface.color_index, true, focus_pulse, size);
             let draft = focused_panel_draft(workspace, surface.id);
             push_panel_contents(
-                &mut vertices,
+                vertices,
                 surface,
                 rect,
                 size,
@@ -7857,9 +7857,9 @@ fn build_vertices(
             );
         }
         if let Some(progress) = space_hold_progress {
-            push_space_hold_progress(&mut vertices, progress, size);
+            push_space_hold_progress(vertices, progress, size);
         }
-        return vertices;
+        return;
     }
 
     let workspace_height = (height - STATUS_BAR_HEIGHT - OUTER_PADDING * 3.0).max(1.0);
@@ -7889,7 +7889,7 @@ fn build_vertices(
         let focused = workspace.is_focused(surface.id);
         let surface_pulse = if focused { focus_pulse } else { 0.0 };
         push_surface(
-            &mut vertices,
+            vertices,
             rect,
             surface.color_index,
             focused,
@@ -7897,22 +7897,12 @@ fn build_vertices(
             size,
         );
         let draft = focused_panel_draft(workspace, surface.id);
-        push_panel_contents(
-            &mut vertices,
-            surface,
-            rect,
-            size,
-            false,
-            0,
-            draft.as_deref(),
-        );
+        push_panel_contents(vertices, surface, rect, size, false, 0, draft.as_deref());
     }
 
     if let Some(progress) = space_hold_progress {
-        push_space_hold_progress(&mut vertices, progress, size);
+        push_space_hold_progress(vertices, progress, size);
     }
-
-    vertices
 }
 
 fn push_space_hold_progress(vertices: &mut Vec<Vertex>, progress: f32, size: PhysicalSize<u32>) {
