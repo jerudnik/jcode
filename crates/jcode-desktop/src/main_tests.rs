@@ -731,6 +731,48 @@ fn single_session_markdown_renderer_scopes_links_and_structures_lists() {
 }
 
 #[test]
+fn single_session_markdown_renderer_handles_extended_gfm_structures() {
+    let mut app = SingleSessionApp::new(None);
+    app.messages.push(SingleSessionMessage::assistant(
+        "Footnote ref[^1].\n\n[^1]: Footnote body.\n\nTerm\n: definition text\n\n> [!WARNING]\n> pay attention\n\nInline $x+y$.\n\nCLI --flag stays literal.\n\n$$\na=b\n$$",
+    ));
+
+    let lines = app.body_styled_lines();
+    let body = lines
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(body.contains("Footnote ref[^1]."));
+    assert!(body.contains("[^1]: Footnote body."));
+    assert_eq!(
+        style_for_text(&lines, "[^1]: Footnote body."),
+        Some(SingleSessionLineStyle::Meta)
+    );
+    assert!(body.contains("Term"));
+    assert_eq!(
+        style_for_text(&lines, "Term"),
+        Some(SingleSessionLineStyle::AssistantHeading)
+    );
+    assert!(body.contains("  : definition text"));
+    assert!(body.contains("WARNING │ pay attention"));
+    assert_eq!(
+        style_for_text(&lines, "WARNING │ pay attention"),
+        Some(SingleSessionLineStyle::AssistantQuote)
+    );
+    assert!(body.contains("Inline $x+y$."));
+    assert!(body.contains("CLI --flag stays literal."));
+    assert!(!body.contains("CLI –flag"));
+    assert!(body.contains("  $$"));
+    assert!(body.contains("  a=b"));
+    assert_eq!(
+        style_for_text(&lines, "  a=b"),
+        Some(SingleSessionLineStyle::Code)
+    );
+}
+
+#[test]
 fn single_session_streaming_markdown_renders_before_done() {
     let mut app = SingleSessionApp::new(None);
     app.apply_session_event(session_launch::DesktopSessionEvent::TextDelta(
@@ -1392,6 +1434,35 @@ fn glyphon_body_buffer_uses_line_style_colors() {
         first_glyph_color_for_text(body, "  model switched"),
         Some(single_session_line_color(SingleSessionLineStyle::Meta))
     );
+}
+
+#[test]
+fn assistant_inline_code_uses_code_text_attrs_inside_prose() {
+    let lines = [SingleSessionStyledLine {
+        text: "Use `cargo test` before `cargo clippy`.".to_string(),
+        style: SingleSessionLineStyle::Assistant,
+    }];
+
+    let segments = single_session_styled_text_segments(&lines);
+
+    assert!(
+        segments.contains(&(
+            "Use ",
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_ASSISTANT_FONT_FAMILY))
+                .color(single_session_line_color(SingleSessionLineStyle::Assistant))
+        ))
+    );
+    for code_segment in ["`", "cargo test", "cargo clippy"] {
+        assert!(
+            segments.contains(&(
+                code_segment,
+                Attrs::new()
+                    .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                    .color(single_session_line_color(SingleSessionLineStyle::Code))
+            ))
+        );
+    }
 }
 
 #[test]

@@ -267,7 +267,16 @@ pub(crate) fn welcome_hero_reveal_progress_for_elapsed(elapsed: Duration) -> f32
 }
 
 pub(crate) fn welcome_hero_runtime_mask_supported(phrase: &str) -> bool {
-    phrase.trim().eq_ignore_ascii_case("Hello there")
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let enabled = *ENABLED.get_or_init(|| {
+        std::env::var_os("JCODE_DESKTOP_RUNTIME_HERO_MASK").is_some_and(|value| {
+            !matches!(
+                value.to_string_lossy().trim().to_ascii_lowercase().as_str(),
+                "" | "0" | "false" | "off" | "no"
+            )
+        })
+    });
+    enabled && phrase.trim().eq_ignore_ascii_case("Hello there")
 }
 
 pub(crate) fn welcome_hero_runtime_mask_rect(
@@ -5586,6 +5595,11 @@ pub(crate) fn single_session_styled_text_segments(
                 push_user_prompt_segments(&mut segments, &line.text, total_user_turns);
             } else if line.style == SingleSessionLineStyle::Tool {
                 push_tool_line_segments(&mut segments, &line.text);
+            } else if push_assistant_inline_code_segments(&mut segments, line) {
+                // Inline-code spans need the code font/color even when they live inside
+                // prose rendered with the assistant font. Some assistant display fonts do
+                // not contain a visible backtick glyph, so keeping the whole line in the
+                // assistant font makes markdown code spans look unrendered.
             } else {
                 segments.push((
                     line.text.as_str(),
@@ -5607,6 +5621,66 @@ pub(crate) fn single_session_styled_text_segments(
         ));
     }
     segments
+}
+
+fn push_assistant_inline_code_segments<'a>(
+    segments: &mut Vec<(&'a str, Attrs<'static>)>,
+    line: &'a SingleSessionStyledLine,
+) -> bool {
+    if !matches!(
+        line.style,
+        SingleSessionLineStyle::Assistant
+            | SingleSessionLineStyle::AssistantQuote
+            | SingleSessionLineStyle::AssistantLink
+    ) || !line.text.contains('`')
+    {
+        return false;
+    }
+
+    let mut search_start = 0;
+    let mut emitted_any_code = false;
+    while let Some(open_rel) = line.text[search_start..].find('`') {
+        let open = search_start + open_rel;
+        let code_start = open + '`'.len_utf8();
+        let Some(close_rel) = line.text[code_start..].find('`') else {
+            break;
+        };
+        let close = code_start + close_rel;
+        if open > search_start {
+            segments.push((
+                &line.text[search_start..open],
+                single_session_style_attrs_for_text(line.style, &line.text[search_start..open]),
+            ));
+        }
+        segments.push((
+            &line.text[open..code_start],
+            single_session_style_attrs(SingleSessionLineStyle::Code),
+        ));
+        if close > code_start {
+            segments.push((
+                &line.text[code_start..close],
+                single_session_style_attrs(SingleSessionLineStyle::Code),
+            ));
+        }
+        let after_close = close + '`'.len_utf8();
+        segments.push((
+            &line.text[close..after_close],
+            single_session_style_attrs(SingleSessionLineStyle::Code),
+        ));
+        search_start = after_close;
+        emitted_any_code = true;
+    }
+
+    if !emitted_any_code {
+        return false;
+    }
+    if search_start < line.text.len() {
+        segments.push((
+            &line.text[search_start..],
+            single_session_style_attrs_for_text(line.style, &line.text[search_start..]),
+        ));
+    }
+    true
 }
 
 fn push_user_prompt_segments<'a>(

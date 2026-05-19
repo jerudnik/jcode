@@ -1016,7 +1016,7 @@ pub(crate) const REDRAW_IDLE: Duration = Duration::from_millis(250);
 pub(crate) const REDRAW_DEEP_IDLE: Duration = Duration::from_millis(5000);
 pub(crate) const REDRAW_REMOTE_STARTUP: Duration = Duration::from_millis(1000);
 pub(crate) const REDRAW_PASSIVE_LIVENESS: Duration = Duration::from_millis(1000);
-const REDRAW_DEEP_IDLE_AFTER: Duration = Duration::from_secs(30);
+pub(crate) const REDRAW_DEEP_IDLE_AFTER: Duration = Duration::from_secs(30);
 
 fn idle_donut_active_with_policy(
     state: &dyn TuiState,
@@ -1069,6 +1069,20 @@ pub(crate) fn redraw_interval_with_policy(
     let animation_interval = fps_to_duration(policy.animation_fps);
     let fast_interval = fps_to_duration(policy.redraw_fps);
 
+    let deep_idle = state
+        .time_since_activity()
+        .map(|d| d >= REDRAW_DEEP_IDLE_AFTER)
+        .unwrap_or(false);
+
+    if deep_idle
+        && !state.is_processing()
+        && state.streaming_text().is_empty()
+        && !state.has_pending_mouse_scroll_animation()
+        && !state.remote_startup_phase_active()
+    {
+        return REDRAW_DEEP_IDLE;
+    }
+
     if idle_donut_active_with_policy(state, policy) {
         return match policy.tier {
             crate::perf::PerformanceTier::Minimal => fast_interval,
@@ -1076,10 +1090,8 @@ pub(crate) fn redraw_interval_with_policy(
         };
     }
 
-    if !policy.enable_decorative_animations
-        && !state.has_pending_mouse_scroll_animation()
-        && state.status_notice().is_none()
-        && !state.has_notification()
+    if !state.has_pending_mouse_scroll_animation()
+        && state.streaming_text().is_empty()
         && (state.is_processing() || rate_limit_countdown_redraw_active(state))
     {
         return REDRAW_PASSIVE_LIVENESS;
@@ -1102,11 +1114,6 @@ pub(crate) fn redraw_interval_with_policy(
         return REDRAW_REMOTE_STARTUP;
     }
 
-    let deep_idle = state
-        .time_since_activity()
-        .map(|d| d >= REDRAW_DEEP_IDLE_AFTER)
-        .unwrap_or(false);
-
     if deep_idle {
         REDRAW_DEEP_IDLE
     } else {
@@ -1121,6 +1128,21 @@ pub(crate) fn redraw_interval(state: &dyn TuiState) -> Duration {
 
 pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
     let policy = crate::perf::tui_policy();
+
+    let deep_idle = state
+        .time_since_activity()
+        .map(|d| d >= REDRAW_DEEP_IDLE_AFTER)
+        .unwrap_or(false);
+
+    if deep_idle
+        && !state.is_processing()
+        && state.streaming_text().is_empty()
+        && !state.has_pending_mouse_scroll_animation()
+        && !state.remote_startup_phase_active()
+        && !rate_limit_countdown_redraw_active(state)
+    {
+        return false;
+    }
 
     if idle_donut_active_with_policy(state, &policy) {
         return true;
