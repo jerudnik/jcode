@@ -1,5 +1,16 @@
 use super::*;
-use crate::single_session::{MODEL_PICKER_INLINE_ROW_LIMIT, SingleSessionTypography};
+use crate::single_session::{
+    MODEL_PICKER_INLINE_ROW_LIMIT, SingleSessionInlineSpan, SingleSessionInlineSpanKind,
+    SingleSessionTypography, single_session_trimmed_line_end_preserving_inline_code_whitespace,
+};
+
+pub(crate) const INLINE_MATH_BACKGROUND_COLOR: [f32; 4] = [0.035, 0.220, 0.155, 0.115];
+pub(crate) const MARKDOWN_HEADING_BACKGROUND_COLOR: [f32; 4] = [0.060, 0.180, 0.520, 0.055];
+pub(crate) const MARKDOWN_RULE_COLOR: [f32; 4] = [0.060, 0.130, 0.260, 0.220];
+pub(crate) const MARKDOWN_LIST_MARKER_COLOR: [f32; 4] = [0.060, 0.110, 0.240, 0.960];
+pub(crate) const MARKDOWN_TASK_DONE_COLOR: [f32; 4] = [0.025, 0.350, 0.190, 1.000];
+pub(crate) const MARKDOWN_TASK_OPEN_COLOR: [f32; 4] = [0.420, 0.320, 0.075, 0.980];
+pub(crate) const MARKDOWN_STRIKE_TEXT_COLOR: [f32; 4] = [0.310, 0.330, 0.380, 0.880];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SingleSessionTextKey {
@@ -15,7 +26,6 @@ pub(crate) struct SingleSessionTextKey {
     pub(crate) body: Vec<SingleSessionStyledLine>,
     pub(crate) inline_widget: Vec<SingleSessionStyledLine>,
     pub(crate) draft: String,
-    pub(crate) status: String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -121,9 +131,6 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         );
     }
 
-    if app.has_activity_indicator() {
-        push_native_activity_spinner(&mut vertices, app, size, spinner_tick);
-    }
     push_single_session_inline_widget_card(
         &mut vertices,
         app,
@@ -138,6 +145,23 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         spinner_tick,
         smooth_scroll_lines,
     );
+    push_single_session_inline_code_cards(
+        &mut vertices,
+        app,
+        size,
+        spinner_tick,
+        smooth_scroll_lines,
+    );
+    push_single_session_markdown_rule_lines(
+        &mut vertices,
+        app,
+        size,
+        spinner_tick,
+        smooth_scroll_lines,
+    );
+    if app.has_activity_indicator() {
+        push_streaming_activity_cue(&mut vertices, app, size, spinner_tick, None);
+    }
     push_single_session_selection(&mut vertices, app, size);
     push_single_session_scrollbar(&mut vertices, app, size, spinner_tick, smooth_scroll_lines);
 
@@ -209,10 +233,6 @@ pub(crate) fn build_single_session_vertices_with_cached_body(
         );
     }
 
-    if app.has_activity_indicator() {
-        push_native_activity_spinner(&mut vertices, app, size, spinner_tick);
-    }
-
     push_single_session_inline_widget_card(
         &mut vertices,
         app,
@@ -234,6 +254,23 @@ pub(crate) fn build_single_session_vertices_with_cached_body(
         &viewport,
         rendered_body_lines.len(),
     );
+    push_single_session_inline_code_cards_from_viewport(
+        &mut vertices,
+        app,
+        size,
+        &viewport,
+        rendered_body_lines.len(),
+    );
+    push_single_session_markdown_rule_lines_from_viewport(
+        &mut vertices,
+        app,
+        size,
+        &viewport,
+        rendered_body_lines.len(),
+    );
+    if app.has_activity_indicator() {
+        push_streaming_activity_cue(&mut vertices, app, size, spinner_tick, Some(&viewport));
+    }
     push_single_session_selection(&mut vertices, app, size);
     push_single_session_scrollbar_for_total_lines(
         &mut vertices,
@@ -267,14 +304,11 @@ pub(crate) fn welcome_hero_reveal_progress_for_elapsed(elapsed: Duration) -> f32
 }
 
 pub(crate) fn welcome_hero_runtime_mask_supported(phrase: &str) -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let enabled = *ENABLED.get_or_init(|| {
-        std::env::var_os("JCODE_DESKTOP_RUNTIME_HERO_MASK").is_some_and(|value| {
-            !matches!(
-                value.to_string_lossy().trim().to_ascii_lowercase().as_str(),
-                "" | "0" | "false" | "off" | "no"
-            )
-        })
+    let enabled = std::env::var_os("JCODE_DESKTOP_RUNTIME_HERO_MASK").is_none_or(|value| {
+        !matches!(
+            value.to_string_lossy().trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "off" | "no"
+        )
     });
     enabled && phrase.trim().eq_ignore_ascii_case("Hello there")
 }
@@ -964,6 +998,7 @@ fn handwritten_welcome_paths_for_phrase(phrase: &str) -> Vec<Vec<[f32; 2]>> {
     }
 }
 
+#[allow(clippy::approx_constant)]
 fn handwritten_hello_there_paths() -> Vec<Vec<[f32; 2]>> {
     vec![
         vec![
@@ -4087,6 +4122,7 @@ fn push_aurora_ribbon(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_gradient_quad(
     vertices: &mut Vec<Vertex>,
     a: [f32; 2],
@@ -4112,6 +4148,7 @@ fn mix_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_gradient_triangle(
     vertices: &mut Vec<Vertex>,
     a: [f32; 2],
@@ -4143,76 +4180,79 @@ fn transparent(mut color: [f32; 4]) -> [f32; 4] {
     color
 }
 
-pub(crate) fn push_native_activity_spinner(
+pub(crate) fn push_streaming_activity_cue(
     vertices: &mut Vec<Vertex>,
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
     tick: u64,
+    viewport: Option<&SingleSessionBodyViewport>,
 ) {
     let typography = single_session_typography();
-    let draft_top = single_session_draft_top_for_app(app, size);
-    let center_y = if welcome_status_lane_visible(app) {
-        draft_top + typography.meta_size * 0.58
+    let line_height = typography.body_size * typography.body_line_height;
+    let body_top = single_session_body_top_for_app(app, size);
+    let viewport = viewport
+        .cloned()
+        .unwrap_or_else(|| single_session_body_viewport_for_tick(app, size, tick, 0.0));
+    let active_line_index = if app.streaming_response.is_empty() {
+        None
     } else {
-        draft_top - SINGLE_SESSION_STATUS_GAP + 7.0
+        viewport.lines.len().checked_sub(1)
     };
-    let center = [
-        size.width as f32 - PANEL_TITLE_LEFT_PADDING - 12.0,
-        center_y,
-    ];
-    let radius = (typography.meta_size * 0.54).clamp(5.0, 9.0);
-    let thickness = 2.4;
-    let segments = 12;
-    let phase = (tick as usize) % segments;
-    for segment in 0..segments {
-        let age = (segment + segments - phase) % segments;
-        let alpha_scale = if age == 0 {
-            1.0
-        } else {
-            0.18 + (segments - age) as f32 / segments as f32 * 0.52
-        };
-        let mut color = if age == 0 {
-            NATIVE_SPINNER_HEAD_COLOR
-        } else {
-            NATIVE_SPINNER_TRACK_COLOR
-        };
-        color[3] = (color[3] * alpha_scale).clamp(0.08, 1.0);
-        let start =
-            -std::f32::consts::FRAC_PI_2 + segment as f32 / segments as f32 * std::f32::consts::TAU;
-        let end = start + std::f32::consts::TAU / segments as f32 * 0.64;
-        push_spinner_segment(vertices, center, radius, thickness, start, end, color, size);
-    }
-}
 
-fn push_spinner_segment(
-    vertices: &mut Vec<Vertex>,
-    center: [f32; 2],
-    radius: f32,
-    thickness: f32,
-    start: f32,
-    end: f32,
-    color: [f32; 4],
-    size: PhysicalSize<u32>,
-) {
-    let inner_radius = (radius - thickness).max(1.0);
-    let outer_start = [
-        center[0] + radius * start.cos(),
-        center[1] + radius * start.sin(),
-    ];
-    let outer_end = [
-        center[0] + radius * end.cos(),
-        center[1] + radius * end.sin(),
-    ];
-    let inner_start = [
-        center[0] + inner_radius * start.cos(),
-        center[1] + inner_radius * start.sin(),
-    ];
-    let inner_end = [
-        center[0] + inner_radius * end.cos(),
-        center[1] + inner_radius * end.sin(),
-    ];
-    push_pixel_triangle(vertices, outer_start, outer_end, inner_end, color, size);
-    push_pixel_triangle(vertices, outer_start, inner_end, inner_start, color, size);
+    let cue_y = active_line_index
+        .map(|line_index| body_top + viewport.top_offset_pixels + line_index as f32 * line_height)
+        .filter(|y| *y >= PANEL_BODY_TOP_PADDING && *y <= single_session_body_bottom(size))
+        .unwrap_or_else(|| {
+            single_session_draft_top_for_app(app, size) - typography.body_size * 0.82
+        });
+    let cue_x = PANEL_TITLE_LEFT_PADDING + typography.body_size * 0.08;
+    let phase = (tick % 24) as f32 / 24.0;
+    let pulse = 0.5 + 0.5 * (phase * std::f32::consts::TAU).sin();
+
+    let mut beam_color = NATIVE_SPINNER_HEAD_COLOR;
+    beam_color[3] = if app.streaming_response.is_empty() {
+        0.22 + 0.24 * pulse
+    } else {
+        0.36 + 0.34 * pulse
+    };
+    push_rounded_rect(
+        vertices,
+        Rect {
+            x: cue_x,
+            y: cue_y + line_height * 0.16,
+            width: 3.0,
+            height: line_height * 0.68,
+        },
+        1.5,
+        beam_color,
+        size,
+    );
+
+    let dot_radius = (typography.body_size * 0.12).clamp(2.0, 3.5);
+    let dot_y = cue_y + line_height * 0.50 - dot_radius;
+    let dot_start_x = cue_x + typography.body_size * 0.55;
+    for dot in 0..3 {
+        let dot_phase = ((tick + dot as u64 * 3) % 12) as f32 / 12.0;
+        let dot_pulse = 0.5 + 0.5 * (dot_phase * std::f32::consts::TAU).sin();
+        let mut dot_color = if app.streaming_response.is_empty() {
+            NATIVE_SPINNER_TRACK_COLOR
+        } else {
+            NATIVE_SPINNER_HEAD_COLOR
+        };
+        dot_color[3] = (0.30 + 0.58 * dot_pulse).clamp(0.24, 0.92);
+        push_rounded_rect(
+            vertices,
+            Rect {
+                x: dot_start_x + dot as f32 * dot_radius * 2.8,
+                y: dot_y,
+                width: dot_radius * 2.0,
+                height: dot_radius * 2.0,
+            },
+            dot_radius,
+            dot_color,
+            size,
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -4267,6 +4307,353 @@ fn push_single_session_transcript_cards_from_viewport(
         };
         push_rounded_rect(vertices, rect, 7.0, color, size);
     }
+}
+
+fn push_single_session_inline_code_cards(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    tick: u64,
+    smooth_scroll_lines: f32,
+) {
+    let viewport = single_session_body_viewport_for_tick(app, size, tick, smooth_scroll_lines);
+    push_single_session_inline_code_cards_from_viewport(
+        vertices,
+        app,
+        size,
+        &viewport,
+        viewport.total_lines,
+    );
+}
+
+fn push_single_session_inline_code_cards_from_viewport(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    viewport: &SingleSessionBodyViewport,
+    total_lines: usize,
+) {
+    let text_scale = app.text_scale();
+    let typography = single_session_typography_for_scale(text_scale);
+    let line_height = typography.body_size * typography.body_line_height;
+    let char_width = single_session_body_char_width_for_scale(text_scale);
+    let body_top = single_session_body_top_for_app(app, size);
+    let body_bottom = single_session_body_bottom_for_total_lines(app, size, total_lines);
+    let right = (size.width as f32 - PANEL_TITLE_LEFT_PADDING + 3.0).max(PANEL_TITLE_LEFT_PADDING);
+    let card_height = (typography.body_size * 1.10)
+        .min(line_height - 5.0)
+        .max(typography.body_size * 0.85);
+    let radius = (5.0 * text_scale).clamp(4.0, 8.0);
+    let horizontal_pad = (3.5 * text_scale).clamp(3.0, 6.0);
+
+    for (line_index, line) in viewport.lines.iter().enumerate() {
+        if !single_session_line_style_supports_inline_code_cards(line.style) {
+            continue;
+        }
+        let line_y = body_top + viewport.top_offset_pixels + line_index as f32 * line_height;
+        let code_runs = single_session_inline_code_runs_for_line(line);
+        for run in &code_runs {
+            let x =
+                PANEL_TITLE_LEFT_PADDING + run.start_column as f32 * char_width - horizontal_pad;
+            let width = run.column_count as f32 * char_width + horizontal_pad * 2.0;
+            let clipped_right = (x + width).min(right);
+            if clipped_right <= x {
+                continue;
+            }
+            let rect = Rect {
+                x,
+                y: line_y + (line_height - card_height) * 0.5,
+                width: clipped_right - x,
+                height: card_height,
+            };
+            let Some(rect) = clip_rect_to_vertical_bounds(rect, body_top, body_bottom) else {
+                continue;
+            };
+            push_rounded_rect(vertices, rect, radius, INLINE_CODE_BACKGROUND_COLOR, size);
+        }
+        for run in single_session_inline_math_runs_for_line(line) {
+            if code_runs.iter().any(|code_run| {
+                inline_markdown_runs_overlap(
+                    run.start_column,
+                    run.column_count,
+                    code_run.start_column,
+                    code_run.column_count,
+                )
+            }) {
+                continue;
+            }
+            let x =
+                PANEL_TITLE_LEFT_PADDING + run.start_column as f32 * char_width - horizontal_pad;
+            let width = run.column_count as f32 * char_width + horizontal_pad * 2.0;
+            let clipped_right = (x + width).min(right);
+            if clipped_right <= x {
+                continue;
+            }
+            let rect = Rect {
+                x,
+                y: line_y + (line_height - card_height) * 0.5,
+                width: clipped_right - x,
+                height: card_height,
+            };
+            let Some(rect) = clip_rect_to_vertical_bounds(rect, body_top, body_bottom) else {
+                continue;
+            };
+            push_rounded_rect(vertices, rect, radius, INLINE_MATH_BACKGROUND_COLOR, size);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SingleSessionInlineCodeRun {
+    pub(crate) start_column: usize,
+    pub(crate) column_count: usize,
+}
+
+pub(crate) fn single_session_inline_code_runs(text: &str) -> Vec<SingleSessionInlineCodeRun> {
+    let mut runs = Vec::new();
+    let mut search_start = 0;
+
+    while let Some(open_rel) = text[search_start..].find('`') {
+        let open = search_start + open_rel;
+        let code_start = open + '`'.len_utf8();
+        let Some(close_rel) = text[code_start..].find('`') else {
+            break;
+        };
+        let close = code_start + close_rel;
+        let after_close = close + '`'.len_utf8();
+        let start_column = text[..open].chars().count();
+        let column_count = text[open..after_close].chars().count();
+        if column_count > 1 {
+            runs.push(SingleSessionInlineCodeRun {
+                start_column,
+                column_count,
+            });
+        }
+        search_start = after_close;
+    }
+
+    runs
+}
+
+pub(crate) fn single_session_inline_code_runs_for_line(
+    line: &SingleSessionStyledLine,
+) -> Vec<SingleSessionInlineCodeRun> {
+    if line.inline_spans.is_empty() {
+        return single_session_inline_code_runs(&line.text);
+    }
+    line.inline_spans
+        .iter()
+        .filter(|span| span.kind == SingleSessionInlineSpanKind::Code)
+        .filter_map(|span| inline_code_run_from_span(&line.text, span))
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SingleSessionInlineMathRun {
+    pub(crate) start_column: usize,
+    pub(crate) column_count: usize,
+}
+
+pub(crate) fn single_session_inline_math_runs(text: &str) -> Vec<SingleSessionInlineMathRun> {
+    let mut runs = Vec::new();
+    let mut search_start = 0;
+    let code_ranges = single_session_inline_code_byte_ranges(text);
+
+    while let Some(open_rel) = text[search_start..].find('$') {
+        let open = search_start + open_rel;
+        if byte_index_inside_any_range(open, &code_ranges) {
+            search_start = open + '$'.len_utf8();
+            continue;
+        }
+        if text[open..].starts_with("$$") {
+            search_start = open + '$'.len_utf8();
+            continue;
+        }
+        let math_start = open + '$'.len_utf8();
+        let Some(close_rel) = text[math_start..].find('$') else {
+            break;
+        };
+        let close = math_start + close_rel;
+        if text[close..].starts_with("$$") || close == math_start {
+            search_start = close + '$'.len_utf8();
+            continue;
+        }
+        let after_close = close + '$'.len_utf8();
+        if byte_range_overlaps_any_range(open, after_close, &code_ranges) {
+            search_start = after_close;
+            continue;
+        }
+        let start_column = text[..open].chars().count();
+        let column_count = text[open..after_close].chars().count();
+        runs.push(SingleSessionInlineMathRun {
+            start_column,
+            column_count,
+        });
+        search_start = after_close;
+    }
+
+    runs
+}
+
+pub(crate) fn single_session_inline_math_runs_for_line(
+    line: &SingleSessionStyledLine,
+) -> Vec<SingleSessionInlineMathRun> {
+    if line.inline_spans.is_empty() {
+        return single_session_inline_math_runs(&line.text);
+    }
+    line.inline_spans
+        .iter()
+        .filter(|span| span.kind == SingleSessionInlineSpanKind::Math)
+        .filter_map(|span| inline_math_run_from_span(&line.text, span))
+        .collect()
+}
+
+fn inline_code_run_from_span(
+    text: &str,
+    span: &SingleSessionInlineSpan,
+) -> Option<SingleSessionInlineCodeRun> {
+    let (start_column, column_count) = inline_run_columns_from_span(text, span)?;
+    (column_count > 0).then_some(SingleSessionInlineCodeRun {
+        start_column,
+        column_count,
+    })
+}
+
+fn inline_math_run_from_span(
+    text: &str,
+    span: &SingleSessionInlineSpan,
+) -> Option<SingleSessionInlineMathRun> {
+    let (start_column, column_count) = inline_run_columns_from_span(text, span)?;
+    (column_count > 0).then_some(SingleSessionInlineMathRun {
+        start_column,
+        column_count,
+    })
+}
+
+fn inline_run_columns_from_span(
+    text: &str,
+    span: &SingleSessionInlineSpan,
+) -> Option<(usize, usize)> {
+    if span.start >= span.end || span.end > text.len() {
+        return None;
+    }
+    let content = text.get(span.start..span.end)?;
+    let start_column = text.get(..span.start)?.chars().count();
+    let column_count = content.chars().count();
+    Some((start_column, column_count))
+}
+
+fn single_session_inline_code_byte_ranges(text: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut search_start = 0;
+
+    while let Some(open_rel) = text[search_start..].find('`') {
+        let open = search_start + open_rel;
+        let code_start = open + '`'.len_utf8();
+        let Some(close_rel) = text[code_start..].find('`') else {
+            break;
+        };
+        let close = code_start + close_rel;
+        let after_close = close + '`'.len_utf8();
+        ranges.push((open, after_close));
+        search_start = after_close;
+    }
+
+    ranges
+}
+
+fn byte_index_inside_any_range(index: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(start, end)| *start <= index && index < *end)
+}
+
+fn byte_range_overlaps_any_range(start: usize, end: usize, ranges: &[(usize, usize)]) -> bool {
+    ranges
+        .iter()
+        .any(|(range_start, range_end)| start < *range_end && *range_start < end)
+}
+
+fn inline_markdown_runs_overlap(
+    start_a: usize,
+    count_a: usize,
+    start_b: usize,
+    count_b: usize,
+) -> bool {
+    let end_a = start_a.saturating_add(count_a);
+    let end_b = start_b.saturating_add(count_b);
+    start_a < end_b && start_b < end_a
+}
+
+fn single_session_line_style_supports_inline_code_cards(style: SingleSessionLineStyle) -> bool {
+    matches!(
+        style,
+        SingleSessionLineStyle::Assistant
+            | SingleSessionLineStyle::AssistantHeading
+            | SingleSessionLineStyle::AssistantQuote
+            | SingleSessionLineStyle::AssistantLink
+    )
+}
+
+fn push_single_session_markdown_rule_lines(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    tick: u64,
+    smooth_scroll_lines: f32,
+) {
+    let viewport = single_session_body_viewport_for_tick(app, size, tick, smooth_scroll_lines);
+    push_single_session_markdown_rule_lines_from_viewport(
+        vertices,
+        app,
+        size,
+        &viewport,
+        viewport.total_lines,
+    );
+}
+
+fn push_single_session_markdown_rule_lines_from_viewport(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    viewport: &SingleSessionBodyViewport,
+    total_lines: usize,
+) {
+    let typography = single_session_typography_for_scale(app.text_scale());
+    let line_height = typography.body_size * typography.body_line_height;
+    let body_top = single_session_body_top_for_app(app, size);
+    let body_bottom = single_session_body_bottom_for_total_lines(app, size, total_lines);
+    let left = PANEL_TITLE_LEFT_PADDING - 2.0;
+    let right = (size.width as f32 - PANEL_TITLE_LEFT_PADDING + 3.0).max(left + 1.0);
+    let thickness = (1.7 * app.text_scale()).clamp(1.0, 3.0);
+
+    for (line_index, line) in viewport.lines.iter().enumerate() {
+        if !is_single_session_markdown_rule_line(line) {
+            continue;
+        }
+        let center_y = body_top
+            + viewport.top_offset_pixels
+            + line_index as f32 * line_height
+            + line_height * 0.5;
+        let rect = Rect {
+            x: left,
+            y: center_y - thickness * 0.5,
+            width: right - left,
+            height: thickness,
+        };
+        let Some(rect) = clip_rect_to_vertical_bounds(rect, body_top, body_bottom) else {
+            continue;
+        };
+        push_rounded_rect(vertices, rect, thickness, MARKDOWN_RULE_COLOR, size);
+    }
+}
+
+fn is_single_session_markdown_rule_line(line: &SingleSessionStyledLine) -> bool {
+    if line.style != SingleSessionLineStyle::Meta {
+        return false;
+    }
+    let trimmed = line.text.trim();
+    trimmed.chars().count() >= 3 && trimmed.chars().all(|ch| ch == '─')
 }
 
 fn push_single_session_scrollbar(
@@ -4422,6 +4809,7 @@ pub(crate) fn single_session_transcript_card_runs(
 
 fn single_session_line_card_color(style: SingleSessionLineStyle) -> Option<[f32; 4]> {
     match style {
+        SingleSessionLineStyle::AssistantHeading => Some(MARKDOWN_HEADING_BACKGROUND_COLOR),
         SingleSessionLineStyle::Code => Some(CODE_BLOCK_BACKGROUND_COLOR),
         SingleSessionLineStyle::AssistantQuote => Some(QUOTE_CARD_BACKGROUND_COLOR),
         SingleSessionLineStyle::AssistantTable => Some(TABLE_CARD_BACKGROUND_COLOR),
@@ -4844,14 +5232,30 @@ pub(crate) fn single_session_text_key_for_tick_with_rendered_body(
 fn single_session_text_key_for_body_lines(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
-    tick: u64,
+    _tick: u64,
     body: Vec<SingleSessionStyledLine>,
     welcome_chrome_visible: bool,
 ) -> SingleSessionTextKey {
     let welcome_handoff_visible = false;
     let welcome_input_visible = true;
     let (welcome_hero, welcome_hint) = if welcome_chrome_visible {
-        (app.welcome_hero_text(), Vec::new())
+        let welcome_hint = if app.draft.is_empty() {
+            vec![SingleSessionStyledLine::new(
+                "Type a message to start. Ask me to build, debug, explain, or automate something.",
+                SingleSessionLineStyle::Meta,
+            )]
+        } else {
+            Vec::new()
+        };
+        (app.welcome_hero_text(), welcome_hint)
+    } else if app.is_fresh_welcome_visible() && app.draft.is_empty() {
+        (
+            String::new(),
+            vec![SingleSessionStyledLine::new(
+                "Type a message to start. Ask me to build, debug, explain, or automate something.",
+                SingleSessionLineStyle::Meta,
+            )],
+        )
     } else {
         (String::new(), Vec::new())
     };
@@ -4883,11 +5287,6 @@ fn single_session_text_key_for_body_lines(
             visualize_composer_whitespace(&app.composer_text())
         } else {
             String::new()
-        },
-        status: if welcome_chrome_visible && !app.has_welcome_timeline_transcript() {
-            String::new()
-        } else {
-            app.composer_status_line_for_tick(tick)
         },
     }
 }
@@ -4942,7 +5341,7 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
     } else {
         single_session_draft_top_for_fresh_state(size, false)
     };
-    let prompt_height = (size.height as f32 - draft_top - SINGLE_SESSION_STATUS_GAP - 18.0)
+    let prompt_height = (size.height as f32 - draft_top - 18.0)
         .max(typography.code_size * typography.code_line_height * 2.0);
     let version_font_size = if key.fresh_welcome_visible {
         fresh_welcome_version_font_size()
@@ -4984,19 +5383,19 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
         reuse_body_buffer || previous.is_some_and(|previous| previous.body == key.body),
     )
     .unwrap_or_else(|| {
-        single_session_styled_text_buffer(
-            font_system,
-            &key.body,
-            typography.body_size,
-            typography.body_size * typography.body_line_height,
-            content_width,
-            (size.height as f32 - 150.0).max(1.0),
-        )
+        single_session_body_text_buffer_from_lines(font_system, &key.body, size, text_scale)
     });
 
+    let inline_widget_width = if key.inline_widget.is_empty() {
+        content_width
+    } else {
+        inline_widget_intrinsic_text_width(&key.inline_widget, size, text_scale)
+            .max(1.0)
+            .min(content_width)
+    };
     let inline_widget_buffer = take_reusable(
         &mut old_buffers,
-        5,
+        4,
         previous.is_some_and(|previous| previous.inline_widget == key.inline_widget),
     )
     .unwrap_or_else(|| {
@@ -5005,8 +5404,9 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
             &key.inline_widget,
             typography.body_size,
             typography.body_size * typography.body_line_height,
-            content_width,
+            inline_widget_width,
             prompt_height,
+            Wrap::Word,
         )
     });
 
@@ -5026,25 +5426,9 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
         )
     });
 
-    let status_buffer = take_reusable(
-        &mut old_buffers,
-        3,
-        previous.is_some_and(|previous| previous.status == key.status),
-    )
-    .unwrap_or_else(|| {
-        single_session_text_buffer(
-            font_system,
-            &key.status,
-            typography.meta_size,
-            typography.meta_size * typography.meta_line_height,
-            content_width,
-            28.0,
-        )
-    });
-
     let version_buffer = take_reusable(
         &mut old_buffers,
-        4,
+        3,
         previous.is_some_and(|previous| previous.version == key.version),
     )
     .unwrap_or_else(|| {
@@ -5064,7 +5448,7 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
     let hero_font_size = glyph_welcome_hero_font_size(size, text_scale);
     let hero_buffer = take_reusable(
         &mut old_buffers,
-        6,
+        5,
         previous.is_some_and(|previous| previous.welcome_hero == key.welcome_hero),
     )
     .unwrap_or_else(|| {
@@ -5079,14 +5463,31 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
         )
     });
 
+    let welcome_hint_buffer = take_reusable(
+        &mut old_buffers,
+        6,
+        previous.is_some_and(|previous| previous.welcome_hint == key.welcome_hint),
+    )
+    .unwrap_or_else(|| {
+        single_session_styled_text_buffer(
+            font_system,
+            &key.welcome_hint,
+            typography.meta_size,
+            typography.meta_size * typography.meta_line_height,
+            content_width,
+            48.0,
+            Wrap::Word,
+        )
+    });
+
     vec![
         title_buffer,
         body_buffer,
         draft_buffer,
-        status_buffer,
         version_buffer,
         inline_widget_buffer,
         hero_buffer,
+        welcome_hint_buffer,
     ]
 }
 
@@ -5105,6 +5506,7 @@ pub(crate) fn single_session_body_text_buffer_from_lines(
         typography.body_size * typography.body_line_height,
         content_width,
         (size.height as f32 - 150.0).max(1.0),
+        Wrap::None,
     );
     buffer.shape_until(font_system, i32::MAX);
     buffer
@@ -5270,10 +5672,7 @@ pub(crate) fn single_session_streaming_response_rendered_body_line_count(
 }
 
 fn blank_render_line() -> SingleSessionStyledLine {
-    SingleSessionStyledLine {
-        text: String::new(),
-        style: SingleSessionLineStyle::Blank,
-    }
+    SingleSessionStyledLine::new(String::new(), SingleSessionLineStyle::Blank)
 }
 
 fn single_session_wrapped_body_lines(
@@ -5291,11 +5690,15 @@ fn single_session_wrapped_body_lines(
             wrapped.push(line);
             continue;
         }
-        for text in wrap_body_line_text(&line.text, max_columns) {
-            wrapped.push(SingleSessionStyledLine {
+        let style = line.style;
+        for (text, inline_spans) in
+            wrap_body_line_text_with_spans(&line.text, &line.inline_spans, max_columns)
+        {
+            wrapped.push(SingleSessionStyledLine::with_inline_spans(
                 text,
-                style: line.style,
-            });
+                style,
+                inline_spans,
+            ));
         }
     }
 
@@ -5309,20 +5712,60 @@ fn single_session_body_max_columns(size: PhysicalSize<u32>, text_scale: f32) -> 
         .max(20.0) as usize
 }
 
-fn wrap_body_line_text(text: &str, max_columns: usize) -> Vec<String> {
+fn wrap_body_line_text_with_spans(
+    text: &str,
+    inline_spans: &[SingleSessionInlineSpan],
+    max_columns: usize,
+) -> Vec<(String, Vec<SingleSessionInlineSpan>)> {
     let max_columns = max_columns.max(1);
-    let mut remaining = text.trim_end();
+    let trimmed_end =
+        single_session_trimmed_line_end_preserving_inline_code_whitespace(text, inline_spans);
+    let mut remaining = &text[..trimmed_end];
     let mut lines = Vec::new();
+    let mut base_byte = 0usize;
 
     while text_exceeds_columns(remaining, max_columns) {
         let split = word_wrap_split_index(remaining, max_columns);
         let (line, rest) = remaining.split_at(split);
-        lines.push(line.trim_end().to_string());
-        remaining = rest.trim_start();
+        let line = line.trim_end();
+        let start = base_byte;
+        let end = start + line.len();
+        lines.push((
+            line.to_string(),
+            inline_spans_for_wrapped_range(inline_spans, start, end),
+        ));
+
+        let trimmed_rest = rest.trim_start();
+        base_byte += split + rest.len().saturating_sub(trimmed_rest.len());
+        remaining = trimmed_rest;
     }
 
-    lines.push(remaining.to_string());
+    let start = base_byte;
+    let end = start + remaining.len();
+    lines.push((
+        remaining.to_string(),
+        inline_spans_for_wrapped_range(inline_spans, start, end),
+    ));
     lines
+}
+
+fn inline_spans_for_wrapped_range(
+    inline_spans: &[SingleSessionInlineSpan],
+    start: usize,
+    end: usize,
+) -> Vec<SingleSessionInlineSpan> {
+    inline_spans
+        .iter()
+        .filter_map(|span| {
+            let span_start = span.start.max(start);
+            let span_end = span.end.min(end);
+            (span_start < span_end).then(|| SingleSessionInlineSpan {
+                start: span_start - start,
+                end: span_end - start,
+                kind: span.kind,
+            })
+        })
+        .collect()
 }
 
 fn text_exceeds_columns(text: &str, max_columns: usize) -> bool {
@@ -5423,7 +5866,7 @@ fn single_session_body_bottom_base_for_total_lines(
     single_session_body_bottom(size)
 }
 
-fn single_session_body_bottom_for_total_lines(
+pub(crate) fn single_session_body_bottom_for_total_lines(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
     total_lines: usize,
@@ -5470,7 +5913,7 @@ fn inline_widget_target_top(
 }
 
 pub(crate) fn single_session_body_bottom(size: PhysicalSize<u32>) -> f32 {
-    single_session_draft_top(size) - SINGLE_SESSION_STATUS_GAP - 12.0
+    single_session_draft_top(size) - 12.0
 }
 
 fn clip_rect_to_vertical_bounds(rect: Rect, top: f32, bottom: f32) -> Option<Rect> {
@@ -5481,6 +5924,10 @@ fn clip_rect_to_vertical_bounds(rect: Rect, top: f32, bottom: f32) -> Option<Rec
         height: clipped_bottom - clipped_y,
         ..rect
     })
+}
+
+fn text_bounds_bottom(value: f32) -> i32 {
+    value.ceil().clamp(0.0, i32::MAX as f32) as i32
 }
 
 fn single_session_text_buffer(
@@ -5531,9 +5978,11 @@ fn single_session_styled_text_buffer(
     line_height: f32,
     width: f32,
     height: f32,
+    wrap: Wrap,
 ) -> Buffer {
     let mut buffer = Buffer::new(font_system, Metrics::new(font_size, line_height));
     buffer.set_size(font_system, width, height);
+    buffer.set_wrap(font_system, wrap);
     let segments = single_session_styled_text_segments(lines);
     let shaping = if segments
         .iter()
@@ -5595,11 +6044,11 @@ pub(crate) fn single_session_styled_text_segments(
                 push_user_prompt_segments(&mut segments, &line.text, total_user_turns);
             } else if line.style == SingleSessionLineStyle::Tool {
                 push_tool_line_segments(&mut segments, &line.text);
-            } else if push_assistant_inline_code_segments(&mut segments, line) {
-                // Inline-code spans need the code font/color even when they live inside
-                // prose rendered with the assistant font. Some assistant display fonts do
-                // not contain a visible backtick glyph, so keeping the whole line in the
-                // assistant font makes markdown code spans look unrendered.
+            } else if push_assistant_markdown_inline_segments(&mut segments, line) {
+                // Markdown prose can mix display fonts with inline code/math, emphasis,
+                // strong text, strike-through spans, and task/list markers. Segmenting
+                // here keeps rendered text clean while giving each semantic run a
+                // distinct font, weight, style, or color.
             } else {
                 segments.push((
                     line.text.as_str(),
@@ -5623,64 +6072,239 @@ pub(crate) fn single_session_styled_text_segments(
     segments
 }
 
-fn push_assistant_inline_code_segments<'a>(
+fn push_assistant_markdown_inline_segments<'a>(
     segments: &mut Vec<(&'a str, Attrs<'static>)>,
     line: &'a SingleSessionStyledLine,
 ) -> bool {
-    if !matches!(
-        line.style,
+    if !single_session_line_style_supports_markdown_inline_segments(line.style) {
+        return false;
+    }
+
+    if let Some(marker) = assistant_markdown_list_marker_span(&line.text) {
+        if marker.prefix_start > 0 {
+            push_assistant_markdown_inline_range(segments, line, 0, marker.prefix_start, false);
+        }
+        if marker.marker_start > marker.prefix_start {
+            push_assistant_markdown_inline_range(
+                segments,
+                line,
+                marker.prefix_start,
+                marker.marker_start,
+                false,
+            );
+        }
+        segments.push((
+            &line.text[marker.marker_start..marker.marker_end],
+            single_session_inline_color_attrs_for_text(
+                line.style,
+                &line.text[marker.marker_start..marker.marker_end],
+                marker.color,
+            ),
+        ));
+        push_assistant_markdown_inline_range(
+            segments,
+            line,
+            marker.marker_end,
+            line.text.len(),
+            false,
+        );
+        return true;
+    }
+
+    push_assistant_markdown_inline_range(segments, line, 0, line.text.len(), true)
+}
+
+fn single_session_line_style_supports_markdown_inline_segments(
+    style: SingleSessionLineStyle,
+) -> bool {
+    matches!(
+        style,
         SingleSessionLineStyle::Assistant
+            | SingleSessionLineStyle::AssistantHeading
             | SingleSessionLineStyle::AssistantQuote
             | SingleSessionLineStyle::AssistantLink
-    ) || !line.text.contains('`')
-    {
+    )
+}
+
+fn push_assistant_markdown_inline_range<'a>(
+    segments: &mut Vec<(&'a str, Attrs<'static>)>,
+    line: &'a SingleSessionStyledLine,
+    start: usize,
+    end: usize,
+    require_semantic_span: bool,
+) -> bool {
+    if start >= end {
         return false;
     }
 
-    let mut search_start = 0;
-    let mut emitted_any_code = false;
-    while let Some(open_rel) = line.text[search_start..].find('`') {
-        let open = search_start + open_rel;
-        let code_start = open + '`'.len_utf8();
-        let Some(close_rel) = line.text[code_start..].find('`') else {
-            break;
-        };
-        let close = code_start + close_rel;
-        if open > search_start {
-            segments.push((
-                &line.text[search_start..open],
-                single_session_style_attrs_for_text(line.style, &line.text[search_start..open]),
-            ));
-        }
-        segments.push((
-            &line.text[open..code_start],
-            single_session_style_attrs(SingleSessionLineStyle::Code),
-        ));
-        if close > code_start {
-            segments.push((
-                &line.text[code_start..close],
-                single_session_style_attrs(SingleSessionLineStyle::Code),
-            ));
-        }
-        let after_close = close + '`'.len_utf8();
-        segments.push((
-            &line.text[close..after_close],
-            single_session_style_attrs(SingleSessionLineStyle::Code),
-        ));
-        search_start = after_close;
-        emitted_any_code = true;
-    }
-
-    if !emitted_any_code {
+    let inline_spans = clipped_inline_spans_for_range(&line.inline_spans, start, end);
+    if inline_spans.is_empty() && require_semantic_span {
         return false;
     }
-    if search_start < line.text.len() {
+
+    if inline_spans.is_empty() {
+        let text = &line.text[start..end];
+        segments.push((text, single_session_style_attrs_for_text(line.style, text)));
+        return true;
+    }
+
+    let mut boundaries = Vec::with_capacity(inline_spans.len().saturating_mul(2) + 2);
+    boundaries.push(start);
+    boundaries.push(end);
+    for span in &inline_spans {
+        boundaries.push(span.start);
+        boundaries.push(span.end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    for window in boundaries.windows(2) {
+        let segment_start = window[0];
+        let segment_end = window[1];
+        if segment_start >= segment_end {
+            continue;
+        }
+        let text = &line.text[segment_start..segment_end];
+        let active_kinds =
+            active_inline_span_kinds_for_range(&inline_spans, segment_start, segment_end);
         segments.push((
-            &line.text[search_start..],
-            single_session_style_attrs_for_text(line.style, &line.text[search_start..]),
+            text,
+            assistant_inline_markdown_run_attrs(line.style, text, &active_kinds),
         ));
     }
     true
+}
+
+fn clipped_inline_spans_for_range(
+    inline_spans: &[SingleSessionInlineSpan],
+    start: usize,
+    end: usize,
+) -> Vec<SingleSessionInlineSpan> {
+    inline_spans
+        .iter()
+        .filter_map(|span| {
+            let span_start = span.start.max(start);
+            let span_end = span.end.min(end);
+            (span_start < span_end).then_some(SingleSessionInlineSpan {
+                start: span_start,
+                end: span_end,
+                kind: span.kind,
+            })
+        })
+        .collect()
+}
+
+fn active_inline_span_kinds_for_range(
+    inline_spans: &[SingleSessionInlineSpan],
+    start: usize,
+    end: usize,
+) -> Vec<SingleSessionInlineSpanKind> {
+    inline_spans
+        .iter()
+        .filter_map(|span| (span.start <= start && end <= span.end).then_some(span.kind))
+        .collect()
+}
+
+fn assistant_inline_markdown_run_attrs(
+    style: SingleSessionLineStyle,
+    text: &str,
+    kinds: &[SingleSessionInlineSpanKind],
+) -> Attrs<'static> {
+    if kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            SingleSessionInlineSpanKind::Code | SingleSessionInlineSpanKind::Math
+        )
+    }) {
+        return single_session_style_attrs(SingleSessionLineStyle::Code);
+    }
+
+    let mut attrs = single_session_style_attrs_for_text(style, text);
+    if kinds.contains(&SingleSessionInlineSpanKind::Strike) {
+        attrs = attrs.color(text_color(MARKDOWN_STRIKE_TEXT_COLOR));
+    }
+    if kinds.contains(&SingleSessionInlineSpanKind::Strong) {
+        attrs = attrs.weight(glyphon::Weight::BOLD);
+    }
+    if kinds.contains(&SingleSessionInlineSpanKind::Emphasis) {
+        attrs = attrs.style(glyphon::Style::Italic);
+    }
+    attrs
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AssistantMarkdownListMarkerSpan {
+    prefix_start: usize,
+    marker_start: usize,
+    marker_end: usize,
+    color: [f32; 4],
+}
+
+fn assistant_markdown_list_marker_span(text: &str) -> Option<AssistantMarkdownListMarkerSpan> {
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        if rest.starts_with("│ ") {
+            index += "│ ".len();
+        } else if rest.starts_with("  ") {
+            index += "  ".len();
+        } else {
+            break;
+        }
+    }
+
+    let rest = &text[index..];
+    let (marker_len, color) = if rest.starts_with("✓ ") {
+        ("✓ ".len(), MARKDOWN_TASK_DONE_COLOR)
+    } else if rest.starts_with("☐ ") {
+        ("☐ ".len(), MARKDOWN_TASK_OPEN_COLOR)
+    } else if rest.starts_with("• ") || rest.starts_with("◦ ") || rest.starts_with("▪ ") {
+        (
+            rest.chars().take(2).map(char::len_utf8).sum(),
+            MARKDOWN_LIST_MARKER_COLOR,
+        )
+    } else if let Some(marker_len) = ordered_list_marker_len(rest) {
+        (marker_len, MARKDOWN_LIST_MARKER_COLOR)
+    } else {
+        return None;
+    };
+
+    Some(AssistantMarkdownListMarkerSpan {
+        prefix_start: 0,
+        marker_start: index,
+        marker_end: index + marker_len,
+        color,
+    })
+}
+
+fn ordered_list_marker_len(text: &str) -> Option<usize> {
+    let mut digit_bytes = 0;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            digit_bytes += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if digit_bytes == 0 || !text[digit_bytes..].starts_with(". ") {
+        return None;
+    }
+    Some(digit_bytes + ". ".len())
+}
+
+fn single_session_inline_color_attrs_for_text(
+    style: SingleSessionLineStyle,
+    text: &str,
+    color: [f32; 4],
+) -> Attrs<'static> {
+    let family = if is_ai_response_font_style(style) && text_contains_symbol_glyphs(text) {
+        SINGLE_SESSION_FONT_FAMILY
+    } else {
+        single_session_font_family_for_style(style)
+    };
+    Attrs::new()
+        .family(Family::Name(family))
+        .color(text_color(color))
 }
 
 fn push_user_prompt_segments<'a>(
@@ -5899,12 +6523,11 @@ fn single_session_style_attrs_for_text(
 }
 
 fn single_session_font_family_for_style(style: SingleSessionLineStyle) -> &'static str {
-    let family = if is_ai_response_font_style(style) {
+    if is_ai_response_font_style(style) {
         SINGLE_SESSION_ASSISTANT_FONT_FAMILY
     } else {
         SINGLE_SESSION_FONT_FAMILY
-    };
-    family
+    }
 }
 
 fn single_session_style_attrs_for_family(
@@ -5917,7 +6540,7 @@ fn single_session_style_attrs_for_family(
 }
 
 fn text_contains_symbol_glyphs(text: &str) -> bool {
-    text.chars().any(|ch| !ch.is_ascii())
+    !text.is_ascii()
 }
 
 fn is_ai_response_font_style(style: SingleSessionLineStyle) -> bool {
@@ -6029,12 +6652,13 @@ pub(crate) fn single_session_text_areas_for_app_with_scroll<'a>(
         false,
         body_top_offset_pixels,
         single_session_body_top_for_app(app, size),
-        single_session_body_bottom_for_app(app, size) as i32,
+        text_bounds_bottom(single_session_body_bottom_for_app(app, size)),
         inline_widget_lines.len(),
         inline_widget_text_width,
         single_session_draft_top_for_app(app, size),
         welcome_chrome_offset_pixels,
         welcome_status_lane_visible(app),
+        app.is_fresh_welcome_visible() && app.draft.is_empty(),
         app.text_scale(),
         welcome_hero_runtime_mask_supported(&app.welcome_hero_text()),
         1.0,
@@ -6107,12 +6731,17 @@ pub(crate) fn single_session_text_areas_for_app_with_cached_body_viewport_and_re
         false,
         viewport.top_offset_pixels,
         single_session_body_top_for_app(app, size),
-        single_session_body_bottom_for_total_lines(app, size, viewport.total_lines) as i32,
+        text_bounds_bottom(single_session_body_bottom_for_total_lines(
+            app,
+            size,
+            viewport.total_lines,
+        )),
         inline_widget_lines.len(),
         inline_widget_text_width,
         single_session_draft_top_for_total_lines(app, size, viewport.total_lines),
         welcome_chrome_offset_pixels,
         welcome_status_lane_visible(app),
+        app.is_fresh_welcome_visible() && app.draft.is_empty(),
         app.text_scale(),
         welcome_hero_runtime_mask_supported(&app.welcome_hero_text()),
         welcome_hero_reveal_progress,
@@ -6126,6 +6755,7 @@ pub(crate) fn single_session_streaming_text_area_for_cached_body_viewport<'a>(
     size: PhysicalSize<u32>,
     viewport: SingleSessionBodyViewport,
     streaming_start_line: usize,
+    opacity: f32,
 ) -> TextArea<'a> {
     let typography = single_session_typography_for_scale(app.text_scale());
     let line_height = typography.body_size * typography.body_line_height;
@@ -6144,10 +6774,18 @@ pub(crate) fn single_session_streaming_text_area_for_cached_body_viewport<'a>(
             left: 0,
             top: body_top as i32,
             right,
-            bottom: single_session_body_bottom_for_total_lines(app, size, viewport.total_lines)
-                as i32,
+            bottom: text_bounds_bottom(single_session_body_bottom_for_total_lines(
+                app,
+                size,
+                viewport.total_lines,
+            )),
         },
-        default_color: text_color(ASSISTANT_TEXT_COLOR),
+        default_color: text_color([
+            ASSISTANT_TEXT_COLOR[0],
+            ASSISTANT_TEXT_COLOR[1],
+            ASSISTANT_TEXT_COLOR[2],
+            ASSISTANT_TEXT_COLOR[3] * opacity.clamp(0.0, 1.0),
+        ]),
     }
 }
 
@@ -6163,11 +6801,12 @@ pub(crate) fn single_session_text_areas_for_fresh_state(
         false,
         0.0,
         PANEL_BODY_TOP_PADDING,
-        single_session_body_bottom(size) as i32,
+        text_bounds_bottom(single_session_body_bottom(size)),
         0,
         0.0,
         single_session_draft_top_for_fresh_state(size, fresh_welcome_visible),
         0.0,
+        false,
         false,
         1.0,
         false,
@@ -6177,12 +6816,11 @@ pub(crate) fn single_session_text_areas_for_fresh_state(
 }
 
 fn welcome_status_lane_visible(app: &SingleSessionApp) -> bool {
-    app.is_welcome_timeline_visible()
-        && app.has_welcome_timeline_transcript()
-        && app.draft.is_empty()
-        && app.has_activity_indicator()
+    let _ = app;
+    false
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn single_session_text_areas_for_state(
     buffers: &[Buffer],
     size: PhysicalSize<u32>,
@@ -6196,12 +6834,13 @@ pub(crate) fn single_session_text_areas_for_state(
     draft_top: f32,
     welcome_chrome_offset_pixels: f32,
     status_lane_visible: bool,
+    startup_hint_visible: bool,
     ui_scale: f32,
     welcome_hero_runtime_mask_available: bool,
     welcome_hero_reveal_progress: f32,
     inline_widget_reveal_progress: f32,
 ) -> Vec<TextArea<'_>> {
-    if buffers.len() < 5 {
+    if buffers.len() < 4 {
         return Vec::new();
     }
 
@@ -6267,21 +6906,7 @@ pub(crate) fn single_session_text_areas_for_state(
     // Keep the composer lane first in glyphon preparation order. The visual
     // positions are unchanged, but fresh keystrokes get shaped before the
     // heavier transcript/chrome text on frames where both changed.
-    if status_lane_visible {
-        areas.push(TextArea {
-            buffer: &buffers[3],
-            left,
-            top: draft_top,
-            scale: 1.0,
-            bounds: TextBounds {
-                left: 0,
-                top: draft_top as i32,
-                right,
-                bottom,
-            },
-            default_color: text_color(STATUS_TEXT_ACCENT_COLOR),
-        });
-    } else if !welcome_handoff_visible {
+    if !status_lane_visible && !welcome_handoff_visible {
         areas.push(TextArea {
             buffer: &buffers[2],
             left,
@@ -6297,19 +6922,24 @@ pub(crate) fn single_session_text_areas_for_state(
         });
     }
 
-    if !welcome_chrome_visible && !status_lane_visible {
+    if startup_hint_visible
+        && !welcome_handoff_visible
+        && !status_lane_visible
+        && let Some(hint_buffer) = buffers.get(6)
+    {
+        let hint_top = draft_top + typography.code_size * typography.code_line_height * 1.35;
         areas.push(TextArea {
-            buffer: &buffers[3],
+            buffer: hint_buffer,
             left,
-            top: draft_top - SINGLE_SESSION_STATUS_GAP,
+            top: hint_top,
             scale: 1.0,
             bounds: TextBounds {
                 left: 0,
-                top: (draft_top - SINGLE_SESSION_STATUS_GAP) as i32,
+                top: hint_top as i32,
                 right,
-                bottom: draft_top as i32,
+                bottom,
             },
-            default_color: text_color(PANEL_SECTION_COLOR),
+            default_color: text_color(META_TEXT_COLOR),
         });
     }
 
@@ -6327,7 +6957,7 @@ pub(crate) fn single_session_text_areas_for_state(
         default_color: text_color(PANEL_TITLE_COLOR),
     });
     areas.push(TextArea {
-        buffer: &buffers[4],
+        buffer: &buffers[3],
         left: version_left,
         top: version_top,
         scale: 1.0,
@@ -6356,7 +6986,7 @@ pub(crate) fn single_session_text_areas_for_state(
     if welcome_chrome_visible
         && !welcome_hero_runtime_mask_available
         && !welcome_hero_reveal_is_active(welcome_hero_reveal_progress)
-        && let Some(hero_buffer) = buffers.get(6)
+        && let Some(hero_buffer) = buffers.get(5)
     {
         let (hero_min, hero_max) = glyph_welcome_hero_bounds(size, ui_scale);
         areas.push(TextArea {
@@ -6375,7 +7005,7 @@ pub(crate) fn single_session_text_areas_for_state(
     }
 
     if inline_widget_line_count > 0
-        && let Some(buffer) = buffers.get(5)
+        && let Some(buffer) = buffers.get(4)
         && let Some(layout) = inline_widget_layout
     {
         let inline_bounds_right = layout
@@ -6411,19 +7041,21 @@ fn visualize_composer_whitespace(text: &str) -> String {
 }
 
 pub(crate) fn desktop_header_version_label() -> String {
-    let version = option_env!("JCODE_DESKTOP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
-    let binary = std::env::current_exe()
+    desktop_app_directory_label()
+}
+
+fn desktop_app_directory_label() -> String {
+    std::env::current_exe()
         .ok()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "unknown binary".to_string());
-    format!("{binary} · {version}")
+        .and_then(|path| {
+            path.parent()
+                .map(|directory| directory.display().to_string())
+        })
+        .unwrap_or_else(|| "unknown app directory".to_string())
 }
 
 pub(crate) fn fresh_welcome_version_label() -> String {
-    let version = option_env!("JCODE_PRODUCT_VERSION")
-        .or(option_env!("JCODE_DESKTOP_VERSION"))
-        .unwrap_or(env!("CARGO_PKG_VERSION"));
-    format!("jcode {version}")
+    desktop_app_directory_label()
 }
 
 fn fresh_welcome_version_font_size() -> f32 {

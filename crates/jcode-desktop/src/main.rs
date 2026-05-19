@@ -1,4 +1,5 @@
 mod animation;
+mod desktop_log;
 mod desktop_prefs;
 mod power_inhibit;
 mod render_helpers;
@@ -64,6 +65,10 @@ const STATUS_PREVIEW_PANEL_WIDTH: f32 = 9.0;
 const STATUS_PREVIEW_PANEL_GAP: f32 = 2.0;
 const STATUS_PREVIEW_GROUP_GAP: f32 = 10.0;
 const STATUS_PREVIEW_SIDE_RESERVE: f32 = 74.0;
+const SPACE_HOLD_PROGRESS_HEIGHT: f32 = 7.0;
+const SPACE_HOLD_PROGRESS_WIDTH_FRACTION: f32 = 0.36;
+const SPACE_HOLD_PROGRESS_TRACK_COLOR: [f32; 4] = [0.055, 0.060, 0.075, 0.96];
+const SPACE_HOLD_PROGRESS_FILL_COLOR: [f32; 4] = [0.180, 0.900, 0.470, 1.0];
 const WORKSPACE_NUMBER_LEFT_PADDING: f32 = 14.0;
 const WORKSPACE_NUMBER_DIGIT_WIDTH: f32 = 8.0;
 const WORKSPACE_NUMBER_DIGIT_HEIGHT: f32 = 14.0;
@@ -76,7 +81,6 @@ const PANEL_TITLE_TOP_PADDING: f32 = 12.0;
 const PANEL_BODY_TOP_PADDING: f32 = 38.0;
 const PANEL_BODY_LINE_GAP: f32 = 8.0;
 const SINGLE_SESSION_DRAFT_TOP_OFFSET: f32 = 158.0;
-const SINGLE_SESSION_STATUS_GAP: f32 = 30.0;
 const SINGLE_SESSION_CARET_WIDTH: f32 = 2.0;
 const SINGLE_SESSION_CARET_COLOR: [f32; 4] = [0.130, 0.150, 0.190, 0.92];
 const SESSION_SPAWN_REFRESH_DELAY: Duration = Duration::from_millis(350);
@@ -100,6 +104,21 @@ const SINGLE_SESSION_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 48;
 const SINGLE_SESSION_BODY_TEXT_WINDOW_AFTER_LINES: usize = 96;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 2;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_AFTER_LINES: usize = 4;
+const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(120);
+const STREAMING_TEXT_FADE_START_OPACITY: f32 = 0.4;
+
+fn streaming_text_fade_opacity_for_elapsed(elapsed: Duration) -> (f32, bool) {
+    let progress =
+        (elapsed.as_secs_f32() / STREAMING_TEXT_FADE_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+    if progress >= 1.0 {
+        return (1.0, false);
+    }
+    let eased = animation::ease_out_cubic(progress);
+    (
+        STREAMING_TEXT_FADE_START_OPACITY + (1.0 - STREAMING_TEXT_FADE_START_OPACITY) * eased,
+        true,
+    )
+}
 const DESKTOP_120FPS_FRAME_BUDGET: Duration = Duration::from_micros(8_333);
 const DESKTOP_PRESENT_STALL_BUDGET: Duration = Duration::from_millis(33);
 const DESKTOP_INPUT_LATENCY_BUDGET: Duration = Duration::from_millis(25);
@@ -155,9 +174,10 @@ const WELCOME_AURORA_VIOLET: [f32; 4] = [0.720, 0.360, 0.980, 0.125];
 const WELCOME_AURORA_MINT: [f32; 4] = [0.220, 0.840, 0.660, 0.115];
 const WELCOME_AURORA_WARM: [f32; 4] = [1.000, 0.620, 0.360, 0.075];
 const WELCOME_HANDWRITING_COLOR: [f32; 4] = [0.012, 0.080, 0.250, 0.94];
-const NATIVE_SPINNER_TRACK_COLOR: [f32; 4] = [0.105, 0.135, 0.190, 0.16];
-const NATIVE_SPINNER_HEAD_COLOR: [f32; 4] = [0.045, 0.185, 0.470, 0.96];
+const NATIVE_SPINNER_TRACK_COLOR: [f32; 4] = [0.055, 0.125, 0.270, 0.34];
+const NATIVE_SPINNER_HEAD_COLOR: [f32; 4] = [0.000, 0.260, 0.720, 1.0];
 const CODE_BLOCK_BACKGROUND_COLOR: [f32; 4] = [0.075, 0.095, 0.135, 0.075];
+const INLINE_CODE_BACKGROUND_COLOR: [f32; 4] = [0.075, 0.095, 0.135, 0.135];
 const QUOTE_CARD_BACKGROUND_COLOR: [f32; 4] = [0.520, 0.330, 0.760, 0.070];
 const TABLE_CARD_BACKGROUND_COLOR: [f32; 4] = [0.080, 0.460, 0.520, 0.060];
 const ERROR_CARD_BACKGROUND_COLOR: [f32; 4] = [0.850, 0.170, 0.170, 0.105];
@@ -231,8 +251,32 @@ fn fs_main(in: HeroVertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
-fn main() -> Result<()> {
-    pollster::block_on(run())
+fn main() {
+    desktop_log::init();
+    install_desktop_diagnostic_hooks();
+    desktop_log::info(format_args!(
+        "jcode-desktop: starting pid={} version={} build_hash={}",
+        std::process::id(),
+        desktop_header_version_label(),
+        desktop_build_hash_label()
+    ));
+
+    if let Err(error) = pollster::block_on(run()) {
+        desktop_log::error(format_args!("jcode-desktop: fatal error: {error:#}"));
+        std::process::exit(1);
+    }
+}
+
+fn install_desktop_diagnostic_hooks() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        desktop_log::error(format_args!("jcode-desktop: panic: {panic_info}"));
+        desktop_log::error(format_args!(
+            "jcode-desktop: panic backtrace: {}",
+            std::backtrace::Backtrace::force_capture()
+        ));
+        default_hook(panic_info);
+    }));
 }
 
 async fn run() -> Result<()> {
@@ -248,7 +292,11 @@ async fn run() -> Result<()> {
         return Ok(());
     }
     if args.iter().any(|arg| arg == "--version" || arg == "-V") {
-        println!("{}", desktop_header_version_label());
+        println!(
+            "{} {}",
+            desktop_header_version_label(),
+            desktop_build_hash_label()
+        );
         return Ok(());
     }
     if let Some(message) = headless_chat_smoke_message(&args) {
@@ -331,6 +379,8 @@ async fn run() -> Result<()> {
     let mut last_backend_redraw_request: Option<Instant> = None;
     let mut pending_backend_redraw_since: Option<Instant> = None;
     let mut pending_resize: Option<PhysicalSize<u32>> = None;
+    let mut space_hold_started_at: Option<Instant> = None;
+    let mut space_hold_consumed = false;
 
     event_loop.run(move |event, target| {
         let event_loop_now = Instant::now();
@@ -342,13 +392,18 @@ async fn run() -> Result<()> {
             None
         };
         let backend_wake = pending_backend_redraw_since
-            .and_then(|_| last_backend_redraw_request)
+            .and(last_backend_redraw_request)
             .map(|last| last + BACKEND_REDRAW_FRAME_INTERVAL);
-        let wake = match (default_wake, backend_wake) {
-            (Some(default_wake), Some(backend_wake)) => Some(default_wake.min(backend_wake)),
-            (Some(wake), None) | (None, Some(wake)) => Some(wake),
-            (None, None) => None,
-        };
+        let space_hold_wake = space_hold_started_at.and_then(|started_at| match &app {
+            DesktopApp::Workspace(workspace) if !space_hold_consumed => {
+                Some(started_at + workspace.space_hold_toggle_duration())
+            }
+            _ => None,
+        });
+        let wake = [default_wake, backend_wake, space_hold_wake]
+            .into_iter()
+            .flatten()
+            .min();
         if let Some(wake) = wake {
             target.set_control_flow(ControlFlow::WaitUntil(wake));
         } else {
@@ -512,6 +567,19 @@ async fn run() -> Result<()> {
                     }
                     }
                 }
+                WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Released => {
+                    if app.is_workspace() && is_space_key(&event.logical_key) {
+                        if space_hold_started_at.take().is_some()
+                            && !space_hold_consumed
+                            && matches!(&app, DesktopApp::Workspace(workspace) if workspace.mode == InputMode::Insert)
+                            && matches!(app.handle_key(KeyInput::Character(" ".to_string())), KeyOutcome::Redraw)
+                        {
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        space_hold_consumed = false;
+                    }
+                }
                 WindowEvent::KeyboardInput { event, .. }
                     if event.state == ElementState::Pressed =>
                 {
@@ -529,6 +597,18 @@ async fn run() -> Result<()> {
                     if had_smooth_scroll {
                         window.request_redraw();
                     }
+                    if app.is_workspace()
+                        && is_space_key(&event.logical_key)
+                        && modifiers.is_empty()
+                    {
+                        if space_hold_started_at.is_none() {
+                            space_hold_started_at = Some(keyboard_started);
+                            space_hold_consumed = false;
+                        }
+                        window.request_redraw();
+                        return;
+                    }
+
                     let key_input = to_key_input(&event.logical_key, modifiers);
                     let key_debug = format!("{key_input:?}");
                     interaction_latency.mark("keyboard_input", keyboard_started);
@@ -558,9 +638,9 @@ async fn run() -> Result<()> {
                             if let Err(error) =
                                 session_launch::launch_validated_resume_session(&session_id, &title)
                             {
-                                eprintln!(
+                                desktop_log::error(format_args!(
                                     "jcode-desktop: failed to open session {session_id}: {error:#}"
-                                );
+                                ));
                             }
                         }
                         KeyOutcome::SpawnSession => {
@@ -572,7 +652,9 @@ async fn run() -> Result<()> {
                             }
 
                             if let Err(error) = session_launch::launch_new_session() {
-                                eprintln!("jcode-desktop: failed to spawn session: {error:#}");
+                                desktop_log::error(format_args!(
+                                    "jcode-desktop: failed to spawn session: {error:#}"
+                                ));
                             } else {
                                 spawn_session_cards_load(
                                     DesktopSessionCardsPurpose::WorkspaceRefresh,
@@ -615,18 +697,18 @@ async fn run() -> Result<()> {
                                         );
                                         window.request_redraw();
                                     }
-                                    Err(error) => eprintln!(
+                                    Err(error) => desktop_log::error(format_args!(
                                         "jcode-desktop: failed to send image draft to {session_id}: {error:#}"
-                                    ),
+                                    )),
                                 }
                             } else if let Err(error) = session_launch::send_message_to_session(
                                 &session_id,
                                 &title,
                                 &message,
                             ) {
-                                eprintln!(
+                                desktop_log::error(format_args!(
                                     "jcode-desktop: failed to send draft to {session_id}: {error:#}"
-                                );
+                                ));
                             } else {
                                 spawn_session_cards_load(
                                     DesktopSessionCardsPurpose::WorkspaceRefresh,
@@ -784,6 +866,7 @@ async fn run() -> Result<()> {
                         &app,
                         window.current_monitor().map(|monitor| monitor.size()),
                         smooth_scroll_lines,
+                        workspace_space_hold_progress(&app, space_hold_started_at, space_hold_consumed),
                     ) {
                     Ok(frame) => {
                         no_paint_watchdog.observe_presented(Instant::now(), &frame);
@@ -1009,6 +1092,18 @@ async fn run() -> Result<()> {
                     scroll_accumulator.reset();
                     scroll_metrics_cache.clear();
                 }
+                if let (DesktopApp::Workspace(workspace), Some(started_at)) = (&mut app, space_hold_started_at)
+                    && !space_hold_consumed
+                {
+                    let now = Instant::now();
+                    if now.saturating_duration_since(started_at) >= workspace.space_hold_toggle_duration() {
+                        space_hold_consumed = true;
+                        if matches!(workspace.handle_key(KeyInput::ToggleInputMode), KeyOutcome::Redraw) {
+                            window.set_title(&app.status_title());
+                        }
+                    }
+                    window.request_redraw();
+                }
                 if let Some(first_pending_backend_redraw) = pending_backend_redraw_since {
                     let now = Instant::now();
                     if last_backend_redraw_request.is_none_or(|last| {
@@ -1022,7 +1117,9 @@ async fn run() -> Result<()> {
                 }
                 if let Some(relaunch) = hot_reloader.poll() {
                     if let Err(error) = relaunch.spawn() {
-                        eprintln!("jcode-desktop: failed to hot reload desktop: {error:#}");
+                        desktop_log::error(format_args!(
+                            "jcode-desktop: failed to hot reload desktop: {error:#}"
+                        ));
                     } else {
                         target.exit();
                         return;
@@ -1047,7 +1144,9 @@ fn load_session_cards_for_desktop() -> Vec<workspace::SessionCard> {
     match session_data::load_recent_session_cards() {
         Ok(cards) => cards,
         Err(error) => {
-            eprintln!("jcode-desktop: failed to load session metadata: {error:#}");
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to load session metadata: {error:#}"
+            ));
             Vec::new()
         }
     }
@@ -1057,7 +1156,9 @@ fn load_crashed_session_cards_for_desktop() -> Vec<workspace::SessionCard> {
     match session_data::load_crashed_session_cards() {
         Ok(cards) => cards,
         Err(error) => {
-            eprintln!("jcode-desktop: failed to load crashed session metadata: {error:#}");
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to load crashed session metadata: {error:#}"
+            ));
             Vec::new()
         }
     }
@@ -1075,10 +1176,19 @@ fn spawn_recovery_session_count_scan(
             startup_trace.mark(&format!(
                 "recovery scan completed ({recovery_count} crashed)"
             ));
-            let _ = event_loop_proxy.send_event(DesktopUserEvent::RecoveryCount(recovery_count));
+            if event_loop_proxy
+                .send_event(DesktopUserEvent::RecoveryCount(recovery_count))
+                .is_err()
+            {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: failed to deliver recovery count, event loop is closed"
+                ));
+            }
         })
     {
-        eprintln!("jcode-desktop: failed to start recovery scan: {error:#}");
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to start recovery scan: {error:#}"
+        ));
     }
 }
 
@@ -1094,14 +1204,23 @@ fn spawn_single_session_card_refresh(
                 .into_iter()
                 .find(|card| card.session_id == session_id);
             let loaded_in = started.elapsed();
-            let _ = event_loop_proxy.send_event(DesktopUserEvent::SessionCardLoaded {
-                session_id,
-                card,
-                loaded_in,
-            });
+            if event_loop_proxy
+                .send_event(DesktopUserEvent::SessionCardLoaded {
+                    session_id,
+                    card,
+                    loaded_in,
+                })
+                .is_err()
+            {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: failed to deliver session card refresh, event loop is closed"
+                ));
+            }
         })
     {
-        eprintln!("jcode-desktop: failed to start session card refresh: {error:#}");
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to start session card refresh: {error:#}"
+        ));
     }
 }
 
@@ -1119,14 +1238,23 @@ fn spawn_session_cards_load(
             let started = Instant::now();
             let cards = load_session_cards_for_desktop();
             let loaded_in = started.elapsed();
-            let _ = event_loop_proxy.send_event(DesktopUserEvent::SessionCardsLoaded {
-                purpose,
-                cards,
-                loaded_in,
-            });
+            if event_loop_proxy
+                .send_event(DesktopUserEvent::SessionCardsLoaded {
+                    purpose,
+                    cards,
+                    loaded_in,
+                })
+                .is_err()
+            {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: failed to deliver session cards load, event loop is closed"
+                ));
+            }
         })
     {
-        eprintln!("jcode-desktop: failed to start session card load: {error:#}");
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to start session card load: {error:#}"
+        ));
     }
 }
 
@@ -1145,14 +1273,20 @@ fn spawn_restore_crashed_sessions(event_loop_proxy: EventLoopProxy<DesktopUserEv
                     Err(error) => errors.push(format!("{}: {error:#}", card.session_id)),
                 }
             }
-            let _ = event_loop_proxy.send_event(DesktopUserEvent::CrashedSessionsRestoreFinished {
+            if event_loop_proxy.send_event(DesktopUserEvent::CrashedSessionsRestoreFinished {
                 restored,
                 errors,
                 elapsed: started.elapsed(),
-            });
+            }).is_err() {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: failed to deliver crashed-session restore result, event loop is closed"
+                ));
+            }
         })
     {
-        eprintln!("jcode-desktop: failed to start crashed-session restore: {error:#}");
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to start crashed-session restore: {error:#}"
+        ));
     }
 }
 
@@ -1177,7 +1311,9 @@ fn spawn_desktop_preferences_saver() -> Option<mpsc::Sender<workspace::DesktopPr
         }) {
         Ok(_) => Some(tx),
         Err(error) => {
-            eprintln!("jcode-desktop: failed to start preferences saver: {error:#}");
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to start preferences saver: {error:#}"
+            ));
             None
         }
     }
@@ -1200,7 +1336,9 @@ fn queue_desktop_preferences_save(
             save_desktop_preferences_off_ui_thread(preferences, 1, Duration::ZERO);
         })
     {
-        eprintln!("jcode-desktop: failed to queue preferences save: {error:#}");
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to queue preferences save: {error:#}"
+        ));
     }
 }
 
@@ -1617,7 +1755,11 @@ async fn render_hero_frame_to_image(
     let buffer_slice = output_buffer.slice(..);
     let (tx, rx) = mpsc::channel();
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = tx.send(result);
+        if tx.send(result).is_err() {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: failed to deliver hero capture readback result"
+            ));
+        }
     });
     device.poll(wgpu::Maintain::Wait);
     rx.recv()
@@ -1680,6 +1822,10 @@ impl DesktopStartupTrace {
                 "jcode-desktop startup +{:>7.2} ms  {milestone}",
                 self.started_at.elapsed().as_secs_f64() * 1000.0
             );
+            desktop_log::info(format_args!(
+                "jcode-desktop: startup +{:>7.2} ms {milestone}",
+                self.started_at.elapsed().as_secs_f64() * 1000.0
+            ));
         }
     }
 }
@@ -1749,12 +1895,17 @@ fn spawn_session_event_forwarder(
                     .send_event(DesktopUserEvent::SessionEvents(batch))
                     .is_err()
                 {
+                    desktop_log::warn(format_args!(
+                        "jcode-desktop: failed to forward session events, event loop is closed"
+                    ));
                     break;
                 }
             }
         })
     {
-        eprintln!("jcode-desktop: failed to start session event forwarder: {error:#}");
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to start session event forwarder: {error:#}"
+        ));
     }
 }
 
@@ -2863,6 +3014,7 @@ fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
                 size,
                 viewport,
                 start_line,
+                1.0,
             ));
         }
         streaming_areas_ms += phase_started.elapsed().as_secs_f64() * 1000.0;
@@ -3259,7 +3411,7 @@ fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
             let key = if frame % 2 == 0 { "l" } else { "h" };
             let _ = workspace_app.handle_key(KeyInput::Character(key.to_string()));
             let layout = workspace_render_layout(&workspace_app, size, Some(size));
-            let vertices = build_vertices(&workspace_app, size, layout, 0.0);
+            let vertices = build_vertices(&workspace_app, size, layout, 0.0, None);
             vertices.len() ^ (workspace_app.focused_id as usize) ^ workspace_app.surfaces.len()
         });
 
@@ -3751,7 +3903,9 @@ fn load_desktop_preferences() -> Option<workspace::DesktopPreferences> {
     match desktop_prefs::load_preferences() {
         Ok(preferences) => preferences,
         Err(error) => {
-            eprintln!("jcode-desktop: failed to load desktop preferences: {error:#}");
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to load desktop preferences: {error:#}"
+            ));
             None
         }
     }
@@ -3776,6 +3930,9 @@ fn initial_single_session_app(resume_session_id: Option<&str>) -> DesktopApp {
             app.status = Some(format!("resumed session {session_id}"));
         }
         Err(error) => {
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to load resumed session metadata for {session_id}: {error:#}"
+            ));
             app.status = Some(format!("resumed session {session_id}"));
             app.error = Some(format!("failed to load session metadata: {error:#}"));
         }
@@ -3896,10 +4053,7 @@ fn binary_modified_time(path: &Path) -> Option<std::time::SystemTime> {
         Ok(metadata) => metadata,
         Err(_) => return None,
     };
-    match metadata.modified() {
-        Ok(modified) => Some(modified),
-        Err(_) => None,
-    }
+    metadata.modified().ok()
 }
 
 fn resolve_invoked_binary(argv0: &OsString) -> Option<PathBuf> {
@@ -3914,6 +4068,7 @@ fn resolve_invoked_binary(argv0: &OsString) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+#[allow(clippy::large_enum_variant)]
 enum DesktopApp {
     SingleSession(SingleSessionApp),
     Workspace(Workspace),
@@ -4342,6 +4497,35 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
     }
 }
 
+fn is_space_key(key: &Key) -> bool {
+    matches!(key, Key::Named(NamedKey::Space)) || matches!(key, Key::Character(text) if text == " ")
+}
+
+fn workspace_space_hold_progress(
+    app: &DesktopApp,
+    started_at: Option<Instant>,
+    consumed: bool,
+) -> Option<f32> {
+    let DesktopApp::Workspace(workspace) = app else {
+        return None;
+    };
+    let started_at = started_at?;
+    if consumed {
+        return None;
+    }
+    let threshold = workspace.space_hold_toggle_duration();
+    if threshold.is_zero() {
+        return Some(1.0);
+    }
+    Some(
+        (Instant::now()
+            .saturating_duration_since(started_at)
+            .as_secs_f32()
+            / threshold.as_secs_f32())
+        .clamp(0.0, 1.0),
+    )
+}
+
 fn apply_desktop_session_event_batch(
     app: &mut DesktopApp,
     events: Vec<session_launch::DesktopSessionEvent>,
@@ -4377,6 +4561,7 @@ fn apply_desktop_session_event_batch_with_stats(
     let mut visible_changed = false;
     let mut session_card_refresh_requested = false;
     for event in events {
+        log_desktop_session_event_error(&event);
         if let session_launch::DesktopSessionEvent::TextDelta(text) = &event {
             text_delta_bytes += text.len();
         }
@@ -4402,6 +4587,50 @@ fn apply_desktop_session_event_batch_with_stats(
     }
 }
 
+fn log_desktop_session_event_error(event: &session_launch::DesktopSessionEvent) {
+    match event {
+        session_launch::DesktopSessionEvent::Error(error) => {
+            desktop_log::error(format_args!(
+                "jcode-desktop: session error event: {}",
+                desktop_log::truncate_for_log(error, 2048)
+            ));
+        }
+        session_launch::DesktopSessionEvent::ModelCatalogError { error } => {
+            desktop_log::error(format_args!(
+                "jcode-desktop: model catalog error event: {}",
+                desktop_log::truncate_for_log(error, 2048)
+            ));
+        }
+        session_launch::DesktopSessionEvent::ModelChanged {
+            model,
+            provider_name,
+            error: Some(error),
+        } => {
+            desktop_log::error(format_args!(
+                "jcode-desktop: model switch failed model={} provider={} error={}",
+                desktop_log::truncate_for_log(model, 256),
+                provider_name
+                    .as_deref()
+                    .map(|provider| desktop_log::truncate_for_log(provider, 256))
+                    .unwrap_or_else(|| "<unknown>".to_string()),
+                desktop_log::truncate_for_log(error, 2048)
+            ));
+        }
+        session_launch::DesktopSessionEvent::ToolFinished {
+            name,
+            summary,
+            is_error: true,
+        } => {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: tool failed name={} summary={}",
+                desktop_log::truncate_for_log(name, 256),
+                desktop_log::truncate_for_log(summary, 2048)
+            ));
+        }
+        _ => {}
+    }
+}
+
 fn desktop_session_event_refreshes_session_card(
     event: &session_launch::DesktopSessionEvent,
 ) -> bool {
@@ -4414,6 +4643,7 @@ fn desktop_session_event_refreshes_session_card(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn log_desktop_session_event_batch_profile(
     raw_event_count: usize,
     raw_payload_bytes: usize,
@@ -4686,6 +4916,7 @@ fn apply_pending_session_events(
 }
 
 fn apply_single_session_error(app: &mut DesktopApp, error: anyhow::Error) {
+    desktop_log::error(format_args!("jcode-desktop: UI action failed: {error:#}"));
     app.apply_session_event(session_launch::DesktopSessionEvent::Error(format!(
         "{error:#}"
     )));
@@ -4696,9 +4927,14 @@ fn copy_text_to_clipboard(text: &str, success_notice: &'static str, app: &mut De
         Ok(()) => app.apply_session_event(session_launch::DesktopSessionEvent::Status(
             success_notice.to_string(),
         )),
-        Err(error) => app.apply_session_event(session_launch::DesktopSessionEvent::Error(format!(
-            "failed to update clipboard after {success_notice}: {error}"
-        ))),
+        Err(error) => {
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to update clipboard after {success_notice}: {error}"
+            ));
+            app.apply_session_event(session_launch::DesktopSessionEvent::Error(format!(
+                "failed to update clipboard after {success_notice}: {error}"
+            )));
+        }
     }
 }
 
@@ -4901,7 +5137,7 @@ fn desktop_spinner_tick(_now: Instant) -> u64 {
 fn single_session_text_buffer_cache_key(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
-    tick: u64,
+    _tick: u64,
     rendered_body_key: u64,
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
@@ -4914,7 +5150,6 @@ fn single_session_text_buffer_cache_key(
     app.welcome_hero_text().hash(&mut hasher);
     app.inline_widget_styled_lines().hash(&mut hasher);
     app.composer_text().hash(&mut hasher);
-    app.composer_status_line_for_tick(tick).hash(&mut hasher);
     hasher.finish()
 }
 
@@ -5507,23 +5742,45 @@ fn desktop_profile_log_sender() -> Option<&'static mpsc::Sender<DesktopProfileLo
                 .name("jcode-desktop-profile-log".to_string())
                 .spawn(move || {
                     let mut file = path.and_then(|path| {
-                        if let Some(parent) = path.parent() {
-                            let _ = std::fs::create_dir_all(parent);
+                        if let Some(parent) = path.parent()
+                            && let Err(error) = std::fs::create_dir_all(parent)
+                        {
+                            desktop_log::error(format_args!(
+                                "jcode-desktop: failed to create profile log directory {}: {error}",
+                                parent.display()
+                            ));
+                            return None;
                         }
-                        OpenOptions::new().create(true).append(true).open(path).ok()
+                        match OpenOptions::new().create(true).append(true).open(&path) {
+                            Ok(file) => Some(file),
+                            Err(error) => {
+                                desktop_log::error(format_args!(
+                                    "jcode-desktop: failed to open profile log {}: {error}",
+                                    path.display()
+                                ));
+                                None
+                            }
+                        }
                     });
                     while let Ok(line) = rx.recv() {
                         if stderr_enabled {
                             eprintln!("{}", line.stderr_line);
                         }
-                        if let Some(file) = file.as_mut() {
-                            let _ = writeln!(file, "{}", line.jsonl_line);
+                        if let Some(profile_file) = file.as_mut()
+                            && let Err(error) = writeln!(profile_file, "{}", line.jsonl_line)
+                        {
+                            desktop_log::error(format_args!(
+                                "jcode-desktop: failed to write profile log: {error}"
+                            ));
+                            file = None;
                         }
                     }
                 }) {
                 Ok(_) => Some(tx),
                 Err(error) => {
-                    eprintln!("jcode-desktop: failed to start profile logger: {error:#}");
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to start profile logger: {error:#}"
+                    ));
                     None
                 }
             }
@@ -5547,10 +5804,17 @@ fn emit_desktop_profile_event(event: &'static str, payload: serde_json::Value) {
             "payload": payload,
         })
         .to_string();
-        let _ = tx.send(DesktopProfileLogLine {
-            stderr_line,
-            jsonl_line,
-        });
+        if tx
+            .send(DesktopProfileLogLine {
+                stderr_line,
+                jsonl_line,
+            })
+            .is_err()
+        {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: failed to queue profile event {event}, logger is closed"
+            ));
+        }
     }
 }
 
@@ -5579,6 +5843,7 @@ fn log_desktop_slow_interaction(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn single_session_streaming_primitive_geometry_cache_key(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
@@ -5663,6 +5928,8 @@ struct Canvas<'window> {
     single_session_body_lines: Vec<SingleSessionStyledLine>,
     single_session_streaming_base_key: Option<u64>,
     single_session_streaming_base_len: usize,
+    single_session_streaming_response_len: usize,
+    single_session_streaming_fade_started_at: Option<Instant>,
     single_session_streaming_text_key: Option<u64>,
     single_session_streaming_text_start_line: Option<usize>,
     single_session_streaming_text_buffer: Option<Buffer>,
@@ -5763,6 +6030,8 @@ impl<'window> Canvas<'window> {
             single_session_body_lines: Vec::new(),
             single_session_streaming_base_key: None,
             single_session_streaming_base_len: 0,
+            single_session_streaming_response_len: 0,
+            single_session_streaming_fade_started_at: None,
             single_session_streaming_text_key: None,
             single_session_streaming_text_start_line: None,
             single_session_streaming_text_buffer: None,
@@ -5787,6 +6056,8 @@ impl<'window> Canvas<'window> {
         self.single_session_body_key = None;
         self.single_session_streaming_base_key = None;
         self.single_session_streaming_base_len = 0;
+        self.single_session_streaming_response_len = 0;
+        self.single_session_streaming_fade_started_at = None;
         self.single_session_streaming_text_key = None;
         self.single_session_streaming_text_start_line = None;
         self.single_session_streaming_text_buffer = None;
@@ -5977,6 +6248,7 @@ impl<'window> Canvas<'window> {
         app: &SingleSessionApp,
         viewport: &SingleSessionBodyViewport,
     ) {
+        self.update_single_session_streaming_fade(app);
         let Some((start_line, end_line)) =
             self.single_session_streaming_visible_range(app, viewport)
         else {
@@ -6011,6 +6283,33 @@ impl<'window> Canvas<'window> {
             self.single_session_streaming_text_start_line = Some(start_line);
             self.streaming_text_needs_prepare = true;
         }
+    }
+
+    fn update_single_session_streaming_fade(&mut self, app: &SingleSessionApp) {
+        let response_len = app.streaming_response.len();
+        if response_len == 0 {
+            self.single_session_streaming_response_len = 0;
+            self.single_session_streaming_fade_started_at = None;
+            return;
+        }
+
+        if response_len > self.single_session_streaming_response_len {
+            self.single_session_streaming_fade_started_at = Some(Instant::now());
+        }
+        self.single_session_streaming_response_len = response_len;
+    }
+
+    fn single_session_streaming_fade_opacity(&mut self, now: Instant) -> (f32, bool) {
+        let Some(started_at) = self.single_session_streaming_fade_started_at else {
+            return (1.0, false);
+        };
+        let (opacity, active) =
+            streaming_text_fade_opacity_for_elapsed(now.saturating_duration_since(started_at));
+        if !active {
+            self.single_session_streaming_fade_started_at = None;
+            return (1.0, false);
+        }
+        (opacity, true)
     }
 
     fn single_session_streaming_visible_range(
@@ -6053,7 +6352,15 @@ impl<'window> Canvas<'window> {
         self.font_system = Some(
             self.font_system_loader
                 .take()
-                .and_then(|loader| loader.join().ok())
+                .and_then(|loader| match loader.join() {
+                    Ok(font_system) => Some(font_system),
+                    Err(_) => {
+                        desktop_log::error(format_args!(
+                            "jcode-desktop: font system loader thread panicked"
+                        ));
+                        None
+                    }
+                })
                 .unwrap_or_else(create_desktop_font_system),
         );
     }
@@ -6289,6 +6596,7 @@ impl<'window> Canvas<'window> {
         app: &DesktopApp,
         monitor_size: Option<PhysicalSize<u32>>,
         smooth_scroll_lines: f32,
+        workspace_space_hold_progress: Option<f32>,
     ) -> std::result::Result<DesktopRenderFrameResult, SurfaceError> {
         if !self.boot_frame_presented {
             return self.render_boot_frame();
@@ -6366,6 +6674,11 @@ impl<'window> Canvas<'window> {
         frame_profile.checkpoint("text_renderer");
         self.ensure_render_pipeline();
         frame_profile.checkpoint("primitive_pipeline");
+        let (streaming_text_opacity, streaming_text_fade_active) =
+            self.single_session_streaming_fade_opacity(now);
+        if streaming_text_fade_active && self.single_session_streaming_text_buffer.is_some() {
+            self.streaming_text_needs_prepare = true;
+        }
         let text_buffers = &self.single_session_text_buffers;
         let has_text_buffers = !text_buffers.is_empty();
         let has_streaming_text_buffer = self.single_session_streaming_text_buffer.is_some();
@@ -6434,7 +6747,9 @@ impl<'window> Canvas<'window> {
                     text_areas,
                     &mut self.swash_cache,
                 ) {
-                    eprintln!("jcode-desktop: failed to prepare text: {error:?}");
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to prepare text: {error:?}"
+                    ));
                 } else {
                     self.text_needs_prepare = false;
                 }
@@ -6461,6 +6776,7 @@ impl<'window> Canvas<'window> {
                     self.size,
                     viewport,
                     start_line,
+                    streaming_text_opacity,
                 )]
             } else {
                 Vec::new()
@@ -6494,7 +6810,9 @@ impl<'window> Canvas<'window> {
                     streaming_text_areas,
                     &mut self.swash_cache,
                 ) {
-                    eprintln!("jcode-desktop: failed to prepare streaming text: {error:?}");
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to prepare streaming text: {error:?}"
+                    ));
                 } else {
                     self.streaming_text_needs_prepare = false;
                 }
@@ -6508,7 +6826,8 @@ impl<'window> Canvas<'window> {
                 let focus_pulse = self.focus_pulse.frame(1, now);
                 let animation_active = self.focus_pulse.is_animating()
                     || single_session.has_background_work()
-                    || welcome_hero_reveal_active;
+                    || welcome_hero_reveal_active
+                    || streaming_text_fade_active;
                 let geometry_cache_key = single_session_streaming_primitive_geometry_cache_key(
                     single_session,
                     self.size,
@@ -6564,6 +6883,7 @@ impl<'window> Canvas<'window> {
                         self.size,
                         render_layout,
                         focus_pulse,
+                        workspace_space_hold_progress,
                     )),
                     animation_active,
                 )
@@ -6660,17 +6980,18 @@ impl<'window> Canvas<'window> {
                 render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 render_pass.draw(0..primitive_vertex_count as u32, 0..1);
             }
-            if hero_mask_prepared {
-                if let Some(hero_mask_renderer) = self.hero_mask_renderer.as_ref() {
-                    hero_mask_renderer.render_prepared(&mut render_pass);
-                }
+            if hero_mask_prepared && let Some(hero_mask_renderer) = self.hero_mask_renderer.as_ref()
+            {
+                hero_mask_renderer.render_prepared(&mut render_pass);
             }
             if has_text_buffers
                 && let (Some(text_renderer), Some(text_atlas)) =
                     (self.text_renderer.as_mut(), self.text_atlas.as_ref())
                 && let Err(error) = text_renderer.render(text_atlas, &mut render_pass)
             {
-                eprintln!("jcode-desktop: failed to render text: {error:?}");
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to render text: {error:?}"
+                ));
             }
             if has_streaming_text_buffer
                 && let (Some(text_renderer), Some(text_atlas)) = (
@@ -6679,7 +7000,9 @@ impl<'window> Canvas<'window> {
                 )
                 && let Err(error) = text_renderer.render(text_atlas, &mut render_pass)
             {
-                eprintln!("jcode-desktop: failed to render streaming text: {error:?}");
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to render streaming text: {error:?}"
+                ));
             }
         }
         frame_profile.checkpoint("render_pass");
@@ -7454,6 +7777,7 @@ fn build_vertices(
     size: PhysicalSize<u32>,
     render_layout: WorkspaceRenderLayout,
     focus_pulse: f32,
+    space_hold_progress: Option<f32>,
 ) -> Vec<Vertex> {
     let width = size.width as f32;
     let height = size.height as f32;
@@ -7532,6 +7856,9 @@ fn build_vertices(
                 draft.as_deref(),
             );
         }
+        if let Some(progress) = space_hold_progress {
+            push_space_hold_progress(&mut vertices, progress, size);
+        }
         return vertices;
     }
 
@@ -7581,7 +7908,40 @@ fn build_vertices(
         );
     }
 
+    if let Some(progress) = space_hold_progress {
+        push_space_hold_progress(&mut vertices, progress, size);
+    }
+
     vertices
+}
+
+fn push_space_hold_progress(vertices: &mut Vec<Vertex>, progress: f32, size: PhysicalSize<u32>) {
+    let width = size.width as f32;
+    let bar_width = (width * SPACE_HOLD_PROGRESS_WIDTH_FRACTION).clamp(120.0, 460.0);
+    let rect = Rect {
+        x: (width - bar_width) * 0.5,
+        y: OUTER_PADDING + STATUS_BAR_HEIGHT + 4.0,
+        width: bar_width,
+        height: SPACE_HOLD_PROGRESS_HEIGHT,
+    };
+    push_rounded_rect(
+        vertices,
+        rect,
+        SPACE_HOLD_PROGRESS_HEIGHT * 0.5,
+        SPACE_HOLD_PROGRESS_TRACK_COLOR,
+        size,
+    );
+    let fill = Rect {
+        width: (rect.width * progress.clamp(0.0, 1.0)).max(SPACE_HOLD_PROGRESS_HEIGHT),
+        ..rect
+    };
+    push_rounded_rect(
+        vertices,
+        fill,
+        SPACE_HOLD_PROGRESS_HEIGHT * 0.5,
+        SPACE_HOLD_PROGRESS_FILL_COLOR,
+        size,
+    );
 }
 
 fn workspace_render_layout(

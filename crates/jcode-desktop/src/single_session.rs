@@ -3,7 +3,7 @@ use crate::{
     workspace,
 };
 use pulldown_cmark::{
-    BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
+    Alignment, BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -157,6 +157,23 @@ pub(crate) struct SelectionLineSegment {
 pub(crate) struct SingleSessionStyledLine {
     pub(crate) text: String,
     pub(crate) style: SingleSessionLineStyle,
+    pub(crate) inline_spans: Vec<SingleSessionInlineSpan>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct SingleSessionInlineSpan {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) kind: SingleSessionInlineSpanKind,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum SingleSessionInlineSpanKind {
+    Code,
+    Math,
+    Strong,
+    Emphasis,
+    Strike,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -176,6 +193,7 @@ pub(crate) enum InlineWidgetKind {
     HotkeyHelp,
     SessionInfo,
     ModelPicker,
+    SessionSwitcher,
 }
 
 impl InlineWidgetKind {
@@ -184,6 +202,7 @@ impl InlineWidgetKind {
             Self::HotkeyHelp | Self::SessionInfo => InlineWidgetMode::ReadOnly,
             Self::ModelPicker if app.model_picker.preview => InlineWidgetMode::ReadOnly,
             Self::ModelPicker => InlineWidgetMode::Interactive,
+            Self::SessionSwitcher => InlineWidgetMode::Interactive,
         }
     }
 }
@@ -210,8 +229,9 @@ impl ReadOnlyInlineWidget {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub(crate) enum SingleSessionLineStyle {
+    #[default]
     Assistant,
     AssistantHeading,
     AssistantQuote,
@@ -231,10 +251,23 @@ pub(crate) enum SingleSessionLineStyle {
 }
 
 impl SingleSessionStyledLine {
-    fn new(text: impl Into<String>, style: SingleSessionLineStyle) -> Self {
+    pub(crate) fn new(text: impl Into<String>, style: SingleSessionLineStyle) -> Self {
         Self {
             text: text.into(),
             style,
+            inline_spans: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_inline_spans(
+        text: impl Into<String>,
+        style: SingleSessionLineStyle,
+        inline_spans: Vec<SingleSessionInlineSpan>,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            inline_spans,
         }
     }
 }
@@ -248,7 +281,7 @@ pub(crate) struct StdinResponseState {
     pub(crate) input: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ModelPickerState {
     pub(crate) open: bool,
     pub(crate) loading: bool,
@@ -260,23 +293,6 @@ pub(crate) struct ModelPickerState {
     pub(crate) provider_name: Option<String>,
     pub(crate) choices: Vec<DesktopModelChoice>,
     pub(crate) error: Option<String>,
-}
-
-impl Default for ModelPickerState {
-    fn default() -> Self {
-        Self {
-            open: false,
-            loading: false,
-            preview: false,
-            filter: String::new(),
-            selected: 0,
-            column: 0,
-            current_model: None,
-            provider_name: None,
-            choices: Vec::new(),
-            error: None,
-        }
-    }
 }
 
 impl ModelPickerState {
@@ -795,10 +811,7 @@ impl SingleSessionApp {
     }
 
     pub(crate) fn status_title(&self) -> String {
-        let title = self.title();
-        format!(
-            "Jcode Desktop · single session · {title} · Enter send · Shift+Enter newline · Ctrl+Enter queue · Ctrl+P sessions · Ctrl+Shift+M models · Ctrl+Shift+S info · Ctrl+; spawn · Esc interrupt · --workspace for Niri layout"
-        )
+        format!("Jcode · {}", self.title())
     }
 
     pub(crate) fn title(&self) -> String {
@@ -825,8 +838,8 @@ impl SingleSessionApp {
             && !self.model_picker.open
             && !self.session_switcher.open
             && self.stdin_response.is_none()
-            && self.show_help == false
-            && self.show_session_info == false
+            && !self.show_help
+            && !self.show_session_info
             && self.session.is_some()
     }
 
@@ -853,7 +866,7 @@ impl SingleSessionApp {
 
         #[cfg(test)]
         {
-            return 1.0;
+            1.0
         }
 
         #[cfg(not(test))]
@@ -896,11 +909,6 @@ impl SingleSessionApp {
     }
 
     #[cfg(test)]
-    pub(crate) fn composer_status_line(&self) -> String {
-        self.composer_status_line_for_tick(0)
-    }
-
-    #[cfg(test)]
     pub(crate) fn queued_draft_count(&self) -> usize {
         self.queued_drafts.len()
     }
@@ -911,52 +919,6 @@ impl SingleSessionApp {
             .iter()
             .map(|(message, _)| message.clone())
             .collect()
-    }
-
-    pub(crate) fn composer_status_line_for_tick(&self, tick: u64) -> String {
-        let _ = tick;
-        let status = self.status.as_deref().unwrap_or("ready");
-        let mode = if self.is_processing {
-            "Esc interrupt"
-        } else {
-            "Enter send · Shift+Enter newline · Ctrl+Enter queue/send"
-        };
-        let scroll = scroll_status_fragment(self.body_scroll_lines);
-        let images = match self.pending_images.len() {
-            0 => String::new(),
-            1 => " · 1 image".to_string(),
-            count => format!(" · {count} images"),
-        };
-        let queued = match self.queued_drafts.len() {
-            0 => String::new(),
-            1 => " · 1 queued".to_string(),
-            count => format!(" · {count} queued"),
-        };
-        let stdin = self
-            .stdin_response
-            .as_ref()
-            .map(|state| {
-                if state.is_password {
-                    " · password input requested".to_string()
-                } else {
-                    " · interactive input requested".to_string()
-                }
-            })
-            .unwrap_or_default();
-        let model = self
-            .model_picker
-            .current_model
-            .as_ref()
-            .map(|model| {
-                self.model_picker
-                    .provider_name
-                    .as_deref()
-                    .filter(|provider| !provider.is_empty())
-                    .map(|provider| format!(" · model {provider}/{model}"))
-                    .unwrap_or_else(|| format!(" · model {model}"))
-            })
-            .unwrap_or_default();
-        format!("{status}{images}{queued}{stdin}{model}{scroll} · {mode}")
     }
 
     #[cfg(test)]
@@ -1265,6 +1227,7 @@ impl SingleSessionApp {
             .open_loading(current_session_id.as_deref());
         self.status = Some("loading recent sessions".to_string());
         self.scroll_body_to_bottom();
+        self.mark_inline_widget_opened();
         KeyOutcome::LoadSessionSwitcher
     }
 
@@ -1341,6 +1304,7 @@ impl SingleSessionApp {
                 self.session_switcher
                     .open_loading(current_session_id.as_deref());
                 self.status = Some("loading recent sessions".to_string());
+                self.mark_inline_widget_opened();
                 KeyOutcome::LoadSessionSwitcher
             }
             KeyInput::ModelPickerMove(delta) => {
@@ -1474,12 +1438,6 @@ impl SingleSessionApp {
         if let Some(stdin_response) = &self.stdin_response {
             return stdin_response_styled_lines(stdin_response);
         }
-        if self.session_switcher.open {
-            return session_switcher_styled_lines(
-                &self.session_switcher,
-                self.current_session_id(),
-            );
-        }
         self.body_styled_lines_without_inline_widgets()
     }
 
@@ -1488,6 +1446,9 @@ impl SingleSessionApp {
             Some(InlineWidgetKind::HotkeyHelp) => hotkey_help_inline_widget().styled_lines(),
             Some(InlineWidgetKind::ModelPicker) => {
                 model_picker_inline_styled_lines(&self.model_picker)
+            }
+            Some(InlineWidgetKind::SessionSwitcher) => {
+                session_switcher_styled_lines(&self.session_switcher, self.current_session_id())
             }
             Some(InlineWidgetKind::SessionInfo) => session_info_inline_styled_lines(self),
             None => Vec::new(),
@@ -1504,6 +1465,9 @@ impl SingleSessionApp {
         }
         if self.model_picker.open {
             return Some(InlineWidgetKind::ModelPicker);
+        }
+        if self.session_switcher.open {
+            return Some(InlineWidgetKind::SessionSwitcher);
         }
         if self.show_session_info {
             return Some(InlineWidgetKind::SessionInfo);
@@ -1609,12 +1573,17 @@ impl SingleSessionApp {
                             tool_message,
                             &mut user_turn,
                             is_active_tool,
+                            if is_active_tool {
+                                Some(self.active_tool_input_buffer.as_str())
+                            } else {
+                                None
+                            },
                         );
                     }
                 }
                 continue;
             }
-            append_chat_message_lines(&mut lines, message, &mut user_turn, false);
+            append_chat_message_lines(&mut lines, message, &mut user_turn, false, None);
             message_index += 1;
         }
         if include_streaming_response && !self.streaming_response.is_empty() {
@@ -1653,9 +1622,12 @@ impl SingleSessionApp {
             .hash(&mut hasher);
         hash_messages_cache_fingerprint(&self.messages, &mut hasher);
         hash_text_cache_fingerprint(&self.streaming_response, &mut hasher);
+        self.active_tool_message_index.hash(&mut hasher);
+        hash_text_cache_fingerprint(&self.active_tool_input_buffer, &mut hasher);
         self.status.hash(&mut hasher);
         self.error.hash(&mut hasher);
         self.show_help.hash(&mut hasher);
+        self.show_session_info.hash(&mut hasher);
         self.model_picker.open.hash(&mut hasher);
         self.model_picker.filter.hash(&mut hasher);
         self.model_picker.selected.hash(&mut hasher);
@@ -1688,9 +1660,12 @@ impl SingleSessionApp {
             })
             .hash(&mut hasher);
         hash_messages_cache_fingerprint(&self.messages, &mut hasher);
+        self.active_tool_message_index.hash(&mut hasher);
+        hash_text_cache_fingerprint(&self.active_tool_input_buffer, &mut hasher);
         self.status.hash(&mut hasher);
         self.error.hash(&mut hasher);
         self.show_help.hash(&mut hasher);
+        self.show_session_info.hash(&mut hasher);
         self.model_picker.open.hash(&mut hasher);
         self.model_picker.filter.hash(&mut hasher);
         self.model_picker.selected.hash(&mut hasher);
@@ -1713,6 +1688,7 @@ impl SingleSessionApp {
     pub(crate) fn is_welcome_timeline_visible(&self) -> bool {
         self.welcome_timeline
             && !self.show_help
+            && !self.show_session_info
             && !self.session_switcher.open
             && self.stdin_response.is_none()
     }
@@ -2331,8 +2307,8 @@ impl SingleSessionApp {
         }
         let end_line = end.line.min(lines.len().saturating_sub(1));
         let mut segments = Vec::new();
-        for line_index in start.line..=end_line {
-            let line_len = lines[line_index].chars().count();
+        for (line_index, line) in lines.iter().enumerate().take(end_line + 1).skip(start.line) {
+            let line_len = line.chars().count();
             let prompt_columns = if line_index == 0 {
                 self.composer_prompt().chars().count()
             } else {
@@ -2426,8 +2402,8 @@ impl SingleSessionApp {
 
         let end_line = end.line.min(lines.len().saturating_sub(1));
         let mut segments = Vec::new();
-        for line_index in start.line..=end_line {
-            let line_len = lines[line_index].chars().count();
+        for (line_index, line) in lines.iter().enumerate().take(end_line + 1).skip(start.line) {
+            let line_len = line.chars().count();
             let start_column = if line_index == start.line {
                 start.column.min(line_len)
             } else {
@@ -2464,8 +2440,7 @@ impl SingleSessionApp {
         }
         let end_line = end.line.min(lines.len().saturating_sub(1));
         let mut selected = Vec::new();
-        for line_index in start.line..=end_line {
-            let line = &lines[line_index];
+        for (line_index, line) in lines.iter().enumerate().take(end_line + 1).skip(start.line) {
             let line_len = line.chars().count();
             let start_column = if line_index == start.line {
                 start.column.min(line_len)
@@ -3506,6 +3481,7 @@ fn append_chat_message_lines(
     message: &SingleSessionMessage,
     user_turn: &mut usize,
     is_active_tool: bool,
+    active_tool_input: Option<&str>,
 ) {
     match message.role {
         SingleSessionRole::User => {
@@ -3513,7 +3489,12 @@ fn append_chat_message_lines(
             *user_turn += 1;
         }
         SingleSessionRole::Assistant => append_assistant_lines(lines, message.content.trim()),
-        SingleSessionRole::Tool => append_tool_lines(lines, message.content.trim(), is_active_tool),
+        SingleSessionRole::Tool => append_tool_lines(
+            lines,
+            message.content.trim(),
+            is_active_tool,
+            active_tool_input,
+        ),
         SingleSessionRole::System | SingleSessionRole::Meta => {
             append_meta_lines(lines, message.content.trim())
         }
@@ -3552,6 +3533,45 @@ fn append_streaming_assistant_lines(lines: &mut Vec<SingleSessionStyledLine>, co
     lines.extend(render_assistant_markdown_lines(content));
 }
 
+fn take_current_inline_spans(
+    inline_spans: &mut Vec<SingleSessionInlineSpan>,
+    trimmed_len: usize,
+) -> Vec<SingleSessionInlineSpan> {
+    let mut spans = std::mem::take(inline_spans);
+    spans = spans
+        .into_iter()
+        .filter_map(|span| {
+            let start = span.start.min(trimmed_len);
+            let end = span.end.min(trimmed_len);
+            (start < end).then_some(SingleSessionInlineSpan {
+                start,
+                end,
+                kind: span.kind,
+            })
+        })
+        .collect();
+    spans.sort_by_key(|span| (span.start, span.end));
+    spans
+}
+
+pub(crate) fn single_session_trimmed_line_end_preserving_inline_code_whitespace(
+    text: &str,
+    inline_spans: &[SingleSessionInlineSpan],
+) -> usize {
+    let trimmed_len = text.trim_end().len();
+    let inline_code_end = inline_spans
+        .iter()
+        .filter(|span| span.kind == SingleSessionInlineSpanKind::Code)
+        .filter_map(|span| {
+            let end = span.end.min(text.len());
+            (end > trimmed_len && text.is_char_boundary(end)).then_some(end)
+        })
+        .max()
+        .unwrap_or(trimmed_len);
+
+    trimmed_len.max(inline_code_end)
+}
+
 fn render_assistant_markdown_lines(content: &str) -> Vec<SingleSessionStyledLine> {
     let markdown_options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
@@ -3581,6 +3601,8 @@ fn render_assistant_markdown_lines(content: &str) -> Vec<SingleSessionStyledLine
 struct AssistantMarkdownRenderer {
     lines: Vec<SingleSessionStyledLine>,
     current: String,
+    current_inline_spans: Vec<SingleSessionInlineSpan>,
+    active_inline_spans: Vec<AssistantMarkdownActiveInlineSpan>,
     current_style: SingleSessionLineStyle,
     line_style_override: Option<SingleSessionLineStyle>,
     quote_depth: usize,
@@ -3593,6 +3615,12 @@ struct AssistantMarkdownRenderer {
     table: Option<AssistantMarkdownTable>,
     image_stack: Vec<AssistantMarkdownImage>,
     link_stack: Vec<AssistantMarkdownLink>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AssistantMarkdownActiveInlineSpan {
+    kind: SingleSessionInlineSpanKind,
+    start: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -3618,12 +3646,7 @@ struct AssistantMarkdownTable {
     current_row: Vec<String>,
     current_cell: String,
     header_rows: usize,
-}
-
-impl Default for SingleSessionLineStyle {
-    fn default() -> Self {
-        Self::Assistant
-    }
+    alignments: Vec<Alignment>,
 }
 
 impl AssistantMarkdownRenderer {
@@ -3652,7 +3675,7 @@ impl AssistantMarkdownRenderer {
             Event::TaskListMarker(checked) => self.apply_task_marker(checked),
             Event::Start(Tag::CodeBlock(kind)) => self.start_code_block(kind),
             Event::End(TagEnd::CodeBlock) => self.end_code_block(),
-            Event::Start(Tag::Table(_)) => self.start_table(),
+            Event::Start(Tag::Table(alignments)) => self.start_table(alignments),
             Event::End(TagEnd::Table) => self.end_table(),
             Event::Start(Tag::TableHead) => self.start_table_head(),
             Event::End(TagEnd::TableHead) => self.end_table_head(),
@@ -3664,8 +3687,22 @@ impl AssistantMarkdownRenderer {
             Event::End(TagEnd::Link) => self.end_link(),
             Event::Start(Tag::Image { dest_url, .. }) => self.start_image(dest_url.as_ref()),
             Event::End(TagEnd::Image) => self.end_image(),
-            Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough) => {}
-            Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough) => {}
+            Event::Start(Tag::Emphasis) => {
+                self.start_inline_span(SingleSessionInlineSpanKind::Emphasis)
+            }
+            Event::End(TagEnd::Emphasis) => {
+                self.end_inline_span(SingleSessionInlineSpanKind::Emphasis)
+            }
+            Event::Start(Tag::Strong) => {
+                self.start_inline_span(SingleSessionInlineSpanKind::Strong)
+            }
+            Event::End(TagEnd::Strong) => self.end_inline_span(SingleSessionInlineSpanKind::Strong),
+            Event::Start(Tag::Strikethrough) => {
+                self.start_inline_span(SingleSessionInlineSpanKind::Strike)
+            }
+            Event::End(TagEnd::Strikethrough) => {
+                self.end_inline_span(SingleSessionInlineSpanKind::Strike)
+            }
             Event::Text(text) => self.push_text(text.as_ref()),
             Event::Code(code) => self.push_inline_code(code.as_ref()),
             Event::InlineMath(math) => self.push_inline_math(math.as_ref()),
@@ -3673,7 +3710,8 @@ impl AssistantMarkdownRenderer {
             Event::SoftBreak => self.soft_break(),
             Event::HardBreak => self.hard_break(),
             Event::Rule => self.rule(),
-            Event::Html(html) | Event::InlineHtml(html) => self.push_text(html.as_ref()),
+            Event::Html(html) => self.push_html_block(html.as_ref()),
+            Event::InlineHtml(html) => self.push_inline_code(html.as_ref()),
             Event::FootnoteReference(name) => {
                 self.push_text("[^");
                 self.push_text(name.as_ref());
@@ -3860,10 +3898,13 @@ impl AssistantMarkdownRenderer {
         self.in_code_block = false;
     }
 
-    fn start_table(&mut self) {
+    fn start_table(&mut self, alignments: Vec<Alignment>) {
         self.flush_current_line();
         self.ensure_block_gap();
-        self.table = Some(AssistantMarkdownTable::default());
+        self.table = Some(AssistantMarkdownTable {
+            alignments,
+            ..AssistantMarkdownTable::default()
+        });
     }
 
     fn end_table(&mut self) {
@@ -3955,9 +3996,9 @@ impl AssistantMarkdownRenderer {
         self.begin_line_if_needed();
         let alt = image.alt_text.trim();
         if alt.is_empty() {
-            self.current.push_str("image");
+            self.current.push_str("🖼 image");
         } else {
-            self.current.push_str("image: ");
+            self.current.push_str("🖼 ");
             self.current.push_str(alt);
         }
         if !image.dest_url.is_empty() {
@@ -3988,40 +4029,71 @@ impl AssistantMarkdownRenderer {
 
     fn push_inline_code(&mut self, code: &str) {
         if let Some(image) = self.image_stack.last_mut() {
-            image.alt_text.push('`');
             image.alt_text.push_str(code);
-            image.alt_text.push('`');
             return;
         }
         if let Some(table) = &mut self.table {
-            table.push_text("`");
             table.push_text(code);
-            table.push_text("`");
             return;
         }
         self.begin_line_if_needed();
-        self.current.push('`');
+        let start = self.current.len();
         self.current.push_str(code);
-        self.current.push('`');
+        self.push_current_inline_span(start, self.current.len(), SingleSessionInlineSpanKind::Code);
     }
 
     fn push_inline_math(&mut self, math: &str) {
         if let Some(image) = self.image_stack.last_mut() {
-            image.alt_text.push('$');
             image.alt_text.push_str(math);
-            image.alt_text.push('$');
             return;
         }
         if let Some(table) = &mut self.table {
-            table.push_text("$");
             table.push_text(math);
-            table.push_text("$");
             return;
         }
         self.begin_line_if_needed();
-        self.current.push('$');
+        let start = self.current.len();
         self.current.push_str(math);
-        self.current.push('$');
+        self.push_current_inline_span(start, self.current.len(), SingleSessionInlineSpanKind::Math);
+    }
+
+    fn start_inline_span(&mut self, kind: SingleSessionInlineSpanKind) {
+        if self.image_stack.last_mut().is_some() || self.table.is_some() {
+            return;
+        }
+        self.begin_line_if_needed();
+        self.active_inline_spans
+            .push(AssistantMarkdownActiveInlineSpan {
+                kind,
+                start: self.current.len(),
+            });
+    }
+
+    fn end_inline_span(&mut self, kind: SingleSessionInlineSpanKind) {
+        if self.image_stack.last_mut().is_some() || self.table.is_some() {
+            return;
+        }
+        let Some(index) = self
+            .active_inline_spans
+            .iter()
+            .rposition(|span| span.kind == kind)
+        else {
+            return;
+        };
+        let active = self.active_inline_spans.remove(index);
+        self.push_current_inline_span(active.start, self.current.len(), kind);
+    }
+
+    fn push_current_inline_span(
+        &mut self,
+        start: usize,
+        end: usize,
+        kind: SingleSessionInlineSpanKind,
+    ) {
+        if start < end {
+            self.current_inline_spans
+                .push(SingleSessionInlineSpan { start, end, kind });
+        }
     }
 
     fn push_display_math(&mut self, math: &str) {
@@ -4050,6 +4122,35 @@ impl AssistantMarkdownRenderer {
         }
         self.lines
             .push(styled_line("  $$", SingleSessionLineStyle::Code));
+    }
+
+    fn push_html_block(&mut self, html: &str) {
+        if let Some(image) = self.image_stack.last_mut() {
+            image.alt_text.push_str(html.trim());
+            return;
+        }
+        if let Some(table) = &mut self.table {
+            table.push_text("html ");
+            table.push_text(html.trim());
+            return;
+        }
+        if self.in_code_block {
+            self.push_code_text(html);
+            return;
+        }
+
+        self.flush_current_line();
+        self.ensure_block_gap();
+        for line in html.trim_matches('\n').lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            self.lines.push(styled_line(
+                format!("html │ {trimmed}"),
+                SingleSessionLineStyle::Meta,
+            ));
+        }
     }
 
     fn soft_break(&mut self) {
@@ -4092,10 +4193,19 @@ impl AssistantMarkdownRenderer {
         if !self.pending_line_prefix.is_empty() {
             self.current.push_str(&self.pending_line_prefix);
             self.pending_line_prefix.clear();
+            self.reset_active_inline_span_starts();
             return;
         }
         if self.quote_depth > 0 {
             self.current.push_str(&self.quote_prefix());
+            self.reset_active_inline_span_starts();
+        }
+    }
+
+    fn reset_active_inline_span_starts(&mut self) {
+        let start = self.current.len();
+        for span in &mut self.active_inline_spans {
+            span.start = start;
         }
     }
 
@@ -4129,11 +4239,27 @@ impl AssistantMarkdownRenderer {
     }
 
     fn flush_current_line_as(&mut self, style: SingleSessionLineStyle) {
-        let trimmed = self.current.trim_end();
-        if !trimmed.is_empty() {
-            self.lines.push(styled_line(trimmed, style));
+        let trimmed_len = single_session_trimmed_line_end_preserving_inline_code_whitespace(
+            &self.current,
+            &self.current_inline_spans,
+        );
+        if trimmed_len > 0 {
+            let trimmed = self
+                .current
+                .get(..trimmed_len)
+                .expect("trimmed markdown line end should be a UTF-8 boundary");
+            let inline_spans =
+                take_current_inline_spans(&mut self.current_inline_spans, trimmed_len);
+            self.lines.push(SingleSessionStyledLine::with_inline_spans(
+                trimmed,
+                style,
+                inline_spans,
+            ));
+        } else {
+            self.current_inline_spans.clear();
         }
         self.current.clear();
+        self.active_inline_spans.clear();
         self.line_style_override = None;
     }
 
@@ -4199,6 +4325,7 @@ impl AssistantMarkdownRenderer {
 
     fn render_table(&mut self, table: AssistantMarkdownTable) {
         let header_rows = table.header_rows;
+        let alignments = table.alignments.clone();
         let rows = table.non_empty_rows();
         if rows.is_empty() {
             return;
@@ -4215,12 +4342,12 @@ impl AssistantMarkdownRenderer {
         }
         for (row_index, row) in rows.iter().enumerate() {
             self.lines.push(styled_line(
-                format_table_row(row, &widths),
+                format_table_row(row, &widths, &alignments),
                 SingleSessionLineStyle::AssistantTable,
             ));
             if header_rows > 0 && row_index + 1 == header_rows.min(rows.len()) {
                 self.lines.push(styled_line(
-                    format_table_separator(&widths),
+                    format_table_separator(&widths, &alignments),
                     SingleSessionLineStyle::AssistantTable,
                 ));
             }
@@ -4293,31 +4420,67 @@ fn bullet_for_depth(depth: usize) -> &'static str {
     }
 }
 
-fn format_table_row(row: &[String], widths: &[usize]) -> String {
+fn format_table_row(row: &[String], widths: &[usize], alignments: &[Alignment]) -> String {
     let mut rendered = String::new();
     for (column, width) in widths.iter().enumerate() {
         if column > 0 {
             rendered.push_str(" │ ");
         }
         let cell = row.get(column).map(String::as_str).unwrap_or_default();
-        rendered.push_str(cell);
-        rendered.push_str(&" ".repeat(width.saturating_sub(cell.chars().count())));
+        let alignment = alignments.get(column).copied().unwrap_or(Alignment::None);
+        rendered.push_str(&format_table_cell(cell, *width, alignment));
     }
     rendered.trim_end().to_string()
 }
 
-fn format_table_separator(widths: &[usize]) -> String {
+fn format_table_cell(cell: &str, width: usize, alignment: Alignment) -> String {
+    let padding = width.saturating_sub(cell.chars().count());
+    match alignment {
+        Alignment::Right => format!("{}{cell}", " ".repeat(padding)),
+        Alignment::Center => {
+            let left = padding / 2;
+            let right = padding.saturating_sub(left);
+            format!("{}{cell}{}", " ".repeat(left), " ".repeat(right))
+        }
+        Alignment::Left | Alignment::None => format!("{cell}{}", " ".repeat(padding)),
+    }
+}
+
+fn format_table_separator(widths: &[usize], alignments: &[Alignment]) -> String {
     let mut rendered = String::new();
     for (column, width) in widths.iter().enumerate() {
         if column > 0 {
             rendered.push_str("─┼─");
         }
-        rendered.push_str(&"─".repeat((*width).max(1)));
+        let width = (*width).max(1);
+        match alignments.get(column).copied().unwrap_or(Alignment::None) {
+            Alignment::Left => {
+                rendered.push('╾');
+                rendered.push_str(&"─".repeat(width.saturating_sub(1)));
+            }
+            Alignment::Right => {
+                rendered.push_str(&"─".repeat(width.saturating_sub(1)));
+                rendered.push('╼');
+            }
+            Alignment::Center => {
+                rendered.push('╾');
+                if width > 1 {
+                    rendered.push_str(&"─".repeat(width.saturating_sub(2)));
+                    rendered.push('╼');
+                }
+            }
+            Alignment::None => rendered.push_str(&"─".repeat(width)),
+        }
     }
     rendered
 }
 
-fn append_tool_lines(lines: &mut Vec<SingleSessionStyledLine>, content: &str, active: bool) {
+fn append_tool_lines(
+    lines: &mut Vec<SingleSessionStyledLine>,
+    content: &str,
+    active: bool,
+    active_input: Option<&str>,
+) {
     if content.is_empty() {
         return;
     }
@@ -4345,6 +4508,9 @@ fn append_tool_lines(lines: &mut Vec<SingleSessionStyledLine>, content: &str, ac
         } else if !line.trim().is_empty() {
             widget_lines.push(compact_tool_widget_text(line.trim(), 112));
         }
+    }
+    if let Some(raw_input) = active_input.filter(|input| !input.is_empty()) {
+        metadata_lines.extend(formatted_tool_input_lines(&header.name, raw_input));
     }
 
     lines.push(styled_line(
@@ -4530,7 +4696,6 @@ fn tool_summary_name(content: &str) -> String {
         .next()
         .unwrap_or("tool")
         .trim_start_matches(['▾', '▸'])
-        .trim()
         .split_whitespace()
         .next()
         .filter(|name| !name.is_empty())
@@ -4618,12 +4783,34 @@ fn formatted_tool_input_summary(
         }
         "write" | "edit" | "multiedit" => {
             if let Some(path) = string_value("file_path") {
-                lines.push(format!("file {}", compact_tool_text(path, 132)));
+                let mut summary = compact_tool_text(path, 132);
+                if tool_name == "multiedit"
+                    && let Some(count) = map
+                        .get("edits")
+                        .and_then(serde_json::Value::as_array)
+                        .map(Vec::len)
+                {
+                    summary.push_str(&format!(" ({count} edits)"));
+                }
+                lines.push(summary);
+            }
+        }
+        "glob" => {
+            if let Some(pattern) = string_value("pattern") {
+                lines.push(format!("'{}'", compact_tool_text(pattern, 96)));
             }
         }
         "agentgrep" | "grep" => {
-            if let Some(query) = string_value("query").or_else(|| string_value("pattern")) {
-                lines.push(format!("search {}", compact_tool_text(query, 132)));
+            let query = string_value("query").or_else(|| string_value("pattern"));
+            if tool_name == "agentgrep" {
+                let mode = string_value("mode").unwrap_or("grep");
+                if let Some(query) = query.filter(|query| !query.trim().is_empty()) {
+                    lines.push(format!("{mode} '{}'", compact_tool_text(query, 72)));
+                } else {
+                    lines.push(mode.to_string());
+                }
+            } else if let Some(query) = query {
+                lines.push(format!("'{}'", compact_tool_text(query, 72)));
             }
             if let Some(path) = string_value("path") {
                 lines.push(format!("in {}", compact_tool_text(path, 132)));
@@ -4645,12 +4832,57 @@ fn formatted_tool_input_summary(
                 });
             }
         }
+        "open" | "launch" => {
+            let action = string_value("action").unwrap_or("open");
+            if let Some(target) = string_value("target") {
+                lines.push(format!("{action} {}", compact_tool_text(target, 96)));
+            } else {
+                lines.push(action.to_string());
+            }
+        }
+        "todo" => {
+            if let Some(count) = map
+                .get("todos")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len)
+            {
+                lines.push(format!("{count} items"));
+            }
+        }
+        "memory" | "goal" | "side_panel" | "bg" | "mcp" | "selfdev" | "swarm" => {
+            if let Some(action) = string_value("action") {
+                let target = string_value("title")
+                    .or_else(|| string_value("id"))
+                    .or_else(|| string_value("task_id"))
+                    .or_else(|| string_value("server"))
+                    .or_else(|| string_value("server_name"));
+                lines.push(match target {
+                    Some(target) => format!("{action} {}", compact_tool_text(target, 96)),
+                    None => action.to_string(),
+                });
+            }
+        }
+        "batch" => {
+            if let Some(count) = map
+                .get("tool_calls")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len)
+            {
+                lines.push(format!("{count} calls"));
+            }
+        }
+        "subagent" | "task" => {
+            let desc = string_value("description").unwrap_or("task");
+            let agent_type = string_value("subagent_type").unwrap_or("agent");
+            lines.push(format!(
+                "{} ({})",
+                compact_tool_text(desc, 84),
+                compact_tool_text(agent_type, 28)
+            ));
+        }
         _ => {}
     }
 
-    if let Some(intent) = string_value("intent").filter(|intent| !intent.trim().is_empty()) {
-        lines.insert(0, format!("intent: {}", compact_tool_text(intent, 112)));
-    }
     if bool_value("run_in_background") == Some(true) {
         lines.push("background: yes".to_string());
     }
@@ -4660,13 +4892,14 @@ fn formatted_tool_input_summary(
 
 fn tool_input_key_priority(key: &str) -> usize {
     match key {
-        "intent" => 0,
-        "command" => 1,
-        "file_path" | "path" => 2,
-        "query" => 3,
-        "pattern" | "glob" => 4,
-        "url" => 5,
-        "task" | "prompt" => 6,
+        "command" => 0,
+        "file_path" | "path" => 1,
+        "query" => 2,
+        "pattern" | "glob" => 3,
+        "url" => 4,
+        "action" => 5,
+        "task" | "prompt" | "description" => 6,
+        "intent" => 90,
         _ => 100,
     }
 }
@@ -4928,7 +5161,7 @@ mod tests {
 
     fn rendered_tool_text(content: &str, active: bool) -> Vec<String> {
         let mut lines = Vec::new();
-        append_tool_lines(&mut lines, content, active);
+        append_tool_lines(&mut lines, content, active, None);
         lines.into_iter().map(|line| line.text).collect()
     }
 
@@ -4953,11 +5186,36 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "  ● bash · running · intent: run the desktop tests · $ cargo test -p jcode-desktop · background: yes",
+                "  ● bash · running · $ cargo test -p jcode-desktop · background: yes",
                 "  ╭────────────────────────────────────────────────────────────────────╮",
                 "  │waiting for tool output…                                            │",
                 "  ╰────────────────────────────────────────────────────────────────────╯",
             ]
+        );
+    }
+
+    #[test]
+    fn desktop_tool_metadata_prioritizes_tui_like_summary_over_intent() {
+        assert_eq!(
+            formatted_tool_input_lines(
+                "agentgrep",
+                "{\"intent\":\"Locate rendering code\",\"query\":\"tool call\",\"path\":\"src/tui\"}",
+            ),
+            vec!["grep 'tool call'", "in src/tui"]
+        );
+        assert_eq!(
+            formatted_tool_input_lines(
+                "side_panel",
+                "{\"intent\":\"Show notes\",\"action\":\"write\",\"title\":\"Plan\"}",
+            ),
+            vec!["write Plan"]
+        );
+        assert_eq!(
+            formatted_tool_input_lines(
+                "subagent",
+                "{\"intent\":\"Delegate\",\"description\":\"Inspect parser\",\"subagent_type\":\"agent\"}",
+            ),
+            vec!["Inspect parser (agent)"]
         );
     }
 
@@ -5010,5 +5268,14 @@ mod tests {
             "{\"token\":\"secret\",\"query\":\"tool calls\",\"extra\":42}",
         );
         assert_eq!(lines, vec!["query: tool calls", "extra: 42", "token: ••••"]);
+    }
+
+    #[test]
+    fn unknown_tool_uses_intent_only_as_fallback() {
+        let lines = formatted_tool_input_lines(
+            "custom",
+            "{\"intent\":\"describe action\",\"query\":\"tool calls\"}",
+        );
+        assert_eq!(lines, vec!["query: tool calls", "intent: describe action"]);
     }
 }
