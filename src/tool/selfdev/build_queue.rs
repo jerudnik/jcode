@@ -1,6 +1,52 @@
 use super::*;
 
 impl SelfDevTool {
+    fn shell_single_quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+
+    fn starts_with_shell_cargo_command(command: &str) -> bool {
+        let trimmed = command.trim_start();
+        trimmed == "cargo"
+            || trimmed
+                .strip_prefix("cargo")
+                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+    }
+
+    pub(super) fn selfdev_test_command(
+        repo_dir: &std::path::Path,
+        display_command: String,
+    ) -> SelfDevBuildCommand {
+        let mut actual_command = display_command.clone();
+        if Self::starts_with_shell_cargo_command(&display_command) {
+            let wrapper = repo_dir.join("scripts").join("dev_cargo.sh");
+            let cargo_impl = if wrapper.is_file() {
+                Self::shell_single_quote(&wrapper.to_string_lossy())
+            } else {
+                "$(type -P cargo || true)".to_string()
+            };
+            let repo_arg = Self::shell_single_quote(&repo_dir.to_string_lossy());
+            actual_command = format!(
+                r#"cargo() {{
+  local cargo_bin={cargo_impl};
+  if [[ -n "$cargo_bin" ]]; then
+    "$cargo_bin" "$@"
+  elif command -v nix >/dev/null 2>&1 && [[ -f {repo_arg}/flake.nix ]]; then
+    nix develop {repo_arg} -c cargo "$@"
+  else
+    command cargo "$@"
+  fi
+}}
+{display_command}"#,
+            );
+        }
+        SelfDevBuildCommand {
+            program: "bash".to_string(),
+            args: vec!["-lc".to_string(), actual_command],
+            display: display_command,
+        }
+    }
+
     async fn append_output_line(file: &mut tokio::fs::File, line: impl AsRef<str>) {
         let _ = file.write_all(line.as_ref().as_bytes()).await;
         let _ = file.write_all(b"\n").await;
@@ -736,11 +782,7 @@ impl SelfDevTool {
                 anyhow::anyhow!("Could not find the jcode repository directory for selfdev test")
             })?;
         let requested_source = SelfDevTool::requested_source_state(&repo_dir)?;
-        let shell_command = SelfDevBuildCommand {
-            program: "bash".to_string(),
-            args: vec!["-lc".to_string(), command.clone()],
-            display: command.clone(),
-        };
+        let shell_command = SelfDevTool::selfdev_test_command(&repo_dir, command.clone());
         let dedupe_key = format!(
             "test:{}:{}:{}",
             requested_source.worktree_scope, requested_source.fingerprint, shell_command.display

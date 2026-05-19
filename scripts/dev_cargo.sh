@@ -33,11 +33,6 @@ maybe_enable_sccache() {
     log "keeping existing RUSTC_WRAPPER=${RUSTC_WRAPPER}"
     return
   fi
-  if [[ -n "${CARGO_INCREMENTAL:-}" ]]; then
-    sccache_status="skipped-cargo-incremental-env"
-    log "CARGO_INCREMENTAL is set; using direct rustc because sccache requires it to be unset"
-    return
-  fi
   if command -v sccache >/dev/null 2>&1; then
     sccache --start-server >/dev/null 2>&1 || true
     export RUSTC_WRAPPER=sccache
@@ -372,11 +367,22 @@ cargo_test_has_explicit_filter() {
 }
 
 run_local_cargo() {
+  local cargo_cmd=(cargo)
+  if ! command -v cargo >/dev/null 2>&1; then
+    if command -v nix >/dev/null 2>&1 && [[ -f "$repo_root/flake.nix" ]]; then
+      log "cargo not found; using nix develop fallback"
+      cargo_cmd=(nix develop "$repo_root" -c cargo)
+    else
+      printf 'error: cargo not found and nix develop fallback is unavailable\n' >&2
+      return 127
+    fi
+  fi
+
   if cargo_test_has_explicit_filter "${cargo_argv[@]}" && [[ "${JCODE_DEV_CARGO_ALLOW_ZERO_TESTS:-0}" != "1" ]]; then
     local output_file
     output_file=$(mktemp "${TMPDIR:-/tmp}/jcode-dev-cargo.XXXXXX")
     local status=0
-    cargo "${cargo_argv[@]}" 2>&1 | tee "$output_file" || status=${PIPESTATUS[0]}
+    "${cargo_cmd[@]}" "${cargo_argv[@]}" 2>&1 | tee "$output_file" || status=${PIPESTATUS[0]}
     if [[ "$status" -eq 0 ]] \
       && grep -qE '^running 0 tests$' "$output_file" \
       && ! grep -qE '^running [1-9][0-9]* tests$' "$output_file"; then
@@ -388,7 +394,7 @@ run_local_cargo() {
     return "$status"
   fi
 
-  exec cargo "${cargo_argv[@]}"
+  exec "${cargo_cmd[@]}" "${cargo_argv[@]}"
 }
 
 validate_feature_profile
