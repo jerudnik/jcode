@@ -304,6 +304,42 @@ async fn test_action_queues_command_in_test_mode() {
     );
 }
 
+#[test]
+fn selfdev_test_command_uses_dev_cargo_wrapper_for_cargo_commands() {
+    let repo = create_repo_fixture();
+    let scripts = repo.path().join("scripts");
+    std::fs::create_dir_all(&scripts).expect("scripts dir");
+    std::fs::write(scripts.join("dev_cargo.sh"), "#!/usr/bin/env bash\n").expect("wrapper");
+
+    let command = SelfDevTool::selfdev_test_command(
+        repo.path(),
+        "cargo test -p jcode selfdev_build_command".to_string(),
+    );
+
+    assert_eq!(command.display, "cargo test -p jcode selfdev_build_command");
+    assert_eq!(command.program, "bash");
+    let shell = command.args.join(" ");
+    assert!(shell.contains("dev_cargo.sh"), "got: {shell}");
+    assert!(
+        shell.contains("cargo test -p jcode selfdev_build_command"),
+        "got: {shell}"
+    );
+}
+
+#[test]
+fn selfdev_test_command_falls_back_to_nix_when_plain_cargo_is_unavailable() {
+    let repo = create_repo_fixture();
+    std::fs::write(repo.path().join("flake.nix"), "{}").expect("flake");
+
+    let command = SelfDevTool::selfdev_test_command(repo.path(), " cargo check".to_string());
+
+    assert_eq!(command.display, " cargo check");
+    let shell = command.args.join(" ");
+    assert!(shell.contains("type -P cargo"), "got: {shell}");
+    assert!(shell.contains("nix develop"), "got: {shell}");
+    assert!(shell.contains(" cargo check"), "got: {shell}");
+}
+
 #[tokio::test]
 async fn do_reload_returns_after_ack_in_direct_mode() {
     let request_id = server::send_reload_signal("direct-hash".to_string(), None, true);
