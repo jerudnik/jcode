@@ -2,7 +2,9 @@ mod animation;
 mod desktop_config;
 mod desktop_log;
 mod desktop_prefs;
+mod desktop_rich_text;
 mod desktop_session_events;
+mod desktop_ui_engine;
 mod power_inhibit;
 mod render_helpers;
 mod session_data;
@@ -114,8 +116,9 @@ const SINGLE_SESSION_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 48;
 const SINGLE_SESSION_BODY_TEXT_WINDOW_AFTER_LINES: usize = 96;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 2;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_AFTER_LINES: usize = 4;
-const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(120);
+const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(150);
 const STREAMING_TEXT_FADE_START_OPACITY: f32 = 0.4;
+const STREAMING_TEXT_RISE_START_OFFSET_PIXELS: f32 = 3.5;
 const DESKTOP_ASYNC_JOB_LIMIT: usize = 12;
 const PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY: usize = 1024;
 const PRIMITIVE_VERTEX_BUFFER_SHRINK_RATIO: usize = 4;
@@ -209,17 +212,36 @@ fn desktop_background_wake(
     }
 }
 
-fn streaming_text_fade_opacity_for_elapsed(elapsed: Duration) -> (f32, bool) {
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StreamingTextArrivalStyle {
+    opacity: f32,
+    y_offset_pixels: f32,
+    active: bool,
+}
+
+fn streaming_text_arrival_style_for_elapsed(elapsed: Duration) -> StreamingTextArrivalStyle {
     let progress =
         (elapsed.as_secs_f32() / STREAMING_TEXT_FADE_DURATION.as_secs_f32()).clamp(0.0, 1.0);
     if progress >= 1.0 {
-        return (1.0, false);
+        return StreamingTextArrivalStyle {
+            opacity: 1.0,
+            y_offset_pixels: 0.0,
+            active: false,
+        };
     }
     let eased = animation::ease_out_cubic(progress);
-    (
-        STREAMING_TEXT_FADE_START_OPACITY + (1.0 - STREAMING_TEXT_FADE_START_OPACITY) * eased,
-        true,
-    )
+    StreamingTextArrivalStyle {
+        opacity: STREAMING_TEXT_FADE_START_OPACITY
+            + (1.0 - STREAMING_TEXT_FADE_START_OPACITY) * eased,
+        y_offset_pixels: STREAMING_TEXT_RISE_START_OFFSET_PIXELS * (1.0 - eased),
+        active: true,
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn streaming_text_fade_opacity_for_elapsed(elapsed: Duration) -> (f32, bool) {
+    let style = streaming_text_arrival_style_for_elapsed(elapsed);
+    (style.opacity, style.active)
 }
 const DESKTOP_120FPS_FRAME_BUDGET: Duration = Duration::from_micros(8_333);
 const DESKTOP_PRESENT_STALL_BUDGET: Duration = Duration::from_millis(33);
@@ -860,6 +882,14 @@ async fn run() -> Result<()> {
                         }
                         KeyOutcome::CopyLatestResponse(text) => {
                             copy_text_to_clipboard(&text, "copied latest response", &mut app);
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::CopyText {
+                            text,
+                            success_notice,
+                        } => {
+                            copy_text_to_clipboard(&text, success_notice, &mut app);
                             window.set_title(&app.status_title());
                             window.request_redraw();
                         }
@@ -2862,6 +2892,7 @@ fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
                 viewport,
                 start_line,
                 1.0,
+                0.0,
             ));
         }
         streaming_areas_ms += phase_started.elapsed().as_secs_f64() * 1000.0;
@@ -3901,6 +3932,14 @@ impl DesktopRelaunch {
     }
 
     fn for_app(&self, app: &DesktopApp, binary: PathBuf) -> Self {
+        if let DesktopApp::Workspace(workspace) = app
+            && let Err(error) = desktop_prefs::save_preferences(&workspace.preferences())
+        {
+            desktop_log::error(format_args!(
+                "jcode-desktop: failed to persist workspace state before hot reload: {error:#}"
+            ));
+        }
+
         let mut args = desktop_args_without_resume(&self.args);
         if let Some(session_id) = app.single_session_live_id() {
             args.push(OsString::from("--resume"));
@@ -4317,8 +4356,15 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         Key::Named(NamedKey::Escape) => KeyInput::Escape,
         Key::Named(NamedKey::Space) => KeyInput::Character(" ".to_string()),
         Key::Named(NamedKey::Enter) if modifiers.control_key() => KeyInput::QueueDraft,
-        Key::Named(NamedKey::Enter) if modifiers.shift_key() => KeyInput::Enter,
+        Key::Named(NamedKey::Enter) if modifiers.shift_key() || modifiers.alt_key() => {
+            KeyInput::Enter
+        }
         Key::Named(NamedKey::Enter) => KeyInput::SubmitDraft,
+        Key::Named(NamedKey::Tab) if modifiers.control_key() && modifiers.shift_key() => {
+            KeyInput::CycleModel(-1)
+        }
+        Key::Named(NamedKey::Tab) if modifiers.control_key() => KeyInput::CycleModel(1),
+        Key::Named(NamedKey::Tab) => KeyInput::Autocomplete,
         Key::Named(NamedKey::Backspace) if modifiers.control_key() || modifiers.alt_key() => {
             KeyInput::DeletePreviousWord
         }
@@ -4343,6 +4389,8 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         }
         Key::Named(NamedKey::ArrowLeft) => KeyInput::MoveCursorLeft,
         Key::Named(NamedKey::ArrowRight) => KeyInput::MoveCursorRight,
+        Key::Named(NamedKey::Home) if modifiers.control_key() => KeyInput::ScrollBodyToTop,
+        Key::Named(NamedKey::End) if modifiers.control_key() => KeyInput::ScrollBodyToBottom,
         Key::Named(NamedKey::Home) => KeyInput::MoveToLineStart,
         Key::Named(NamedKey::End) => KeyInput::MoveToLineEnd,
         Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("a") => {
@@ -4359,6 +4407,13 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         }
         Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("u") => {
             KeyInput::DeleteToLineStart
+        }
+        Key::Character(text)
+            if modifiers.control_key()
+                && modifiers.shift_key()
+                && text.eq_ignore_ascii_case("k") =>
+        {
+            KeyInput::CopyLatestCodeBlock
         }
         Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("k") => {
             KeyInput::DeleteToLineEnd
@@ -4381,6 +4436,13 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         }
         Key::Character(text)
             if modifiers.control_key()
+                && modifiers.shift_key()
+                && text.eq_ignore_ascii_case("t") =>
+        {
+            KeyInput::CopyTranscript
+        }
+        Key::Character(text)
+            if modifiers.control_key()
                 && (text.eq_ignore_ascii_case("c") || text.eq_ignore_ascii_case("d")) =>
         {
             KeyInput::CancelGeneration
@@ -4396,6 +4458,20 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         }
         Key::Character(text) if modifiers.alt_key() && text.eq_ignore_ascii_case("v") => {
             KeyInput::AttachClipboardImage
+        }
+        Key::Character(text) if modifiers.control_key() && text == "[" => KeyInput::JumpPrompt(-1),
+        Key::Character(text) if modifiers.control_key() && text == "]" => KeyInput::JumpPrompt(1),
+        Key::Character(text) if modifiers.super_key() && text.eq_ignore_ascii_case("k") => {
+            KeyInput::ScrollBodyLines(1)
+        }
+        Key::Character(text) if modifiers.super_key() && text.eq_ignore_ascii_case("j") => {
+            KeyInput::ScrollBodyLines(-1)
+        }
+        Key::Character(text)
+            if (modifiers.control_key() || modifiers.super_key())
+                && text.eq_ignore_ascii_case("q") =>
+        {
+            KeyInput::ExitApp
         }
         Key::Character(text) if modifiers.control_key() && text == ";" => KeyInput::SpawnPanel,
         Key::Character(text) if modifiers.control_key() && (text == "?" || text == "/") => {
@@ -5916,6 +5992,8 @@ struct Canvas {
     single_session_streaming_fade_started_at: Option<Instant>,
     single_session_streaming_text_key: Option<u64>,
     single_session_streaming_text_start_line: Option<usize>,
+    single_session_streaming_text_end_line: Option<usize>,
+    single_session_streaming_text_opacity_bits: Option<u32>,
     single_session_streaming_text_buffer: Option<Buffer>,
     single_session_body_text_scroll_start: Option<usize>,
     single_session_body_text_window_start: Option<usize>,
@@ -6025,6 +6103,8 @@ impl Canvas {
             single_session_streaming_fade_started_at: None,
             single_session_streaming_text_key: None,
             single_session_streaming_text_start_line: None,
+            single_session_streaming_text_end_line: None,
+            single_session_streaming_text_opacity_bits: None,
             single_session_streaming_text_buffer: None,
             single_session_body_text_scroll_start: None,
             single_session_body_text_window_start: None,
@@ -6074,6 +6154,8 @@ impl Canvas {
         self.single_session_streaming_fade_started_at = None;
         self.single_session_streaming_text_key = None;
         self.single_session_streaming_text_start_line = None;
+        self.single_session_streaming_text_end_line = None;
+        self.single_session_streaming_text_opacity_bits = None;
         self.single_session_streaming_text_buffer = None;
         self.streaming_text_needs_prepare = false;
         self.single_session_body_text_scroll_start = None;
@@ -6268,6 +6350,8 @@ impl Canvas {
         else {
             self.single_session_streaming_text_key = None;
             self.single_session_streaming_text_start_line = None;
+            self.single_session_streaming_text_end_line = None;
+            self.single_session_streaming_text_opacity_bits = None;
             self.single_session_streaming_text_buffer = None;
             self.streaming_text_needs_prepare = false;
             return;
@@ -6287,14 +6371,17 @@ impl Canvas {
         if let Some(font_system) = self.font_system.as_mut() {
             let lines = self.single_session_body_lines[start_line..end_line].to_vec();
             self.single_session_streaming_text_buffer =
-                Some(single_session_body_text_buffer_from_lines(
+                Some(single_session_body_text_buffer_from_lines_with_opacity(
                     font_system,
                     &lines,
                     self.size,
                     app.text_scale(),
+                    1.0,
                 ));
             self.single_session_streaming_text_key = Some(key);
             self.single_session_streaming_text_start_line = Some(start_line);
+            self.single_session_streaming_text_end_line = Some(end_line);
+            self.single_session_streaming_text_opacity_bits = Some(1.0f32.to_bits());
             self.streaming_text_needs_prepare = true;
         }
     }
@@ -6313,17 +6400,63 @@ impl Canvas {
         self.single_session_streaming_response_len = response_len;
     }
 
-    fn single_session_streaming_fade_opacity(&mut self, now: Instant) -> (f32, bool) {
+    fn single_session_streaming_arrival_style(
+        &mut self,
+        now: Instant,
+    ) -> StreamingTextArrivalStyle {
         let Some(started_at) = self.single_session_streaming_fade_started_at else {
-            return (1.0, false);
+            return StreamingTextArrivalStyle {
+                opacity: 1.0,
+                y_offset_pixels: 0.0,
+                active: false,
+            };
         };
-        let (opacity, active) =
-            streaming_text_fade_opacity_for_elapsed(now.saturating_duration_since(started_at));
-        if !active {
+        let style =
+            streaming_text_arrival_style_for_elapsed(now.saturating_duration_since(started_at));
+        if !style.active {
             self.single_session_streaming_fade_started_at = None;
-            return (1.0, false);
+            return StreamingTextArrivalStyle {
+                opacity: 1.0,
+                y_offset_pixels: 0.0,
+                active: false,
+            };
         }
-        (opacity, true)
+        style
+    }
+
+    fn update_single_session_streaming_text_buffer_opacity(
+        &mut self,
+        app: &SingleSessionApp,
+        opacity: f32,
+    ) {
+        let opacity = opacity.clamp(0.0, 1.0);
+        let quantized_opacity = (opacity * 255.0).round() / 255.0;
+        let opacity_bits = quantized_opacity.to_bits();
+        if self.single_session_streaming_text_opacity_bits == Some(opacity_bits) {
+            return;
+        }
+        let (Some(start_line), Some(end_line), Some(font_system)) = (
+            self.single_session_streaming_text_start_line,
+            self.single_session_streaming_text_end_line,
+            self.font_system.as_mut(),
+        ) else {
+            return;
+        };
+        if start_line >= end_line || end_line > self.single_session_body_lines.len() {
+            return;
+        }
+
+        let lines = self.single_session_body_lines[start_line..end_line].to_vec();
+        self.single_session_streaming_text_buffer =
+            Some(single_session_body_text_buffer_from_lines_with_opacity(
+                font_system,
+                &lines,
+                self.size,
+                app.text_scale(),
+                quantized_opacity,
+            ));
+        self.single_session_streaming_text_opacity_bits = Some(opacity_bits);
+        self.streaming_text_needs_prepare = true;
     }
 
     fn single_session_streaming_visible_range(
@@ -6663,6 +6796,8 @@ impl Canvas {
             self.single_session_text_buffers.clear();
             self.single_session_streaming_text_key = None;
             self.single_session_streaming_text_start_line = None;
+            self.single_session_streaming_text_end_line = None;
+            self.single_session_streaming_text_opacity_bits = None;
             self.single_session_streaming_text_buffer = None;
             self.streaming_text_needs_prepare = false;
             self.single_session_body_text_scroll_start = None;
@@ -6686,6 +6821,8 @@ impl Canvas {
             self.single_session_text_buffers.clear();
             self.single_session_streaming_text_key = None;
             self.single_session_streaming_text_start_line = None;
+            self.single_session_streaming_text_end_line = None;
+            self.single_session_streaming_text_opacity_bits = None;
             self.single_session_streaming_text_buffer = None;
             self.streaming_text_needs_prepare = false;
             self.single_session_body_text_scroll_start = None;
@@ -6702,9 +6839,16 @@ impl Canvas {
         frame_profile.checkpoint("text_renderer");
         self.ensure_render_pipeline();
         frame_profile.checkpoint("primitive_pipeline");
-        let (streaming_text_opacity, streaming_text_fade_active) =
-            self.single_session_streaming_fade_opacity(now);
-        if streaming_text_fade_active && self.single_session_streaming_text_buffer.is_some() {
+        let streaming_text_arrival_style = self.single_session_streaming_arrival_style(now);
+        if let DesktopApp::SingleSession(single_session) = app {
+            self.update_single_session_streaming_text_buffer_opacity(
+                single_session,
+                streaming_text_arrival_style.opacity,
+            );
+        }
+        if streaming_text_arrival_style.active
+            && self.single_session_streaming_text_buffer.is_some()
+        {
             self.streaming_text_needs_prepare = true;
         }
         let has_streaming_text_buffer = self.single_session_streaming_text_buffer.is_some();
@@ -6817,7 +6961,8 @@ impl Canvas {
                     self.size,
                     viewport,
                     start_line,
-                    streaming_text_opacity,
+                    streaming_text_arrival_style.opacity,
+                    streaming_text_arrival_style.y_offset_pixels,
                 )]
             } else {
                 Vec::new()
@@ -6875,7 +7020,7 @@ impl Canvas {
                 let animation_active = self.focus_pulse.is_animating()
                     || single_session.has_background_work()
                     || welcome_hero_reveal_active
-                    || streaming_text_fade_active;
+                    || streaming_text_arrival_style.active;
                 let geometry_cache_key = single_session_streaming_primitive_geometry_cache_key(
                     single_session,
                     self.size,

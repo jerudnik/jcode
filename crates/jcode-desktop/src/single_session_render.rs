@@ -1,4 +1,7 @@
 use super::*;
+use crate::desktop_rich_text::{
+    AnsiColor, AnsiStyle, RichLine, RichLineStyle, RichSpanStyle, SyntaxTokenKind,
+};
 use crate::single_session::{
     MODEL_PICKER_INLINE_ROW_LIMIT, SingleSessionInlineSpan, SingleSessionInlineSpanKind,
     SingleSessionTypography, single_session_trimmed_line_end_preserving_inline_code_whitespace,
@@ -758,28 +761,30 @@ fn push_single_session_inline_widget_card(
         return;
     };
 
-    const INLINE_CARD_BACKGROUND_COLOR: [f32; 4] = [0.972, 0.982, 1.000, 0.54];
-    const INLINE_CARD_BORDER_COLOR: [f32; 4] = [0.180, 0.255, 0.430, 0.18];
-    push_rounded_rect(
-        vertices,
-        layout.card,
-        INLINE_WIDGET_CARD_RADIUS,
-        with_alpha(
-            INLINE_CARD_BORDER_COLOR,
-            INLINE_CARD_BORDER_COLOR[3] * progress,
-        ),
-        size,
-    );
-    push_rounded_rect(
-        vertices,
-        inset_rect(layout.card, 1.0),
-        INLINE_WIDGET_CARD_RADIUS - 1.0,
-        with_alpha(
-            INLINE_CARD_BACKGROUND_COLOR,
-            INLINE_CARD_BACKGROUND_COLOR[3] * progress,
-        ),
-        size,
-    );
+    if app.active_inline_widget_uses_card_chrome() {
+        const INLINE_CARD_BACKGROUND_COLOR: [f32; 4] = [0.972, 0.982, 1.000, 0.54];
+        const INLINE_CARD_BORDER_COLOR: [f32; 4] = [0.180, 0.255, 0.430, 0.18];
+        push_rounded_rect(
+            vertices,
+            layout.card,
+            INLINE_WIDGET_CARD_RADIUS,
+            with_alpha(
+                INLINE_CARD_BORDER_COLOR,
+                INLINE_CARD_BORDER_COLOR[3] * progress,
+            ),
+            size,
+        );
+        push_rounded_rect(
+            vertices,
+            inset_rect(layout.card, 1.0),
+            INLINE_WIDGET_CARD_RADIUS - 1.0,
+            with_alpha(
+                INLINE_CARD_BACKGROUND_COLOR,
+                INLINE_CARD_BACKGROUND_COLOR[3] * progress,
+            ),
+            size,
+        );
+    }
 
     if app.model_picker.open
         && !app.model_picker.loading
@@ -4263,6 +4268,15 @@ pub(crate) struct SingleSessionTranscriptCardRun {
     pub(crate) style: SingleSessionLineStyle,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SingleSessionTranscriptCardGeometry {
+    pub(crate) run: SingleSessionTranscriptCardRun,
+    pub(crate) card_rect: Rect,
+    pub(crate) text_left: f32,
+    pub(crate) line_height: f32,
+}
+
 fn push_single_session_transcript_cards(
     vertices: &mut Vec<Vertex>,
     app: &SingleSessionApp,
@@ -4308,6 +4322,37 @@ fn push_single_session_transcript_cards_from_viewport(
         };
         push_rounded_rect(vertices, rect, 7.0, color, size);
     }
+}
+
+#[cfg(test)]
+pub(crate) fn single_session_transcript_card_geometries(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    rendered_body_lines: &[SingleSessionStyledLine],
+) -> Vec<SingleSessionTranscriptCardGeometry> {
+    let typography = single_session_typography_for_scale(app.text_scale());
+    let line_height = typography.body_size * typography.body_line_height;
+    let width = (size.width as f32 - PANEL_TITLE_LEFT_PADDING * 2.0 + 12.0).max(1.0);
+    let body_top = single_session_body_top_for_app(app, size);
+
+    single_session_transcript_card_runs(rendered_body_lines)
+        .into_iter()
+        .filter_map(|run| {
+            single_session_line_card_color(run.style)?;
+            let card_rect = Rect {
+                x: PANEL_TITLE_LEFT_PADDING - 6.0,
+                y: body_top + run.line as f32 * line_height + 3.0,
+                width,
+                height: (run.line_count as f32 * line_height - 6.0).max(1.0),
+            };
+            Some(SingleSessionTranscriptCardGeometry {
+                run,
+                card_rect,
+                text_left: PANEL_TITLE_LEFT_PADDING,
+                line_height,
+            })
+        })
+        .collect()
 }
 
 fn push_single_session_inline_code_cards(
@@ -4781,7 +4826,11 @@ pub(crate) fn single_session_transcript_card_runs(
         }
 
         match &mut current {
-            Some(run) if run.style == styled_line.style && run.line + run.line_count == line => {
+            Some(run)
+                if single_session_line_card_color(run.style)
+                    == single_session_line_card_color(styled_line.style)
+                    && run.line + run.line_count == line =>
+            {
                 run.line_count += 1;
             }
             Some(run) => {
@@ -4811,7 +4860,9 @@ pub(crate) fn single_session_transcript_card_runs(
 fn single_session_line_card_color(style: SingleSessionLineStyle) -> Option<[f32; 4]> {
     match style {
         SingleSessionLineStyle::AssistantHeading => Some(MARKDOWN_HEADING_BACKGROUND_COLOR),
-        SingleSessionLineStyle::Code => Some(CODE_BLOCK_BACKGROUND_COLOR),
+        SingleSessionLineStyle::CodeHeader | SingleSessionLineStyle::Code => {
+            Some(CODE_BLOCK_BACKGROUND_COLOR)
+        }
         SingleSessionLineStyle::AssistantQuote => Some(QUOTE_CARD_BACKGROUND_COLOR),
         SingleSessionLineStyle::AssistantTable => Some(TABLE_CARD_BACKGROUND_COLOR),
         SingleSessionLineStyle::Error => Some(ERROR_CARD_BACKGROUND_COLOR),
@@ -5507,9 +5558,25 @@ pub(crate) fn single_session_body_text_buffer_from_lines(
     size: PhysicalSize<u32>,
     text_scale: f32,
 ) -> Buffer {
+    single_session_body_text_buffer_from_lines_with_opacity(
+        font_system,
+        lines,
+        size,
+        text_scale,
+        1.0,
+    )
+}
+
+pub(crate) fn single_session_body_text_buffer_from_lines_with_opacity(
+    font_system: &mut FontSystem,
+    lines: &[SingleSessionStyledLine],
+    size: PhysicalSize<u32>,
+    text_scale: f32,
+    opacity: f32,
+) -> Buffer {
     let typography = single_session_typography_for_scale(text_scale);
     let content_width = (size.width as f32 - PANEL_TITLE_LEFT_PADDING * 2.0).max(1.0);
-    let mut buffer = single_session_styled_text_buffer(
+    let mut buffer = single_session_styled_text_buffer_with_opacity(
         font_system,
         lines,
         typography.body_size,
@@ -5517,6 +5584,7 @@ pub(crate) fn single_session_body_text_buffer_from_lines(
         content_width,
         (size.height as f32 - 150.0).max(1.0),
         Wrap::None,
+        opacity,
     );
     buffer.shape_until(font_system, i32::MAX);
     buffer
@@ -5836,7 +5904,7 @@ pub(crate) fn single_session_body_char_width() -> f32 {
     single_session_body_char_width_for_scale(1.0)
 }
 
-fn single_session_body_char_width_for_scale(text_scale: f32) -> f32 {
+pub(crate) fn single_session_body_char_width_for_scale(text_scale: f32) -> f32 {
     let typography = single_session_typography_for_scale(text_scale);
     typography.body_size * 0.58
 }
@@ -5990,10 +6058,33 @@ fn single_session_styled_text_buffer(
     height: f32,
     wrap: Wrap,
 ) -> Buffer {
+    single_session_styled_text_buffer_with_opacity(
+        font_system,
+        lines,
+        font_size,
+        line_height,
+        width,
+        height,
+        wrap,
+        1.0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn single_session_styled_text_buffer_with_opacity(
+    font_system: &mut FontSystem,
+    lines: &[SingleSessionStyledLine],
+    font_size: f32,
+    line_height: f32,
+    width: f32,
+    height: f32,
+    wrap: Wrap,
+    opacity: f32,
+) -> Buffer {
     let mut buffer = Buffer::new(font_system, Metrics::new(font_size, line_height));
     buffer.set_size(font_system, width, height);
     buffer.set_wrap(font_system, wrap);
-    let segments = single_session_styled_text_segments(lines);
+    let segments = single_session_styled_text_segments_with_opacity(lines, opacity);
     let shaping = if segments
         .iter()
         .any(|(text, _)| text_needs_advanced_shaping(text))
@@ -6040,8 +6131,17 @@ fn char_needs_advanced_shaping(ch: char) -> bool {
     )
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn single_session_styled_text_segments(
     lines: &[SingleSessionStyledLine],
+) -> Vec<(&str, Attrs<'static>)> {
+    single_session_styled_text_segments_with_opacity(lines, 1.0)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn single_session_styled_text_segments_with_opacity(
+    lines: &[SingleSessionStyledLine],
+    opacity: f32,
 ) -> Vec<(&str, Attrs<'static>)> {
     let mut segments = Vec::new();
     let total_user_turns = lines
@@ -6079,7 +6179,27 @@ pub(crate) fn single_session_styled_text_segments(
             single_session_style_attrs(SingleSessionLineStyle::Blank),
         ));
     }
+    let opacity = opacity.clamp(0.0, 1.0);
+    if opacity < 0.999 {
+        for (_, attrs) in &mut segments {
+            *attrs = text_attrs_with_opacity(*attrs, opacity);
+        }
+    }
     segments
+}
+
+fn text_attrs_with_opacity(mut attrs: Attrs<'static>, opacity: f32) -> Attrs<'static> {
+    let Some(color) = attrs.color_opt else {
+        return attrs;
+    };
+    let (r, g, b, a) = color.as_rgba_tuple();
+    attrs.color_opt = Some(TextColor::rgba(
+        r,
+        g,
+        b,
+        (a as f32 * opacity).round().clamp(0.0, 255.0) as u8,
+    ));
+    attrs
 }
 
 fn push_assistant_markdown_inline_segments<'a>(
@@ -6240,6 +6360,161 @@ fn assistant_inline_markdown_run_attrs(
         attrs = attrs.style(glyphon::Style::Italic);
     }
     attrs
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn rich_line_text_segments(line: &RichLine) -> Vec<(&str, Attrs<'static>)> {
+    let base_style = rich_line_style_to_single_session_style(line.style);
+    let valid_spans = line
+        .spans
+        .iter()
+        .filter(|span| {
+            span.start < span.end
+                && span.end <= line.text.len()
+                && line.text.is_char_boundary(span.start)
+                && line.text.is_char_boundary(span.end)
+        })
+        .collect::<Vec<_>>();
+    if valid_spans.is_empty() {
+        return vec![(
+            &line.text,
+            single_session_style_attrs_for_text(base_style, &line.text),
+        )];
+    }
+
+    let mut boundaries = Vec::with_capacity(valid_spans.len().saturating_mul(2) + 2);
+    boundaries.push(0);
+    boundaries.push(line.text.len());
+    for span in &valid_spans {
+        boundaries.push(span.start);
+        boundaries.push(span.end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let mut segments = Vec::new();
+    for window in boundaries.windows(2) {
+        let start = window[0];
+        let end = window[1];
+        if start >= end {
+            continue;
+        }
+        let text = &line.text[start..end];
+        let active = valid_spans
+            .iter()
+            .filter_map(|span| (span.start <= start && end <= span.end).then_some(&span.style))
+            .collect::<Vec<_>>();
+        segments.push((text, rich_span_attrs(base_style, text, &active)));
+    }
+    segments
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn rich_line_style_to_single_session_style(
+    style: RichLineStyle,
+) -> SingleSessionLineStyle {
+    match style {
+        RichLineStyle::User => SingleSessionLineStyle::User,
+        RichLineStyle::Assistant => SingleSessionLineStyle::Assistant,
+        RichLineStyle::AssistantHeading => SingleSessionLineStyle::AssistantHeading,
+        RichLineStyle::AssistantQuote => SingleSessionLineStyle::AssistantQuote,
+        RichLineStyle::AssistantTable => SingleSessionLineStyle::AssistantTable,
+        RichLineStyle::CodeHeader => SingleSessionLineStyle::CodeHeader,
+        RichLineStyle::Code => SingleSessionLineStyle::Code,
+        RichLineStyle::ToolHeader | RichLineStyle::ToolOutput | RichLineStyle::ToolMetadata => {
+            SingleSessionLineStyle::Tool
+        }
+        RichLineStyle::System => SingleSessionLineStyle::Status,
+        RichLineStyle::Meta | RichLineStyle::MediaPlaceholder => SingleSessionLineStyle::Meta,
+    }
+}
+
+fn rich_span_attrs(
+    base_style: SingleSessionLineStyle,
+    text: &str,
+    styles: &[&RichSpanStyle],
+) -> Attrs<'static> {
+    let mut attrs = single_session_style_attrs_for_text(base_style, text);
+    for style in styles {
+        match style {
+            RichSpanStyle::InlineCode => {
+                attrs = single_session_style_attrs(SingleSessionLineStyle::Code);
+            }
+            RichSpanStyle::Link { .. } => {
+                attrs = attrs.color(single_session_line_color(
+                    SingleSessionLineStyle::AssistantLink,
+                ));
+            }
+            RichSpanStyle::Emphasis => {
+                attrs = attrs.style(glyphon::Style::Italic);
+            }
+            RichSpanStyle::Strong => {
+                attrs = attrs.weight(glyphon::Weight::BOLD);
+            }
+            RichSpanStyle::Strike => {
+                attrs = attrs.color(text_color(MARKDOWN_STRIKE_TEXT_COLOR));
+            }
+            RichSpanStyle::Syntax(kind) => {
+                attrs = attrs.color(text_color(rich_syntax_token_color(*kind)));
+            }
+            RichSpanStyle::Ansi(style) => {
+                if let Some(color) = rich_ansi_foreground(*style) {
+                    attrs = attrs.color(text_color(color));
+                }
+                if style.bold {
+                    attrs = attrs.weight(glyphon::Weight::BOLD);
+                }
+                if style.italic {
+                    attrs = attrs.style(glyphon::Style::Italic);
+                }
+            }
+            RichSpanStyle::SearchMatch => {
+                attrs = attrs
+                    .color(text_color(STATUS_TEXT_ACCENT_COLOR))
+                    .weight(glyphon::Weight::BOLD);
+            }
+        }
+    }
+    attrs
+}
+
+fn rich_syntax_token_color(kind: SyntaxTokenKind) -> [f32; 4] {
+    match kind {
+        SyntaxTokenKind::Keyword => [0.350, 0.145, 0.640, 1.0],
+        SyntaxTokenKind::String => [0.020, 0.360, 0.190, 1.0],
+        SyntaxTokenKind::Number => [0.490, 0.250, 0.035, 1.0],
+        SyntaxTokenKind::Comment => [0.320, 0.350, 0.420, 0.95],
+        SyntaxTokenKind::Function => [0.000, 0.255, 0.430, 1.0],
+        SyntaxTokenKind::Type => [0.225, 0.215, 0.620, 1.0],
+        SyntaxTokenKind::Punctuation => [0.270, 0.290, 0.340, 0.98],
+        SyntaxTokenKind::Plain => CODE_TEXT_COLOR,
+    }
+}
+
+fn rich_ansi_foreground(style: AnsiStyle) -> Option<[f32; 4]> {
+    let color = if style.inverse {
+        style.background.or(style.foreground)
+    } else {
+        style.foreground
+    }?;
+    Some(match color {
+        AnsiColor::Black => [0.040, 0.045, 0.055, 1.0],
+        AnsiColor::Red => [0.560, 0.070, 0.095, 1.0],
+        AnsiColor::Green => [0.035, 0.360, 0.220, 1.0],
+        AnsiColor::Yellow => [0.520, 0.360, 0.055, 1.0],
+        AnsiColor::Blue => [0.045, 0.265, 0.640, 1.0],
+        AnsiColor::Magenta => [0.410, 0.145, 0.580, 1.0],
+        AnsiColor::Cyan => [0.000, 0.330, 0.430, 1.0],
+        AnsiColor::White => [0.700, 0.720, 0.770, 1.0],
+        AnsiColor::BrightBlack => [0.320, 0.345, 0.405, 1.0],
+        AnsiColor::BrightRed => [0.780, 0.110, 0.145, 1.0],
+        AnsiColor::BrightGreen => [0.025, 0.500, 0.275, 1.0],
+        AnsiColor::BrightYellow => [0.700, 0.500, 0.080, 1.0],
+        AnsiColor::BrightBlue => [0.090, 0.360, 0.850, 1.0],
+        AnsiColor::BrightMagenta => [0.560, 0.190, 0.760, 1.0],
+        AnsiColor::BrightCyan => [0.000, 0.460, 0.580, 1.0],
+        AnsiColor::BrightWhite => [0.900, 0.915, 0.945, 1.0],
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -6609,6 +6884,7 @@ fn single_session_line_rgba(style: SingleSessionLineStyle) -> [f32; 4] {
         SingleSessionLineStyle::AssistantQuote => ASSISTANT_QUOTE_TEXT_COLOR,
         SingleSessionLineStyle::AssistantTable => ASSISTANT_TABLE_TEXT_COLOR,
         SingleSessionLineStyle::AssistantLink => ASSISTANT_LINK_TEXT_COLOR,
+        SingleSessionLineStyle::CodeHeader => META_TEXT_COLOR,
         SingleSessionLineStyle::Code => CODE_TEXT_COLOR,
         SingleSessionLineStyle::User => USER_TEXT_COLOR,
         SingleSessionLineStyle::UserContinuation => USER_CONTINUATION_TEXT_COLOR,
@@ -6766,6 +7042,7 @@ pub(crate) fn single_session_streaming_text_area_for_cached_body_viewport<'a>(
     viewport: SingleSessionBodyViewport,
     streaming_start_line: usize,
     opacity: f32,
+    y_offset_pixels: f32,
 ) -> TextArea<'a> {
     let typography = single_session_typography_for_scale(app.text_scale());
     let line_height = typography.body_size * typography.body_line_height;
@@ -6774,7 +7051,8 @@ pub(crate) fn single_session_streaming_text_area_for_cached_body_viewport<'a>(
     let body_top = single_session_body_top_for_app(app, size);
     let top = body_top
         + viewport.top_offset_pixels
-        + streaming_start_line.saturating_sub(viewport.start_line) as f32 * line_height;
+        + streaming_start_line.saturating_sub(viewport.start_line) as f32 * line_height
+        + y_offset_pixels.max(0.0);
     TextArea {
         buffer,
         left,

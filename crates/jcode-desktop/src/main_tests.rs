@@ -1,6 +1,7 @@
 use super::animation::{FOCUS_PULSE_DURATION, VIEWPORT_ANIMATION_DURATION};
 use super::single_session::*;
 use super::*;
+use std::sync::Mutex;
 
 #[test]
 fn desktop_frame_profile_is_opt_in_and_recognizes_trace_modes() {
@@ -92,6 +93,64 @@ fn desktop_hot_reload_drops_resume_when_current_app_is_fresh() {
     let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
 
     assert_eq!(updated.args, vec![OsString::from("--fullscreen")]);
+}
+
+#[test]
+fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    let Ok(_guard) = ENV_LOCK.lock() else {
+        anyhow::bail!("desktop hot reload env lock poisoned");
+    };
+    let temp = unique_desktop_test_dir("desktop-hot-reload-workspace-state")?;
+    let state_path = temp.join("desktop-state.json");
+    unsafe {
+        std::env::set_var("JCODE_DESKTOP_STATE", &state_path);
+    }
+
+    let relaunch = DesktopRelaunch {
+        binary: PathBuf::from("/old/jcode-desktop"),
+        args: vec![OsString::from("--workspace")],
+    };
+    let cards = vec![
+        workspace::SessionCard {
+            session_id: "session-a".to_string(),
+            title: "alpha".to_string(),
+            subtitle: "active".to_string(),
+            detail: "1 message".to_string(),
+            preview_lines: vec![],
+            detail_lines: vec![],
+        },
+        workspace::SessionCard {
+            session_id: "session-b".to_string(),
+            title: "bravo".to_string(),
+            subtitle: "active".to_string(),
+            detail: "2 messages".to_string(),
+            preview_lines: vec![],
+            detail_lines: vec![],
+        },
+    ];
+    let mut workspace = Workspace::from_session_cards(cards);
+    workspace.apply_preferences(workspace::DesktopPreferences {
+        panel_size: PanelSizePreset::ThreeQuarter,
+        focused_session_id: Some("session-b".to_string()),
+        workspace_lane: 0,
+        space_hold_toggle_ms: 333,
+    });
+    let app = DesktopApp::Workspace(workspace);
+
+    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
+
+    assert_eq!(updated.args, vec![OsString::from("--workspace")]);
+    let saved = desktop_prefs::load_preferences()?.expect("workspace preferences saved");
+    assert_eq!(saved.focused_session_id.as_deref(), Some("session-b"));
+    assert_eq!(saved.panel_size, PanelSizePreset::ThreeQuarter);
+    assert_eq!(saved.space_hold_toggle_ms, 333);
+
+    unsafe {
+        std::env::remove_var("JCODE_DESKTOP_STATE");
+    }
+    std::fs::remove_dir_all(temp)?;
+    Ok(())
 }
 
 #[test]
@@ -655,6 +714,9 @@ fn single_session_streaming_response_does_not_draw_line_reveal_shimmer() {
 
 #[test]
 fn single_session_streaming_text_fades_in() {
+    let start_style = streaming_text_arrival_style_for_elapsed(Duration::from_millis(0));
+    let mid_style = streaming_text_arrival_style_for_elapsed(STREAMING_TEXT_FADE_DURATION / 2);
+    let end_style = streaming_text_arrival_style_for_elapsed(STREAMING_TEXT_FADE_DURATION);
     let (start_opacity, start_active) =
         streaming_text_fade_opacity_for_elapsed(Duration::from_millis(0));
     let (mid_opacity, mid_active) =
@@ -669,6 +731,34 @@ fn single_session_streaming_text_fades_in() {
     assert!(mid_opacity > start_opacity);
     assert!(mid_opacity < 1.0);
     assert!((end_opacity - 1.0).abs() < f32::EPSILON);
+    assert_eq!(start_style.opacity, start_opacity);
+    assert_eq!(
+        start_style.y_offset_pixels,
+        STREAMING_TEXT_RISE_START_OFFSET_PIXELS
+    );
+    assert!(mid_style.y_offset_pixels < start_style.y_offset_pixels);
+    assert!(mid_style.y_offset_pixels > 0.0);
+    assert_eq!(end_style.y_offset_pixels, 0.0);
+    assert!(!end_style.active);
+}
+
+#[test]
+fn single_session_streaming_text_opacity_scales_rich_text_segments() {
+    let lines = vec![SingleSessionStyledLine::new(
+        "streaming answer",
+        SingleSessionLineStyle::Assistant,
+    )];
+    let segments = single_session_styled_text_segments_with_opacity(&lines, 0.5);
+    let (_, attrs) = segments
+        .iter()
+        .find(|(text, _)| *text == "streaming answer")
+        .expect("streaming assistant segment should be present");
+    let (_, _, _, alpha) = attrs
+        .color_opt
+        .expect("assistant segment should have an explicit color")
+        .as_rgba_tuple();
+
+    assert_eq!(alpha, 128);
 }
 
 #[test]
@@ -720,6 +810,136 @@ fn single_session_cursor_editing_inserts_and_deletes_in_middle() {
 
     app.handle_key(KeyInput::DeleteNextChar);
     assert_eq!(app.draft, "hell");
+}
+
+#[test]
+fn single_session_escape_clears_idle_draft_and_undo_restores() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("keep this".to_string()));
+
+    assert_eq!(app.handle_key(KeyInput::Escape), KeyOutcome::Redraw);
+    assert!(app.draft.is_empty());
+    assert_eq!(app.draft_cursor, 0);
+
+    assert_eq!(app.handle_key(KeyInput::UndoInput), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "keep this");
+    assert_eq!(app.draft_cursor, "keep this".len());
+}
+
+#[test]
+fn single_session_tab_autocompletes_desktop_slash_command() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/cop".to_string()));
+
+    assert_eq!(app.handle_key(KeyInput::Autocomplete), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/copy");
+    assert_eq!(app.draft_cursor, "/copy".len());
+
+    assert_eq!(app.handle_key(KeyInput::UndoInput), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/cop");
+}
+
+#[test]
+fn single_session_slash_suggestions_filter_select_and_submit() {
+    let mut app = SingleSessionApp::new(None);
+
+    assert_eq!(
+        app.handle_key(KeyInput::Character("/c".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    assert_eq!(
+        app.active_inline_widget_mode(),
+        Some(InlineWidgetMode::ReadOnly)
+    );
+    assert!(app.should_draw_composer_caret());
+    assert!(app.active_inline_widget_uses_card_chrome());
+
+    let suggestions = app.inline_widget_styled_lines();
+    let suggestion_text = suggestions
+        .iter()
+        .map(|line| line.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(suggestion_text.contains("slash command suggestions"));
+    assert!(suggestion_text.contains("/clear"));
+    assert!(suggestion_text.contains("/copy [latest|code|transcript]"));
+    assert!(!suggestion_text.contains("/help"));
+    assert!(suggestions.iter().any(|line| {
+        line.style == SingleSessionLineStyle::OverlaySelection && line.text.contains("/clear")
+    }));
+
+    assert_eq!(
+        app.handle_key(KeyInput::ModelPickerMove(1)),
+        KeyOutcome::Redraw
+    );
+    let suggestions = app.inline_widget_styled_lines();
+    assert!(suggestions.iter().any(|line| {
+        line.style == SingleSessionLineStyle::OverlaySelection && line.text.contains("/copy")
+    }));
+
+    assert_eq!(app.handle_key(KeyInput::SubmitDraft), KeyOutcome::Redraw);
+    assert!(app.draft.is_empty());
+    assert_eq!(app.status.as_deref(), Some("no assistant response to copy"));
+    assert!(app.messages.is_empty());
+}
+
+#[test]
+fn single_session_slash_suggestions_escape_dismisses_until_draft_changes() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/m".to_string()));
+
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    assert_eq!(app.handle_key(KeyInput::Escape), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/m");
+    assert_eq!(app.active_inline_widget(), None);
+
+    assert_eq!(
+        app.handle_key(KeyInput::Character("o".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.draft, "/mo");
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+}
+
+#[test]
+fn single_session_slash_suggestions_use_inline_card_geometry() {
+    let size = PhysicalSize::new(1000, 720);
+    let mut base = SingleSessionApp::new(Some(test_session_card(
+        "slash_suggestions_geometry",
+        "Slash Geometry",
+        "ready",
+    )));
+
+    assert_eq!(
+        base.handle_key(KeyInput::Character("/c".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(
+        base.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    assert!(base.active_inline_widget_uses_card_chrome());
+    let suggestion_vertices = build_single_session_vertices(&base, size, 0.0, 0);
+    assert!(!suggestion_vertices.is_empty());
+
+    assert_eq!(base.handle_key(KeyInput::HotkeyHelp), KeyOutcome::Redraw);
+    assert_eq!(
+        base.active_inline_widget(),
+        Some(InlineWidgetKind::HotkeyHelp)
+    );
+    assert!(base.active_inline_widget_uses_card_chrome());
+    let help_vertices = build_single_session_vertices(&base, size, 0.0, 0);
+    assert!(help_vertices.len() >= suggestion_vertices.len());
 }
 
 #[test]
@@ -995,6 +1215,78 @@ fn single_session_slash_copy_reports_missing_response_locally() {
     assert!(app.messages.is_empty());
     assert!(app.draft.is_empty());
     assert_eq!(app.status.as_deref(), Some("no assistant response to copy"));
+}
+
+#[test]
+fn single_session_rich_copy_search_and_media_wiring_are_available() {
+    let mut app = SingleSessionApp::new(None);
+    app.messages.push(SingleSessionMessage::assistant(
+        "# Result\n\nAlpha text.\n\n```rust\nfn main() { let value = 42; }\n```",
+    ));
+    app.messages.push(SingleSessionMessage::tool(
+        "▾ shell running: cargo test\n  input: cargo test\n  \\x1b[32mok\\x1b[0m",
+    ));
+
+    app.handle_key(KeyInput::Character("/copy code".to_string()));
+    assert_eq!(
+        app.handle_key(KeyInput::SubmitDraft),
+        KeyOutcome::CopyText {
+            text: "fn main() { let value = 42; }\n".to_string(),
+            success_notice: "copied latest code block",
+        }
+    );
+
+    app.handle_key(KeyInput::Character("/search alpha".to_string()));
+    assert_eq!(app.handle_key(KeyInput::SubmitDraft), KeyOutcome::Redraw);
+    assert_eq!(app.status.as_deref(), Some("1 match(es) for \"alpha\""));
+
+    app.pending_images
+        .push(("image/png".to_string(), "base64-data".to_string()));
+    app.handle_key(KeyInput::Character("attached".to_string()));
+    assert!(matches!(
+        app.handle_key(KeyInput::SubmitDraft),
+        KeyOutcome::StartFreshSession { .. }
+    ));
+    let document = app.rich_transcript_document();
+    assert!(document.blocks.iter().any(|block| matches!(
+        block.kind,
+        desktop_rich_text::TranscriptBlockKind::ImageAttachment { .. }
+    )));
+    assert!(
+        document
+            .jumps
+            .iter()
+            .any(|jump| jump.kind == desktop_rich_text::TranscriptJumpKind::Media)
+    );
+}
+
+#[test]
+fn single_session_rich_transcript_virtualizes_and_copies_transcript() {
+    let mut app = SingleSessionApp::new(None);
+    for index in 0..120 {
+        app.messages.push(SingleSessionMessage::assistant(format!(
+            "line {index}\n\n```json\n{{\"index\": {index}}}\n```"
+        )));
+    }
+
+    let document = app.rich_transcript_document();
+    let window =
+        desktop_rich_text::VirtualLineWindow::for_viewport(document.total_lines, 50, 10, 3);
+    assert!(window.start < window.end);
+    assert!(window.end - window.start <= 16);
+
+    app.handle_key(KeyInput::Character("/copy transcript".to_string()));
+    match app.handle_key(KeyInput::SubmitDraft) {
+        KeyOutcome::CopyText {
+            text,
+            success_notice,
+        } => {
+            assert_eq!(success_notice, "copied transcript");
+            assert!(text.contains("line 0"));
+            assert!(text.contains("line 119"));
+        }
+        other => panic!("expected transcript copy, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1573,6 +1865,75 @@ fn desktop_maps_terminal_editing_shortcuts_from_tui() {
         to_key_input(&Key::Character("d".into()), ModifiersState::CONTROL),
         KeyInput::CancelGeneration
     );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Enter), ModifiersState::ALT),
+        KeyInput::Enter
+    );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Tab), ModifiersState::empty()),
+        KeyInput::Autocomplete
+    );
+}
+
+#[test]
+fn desktop_maps_remaining_global_shortcuts() {
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Tab), ModifiersState::CONTROL),
+        KeyInput::CycleModel(1)
+    );
+    assert_eq!(
+        to_key_input(
+            &Key::Named(NamedKey::Tab),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ),
+        KeyInput::CycleModel(-1)
+    );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Home), ModifiersState::CONTROL),
+        KeyInput::ScrollBodyToTop
+    );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::End), ModifiersState::CONTROL),
+        KeyInput::ScrollBodyToBottom
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("k".into()), ModifiersState::SUPER),
+        KeyInput::ScrollBodyLines(1)
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("j".into()), ModifiersState::SUPER),
+        KeyInput::ScrollBodyLines(-1)
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("[".into()), ModifiersState::CONTROL),
+        KeyInput::JumpPrompt(-1)
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("]".into()), ModifiersState::CONTROL),
+        KeyInput::JumpPrompt(1)
+    );
+    assert_eq!(
+        to_key_input(
+            &Key::Character("k".into()),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ),
+        KeyInput::CopyLatestCodeBlock
+    );
+    assert_eq!(
+        to_key_input(
+            &Key::Character("t".into()),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ),
+        KeyInput::CopyTranscript
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("q".into()), ModifiersState::CONTROL),
+        KeyInput::ExitApp
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("q".into()), ModifiersState::SUPER),
+        KeyInput::ExitApp
+    );
 }
 
 #[test]
@@ -1927,7 +2288,7 @@ fn single_session_body_styled_lines_follow_roles_and_overlays() {
     );
     assert_eq!(
         style_for_text(&lines, "  rust"),
-        Some(SingleSessionLineStyle::Code)
+        Some(SingleSessionLineStyle::CodeHeader)
     );
     assert_eq!(
         style_for_text(&lines, "  fn main() {}"),
@@ -2019,7 +2380,9 @@ fn glyphon_body_buffer_uses_line_style_colors() {
     );
     assert_eq!(
         first_glyph_color_for_text(body, "  rust"),
-        Some(single_session_line_color(SingleSessionLineStyle::Code))
+        Some(single_session_line_color(
+            SingleSessionLineStyle::CodeHeader
+        ))
     );
     assert_eq!(
         first_glyph_color_for_text(body, "  bash done"),
@@ -2078,6 +2441,68 @@ fn assistant_inline_code_uses_code_text_attrs_inside_prose() {
             ))
         );
     }
+}
+
+#[test]
+fn rich_transcript_line_segments_apply_syntax_ansi_and_search_attrs() {
+    let line = desktop_rich_text::RichLine {
+        block_id: desktop_rich_text::TranscriptBlockId("block".to_string()),
+        text: "fn main ok".to_string(),
+        style: desktop_rich_text::RichLineStyle::Code,
+        spans: vec![
+            desktop_rich_text::RichTextSpan {
+                start: 0,
+                end: 2,
+                style: desktop_rich_text::RichSpanStyle::Syntax(
+                    desktop_rich_text::SyntaxTokenKind::Keyword,
+                ),
+            },
+            desktop_rich_text::RichTextSpan {
+                start: 3,
+                end: 7,
+                style: desktop_rich_text::RichSpanStyle::SearchMatch,
+            },
+            desktop_rich_text::RichTextSpan {
+                start: 8,
+                end: 10,
+                style: desktop_rich_text::RichSpanStyle::Ansi(desktop_rich_text::AnsiStyle {
+                    foreground: Some(desktop_rich_text::AnsiColor::Green),
+                    bold: true,
+                    ..desktop_rich_text::AnsiStyle::default()
+                }),
+            },
+        ],
+        semantic_role: Some(desktop_rich_text::RichSemanticRole::CodeBlock),
+    };
+
+    let segments = rich_line_text_segments(&line);
+
+    assert!(
+        segments.contains(&(
+            "fn",
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                .color(text_color([0.350, 0.145, 0.640, 1.0]))
+        ))
+    );
+    assert!(
+        segments.contains(&(
+            "main",
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                .color(text_color(STATUS_TEXT_ACCENT_COLOR))
+                .weight(glyphon::Weight::BOLD)
+        ))
+    );
+    assert!(
+        segments.contains(&(
+            "ok",
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                .color(text_color([0.035, 0.360, 0.220, 1.0]))
+                .weight(glyphon::Weight::BOLD)
+        ))
+    );
 }
 
 #[test]
@@ -2498,10 +2923,25 @@ fn single_session_transcript_card_runs_group_card_styles() {
 
     let code = runs
         .iter()
-        .find(|run| run.style == SingleSessionLineStyle::Code)
+        .find(|run| run.style == SingleSessionLineStyle::CodeHeader)
         .expect("code block should have a card run");
     assert_eq!(code.line_count, 2);
     assert_eq!(lines[code.line].text, "  rust");
+    assert_eq!(lines[code.line].style, SingleSessionLineStyle::CodeHeader);
+    assert_eq!(lines[code.line + 1].style, SingleSessionLineStyle::Code);
+
+    // The language chip participates in the same code-card background run, but
+    // is semantically separate from code content so it can be placed/styled as a
+    // header instead of being treated as the first source line.
+    assert_eq!(
+        runs.iter()
+            .filter(|run| {
+                run.style == SingleSessionLineStyle::CodeHeader
+                    || run.style == SingleSessionLineStyle::Code
+            })
+            .count(),
+        1
+    );
 
     // Tool rows are neutral inline transcript rows, not orange card runs.
     assert!(
@@ -2516,6 +2956,288 @@ fn single_session_transcript_card_runs_group_card_styles() {
         .expect("error line should have a card run");
     assert_eq!(error.line_count, 1);
     assert_eq!(lines[error.line].text, "error: boom");
+}
+
+#[test]
+fn code_block_header_placement_is_stable_across_sizes_and_text_scales() {
+    let markdown = "before\n\n```text\njcode-desktop native window input uses winit and renders via wgpu\n  indented code stays code\n```\n\nafter";
+    let sizes = [
+        PhysicalSize::new(520, 420),
+        PhysicalSize::new(900, 640),
+        PhysicalSize::new(1440, 900),
+    ];
+    let scale_steps: [i8; 3] = [-2, 0, 3];
+
+    for size in sizes {
+        for scale_step in scale_steps {
+            let mut app = SingleSessionApp::new(None);
+            for _ in 0..scale_step.unsigned_abs() {
+                app.handle_key(workspace::KeyInput::AdjustTextScale(scale_step.signum()));
+            }
+            app.messages.push(SingleSessionMessage::assistant(markdown));
+
+            let lines = single_session_rendered_body_lines_for_tick(&app, size, 0);
+            let header_index = lines
+                .iter()
+                .position(|line| line.text == "  text")
+                .unwrap_or_else(|| {
+                    panic!("missing code header at size {size:?}, scale {scale_step}")
+                });
+
+            assert_eq!(
+                lines[header_index].style,
+                SingleSessionLineStyle::CodeHeader
+            );
+            assert!(
+                lines[header_index + 1..]
+                    .iter()
+                    .take_while(|line| line.style == SingleSessionLineStyle::Code)
+                    .any(|line| line.text.starts_with("  jcode-desktop")),
+                "first code content line should immediately follow header as code at size {size:?}, scale {scale_step}"
+            );
+
+            let runs = single_session_transcript_card_runs(&lines);
+            let header_run = runs
+                .iter()
+                .find(|run| run.line <= header_index && header_index < run.line + run.line_count)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "header is not covered by a code card at size {size:?}, scale {scale_step}"
+                    )
+                });
+            assert_eq!(header_run.style, SingleSessionLineStyle::CodeHeader);
+            assert!(
+                header_run.line_count >= 3,
+                "language header and code content should be one contiguous card at size {size:?}, scale {scale_step}"
+            );
+            assert!(
+                lines[header_run.line + 1..header_run.line + header_run.line_count]
+                    .iter()
+                    .all(|line| line.style == SingleSessionLineStyle::Code),
+                "only the first line in the card run may be the language header at size {size:?}, scale {scale_step}"
+            );
+
+            let geometry = single_session_transcript_card_geometries(&app, size, &lines)
+                .into_iter()
+                .find(|geometry| geometry.run == *header_run)
+                .unwrap_or_else(|| {
+                    panic!("missing code card geometry at size {size:?}, scale {scale_step}")
+                });
+            let typography = single_session_typography_for_scale(app.text_scale());
+            let char_width = single_session_body_char_width_for_scale(app.text_scale());
+            let card_bottom = geometry.card_rect.y + geometry.card_rect.height;
+            let text_glyph_left = geometry.text_left + 2.0 * char_width;
+            assert!(
+                geometry.card_rect.x <= text_glyph_left,
+                "code text must start inside the card at size {size:?}, scale {scale_step}"
+            );
+            assert!(
+                text_glyph_left - geometry.card_rect.x >= 6.0,
+                "code text must keep visible left padding inside the card at size {size:?}, scale {scale_step}"
+            );
+
+            let mut previous_glyph_bottom = None;
+            for line_index in header_run.line..header_run.line + header_run.line_count {
+                let row_offset = line_index - header_run.line;
+                let row_top = geometry.card_rect.y - 3.0 + row_offset as f32 * geometry.line_height;
+                let glyph_top = row_top + (geometry.line_height - typography.body_size) * 0.5;
+                let glyph_bottom = glyph_top + typography.body_size;
+                assert!(
+                    glyph_top >= geometry.card_rect.y,
+                    "line glyph top escaped code card at line {line_index}, size {size:?}, scale {scale_step}"
+                );
+                assert!(
+                    glyph_bottom <= card_bottom,
+                    "line glyph bottom escaped code card at line {line_index}, size {size:?}, scale {scale_step}"
+                );
+                if let Some(previous_glyph_bottom) = previous_glyph_bottom {
+                    assert!(
+                        previous_glyph_bottom < glyph_top,
+                        "code header/content glyph rows overlap at line {line_index}, size {size:?}, scale {scale_step}"
+                    );
+                }
+                previous_glyph_bottom = Some(glyph_bottom);
+
+                let line_text = &lines[line_index].text;
+                let text_glyph_right =
+                    geometry.text_left + line_text.chars().count() as f32 * char_width;
+                assert!(
+                    text_glyph_right <= geometry.card_rect.x + geometry.card_rect.width,
+                    "code text must fit horizontally inside the card at line {line_index}, size {size:?}, scale {scale_step}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn code_block_header_actual_glyph_rasters_stay_inside_rendered_card() {
+    let markdown = "```text\njcode-desktop\n  indented code\n```";
+    let sizes = [
+        PhysicalSize::new(520, 420),
+        PhysicalSize::new(900, 640),
+        PhysicalSize::new(1440, 900),
+    ];
+    let scale_steps: [i8; 3] = [-2, 0, 3];
+
+    for size in sizes {
+        for scale_step in scale_steps {
+            let mut app = SingleSessionApp::new(Some(test_session_card(
+                "code-geometry",
+                "Code geometry",
+                "ready",
+            )));
+            for _ in 0..scale_step.unsigned_abs() {
+                app.handle_key(workspace::KeyInput::AdjustTextScale(scale_step.signum()));
+            }
+            app.messages.push(SingleSessionMessage::assistant(markdown));
+
+            let lines = single_session_rendered_body_lines_for_tick(&app, size, 0);
+            let header_index = lines
+                .iter()
+                .position(|line| line.text == "  text")
+                .unwrap_or_else(|| {
+                    panic!("missing code header at size {size:?}, scale {scale_step}")
+                });
+            let header_run = single_session_transcript_card_runs(&lines)
+                .into_iter()
+                .find(|run| run.line <= header_index && header_index < run.line + run.line_count)
+                .unwrap_or_else(|| {
+                    panic!("missing code card run at size {size:?}, scale {scale_step}")
+                });
+
+            let vertices = build_single_session_vertices(&app, size, 0.0, 0);
+            let card_bounds = pixel_bounds_for_color(&vertices, CODE_BLOCK_BACKGROUND_COLOR, size)
+                .unwrap_or_else(|| {
+                    panic!("missing rendered code card at size {size:?}, scale {scale_step}")
+                });
+            let viewport = single_session_body_viewport_from_lines(&app, size, 0.0, &lines);
+            let viewport_header_run = single_session_transcript_card_runs(&viewport.lines)
+                .into_iter()
+                .find(|run| run.style == SingleSessionLineStyle::CodeHeader)
+                .unwrap_or_else(|| {
+                    panic!("missing visible code card run at size {size:?}, scale {scale_step}")
+                });
+            assert_eq!(
+                viewport_header_run.line_count, header_run.line_count,
+                "code card should be fully visible in the actual glyph fixture at size {size:?}, scale {scale_step}"
+            );
+            let typography = single_session_typography_for_scale(app.text_scale());
+            let line_height = typography.body_size * typography.body_line_height;
+            let text_left = card_bounds.min_x + 6.0;
+            let text_top = card_bounds.min_y
+                - 3.0
+                - viewport_header_run.line as f32 * line_height
+                - viewport.top_offset_pixels;
+
+            let mut font_system = FontSystem::new();
+            let body_buffer = single_session_body_text_buffer_from_lines(
+                &mut font_system,
+                &viewport.lines,
+                size,
+                app.text_scale(),
+            );
+            let layout_runs = body_buffer.layout_runs().collect::<Vec<_>>();
+
+            let mut swash_cache = SwashCache::new();
+            let mut previous_raster_bottom = None;
+            for line_index in
+                viewport_header_run.line..viewport_header_run.line + viewport_header_run.line_count
+            {
+                let line = &viewport.lines[line_index];
+                let layout_run = layout_runs
+                    .iter()
+                    .find(|run| run.line_i == line_index)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "missing glyphon layout run for line {line_index}, size {size:?}, scale {scale_step}"
+                        )
+                    });
+                assert_eq!(layout_run.text, line.text);
+
+                let (highlight_x, highlight_width) = layout_run
+                    .highlight(
+                        glyphon::Cursor::new(line_index, 0),
+                        glyphon::Cursor::new(line_index, line.text.len()),
+                    )
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "glyphon did not expose text bounds for line {line_index}, size {size:?}, scale {scale_step}"
+                        )
+                    });
+                let highlight_left = text_left + highlight_x;
+                let highlight_right = highlight_left + highlight_width;
+                assert!(
+                    highlight_left >= card_bounds.min_x,
+                    "actual glyphon text starts left of rendered card at line {line_index}, size {size:?}, scale {scale_step}"
+                );
+                assert!(
+                    highlight_right <= card_bounds.max_x,
+                    "actual glyphon text exceeds rendered card width at line {line_index}, size {size:?}, scale {scale_step}"
+                );
+
+                let baseline_y = text_top + layout_run.line_y;
+                assert!(
+                    baseline_y > card_bounds.min_y && baseline_y < card_bounds.max_y,
+                    "actual glyphon baseline escaped rendered card at line {line_index}, size {size:?}, scale {scale_step}"
+                );
+
+                let mut raster_bounds: Option<PixelBounds> = None;
+                for glyph in layout_run.glyphs {
+                    let physical_glyph = glyph.physical((text_left, text_top), 1.0);
+                    let Some(image) =
+                        swash_cache.get_image_uncached(&mut font_system, physical_glyph.cache_key)
+                    else {
+                        continue;
+                    };
+                    if image.placement.width == 0 || image.placement.height == 0 {
+                        continue;
+                    }
+                    let x = physical_glyph.x as f32 + image.placement.left as f32;
+                    let y = layout_run.line_y.round() + physical_glyph.y as f32
+                        - image.placement.top as f32;
+                    let glyph_bounds = PixelBounds {
+                        min_x: x,
+                        max_x: x + image.placement.width as f32,
+                        min_y: y,
+                        max_y: y + image.placement.height as f32,
+                    };
+                    raster_bounds = Some(match raster_bounds {
+                        Some(bounds) => PixelBounds {
+                            min_x: bounds.min_x.min(glyph_bounds.min_x),
+                            max_x: bounds.max_x.max(glyph_bounds.max_x),
+                            min_y: bounds.min_y.min(glyph_bounds.min_y),
+                            max_y: bounds.max_y.max(glyph_bounds.max_y),
+                        },
+                        None => glyph_bounds,
+                    });
+                }
+                let raster_bounds = raster_bounds.unwrap_or_else(|| {
+                    panic!(
+                        "missing actual glyph rasters for line {line_index}, size {size:?}, scale {scale_step}"
+                    )
+                });
+                let tolerance = 1.0;
+                assert!(
+                    raster_bounds.min_x >= card_bounds.min_x - tolerance
+                        && raster_bounds.max_x <= card_bounds.max_x + tolerance,
+                    "actual glyph raster escaped rendered card horizontally at line {line_index}, size {size:?}, scale {scale_step}: {raster_bounds:?} vs {card_bounds:?}"
+                );
+                assert!(
+                    raster_bounds.min_y >= card_bounds.min_y - tolerance
+                        && raster_bounds.max_y <= card_bounds.max_y + tolerance,
+                    "actual glyph raster escaped rendered card vertically at line {line_index}, size {size:?}, scale {scale_step}: {raster_bounds:?} vs {card_bounds:?}"
+                );
+                if let Some(previous_raster_bottom) = previous_raster_bottom {
+                    assert!(
+                        previous_raster_bottom < raster_bounds.min_y,
+                        "actual glyph rasters overlap between code rows at line {line_index}, size {size:?}, scale {scale_step}"
+                    );
+                }
+                previous_raster_bottom = Some(raster_bounds.max_y);
+            }
+        }
+    }
 }
 
 #[test]
@@ -2865,6 +3587,31 @@ fn single_session_hotkey_help_toggles_discoverable_shortcuts() {
         "Alt+Up/Down",
         "jump between user prompts"
     ));
+    assert!(help_has_shortcut(&help, "Ctrl+Home/End", "jump transcript"));
+    assert!(help_has_shortcut(&help, "Super+K/J", "scroll transcript"));
+    assert!(help_has_shortcut(
+        &help,
+        "Ctrl+Shift+K",
+        "copy latest code block"
+    ));
+    assert!(help_has_shortcut(&help, "Ctrl+Shift+T", "copy transcript"));
+    assert!(help_has_shortcut(&help, "Ctrl+Tab", "switch to next model"));
+    assert!(help_has_shortcut(
+        &help,
+        "Ctrl+Shift+Tab",
+        "switch to previous model"
+    ));
+    assert!(help_has_shortcut(
+        &help,
+        "Ctrl+[/]",
+        "jump between user prompts"
+    ));
+    assert!(help_has_shortcut(&help, "q", "close help or session info"));
+    assert!(help_has_shortcut(
+        &help,
+        "Ctrl+Q/Super+Q",
+        "quit desktop app"
+    ));
     let help_text = help.join("\n");
     assert!(!help_text.contains("desktop queue follow-up pending"));
     assert!(!help_text.contains("1  question"));
@@ -2875,6 +3622,30 @@ fn single_session_hotkey_help_toggles_discoverable_shortcuts() {
     assert!(app.inline_widget_styled_lines().is_empty());
     assert_eq!(app.handle_key(KeyInput::Escape), KeyOutcome::None);
     assert!(app.body_lines().join("\n").contains("1  question"));
+}
+
+#[test]
+fn single_session_q_closes_read_only_overlays() {
+    let mut app = SingleSessionApp::new(None);
+
+    assert_eq!(app.handle_key(KeyInput::HotkeyHelp), KeyOutcome::Redraw);
+    assert!(app.show_help);
+    assert_eq!(
+        app.handle_key(KeyInput::Character("q".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert!(!app.show_help);
+
+    assert_eq!(
+        app.handle_key(KeyInput::ToggleSessionInfo),
+        KeyOutcome::Redraw
+    );
+    assert!(app.show_session_info);
+    assert_eq!(
+        app.handle_key(KeyInput::Character("Q".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert!(!app.show_session_info);
 }
 
 #[test]
@@ -2918,6 +3689,12 @@ fn single_session_model_cycle_updates_status_and_transcript() {
             .join("\n")
             .contains("model switched to Claude · claude-opus-4-5")
     );
+}
+
+#[test]
+fn single_session_exit_shortcut_requests_exit() {
+    let mut app = SingleSessionApp::new(None);
+    assert_eq!(app.handle_key(KeyInput::ExitApp), KeyOutcome::Exit);
 }
 
 #[test]
@@ -2997,6 +3774,22 @@ fn single_session_model_picker_loads_filters_and_selects_model() {
     assert!(filtered.contains("\"opus\""));
     assert!(filtered.contains("claude-opus-4-5"));
 
+    for _ in 0.."opus".len() {
+        assert_eq!(app.handle_key(KeyInput::Backspace), KeyOutcome::Redraw);
+    }
+    assert_eq!(app.model_picker.filter, "");
+    assert_eq!(app.handle_key(KeyInput::MoveToLineEnd), KeyOutcome::Redraw);
+    assert_eq!(app.model_picker.selected, 1);
+    assert_eq!(
+        app.handle_key(KeyInput::MoveToLineStart),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.model_picker.selected, 0);
+
+    assert_eq!(
+        app.handle_key(KeyInput::ModelPickerMove(1)),
+        KeyOutcome::Redraw
+    );
     assert_eq!(
         app.handle_key(KeyInput::SubmitDraft),
         KeyOutcome::SetModel("claude-opus-4-5".to_string())
@@ -3047,6 +3840,14 @@ fn single_session_session_switcher_loads_filters_and_resumes_session() {
     assert!(switcher.contains("desktop session switcher"));
     assert!(switcher.contains("alpha"));
     assert!(switcher.contains("beta"));
+
+    assert_eq!(app.handle_key(KeyInput::MoveToLineEnd), KeyOutcome::Redraw);
+    assert_eq!(app.session_switcher.selected, 1);
+    assert_eq!(
+        app.handle_key(KeyInput::MoveToLineStart),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.session_switcher.selected, 0);
 
     assert_eq!(
         app.handle_key(KeyInput::Character("beta".to_string())),
@@ -3955,6 +4756,38 @@ fn single_session_prompt_jump_moves_between_user_turns() {
 }
 
 #[test]
+fn single_session_scroll_shortcuts_move_body_position() {
+    let mut app = SingleSessionApp::new(None);
+    for index in 0..10 {
+        app.messages
+            .push(SingleSessionMessage::user(format!("question {index}")));
+        app.messages
+            .push(SingleSessionMessage::assistant(format!("answer {index}")));
+    }
+
+    assert_eq!(
+        app.handle_key(KeyInput::ScrollBodyLines(1)),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.body_scroll_lines, 1.0);
+    assert_eq!(
+        app.handle_key(KeyInput::ScrollBodyToBottom),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.body_scroll_lines, 0.0);
+    assert_eq!(
+        app.handle_key(KeyInput::ScrollBodyToTop),
+        KeyOutcome::Redraw
+    );
+    assert!(app.body_scroll_lines > 1.0);
+    assert_eq!(
+        app.handle_key(KeyInput::ScrollBodyToBottom),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.body_scroll_lines, 0.0);
+}
+
+#[test]
 fn single_session_copy_latest_response_prefers_streaming_text() {
     let mut app = SingleSessionApp::new(None);
     app.messages
@@ -3971,6 +4804,42 @@ fn single_session_copy_latest_response_prefers_streaming_text() {
         app.handle_key(KeyInput::CopyLatestResponse),
         KeyOutcome::CopyLatestResponse("streaming answer".to_string())
     );
+}
+
+#[test]
+fn single_session_copy_code_and_transcript_shortcuts_use_rich_transcript() {
+    let mut app = SingleSessionApp::new(None);
+    app.messages.push(SingleSessionMessage::user("question"));
+    app.messages.push(SingleSessionMessage::assistant(
+        "Answer\n\n```rust\nfn main() {}\n```",
+    ));
+
+    assert_eq!(
+        app.handle_key(KeyInput::CopyLatestCodeBlock),
+        KeyOutcome::CopyText {
+            text: "fn main() {}\n".to_string(),
+            success_notice: "copied latest code block",
+        }
+    );
+
+    match app.handle_key(KeyInput::CopyTranscript) {
+        KeyOutcome::CopyText {
+            text,
+            success_notice,
+        } => {
+            assert_eq!(success_notice, "copied transcript");
+            assert!(text.contains("question"));
+            assert!(text.contains("fn main() {}"));
+        }
+        other => panic!("expected transcript copy, got {other:?}"),
+    }
+
+    let mut empty = SingleSessionApp::new(None);
+    assert_eq!(
+        empty.handle_key(KeyInput::CopyLatestCodeBlock),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(empty.status.as_deref(), Some("no code block to copy"));
 }
 
 #[test]
