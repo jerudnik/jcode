@@ -8,6 +8,7 @@
 //! - Agent socket: Inter-agent communication (AI-to-AI)
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 mod comm_format;
 mod notifications;
@@ -172,6 +173,21 @@ pub struct ToolCallSummary {
 pub struct SwarmChannelInfo {
     pub channel: String,
     pub member_count: usize,
+}
+
+/// Lightweight summary of a single swarm, used by `Request::CommListSwarms`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SwarmSummary {
+    pub swarm_id: String,
+    pub member_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_version: Option<u64>,
+    #[serde(default)]
+    pub status_counts: HashMap<String, usize>,
 }
 
 /// A shared context entry
@@ -408,6 +424,7 @@ impl Request {
             Request::CommMessage { id, .. } => *id,
             Request::CommList { id, .. } => *id,
             Request::CommListChannels { id, .. } => *id,
+            Request::CommListSwarms { id, .. } => *id,
             Request::CommChannelMembers { id, .. } => *id,
             Request::CommProposePlan { id, .. } => *id,
             Request::CommApprovePlan { id, .. } => *id,
@@ -439,6 +456,7 @@ impl Request {
                 | Request::CommMessage { .. }
                 | Request::CommList { .. }
                 | Request::CommListChannels { .. }
+                | Request::CommListSwarms { .. }
                 | Request::CommChannelMembers { .. }
                 | Request::CommProposePlan { .. }
                 | Request::CommApprovePlan { .. }
