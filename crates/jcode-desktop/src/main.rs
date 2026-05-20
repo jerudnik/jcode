@@ -427,6 +427,9 @@ async fn run() -> Result<()> {
     if let Some(message) = headless_chat_smoke_message(&args) {
         return run_headless_chat_smoke(message);
     }
+    if let Some(frames) = resize_render_benchmark_frames(&args) {
+        return run_resize_render_benchmark(frames);
+    }
     if let Some(frames) = scroll_render_benchmark_frames(&args) {
         return run_scroll_render_benchmark(frames);
     }
@@ -582,12 +585,10 @@ async fn run() -> Result<()> {
                 WindowEvent::CloseRequested => target.exit(),
                 WindowEvent::Resized(size) => {
                     pending_resize = Some(size);
-                    scroll_metrics_cache.clear();
                     window.request_redraw();
                 }
                 WindowEvent::ScaleFactorChanged { .. } => {
                     pending_resize = Some(window.inner_size());
-                    scroll_metrics_cache.clear();
                     window.request_redraw();
                 }
                 WindowEvent::ModifiersChanged(new_modifiers) => {
@@ -962,6 +963,119 @@ async fn run() -> Result<()> {
                             } else {
                                 app.apply_session_event(session_launch::DesktopSessionEvent::Status(
                                     DesktopSessionStatus::SwitchingModel,
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::RefreshModelCatalog => {
+                            if let Err(error) = session_launch::spawn_refresh_models(
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::SetReasoningEffort(effort) => {
+                            if let Err(error) = session_launch::spawn_set_reasoning_effort(
+                                effort,
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::SwitchingReasoningEffort,
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::SetServiceTier(service_tier) => {
+                            if let Err(error) = session_launch::spawn_set_service_tier(
+                                service_tier,
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::external("setting fast mode"),
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::SetTransport(transport) => {
+                            if let Err(error) = session_launch::spawn_set_transport(
+                                transport,
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::external("setting transport"),
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::SetCompactionMode(mode) => {
+                            if let Err(error) = session_launch::spawn_set_compaction_mode(
+                                mode,
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::external("setting compaction mode"),
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::CompactSession => {
+                            if let Err(error) = session_launch::spawn_compact_session(
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::external("requesting compaction"),
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::RenameSession(title) => {
+                            if let Err(error) = session_launch::spawn_rename_session(
+                                title,
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::external("renaming session"),
+                                ));
+                            }
+                            window.set_title(&app.status_title());
+                            window.request_redraw();
+                        }
+                        KeyOutcome::ClearServerSession => {
+                            if let Err(error) = session_launch::spawn_clear_server_session(
+                                app.single_session_live_id(),
+                                session_event_tx.clone(),
+                            ) {
+                                apply_single_session_error(&mut app, error);
+                            } else {
+                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
+                                    DesktopSessionStatus::external("clearing session"),
                                 ));
                             }
                             window.set_title(&app.status_title());
@@ -1571,6 +1685,7 @@ const DESKTOP_HELP_LINES: &[&str] = &[
     "  --startup-log                Print launch timing milestones to stderr",
     "  --startup-benchmark          Print launch timings and exit after the first frame",
     "  --capture-hero-animation DIR Write deterministic hero animation PNG frames and exit",
+    "  --resize-render-benchmark[N]  Print CPU resize/render benchmark JSON and exit",
     "  --scroll-render-benchmark[N]  Print CPU scroll/render benchmark JSON and exit",
     "  --stream-e2e-benchmark[N]     Print stream event-to-paint guardrail JSON and exit",
     "  --headless-chat-smoke <MSG>  Run a hidden backend smoke test and print JSON events",
@@ -1606,6 +1721,20 @@ fn scroll_render_benchmark_frames(args: &[String]) -> Option<usize> {
                     args.get(index + 1)
                         .and_then(|value| value.parse::<usize>().ok())
                         .unwrap_or(600)
+                })
+            })
+    })
+}
+
+fn resize_render_benchmark_frames(args: &[String]) -> Option<usize> {
+    args.iter().enumerate().find_map(|(index, arg)| {
+        arg.strip_prefix("--resize-render-benchmark=")
+            .and_then(|value| value.parse::<usize>().ok())
+            .or_else(|| {
+                (arg == "--resize-render-benchmark").then(|| {
+                    args.get(index + 1)
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(240)
                 })
             })
     })
@@ -2039,6 +2168,24 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
                     serde_json::json!({"event": "session", "session_id": id})
                 );
             }
+            session_launch::DesktopSessionEvent::SessionRenamed {
+                title,
+                display_title,
+            } => {
+                last_status = Some(if title.is_some() {
+                    format!("renamed session to {display_title}")
+                } else {
+                    format!("cleared session name; title is now {display_title}")
+                });
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "session_renamed",
+                        "title": title,
+                        "display_title": display_title,
+                    })
+                );
+            }
             session_launch::DesktopSessionEvent::Reloaded { session_id: id } => {
                 session_id = Some(id.clone());
                 last_status = Some("server reconnected".to_string());
@@ -2144,6 +2291,7 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
                 current_model,
                 provider_name,
                 models,
+                ..
             } => {
                 last_status = Some(format!("models loaded ({})", models.len()));
                 println!(
@@ -2218,6 +2366,243 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
         response.chars().count(),
         last_status.as_deref().unwrap_or("unknown")
     )
+}
+
+fn run_resize_render_benchmark(frames: usize) -> Result<()> {
+    let frames = frames.max(1);
+    let target_p95_ms = 16.0;
+    let target_max_ms = 33.0;
+    let base_size = PhysicalSize::new(1200, 760);
+    let mut app = desktop_large_transcript_benchmark_app();
+    let initial_body_lines = single_session_rendered_body_lines_for_tick(&app, base_size, 0);
+    if let Some(metrics) = single_session_body_scroll_metrics_for_total_lines(
+        &app,
+        base_size,
+        initial_body_lines.len(),
+    ) {
+        app.body_scroll_lines = metrics.max_scroll_lines as f32 / 2.0;
+    }
+    let sizes = (0..frames)
+        .map(|frame| benchmark_resize_size(frame))
+        .collect::<Vec<_>>();
+
+    let mut legacy_font_system = benchmark_font_system();
+    let (legacy_samples, legacy_checksum) = benchmark_frame_samples(frames, |frame| {
+        let size = sizes[frame];
+        let tick = frame as u64;
+        let key = single_session_text_key_for_tick_with_scroll(&app, size, tick, 0.0);
+        let buffers = single_session_text_buffers_from_key(&key, size, &mut legacy_font_system);
+        let areas = single_session_text_areas_for_app_with_scroll(&app, &buffers, size, tick, 0.0);
+        let body_glyphs = buffers
+            .get(1)
+            .map(|buffer| {
+                buffer
+                    .layout_runs()
+                    .map(|run| run.glyphs.len())
+                    .sum::<usize>()
+            })
+            .unwrap_or_default();
+        let vertices =
+            build_single_session_vertices_with_scroll_and_reveal(&app, size, 0.0, tick, 0.0, 1.0);
+        key.body.len() ^ buffers.len() ^ areas.len() ^ vertices.len() ^ body_glyphs
+    });
+
+    let mut optimized_font_system = benchmark_font_system();
+    let mut optimized_raw_body_key = None;
+    let mut optimized_raw_body_lines = Vec::new();
+    let mut optimized_body_key = None;
+    let mut optimized_body_lines = Vec::new();
+    let mut optimized_text_cache_key = None;
+    let mut optimized_text_key = None;
+    let mut optimized_buffers: Vec<Buffer> = Vec::new();
+    let mut optimized_window_start = None;
+    let mut optimized_window_end = None;
+    let mut optimized_body_rebuilds = 0usize;
+    let mut optimized_body_wraps = 0usize;
+    let (optimized_samples, optimized_checksum) = benchmark_frame_samples(frames, |frame| {
+        let size = sizes[frame];
+        let tick = frame as u64;
+        let body_layout_size = single_session_body_layout_cache_size(&app, size);
+        let body_key = app.rendered_body_cache_key(body_layout_size);
+        let rendered_body_changed = if optimized_body_key != Some(body_key) {
+            let raw_body_key = app.rendered_body_cache_key((0, 0));
+            if optimized_raw_body_key != Some(raw_body_key) {
+                optimized_raw_body_lines = app.body_styled_lines_for_tick(tick);
+                optimized_raw_body_key = Some(raw_body_key);
+            }
+            optimized_body_lines = single_session_rendered_body_lines_from_raw_ref(
+                &app,
+                size,
+                &optimized_raw_body_lines,
+            );
+            optimized_body_key = Some(body_key);
+            optimized_window_start = None;
+            optimized_window_end = None;
+            optimized_body_wraps += 1;
+            true
+        } else {
+            false
+        };
+
+        let viewport =
+            single_session_body_viewport_from_lines(&app, size, 0.0, &optimized_body_lines);
+        let text_cache_key = single_session_text_buffer_cache_key(&app, size, tick, body_key);
+        let key = single_session_text_key_for_tick_with_rendered_body(
+            &app,
+            size,
+            tick,
+            0.0,
+            &optimized_body_lines,
+        );
+        let text_key_changed = optimized_text_key.as_ref() != Some(&key);
+        if optimized_text_cache_key != Some(text_cache_key) || text_key_changed {
+            let desired_body_window = single_session_body_text_window_bounds(&viewport);
+            let body_window_contains = if let (Some(window_start), Some(window_end)) =
+                (optimized_window_start, optimized_window_end)
+            {
+                single_session_body_text_window_contains(window_start, window_end, &viewport)
+            } else {
+                false
+            };
+            let previous_key = optimized_text_key.take();
+            let mut old_buffers = std::mem::take(&mut optimized_buffers);
+            let body_content_changed_in_buffer =
+                rendered_body_changed && app.streaming_response.is_empty();
+            let body_layout_compatible = previous_key.as_ref().is_some_and(|previous| {
+                single_session_body_text_buffer_layout_compatible(
+                    previous.size,
+                    size,
+                    app.text_scale(),
+                )
+            });
+            let mut can_reuse_body_buffer = old_buffers.len() > 1
+                && body_window_contains
+                && !body_content_changed_in_buffer
+                && body_layout_compatible;
+            if old_buffers.len() > 1
+                && (!body_window_contains
+                    || body_content_changed_in_buffer
+                    || !body_layout_compatible)
+            {
+                let (window_start, window_end) = desired_body_window;
+                old_buffers[1] = single_session_body_text_buffer_from_lines(
+                    &mut optimized_font_system,
+                    &optimized_body_lines[window_start..window_end],
+                    size,
+                    app.text_scale(),
+                );
+                optimized_window_start = Some(window_start);
+                optimized_window_end = Some(window_end);
+                optimized_body_rebuilds += 1;
+                can_reuse_body_buffer = true;
+            }
+            optimized_buffers = single_session_text_buffers_from_key_reusing_unchanged(
+                &key,
+                previous_key.as_ref(),
+                old_buffers,
+                can_reuse_body_buffer,
+                size,
+                &mut optimized_font_system,
+            );
+            optimized_text_key = Some(key);
+            optimized_text_cache_key = Some(text_cache_key);
+            if !can_reuse_body_buffer {
+                optimized_window_start = None;
+                optimized_window_end = None;
+            }
+        }
+
+        let viewport =
+            single_session_body_viewport_from_lines(&app, size, 0.0, &optimized_body_lines);
+        if let (Some(window_start), Some(window_end)) =
+            (optimized_window_start, optimized_window_end)
+            && single_session_body_text_window_contains(window_start, window_end, &viewport)
+        {
+            if let Some(body_buffer) = optimized_buffers.get_mut(1) {
+                body_buffer.set_scroll(
+                    viewport
+                        .start_line
+                        .saturating_sub(window_start)
+                        .min(i32::MAX as usize) as i32,
+                );
+            }
+        } else {
+            let (window_start, window_end) = single_session_body_text_window_bounds(&viewport);
+            if let Some(body_buffer) = optimized_buffers.get_mut(1) {
+                *body_buffer = single_session_body_text_buffer_from_lines(
+                    &mut optimized_font_system,
+                    &optimized_body_lines[window_start..window_end],
+                    size,
+                    app.text_scale(),
+                );
+                body_buffer.set_scroll(
+                    viewport
+                        .start_line
+                        .saturating_sub(window_start)
+                        .min(i32::MAX as usize) as i32,
+                );
+                optimized_body_rebuilds += 1;
+            }
+            optimized_window_start = Some(window_start);
+            optimized_window_end = Some(window_end);
+        }
+
+        let areas = single_session_text_areas_for_app_with_cached_body_viewport(
+            &app,
+            &optimized_buffers,
+            size,
+            0.0,
+            viewport,
+        );
+        let body_glyphs = optimized_buffers
+            .get(1)
+            .map(|buffer| {
+                buffer
+                    .layout_runs()
+                    .map(|run| run.glyphs.len())
+                    .sum::<usize>()
+            })
+            .unwrap_or_default();
+        let vertices = build_single_session_vertices_with_cached_body(
+            &app,
+            size,
+            0.0,
+            tick,
+            0.0,
+            1.0,
+            &optimized_body_lines,
+        );
+        optimized_body_lines.len()
+            ^ optimized_buffers.len()
+            ^ areas.len()
+            ^ vertices.len()
+            ^ body_glyphs
+    });
+
+    let optimized_p95 = percentile_ms(&optimized_samples, 0.95);
+    let optimized_max = max_sample_ms(&optimized_samples);
+    let passes_resize_cpu_budget = optimized_p95 <= target_p95_ms && optimized_max <= target_max_ms;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "frames": frames,
+            "target_p95_ms": target_p95_ms,
+            "target_repeated_max_ms": target_max_ms,
+            "passes_resize_cpu_budget": passes_resize_cpu_budget,
+            "scenario": "large transcript continuous resize CPU layout path",
+            "size_range": {
+                "min_width": sizes.iter().map(|size| size.width).min().unwrap_or_default(),
+                "max_width": sizes.iter().map(|size| size.width).max().unwrap_or_default(),
+                "min_height": sizes.iter().map(|size| size.height).min().unwrap_or_default(),
+                "max_height": sizes.iter().map(|size| size.height).max().unwrap_or_default(),
+            },
+            "optimized_body_wraps": optimized_body_wraps,
+            "optimized_body_buffer_rebuilds": optimized_body_rebuilds,
+            "legacy": benchmark_samples_json("legacy_resize_full_text_relayout", &legacy_samples, legacy_checksum),
+            "optimized": benchmark_samples_json("optimized_resize_cached_visible_body", &optimized_samples, optimized_checksum),
+        }))?
+    );
+    Ok(())
 }
 
 fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
@@ -3607,6 +3992,21 @@ fn benchmark_phase(mut frames: usize, mut run_frame: impl FnMut(usize) -> usize)
     (started.elapsed().as_secs_f64() * 1000.0, checksum)
 }
 
+fn benchmark_frame_samples(
+    mut frames: usize,
+    mut run_frame: impl FnMut(usize) -> usize,
+) -> (Vec<f64>, usize) {
+    frames = frames.max(1);
+    let mut samples = Vec::with_capacity(frames);
+    let mut checksum = 0usize;
+    for frame in 0..frames {
+        let started = Instant::now();
+        checksum ^= std::hint::black_box(run_frame(frame));
+        samples.push(started.elapsed().as_secs_f64() * 1000.0);
+    }
+    (samples, checksum)
+}
+
 fn benchmark_phase_json(
     name: &str,
     total_ms: f64,
@@ -3621,6 +4021,44 @@ fn benchmark_phase_json(
         "mean_us_per_frame": total_ms * 1000.0 / frames as f64,
         "checksum": checksum,
     })
+}
+
+fn benchmark_samples_json(name: &str, samples: &[f64], checksum: usize) -> serde_json::Value {
+    let frames = samples.len().max(1);
+    let total_ms = samples.iter().sum::<f64>();
+    serde_json::json!({
+        "name": name,
+        "frames": samples.len(),
+        "total_ms": total_ms,
+        "mean_ms_per_frame": total_ms / frames as f64,
+        "p50_ms": percentile_ms(samples, 0.50),
+        "p95_ms": percentile_ms(samples, 0.95),
+        "p99_ms": percentile_ms(samples, 0.99),
+        "max_ms": max_sample_ms(samples),
+        "checksum": checksum,
+    })
+}
+
+fn percentile_ms(samples: &[f64], quantile: f64) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|left, right| left.total_cmp(right));
+    let index = ((sorted.len() as f64 * quantile.clamp(0.0, 1.0)).ceil() as usize)
+        .saturating_sub(1)
+        .min(sorted.len() - 1);
+    sorted[index]
+}
+
+fn max_sample_ms(samples: &[f64]) -> f64 {
+    samples.iter().copied().fold(0.0, f64::max)
+}
+
+fn benchmark_resize_size(frame: usize) -> PhysicalSize<u32> {
+    let width = 1080 + ((frame * 17) % 260) as u32;
+    let height = 650 + ((frame * 11) % 180) as u32;
+    PhysicalSize::new(width, height)
 }
 
 fn benchmark_smooth_scroll_lines(frame: usize) -> f32 {
@@ -4688,6 +5126,7 @@ fn desktop_session_event_refreshes_session_card(
     matches!(
         event,
         session_launch::DesktopSessionEvent::SessionStarted { .. }
+            | session_launch::DesktopSessionEvent::SessionRenamed { .. }
             | session_launch::DesktopSessionEvent::Reloaded { .. }
             | session_launch::DesktopSessionEvent::Done
             | session_launch::DesktopSessionEvent::Error(_)
@@ -5227,6 +5666,8 @@ fn single_session_body_text_window_contains(
 struct SingleSessionScrollMetricsCache {
     key: Option<u64>,
     total_lines: usize,
+    raw_body_key: Option<u64>,
+    raw_body_lines: Vec<SingleSessionStyledLine>,
     streaming_base_key: Option<u64>,
     streaming_base_total_lines: usize,
 }
@@ -5237,10 +5678,11 @@ impl SingleSessionScrollMetricsCache {
         app: &SingleSessionApp,
         size: PhysicalSize<u32>,
     ) -> Option<SingleSessionBodyScrollMetrics> {
-        let key = app.rendered_body_cache_key((size.width, size.height));
+        let body_layout_size = single_session_body_layout_cache_size(app, size);
+        let key = app.rendered_body_cache_key(body_layout_size);
         if self.key != Some(key) {
             if !app.streaming_response.is_empty() {
-                let base_key = app.rendered_body_static_cache_key((size.width, size.height));
+                let base_key = app.rendered_body_static_cache_key(body_layout_size);
                 if self.streaming_base_key != Some(base_key) {
                     if let Some(base_lines) =
                         single_session_rendered_static_body_lines_for_streaming(app, size, 0)
@@ -5260,7 +5702,17 @@ impl SingleSessionScrollMetricsCache {
                         single_session_rendered_body_lines_for_tick(app, size, 0).len();
                 }
             } else {
-                self.total_lines = single_session_rendered_body_lines_for_tick(app, size, 0).len();
+                let raw_key = app.rendered_body_cache_key((0, 0));
+                if self.raw_body_key != Some(raw_key) {
+                    self.raw_body_lines = app.body_styled_lines_for_tick(0);
+                    self.raw_body_key = Some(raw_key);
+                }
+                self.total_lines = single_session_rendered_body_lines_from_raw_ref(
+                    app,
+                    size,
+                    &self.raw_body_lines,
+                )
+                .len();
                 self.streaming_base_key = None;
                 self.streaming_base_total_lines = 0;
             }
@@ -5272,6 +5724,8 @@ impl SingleSessionScrollMetricsCache {
     fn clear(&mut self) {
         self.key = None;
         self.total_lines = 0;
+        self.raw_body_key = None;
+        self.raw_body_lines.clear();
         self.streaming_base_key = None;
         self.streaming_base_total_lines = 0;
     }
@@ -5984,6 +6438,8 @@ struct Canvas {
     single_session_text_cache_key: Option<u64>,
     single_session_text_key: Option<SingleSessionTextKey>,
     single_session_text_buffers: Vec<Buffer>,
+    single_session_raw_body_key: Option<u64>,
+    single_session_raw_body_lines: Vec<SingleSessionStyledLine>,
     single_session_body_key: Option<u64>,
     single_session_body_lines: Vec<SingleSessionStyledLine>,
     single_session_streaming_base_key: Option<u64>,
@@ -6095,6 +6551,8 @@ impl Canvas {
             single_session_text_cache_key: None,
             single_session_text_key: None,
             single_session_text_buffers: Vec::new(),
+            single_session_raw_body_key: None,
+            single_session_raw_body_lines: Vec::new(),
             single_session_body_key: None,
             single_session_body_lines: Vec::new(),
             single_session_streaming_base_key: None,
@@ -6145,27 +6603,14 @@ impl Canvas {
         }
 
         self.size = size;
-        self.single_session_text_cache_key = None;
-        self.single_session_text_key = None;
-        self.single_session_body_key = None;
-        self.single_session_streaming_base_key = None;
-        self.single_session_streaming_base_len = 0;
-        self.single_session_streaming_response_len = 0;
-        self.single_session_streaming_fade_started_at = None;
-        self.single_session_streaming_text_key = None;
-        self.single_session_streaming_text_start_line = None;
-        self.single_session_streaming_text_end_line = None;
-        self.single_session_streaming_text_opacity_bits = None;
-        self.single_session_streaming_text_buffer = None;
-        self.streaming_text_needs_prepare = false;
-        self.single_session_body_text_scroll_start = None;
-        self.single_session_body_text_window_start = None;
-        self.single_session_body_text_window_end = None;
         self.primitive_vertices_cache_key = None;
         self.primitive_vertices_cache.clear();
         self.primitive_frame_vertices.clear();
         self.first_render_completed = false;
         self.text_needs_prepare = true;
+        if self.single_session_streaming_text_buffer.is_some() {
+            self.streaming_text_needs_prepare = true;
+        }
         self.config.width = size.width;
         self.config.height = size.height;
         self.surface.configure(&self.device, &self.config);
@@ -6224,9 +6669,22 @@ impl Canvas {
             let mut old_buffers = std::mem::take(&mut self.single_session_text_buffers);
             let body_content_changed_in_buffer =
                 rendered_body_changed && app.streaming_response.is_empty();
-            let mut can_reuse_body_buffer =
-                old_buffers.len() > 1 && body_window_contains && !body_content_changed_in_buffer;
-            if old_buffers.len() > 1 && (!body_window_contains || body_content_changed_in_buffer) {
+            let body_layout_compatible = previous_key.as_ref().is_some_and(|previous| {
+                single_session_body_text_buffer_layout_compatible(
+                    previous.size,
+                    self.size,
+                    app.text_scale(),
+                )
+            });
+            let mut can_reuse_body_buffer = old_buffers.len() > 1
+                && body_window_contains
+                && !body_content_changed_in_buffer
+                && body_layout_compatible;
+            if old_buffers.len() > 1
+                && (!body_window_contains
+                    || body_content_changed_in_buffer
+                    || !body_layout_compatible)
+            {
                 let (window_start, window_end) = desired_body_window;
                 old_buffers[1] = single_session_body_text_buffer_from_lines(
                     font_system,
@@ -6621,13 +7079,16 @@ impl Canvas {
         app: &SingleSessionApp,
         tick: u64,
     ) -> (u64, bool) {
-        let key = app.rendered_body_cache_key((self.size.width, self.size.height));
+        let body_layout_size = single_session_body_layout_cache_size(app, self.size);
+        let key = app.rendered_body_cache_key(body_layout_size);
         if self.single_session_body_key == Some(key) {
             return (key, false);
         }
 
         if !app.streaming_response.is_empty() {
-            let base_key = app.rendered_body_static_cache_key((self.size.width, self.size.height));
+            self.single_session_raw_body_key = None;
+            self.single_session_raw_body_lines.clear();
+            let base_key = app.rendered_body_static_cache_key(body_layout_size);
             if self.single_session_streaming_base_key != Some(base_key) {
                 if let Some(base_lines) =
                     single_session_rendered_static_body_lines_for_streaming(app, self.size, tick)
@@ -6659,8 +7120,16 @@ impl Canvas {
                 &mut self.single_session_body_lines,
             );
         } else {
-            self.single_session_body_lines =
-                single_session_rendered_body_lines_for_tick(app, self.size, tick);
+            let raw_key = app.rendered_body_cache_key((0, 0));
+            if self.single_session_raw_body_key != Some(raw_key) {
+                self.single_session_raw_body_lines = app.body_styled_lines_for_tick(tick);
+                self.single_session_raw_body_key = Some(raw_key);
+            }
+            self.single_session_body_lines = single_session_rendered_body_lines_from_raw_ref(
+                app,
+                self.size,
+                &self.single_session_raw_body_lines,
+            );
             self.single_session_streaming_base_key = None;
             self.single_session_streaming_base_len = 0;
             self.single_session_body_text_window_start = None;
