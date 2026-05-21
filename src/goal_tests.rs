@@ -6,8 +6,7 @@ fn create_and_resume_goal_persists_project_goal() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("repo");
     std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let goal = create_goal(
         GoalCreateInput {
@@ -41,12 +40,6 @@ fn create_and_resume_goal_persists_project_goal() {
         .expect("resume")
         .expect("goal resumed");
     assert_eq!(resumed.id, goal.id);
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
@@ -55,8 +48,7 @@ fn write_goal_page_auto_focuses_first_goal_only() {
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("repo");
     std::fs::create_dir_all(&project).expect("project dir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let session_id = "ses_goal_panel";
     let goal = create_goal(
@@ -81,20 +73,13 @@ fn write_goal_page_auto_focuses_first_goal_only() {
     let second = write_goal_page(session_id, Some(&project), &goal, GoalDisplayMode::Auto)
         .expect("second write");
     assert_eq!(second.focused_page_id.as_deref(), Some("notes"));
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
-fn create_goal_empty_title_fails() {
+fn test_create_goal_empty_title_fails() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let result = create_goal(
         GoalCreateInput {
@@ -110,20 +95,13 @@ fn create_goal_empty_title_fails() {
         result.unwrap_err().to_string(),
         "goal title cannot be empty"
     );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
 fn test_create_goal_with_custom_id() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let goal = create_goal(
         GoalCreateInput {
@@ -137,20 +115,13 @@ fn test_create_goal_with_custom_id() {
     .expect("create goal");
 
     assert_eq!(goal.id, "my-custom-id");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
 fn test_create_goal_id_conflict_resolution() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let goal1 = create_goal(
         GoalCreateInput {
@@ -184,20 +155,13 @@ fn test_create_goal_id_conflict_resolution() {
     )
     .expect("create goal 3");
     assert_eq!(goal3.id, "duplicate-goal-3");
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
 fn test_create_goal_clamps_progress() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let goal = create_goal(
         GoalCreateInput {
@@ -211,20 +175,13 @@ fn test_create_goal_clamps_progress() {
     .expect("create goal");
 
     assert_eq!(goal.progress_percent, Some(100));
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
 fn test_create_goal_global_scope() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _env_guard = EnvGuard::set("JCODE_HOME", temp.path());
 
     let goal = create_goal(
         GoalCreateInput {
@@ -265,10 +222,27 @@ fn test_create_goal_global_scope() {
         .expect("goal memory mirror");
     assert!(goal_mem.tags.iter().any(|tag| tag == "goal"));
     assert!(goal_mem.content.contains("Learn Rust"));
+}
 
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
+struct EnvGuard {
+    key: &'static str,
+    saved: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, val: impl AsRef<std::ffi::OsStr>) -> Self {
+        let saved = std::env::var_os(key);
+        crate::env::set_var(key, val);
+        Self { key, saved }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(val) = &self.saved {
+            crate::env::set_var(self.key, val);
+        } else {
+            crate::env::remove_var(self.key);
+        }
     }
 }
