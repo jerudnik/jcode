@@ -52,6 +52,7 @@ jobs:
 
       - name: Configure SSH for cargo git dependencies
         uses: webfactory/ssh-agent@v0.9.0
+        if: ${{ secrets.DEPLOY_KEY != '' }}
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
 
