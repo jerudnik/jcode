@@ -90,7 +90,7 @@ fn write_goal_page_auto_focuses_first_goal_only() {
 }
 
 #[test]
-fn test_create_goal_empty_title_fails() {
+fn create_goal_empty_title_fails() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_home = std::env::var_os("JCODE_HOME");
