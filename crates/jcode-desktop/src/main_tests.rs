@@ -182,6 +182,86 @@ fn desktop_hot_reload_prefers_newer_selfdev_binary() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn desktop_reload_window_placement_roundtrips_position_and_size() {
+    let placement = DesktopReloadWindowPlacement {
+        position: Some(PhysicalPosition::new(-24, 48)),
+        inner_size: PhysicalSize::new(1280, 800),
+    };
+
+    let encoded = placement.to_env_value();
+
+    assert_eq!(encoded, "-24,48,1280,800");
+    assert_eq!(
+        DesktopReloadWindowPlacement::from_env_value(&encoded),
+        Some(placement)
+    );
+}
+
+#[test]
+fn desktop_reload_window_placement_allows_size_without_position() {
+    let placement = DesktopReloadWindowPlacement {
+        position: None,
+        inner_size: PhysicalSize::new(1024, 720),
+    };
+
+    let encoded = placement.to_env_value();
+
+    assert_eq!(encoded, "_,_,1024,720");
+    assert_eq!(
+        DesktopReloadWindowPlacement::from_env_value(&encoded),
+        Some(placement)
+    );
+}
+
+#[test]
+fn desktop_reload_window_placement_rejects_invalid_values() {
+    for raw in [
+        "",
+        "1,2,3",
+        "1,2,3,4,5",
+        "_,2,1280,800",
+        "1,_,1280,800",
+        "x,2,1280,800",
+        "1,y,1280,800",
+        "1,2,0,800",
+        "1,2,1280,0",
+        "1,2,32769,800",
+        "1,2,1280,32769",
+        "1,2,width,800",
+        "1,2,1280,height",
+    ] {
+        assert_eq!(
+            DesktopReloadWindowPlacement::from_env_value(raw),
+            None,
+            "expected {raw:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn desktop_reload_handoff_watcher_releases_ready_child() -> Result<()> {
+    let dir = desktop_reload_handoff_temp_dir();
+    std::fs::create_dir_all(&dir)?;
+    let ready_file = dir.join("ready");
+    let release_file = dir.join("release");
+    let watcher = DesktopReloadHandoffWatcher {
+        ready_file: ready_file.clone(),
+        release_file: release_file.clone(),
+        spawned_at: Instant::now(),
+    };
+
+    assert_eq!(watcher.poll()?, DesktopReloadHandoffPoll::Waiting);
+    std::fs::write(&ready_file, b"ready")?;
+
+    assert_eq!(watcher.poll()?, DesktopReloadHandoffPoll::Ready);
+    assert!(release_file.exists());
+
+    watcher.cleanup();
+    assert!(!dir.exists());
+    Ok(())
+}
+
 fn unique_desktop_test_dir(name: &str) -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!(
         "jcode-{name}-{}-{}",
@@ -901,6 +981,32 @@ fn single_session_tab_autocompletes_desktop_slash_command() {
 }
 
 #[test]
+fn single_session_slash_suggestions_support_tui_style_fuzzy_abbreviations() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/cp".to_string()));
+
+    assert_eq!(app.active_inline_widget(), Some(InlineWidgetKind::SlashSuggestions));
+    let suggestions = app.inline_widget_styled_lines();
+    assert!(suggestions.iter().any(|line| {
+        line.style == SingleSessionLineStyle::OverlaySelection && line.text.contains("/copy")
+    }));
+
+    assert_eq!(app.handle_key(KeyInput::Autocomplete), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/copy");
+}
+
+#[test]
+fn single_session_slash_suggestions_keep_prefix_matches_before_fuzzy_matches() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/c".to_string()));
+
+    let suggestions = app.inline_widget_styled_lines();
+    assert!(suggestions.iter().any(|line| {
+        line.style == SingleSessionLineStyle::OverlaySelection && line.text.contains("/commands")
+    }));
+}
+
+#[test]
 fn single_session_slash_suggestions_filter_select_and_submit() {
     let mut app = SingleSessionApp::new(None);
 
@@ -1115,6 +1221,48 @@ fn single_session_commands_alias_opens_help_without_sending_prompt() {
         app.active_inline_widget(),
         Some(InlineWidgetKind::HotkeyHelp)
     );
+}
+
+#[test]
+fn single_session_slash_resume_opens_session_switcher_without_sending_prompt() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/resume".to_string()));
+
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    assert_eq!(
+        app.handle_key(KeyInput::SubmitDraft),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert!(app.session_switcher.open);
+    assert!(app.session_switcher.loading);
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SessionSwitcher)
+    );
+    assert_eq!(
+        app.active_inline_widget_mode(),
+        Some(InlineWidgetMode::Interactive)
+    );
+    assert!(app.draft.is_empty());
+    assert!(app.messages.is_empty());
+}
+
+#[test]
+fn single_session_slash_resume_completion_opens_session_switcher() {
+    let mut app = SingleSessionApp::new(None);
+    for ch in ["/", "r", "e", "s"] {
+        app.handle_key(KeyInput::Character(ch.to_string()));
+    }
+
+    assert_eq!(
+        app.handle_key(KeyInput::SubmitDraft),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert_eq!(app.draft, "");
+    assert!(app.session_switcher.open);
 }
 
 #[test]
@@ -2453,6 +2601,14 @@ fn single_session_visual_state_smoke_covers_markdown_spinner_and_switcher() {
     assert_visual_text_contains(&markdown_key, "streaming tail");
 
     let markdown_vertices = build_single_session_vertices(&markdown_app, size, 0.0, 0);
+    assert!(vertices_have_color(
+        &markdown_vertices,
+        COMPOSER_INPUT_BACKGROUND_COLOR
+    ));
+    assert!(vertices_have_color(
+        &markdown_vertices,
+        COMPOSER_INPUT_BORDER_COLOR
+    ));
     assert!(vertices_have_color(
         &markdown_vertices,
         QUOTE_CARD_BACKGROUND_COLOR
@@ -4157,7 +4313,10 @@ fn single_session_resume_switcher_reopens_without_stale_filter_but_refresh_prese
     );
     assert_eq!(app.session_switcher.filter, "beta");
 
-    assert_eq!(app.handle_key(KeyInput::RefreshSessions), KeyOutcome::LoadSessionSwitcher);
+    assert_eq!(
+        app.handle_key(KeyInput::RefreshSessions),
+        KeyOutcome::LoadSessionSwitcher
+    );
     assert_eq!(
         app.session_switcher.filter, "beta",
         "explicit refresh should keep the user's current filter"
