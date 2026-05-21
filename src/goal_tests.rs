@@ -88,3 +88,187 @@ fn write_goal_page_auto_focuses_first_goal_only() {
         crate::env::remove_var("JCODE_HOME");
     }
 }
+
+#[test]
+fn test_create_goal_empty_title_fails() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let result = create_goal(
+        GoalCreateInput {
+            title: "   ".to_string(),
+            scope: GoalScope::Global,
+            ..GoalCreateInput::default()
+        },
+        None,
+    );
+
+    assert!(result.is_err());
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "goal title cannot be empty"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_create_goal_with_custom_id() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let goal = create_goal(
+        GoalCreateInput {
+            id: Some("  My Custom ID !  ".to_string()),
+            title: "Custom ID Goal".to_string(),
+            scope: GoalScope::Global,
+            ..GoalCreateInput::default()
+        },
+        None,
+    )
+    .expect("create goal");
+
+    assert_eq!(goal.id, "my-custom-id");
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_create_goal_id_conflict_resolution() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let goal1 = create_goal(
+        GoalCreateInput {
+            title: "Duplicate Goal".to_string(),
+            scope: GoalScope::Global,
+            ..GoalCreateInput::default()
+        },
+        None,
+    )
+    .expect("create goal 1");
+    assert_eq!(goal1.id, "duplicate-goal");
+
+    let goal2 = create_goal(
+        GoalCreateInput {
+            title: "Duplicate Goal".to_string(),
+            scope: GoalScope::Global,
+            ..GoalCreateInput::default()
+        },
+        None,
+    )
+    .expect("create goal 2");
+    assert_eq!(goal2.id, "duplicate-goal-2");
+
+    let goal3 = create_goal(
+        GoalCreateInput {
+            title: "Duplicate Goal".to_string(),
+            scope: GoalScope::Global,
+            ..GoalCreateInput::default()
+        },
+        None,
+    )
+    .expect("create goal 3");
+    assert_eq!(goal3.id, "duplicate-goal-3");
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_create_goal_clamps_progress() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let goal = create_goal(
+        GoalCreateInput {
+            title: "Progress Clamp".to_string(),
+            scope: GoalScope::Global,
+            progress_percent: Some(150),
+            ..GoalCreateInput::default()
+        },
+        None,
+    )
+    .expect("create goal");
+
+    assert_eq!(goal.progress_percent, Some(100));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_create_goal_global_scope() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let goal = create_goal(
+        GoalCreateInput {
+            title: "Learn Rust".to_string(),
+            scope: GoalScope::Global,
+            description: Some("   Master borrow checker   ".to_string()),
+            why: Some("   To write safe concurrent code   ".to_string()),
+            success_criteria: vec!["   Write a web server   ".to_string(), " ".to_string()],
+            ..GoalCreateInput::default()
+        },
+        None,
+    )
+    .expect("create goal");
+
+    assert_eq!(goal.id, "learn-rust");
+    assert_eq!(goal.description, "Master borrow checker");
+    assert_eq!(goal.why, "To write safe concurrent code");
+    assert_eq!(
+        goal.success_criteria,
+        vec!["Write a web server".to_string()]
+    ); // empty one is filtered
+
+    let loaded = load_goal(&goal.id, Some(GoalScope::Global), None)
+        .expect("load")
+        .expect("goal exists");
+    assert_eq!(loaded.title, "Learn Rust");
+    assert_eq!(loaded.description, "Master borrow checker");
+    assert_eq!(loaded.why, "To write safe concurrent code");
+    assert_eq!(
+        loaded.success_criteria,
+        vec!["Write a web server".to_string()]
+    );
+
+    let manager = crate::memory::MemoryManager::new();
+    let graph = manager.load_global_graph().expect("load graph");
+    let goal_mem = graph
+        .get_memory(&format!("goal:{}", goal.id))
+        .expect("goal memory mirror");
+    assert!(goal_mem.tags.iter().any(|tag| tag == "goal"));
+    assert!(goal_mem.content.contains("Learn Rust"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
