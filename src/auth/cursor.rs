@@ -255,9 +255,11 @@ fn cursor_vscdb_paths() -> Vec<PathBuf> {
 /// Read a key from a vscdb file using the sqlite3 CLI.
 fn read_vscdb_key(db_path: &PathBuf, key: &str) -> Result<String> {
     let mut command = Command::new("sqlite3");
+    // Escape single quotes to prevent SQL injection when executing via sqlite3 CLI
+    let safe_key = key.replace('\'', "''");
     command.arg(db_path).arg(format!(
         "SELECT value FROM ItemTable WHERE key = '{}';",
-        key
+        safe_key
     ));
     let output = command_output_with_timeout(&mut command, CURSOR_EXTERNAL_COMMAND_TIMEOUT)
         .context("Failed to run sqlite3 (is it installed?)")?
