@@ -1292,7 +1292,10 @@ mod tests {
         std::fs::write(manifest.task_cards_dir.join("bad.json"), "{ invalid json }").unwrap();
 
         let summary = summarize_task_cards(&manifest);
-        assert_eq!(summary.total, 0, "Invalid or ignored files should yield 0 tasks");
+        assert_eq!(
+            summary.total, 0,
+            "Invalid or ignored files should yield 0 tasks"
+        );
 
         // Edge case 4: Valid task card mixed with invalid ones
         std::fs::write(
