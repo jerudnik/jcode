@@ -1,0 +1,5 @@
+🧪 Missing edge case tests for overnight::summarize_task_cards
+
+🎯 What: Added missing test coverage for `summarize_task_cards` in `src/overnight.rs`.
+📊 Coverage: Tested edge cases for missing directory, empty directory, invalid task cards (wrong format, bad json), and valid cards mixed with invalid files.
+✨ Result: Ensured `summarize_task_cards` correctly handles all edge cases and accurately counts tasks without panicking or bubbling errors.

@@ -1270,4 +1270,46 @@ mod tests {
         assert!(html.contains("Reproducible failure"));
         assert!(html.contains("cargo test deterministic_bug"));
     }
+
+    #[test]
+    fn summarize_task_cards_handles_edge_cases() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let manifest = test_manifest(temp.path(), "overnight_edge_cases");
+
+        // Edge case 1: Directory does not exist
+        assert!(!manifest.task_cards_dir.exists());
+        let summary = summarize_task_cards(&manifest);
+        assert_eq!(summary.total, 0, "Missing directory should yield 0 tasks");
+
+        // Edge case 2: Directory exists but is empty
+        std::fs::create_dir_all(&manifest.task_cards_dir).expect("task card dir");
+        let summary = summarize_task_cards(&manifest);
+        assert_eq!(summary.total, 0, "Empty directory should yield 0 tasks");
+
+        // Edge case 3: Invalid files (wrong extension, starts with _, bad json)
+        std::fs::write(manifest.task_cards_dir.join("not_json.txt"), "hello").unwrap();
+        std::fs::write(manifest.task_cards_dir.join("_ignored.json"), "{}").unwrap();
+        std::fs::write(manifest.task_cards_dir.join("bad.json"), "{ invalid json }").unwrap();
+
+        let summary = summarize_task_cards(&manifest);
+        assert_eq!(summary.total, 0, "Invalid or ignored files should yield 0 tasks");
+
+        // Edge case 4: Valid task card mixed with invalid ones
+        std::fs::write(
+            manifest.task_cards_dir.join("task-001.json"),
+            r#"{
+              "id": "task-001",
+              "title": "Valid task",
+              "status": "completed",
+              "validation": { "result": "passed" },
+              "updated_at": "2026-05-01T08:00:00Z"
+            }"#,
+        )
+        .unwrap();
+
+        let summary = summarize_task_cards(&manifest);
+        assert_eq!(summary.total, 1, "Valid file should be parsed successfully");
+        assert_eq!(summary.counts.completed, 1);
+        assert_eq!(summary.validated, 1);
+    }
 }
