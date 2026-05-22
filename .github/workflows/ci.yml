@@ -26,7 +26,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
-        if: ${{ secrets.DEPLOY_KEY != '' }}
+        if: "${{ secrets.DEPLOY_KEY }}" != ''
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -80,7 +80,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
-        if: ${{ secrets.DEPLOY_KEY != '' }}
+        if: "${{ secrets.DEPLOY_KEY }}" != ''
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -122,7 +122,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
-        if: ${{ secrets.DEPLOY_KEY != '' }}
+        if: "${{ secrets.DEPLOY_KEY }}" != ''
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -212,7 +212,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
-        if: ${{ secrets.DEPLOY_KEY != '' }}
+        if: "${{ secrets.DEPLOY_KEY }}" != ''
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -384,7 +384,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
-        if: ${{ secrets.DEPLOY_KEY != '' }}
+        if: "${{ secrets.DEPLOY_KEY }}" != ''
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
