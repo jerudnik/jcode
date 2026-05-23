@@ -451,10 +451,6 @@ impl crate::tui::TuiState for App {
         App::command_suggestions(self)
     }
 
-    fn command_suggestion_selected(&self) -> usize {
-        self.command_suggestion_selected
-    }
-
     fn active_skill(&self) -> Option<String> {
         self.active_skill.clone()
     }

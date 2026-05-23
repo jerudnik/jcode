@@ -364,7 +364,7 @@ fn redact_secrets_fast_path_skips_when_no_indicators() {
 }
 
 #[test]
-fn redact_secrets_lowercase_indicators_without_matches_leave_output_unchanged() {
+fn redact_secrets_triggers_regex_if_lower_api_key_present() {
     // Contains "api_key" in lower case, but it's not a secret matching our regexes.
     let input = "The parameter api_key is required.";
     let out = redact_secrets(input);

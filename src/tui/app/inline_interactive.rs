@@ -1885,14 +1885,7 @@ impl App {
                 }
             }
             OverlayAction::Selected(PickerResult::SelectedInCurrentTerminal(ids)) => {
-                if self.session_picker_mode == SessionPickerMode::CatchUp {
-                    self.handle_session_picker_selection(&ids);
-                    if let Some(picker_cell) = self.session_picker_overlay.as_ref() {
-                        picker_cell.borrow_mut().clear_selected_sessions();
-                    }
-                } else {
-                    self.handle_session_picker_current_terminal_selection(&ids);
-                }
+                self.handle_session_picker_current_terminal_selection(&ids);
             }
             OverlayAction::Selected(PickerResult::RestoreCrashedGroup(session_ids)) => {
                 self.handle_batch_crash_restore(&session_ids);

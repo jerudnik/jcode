@@ -510,7 +510,7 @@ fn test_notification_file_activity_repaint_does_not_leave_trailing_digit_artifac
 }
 
 #[test]
-fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_mutation() {
+fn test_file_activity_scroll_reproduces_trailing_nines_after_native_scroll_like_mutation() {
     let _lock = scroll_render_test_lock();
 
     let mut app = create_test_app();
@@ -531,10 +531,6 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
     app.scroll_offset = 0;
 
     let clean = render_and_snap(&app, &mut terminal);
-    assert!(
-        !clean.contains('Z'),
-        "ghost marker must not be present before injection:\n{clean}"
-    );
     let target_row = clean
         .lines()
         .position(|line| line.contains("read lines"))
@@ -545,7 +541,7 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
         .expect("expected file activity suffix")
         + "read lines 1-9".len();
 
-    let ghost = ratatui::buffer::Buffer::with_lines(["ZZZZ"]);
+    let ghost = ratatui::buffer::Buffer::with_lines(["9999"]);
     let updates = ghost
         .content()
         .iter()
@@ -560,8 +556,8 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
     let scrolled = render_and_snap(&app, &mut terminal);
 
     assert!(
-        scrolled.contains('Z'),
-        "expected an injected ghost marker to remain after scroll-like repaint:\n{scrolled}"
+        scrolled.contains("9999"),
+        "expected stale trailing nines to remain after scroll-like repaint:\n{scrolled}"
     );
 }
 

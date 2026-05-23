@@ -370,10 +370,6 @@ async fn handle_remote_key_internal(
         }
     }
 
-    if app.handle_command_suggestion_key(code, modifiers) {
-        return Ok(());
-    }
-
     if let Some(amount) = app.scroll_keys.scroll_amount(code, modifiers) {
         if amount < 0 {
             app.scroll_up((-amount) as usize);
@@ -1516,7 +1512,7 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
-                if trimmed == "/resume" || trimmed == "/sessions" || trimmed == "/session" {
+                if trimmed == "/resume" || trimmed == "/sessions" {
                     app.open_session_picker();
                     return Ok(());
                 }

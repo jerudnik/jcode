@@ -252,19 +252,15 @@ pub enum DesktopSessionEvent {
     TextDelta(String),
     TextReplace(String),
     ToolStarted {
-        id: Option<String>,
         name: String,
     },
     ToolExecuting {
-        id: Option<String>,
         name: String,
     },
     ToolInput {
-        id: Option<String>,
         delta: String,
     },
     ToolFinished {
-        id: Option<String>,
         name: String,
         summary: String,
         is_error: bool,
