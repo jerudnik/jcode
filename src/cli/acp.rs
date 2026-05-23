@@ -468,6 +468,7 @@ impl AcpRuntime {
             .send(&Request::Subscribe {
                 id: subscribe_id,
                 working_dir: Some(cwd.display().to_string()),
+                session_kind: None,
                 selfdev: None,
                 target_session_id: None,
                 client_instance_id: Some("acp".to_string()),
