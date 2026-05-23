@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn create_and_resume_goal_persists_project_goal() {
+fn test_create_and_resume_goal_persists_project_goal() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("repo");
@@ -43,7 +43,7 @@ fn create_and_resume_goal_persists_project_goal() {
 }
 
 #[test]
-fn write_goal_page_auto_focuses_first_goal_only() {
+fn test_write_goal_page_auto_focuses_first_goal_only() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("repo");
