@@ -19,8 +19,6 @@ fn test_is_browser_command() {
 
 #[test]
 fn test_rewrite_command_with_full_path() {
-    let _guard = crate::storage::lock_test_env();
-
     let cmd = "browser ping";
     let result = rewrite_command_with_full_path(cmd);
     // If binary exists, it rewrites; if not, returns unchanged
@@ -34,8 +32,6 @@ fn test_rewrite_command_with_full_path() {
 
 #[test]
 fn test_paths() {
-    let _guard = crate::storage::lock_test_env();
-
     let bdir = browser_dir();
     assert!(bdir.to_string_lossy().contains(".jcode"));
     assert!(bdir.to_string_lossy().ends_with("browser"));

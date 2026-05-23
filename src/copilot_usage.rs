@@ -105,9 +105,16 @@ mod tests {
         save_tracker, usage_path,
     };
     use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        crate::storage::lock_test_env()
+        let mutex = ENV_LOCK.get_or_init(|| Mutex::new(()));
+        match mutex.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     struct EnvVarGuard {

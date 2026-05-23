@@ -58,7 +58,6 @@ impl Config {
 - Memory: {}
 - Swarm: {}
 - Message timestamps: {}
-- Persist memory injections: {}
 - Update channel: {}
 
 **Provider:**
@@ -164,7 +163,6 @@ impl Config {
             self.features.memory,
             self.features.swarm,
             self.features.message_timestamps,
-            self.features.persist_memory_injections,
             self.features.update_channel,
             self.provider
                 .default_model
