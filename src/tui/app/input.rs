@@ -1231,19 +1231,7 @@ pub(super) fn handle_visible_copy_shortcut(
         return false;
     }
 
-    if c.eq_ignore_ascii_case(&'e') && app.diff_mode.is_inline() {
-        app.diff_mode = if app.diff_mode.is_full_inline() {
-            crate::config::DiffDisplayMode::Inline
-        } else {
-            crate::config::DiffDisplayMode::FullInline
-        };
-        app.record_copy_badge_key_press('e');
-        let action = if app.diff_mode.is_full_inline() {
-            "Expanded edit diffs"
-        } else {
-            "Collapsed edit diffs"
-        };
-        app.set_status_notice(format!("{} · Diffs: {}", action, app.diff_mode.label()));
+    if handle_expand_edit_badge_shortcut(app, c) {
         return true;
     }
 
@@ -1262,6 +1250,32 @@ pub(super) fn handle_visible_copy_shortcut(
     }
 
     false
+}
+
+fn handle_expand_edit_badge_shortcut(app: &mut App, key: char) -> bool {
+    if !key.eq_ignore_ascii_case(&'e') {
+        return false;
+    }
+
+    // The inline edit badge is rendered from the inline diff mode itself, while
+    // opening it from other diff modes requires at least one edit tool message.
+    // Keep this predicate in one place so the [Alt] [⇧] [E] badge uses the same
+    // shortcut path as visible copy badges without falling through to copy key E.
+    if !app.diff_mode.is_inline() && app.display_edit_tool_message_count == 0 {
+        return false;
+    }
+
+    if app.diff_mode.is_full_inline() {
+        return false;
+    }
+
+    app.diff_mode = crate::config::DiffDisplayMode::FullInline;
+    app.record_copy_badge_key_press('e');
+    app.set_status_notice(format!(
+        "Expanded edit diffs · Diffs: {}",
+        app.diff_mode.label()
+    ));
+    true
 }
 
 pub(super) fn handle_modal_key(
@@ -1593,12 +1607,16 @@ impl App {
             }
         }
 
-        if handle_pre_control_shortcuts(self, code, modifiers) {
+        if is_next_prompt_new_session_hotkey(code, modifiers) {
+            self.toggle_next_prompt_new_session_routing();
             return Ok(());
         }
 
-        if is_next_prompt_new_session_hotkey(code, modifiers) {
-            self.toggle_next_prompt_new_session_routing();
+        if self.handle_command_suggestion_key(code, modifiers) {
+            return Ok(());
+        }
+
+        if handle_pre_control_shortcuts(self, code, modifiers) {
             return Ok(());
         }
 

@@ -8,8 +8,11 @@ mod client_comm_context;
 mod client_comm_message;
 mod client_disconnect_cleanup;
 mod client_lifecycle;
+mod client_lifecycle_logging;
+mod client_lightweight_control;
 mod client_session;
 mod client_state;
+mod client_writer;
 mod comm_await;
 mod comm_control;
 mod comm_plan;
@@ -326,9 +329,9 @@ pub use crate::plan::{SwarmTaskProgress, VersionedPlan};
 pub use self::await_members_state::pending_await_members_for_session;
 use self::reload_state::clear_reload_marker_if_stale_for_pid;
 #[cfg(test)]
-pub(crate) use self::reload_state::subscribe_reload_signal_for_tests;
-#[cfg(test)]
 pub(crate) use self::reload_state::reset_reload_signal_for_tests;
+#[cfg(test)]
+pub(crate) use self::reload_state::subscribe_reload_signal_for_tests;
 pub use self::reload_state::{
     ReloadAck, ReloadPhase, ReloadSignal, ReloadState, ReloadWaitStatus, acknowledge_reload_signal,
     await_reload_handoff, clear_reload_marker, inspect_reload_wait_status,

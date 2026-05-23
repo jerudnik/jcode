@@ -103,7 +103,10 @@ mod tests {
             crate::env::remove_var(DISABLE_ENV_VAR);
         }
 
-        assert!(result.is_ok(), "open_url should succeed silently when disabled");
+        assert!(
+            result.is_ok(),
+            "open_url should succeed silently when disabled"
+        );
     }
 
     #[test]

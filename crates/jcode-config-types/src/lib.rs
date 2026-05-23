@@ -544,6 +544,8 @@ pub struct DisplayConfig {
     pub redraw_fps: u32,
     /// Show a truncated preview of the previous prompt at the top when it scrolls out of view (default: true)
     pub prompt_preview: bool,
+    /// Override the Alt/Option label shown in copy badges. Empty = auto (⌥ on macOS, Alt elsewhere).
+    pub copy_badge_alt_label: String,
     /// Native terminal scrollbar configuration for scrollable panes
     pub native_scrollbars: NativeScrollbarConfig,
 }
@@ -570,6 +572,7 @@ impl Default for DisplayConfig {
             animation_fps: 60,
             redraw_fps: 60,
             prompt_preview: true,
+            copy_badge_alt_label: String::new(),
             native_scrollbars: NativeScrollbarConfig::default(),
         }
     }
@@ -597,6 +600,9 @@ pub struct FeatureConfig {
     pub swarm: bool,
     /// Inject timestamps into user messages and tool results sent to the model (default: true)
     pub message_timestamps: bool,
+    /// Persist auto-recalled memory injections into normal session history instead of sending
+    /// them as request-only ephemeral suffix messages (default: false)
+    pub persist_memory_injections: bool,
     /// Update channel: "stable" (releases only) or "main" (latest commits)
     pub update_channel: UpdateChannel,
 }
@@ -607,6 +613,7 @@ impl Default for FeatureConfig {
             memory: true,
             swarm: true,
             message_timestamps: true,
+            persist_memory_injections: false,
             update_channel: UpdateChannel::default(),
         }
     }
@@ -677,6 +684,8 @@ pub struct ProviderConfig {
     pub default_provider: Option<String>,
     /// Reasoning effort for OpenAI Responses API (none|low|medium|high|xhigh)
     pub openai_reasoning_effort: Option<String>,
+    /// Reasoning effort for Anthropic Messages API output_config (none|low|medium|high|xhigh; max aliases to strongest supported)
+    pub anthropic_reasoning_effort: Option<String>,
     /// OpenAI transport mode (auto|websocket|https)
     pub openai_transport: Option<String>,
     /// OpenAI service tier override (priority|flex)
@@ -701,6 +710,7 @@ impl Default for ProviderConfig {
             default_model: None,
             default_provider: None,
             openai_reasoning_effort: Some("low".to_string()),
+            anthropic_reasoning_effort: None,
             openai_transport: None,
             openai_service_tier: Some("priority".to_string()),
             openai_native_compaction_mode: "auto".to_string(),

@@ -97,8 +97,7 @@ fn spawn_resume_in_new_terminal_uses_handterm_exec_mode() {
     // `crate::terminal_launch::is_disabled`). This test specifically
     // wants to exercise the real spawn path with a fake handterm
     // binary on PATH, so opt back in for our scope.
-    let _spawn_guard =
-        EnvVarGuard::set_value(crate::terminal_launch::TEST_ALLOW_ENV_VAR, "1");
+    let _spawn_guard = EnvVarGuard::set_value(crate::terminal_launch::TEST_ALLOW_ENV_VAR, "1");
     let temp = tempfile::tempdir().expect("temp dir");
     let output_path = temp.path().join("resume-launch.txt");
     write_fake_handterm(&temp, &output_path);
@@ -173,8 +172,7 @@ fn spawn_selfdev_in_new_terminal_uses_handterm_exec_mode() {
     let _global_lock = crate::storage::lock_test_env();
     // See spawn_resume_in_new_terminal_uses_handterm_exec_mode above
     // for the rationale of opting back in to the real spawn here.
-    let _spawn_guard =
-        EnvVarGuard::set_value(crate::terminal_launch::TEST_ALLOW_ENV_VAR, "1");
+    let _spawn_guard = EnvVarGuard::set_value(crate::terminal_launch::TEST_ALLOW_ENV_VAR, "1");
     let temp = tempfile::tempdir().expect("temp dir");
     let output_path = temp.path().join("selfdev-launch.txt");
     write_fake_handterm(&temp, &output_path);

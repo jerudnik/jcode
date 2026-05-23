@@ -459,6 +459,8 @@ fn version_command_plain_output_includes_core_fields() {
 
 #[tokio::test]
 async fn restore_agent_session_if_requested_restores_resumed_session() {
+    let _guard = crate::storage::lock_test_env();
+
     let provider: Arc<dyn Provider> = Arc::new(TestProvider);
     let registry = Registry::new(provider.clone()).await;
     let mut original = crate::agent::Agent::new(provider.clone(), registry);

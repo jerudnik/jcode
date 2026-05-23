@@ -36,7 +36,14 @@ async fn apply_remote_effort_direction(
     remote: &mut RemoteConnection,
     direction: i8,
 ) -> Result<()> {
-    let efforts = ["none", "low", "medium", "high", "xhigh"];
+    let efforts = app_mod::inferred_reasoning_efforts(
+        app.remote_provider_name.as_deref(),
+        app.remote_provider_model.as_deref(),
+    );
+    if efforts.is_empty() {
+        app.set_status_notice("Reasoning effort not available for this provider");
+        return Ok(());
+    }
     let current = app.remote_reasoning_effort.as_deref();
     let current_index = current
         .and_then(|c| efforts.iter().position(|e| *e == c))
@@ -368,6 +375,10 @@ async fn handle_remote_key_internal(
             }
             _ => {}
         }
+    }
+
+    if app.handle_command_suggestion_key(code, modifiers) {
+        return Ok(());
     }
 
     if let Some(amount) = app.scroll_keys.scroll_amount(code, modifiers) {
@@ -944,7 +955,16 @@ async fn handle_remote_key_internal(
                     let label = current
                         .map(app_mod::effort_display_label)
                         .unwrap_or("default");
-                    let efforts = ["none", "low", "medium", "high", "xhigh"];
+                    let efforts = app_mod::inferred_reasoning_efforts(
+                        app.remote_provider_name.as_deref(),
+                        app.remote_provider_model.as_deref(),
+                    );
+                    if efforts.is_empty() {
+                        app.push_display_message(DisplayMessage::system(
+                            "Reasoning effort not available for this provider.".to_string(),
+                        ));
+                        return Ok(());
+                    }
                     let list: Vec<String> = efforts
                         .iter()
                         .map(|e| {
@@ -969,8 +989,11 @@ async fn handle_remote_key_internal(
                         app.push_display_message(DisplayMessage::error("Usage: /effort <level>"));
                         return Ok(());
                     }
-                    const EFFORTS: [&str; 5] = ["none", "low", "medium", "high", "xhigh"];
-                    if EFFORTS.contains(&level) {
+                    let efforts = app_mod::inferred_reasoning_efforts(
+                        app.remote_provider_name.as_deref(),
+                        app.remote_provider_model.as_deref(),
+                    );
+                    if efforts.contains(&level) {
                         app.remote_reasoning_effort = Some(level.to_string());
                         app.invalidate_model_picker_cache();
                         app.set_status_notice(format!(
@@ -1512,7 +1535,7 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
-                if trimmed == "/resume" || trimmed == "/sessions" {
+                if trimmed == "/resume" || trimmed == "/sessions" || trimmed == "/session" {
                     app.open_session_picker();
                     return Ok(());
                 }
@@ -1658,6 +1681,44 @@ async fn handle_remote_key_internal(
                 }
 
                 if handle_workspace_command(app, remote, trimmed).await? {
+                    return Ok(());
+                }
+
+                if trimmed == "/commit" {
+                    let prompt = app_mod::commands::build_commit_prompt();
+                    if app.is_processing {
+                        app.push_display_message(DisplayMessage::system(
+                            app_mod::commands::commit_launch_notice(true),
+                        ));
+                        match remote.soft_interrupt(prompt.clone(), false).await {
+                            Ok(request_id) => {
+                                app.track_pending_soft_interrupt(request_id, prompt);
+                                app.set_status_notice("Interrupting for /commit...");
+                            }
+                            Err(error) => {
+                                app.push_display_message(DisplayMessage::error(format!(
+                                    "Failed to start /commit: {}",
+                                    error
+                                )));
+                                app.set_status_notice("/commit failed");
+                            }
+                        }
+                    } else {
+                        app.push_display_message(DisplayMessage::system(
+                            app_mod::commands::commit_launch_notice(false),
+                        ));
+                        input_dispatch::begin_remote_send(
+                            app,
+                            remote,
+                            prompt,
+                            Vec::new(),
+                            false,
+                            None,
+                            false,
+                            0,
+                        )
+                        .await?;
+                    }
                     return Ok(());
                 }
 

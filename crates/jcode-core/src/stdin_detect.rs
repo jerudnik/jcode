@@ -149,12 +149,8 @@ pub mod macos {
             buffer: *mut libc::c_void,
             buffersize: i32,
         ) -> i32;
-        fn proc_listpids(
-            ty: u32,
-            typeinfo: u32,
-            buffer: *mut libc::c_void,
-            buffersize: i32,
-        ) -> i32;
+        fn proc_listpids(ty: u32, typeinfo: u32, buffer: *mut libc::c_void, buffersize: i32)
+        -> i32;
     }
 
     // proc_pidinfo flavors (sys/proc_info.h)
@@ -355,7 +351,12 @@ pub mod macos {
         let mut buf = vec![0i32; cap];
         let bytes = (buf.len() * mem::size_of::<i32>()) as i32;
         let got = unsafe {
-            proc_listpids(PROC_ALL_PIDS, 0, buf.as_mut_ptr() as *mut libc::c_void, bytes)
+            proc_listpids(
+                PROC_ALL_PIDS,
+                0,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                bytes,
+            )
         };
         if got <= 0 {
             return None;

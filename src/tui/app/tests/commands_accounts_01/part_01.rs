@@ -103,6 +103,51 @@ fn session_picker_enter_queues_current_terminal_resume_and_closes_overlay() {
 }
 
 #[test]
+fn slash_resume_opens_session_picker_overlay_locally() {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let _guard = runtime.enter();
+    let mut app = create_test_app();
+
+    app.input = "/resume".to_string();
+    app.submit_input();
+
+    assert!(app.session_picker_overlay.is_some());
+    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
+    assert!(app.pending_session_picker_load.is_some());
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn slash_sessions_alias_opens_session_picker_overlay_locally() {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let _guard = runtime.enter();
+    let mut app = create_test_app();
+
+    app.input = "/sessions".to_string();
+    app.submit_input();
+
+    assert!(app.session_picker_overlay.is_some());
+    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
+    assert!(app.pending_session_picker_load.is_some());
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn slash_session_alias_opens_session_picker_overlay_locally() {
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime");
+    let _guard = runtime.enter();
+    let mut app = create_test_app();
+
+    app.input = "/session".to_string();
+    app.submit_input();
+
+    assert!(app.session_picker_overlay.is_some());
+    assert_eq!(app.session_picker_mode, SessionPickerMode::Resume);
+    assert!(app.pending_session_picker_load.is_some());
+    assert!(app.input.is_empty());
+}
+
+#[test]
 fn test_resize_redraw_is_debounced() {
     let mut app = create_test_app();
 
@@ -158,6 +203,38 @@ fn test_help_topic_shows_git_command_details() {
     assert!(msg.content.contains("`/git`"));
     assert!(msg.content.contains("git status --short --branch"));
     assert!(msg.content.contains("`/git status`"));
+}
+
+#[test]
+fn test_help_topic_shows_commit_command_details() {
+    let mut app = create_test_app();
+    app.input = "/help commit".to_string();
+    app.submit_input();
+
+    let msg = app
+        .display_messages()
+        .last()
+        .expect("missing help response");
+    assert_eq!(msg.role, "system");
+    assert!(msg.content.contains("`/commit`"));
+    assert!(msg.content.contains("logical commits"));
+    assert!(msg.content.contains("preserve unrelated work"));
+}
+
+#[test]
+fn test_commit_command_starts_synthetic_user_turn() {
+    let mut app = create_test_app();
+    app.input = "/commit".to_string();
+    app.submit_input();
+
+    assert!(app.is_processing);
+    assert!(app.pending_turn);
+    let notice = app
+        .display_messages()
+        .last()
+        .expect("missing launch notice");
+    assert_eq!(notice.role, "system");
+    assert!(notice.content.contains("Starting logical commits"));
 }
 
 #[test]
@@ -517,8 +594,7 @@ fn test_git_command_shows_repo_status_for_working_directory() {
 
     let mut app = create_test_app();
     app.session.working_dir = Some(repo.path().display().to_string());
-    app.input = "/git".to_string();
-    submit_git_command_and_wait(&mut app);
+    submit_git_command_and_wait_for_response(&mut app);
 
     let msg = app.display_messages().last().expect("missing git response");
     assert_eq!(msg.role, "system");
@@ -537,8 +613,7 @@ fn test_git_command_works_in_remote_mode_with_accessible_working_directory() {
     app.is_remote = true;
     app.remote_session_id = Some("ses_remote_git".to_string());
     app.session.working_dir = Some(repo.path().display().to_string());
-    app.input = "/git".to_string();
-    submit_git_command_and_wait(&mut app);
+    submit_git_command_and_wait_for_response(&mut app);
 
     let msg = app.display_messages().last().expect("missing git response");
     assert_eq!(msg.role, "system");
@@ -552,28 +627,39 @@ fn test_git_command_works_in_remote_mode_with_accessible_working_directory() {
     );
 }
 
-fn submit_git_command_and_wait(app: &mut App) {
-    let mut rx = crate::bus::Bus::global().subscribe();
+fn submit_git_command_and_wait_for_response(app: &mut App) {
+    let expected_session_id = if app.is_remote {
+        app.remote_session_id
+            .clone()
+            .unwrap_or_else(|| app.session.id.clone())
+    } else {
+        app.session.id.clone()
+    };
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut bus_rx = crate::bus::Bus::global().subscribe();
+    while bus_rx.try_recv().is_ok() {}
+
+    app.input = "/git".to_string();
     app.submit_input();
 
-    let rt = tokio::runtime::Runtime::new().expect("git command test runtime");
-    let event = rt
-        .block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(3), async {
-                loop {
-                    match rx.recv().await {
-                        Ok(event @ crate::bus::BusEvent::GitStatusCompleted(_)) => break event,
-                        Ok(_) => continue,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(error) => panic!("git status bus closed: {error}"),
-                    }
-                }
-            })
-            .await
-        })
-        .expect("timed out waiting for git status bus event");
-
-    assert!(super::local::handle_bus_event(app, Ok(event)));
+    rt.block_on(async {
+        loop {
+            let event = tokio::time::timeout(std::time::Duration::from_secs(2), bus_rx.recv())
+                .await
+                .expect("timed out waiting for git status bus event")
+                .expect("bus should stay open");
+            let saw_completion_for_app = matches!(
+                &event,
+                crate::bus::BusEvent::GitStatusCompleted(completed)
+                    if completed.session_id == expected_session_id
+            );
+            super::local::handle_bus_event(app, Ok(event));
+            if saw_completion_for_app {
+                break;
+            }
+        }
+    });
 }
 
 #[test]

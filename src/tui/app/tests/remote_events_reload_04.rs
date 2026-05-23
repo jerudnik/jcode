@@ -752,6 +752,7 @@ fn test_debug_command_message_respects_queue_mode() {
     let mut app = create_test_app();
 
     // Test 1: When not processing, should submit directly
+    let initial_session_messages = app.session.messages.len();
     app.is_processing = false;
     let result = app.handle_debug_command("message:hello");
     assert!(
@@ -764,20 +765,15 @@ fn test_debug_command_message_respects_queue_mode() {
     assert!(app.pending_turn);
     assert_eq!(app.messages.len(), 0);
     assert_eq!(app.display_messages.len(), 1);
-    assert_eq!(
-        app.session
-            .messages
-            .iter()
-            .filter(|m| {
-                m.role == crate::message::Role::User
-                    && m.content.iter().any(|block| matches!(
-                        block,
-                        crate::message::ContentBlock::Text { text, .. } if text == "hello"
-                    ))
-            })
-            .count(),
-        1
-    );
+    assert_eq!(app.session.messages.len(), initial_session_messages + 1);
+    let submitted_message = app
+        .session
+        .messages
+        .last()
+        .expect("submitted debug message should be stored");
+    assert_eq!(submitted_message.role, crate::message::Role::User);
+    assert_eq!(submitted_message.display_role, None);
+    assert_eq!(submitted_message.content_preview(), "hello");
 
     // Reset for next test
     app.pending_turn = false;
@@ -973,14 +969,21 @@ fn test_remote_super_space_routes_next_prompt_to_new_session() {
             .expect("Super+Space should arm routing");
         assert!(app.route_next_prompt_to_new_session);
 
+        app.is_processing = true;
+        app.status = ProcessingStatus::Streaming;
+        app.processing_started = Some(std::time::Instant::now());
+        let active_started = app.processing_started;
+
         rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-            .expect("armed prompt should launch split request");
+            .expect("armed prompt should launch split request immediately");
 
         assert!(!app.route_next_prompt_to_new_session);
         assert!(app.pending_split_prompt.is_some());
         assert_eq!(app.pending_split_label.as_deref(), Some("Prompt"));
+        assert!(!app.pending_split_request);
         assert!(app.is_processing);
-        assert!(matches!(app.status, ProcessingStatus::Sending));
+        assert!(matches!(app.status, ProcessingStatus::Streaming));
+        assert_eq!(app.processing_started, active_started);
         assert!(app.current_message_id.is_none());
 
         app.handle_server_event(

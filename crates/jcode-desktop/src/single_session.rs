@@ -1,5 +1,6 @@
 use crate::{
     desktop_rich_text,
+    session_data::{self, SessionTranscriptMessage},
     session_launch::{
         DesktopModelChoice, DesktopSessionEvent, DesktopSessionHandle, DesktopSessionStatus,
     },
@@ -15,6 +16,7 @@ use std::time::{Duration, Instant};
 use workspace::{KeyInput, KeyOutcome};
 
 pub(crate) const SINGLE_SESSION_FONT_FAMILY: &str = "JetBrainsMono Nerd Font";
+pub(crate) const SINGLE_SESSION_USER_FONT_FAMILY: &str = "Kalam";
 pub(crate) const SINGLE_SESSION_ASSISTANT_FONT_FAMILY: &str = SINGLE_SESSION_FONT_FAMILY;
 pub(crate) const SINGLE_SESSION_WELCOME_FONT_FAMILY: &str = "Homemade Apple";
 pub(crate) const SINGLE_SESSION_FONT_WEIGHT: &str = "Light";
@@ -23,6 +25,103 @@ pub(crate) const SINGLE_SESSION_FONT_FALLBACKS: &[&str] = &[
     "JetBrains Mono",
     "monospace",
 ];
+
+pub(crate) const SINGLE_SESSION_HANDWRITING_FONT_FAMILIES: &[&str] = &[
+    "Homemade Apple",
+    "Kalam",
+    "Shadows Into Light Two",
+    "Patrick Hand",
+    "Gaegu",
+    "Caveat",
+    "Indie Flower",
+    "Gloria Hallelujah",
+    "Handlee",
+    "Reenie Beanie",
+];
+
+static DESKTOP_USER_FONT_INDEX: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(usize::MAX);
+static DESKTOP_ASSISTANT_FONT_INDEX: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+pub(crate) fn single_session_user_font_family() -> &'static str {
+    desktop_font_family_from_index(
+        DESKTOP_USER_FONT_INDEX.load(std::sync::atomic::Ordering::Relaxed),
+    )
+    .or_else(|| desktop_font_family_from_env("JCODE_DESKTOP_USER_FONT"))
+    .unwrap_or(SINGLE_SESSION_USER_FONT_FAMILY)
+}
+
+pub(crate) fn single_session_assistant_font_family() -> &'static str {
+    desktop_font_family_from_index(
+        DESKTOP_ASSISTANT_FONT_INDEX.load(std::sync::atomic::Ordering::Relaxed),
+    )
+    .or_else(|| desktop_font_family_from_env("JCODE_DESKTOP_AI_FONT"))
+    .or_else(|| desktop_font_family_from_env("JCODE_DESKTOP_ASSISTANT_FONT"))
+    .unwrap_or(SINGLE_SESSION_ASSISTANT_FONT_FAMILY)
+}
+
+pub(crate) fn set_single_session_user_font_family(value: &str) -> Option<&'static str> {
+    let (index, family) = desktop_font_family_index_from_key(value)?;
+    DESKTOP_USER_FONT_INDEX.store(index, std::sync::atomic::Ordering::Relaxed);
+    Some(family)
+}
+
+pub(crate) fn set_single_session_assistant_font_family(value: &str) -> Option<&'static str> {
+    let (index, family) = desktop_font_family_index_from_key(value)?;
+    DESKTOP_ASSISTANT_FONT_INDEX.store(index, std::sync::atomic::Ordering::Relaxed);
+    Some(family)
+}
+
+fn desktop_font_family_from_index(index: usize) -> Option<&'static str> {
+    match index {
+        0 => Some(SINGLE_SESSION_FONT_FAMILY),
+        index => SINGLE_SESSION_HANDWRITING_FONT_FAMILIES
+            .get(index - 1)
+            .copied(),
+    }
+}
+
+fn desktop_font_family_index_from_key(value: &str) -> Option<(usize, &'static str)> {
+    let family = desktop_font_family_from_key(value)?;
+    if family == SINGLE_SESSION_FONT_FAMILY {
+        return Some((0, family));
+    }
+    SINGLE_SESSION_HANDWRITING_FONT_FAMILIES
+        .iter()
+        .position(|candidate| *candidate == family)
+        .map(|index| (index + 1, family))
+}
+
+fn desktop_font_family_from_env(name: &str) -> Option<&'static str> {
+    let value = std::env::var(name).ok()?;
+    desktop_font_family_from_key(&value)
+}
+
+pub(crate) fn desktop_font_family_from_key(value: &str) -> Option<&'static str> {
+    let normalized = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>();
+    match normalized.as_str() {
+        "jetbrains" | "jetbrainsmono" | "jetbrainsmononerdfont" | "default" => {
+            Some(SINGLE_SESSION_FONT_FAMILY)
+        }
+        "homemadeapple" => Some("Homemade Apple"),
+        "kalam" => Some("Kalam"),
+        "shadowsintolighttwo" | "shadowsintolight" => Some("Shadows Into Light Two"),
+        "patrickhand" => Some("Patrick Hand"),
+        "gaegu" => Some("Gaegu"),
+        "caveat" => Some("Caveat"),
+        "indieflower" => Some("Indie Flower"),
+        "gloriahallelujah" => Some("Gloria Hallelujah"),
+        "handlee" => Some("Handlee"),
+        "reeniebeanie" => Some("Reenie Beanie"),
+        _ => None,
+    }
+}
 pub(crate) const SINGLE_SESSION_DEFAULT_FONT_SIZE: f32 = 22.0;
 pub(crate) const SINGLE_SESSION_TITLE_FONT_SIZE: f32 = SINGLE_SESSION_DEFAULT_FONT_SIZE;
 pub(crate) const SINGLE_SESSION_BODY_FONT_SIZE: f32 = SINGLE_SESSION_DEFAULT_FONT_SIZE * 1.55;
@@ -44,10 +143,15 @@ const DESKTOP_SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/new", "reset to a fresh desktop session"),
     ("/resume", "open the recent session switcher"),
     ("/sessions", "open the recent session switcher"),
+    ("/session", "alias for /sessions"),
     ("/model [name]", "open model picker or switch to a model"),
     ("/models", "alias for /model"),
     ("/refresh-model-list", "refresh provider model catalogs"),
     ("/effort [level]", "show or change reasoning effort"),
+    (
+        "/font [user|ai] [name]",
+        "show or hot-swap desktop transcript fonts",
+    ),
     ("/fast [on|off|status]", "show or toggle OpenAI fast mode"),
     ("/transport [mode]", "show or change OpenAI transport"),
     (
@@ -63,19 +167,27 @@ const DESKTOP_SLASH_COMMANDS: &[(&str, &str)] = &[
         "/search <query>",
         "count transcript matches and jump to the first one",
     ),
+    ("/commit", "make logical commits from current changes"),
     ("/stop", "interrupt the running generation"),
+    ("/cancel", "alias for /stop"),
     ("/status", "show current desktop session status"),
     ("/quit", "exit the desktop app"),
+    ("/exit", "alias for /quit"),
 ];
-const DESKTOP_SLASH_SUGGESTION_ROW_LIMIT: usize = 7;
+pub(crate) const DESKTOP_SLASH_SUGGESTION_ROW_LIMIT: usize = 7;
 
 #[cfg_attr(test, allow(dead_code))]
 const INLINE_WIDGET_REVEAL_DURATION: Duration = Duration::from_millis(180);
 pub(crate) const MODEL_PICKER_INLINE_ROW_LIMIT: usize = 5;
+pub(crate) const INLINE_WIDGET_DEFAULT_VISIBLE_LINE_LIMIT: usize = 12;
 
 const BODY_CACHE_TEXT_EDGE_BYTES: usize = 256;
 const BODY_CACHE_MESSAGE_EDGE_COUNT: usize = 12;
 const BODY_CACHE_MESSAGE_MIDDLE_SAMPLE_COUNT: usize = 8;
+
+fn desktop_commit_prompt() -> String {
+    "Make interactive, logical commits for the current uncommitted work. Inspect the git state first, including unstaged and staged changes. Group related changes into small coherent commits, staging only the files or hunks that belong together. Preserve unrelated user or agent work, do not discard changes, and do not amend existing commits unless clearly necessary. For each commit, use a concise conventional-style message when possible. Validate as appropriate for the changed files before committing, and report the commits created plus any remaining uncommitted changes.".to_string()
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
@@ -224,7 +336,62 @@ struct SingleSessionRuntimeSettings {
 #[derive(Clone, Debug, Default)]
 struct SingleSessionToolState {
     active_message_index: Option<usize>,
+    active_call_id: Option<String>,
     input_buffer: String,
+    event_sequence: u64,
+    runs: Vec<SingleSessionToolRun>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct SingleSessionToolRun {
+    pub(crate) call_id: String,
+    pub(crate) message_index: usize,
+    pub(crate) name: String,
+    pub(crate) state: SingleSessionToolVisualState,
+    pub(crate) summary: Option<String>,
+    pub(crate) input_raw: String,
+    pub(crate) input_preview: Option<String>,
+    pub(crate) stdin_prompt: Option<String>,
+    pub(crate) started_sequence: u64,
+    pub(crate) updated_sequence: u64,
+    pub(crate) completed_sequence: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum SingleSessionToolVisualState {
+    Preparing,
+    Running,
+    Succeeded,
+    Failed,
+    Unknown,
+    Group,
+}
+
+impl SingleSessionToolVisualState {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Preparing => "preparing",
+            Self::Running => "running",
+            Self::Succeeded => "done",
+            Self::Failed => "failed",
+            Self::Unknown => "unknown",
+            Self::Group => "tools",
+        }
+    }
+
+    pub(crate) fn from_tool_state_text(text: &str) -> Self {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "preparing" | "pending" | "queued" | "waiting" => Self::Preparing,
+            "running" | "executing" | "active" => Self::Running,
+            "done" | "success" | "succeeded" | "passed" => Self::Succeeded,
+            "failed" | "failure" | "error" | "errored" => Self::Failed,
+            _ => Self::Unknown,
+        }
+    }
+
+    pub(crate) fn is_active(self) -> bool {
+        matches!(self, Self::Preparing | Self::Running)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -266,6 +433,25 @@ pub(crate) struct SingleSessionStyledLine {
     pub(crate) text: String,
     pub(crate) style: SingleSessionLineStyle,
     pub(crate) inline_spans: Vec<SingleSessionInlineSpan>,
+    pub(crate) tool: Option<SingleSessionToolLineMetadata>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct SingleSessionToolLineMetadata {
+    pub(crate) call_id: String,
+    pub(crate) name: String,
+    pub(crate) state: SingleSessionToolVisualState,
+    pub(crate) kind: SingleSessionToolLineKind,
+    pub(crate) active: bool,
+    pub(crate) expanded: bool,
+    pub(crate) stdin_prompt: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum SingleSessionToolLineKind {
+    Header,
+    Detail,
+    GroupSummary,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -433,6 +619,16 @@ impl InlineWidgetKind {
             Self::SessionSwitcher => InlineWidgetMode::Interactive,
         }
     }
+
+    pub(crate) fn visible_line_limit(self) -> usize {
+        match self {
+            Self::HotkeyHelp => 18,
+            Self::SessionInfo => 10,
+            Self::ModelPicker => usize::MAX,
+            Self::SessionSwitcher => 24,
+            Self::SlashSuggestions => DESKTOP_SLASH_SUGGESTION_ROW_LIMIT + 1,
+        }
+    }
 }
 
 impl ReadOnlyInlineWidget {
@@ -485,6 +681,7 @@ impl SingleSessionStyledLine {
             text: text.into(),
             style,
             inline_spans: Vec::new(),
+            tool: None,
         }
     }
 
@@ -497,7 +694,13 @@ impl SingleSessionStyledLine {
             text: text.into(),
             style,
             inline_spans,
+            tool: None,
         }
+    }
+
+    pub(crate) fn with_tool_metadata(mut self, tool: SingleSessionToolLineMetadata) -> Self {
+        self.tool = Some(tool);
+        self
     }
 }
 
@@ -521,6 +724,7 @@ pub(crate) struct ModelPickerState {
     pub(crate) current_model: Option<String>,
     pub(crate) provider_name: Option<String>,
     pub(crate) choices: Vec<DesktopModelChoice>,
+    visible_indices: Vec<usize>,
     pub(crate) error: Option<String>,
 }
 
@@ -530,6 +734,7 @@ impl ModelPickerState {
         self.loading = true;
         self.preview = false;
         self.error = None;
+        self.refresh_visible_indices();
         self.selected = self.current_choice_index().unwrap_or(0);
         self.column = 0;
     }
@@ -540,6 +745,7 @@ impl ModelPickerState {
         self.preview = true;
         self.filter = filter;
         self.error = None;
+        self.refresh_visible_indices();
         self.selected = self.current_visible_position().unwrap_or(0);
         self.column = 0;
     }
@@ -570,6 +776,7 @@ impl ModelPickerState {
         self.loading = false;
         self.error = None;
         self.ensure_current_choice_present();
+        self.refresh_visible_indices();
         self.selected = self.current_visible_position().unwrap_or(0);
         self.clamp_selection();
         self.column = self.column.min(2);
@@ -587,6 +794,7 @@ impl ModelPickerState {
             self.provider_name = provider_name;
         }
         self.ensure_current_choice_present();
+        self.refresh_visible_indices();
         self.selected = self.current_visible_position().unwrap_or(self.selected);
         self.clamp_selection();
     }
@@ -622,12 +830,14 @@ impl ModelPickerState {
 
     fn push_filter_text(&mut self, text: &str) {
         self.filter.push_str(text);
+        self.refresh_visible_indices();
         self.selected = 0;
         self.column = 0;
     }
 
     fn pop_filter_char(&mut self) {
         self.filter.pop();
+        self.refresh_visible_indices();
         self.selected = 0;
         self.column = 0;
     }
@@ -635,25 +845,44 @@ impl ModelPickerState {
     fn set_filter(&mut self, filter: String) {
         if self.filter != filter {
             self.filter = filter;
+            self.refresh_visible_indices();
             self.selected = 0;
             self.column = 0;
         }
         self.clamp_selection();
     }
 
-    fn filtered_indices(&self) -> Vec<usize> {
+    fn filtered_indices(&self) -> &[usize] {
+        &self.visible_indices
+    }
+
+    fn refresh_visible_indices(&mut self) {
         let query = self.filter.trim().to_lowercase();
-        self.choices
-            .iter()
-            .enumerate()
-            .filter_map(|(index, choice)| {
-                if query.is_empty() || model_choice_search_text(choice).contains(&query) {
-                    Some(index)
-                } else {
-                    None
-                }
-            })
-            .collect()
+        if query.is_empty() {
+            self.visible_indices = (0..self.choices.len()).collect();
+            return;
+        }
+
+        let mut substring_matches = Vec::new();
+        let mut fuzzy_matches = Vec::new();
+        for (index, choice) in self.choices.iter().enumerate() {
+            let search_text = model_choice_search_text(choice);
+            if search_text.contains(&query) {
+                substring_matches.push(index);
+            } else if let Some(score) = model_picker_fuzzy_score(&query, &search_text) {
+                fuzzy_matches.push((score, search_text.len(), index));
+            }
+        }
+        fuzzy_matches.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+
+        self.visible_indices = substring_matches
+            .into_iter()
+            .chain(fuzzy_matches.into_iter().map(|(_, _, index)| index))
+            .collect();
     }
 
     pub(crate) fn visible_row_window(&self, limit: usize) -> (usize, Vec<usize>) {
@@ -731,12 +960,33 @@ pub(crate) struct SessionSwitcherState {
     pub(crate) filter: String,
     pub(crate) selected: usize,
     pub(crate) sessions: Vec<workspace::SessionCard>,
+    preview_scroll: usize,
+    focus: SessionSwitcherPane,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+enum SessionSwitcherPane {
+    #[default]
+    Sessions,
+    Preview,
 }
 
 impl SessionSwitcherState {
     fn open_loading(&mut self, current_session_id: Option<&str>) {
+        self.open_loading_with_filter(current_session_id, String::new());
+    }
+
+    fn refresh_loading(&mut self, current_session_id: Option<&str>) {
+        let filter = self.filter.clone();
+        self.open_loading_with_filter(current_session_id, filter);
+    }
+
+    fn open_loading_with_filter(&mut self, current_session_id: Option<&str>, filter: String) {
         self.open = true;
         self.loading = true;
+        self.filter = filter;
+        self.focus = SessionSwitcherPane::Sessions;
+        self.preview_scroll = 0;
         self.selected = self
             .current_visible_position(current_session_id)
             .unwrap_or(self.selected);
@@ -758,6 +1008,7 @@ impl SessionSwitcherState {
         self.selected = self
             .current_visible_position(current_session_id)
             .unwrap_or(0);
+        self.preview_scroll = 0;
         self.clamp_selection();
     }
 
@@ -780,38 +1031,56 @@ impl SessionSwitcherState {
         } else {
             self.selected = (self.selected + delta as usize).min(visible_len - 1);
         }
+        self.preview_scroll = 0;
     }
 
     fn select_first(&mut self) {
         self.selected = 0;
+        self.preview_scroll = 0;
     }
 
     fn select_last(&mut self) {
         self.selected = self.filtered_indices().len().saturating_sub(1);
+        self.preview_scroll = 0;
     }
 
     fn push_filter_text(&mut self, text: &str) {
         self.filter.push_str(text);
         self.selected = 0;
+        self.preview_scroll = 0;
     }
 
     fn pop_filter_char(&mut self) {
         self.filter.pop();
         self.selected = 0;
+        self.preview_scroll = 0;
     }
 
     fn filtered_indices(&self) -> Vec<usize> {
         let query = self.filter.trim().to_lowercase();
-        self.sessions
-            .iter()
-            .enumerate()
-            .filter_map(|(index, session)| {
-                if query.is_empty() || session_card_search_text(session).contains(&query) {
-                    Some(index)
-                } else {
-                    None
-                }
-            })
+        if query.is_empty() {
+            return (0..self.sessions.len()).collect();
+        }
+
+        let mut substring_matches = Vec::new();
+        let mut fuzzy_matches = Vec::new();
+        for (index, session) in self.sessions.iter().enumerate() {
+            let search_text = session_card_search_text(session);
+            if search_text.contains(&query) {
+                substring_matches.push(index);
+            } else if let Some(score) = session_switcher_fuzzy_score(&query, &search_text) {
+                fuzzy_matches.push((score, search_text.len(), index));
+            }
+        }
+        fuzzy_matches.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+
+        substring_matches
+            .into_iter()
+            .chain(fuzzy_matches.into_iter().map(|(_, _, index)| index))
             .collect()
     }
 
@@ -831,6 +1100,51 @@ impl SessionSwitcherState {
         } else if self.selected >= visible_len {
             self.selected = visible_len - 1;
         }
+    }
+
+    fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            SessionSwitcherPane::Sessions => SessionSwitcherPane::Preview,
+            SessionSwitcherPane::Preview => SessionSwitcherPane::Sessions,
+        };
+    }
+
+    fn focus_sessions(&mut self) {
+        self.focus = SessionSwitcherPane::Sessions;
+    }
+
+    fn focus_preview(&mut self) {
+        self.focus = SessionSwitcherPane::Preview;
+    }
+
+    fn scroll_preview(&mut self, delta: i32) {
+        if delta < 0 {
+            self.preview_scroll = self
+                .preview_scroll
+                .saturating_sub(delta.unsigned_abs() as usize);
+        } else {
+            self.preview_scroll = self.preview_scroll.saturating_add(delta as usize);
+        }
+        let max_scroll = self.preview_line_count().saturating_sub(1);
+        self.preview_scroll = self.preview_scroll.min(max_scroll);
+    }
+
+    fn preview_line_count(&self) -> usize {
+        self.selected_session()
+            .map(|session| session_switcher_preview_lines_for_session(&session).len())
+            .unwrap_or(0)
+    }
+
+    fn visible_row_window(&self, limit: usize) -> (usize, Vec<usize>) {
+        let visible = self.filtered_indices();
+        if visible.is_empty() || limit == 0 {
+            return (0, Vec::new());
+        }
+        let max_start = visible.len().saturating_sub(limit);
+        let selected = self.selected.min(visible.len() - 1);
+        let start = selected.saturating_sub(limit / 2).min(max_start);
+        let end = (start + limit).min(visible.len());
+        (start, visible[start..end].to_vec())
     }
 }
 
@@ -895,6 +1209,16 @@ impl SingleSessionMessage {
         Self {
             display,
             rich_attachments: Vec::new(),
+        }
+    }
+
+    pub(crate) fn from_session_transcript(message: SessionTranscriptMessage) -> Self {
+        match message.role.as_str() {
+            "user" => Self::user(message.content),
+            "assistant" => Self::assistant(message.content),
+            "tool" => Self::tool(message.content),
+            "system" | "background_task" => Self::system(message.content),
+            _ => Self::meta(message.content),
         }
     }
 
@@ -989,6 +1313,30 @@ fn hash_text_cache_fingerprint<H: Hasher>(text: &str, hasher: &mut H) {
     bytes[bytes.len() - BODY_CACHE_TEXT_EDGE_BYTES..].hash(hasher);
 }
 
+fn hash_session_switcher_cache_state<H: Hasher>(switcher: &SessionSwitcherState, hasher: &mut H) {
+    switcher.open.hash(hasher);
+    switcher.loading.hash(hasher);
+    switcher.filter.hash(hasher);
+    switcher.selected.hash(hasher);
+    switcher.preview_scroll.hash(hasher);
+    switcher.focus.hash(hasher);
+    switcher
+        .sessions
+        .iter()
+        .map(|session| {
+            (
+                session.session_id.as_str(),
+                session.title.as_str(),
+                session.subtitle.as_str(),
+                session.detail.as_str(),
+                session.preview_lines.as_slice(),
+                session.detail_lines.as_slice(),
+            )
+        })
+        .collect::<Vec<_>>()
+        .hash(hasher);
+}
+
 impl SingleSessionApp {
     pub(crate) fn new(session: Option<workspace::SessionCard>) -> Self {
         let welcome = SingleSessionWelcomeState::new(session.is_some());
@@ -1057,6 +1405,35 @@ impl SingleSessionApp {
         self.tool.input_buffer.clear();
         self.runtime.reload_phase = ReloadPhase::Stable;
         self.view.inline_widget_opened_at = None;
+        self.welcome.timeline = false;
+    }
+
+    pub(crate) fn hydrate_resumed_session_from_disk(&mut self, session_id: &str) {
+        match session_data::load_session_transcript_by_id(session_id) {
+            Ok(Some(messages)) if !messages.is_empty() => {
+                self.apply_resumed_session_transcript(messages);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                crate::desktop_log::warn(format_args!(
+                    "jcode-desktop: failed to hydrate resumed transcript for {session_id}: {error:#}"
+                ));
+                self.error = Some(format!("failed to load transcript: {error:#}"));
+            }
+        }
+    }
+
+    pub(crate) fn apply_resumed_session_transcript(
+        &mut self,
+        messages: Vec<SessionTranscriptMessage>,
+    ) {
+        self.messages = messages
+            .into_iter()
+            .map(SingleSessionMessage::from_session_transcript)
+            .collect();
+        self.streaming_response.clear();
+        self.tool.active_message_index = None;
+        self.tool.input_buffer.clear();
         self.welcome.timeline = false;
     }
 
@@ -1798,30 +2175,70 @@ impl SingleSessionApp {
                 self.session_switcher.close();
                 KeyOutcome::Redraw
             }
+            KeyInput::Autocomplete => {
+                self.session_switcher.toggle_focus();
+                KeyOutcome::Redraw
+            }
+            KeyInput::MoveCursorLeft => {
+                self.session_switcher.focus_sessions();
+                KeyOutcome::Redraw
+            }
+            KeyInput::MoveCursorRight => {
+                self.session_switcher.focus_preview();
+                KeyOutcome::Redraw
+            }
             KeyInput::RefreshSessions => {
                 let current_session_id = self.current_session_id().map(str::to_string);
                 self.session_switcher
-                    .open_loading(current_session_id.as_deref());
+                    .refresh_loading(current_session_id.as_deref());
                 self.set_status(SingleSessionStatus::LoadingRecentSessions);
                 self.mark_inline_widget_opened();
                 KeyOutcome::LoadSessionSwitcher
             }
             KeyInput::ModelPickerMove(delta) => {
-                self.session_switcher.move_selection(delta);
+                if self.session_switcher.focus == SessionSwitcherPane::Preview {
+                    self.session_switcher.scroll_preview(delta);
+                } else {
+                    self.session_switcher.move_selection(delta);
+                }
                 KeyOutcome::Redraw
             }
             KeyInput::ScrollBodyPages(pages) => {
-                self.session_switcher
-                    .move_selection(if pages > 0 { -5 } else { 5 });
+                if self.session_switcher.focus == SessionSwitcherPane::Preview {
+                    self.session_switcher
+                        .scroll_preview(if pages > 0 { -8 } else { 8 });
+                } else {
+                    self.session_switcher
+                        .move_selection(if pages > 0 { -5 } else { 5 });
+                }
                 KeyOutcome::Redraw
             }
             KeyInput::MoveToLineStart => {
-                self.session_switcher.select_first();
+                if self.session_switcher.focus == SessionSwitcherPane::Preview {
+                    self.session_switcher.preview_scroll = 0;
+                } else {
+                    self.session_switcher.select_first();
+                }
                 KeyOutcome::Redraw
             }
             KeyInput::MoveToLineEnd => {
-                self.session_switcher.select_last();
+                if self.session_switcher.focus == SessionSwitcherPane::Preview {
+                    self.session_switcher.preview_scroll =
+                        self.session_switcher.preview_line_count().saturating_sub(1);
+                } else {
+                    self.session_switcher.select_last();
+                }
                 KeyOutcome::Redraw
+            }
+            KeyInput::QueueDraft => {
+                let Some(session) = self.session_switcher.selected_session() else {
+                    return KeyOutcome::None;
+                };
+                self.session_switcher.close();
+                KeyOutcome::OpenSession {
+                    session_id: session.session_id,
+                    title: session.title,
+                }
             }
             KeyInput::SubmitDraft => self.resume_selected_switcher_session(),
             KeyInput::Backspace => {
@@ -1873,6 +2290,7 @@ impl SingleSessionApp {
             return KeyOutcome::None;
         };
         let title = session.title.clone();
+        let session_id = session.session_id.clone();
         self.session = Some(session);
         self.live_session_id = self
             .session
@@ -1887,6 +2305,7 @@ impl SingleSessionApp {
         self.show_help = false;
         self.welcome.timeline = false;
         self.session_switcher.close();
+        self.hydrate_resumed_session_from_disk(&session_id);
         self.set_status(SingleSessionStatus::Info(format!("resumed {title}")));
         KeyOutcome::Redraw
     }
@@ -1970,6 +2389,15 @@ impl SingleSessionApp {
         self.inline_widget_styled_lines().len()
     }
 
+    pub(crate) fn inline_widget_visible_line_count(&self) -> usize {
+        let line_count = self.inline_widget_line_count();
+        let limit = self
+            .active_inline_widget()
+            .map(InlineWidgetKind::visible_line_limit)
+            .unwrap_or(INLINE_WIDGET_DEFAULT_VISIBLE_LINE_LIMIT);
+        line_count.min(limit)
+    }
+
     fn slash_suggestions_visible(&self) -> bool {
         !self.slash_suggestion_candidates().is_empty()
     }
@@ -2027,16 +2455,32 @@ impl SingleSessionApp {
             self.slash_suggestions.query.as_str()
         };
         let prefix = prefix.to_ascii_lowercase();
-        DESKTOP_SLASH_COMMANDS
-            .iter()
-            .copied()
-            .filter(|(usage, _)| {
-                usage
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or(usage)
-                    .starts_with(&prefix)
-            })
+
+        let mut prefix_matches = Vec::new();
+        let mut fuzzy_matches: Vec<(usize, usize, &'static str, &'static str)> = Vec::new();
+        for (usage, description) in DESKTOP_SLASH_COMMANDS.iter().copied() {
+            let command = usage.split_whitespace().next().unwrap_or(usage);
+            let command_lower = command.to_ascii_lowercase();
+            if command_lower.starts_with(&prefix) {
+                prefix_matches.push((usage, description));
+            } else if let Some(score) = desktop_slash_fuzzy_score(&prefix, &command_lower) {
+                fuzzy_matches.push((score, command.len(), usage, description));
+            }
+        }
+
+        fuzzy_matches.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.cmp(&b.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+
+        prefix_matches
+            .into_iter()
+            .chain(
+                fuzzy_matches
+                    .into_iter()
+                    .map(|(_, _, usage, description)| (usage, description)),
+            )
             .take(DESKTOP_SLASH_SUGGESTION_ROW_LIMIT)
             .collect()
     }
@@ -2190,6 +2634,8 @@ impl SingleSessionApp {
                     for (offset, tool_message) in tool_messages.iter().enumerate() {
                         let is_active_tool = self.tool.active_message_index
                             == Some(group_start.saturating_add(offset));
+                        let tool_run =
+                            self.tool_run_for_message_index(group_start.saturating_add(offset));
                         append_chat_message_lines(
                             &mut lines,
                             tool_message,
@@ -2200,12 +2646,13 @@ impl SingleSessionApp {
                             } else {
                                 None
                             },
+                            tool_run,
                         );
                     }
                 }
                 continue;
             }
-            append_chat_message_lines(&mut lines, message, &mut user_turn, false, None);
+            append_chat_message_lines(&mut lines, message, &mut user_turn, false, None, None);
             message_index += 1;
         }
         if include_streaming_response && !self.streaming_response.is_empty() {
@@ -2245,7 +2692,10 @@ impl SingleSessionApp {
         hash_messages_cache_fingerprint(&self.messages, &mut hasher);
         hash_text_cache_fingerprint(&self.streaming_response, &mut hasher);
         self.tool.active_message_index.hash(&mut hasher);
+        self.tool.active_call_id.hash(&mut hasher);
         hash_text_cache_fingerprint(&self.tool.input_buffer, &mut hasher);
+        self.tool.event_sequence.hash(&mut hasher);
+        self.tool.runs.hash(&mut hasher);
         self.status.hash(&mut hasher);
         self.error.hash(&mut hasher);
         self.show_help.hash(&mut hasher);
@@ -2253,9 +2703,7 @@ impl SingleSessionApp {
         self.model_picker.open.hash(&mut hasher);
         self.model_picker.filter.hash(&mut hasher);
         self.model_picker.selected.hash(&mut hasher);
-        self.session_switcher.open.hash(&mut hasher);
-        self.session_switcher.filter.hash(&mut hasher);
-        self.session_switcher.selected.hash(&mut hasher);
+        hash_session_switcher_cache_state(&self.session_switcher, &mut hasher);
         self.stdin_response.hash(&mut hasher);
         self.welcome.name.hash(&mut hasher);
         self.welcome.recovery_session_count.hash(&mut hasher);
@@ -2283,7 +2731,10 @@ impl SingleSessionApp {
             .hash(&mut hasher);
         hash_messages_cache_fingerprint(&self.messages, &mut hasher);
         self.tool.active_message_index.hash(&mut hasher);
+        self.tool.active_call_id.hash(&mut hasher);
         hash_text_cache_fingerprint(&self.tool.input_buffer, &mut hasher);
+        self.tool.event_sequence.hash(&mut hasher);
+        self.tool.runs.hash(&mut hasher);
         self.status.hash(&mut hasher);
         self.error.hash(&mut hasher);
         self.show_help.hash(&mut hasher);
@@ -2291,9 +2742,7 @@ impl SingleSessionApp {
         self.model_picker.open.hash(&mut hasher);
         self.model_picker.filter.hash(&mut hasher);
         self.model_picker.selected.hash(&mut hasher);
-        self.session_switcher.open.hash(&mut hasher);
-        self.session_switcher.filter.hash(&mut hasher);
-        self.session_switcher.selected.hash(&mut hasher);
+        hash_session_switcher_cache_state(&self.session_switcher, &mut hasher);
         self.stdin_response.hash(&mut hasher);
         self.welcome.name.hash(&mut hasher);
         self.welcome.recovery_session_count.hash(&mut hasher);
@@ -2381,7 +2830,7 @@ impl SingleSessionApp {
                 self.streaming_response = text;
                 self.set_status(SingleSessionStatus::Receiving);
             }
-            DesktopSessionEvent::ToolStarted { name } => {
+            DesktopSessionEvent::ToolStarted { id, name } => {
                 self.runtime.reload_phase = ReloadPhase::Stable;
                 self.finish_streaming_response();
                 self.collapse_active_tool_message();
@@ -2390,19 +2839,24 @@ impl SingleSessionApp {
                 self.messages
                     .push(SingleSessionMessage::tool(format!("▾ {name} preparing")));
                 self.tool.active_message_index = Some(self.messages.len().saturating_sub(1));
+                let message_index = self.messages.len().saturating_sub(1);
+                self.start_tool_run(id, &name, message_index);
             }
-            DesktopSessionEvent::ToolExecuting { name } => {
+            DesktopSessionEvent::ToolExecuting { id, name } => {
                 self.runtime.reload_phase = ReloadPhase::Stable;
                 self.finish_streaming_response();
                 self.set_status(SingleSessionStatus::ToolUsing(name.clone()));
+                self.update_tool_run_state(id, &name, SingleSessionToolVisualState::Running, None);
                 self.replace_active_tool_header(&format!("▾ {name} running"));
             }
-            DesktopSessionEvent::ToolInput { delta } => {
+            DesktopSessionEvent::ToolInput { id, delta } => {
                 self.runtime.reload_phase = ReloadPhase::Stable;
                 self.finish_streaming_response();
+                self.append_tool_run_input(id, &delta);
                 self.append_active_tool_input(&delta);
             }
             DesktopSessionEvent::ToolFinished {
+                id,
                 name,
                 summary,
                 is_error,
@@ -2415,6 +2869,16 @@ impl SingleSessionApp {
                 });
                 let marker = if is_error { "failed" } else { "done" };
                 let line = format!("▾ {name} {marker}: {summary}");
+                let finished_call_id = self.update_tool_run_state(
+                    id,
+                    &name,
+                    if is_error {
+                        SingleSessionToolVisualState::Failed
+                    } else {
+                        SingleSessionToolVisualState::Succeeded
+                    },
+                    Some(summary.clone()),
+                );
                 self.flush_active_tool_input_to_message();
                 if let Some(index) = self.tool.active_message_index
                     && let Some(message) = self.messages.get_mut(index)
@@ -2425,7 +2889,16 @@ impl SingleSessionApp {
                     message.set_content(replacement);
                 } else {
                     self.messages.push(SingleSessionMessage::tool(line));
-                    self.tool.active_message_index = Some(self.messages.len().saturating_sub(1));
+                    let message_index = self.messages.len().saturating_sub(1);
+                    self.tool.active_message_index = Some(message_index);
+                    if let Some(run) = self
+                        .tool
+                        .runs
+                        .iter_mut()
+                        .find(|run| run.call_id == finished_call_id)
+                    {
+                        run.message_index = message_index;
+                    }
                 }
             }
             DesktopSessionEvent::ModelChanged {
@@ -2500,6 +2973,7 @@ impl SingleSessionApp {
                     tool_call_id: tool_call_id.clone(),
                     input: String::new(),
                 });
+                self.mark_tool_stdin_prompt(&tool_call_id, display_prompt);
                 let sensitive = if is_password { " password" } else { "" };
                 self.messages.push(SingleSessionMessage::meta(format!(
                     "interactive{sensitive} input requested by {tool_call_id} ({request_id}): {display_prompt}"
@@ -2516,7 +2990,9 @@ impl SingleSessionApp {
                 self.stdin_response = None;
                 self.runtime.session_handle = None;
                 self.tool.active_message_index = None;
+                self.tool.active_call_id = None;
                 self.tool.input_buffer.clear();
+                self.clear_tool_stdin_prompts();
                 self.set_status(SingleSessionStatus::Ready);
             }
             DesktopSessionEvent::Error(error) => {
@@ -2526,7 +3002,9 @@ impl SingleSessionApp {
                 self.stdin_response = None;
                 self.runtime.session_handle = None;
                 self.tool.active_message_index = None;
+                self.tool.active_call_id = None;
                 self.tool.input_buffer.clear();
+                self.clear_tool_stdin_prompts();
                 self.set_status(SingleSessionStatus::Error);
                 self.error = Some(error);
             }
@@ -2544,6 +3022,7 @@ impl SingleSessionApp {
         match handle.cancel() {
             Ok(()) => {
                 self.stdin_response = None;
+                self.clear_tool_stdin_prompts();
                 self.set_status(SingleSessionStatus::Cancelling);
                 true
             }
@@ -2551,6 +3030,7 @@ impl SingleSessionApp {
                 self.error = Some(format!("{error:#}"));
                 self.is_processing = false;
                 self.stdin_response = None;
+                self.clear_tool_stdin_prompts();
                 self.runtime.session_handle = None;
                 true
             }
@@ -2918,6 +3398,53 @@ impl SingleSessionApp {
                     KeyOutcome::Redraw
                 }
             }
+            "/font" | "/fonts" => {
+                self.draft.clear();
+                self.draft_cursor = 0;
+                self.composer.input_undo_stack.clear();
+                let mut args = args.split_whitespace();
+                match (args.next(), args.collect::<Vec<_>>().join(" ")) {
+                    (None, _) | (Some("status"), _) => {
+                        let options = SINGLE_SESSION_HANDWRITING_FONT_FAMILIES.join(", ");
+                        self.set_status(SingleSessionStatus::Info(format!(
+                            "fonts: user={} · ai={} · options: default, {options}",
+                            single_session_user_font_family(),
+                            single_session_assistant_font_family()
+                        )));
+                        KeyOutcome::Redraw
+                    }
+                    (Some("user"), value) if !value.is_empty() => {
+                        if let Some(family) = set_single_session_user_font_family(&value) {
+                            self.set_status(SingleSessionStatus::Info(format!(
+                                "user font set to {family}"
+                            )));
+                        } else {
+                            self.set_status(SingleSessionStatus::Info(
+                                "unknown font · try /font status".to_string(),
+                            ));
+                        }
+                        KeyOutcome::Redraw
+                    }
+                    (Some("ai" | "assistant"), value) if !value.is_empty() => {
+                        if let Some(family) = set_single_session_assistant_font_family(&value) {
+                            self.set_status(SingleSessionStatus::Info(format!(
+                                "AI font set to {family}"
+                            )));
+                        } else {
+                            self.set_status(SingleSessionStatus::Info(
+                                "unknown font · try /font status".to_string(),
+                            ));
+                        }
+                        KeyOutcome::Redraw
+                    }
+                    _ => {
+                        self.set_status(SingleSessionStatus::Info(
+                            "usage: /font [status|user <name>|ai <name>]".to_string(),
+                        ));
+                        KeyOutcome::Redraw
+                    }
+                }
+            }
             "/fast" => {
                 self.draft.clear();
                 self.draft_cursor = 0;
@@ -3001,6 +3528,29 @@ impl SingleSessionApp {
                     ));
                     KeyOutcome::Redraw
                 }
+            }
+            "/commit" => {
+                self.draft.clear();
+                self.draft_cursor = 0;
+                self.composer.input_undo_stack.clear();
+                let message = desktop_commit_prompt();
+                let Some(session) = &self.session else {
+                    return Some(KeyOutcome::StartFreshSession {
+                        message,
+                        images: Vec::new(),
+                    });
+                };
+                let session_id = session.session_id.clone();
+                let title = session.title.clone();
+                self.set_status(SingleSessionStatus::Info(
+                    "starting logical commits".to_string(),
+                ));
+                return Some(KeyOutcome::SendDraft {
+                    session_id,
+                    title,
+                    message,
+                    images: Vec::new(),
+                });
             }
             "/rename" => {
                 self.draft.clear();
@@ -3169,6 +3719,7 @@ impl SingleSessionApp {
             anyhow::bail!("no active desktop session to receive interactive input");
         };
         handle.send_stdin_response(request_id, input)?;
+        self.clear_tool_stdin_prompts();
         self.set_status(SingleSessionStatus::Info(
             "interactive input sent".to_string(),
         ));
@@ -3472,10 +4023,168 @@ impl SingleSessionApp {
         self.streaming_response.clear();
     }
 
+    fn next_tool_event_sequence(&mut self) -> u64 {
+        self.tool.event_sequence = self.tool.event_sequence.saturating_add(1);
+        self.tool.event_sequence
+    }
+
+    fn start_tool_run(&mut self, id: Option<String>, name: &str, message_index: usize) -> String {
+        let sequence = self.next_tool_event_sequence();
+        let call_id =
+            normalized_tool_call_id(id).unwrap_or_else(|| format!("desktop-tool-{sequence}"));
+        if let Some(run) = self.tool.runs.iter_mut().find(|run| run.call_id == call_id) {
+            run.message_index = message_index;
+            run.name = name.to_string();
+            run.state = SingleSessionToolVisualState::Preparing;
+            run.summary = None;
+            run.input_raw.clear();
+            run.input_preview = None;
+            run.stdin_prompt = None;
+            run.updated_sequence = sequence;
+            run.completed_sequence = None;
+        } else {
+            self.tool.runs.push(SingleSessionToolRun {
+                call_id: call_id.clone(),
+                message_index,
+                name: name.to_string(),
+                state: SingleSessionToolVisualState::Preparing,
+                summary: None,
+                input_raw: String::new(),
+                input_preview: None,
+                stdin_prompt: None,
+                started_sequence: sequence,
+                updated_sequence: sequence,
+                completed_sequence: None,
+            });
+        }
+        self.tool.active_call_id = Some(call_id.clone());
+        call_id
+    }
+
+    fn update_tool_run_state(
+        &mut self,
+        id: Option<String>,
+        name: &str,
+        state: SingleSessionToolVisualState,
+        summary: Option<String>,
+    ) -> String {
+        let sequence = self.next_tool_event_sequence();
+        let call_id = normalized_tool_call_id(id)
+            .or_else(|| self.tool.active_call_id.clone())
+            .or_else(|| {
+                self.tool
+                    .runs
+                    .iter()
+                    .rev()
+                    .find(|run| run.name == name && run.state.is_active())
+                    .map(|run| run.call_id.clone())
+            })
+            .unwrap_or_else(|| format!("desktop-tool-{sequence}"));
+        let message_index = self
+            .tool
+            .active_message_index
+            .unwrap_or_else(|| self.messages.len().saturating_sub(1));
+        let summary = summary.filter(|summary| !summary.trim().is_empty());
+        if let Some(run) = self.tool.runs.iter_mut().find(|run| run.call_id == call_id) {
+            run.message_index = message_index;
+            run.name = name.to_string();
+            run.state = state;
+            run.summary = summary.clone();
+            run.updated_sequence = sequence;
+            run.completed_sequence = matches!(
+                state,
+                SingleSessionToolVisualState::Succeeded | SingleSessionToolVisualState::Failed
+            )
+            .then_some(sequence);
+        } else {
+            self.tool.runs.push(SingleSessionToolRun {
+                call_id: call_id.clone(),
+                message_index,
+                name: name.to_string(),
+                state,
+                summary,
+                input_raw: String::new(),
+                input_preview: None,
+                stdin_prompt: None,
+                started_sequence: sequence,
+                updated_sequence: sequence,
+                completed_sequence: matches!(
+                    state,
+                    SingleSessionToolVisualState::Succeeded | SingleSessionToolVisualState::Failed
+                )
+                .then_some(sequence),
+            });
+        }
+        self.tool.active_call_id = Some(call_id.clone());
+        call_id
+    }
+
+    fn append_tool_run_input(&mut self, id: Option<String>, delta: &str) {
+        if delta.is_empty() {
+            return;
+        }
+        let sequence = self.next_tool_event_sequence();
+        let call_id = normalized_tool_call_id(id)
+            .or_else(|| self.tool.active_call_id.clone())
+            .or_else(|| self.tool.runs.last().map(|run| run.call_id.clone()));
+        let Some(call_id) = call_id else {
+            return;
+        };
+        if let Some(run) = self.tool.runs.iter_mut().find(|run| run.call_id == call_id) {
+            run.input_raw.push_str(delta);
+            run.input_preview =
+                compact_tool_metadata(&formatted_tool_input_lines(&run.name, &run.input_raw));
+            run.updated_sequence = sequence;
+        }
+    }
+
+    fn mark_tool_stdin_prompt(&mut self, tool_call_id: &str, prompt: &str) {
+        let sequence = self.next_tool_event_sequence();
+        if let Some(run) = self
+            .tool
+            .runs
+            .iter_mut()
+            .rev()
+            .find(|run| run.call_id == tool_call_id)
+        {
+            run.stdin_prompt = Some(prompt.to_string());
+            run.updated_sequence = sequence;
+            return;
+        }
+        if let Some(run) = self
+            .tool
+            .runs
+            .iter_mut()
+            .rev()
+            .find(|run| run.state.is_active())
+        {
+            run.stdin_prompt = Some(prompt.to_string());
+            run.updated_sequence = sequence;
+        }
+    }
+
+    fn clear_tool_stdin_prompts(&mut self) {
+        let sequence = self.next_tool_event_sequence();
+        for run in &mut self.tool.runs {
+            if run.stdin_prompt.is_some() {
+                run.stdin_prompt = None;
+                run.updated_sequence = sequence;
+            }
+        }
+    }
+
+    fn tool_run_for_message_index(&self, message_index: usize) -> Option<&SingleSessionToolRun> {
+        self.tool
+            .runs
+            .iter()
+            .find(|run| run.message_index == message_index)
+    }
+
     fn collapse_active_tool_message(&mut self) {
         let Some(index) = self.tool.active_message_index.take() else {
             return;
         };
+        self.tool.active_call_id = None;
         let Some(message) = self.messages.get_mut(index) else {
             return;
         };
@@ -3678,20 +4387,12 @@ impl SingleSessionApp {
     }
 
     fn autocomplete_draft(&mut self) -> KeyOutcome {
-        const DESKTOP_SLASH_COMPLETIONS: &[&str] = &[
-            "/help",
-            "/clear",
-            "/new",
-            "/sessions",
-            "/model",
-            "/copy",
-            "/search",
-            "/stop",
-            "/status",
-            "/quit",
-        ];
+        let completions = DESKTOP_SLASH_COMMANDS
+            .iter()
+            .map(|(usage, _)| usage.split_whitespace().next().unwrap_or(*usage))
+            .collect::<Vec<_>>();
         let Some((draft, cursor)) =
-            complete_slash_command(&self.draft, self.draft_cursor, DESKTOP_SLASH_COMPLETIONS)
+            complete_slash_command(&self.draft, self.draft_cursor, &completions)
         else {
             return KeyOutcome::None;
         };
@@ -3929,23 +4630,31 @@ fn session_switcher_styled_lines(
     switcher: &SessionSwitcherState,
     current_session_id: Option<&str>,
 ) -> Vec<SingleSessionStyledLine> {
+    let visible = switcher.filtered_indices();
+    let session_count = if switcher.filter.trim().is_empty() {
+        switcher.sessions.len().to_string()
+    } else {
+        format!("{}/{}", visible.len(), switcher.sessions.len())
+    };
     let mut lines = vec![
         styled_line(
             "desktop session switcher",
             SingleSessionLineStyle::OverlayTitle,
         ),
         styled_line(
-            "↑/↓ select · PgUp/PgDn jump · Home/End top/bottom · type filter · Enter resume · Ctrl+R reload · Ctrl+P/Esc close",
+            "↑/↓ select · Tab/←/→ panes · PgUp/PgDn scroll · type filter · Enter resume here · Ctrl+Enter terminal · Ctrl+R reload · Ctrl+P/Esc close",
             SingleSessionLineStyle::Overlay,
         ),
         styled_line(
             format!(
-                "filter: {}",
+                "filter: {} · focus: {} · sessions: {}",
                 if switcher.filter.is_empty() {
                     "<none>"
                 } else {
                     switcher.filter.as_str()
-                }
+                },
+                session_switcher_focus_label(switcher.focus),
+                session_count
             ),
             SingleSessionLineStyle::Meta,
         ),
@@ -3959,7 +4668,6 @@ fn session_switcher_styled_lines(
         ));
     }
 
-    let visible = switcher.filtered_indices();
     if visible.is_empty() && !switcher.loading {
         let message = if switcher.sessions.is_empty() {
             "no recent sessions found"
@@ -3974,55 +4682,196 @@ fn session_switcher_styled_lines(
         return lines;
     }
 
-    let limit = 28;
-    for (position, index) in visible.iter().take(limit).enumerate() {
-        let Some(session) = switcher.sessions.get(*index) else {
-            continue;
-        };
-        let selector = if position == switcher.selected {
-            "›"
-        } else {
-            " "
-        };
-        let current_marker = if Some(session.session_id.as_str()) == current_session_id {
-            "✓"
-        } else {
-            " "
-        };
+    const ROW_LIMIT: usize = 16;
+    const LIST_COLUMNS: usize = 58;
+    const PREVIEW_COLUMNS: usize = 78;
+
+    let list_header = if switcher.focus == SessionSwitcherPane::Sessions {
+        "sessions ›"
+    } else {
+        "sessions"
+    };
+    let preview_header = if switcher.focus == SessionSwitcherPane::Preview {
+        "preview ›"
+    } else {
+        "preview"
+    };
+    lines.push(styled_line(
+        format!(
+            "{} │ {}",
+            pad_columns(list_header, LIST_COLUMNS),
+            truncate_chars(preview_header, PREVIEW_COLUMNS)
+        ),
+        SingleSessionLineStyle::OverlayTitle,
+    ));
+    lines.push(styled_line(
+        format!(
+            "{}─┼─{}",
+            "─".repeat(LIST_COLUMNS),
+            "─".repeat(PREVIEW_COLUMNS.min(72))
+        ),
+        SingleSessionLineStyle::Meta,
+    ));
+
+    let (window_start, row_indices) = switcher.visible_row_window(ROW_LIMIT);
+    let preview_lines = switcher
+        .selected_session()
+        .map(|session| session_switcher_preview_lines_for_session(&session))
+        .unwrap_or_else(|| vec!["No session selected".to_string()]);
+    let preview_scroll = switcher
+        .preview_scroll
+        .min(preview_lines.len().saturating_sub(1));
+    let preview_visible = preview_lines
+        .iter()
+        .skip(preview_scroll)
+        .take(ROW_LIMIT)
+        .cloned()
+        .collect::<Vec<_>>();
+    let row_count = row_indices.len().max(preview_visible.len()).max(1);
+
+    for row in 0..row_count {
+        let absolute_position = window_start + row;
+        let list_cell = row_indices
+            .get(row)
+            .and_then(|index| switcher.sessions.get(*index))
+            .map(|session| {
+                session_switcher_list_cell(
+                    switcher,
+                    current_session_id,
+                    absolute_position,
+                    session,
+                    LIST_COLUMNS,
+                )
+            })
+            .unwrap_or_else(|| " ".repeat(LIST_COLUMNS));
+        let preview_cell = preview_visible
+            .get(row)
+            .map(|line| truncate_chars(line, PREVIEW_COLUMNS))
+            .unwrap_or_default();
+        let selected_row = absolute_position == switcher.selected && row < row_indices.len();
         lines.push(styled_line(
             format!(
-                "{selector} {current_marker} {}",
-                session_card_display_line(session)
+                "{} │ {}",
+                pad_columns(&list_cell, LIST_COLUMNS),
+                preview_cell
             ),
-            if position == switcher.selected {
+            if selected_row {
                 SingleSessionLineStyle::OverlaySelection
             } else {
                 SingleSessionLineStyle::Overlay
             },
         ));
     }
-    if visible.len() > limit {
+
+    if window_start + row_indices.len() < visible.len() {
         lines.push(styled_line(
-            format!("… {} more sessions", visible.len() - limit),
+            format!(
+                "… {} more sessions",
+                visible.len() - window_start - row_indices.len()
+            ),
             SingleSessionLineStyle::Overlay,
+        ));
+    }
+    if preview_scroll > 0 || preview_scroll + preview_visible.len() < preview_lines.len() {
+        lines.push(styled_line(
+            format!(
+                "preview lines {}-{} of {}",
+                preview_scroll + 1,
+                preview_scroll + preview_visible.len(),
+                preview_lines.len()
+            ),
+            SingleSessionLineStyle::Meta,
         ));
     }
 
     lines
 }
 
-fn session_card_display_line(session: &workspace::SessionCard) -> String {
-    let subtitle = if session.subtitle.is_empty() {
-        String::new()
+fn session_switcher_focus_label(focus: SessionSwitcherPane) -> &'static str {
+    match focus {
+        SessionSwitcherPane::Sessions => "sessions",
+        SessionSwitcherPane::Preview => "preview",
+    }
+}
+
+fn session_switcher_list_cell(
+    switcher: &SessionSwitcherState,
+    current_session_id: Option<&str>,
+    position: usize,
+    session: &workspace::SessionCard,
+    width: usize,
+) -> String {
+    let selector = if position == switcher.selected {
+        "›"
     } else {
-        format!(" · {}", session.subtitle)
+        " "
     };
-    let detail = if session.detail.is_empty() {
-        String::new()
+    let current_marker = if Some(session.session_id.as_str()) == current_session_id {
+        "✓"
     } else {
-        format!(" · {}", session.detail)
+        " "
     };
-    format!("{}{}{}", session.title, subtitle, detail)
+    let status = session_status_badge(session);
+    let line = format!(
+        "{selector} {current_marker} {} · {status} · {}",
+        session.title, session.detail
+    );
+    truncate_chars(&line, width)
+}
+
+fn session_switcher_preview_lines_for_session(session: &workspace::SessionCard) -> Vec<String> {
+    let mut lines = vec![
+        format!("{}", session.title),
+        format!("id: {}", session.session_id),
+    ];
+    if !session.subtitle.is_empty() {
+        lines.push(session.subtitle.clone());
+    }
+    if !session.detail.is_empty() {
+        lines.push(session.detail.clone());
+    }
+    let transcript = if session.detail_lines.is_empty() {
+        &session.preview_lines
+    } else {
+        &session.detail_lines
+    };
+    if transcript.is_empty() {
+        lines.push("no transcript preview available".to_string());
+    } else {
+        lines.push("recent transcript".to_string());
+        lines.extend(transcript.iter().cloned());
+    }
+    lines
+}
+
+fn session_status_badge(session: &workspace::SessionCard) -> String {
+    let status = session
+        .subtitle
+        .split('·')
+        .next()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+        .unwrap_or("unknown");
+    let icon = match status {
+        "active" => "▶",
+        "closed" => "✓",
+        "crashed" => "💥",
+        "reloaded" => "↻",
+        "compacted" => "📦",
+        status if status.contains("error") => "✕",
+        _ => "•",
+    };
+    format!("{icon} {status}")
+}
+
+fn pad_columns(text: &str, width: usize) -> String {
+    let text = truncate_chars(text, width);
+    let len = text.chars().count();
+    if len >= width {
+        text
+    } else {
+        format!("{text}{}", " ".repeat(width - len))
+    }
 }
 
 fn session_card_search_text(session: &workspace::SessionCard) -> String {
@@ -4039,6 +4888,34 @@ fn session_card_search_text(session: &workspace::SessionCard) -> String {
         text.push_str(line);
     }
     text.to_lowercase()
+}
+
+fn session_switcher_fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    haystack
+        .split_whitespace()
+        .filter_map(|token| session_switcher_token_fuzzy_score(needle, token))
+        .min()
+}
+
+fn session_switcher_token_fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    let mut score = 0usize;
+    let mut position = 0usize;
+    for ch in needle.chars() {
+        let offset = haystack[position..].find(ch)?;
+        score += offset;
+        position += offset + ch.len_utf8();
+    }
+
+    if needle.len() > 1 && score > needle.len() * 6 {
+        return None;
+    }
+
+    Some(score)
 }
 
 fn session_info_inline_styled_lines(app: &SingleSessionApp) -> Vec<SingleSessionStyledLine> {
@@ -4386,6 +5263,66 @@ fn model_choice_search_text(choice: &DesktopModelChoice) -> String {
     .to_lowercase()
 }
 
+fn model_picker_fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    haystack
+        .split_whitespace()
+        .filter_map(|token| model_picker_token_fuzzy_score(needle, token))
+        .min()
+}
+
+fn model_picker_token_fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    let mut score = 0usize;
+    let mut position = 0usize;
+    for ch in needle.chars() {
+        let offset = haystack[position..].find(ch)?;
+        score += offset;
+        position += offset + ch.len_utf8();
+    }
+
+    if needle.len() > 1 && score > needle.len() * 6 {
+        return None;
+    }
+
+    Some(score)
+}
+
+fn desktop_slash_fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    let needle = needle.strip_prefix('/').unwrap_or(needle);
+    let haystack = haystack.strip_prefix('/').unwrap_or(haystack);
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    if let Some(first_char) = needle.chars().next()
+        && !haystack.starts_with(&needle[..first_char.len_utf8()])
+    {
+        return None;
+    }
+
+    let mut score = 0usize;
+    let mut position = 0usize;
+    for ch in needle.chars() {
+        let offset = haystack[position..].find(ch)?;
+        score += offset;
+        position += offset + ch.len_utf8();
+    }
+
+    if needle.len() > 1 && score > needle.len() * 3 {
+        return None;
+    }
+
+    Some(score)
+}
+
 fn dedupe_model_choices(choices: Vec<DesktopModelChoice>) -> Vec<DesktopModelChoice> {
     let mut deduped: Vec<DesktopModelChoice> = Vec::new();
     for choice in choices {
@@ -4517,6 +5454,7 @@ fn append_chat_message_lines(
     user_turn: &mut usize,
     is_active_tool: bool,
     active_tool_input: Option<&str>,
+    tool_run: Option<&SingleSessionToolRun>,
 ) {
     match message.role() {
         SingleSessionRole::User => {
@@ -4529,6 +5467,7 @@ fn append_chat_message_lines(
             message.content().trim(),
             is_active_tool,
             active_tool_input,
+            tool_run,
         ),
         SingleSessionRole::System | SingleSessionRole::Meta => {
             append_meta_lines(lines, message.content().trim())
@@ -5521,6 +6460,7 @@ fn append_tool_lines(
     content: &str,
     active: bool,
     active_input: Option<&str>,
+    tool_run: Option<&SingleSessionToolRun>,
 ) {
     if content.is_empty() {
         return;
@@ -5529,6 +6469,7 @@ fn append_tool_lines(
     let Some(header) = raw_lines.next() else {
         return;
     };
+    let header_is_expanded = header.trim_start().starts_with('▾');
     if !header.trim_start().starts_with(['▾', '▸']) {
         for line in std::iter::once(header).chain(raw_lines) {
             if !line.trim().is_empty() {
@@ -5541,6 +6482,29 @@ fn append_tool_lines(
         return;
     }
     let header = parse_tool_header(header);
+    let tool_state = tool_run
+        .map(|run| run.state)
+        .or_else(|| {
+            header
+                .state
+                .as_deref()
+                .map(SingleSessionToolVisualState::from_tool_state_text)
+        })
+        .unwrap_or(SingleSessionToolVisualState::Unknown);
+    let expanded = active || header_is_expanded;
+    let base_metadata = SingleSessionToolLineMetadata {
+        call_id: tool_run
+            .map(|run| run.call_id.clone())
+            .unwrap_or_else(|| fallback_tool_line_call_id(&header)),
+        name: tool_run
+            .map(|run| run.name.clone())
+            .unwrap_or_else(|| header.name.clone()),
+        state: tool_state,
+        kind: SingleSessionToolLineKind::Header,
+        active: active && tool_state.is_active(),
+        expanded,
+        stdin_prompt: tool_run.and_then(|run| run.stdin_prompt.clone()),
+    };
     let mut metadata_lines = Vec::new();
     let mut widget_lines = Vec::new();
     for line in raw_lines {
@@ -5553,11 +6517,22 @@ fn append_tool_lines(
     if let Some(raw_input) = active_input.filter(|input| !input.is_empty()) {
         metadata_lines.extend(formatted_tool_input_lines(&header.name, raw_input));
     }
+    if metadata_lines.is_empty()
+        && let Some(input_preview) = tool_run.and_then(|run| run.input_preview.as_deref())
+    {
+        metadata_lines.push(input_preview.to_string());
+    }
+    if let Some(stdin_prompt) = &base_metadata.stdin_prompt {
+        metadata_lines.push(format!("input needed: {stdin_prompt}"));
+    }
 
-    lines.push(styled_line(
-        format_tool_header_line_with_metadata(&header, &metadata_lines),
-        SingleSessionLineStyle::Tool,
-    ));
+    lines.push(
+        styled_line(
+            format_tool_header_line_with_metadata(&header, &metadata_lines),
+            SingleSessionLineStyle::Tool,
+        )
+        .with_tool_metadata(base_metadata.clone()),
+    );
 
     if active
         && widget_lines.is_empty()
@@ -5566,9 +6541,18 @@ fn append_tool_lines(
         widget_lines.push("waiting for tool output…".to_string());
     }
 
-    if active && !widget_lines.is_empty() {
-        append_tool_content_widget(lines, &widget_lines);
+    if expanded && !widget_lines.is_empty() {
+        append_tool_content_widget(lines, &widget_lines, &base_metadata);
     }
+}
+
+fn fallback_tool_line_call_id(header: &ToolHeader) -> String {
+    format!(
+        "legacy-tool:{}:{}:{}",
+        header.name,
+        header.state.as_deref().unwrap_or("unknown"),
+        header.summary.as_deref().unwrap_or_default()
+    )
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -5646,39 +6630,34 @@ fn compact_tool_metadata(metadata_lines: &[String]) -> Option<String> {
     (!metadata.is_empty()).then(|| compact_tool_text(&metadata, 116))
 }
 
-fn append_tool_content_widget(lines: &mut Vec<SingleSessionStyledLine>, content_lines: &[String]) {
+fn append_tool_content_widget(
+    lines: &mut Vec<SingleSessionStyledLine>,
+    content_lines: &[String],
+    base_metadata: &SingleSessionToolLineMetadata,
+) {
     const MAX_WIDGET_LINES: usize = 12;
-    const WIDGET_WIDTH: usize = 68;
-
-    lines.push(styled_line(
-        format!("  ╭{}╮", "─".repeat(WIDGET_WIDTH)),
-        SingleSessionLineStyle::Tool,
-    ));
     for line in content_lines.iter().take(MAX_WIDGET_LINES) {
-        lines.push(styled_line(
-            format_tool_widget_content_line(line, WIDGET_WIDTH),
-            SingleSessionLineStyle::Tool,
-        ));
+        lines.push(tool_detail_styled_line(line, base_metadata));
     }
     if content_lines.len() > MAX_WIDGET_LINES {
-        lines.push(styled_line(
-            format_tool_widget_content_line(
-                &format!("… {} more lines", content_lines.len() - MAX_WIDGET_LINES),
-                WIDGET_WIDTH,
-            ),
-            SingleSessionLineStyle::Tool,
+        lines.push(tool_detail_styled_line(
+            &format!("… {} more lines", content_lines.len() - MAX_WIDGET_LINES),
+            base_metadata,
         ));
     }
-    lines.push(styled_line(
-        format!("  ╰{}╯", "─".repeat(WIDGET_WIDTH)),
-        SingleSessionLineStyle::Tool,
-    ));
 }
 
-fn format_tool_widget_content_line(line: &str, width: usize) -> String {
-    let line = compact_tool_widget_text(line, width);
-    let padding = width.saturating_sub(line.chars().count());
-    format!("  │{line}{}│", " ".repeat(padding))
+fn tool_detail_styled_line(
+    line: &str,
+    base_metadata: &SingleSessionToolLineMetadata,
+) -> SingleSessionStyledLine {
+    let mut metadata = base_metadata.clone();
+    metadata.kind = SingleSessionToolLineKind::Detail;
+    styled_line(
+        format!("    {}", compact_tool_widget_text(line, 118)),
+        SingleSessionLineStyle::Tool,
+    )
+    .with_tool_metadata(metadata)
 }
 
 fn compact_tool_widget_text(text: &str, max_chars: usize) -> String {
@@ -5725,10 +6704,20 @@ fn append_tool_group_summary(
         .collect::<Vec<_>>()
         .join(", ");
     let token_fragment = format_approx_tokens(approx_tokens);
-    lines.push(styled_line(
-        format!("  ▸ tools: {fragments} · ~{token_fragment} tokens"),
-        SingleSessionLineStyle::Tool,
-    ));
+    let line = format!("  ▸ tools: {fragments} · ~{token_fragment} tokens");
+    lines.push(
+        styled_line(line.clone(), SingleSessionLineStyle::Tool).with_tool_metadata(
+            SingleSessionToolLineMetadata {
+                call_id: format!("tool-group:{fragments}:{token_fragment}"),
+                name: "tools".to_string(),
+                state: SingleSessionToolVisualState::Group,
+                kind: SingleSessionToolLineKind::GroupSummary,
+                active: false,
+                expanded: false,
+                stdin_prompt: None,
+            },
+        ),
+    );
 }
 
 fn tool_summary_name(content: &str) -> String {
@@ -6002,6 +6991,11 @@ fn compact_tool_text(text: &str, max_chars: usize) -> String {
     }
 }
 
+fn normalized_tool_call_id(id: Option<String>) -> Option<String> {
+    id.map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
+}
+
 fn merge_tool_finish_with_existing_context(existing: &str, finish_line: &str) -> String {
     let context = existing
         .lines()
@@ -6133,13 +7127,14 @@ fn complete_slash_command(
         return None;
     }
     let suffix = &input[cursor..];
+    let prefix_key = prefix.to_ascii_lowercase();
     let matches = completions
         .iter()
         .copied()
-        .filter(|command| command.starts_with(prefix))
+        .filter(|command| command.starts_with(&prefix_key))
         .collect::<Vec<_>>();
     let completion = match matches.as_slice() {
-        [] => return None,
+        [] => fuzzy_slash_completion(&prefix_key, completions)?,
         [only] => *only,
         _ => longest_common_prefix(&matches)?,
     };
@@ -6149,6 +7144,22 @@ fn complete_slash_command(
     let mut completed = completion.to_string();
     completed.push_str(suffix);
     Some((completed, completion.len()))
+}
+
+fn fuzzy_slash_completion(needle: &str, completions: &[&'static str]) -> Option<&'static str> {
+    let mut matches = completions
+        .iter()
+        .copied()
+        .filter_map(|command| {
+            desktop_slash_fuzzy_score(needle, command).map(|score| (score, command.len(), command))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    matches.first().map(|(_, _, command)| *command)
 }
 
 fn longest_common_prefix<'a>(values: &'a [&'a str]) -> Option<&'a str> {
@@ -6267,10 +7278,17 @@ pub(crate) fn single_session_styled_lines(
 mod tests {
     use super::*;
 
-    fn rendered_tool_text(content: &str, active: bool) -> Vec<String> {
+    fn rendered_tool_lines(content: &str, active: bool) -> Vec<SingleSessionStyledLine> {
         let mut lines = Vec::new();
-        append_tool_lines(&mut lines, content, active, None);
-        lines.into_iter().map(|line| line.text).collect()
+        append_tool_lines(&mut lines, content, active, None, None);
+        lines
+    }
+
+    fn rendered_tool_text(content: &str, active: bool) -> Vec<String> {
+        rendered_tool_lines(content, active)
+            .into_iter()
+            .map(|line| line.text)
+            .collect()
     }
 
     #[test]
@@ -6295,11 +7313,35 @@ mod tests {
             lines,
             vec![
                 "  ● bash · running · $ cargo test -p jcode-desktop · background: yes",
-                "  ╭────────────────────────────────────────────────────────────────────╮",
-                "  │waiting for tool output…                                            │",
-                "  ╰────────────────────────────────────────────────────────────────────╯",
+                "    waiting for tool output…",
             ]
         );
+    }
+
+    #[test]
+    fn active_tool_lines_carry_visual_metadata_for_native_cards() {
+        let lines = rendered_tool_lines(
+            "▾ bash running\n  input: {\"command\":\"cargo test -p jcode-desktop\"}",
+            true,
+        );
+
+        let header = lines[0]
+            .tool
+            .as_ref()
+            .expect("tool header should carry native card metadata");
+        assert_eq!(header.name, "bash");
+        assert_eq!(header.state, SingleSessionToolVisualState::Running);
+        assert_eq!(header.kind, SingleSessionToolLineKind::Header);
+        assert!(header.active);
+        assert!(header.expanded);
+
+        let detail = lines[1]
+            .tool
+            .as_ref()
+            .expect("tool detail should share native card metadata");
+        assert_eq!(detail.call_id, header.call_id);
+        assert_eq!(detail.kind, SingleSessionToolLineKind::Detail);
+        assert!(detail.active);
     }
 
     #[test]
@@ -6340,32 +7382,37 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            "  ╭────────────────────────────────────────────────────────────────────╮"
+            "    error[E0425]: cannot find value `foo` in this scope"
         );
-        assert_eq!(
-            lines[2],
-            "  │error[E0425]: cannot find value `foo` in this scope                 │"
-        );
-        assert_eq!(
-            lines[3],
-            "  │test result: FAILED                                                 │"
-        );
-        assert_eq!(
-            lines[4],
-            "  ╰────────────────────────────────────────────────────────────────────╯"
-        );
+        assert_eq!(lines[2], "    test result: FAILED");
     }
 
     #[test]
     fn inactive_tool_result_compacts_to_metadata_only() {
         let lines = rendered_tool_text(
-            "▾ bash done: tests passed\n  input: {\"command\":\"cargo test -p jcode-desktop\"}\n  test result: ok",
+            "▸ bash done: tests passed\n  input: {\"command\":\"cargo test -p jcode-desktop\"}\n  test result: ok",
             false,
         );
 
         assert_eq!(
             lines,
             vec!["  ✓ bash · done · tests passed · $ cargo test -p jcode-desktop"]
+        );
+    }
+
+    #[test]
+    fn expanded_inactive_tool_result_shows_detail_widget() {
+        let lines = rendered_tool_text(
+            "▾ edit done: updated file\n  input: {\"file_path\":\"src/lib.rs\",\"old_string\":\"old\",\"new_string\":\"new\"}\n  Edited src/lib.rs: replaced 1 occurrence",
+            false,
+        );
+
+        assert_eq!(lines[0], "  ✓ edit · done · updated file · src/lib.rs");
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Edited src/lib.rs: replaced 1 occurrence")),
+            "expanded inactive edit tool should render its detail widget: {lines:?}"
         );
     }
 

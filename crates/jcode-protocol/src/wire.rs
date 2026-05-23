@@ -187,7 +187,7 @@ pub enum Request {
         session_id: Option<String>,
     },
 
-    /// Set reasoning effort for OpenAI models (none|low|medium|high|xhigh)
+    /// Set reasoning effort for providers that expose it (OpenAI/Anthropic: none|low|medium|high|xhigh; DeepSeek: none|low|medium|high|max)
     #[serde(rename = "set_reasoning_effort")]
     SetReasoningEffort { id: u64, effort: String },
 
@@ -584,29 +584,43 @@ pub enum Request {
 pub enum ServerEvent {
     /// Acknowledgment of request
     #[serde(rename = "ack")]
-    Ack { id: u64 },
+    Ack {
+        id: u64,
+    },
 
     /// Streaming text delta
     #[serde(rename = "text_delta")]
-    TextDelta { text: String },
+    TextDelta {
+        text: String,
+    },
 
     /// Replace the current turn's streamed text content
     /// Used when text-wrapped tool calls are recovered: the garbled text
     /// shown during streaming is replaced with the clean prefix text.
     #[serde(rename = "text_replace")]
-    TextReplace { text: String },
+    TextReplace {
+        text: String,
+    },
 
     /// Tool call started
     #[serde(rename = "tool_start")]
-    ToolStart { id: String, name: String },
+    ToolStart {
+        id: String,
+        name: String,
+    },
 
     /// Tool input delta (streaming JSON)
     #[serde(rename = "tool_input")]
-    ToolInput { delta: String },
+    ToolInput {
+        delta: String,
+    },
 
     /// Tool call ended, now executing
     #[serde(rename = "tool_exec")]
-    ToolExec { id: String, name: String },
+    ToolExec {
+        id: String,
+        name: String,
+    },
 
     /// Tool execution completed
     #[serde(rename = "tool_done")]
@@ -632,7 +646,9 @@ pub enum ServerEvent {
 
     /// Batch tool progress update, including currently-running subcalls
     #[serde(rename = "batch_progress")]
-    BatchProgress { progress: BatchProgress },
+    BatchProgress {
+        progress: BatchProgress,
+    },
 
     /// Token usage update
     #[serde(rename = "tokens")]
@@ -672,15 +688,21 @@ pub enum ServerEvent {
 
     /// Active transport/connection type for the current stream
     #[serde(rename = "connection_type")]
-    ConnectionType { connection: String },
+    ConnectionType {
+        connection: String,
+    },
 
     /// Connection phase update (authenticating, connecting, waiting, etc.)
     #[serde(rename = "connection_phase")]
-    ConnectionPhase { phase: String },
+    ConnectionPhase {
+        phase: String,
+    },
 
     /// Provider-supplied human-readable transport detail for the current stream.
     #[serde(rename = "status_detail")]
-    StatusDetail { detail: String },
+    StatusDetail {
+        detail: String,
+    },
 
     /// Provider has finished the visible assistant message, but the turn may still be
     /// finalizing bookkeeping such as session IDs or completion trailers.
@@ -689,11 +711,15 @@ pub enum ServerEvent {
 
     /// Upstream provider info (e.g., which provider OpenRouter routed to)
     #[serde(rename = "upstream_provider")]
-    UpstreamProvider { provider: String },
+    UpstreamProvider {
+        provider: String,
+    },
 
     /// Swarm status update (subagent/session lifecycle info)
     #[serde(rename = "swarm_status")]
-    SwarmStatus { members: Vec<SwarmMemberStatus> },
+    SwarmStatus {
+        members: Vec<SwarmMemberStatus>,
+    },
 
     /// Full swarm plan snapshot for synchronization and UI rendering.
     #[serde(rename = "swarm_plan")]
@@ -765,7 +791,9 @@ pub enum ServerEvent {
 
     /// Memory activity state update for remote clients.
     #[serde(rename = "memory_activity")]
-    MemoryActivity { activity: MemoryActivitySnapshot },
+    MemoryActivity {
+        activity: MemoryActivitySnapshot,
+    },
 
     /// Context compaction occurred (background summary or emergency drop)
     #[serde(rename = "compaction")]
@@ -800,7 +828,9 @@ pub enum ServerEvent {
 
     /// Message/turn completed
     #[serde(rename = "done")]
-    Done { id: u64 },
+    Done {
+        id: u64,
+    },
 
     /// Error occurred
     #[serde(rename = "error")]
@@ -813,7 +843,9 @@ pub enum ServerEvent {
 
     /// Pong response
     #[serde(rename = "pong")]
-    Pong { id: u64 },
+    Pong {
+        id: u64,
+    },
 
     /// Current state (debug)
     #[serde(rename = "state")]
@@ -826,7 +858,11 @@ pub enum ServerEvent {
 
     /// Response for debug command
     #[serde(rename = "debug_response")]
-    DebugResponse { id: u64, ok: bool, output: String },
+    DebugResponse {
+        id: u64,
+        ok: bool,
+        output: String,
+    },
 
     /// MCP status update (sent after background MCP connections complete)
     #[serde(rename = "mcp_status")]
@@ -837,15 +873,22 @@ pub enum ServerEvent {
 
     /// Client debug command forwarded from debug socket to TUI
     #[serde(rename = "client_debug_request")]
-    ClientDebugRequest { id: u64, command: String },
+    ClientDebugRequest {
+        id: u64,
+        command: String,
+    },
 
     /// Session ID assigned
     #[serde(rename = "session")]
-    SessionId { session_id: String },
+    SessionId {
+        session_id: String,
+    },
 
     /// Server requests that this client/session close itself.
     #[serde(rename = "session_close_requested")]
-    SessionCloseRequested { reason: String },
+    SessionCloseRequested {
+        reason: String,
+    },
 
     /// Session display title changed.
     #[serde(rename = "session_renamed")]
@@ -921,7 +964,7 @@ pub enum ServerEvent {
         /// Upstream provider (e.g., which provider OpenRouter routed to, or calculated preference)
         #[serde(skip_serializing_if = "Option::is_none")]
         upstream_provider: Option<String>,
-        /// Reasoning effort for OpenAI models
+        /// Reasoning effort for providers that expose it
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning_effort: Option<String>,
         /// Service tier override for OpenAI models
@@ -962,7 +1005,9 @@ pub enum ServerEvent {
 
     /// Side panel state changed for the active session
     #[serde(rename = "side_panel_state")]
-    SidePanelState { snapshot: SidePanelSnapshot },
+    SidePanelState {
+        snapshot: SidePanelSnapshot,
+    },
 
     /// Server is reloading (clients should reconnect)
     #[serde(rename = "reloading")]
@@ -1065,11 +1110,16 @@ pub enum ServerEvent {
 
     /// External transcript text targeted at the active TUI input.
     #[serde(rename = "transcript")]
-    Transcript { text: String, mode: TranscriptMode },
+    Transcript {
+        text: String,
+        mode: TranscriptMode,
+    },
 
     /// Completed `!cmd` shell execution for a connected remote client.
     #[serde(rename = "input_shell_result")]
-    InputShellResult { result: InputShellResult },
+    InputShellResult {
+        result: InputShellResult,
+    },
 
     /// Response to comm_read request
     #[serde(rename = "comm_context")]
@@ -1081,7 +1131,10 @@ pub enum ServerEvent {
 
     /// Response to comm_list request
     #[serde(rename = "comm_members")]
-    CommMembers { id: u64, members: Vec<AgentInfo> },
+    CommMembers {
+        id: u64,
+        members: Vec<AgentInfo>,
+    },
 
     /// Response to comm_list_channels request
     #[serde(rename = "comm_channels")]
@@ -1090,7 +1143,10 @@ pub enum ServerEvent {
         channels: Vec<SwarmChannelInfo>,
     },
 
-    CommListSwarmsResponse { id: u64, swarms: Vec<SwarmSummary> },
+    CommListSwarmsResponse {
+        id: u64,
+        swarms: Vec<SwarmSummary>,
+    },
 
     /// Response to comm_summary request
     #[serde(rename = "comm_summary_response")]
@@ -1117,7 +1173,10 @@ pub enum ServerEvent {
 
     /// Response to comm_plan_status request
     #[serde(rename = "comm_plan_status_response")]
-    CommPlanStatusResponse { id: u64, summary: PlanGraphStatus },
+    CommPlanStatusResponse {
+        id: u64,
+        summary: PlanGraphStatus,
+    },
 
     /// Response to comm_assign_task request
     #[serde(rename = "comm_assign_task_response")]

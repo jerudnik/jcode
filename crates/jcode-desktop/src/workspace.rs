@@ -266,6 +266,30 @@ impl Surface {
         self.session_id = updated.session_id;
     }
 
+    pub fn session_card(&self) -> Option<SessionCard> {
+        let session_id = self.session_id.as_ref()?.clone();
+        Some(SessionCard {
+            session_id,
+            title: self.title.clone(),
+            subtitle: self.body_lines.first().cloned().unwrap_or_default(),
+            detail: self.body_lines.get(1).cloned().unwrap_or_default(),
+            preview_lines: self
+                .body_lines
+                .iter()
+                .skip_while(|line| line.as_str() != "recent transcript")
+                .skip(1)
+                .cloned()
+                .collect(),
+            detail_lines: self
+                .detail_lines
+                .iter()
+                .skip_while(|line| line.as_str() != "expanded transcript")
+                .skip(1)
+                .cloned()
+                .collect(),
+        })
+    }
+
     fn workspace_placeholder(id: u64, lane: i32, column: i32, color_index: usize) -> Self {
         Self {
             id,
@@ -611,6 +635,10 @@ impl Workspace {
                 .as_ref()
                 .map(|id| (id.clone(), surface.title.clone()))
         })
+    }
+
+    pub fn focused_session_card(&self) -> Option<SessionCard> {
+        self.focused_surface().and_then(Surface::session_card)
     }
 
     pub fn is_focused(&self, surface_id: u64) -> bool {
@@ -1459,13 +1487,14 @@ fn complete_slash_command(
         return None;
     }
     let suffix = &input[cursor..];
+    let prefix_key = prefix.to_ascii_lowercase();
     let matches = completions
         .iter()
         .copied()
-        .filter(|command| command.starts_with(prefix))
+        .filter(|command| command.starts_with(&prefix_key))
         .collect::<Vec<_>>();
     let completion = match matches.as_slice() {
-        [] => return None,
+        [] => fuzzy_slash_completion(&prefix_key, completions)?,
         [only] => *only,
         _ => longest_common_prefix(&matches)?,
     };
@@ -1475,6 +1504,54 @@ fn complete_slash_command(
     let mut completed = completion.to_string();
     completed.push_str(suffix);
     Some((completed, completion.len()))
+}
+
+fn fuzzy_slash_completion(needle: &str, completions: &[&'static str]) -> Option<&'static str> {
+    let mut matches = completions
+        .iter()
+        .copied()
+        .filter_map(|command| {
+            slash_fuzzy_score(needle, command).map(|score| (score, command.len(), command))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    matches.first().map(|(_, _, command)| *command)
+}
+
+fn slash_fuzzy_score(needle: &str, haystack: &str) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    let needle = needle.strip_prefix('/').unwrap_or(needle);
+    let haystack = haystack.strip_prefix('/').unwrap_or(haystack);
+    if needle.is_empty() {
+        return Some(0);
+    }
+
+    if let Some(first_char) = needle.chars().next()
+        && !haystack.starts_with(&needle[..first_char.len_utf8()])
+    {
+        return None;
+    }
+
+    let mut score = 0usize;
+    let mut position = 0usize;
+    for ch in needle.chars() {
+        let offset = haystack[position..].find(ch)?;
+        score += offset;
+        position += offset + ch.len_utf8();
+    }
+
+    if needle.len() > 1 && score > needle.len() * 3 {
+        return None;
+    }
+
+    Some(score)
 }
 
 fn longest_common_prefix<'a>(values: &'a [&'a str]) -> Option<&'a str> {

@@ -182,6 +182,86 @@ fn desktop_hot_reload_prefers_newer_selfdev_binary() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn desktop_reload_window_placement_roundtrips_position_and_size() {
+    let placement = DesktopReloadWindowPlacement {
+        position: Some(PhysicalPosition::new(-24, 48)),
+        inner_size: PhysicalSize::new(1280, 800),
+    };
+
+    let encoded = placement.to_env_value();
+
+    assert_eq!(encoded, "-24,48,1280,800");
+    assert_eq!(
+        DesktopReloadWindowPlacement::from_env_value(&encoded),
+        Some(placement)
+    );
+}
+
+#[test]
+fn desktop_reload_window_placement_allows_size_without_position() {
+    let placement = DesktopReloadWindowPlacement {
+        position: None,
+        inner_size: PhysicalSize::new(1024, 720),
+    };
+
+    let encoded = placement.to_env_value();
+
+    assert_eq!(encoded, "_,_,1024,720");
+    assert_eq!(
+        DesktopReloadWindowPlacement::from_env_value(&encoded),
+        Some(placement)
+    );
+}
+
+#[test]
+fn desktop_reload_window_placement_rejects_invalid_values() {
+    for raw in [
+        "",
+        "1,2,3",
+        "1,2,3,4,5",
+        "_,2,1280,800",
+        "1,_,1280,800",
+        "x,2,1280,800",
+        "1,y,1280,800",
+        "1,2,0,800",
+        "1,2,1280,0",
+        "1,2,32769,800",
+        "1,2,1280,32769",
+        "1,2,width,800",
+        "1,2,1280,height",
+    ] {
+        assert_eq!(
+            DesktopReloadWindowPlacement::from_env_value(raw),
+            None,
+            "expected {raw:?} to be rejected"
+        );
+    }
+}
+
+#[test]
+fn desktop_reload_handoff_watcher_releases_ready_child() -> Result<()> {
+    let dir = desktop_reload_handoff_temp_dir();
+    std::fs::create_dir_all(&dir)?;
+    let ready_file = dir.join("ready");
+    let release_file = dir.join("release");
+    let watcher = DesktopReloadHandoffWatcher {
+        ready_file: ready_file.clone(),
+        release_file: release_file.clone(),
+        spawned_at: Instant::now(),
+    };
+
+    assert_eq!(watcher.poll()?, DesktopReloadHandoffPoll::Waiting);
+    std::fs::write(&ready_file, b"ready")?;
+
+    assert_eq!(watcher.poll()?, DesktopReloadHandoffPoll::Ready);
+    assert!(release_file.exists());
+
+    watcher.cleanup();
+    assert!(!dir.exists());
+    Ok(())
+}
+
 fn unique_desktop_test_dir(name: &str) -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!(
         "jcode-{name}-{}-{}",
@@ -486,6 +566,8 @@ fn single_session_typography_targets_jetbrains_mono_light_nerd() {
         SINGLE_SESSION_TITLE_FONT_SIZE,
         SINGLE_SESSION_DEFAULT_FONT_SIZE
     );
+    assert_eq!(SINGLE_SESSION_USER_FONT_FAMILY, "Kalam");
+    assert!(SINGLE_SESSION_HANDWRITING_FONT_FAMILIES.contains(&SINGLE_SESSION_USER_FONT_FAMILY));
     assert_eq!(
         SINGLE_SESSION_ASSISTANT_FONT_FAMILY,
         SINGLE_SESSION_FONT_FAMILY
@@ -743,6 +825,67 @@ fn single_session_streaming_text_fades_in() {
 }
 
 #[test]
+fn single_session_streaming_text_fade_does_not_restart_for_each_delta() {
+    let first = Instant::now();
+    let second = first + Duration::from_millis(40);
+
+    let started = streaming_text_fade_start_after_len_change(0, 5, None, first);
+    assert_eq!(started, Some(first));
+
+    let unchanged = streaming_text_fade_start_after_len_change(5, 12, started, second);
+    assert_eq!(unchanged, Some(first));
+}
+
+#[test]
+fn single_session_streaming_text_fade_restarts_after_previous_fade_finishes() {
+    let first = Instant::now();
+    let later = first + STREAMING_TEXT_FADE_DURATION + Duration::from_millis(1);
+
+    let started = streaming_text_fade_start_after_len_change(0, 5, None, first);
+    assert_eq!(started, Some(first));
+
+    let restarted = streaming_text_fade_start_after_len_change(5, 12, started, later);
+    assert_eq!(restarted, Some(later));
+}
+
+#[test]
+fn single_session_streaming_text_fade_restarts_after_renderer_clears_finished_fade() {
+    let later = Instant::now() + STREAMING_TEXT_FADE_DURATION + Duration::from_millis(1);
+
+    let restarted = streaming_text_fade_start_after_len_change(5, 12, None, later);
+    assert_eq!(restarted, Some(later));
+}
+
+#[test]
+fn single_session_streaming_text_fade_stays_idle_without_response_change() {
+    let now = Instant::now();
+
+    assert_eq!(
+        streaming_text_fade_start_after_len_change(5, 5, None, now),
+        None
+    );
+}
+
+#[test]
+fn single_session_streaming_text_fade_keeps_active_fade_without_response_change() {
+    let first = Instant::now();
+    let during = first + Duration::from_millis(40);
+
+    let unchanged = streaming_text_fade_start_after_len_change(5, 5, Some(first), during);
+    assert_eq!(unchanged, Some(first));
+}
+
+#[test]
+fn single_session_streaming_text_fade_resets_when_streaming_finishes() {
+    let first = Instant::now();
+    let started = streaming_text_fade_start_after_len_change(0, 5, None, first);
+    assert_eq!(
+        streaming_text_fade_start_after_len_change(5, 0, started, first),
+        None
+    );
+}
+
+#[test]
 fn single_session_streaming_text_opacity_scales_rich_text_segments() {
     let lines = vec![SingleSessionStyledLine::new(
         "streaming answer",
@@ -837,6 +980,99 @@ fn single_session_tab_autocompletes_desktop_slash_command() {
 
     assert_eq!(app.handle_key(KeyInput::UndoInput), KeyOutcome::Redraw);
     assert_eq!(app.draft, "/cop");
+}
+
+#[test]
+fn single_session_slash_suggestions_support_tui_style_fuzzy_abbreviations() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/cp".to_string()));
+
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    let suggestions = app.inline_widget_styled_lines();
+    assert!(suggestions.iter().any(|line| {
+        line.style == SingleSessionLineStyle::OverlaySelection && line.text.contains("/copy")
+    }));
+
+    assert_eq!(app.handle_key(KeyInput::Autocomplete), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/copy");
+}
+
+#[test]
+fn single_session_raw_slash_tab_completion_uses_fuzzy_after_suggestions_are_dismissed() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/cp".to_string()));
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+
+    assert_eq!(app.handle_key(KeyInput::Escape), KeyOutcome::Redraw);
+    assert_eq!(app.active_inline_widget(), None);
+
+    assert_eq!(app.handle_key(KeyInput::Autocomplete), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/copy");
+}
+
+#[test]
+fn single_session_raw_slash_tab_completion_covers_commands_from_help_table() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/ef".to_string()));
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+
+    assert_eq!(app.handle_key(KeyInput::Escape), KeyOutcome::Redraw);
+    assert_eq!(app.active_inline_widget(), None);
+
+    assert_eq!(app.handle_key(KeyInput::Autocomplete), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/effort");
+}
+
+#[test]
+fn single_session_slash_suggestions_keep_prefix_matches_before_fuzzy_matches() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/c".to_string()));
+
+    let suggestions = app.inline_widget_styled_lines();
+    assert!(suggestions.iter().any(|line| {
+        line.style == SingleSessionLineStyle::OverlaySelection && line.text.contains("/commands")
+    }));
+}
+
+#[test]
+fn single_session_slash_suggestions_expose_accepted_aliases() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/can".to_string()));
+
+    let suggestions = app
+        .inline_widget_styled_lines()
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(suggestions.contains("/cancel"), "{suggestions}");
+
+    assert_eq!(app.handle_key(KeyInput::Autocomplete), KeyOutcome::Redraw);
+    assert_eq!(app.draft, "/cancel");
+    app.draft.clear();
+    app.draft_cursor = 0;
+
+    app.handle_key(KeyInput::Character("/help".to_string()));
+    assert_eq!(app.handle_key(KeyInput::SubmitDraft), KeyOutcome::Redraw);
+    let help = app
+        .inline_widget_styled_lines()
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(help.contains("/session"), "{help}");
+    assert!(help.contains("/cancel"), "{help}");
+    assert!(help.contains("/exit"), "{help}");
 }
 
 #[test]
@@ -947,6 +1183,47 @@ fn single_session_slash_suggestions_use_inline_card_geometry() {
 }
 
 #[test]
+fn read_only_inline_widgets_use_per_widget_visible_height_limits() {
+    let mut app = SingleSessionApp::new(None);
+
+    app.show_session_info = true;
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SessionInfo)
+    );
+    assert_eq!(
+        app.inline_widget_visible_line_count(),
+        app.inline_widget_line_count().min(10)
+    );
+
+    app.show_session_info = false;
+    assert_eq!(app.handle_key(KeyInput::HotkeyHelp), KeyOutcome::Redraw);
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::HotkeyHelp)
+    );
+    assert_eq!(
+        app.inline_widget_visible_line_count(),
+        app.inline_widget_line_count().min(18)
+    );
+
+    app.show_help = false;
+    assert_eq!(
+        app.handle_key(KeyInput::Character("/".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    assert_eq!(
+        app.inline_widget_visible_line_count(),
+        app.inline_widget_line_count()
+            .min(DESKTOP_SLASH_SUGGESTION_ROW_LIMIT + 1)
+    );
+}
+
+#[test]
 fn single_session_composer_uses_next_prompt_number() {
     let mut app = SingleSessionApp::new(None);
     assert_eq!(app.next_prompt_number(), 1);
@@ -1013,6 +1290,48 @@ fn single_session_commands_alias_opens_help_without_sending_prompt() {
         app.active_inline_widget(),
         Some(InlineWidgetKind::HotkeyHelp)
     );
+}
+
+#[test]
+fn single_session_slash_resume_opens_session_switcher_without_sending_prompt() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/resume".to_string()));
+
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SlashSuggestions)
+    );
+    assert_eq!(
+        app.handle_key(KeyInput::SubmitDraft),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert!(app.session_switcher.open);
+    assert!(app.session_switcher.loading);
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SessionSwitcher)
+    );
+    assert_eq!(
+        app.active_inline_widget_mode(),
+        Some(InlineWidgetMode::Interactive)
+    );
+    assert!(app.draft.is_empty());
+    assert!(app.messages.is_empty());
+}
+
+#[test]
+fn single_session_slash_resume_completion_opens_session_switcher() {
+    let mut app = SingleSessionApp::new(None);
+    for ch in ["/", "r", "e", "s"] {
+        app.handle_key(KeyInput::Character(ch.to_string()));
+    }
+
+    assert_eq!(
+        app.handle_key(KeyInput::SubmitDraft),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert_eq!(app.draft, "");
+    assert!(app.session_switcher.open);
 }
 
 #[test]
@@ -2023,6 +2342,64 @@ fn desktop_maps_terminal_editing_shortcuts_from_tui() {
 }
 
 #[test]
+fn desktop_maps_standard_clipboard_shortcuts_across_platform_modifiers() {
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Paste), ModifiersState::empty()),
+        KeyInput::PasteText
+    );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Cut), ModifiersState::empty()),
+        KeyInput::CutInputLine
+    );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Copy), ModifiersState::empty()),
+        KeyInput::CopyLatestResponse
+    );
+    assert_eq!(
+        to_key_input(&Key::Named(NamedKey::Undo), ModifiersState::empty()),
+        KeyInput::UndoInput
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("v".into()), ModifiersState::CONTROL),
+        KeyInput::PasteText
+    );
+    assert_eq!(
+        to_key_input(
+            &Key::Character("v".into()),
+            ModifiersState::CONTROL | ModifiersState::SHIFT
+        ),
+        KeyInput::PasteText
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("v".into()), ModifiersState::SUPER),
+        KeyInput::PasteText
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("x".into()), ModifiersState::SUPER),
+        KeyInput::CutInputLine
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("z".into()), ModifiersState::SUPER),
+        KeyInput::UndoInput
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("c".into()), ModifiersState::SUPER),
+        KeyInput::CopyLatestResponse
+    );
+    assert_eq!(
+        to_key_input(
+            &Key::Character("c".into()),
+            ModifiersState::SUPER | ModifiersState::SHIFT
+        ),
+        KeyInput::CopyLatestResponse
+    );
+    assert_eq!(
+        to_key_input(&Key::Character("c".into()), ModifiersState::CONTROL),
+        KeyInput::CancelGeneration
+    );
+}
+
+#[test]
 fn desktop_maps_remaining_global_shortcuts() {
     assert_eq!(
         to_key_input(&Key::Named(NamedKey::Tab), ModifiersState::CONTROL),
@@ -2353,6 +2730,14 @@ fn single_session_visual_state_smoke_covers_markdown_spinner_and_switcher() {
     let markdown_vertices = build_single_session_vertices(&markdown_app, size, 0.0, 0);
     assert!(vertices_have_color(
         &markdown_vertices,
+        COMPOSER_INPUT_BACKGROUND_COLOR
+    ));
+    assert!(vertices_have_color(
+        &markdown_vertices,
+        COMPOSER_INPUT_BORDER_COLOR
+    ));
+    assert!(vertices_have_color(
+        &markdown_vertices,
         QUOTE_CARD_BACKGROUND_COLOR
     ));
     assert!(vertices_have_color(
@@ -2408,7 +2793,7 @@ fn single_session_body_styled_lines_follow_roles_and_overlays() {
         segments.contains(&(
             "question",
             Attrs::new()
-                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                .family(Family::Name(SINGLE_SESSION_USER_FONT_FAMILY))
                 .color(single_session_line_color(SingleSessionLineStyle::User))
         ))
     );
@@ -2472,6 +2857,7 @@ fn assistant_symbol_lines_use_main_font_to_avoid_missing_glyph_boxes() {
         text: symbol_line.to_string(),
         style: SingleSessionLineStyle::AssistantLink,
         inline_spans: Vec::new(),
+        tool: None,
     }];
     let symbol_segments = single_session_styled_text_segments(&symbol_lines);
     assert!(
@@ -2490,11 +2876,74 @@ fn assistant_symbol_lines_use_main_font_to_avoid_missing_glyph_boxes() {
         text: plain_line.to_string(),
         style: SingleSessionLineStyle::Assistant,
         inline_spans: Vec::new(),
+        tool: None,
     }];
     let plain_segments = single_session_styled_text_segments(&plain_lines);
     assert!(
         plain_segments.contains(&(
             plain_line,
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_ASSISTANT_FONT_FAMILY))
+                .color(single_session_line_color(SingleSessionLineStyle::Assistant))
+        ))
+    );
+
+    for (text, style, color_style) in [
+        (
+            "See https://example.com/docs for details",
+            SingleSessionLineStyle::Assistant,
+            SingleSessionLineStyle::Assistant,
+        ),
+        (
+            "docs https://example.com",
+            SingleSessionLineStyle::AssistantLink,
+            SingleSessionLineStyle::AssistantLink,
+        ),
+        (
+            "| command | result |",
+            SingleSessionLineStyle::AssistantTable,
+            SingleSessionLineStyle::AssistantTable,
+        ),
+        (
+            "Call single_session_render() carefully",
+            SingleSessionLineStyle::Assistant,
+            SingleSessionLineStyle::Assistant,
+        ),
+        (
+            "こんにちは assistant response",
+            SingleSessionLineStyle::Assistant,
+            SingleSessionLineStyle::Assistant,
+        ),
+    ] {
+        let lines = [SingleSessionStyledLine::new(text, style)];
+        let segments = single_session_styled_text_segments(&lines);
+        assert!(
+            segments.contains(&(
+                text,
+                Attrs::new()
+                    .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                    .color(single_session_line_color(color_style))
+            )),
+            "expected {text:?} to use the main monospace font"
+        );
+    }
+
+    let bullet_lines = [SingleSessionStyledLine::new(
+        "• handwritten list prose",
+        SingleSessionLineStyle::Assistant,
+    )];
+    let bullet_segments = single_session_styled_text_segments(&bullet_lines);
+    assert!(
+        bullet_segments.contains(&(
+            "• ",
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                .color(text_color(MARKDOWN_LIST_MARKER_COLOR))
+        ))
+    );
+    assert!(
+        bullet_segments.contains(&(
+            "handwritten list prose",
             Attrs::new()
                 .family(Family::Name(SINGLE_SESSION_ASSISTANT_FONT_FAMILY))
                 .color(single_session_line_color(SingleSessionLineStyle::Assistant))
@@ -2573,9 +3022,23 @@ fn assistant_inline_code_uses_code_text_attrs_inside_prose() {
         segments.contains(&(
             "Use ",
             Attrs::new()
-                .family(Family::Name(SINGLE_SESSION_ASSISTANT_FONT_FAMILY))
+                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
                 .color(single_session_line_color(SingleSessionLineStyle::Assistant))
         ))
+    );
+    assert!(
+        segments.contains(&(
+            " before ",
+            Attrs::new()
+                .family(Family::Name(SINGLE_SESSION_FONT_FAMILY))
+                .color(single_session_line_color(SingleSessionLineStyle::Assistant))
+        ))
+    );
+    assert!(
+        !segments
+            .iter()
+            .any(|(_, attrs)| attrs.family == Family::Name(SINGLE_SESSION_USER_FONT_FAMILY)),
+        "inline-code lines should avoid mixing handwriting and mono fonts: {segments:?}"
     );
     assert!(!segments.iter().any(|(text, _)| text.contains('`')));
     for code_segment in ["cargo test", "cargo clippy"] {
@@ -2991,16 +3454,19 @@ fn single_session_tool_text_segments_use_stateful_colors() {
             text: "  ✓ bash · done · tests passed".to_string(),
             style: SingleSessionLineStyle::Tool,
             inline_spans: Vec::new(),
+            tool: None,
         },
         SingleSessionStyledLine {
             text: "  │intent: Run tests                                            │".to_string(),
             style: SingleSessionLineStyle::Tool,
             inline_spans: Vec::new(),
+            tool: None,
         },
         SingleSessionStyledLine {
             text: "  plain tool output".to_string(),
             style: SingleSessionLineStyle::Tool,
             inline_spans: Vec::new(),
+            tool: None,
         },
     ];
 
@@ -3571,19 +4037,27 @@ fn first_glyph_color_for_text(buffer: &Buffer, text: &str) -> Option<TextColor> 
         .and_then(|run| run.glyphs.first().and_then(|glyph| glyph.color_opt))
 }
 
+fn buffer_has_layout_run_text(buffer: &Buffer, text: &str) -> bool {
+    buffer.layout_runs().any(|run| run.text == text)
+}
+
 #[test]
 fn single_session_tool_events_expand_context_and_collapse_previous_call() {
     let mut app = SingleSessionApp::new(None);
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: None,
         name: "bash".to_string(),
     });
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolInput {
+        id: None,
         delta: r#"{"command":"cargo test -p jcode-desktop","timeout":120000,"intent":"Run desktop tests"}"#.to_string(),
     });
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolExecuting {
+        id: None,
         name: "bash".to_string(),
     });
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolFinished {
+        id: None,
         name: "bash".to_string(),
         summary: "tests passed".to_string(),
         is_error: false,
@@ -3596,6 +4070,7 @@ fn single_session_tool_events_expand_context_and_collapse_previous_call() {
     assert_eq!(app.status.as_deref(), Some("tool bash done"));
 
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: None,
         name: "read".to_string(),
     });
     let body = app.body_lines().join("\n");
@@ -3609,15 +4084,18 @@ fn single_session_running_tool_input_is_visible_and_invalidates_render_cache() {
     let mut app = SingleSessionApp::new(None);
 
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: None,
         name: "bash".to_string(),
     });
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolExecuting {
+        id: None,
         name: "bash".to_string(),
     });
     let before_input_cache_key = app.rendered_body_cache_key((900, 700));
     let before_static_cache_key = app.rendered_body_static_cache_key((900, 700));
 
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolInput {
+        id: None,
         delta: r#"{"command":"sleep 10","intent":"wait while running"}"#.to_string(),
     });
 
@@ -3635,6 +4113,106 @@ fn single_session_running_tool_input_is_visible_and_invalidates_render_cache() {
 }
 
 #[test]
+fn single_session_tool_ids_drive_stable_native_card_runs() {
+    let mut app = SingleSessionApp::new(None);
+
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: Some("tool-a".to_string()),
+        name: "bash".to_string(),
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolInput {
+        id: Some("tool-a".to_string()),
+        delta: r#"{"command":"echo a"}"#.to_string(),
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolExecuting {
+        id: Some("tool-a".to_string()),
+        name: "bash".to_string(),
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolFinished {
+        id: Some("tool-a".to_string()),
+        name: "bash".to_string(),
+        summary: "printed a".to_string(),
+        is_error: false,
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: Some("tool-b".to_string()),
+        name: "read".to_string(),
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolInput {
+        id: Some("tool-b".to_string()),
+        delta: r#"{"file_path":"src/lib.rs"}"#.to_string(),
+    });
+
+    let lines = app.body_styled_lines();
+    let runs = single_session_tool_card_runs(&lines);
+
+    assert_eq!(
+        runs.len(),
+        2,
+        "each tool id should produce its own native card: {runs:?}"
+    );
+    assert_eq!(runs[0].call_id, "tool-a");
+    assert_eq!(runs[0].state, SingleSessionToolVisualState::Succeeded);
+    assert!(!runs[0].active);
+    assert_eq!(runs[1].call_id, "tool-b");
+    assert_eq!(runs[1].state, SingleSessionToolVisualState::Preparing);
+    assert!(runs[1].active);
+    assert!(
+        lines[runs[0].line]
+            .text
+            .contains("✓ bash · done · printed a"),
+        "finished tool should keep its compact success header: {:?}",
+        lines[runs[0].line]
+    );
+    assert!(
+        lines[runs[1].line].text.contains("○ read · preparing"),
+        "new active tool should keep its preparing header: {:?}",
+        lines[runs[1].line]
+    );
+}
+
+#[test]
+fn single_session_tool_cards_have_native_geometry_and_success_fill() {
+    let mut app = SingleSessionApp::new(None);
+    let size = PhysicalSize::new(900, 640);
+
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: Some("tool-card".to_string()),
+        name: "bash".to_string(),
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolInput {
+        id: Some("tool-card".to_string()),
+        delta: r#"{"command":"cargo check -p jcode-desktop"}"#.to_string(),
+    });
+    app.apply_session_event(session_launch::DesktopSessionEvent::ToolFinished {
+        id: Some("tool-card".to_string()),
+        name: "bash".to_string(),
+        summary: "check passed".to_string(),
+        is_error: false,
+    });
+
+    let lines = single_session_rendered_body_lines_for_tick(&app, size, 0);
+    let geometries = single_session_tool_card_geometries(&app, size, &lines);
+    let geometry = geometries
+        .iter()
+        .find(|geometry| geometry.run.call_id == "tool-card")
+        .unwrap_or_else(|| panic!("missing tool-card geometry: {geometries:?}"));
+
+    assert_eq!(geometry.run.name, "bash");
+    assert_eq!(geometry.run.state, SingleSessionToolVisualState::Succeeded);
+    assert_eq!(geometry.run.detail_line_count, 0);
+    assert!(geometry.card_rect.height > geometry.line_height * 0.45);
+    assert!(geometry.rail_rect.x > geometry.card_rect.x);
+    assert!(geometry.rail_rect.height <= geometry.card_rect.height);
+
+    let vertices = build_single_session_vertices(&app, size, 0.0, 0);
+    let bounds = pixel_bounds_for_color(&vertices, TOOL_CARD_SUCCESS_BACKGROUND_COLOR, size)
+        .expect("success tool card fill should be rendered as native geometry");
+    assert!(bounds.max_x > bounds.min_x);
+    assert!(bounds.max_y > bounds.min_y);
+}
+
+#[test]
 fn single_session_tool_event_preserves_prior_streaming_text_order() {
     let mut app = SingleSessionApp::new(None);
 
@@ -3642,9 +4220,11 @@ fn single_session_tool_event_preserves_prior_streaming_text_order() {
         "Before the tool".to_string(),
     ));
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: None,
         name: "bash".to_string(),
     });
     app.apply_session_event(session_launch::DesktopSessionEvent::ToolFinished {
+        id: None,
         name: "bash".to_string(),
         summary: "done".to_string(),
         is_error: false,
@@ -3689,6 +4269,12 @@ fn single_session_adjacent_tool_messages_render_as_compact_summary() {
         body[0],
         "  ▸ tools: 1 read, 2 agentgrep, 1 edit · ~23 tokens"
     );
+
+    let styled = app.body_styled_lines();
+    let runs = single_session_tool_card_runs(&styled);
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].state, SingleSessionToolVisualState::Group);
+    assert_eq!(runs[0].kind, SingleSessionToolLineKind::GroupSummary);
 }
 
 #[test]
@@ -3953,6 +4539,112 @@ fn single_session_model_picker_loads_filters_and_selects_model() {
 }
 
 #[test]
+fn single_session_model_picker_filter_supports_fuzzy_abbreviations() {
+    let mut app = SingleSessionApp::new(None);
+    assert_eq!(
+        app.handle_key(KeyInput::OpenModelPicker),
+        KeyOutcome::LoadModelCatalog
+    );
+    app.apply_session_event(session_launch::DesktopSessionEvent::ModelCatalog {
+        current_model: None,
+        provider_name: Some("OpenAI".to_string()),
+        models: vec![
+            session_launch::DesktopModelChoice {
+                model: "gpt-5-codex".to_string(),
+                provider: Some("openai".to_string()),
+                api_method: Some("responses".to_string()),
+                detail: Some("coding model".to_string()),
+                available: true,
+            },
+            session_launch::DesktopModelChoice {
+                model: "claude-opus-4-5".to_string(),
+                provider: Some("claude".to_string()),
+                api_method: Some("oauth".to_string()),
+                detail: Some("premium".to_string()),
+                available: true,
+            },
+        ],
+        reasoning_effort: None,
+        service_tier: None,
+        compaction_mode: None,
+    });
+
+    assert_eq!(
+        app.handle_key(KeyInput::Character("g5c".to_string())),
+        KeyOutcome::Redraw
+    );
+    let picker = app
+        .inline_widget_styled_lines()
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(picker.contains("filter \"g5c\""));
+    assert!(picker.contains("gpt-5-codex"), "{picker}");
+    assert!(!picker.contains("claude-opus-4-5"), "{picker}");
+}
+
+#[test]
+fn single_session_model_picker_cold_start_benchmark() {
+    use std::time::Instant;
+
+    let mut app = SingleSessionApp::new(None);
+    let models = (0..5_000)
+        .map(|index| session_launch::DesktopModelChoice {
+            model: format!("provider-family-model-{index:04}"),
+            provider: Some(format!("provider-{}", index % 17)),
+            api_method: Some("responses".to_string()),
+            detail: Some(format!("benchmark detail tier {}", index % 11)),
+            available: true,
+        })
+        .collect::<Vec<_>>();
+
+    let open_started = Instant::now();
+    assert_eq!(
+        app.handle_key(KeyInput::OpenModelPicker),
+        KeyOutcome::LoadModelCatalog
+    );
+    let open_elapsed = open_started.elapsed();
+
+    let catalog_started = Instant::now();
+    app.apply_session_event(session_launch::DesktopSessionEvent::ModelCatalog {
+        current_model: Some("provider-family-model-2500".to_string()),
+        provider_name: Some("Benchmark".to_string()),
+        models,
+        reasoning_effort: None,
+        service_tier: None,
+        compaction_mode: None,
+    });
+    let catalog_elapsed = catalog_started.elapsed();
+
+    let first_render_started = Instant::now();
+    let lines = app.inline_widget_styled_lines();
+    let first_render_elapsed = first_render_started.elapsed();
+    assert!(lines.iter().any(|line| line.text.contains("5000 models")));
+
+    let filter_started = Instant::now();
+    assert_eq!(
+        app.handle_key(KeyInput::Character("2500".to_string())),
+        KeyOutcome::Redraw
+    );
+    let filter_elapsed = filter_started.elapsed();
+
+    let filtered_render_started = Instant::now();
+    let filtered_lines = app.inline_widget_styled_lines();
+    let filtered_render_elapsed = filtered_render_started.elapsed();
+    assert!(
+        filtered_lines
+            .iter()
+            .any(|line| line.text.contains("provider-family-model-2500"))
+    );
+
+    eprintln!(
+        "model_picker_cold_start_benchmark open={open_elapsed:?} catalog={catalog_elapsed:?} first_render={first_render_elapsed:?} filter={filter_elapsed:?} filtered_render={filtered_render_elapsed:?}"
+    );
+}
+
+#[test]
 fn single_session_session_switcher_loads_filters_and_resumes_session() {
     let mut app = SingleSessionApp::new(None);
     app.messages
@@ -3993,8 +4685,11 @@ fn single_session_session_switcher_loads_filters_and_resumes_session() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(switcher.contains("desktop session switcher"));
+    assert!(switcher.contains("sessions ›"));
+    assert!(switcher.contains("preview"));
     assert!(switcher.contains("alpha"));
     assert!(switcher.contains("beta"));
+    assert!(switcher.contains("assistant alpha response"));
 
     assert_eq!(app.handle_key(KeyInput::MoveToLineEnd), KeyOutcome::Redraw);
     assert_eq!(app.session_switcher.selected, 1);
@@ -4032,6 +4727,162 @@ fn single_session_session_switcher_loads_filters_and_resumes_session() {
     let resumed = app.body_lines().join("\n");
     assert!(resumed.contains("beta status"));
     assert!(!resumed.contains("stale live transcript"));
+}
+
+#[test]
+fn single_session_session_switcher_filter_supports_fuzzy_abbreviations() {
+    let mut app = SingleSessionApp::new(None);
+    assert_eq!(
+        app.handle_key(KeyInput::OpenSessionSwitcher),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    app.apply_session_switcher_cards(vec![
+        test_session_card("session_alpha", "alpha-notes", "active"),
+        test_session_card("session_ticket", "ticket-workspace", "closed"),
+    ]);
+
+    assert_eq!(
+        app.handle_key(KeyInput::Character("tkw".to_string())),
+        KeyOutcome::Redraw
+    );
+    let switcher = app
+        .inline_widget_styled_lines()
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_eq!(app.session_switcher.filter, "tkw");
+    assert!(switcher.contains("filter: tkw"), "{switcher}");
+    assert!(switcher.contains("ticket-workspace"), "{switcher}");
+    assert!(!switcher.contains("alpha-notes"), "{switcher}");
+}
+
+#[test]
+fn single_session_session_switcher_filter_reports_visible_match_count() {
+    let mut app = SingleSessionApp::new(None);
+    assert_eq!(
+        app.handle_key(KeyInput::OpenSessionSwitcher),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    app.apply_session_switcher_cards(vec![
+        test_session_card("session_alpha", "alpha", "active"),
+        test_session_card("session_beta", "beta", "closed"),
+    ]);
+
+    assert_eq!(
+        app.handle_key(KeyInput::Character("beta".to_string())),
+        KeyOutcome::Redraw
+    );
+    let switcher = app
+        .inline_widget_styled_lines()
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(switcher.contains("filter: beta"), "{switcher}");
+    assert!(switcher.contains("sessions: 1/2"), "{switcher}");
+}
+
+#[test]
+fn single_session_resume_switcher_reopens_without_stale_filter_but_refresh_preserves_it() {
+    let mut app = SingleSessionApp::new(None);
+    assert_eq!(
+        app.handle_key(KeyInput::OpenSessionSwitcher),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    app.apply_session_switcher_cards(vec![
+        test_session_card("session_alpha", "alpha", "active"),
+        test_session_card("session_beta", "beta", "closed"),
+    ]);
+
+    assert_eq!(
+        app.handle_key(KeyInput::Character("beta".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(app.session_switcher.filter, "beta");
+
+    assert_eq!(
+        app.handle_key(KeyInput::RefreshSessions),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert_eq!(
+        app.session_switcher.filter, "beta",
+        "explicit refresh should keep the user's current filter"
+    );
+
+    assert_eq!(app.handle_key(KeyInput::Escape), KeyOutcome::Redraw);
+    assert!(!app.session_switcher.open);
+    assert_eq!(
+        app.handle_key(KeyInput::OpenSessionSwitcher),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    assert_eq!(
+        app.session_switcher.filter, "",
+        "fresh /resume opens must not inherit a stale filter that hides sessions"
+    );
+}
+
+#[test]
+fn single_session_resume_picker_switches_to_preview_pane_and_opens_terminal() {
+    let mut app = SingleSessionApp::new(None);
+    assert_eq!(
+        app.handle_key(KeyInput::OpenSessionSwitcher),
+        KeyOutcome::LoadSessionSwitcher
+    );
+    app.apply_session_switcher_cards(vec![
+        test_session_card("session_alpha", "alpha", "active"),
+        test_session_card("session_beta", "beta", "closed"),
+    ]);
+
+    assert_eq!(
+        app.handle_key(KeyInput::MoveCursorRight),
+        KeyOutcome::Redraw
+    );
+    let switcher = app
+        .inline_widget_styled_lines()
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(switcher.contains("focus: preview"));
+    assert!(switcher.contains("preview ›"));
+
+    assert_eq!(app.handle_key(KeyInput::MoveCursorLeft), KeyOutcome::Redraw);
+    assert_eq!(
+        app.handle_key(KeyInput::ModelPickerMove(1)),
+        KeyOutcome::Redraw
+    );
+    assert_eq!(
+        app.handle_key(KeyInput::QueueDraft),
+        KeyOutcome::OpenSession {
+            session_id: "session_beta".to_string(),
+            title: "beta".to_string(),
+        }
+    );
+}
+
+#[test]
+fn single_session_resumed_transcript_hydration_replaces_card_preview() {
+    let mut app =
+        SingleSessionApp::new(Some(test_session_card("session_alpha", "alpha", "closed")));
+
+    app.apply_resumed_session_transcript(vec![
+        session_data::SessionTranscriptMessage {
+            role: "user".to_string(),
+            content: "previous prompt".to_string(),
+        },
+        session_data::SessionTranscriptMessage {
+            role: "assistant".to_string(),
+            content: "previous answer".to_string(),
+        },
+    ]);
+
+    let body = app.body_lines().join("\n");
+    assert!(body.contains("previous prompt"));
+    assert!(body.contains("previous answer"));
+    assert!(!body.contains("assistant alpha response"));
 }
 
 #[test]
@@ -5512,6 +6363,35 @@ fn glyphon_caret_position_uses_shaped_draft_buffer() {
 }
 
 #[test]
+fn composer_draft_buffer_rebuilds_when_user_font_changes() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("stale input".to_string()));
+    let size = PhysicalSize::new(640, 480);
+    let mut font_system = FontSystem::new();
+    let stale_key = single_session_text_key(&app, size);
+    let old_buffers = single_session_text_buffers_from_key(&stale_key, size, &mut font_system);
+
+    let mut previous_key = stale_key.clone();
+    previous_key.draft = "typed input".to_string();
+    previous_key.user_font_family = SINGLE_SESSION_USER_FONT_FAMILY;
+
+    let mut next_key = previous_key.clone();
+    next_key.user_font_family = "Patrick Hand";
+
+    let buffers = single_session_text_buffers_from_key_reusing_unchanged(
+        &next_key,
+        Some(&previous_key),
+        old_buffers,
+        false,
+        size,
+        &mut font_system,
+    );
+
+    assert!(buffer_has_layout_run_text(&buffers[2], "typed input"));
+    assert!(!buffer_has_layout_run_text(&buffers[2], "stale input"));
+}
+
+#[test]
 fn fresh_welcome_uses_dominant_hero_composer_while_drafting() {
     let size = PhysicalSize::new(1000, 720);
     let mut app = SingleSessionApp::new(None);
@@ -5645,7 +6525,7 @@ fn fresh_welcome_model_picker_only_reserves_inline_lane() {
     );
 
     let vertices = build_single_session_vertices(&app, size, 0.0, 0);
-    let inline_card_vertices = positions_for_color(&vertices, [0.972, 0.982, 1.000, 0.54]);
+    let inline_card_vertices = positions_for_color(&vertices, [0.992, 0.996, 1.000, 0.72]);
     assert!(
         !inline_card_vertices.is_empty(),
         "inline picker should draw a rounded card background"
@@ -5940,6 +6820,105 @@ fn single_session_wraps_one_session_card() {
             message: "draft".to_string(),
             images: Vec::new(),
         }
+    );
+}
+
+#[test]
+fn workspace_focused_session_promotes_to_single_session_app() {
+    let mut app = DesktopApp::Workspace(Workspace::from_session_cards(vec![
+        workspace::SessionCard {
+            session_id: "session_alpha".to_string(),
+            title: "alpha".to_string(),
+            subtitle: "active".to_string(),
+            detail: "3 msgs".to_string(),
+            preview_lines: vec!["user hello".to_string()],
+            detail_lines: vec!["assistant hi".to_string()],
+        },
+    ]));
+
+    assert!(app.promote_focused_workspace_session());
+    let snapshot = app.debug_snapshot();
+    assert_eq!(snapshot.mode, "single_session");
+    assert_eq!(snapshot.live_session_id.as_deref(), Some("session_alpha"));
+    assert!(snapshot.body_text.contains("user hello"));
+}
+
+#[test]
+fn workspace_session_panel_app_uses_single_session_body_and_focused_draft() {
+    let mut workspace = Workspace::from_session_cards(vec![workspace::SessionCard {
+        session_id: "session_alpha".to_string(),
+        title: "alpha".to_string(),
+        subtitle: "active".to_string(),
+        detail: "3 msgs".to_string(),
+        preview_lines: vec!["user hello".to_string()],
+        detail_lines: vec!["assistant hi".to_string()],
+    }]);
+    workspace.handle_key(KeyInput::Character("i".to_string()));
+    workspace.handle_key(KeyInput::Character("draft text".to_string()));
+
+    let surface = workspace.focused_surface().expect("focused surface");
+    let app = workspace_single_session_app_for_surface(&workspace, surface)
+        .expect("session surface should become a single-session app");
+    let body = app.body_lines().join("\n");
+
+    assert_eq!(app.live_session_id.as_deref(), Some("session_alpha"));
+    assert_eq!(app.draft, "draft text");
+    assert!(body.contains("single session mode"));
+    assert!(body.contains("user hello"));
+    assert!(body.contains("assistant hi"));
+    assert!(!body.contains("session metadata"));
+}
+
+#[test]
+fn workspace_session_panel_composes_single_session_geometry() {
+    let workspace = Workspace::from_session_cards(vec![workspace::SessionCard {
+        session_id: "session_alpha".to_string(),
+        title: "alpha".to_string(),
+        subtitle: "active".to_string(),
+        detail: "3 msgs".to_string(),
+        preview_lines: vec!["user hello".to_string()],
+        detail_lines: vec!["assistant hi".to_string()],
+    }]);
+    let size = PhysicalSize::new(1280, 800);
+    let render_layout = workspace_render_layout(&workspace, size, None);
+    let focused_id = workspace.focused_id;
+    let mut panel_rect = None;
+    for_each_visible_workspace_surface(
+        &workspace,
+        size,
+        render_layout,
+        0.0,
+        |surface, rect, _, _| {
+            if surface.id == focused_id {
+                panel_rect = Some(rect);
+            }
+        },
+    );
+    let rect = panel_rect.expect("focused panel rect");
+    let panel_app = workspace_single_session_app_for_surface(
+        &workspace,
+        workspace.focused_surface().expect("focused surface"),
+    )
+    .expect("single-session panel app");
+    let panel_size = workspace_panel_size(rect);
+    let rendered_body_lines =
+        single_session_rendered_body_lines_for_tick(&panel_app, panel_size, 0);
+    let child_vertices = build_single_session_vertices_with_cached_body(
+        &panel_app,
+        panel_size,
+        0.0,
+        0,
+        0.0,
+        1.0,
+        &rendered_body_lines,
+    );
+
+    let mut vertices = Vec::new();
+    build_vertices_into(&workspace, size, render_layout, 0.0, None, &mut vertices);
+
+    assert!(
+        vertices.len() >= child_vertices.len() + 6,
+        "workspace should include the child single-session primitive geometry"
     );
 }
 

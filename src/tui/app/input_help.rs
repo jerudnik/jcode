@@ -49,6 +49,9 @@ impl App {
             "git" => {
                 "`/git`\nShow `git status --short --branch` for the current session working directory.\n\n`/git status`\nAlias for `/git`."
             }
+            "commit" => {
+                "`/commit`\nAsk the agent to inspect current uncommitted changes and create interactive, logical commits.\n\nThe agent should group related files or hunks, preserve unrelated work, validate as appropriate, and report the commits created plus anything left uncommitted."
+            }
             "catchup" => {
                 "`/catchup`\nOpen the Catch Up picker for finished sessions that need attention.\n\n`/catchup next`\nTeleport to the next session needing attention and open a Catch Up brief in the side panel.\n\n`/catchup list`\nAlias for opening the picker."
             }
@@ -122,7 +125,7 @@ impl App {
                 "`/split`\nSplit the current session into a new window. Clones the full conversation history so both sessions continue from the same point."
             }
             "resume" | "sessions" => {
-                "`/resume`\nOpen the interactive session picker. Browse and search all sessions, preview conversation history, and open any session in a new terminal window.\n\nPress `Esc` to return to your current session."
+                "`/resume`\nOpen the interactive session picker. Browse and search all sessions, preview conversation history, and resume the highlighted session. By default, `Enter` resumes in the current terminal and `Ctrl+Enter` opens a new terminal; `keybindings.session_picker_enter` can swap those actions.\n\nPress `Esc` to return to your current session."
             }
             "info" => "`/info`\nShow session metadata and token usage.",
             "context" => {

@@ -1,16 +1,9 @@
 use super::*;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
 
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    let mutex = ENV_LOCK.get_or_init(|| Mutex::new(()));
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+fn lock_env() -> crate::storage::TestEnvLockGuard {
+    crate::storage::lock_test_env()
 }
 
 /// RAII guard that restores the process current working directory on

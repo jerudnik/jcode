@@ -138,6 +138,9 @@ pub trait TuiState {
     fn elapsed(&self) -> Option<Duration>;
     fn status(&self) -> ProcessingStatus;
     fn command_suggestions(&self) -> Vec<(String, &'static str)>;
+    fn command_suggestion_selected(&self) -> usize {
+        0
+    }
     fn active_skill(&self) -> Option<String>;
     fn subagent_status(&self) -> Option<String>;
     /// Progress of a currently-running batch tool call.
@@ -1210,7 +1213,11 @@ const TERMINAL_CONTEXT_ENV_KEYS: &[&str] = &[
 fn terminal_context_env() -> Option<Vec<(String, String)>> {
     let values: Vec<(String, String)> = TERMINAL_CONTEXT_ENV_KEYS
         .iter()
-        .filter_map(|key| std::env::var(key).ok().map(|value| ((*key).to_string(), value)))
+        .filter_map(|key| {
+            std::env::var(key)
+                .ok()
+                .map(|value| ((*key).to_string(), value))
+        })
         .collect();
     (!values.is_empty()).then_some(values)
 }

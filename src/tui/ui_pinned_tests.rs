@@ -557,7 +557,8 @@ fn render_side_panel_markdown_without_protocol_falls_back_to_text_placeholder() 
         rendered.image_placements.len()
     );
     assert!(
-        text.iter().any(|line| line.contains("mermaid") || line.contains("flowchart")),
+        text.iter()
+            .any(|line| line.contains("mermaid") || line.contains("flowchart")),
         "expected textual mermaid fallback when image protocols are unavailable: {:?}",
         text
     );

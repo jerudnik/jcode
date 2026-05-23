@@ -297,15 +297,12 @@ fn build_spawn_command(term: &str, command: &TerminalCommand, cwd: &Path) -> Opt
         "zellij" => {
             let session = zellij_session_name(command, title);
             let shell = shell_command(&command_parts(command));
-            cmd.args([
-                "attach",
-                "-c",
-                &session,
-                "options",
-                "--default-cwd",
-            ])
-            .arg(cwd)
-            .args(["--default-shell", &format!("/bin/sh -lc {}", sh_escape(&shell))]);
+            cmd.args(["attach", "-c", &session, "options", "--default-cwd"])
+                .arg(cwd)
+                .args([
+                    "--default-shell",
+                    &format!("/bin/sh -lc {}", sh_escape(&shell)),
+                ]);
         }
         #[cfg(unix)]
         "handterm" => {
@@ -487,7 +484,10 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
         assert!(args.windows(2).any(|window| window == ["-na", "Ghostty"]));
-        assert!(args.windows(3).any(|window| window == ["-e", "/bin/bash", "-lc"]));
+        assert!(
+            args.windows(3)
+                .any(|window| window == ["-e", "/bin/bash", "-lc"])
+        );
         let shell = args.last().expect("shell command");
         assert!(shell.contains("'zellij' 'attach'"));
         assert!(shell.contains("'jcode-session_rat_123'"));

@@ -242,8 +242,7 @@ impl TestJcodeHome {
         let temp = tempfile::tempdir().expect("create test JCODE_HOME tempdir");
         let prev_home = std::env::var_os("JCODE_HOME");
         let prev_disable_browser = std::env::var_os(crate::browser_open::DISABLE_ENV_VAR);
-        let prev_disable_terminal_spawn =
-            std::env::var_os(crate::terminal_launch::DISABLE_ENV_VAR);
+        let prev_disable_terminal_spawn = std::env::var_os(crate::terminal_launch::DISABLE_ENV_VAR);
         crate::env::set_var("JCODE_HOME", temp.path());
         crate::env::set_var(crate::browser_open::DISABLE_ENV_VAR, "1");
         crate::env::set_var(crate::terminal_launch::DISABLE_ENV_VAR, "1");

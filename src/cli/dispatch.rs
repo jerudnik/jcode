@@ -34,6 +34,26 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         args.provider = ProviderChoice::OpenaiCompatible;
     }
 
+    if let Some(tool_profile) = args.tool_profile.as_deref() {
+        crate::env::set_var("JCODE_TOOL_PROFILE", tool_profile);
+    }
+    if let Some(tools) = args.tools.as_deref() {
+        crate::env::set_var("JCODE_TOOLS", tools);
+    }
+    if let Some(disabled_tools) = args.disabled_tools.as_deref() {
+        crate::env::set_var("JCODE_DISABLED_TOOLS", disabled_tools);
+    }
+    if args.disable_base_tools {
+        crate::env::set_var("JCODE_DISABLE_BASE_TOOLS", "1");
+    }
+    if args.tool_profile.is_some()
+        || args.tools.is_some()
+        || args.disabled_tools.is_some()
+        || args.disable_base_tools
+    {
+        crate::config::invalidate_config_cache();
+    }
+
     match args.command {
         Some(Command::Serve {
             temporary_server,
@@ -95,6 +115,7 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
             .await?;
         }
         Some(Command::Login {
+            provider: login_provider,
             account,
             no_browser,
             print_auth_url,
@@ -109,7 +130,7 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
             api_key_env,
         }) => {
             login::run_login(
-                &args.provider,
+                &login_provider.unwrap_or(args.provider),
                 account.as_deref(),
                 login::LoginOptions {
                     no_browser,
@@ -311,19 +332,31 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
             prompt,
             json,
             output,
+            coverage,
+            coverage_file,
+            coverage_limit,
         }) => {
-            commands::run_auth_test_command(
-                &args.provider,
-                args.model.as_deref(),
-                login,
-                all_configured,
-                no_smoke,
-                no_tool_smoke,
-                prompt.as_deref(),
-                json,
-                output.as_deref(),
-            )
-            .await?;
+            if coverage {
+                commands::run_auth_test_coverage_command(
+                    json,
+                    output.as_deref(),
+                    coverage_file.as_deref(),
+                    coverage_limit,
+                )?;
+            } else {
+                commands::run_auth_test_command(
+                    &args.provider,
+                    args.model.as_deref(),
+                    login,
+                    all_configured,
+                    no_smoke,
+                    no_tool_smoke,
+                    prompt.as_deref(),
+                    json,
+                    output.as_deref(),
+                )
+                .await?;
+            }
         }
         Some(Command::Restart { action }) => match action {
             RestartCommand::Save { auto_restore } => {
@@ -540,8 +573,13 @@ async fn run_default_command(args: Args) -> Result<()> {
     let explicit_provider_or_model = args.provider != ProviderChoice::Auto
         || args.model.is_some()
         || args.provider_profile.is_some();
+    let explicit_tool_options = args.tool_profile.is_some()
+        || args.tools.is_some()
+        || args.disabled_tools.is_some()
+        || args.disable_base_tools;
     if args.resume.is_none()
         && !explicit_provider_or_model
+        && !explicit_tool_options
         && commands::maybe_run_pending_restart_restore_on_startup().await?
     {
         return Ok(());
@@ -606,6 +644,12 @@ async fn run_default_command(args: Args) -> Result<()> {
                 .map(|m| format!(" --model {}", m))
                 .unwrap_or_default()
         ));
+    }
+
+    if server_running && explicit_tool_options {
+        output::stderr_info(
+            "Server already running; tool flags only apply when starting a new server. Restart server or edit [tools] in config.toml to change the active toolset.",
+        );
     }
 
     if !server_running {

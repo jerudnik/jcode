@@ -8,25 +8,9 @@ use futures::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 const BRIGHT_PEARL_WRAPPED_TOOL_CALL_FIXTURE: &str =
     include_str!("../../tests/fixtures/openai/bright_pearl_wrapped_tool_call.txt");
-static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-/// Acquire the test env lock, recovering from poisoning.
-///
-/// A panic in any test that holds `ENV_LOCK` would otherwise poison
-/// the mutex permanently for the remainder of the test binary and
-/// turn every later `ENV_LOCK.lock().unwrap()` into a cascading
-/// `PoisonError` failure. Swallow the poison: the protected critical
-/// section is per-test scratch env setup, not invariant data.
-fn lock_env() -> MutexGuard<'static, ()> {
-    match ENV_LOCK.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
-}
 
 struct EnvVarGuard {
     key: &'static str,
@@ -95,7 +79,7 @@ async fn test_persistent_ws_state() -> (PersistentWsState, tokio::task::JoinHand
 }
 
 struct LiveOpenAITestEnv {
-    _lock: MutexGuard<'static, ()>,
+    _lock: crate::storage::TestEnvLockGuard,
     _jcode_home: EnvVarGuard,
     _transport: EnvVarGuard,
     _temp: tempfile::TempDir,
@@ -103,7 +87,7 @@ struct LiveOpenAITestEnv {
 
 impl LiveOpenAITestEnv {
     fn new() -> Result<Option<Self>> {
-        let lock = lock_env();
+        let lock = crate::storage::lock_test_env();
         let Some(source_auth) = real_codex_auth_path() else {
             return Ok(None);
         };

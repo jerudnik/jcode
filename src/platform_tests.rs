@@ -60,8 +60,7 @@ fn spawn_detached_creates_new_session() {
     assert!(status.success(), "child should exit successfully");
 
     assert_eq!(
-        child_sid as u32,
-        child_pid,
+        child_sid as u32, child_pid,
         "detached child should lead its own session"
     );
     assert_ne!(

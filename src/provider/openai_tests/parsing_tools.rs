@@ -227,7 +227,7 @@ fn test_parse_openai_response_image_generation_saves_metadata_and_emits_event() 
         }
     }
 
-    let _lock = lock_env();
+    let _lock = crate::storage::lock_test_env();
     let _cwd = CwdGuard(std::env::current_dir().expect("current dir"));
     let temp = tempfile::Builder::new()
         .prefix("jcode-openai-image-test-")
