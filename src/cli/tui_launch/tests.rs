@@ -42,16 +42,6 @@ impl EnvVarGuard {
         crate::env::set_var(key, value);
         Self { key, prev }
     }
-
-    /// Remove an env var for the duration of the guard, capturing its
-    /// prior value so Drop can restore it. Used to opt back into code
-    /// paths that the test harness disabled by default (for example
-    /// `JCODE_DISABLE_TERMINAL_SPAWN`).
-    fn remove(key: &'static str) -> Self {
-        let prev = std::env::var_os(key);
-        crate::env::remove_var(key);
-        Self { key, prev }
-    }
 }
 
 #[cfg(unix)]

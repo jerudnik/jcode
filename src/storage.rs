@@ -139,6 +139,7 @@ pub(crate) struct TestEnvLockGuard {
 }
 
 #[cfg(test)]
+#[allow(dead_code)] // Real guard is held for its Drop side effect; the field is intentionally never read.
 enum TestEnvLockGuardInner {
     Real(MutexGuard<'static, ()>),
     Reentrant,

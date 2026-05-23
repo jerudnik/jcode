@@ -517,7 +517,7 @@ async fn hard_compaction_reduces_provider_payload_with_huge_existing_summary() {
 async fn provider_request_budget_guard_fails_closed() {
     let provider: Arc<dyn Provider> = Arc::new(JcodeCompactionProvider);
     let registry = Registry::new(provider.clone()).await;
-    let mut agent = Agent::new(provider, registry);
+    let agent = Agent::new(provider, registry);
     let messages = vec![Message::user(&"x".repeat(1_600_000))];
     let err = agent
         .check_provider_request_budget(&messages)
