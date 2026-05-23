@@ -340,7 +340,6 @@ const WELCOME_AURORA_VIOLET: [f32; 4] = [0.720, 0.360, 0.980, 0.125];
 const WELCOME_AURORA_MINT: [f32; 4] = [0.220, 0.840, 0.660, 0.115];
 const WELCOME_AURORA_WARM: [f32; 4] = [1.000, 0.620, 0.360, 0.075];
 const WELCOME_HANDWRITING_COLOR: [f32; 4] = [0.012, 0.080, 0.250, 0.94];
-const NATIVE_SPINNER_TRACK_COLOR: [f32; 4] = [0.055, 0.125, 0.270, 0.34];
 const NATIVE_SPINNER_HEAD_COLOR: [f32; 4] = [0.000, 0.260, 0.720, 1.0];
 const CODE_BLOCK_BACKGROUND_COLOR: [f32; 4] = [0.075, 0.095, 0.135, 0.075];
 const INLINE_CODE_BACKGROUND_COLOR: [f32; 4] = [0.075, 0.095, 0.135, 0.135];
@@ -528,6 +527,9 @@ async fn run() -> Result<()> {
             .context("failed to create desktop window")?,
     );
     startup_trace.mark("window created");
+    let mut renderer = DesktopHostRendererState::NoGpuBoot;
+    renderer.start_gpu_init(window.clone(), event_loop_proxy.clone(), startup_trace)?;
+    startup_trace.mark("canvas init spawned");
 
     let mut pending_workspace_startup_load = false;
     let mut pending_workspace_startup_preferences = None;
@@ -546,14 +548,7 @@ async fn run() -> Result<()> {
     };
     startup_trace.mark("app state initialized");
     window.set_title(&app.status_title());
-    let mut canvas = Canvas::new(window.clone(), startup_trace).await?;
-    startup_trace.mark("canvas ready");
-    if let Some(handoff) = desktop_reload_startup.handoff.as_ref() {
-        handoff.signal_ready_and_wait_for_release();
-        window.set_visible(true);
-        window.request_redraw();
-        startup_trace.mark("reload handoff released");
-    }
+    let mut reload_startup_handoff = desktop_reload_startup.handoff;
     let mut modifiers = ModifiersState::empty();
     let mut cursor_position = winit::dpi::PhysicalPosition::new(0.0, 0.0);
     let mut selecting_body = false;
@@ -587,9 +582,15 @@ async fn run() -> Result<()> {
         );
     }
 
+    let mut event_loop_entered = false;
     event_loop.run(move |event, target| {
+        if !event_loop_entered {
+            event_loop_entered = true;
+            startup_trace.mark("event loop entered");
+        }
         let event_loop_now = Instant::now();
         let surface_renderable = desktop_surface_size_is_renderable(window.inner_size());
+        let renderer_ready = renderer.is_gpu_ready();
         let has_background_work = app.has_background_work();
         power_inhibitor.set_active(has_background_work);
         let default_wake = desktop_background_wake(
@@ -627,6 +628,7 @@ async fn run() -> Result<()> {
         let frame_animation_active = app.has_frame_animation();
         let pending_backend_redraw = pending_backend_redraw_since.is_some();
         let no_paint_active = surface_renderable
+            && renderer_ready
             && (!first_frame_presented
                 || has_background_work
                 || frame_animation_active
@@ -1036,8 +1038,13 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::LoadSessionSwitcher => {
+                            let purpose = if app.is_workspace() {
+                                DesktopSessionCardsPurpose::WorkspaceRefresh
+                            } else {
+                                DesktopSessionCardsPurpose::SingleSessionSwitcher
+                            };
                             spawn_session_cards_load(
-                                DesktopSessionCardsPurpose::SingleSessionSwitcher,
+                                purpose,
                                 event_loop_proxy.clone(),
                                 Duration::ZERO,
                             );
@@ -1204,6 +1211,14 @@ async fn run() -> Result<()> {
                             window.set_title(&app.status_title());
                             window.request_redraw();
                         }
+                        KeyOutcome::ForceReload => {
+                            if hot_reloader.force_reload(&app, &window) {
+                                target.exit();
+                            } else {
+                                window.set_title(&app.status_title());
+                                window.request_redraw();
+                            }
+                        }
                         KeyOutcome::None => {}
                     }
                     log_desktop_slow_interaction(
@@ -1213,6 +1228,9 @@ async fn run() -> Result<()> {
                     );
                 }
                 WindowEvent::RedrawRequested => {
+                    let Some(canvas) = renderer.canvas_mut() else {
+                        return;
+                    };
                     if let Some(size) = pending_resize.take() {
                         canvas.resize(size);
                     }
@@ -1297,6 +1315,33 @@ async fn run() -> Result<()> {
                     window.set_title(&app.status_title());
                     interaction_latency.mark("recovery_count", Instant::now());
                     window.request_redraw();
+                }
+            }
+            Event::UserEvent(DesktopUserEvent::CanvasReady(result)) => {
+                let DesktopCanvasInitResult { canvas, elapsed } = result;
+                match canvas {
+                    Ok(mut ready_canvas) => {
+                        startup_trace.mark(&format!(
+                            "canvas ready (async {}ms)",
+                            elapsed.as_millis()
+                        ));
+                        ready_canvas.resize(window.inner_size());
+                        renderer = DesktopHostRendererState::GpuReady(ready_canvas);
+                        if let Some(handoff) = reload_startup_handoff.as_ref() {
+                            handoff.signal_ready_and_wait_for_release();
+                            window.set_visible(true);
+                            startup_trace.mark("reload handoff released");
+                        }
+                        reload_startup_handoff = None;
+                        window.request_redraw();
+                    }
+                    Err(message) => {
+                        desktop_log::error(format_args!(
+                            "jcode-desktop: failed to initialize desktop renderer: {message}"
+                        ));
+                        renderer = DesktopHostRendererState::GpuFailed { _message: message };
+                        target.exit();
+                    }
                 }
             }
             Event::UserEvent(DesktopUserEvent::SessionCardsLoaded {
@@ -1522,7 +1567,10 @@ async fn run() -> Result<()> {
                     return;
                 }
 
-                if surface_renderable && canvas.needs_initial_frame {
+                if let Some(canvas) = renderer.canvas_mut()
+                    && surface_renderable
+                    && canvas.needs_initial_frame
+                {
                     canvas.needs_initial_frame = false;
                     window.request_redraw();
                 } else if surface_renderable && app.has_frame_animation() {
@@ -2148,8 +2196,8 @@ async fn render_hero_frame_to_image(
     Ok((image, vertices.len()))
 }
 
-#[derive(Debug)]
 enum DesktopUserEvent {
+    CanvasReady(DesktopCanvasInitResult),
     SessionEvents(DesktopSessionEventBatch),
     SessionCardsLoaded {
         purpose: DesktopSessionCardsPurpose,
@@ -2167,6 +2215,68 @@ enum DesktopUserEvent {
         elapsed: Duration,
     },
     RecoveryCount(usize),
+}
+
+struct DesktopCanvasInitResult {
+    canvas: std::result::Result<Canvas, String>,
+    elapsed: Duration,
+}
+
+enum DesktopHostRendererState {
+    NoGpuBoot,
+    GpuInitializing { _started_at: Instant },
+    GpuReady(Canvas),
+    GpuFailed { _message: String },
+}
+
+impl DesktopHostRendererState {
+    fn start_gpu_init(
+        &mut self,
+        window: Arc<Window>,
+        event_loop_proxy: EventLoopProxy<DesktopUserEvent>,
+        startup_trace: DesktopStartupTrace,
+    ) -> Result<()> {
+        if matches!(self, Self::GpuInitializing { .. } | Self::GpuReady(_)) {
+            return Ok(());
+        }
+
+        let started_at = Instant::now();
+        std::thread::Builder::new()
+            .name("jcode-desktop-gpu-init".to_string())
+            .spawn(move || {
+                startup_trace.mark("canvas init started");
+                let canvas = pollster::block_on(Canvas::new(window, startup_trace))
+                    .map_err(|error| format!("{error:#}"));
+                let result = DesktopCanvasInitResult {
+                    canvas,
+                    elapsed: started_at.elapsed(),
+                };
+                if event_loop_proxy
+                    .send_event(DesktopUserEvent::CanvasReady(result))
+                    .is_err()
+                {
+                    desktop_log::warn(format_args!(
+                        "jcode-desktop: failed to deliver async canvas initialization result"
+                    ));
+                }
+            })
+            .context("failed to spawn desktop GPU initialization thread")?;
+        *self = Self::GpuInitializing {
+            _started_at: started_at,
+        };
+        Ok(())
+    }
+
+    fn is_gpu_ready(&self) -> bool {
+        matches!(self, Self::GpuReady(_))
+    }
+
+    fn canvas_mut(&mut self) -> Option<&mut Canvas> {
+        match self {
+            Self::GpuReady(canvas) => Some(canvas),
+            Self::NoGpuBoot | Self::GpuInitializing { .. } | Self::GpuFailed { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2380,6 +2490,73 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
                         "is_password": is_password,
                         "tool_call_id": tool_call_id,
                     })
+                );
+            }
+            session_launch::DesktopSessionEvent::ReloadProgress {
+                step,
+                message,
+                success,
+                output,
+            } => {
+                last_status = Some(format!("reload {step}: {message}"));
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "reload_progress",
+                        "step": step,
+                        "message": message,
+                        "success": success,
+                        "output": output,
+                    })
+                );
+            }
+            session_launch::DesktopSessionEvent::RuntimeMetadata {
+                connection_type,
+                status_detail,
+                upstream_provider,
+            } => {
+                if let Some(status_detail) = &status_detail {
+                    last_status = Some(status_detail.clone());
+                }
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "runtime_metadata",
+                        "connection_type": connection_type,
+                        "status_detail": status_detail,
+                        "upstream_provider": upstream_provider,
+                    })
+                );
+            }
+            session_launch::DesktopSessionEvent::TokenUsage {
+                input,
+                output,
+                cache_read_input,
+                cache_creation_input,
+            } => {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "tokens",
+                        "input": input,
+                        "output": output,
+                        "cache_read_input": cache_read_input,
+                        "cache_creation_input": cache_creation_input,
+                    })
+                );
+            }
+            session_launch::DesktopSessionEvent::SystemNotice { title, message } => {
+                last_status = Some(title.clone());
+                println!(
+                    "{}",
+                    serde_json::json!({"event": "system_notice", "title": title, "message": message})
+                );
+            }
+            session_launch::DesktopSessionEvent::SessionCloseRequested { reason } => {
+                anyhow::bail!(
+                    "desktop chat smoke session close requested; session_id={}; reason={}",
+                    session_id.as_deref().unwrap_or("unknown"),
+                    reason
                 );
             }
             session_launch::DesktopSessionEvent::Done => {
@@ -4607,6 +4784,39 @@ impl DesktopHotReloader {
         false
     }
 
+    fn force_reload(&mut self, app: &DesktopApp, window: &Window) -> bool {
+        if self.poll_pending_handoff() {
+            return true;
+        }
+        if self.pending_handoff.is_some() {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: force reload requested while another reload handoff is pending"
+            ));
+            return false;
+        }
+        let Some(relaunch) = self.relaunch.as_ref() else {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: force reload requested but current process cannot be relaunched"
+            ));
+            return false;
+        };
+        let binary = desktop_reload_binary_candidate(&relaunch.binary);
+        let relaunch = relaunch.for_app(app, binary);
+        match relaunch.spawn_for_window(window) {
+            Ok(Some(handoff)) => {
+                self.pending_handoff = Some(handoff);
+                false
+            }
+            Ok(None) => true,
+            Err(error) => {
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to force reload desktop: {error:#}"
+                ));
+                false
+            }
+        }
+    }
+
     fn poll_pending_handoff(&mut self) -> bool {
         let Some(pending_handoff) = self.pending_handoff.as_ref() else {
             return false;
@@ -4710,11 +4920,30 @@ impl DesktopRelaunch {
         }
 
         let mut args = desktop_args_without_resume(&self.args);
-        if let Some(session_id) = app.single_session_live_id() {
-            args.push(OsString::from("--resume"));
-            args.push(OsString::from(session_id));
+        match app {
+            DesktopApp::Workspace(_) => ensure_desktop_workspace_arg(&mut args),
+            DesktopApp::SingleSession(_) => {
+                if let Some(session_id) = app.single_session_live_id() {
+                    args.push(OsString::from("--resume"));
+                    args.push(OsString::from(session_id));
+                }
+            }
         }
         Self { binary, args }
+    }
+}
+
+fn ensure_desktop_workspace_arg(args: &mut Vec<OsString>) {
+    let has_mode_arg = args.iter().any(|arg| {
+        arg == "--workspace"
+            || arg == "--new"
+            || arg == "--resume"
+            || arg.to_str().is_some_and(|value| {
+                value.starts_with("--resume=") || value.starts_with("jcode://")
+            })
+    });
+    if !has_mode_arg {
+        args.push(OsString::from("--workspace"));
     }
 }
 

@@ -154,6 +154,29 @@ fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
 }
 
 #[test]
+fn desktop_hot_reload_restarts_default_launched_workspace_as_workspace() {
+    let relaunch = DesktopRelaunch {
+        binary: PathBuf::from("/old/jcode-desktop"),
+        args: Vec::new(),
+    };
+    let app = DesktopApp::Workspace(Workspace::from_session_cards(vec![
+        workspace::SessionCard {
+            session_id: "session-visible".to_string(),
+            title: "visible session".to_string(),
+            subtitle: "active".to_string(),
+            detail: "already on screen".to_string(),
+            preview_lines: vec!["same content".to_string()],
+            detail_lines: vec![],
+        },
+    ]));
+
+    let updated = relaunch.for_app(&app, PathBuf::from("/new/jcode-desktop"));
+
+    assert_eq!(updated.binary, PathBuf::from("/new/jcode-desktop"));
+    assert_eq!(updated.args, vec![OsString::from("--workspace")]);
+}
+
+#[test]
 fn desktop_hot_reload_prefers_newer_selfdev_binary() -> Result<()> {
     let temp = unique_desktop_test_dir("desktop-hot-reload-candidate")?;
     let current = temp.join("installed").join(desktop_binary_name());
@@ -772,9 +795,29 @@ fn single_session_active_work_uses_streaming_activity_cue_geometry() {
 
     assert!(vertices_have_rgb(&tick_zero, NATIVE_SPINNER_HEAD_COLOR));
     assert!(vertices_have_rgb(&tick_one, NATIVE_SPINNER_HEAD_COLOR));
+    assert!(vertices_have_color(
+        &tick_zero,
+        STREAMING_ACTIVITY_PILL_COLOR
+    ));
     assert_ne!(
         colors_for_rgb(&tick_zero, NATIVE_SPINNER_HEAD_COLOR),
         colors_for_rgb(&tick_one, NATIVE_SPINNER_HEAD_COLOR)
+    );
+
+    let pill_bounds = pixel_bounds_for_color(
+        &tick_zero,
+        STREAMING_ACTIVITY_PILL_COLOR,
+        PhysicalSize::new(900, 700),
+    )
+    .expect("streaming activity cue should draw an inline pill");
+    assert!(
+        (pill_bounds.min_x - PANEL_TITLE_LEFT_PADDING).abs() <= 0.5,
+        "activity cue should align to transcript text, got {pill_bounds:?}"
+    );
+    let pill_width = pill_bounds.max_x - pill_bounds.min_x;
+    assert!(
+        (26.0..=34.1).contains(&pill_width),
+        "activity cue pill should stay compact, got {pill_bounds:?}"
     );
 }
 
@@ -1072,6 +1115,9 @@ fn single_session_slash_suggestions_expose_accepted_aliases() {
 
     assert!(help.contains("/session"), "{help}");
     assert!(help.contains("/cancel"), "{help}");
+    assert!(help.contains("/force-reload"), "{help}");
+    assert!(help.contains("/fonts"), "{help}");
+    assert!(help.contains("/info"), "{help}");
     assert!(help.contains("/exit"), "{help}");
 }
 
@@ -1438,6 +1484,20 @@ fn single_session_status_slash_opens_inline_session_info() {
 }
 
 #[test]
+fn single_session_info_slash_alias_opens_inline_session_info() {
+    let mut app = SingleSessionApp::new(None);
+    app.handle_key(KeyInput::Character("/info".to_string()));
+
+    assert_eq!(app.handle_key(KeyInput::SubmitDraft), KeyOutcome::Redraw);
+    assert!(app.show_session_info);
+    assert!(app.draft.is_empty());
+    assert_eq!(
+        app.active_inline_widget(),
+        Some(InlineWidgetKind::SessionInfo)
+    );
+}
+
+#[test]
 fn single_session_slash_model_with_argument_requests_model_switch() {
     let mut app = SingleSessionApp::new(None);
     app.draft = "/model gpt-5.5".to_string();
@@ -1470,6 +1530,8 @@ fn single_session_slash_server_setting_commands_return_control_outcomes() {
         submit("/refresh-model-list"),
         KeyOutcome::RefreshModelCatalog
     );
+    assert_eq!(submit("/reload"), KeyOutcome::ForceReload);
+    assert_eq!(submit("/force-reload"), KeyOutcome::ForceReload);
     assert_eq!(
         submit("/effort high"),
         KeyOutcome::SetReasoningEffort("high".to_string())
