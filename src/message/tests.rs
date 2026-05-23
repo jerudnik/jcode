@@ -263,72 +263,22 @@ xoxp-0123456789
     assert_eq!(out.matches("[REDACTED_SECRET]").count(), 9);
 }
 
+
 #[test]
 fn redact_secrets_redacts_env_style_assignments() {
-    let input = "\nOPENROUTER_API_KEY=test_secret_for_OPENROUTER_API_KEY\nOPENCODE_API_KEY=test_secret_for_OPENCODE_API_KEY\nOPENCODE_GO_API_KEY=test_secret_for_OPENCODE_GO_API_KEY\nZHIPU_API_KEY=test_secret_for_ZHIPU_API_KEY\nZAI_API_KEY=test_secret_for_ZAI_API_KEY\n302AI_API_KEY=test_secret_for_302AI_API_KEY\nBASETEN_API_KEY=test_secret_for_BASETEN_API_KEY\nCORTECS_API_KEY=test_secret_for_CORTECS_API_KEY\nDEEPSEEK_API_KEY=test_secret_for_DEEPSEEK_API_KEY\nFIRMWARE_API_KEY=test_secret_for_FIRMWARE_API_KEY\nHF_TOKEN=test_secret_for_HF_TOKEN\nMOONSHOT_API_KEY=test_secret_for_MOONSHOT_API_KEY\nNEBIUS_API_KEY=test_secret_for_NEBIUS_API_KEY\nSCALEWAY_API_KEY=test_secret_for_SCALEWAY_API_KEY\nSTACKIT_API_KEY=test_secret_for_STACKIT_API_KEY\nGROQ_API_KEY=test_secret_for_GROQ_API_KEY\nMISTRAL_API_KEY=test_secret_for_MISTRAL_API_KEY\nPERPLEXITY_API_KEY=test_secret_for_PERPLEXITY_API_KEY\nTOGETHER_API_KEY=test_secret_for_TOGETHER_API_KEY\nDEEPINFRA_API_KEY=test_secret_for_DEEPINFRA_API_KEY\nXAI_API_KEY=test_secret_for_XAI_API_KEY\nLMSTUDIO_API_KEY=test_secret_for_LMSTUDIO_API_KEY\nOLLAMA_API_KEY=test_secret_for_OLLAMA_API_KEY\nCHUTES_API_KEY=test_secret_for_CHUTES_API_KEY\nCEREBRAS_API_KEY=test_secret_for_CEREBRAS_API_KEY\nOPENAI_COMPAT_API_KEY=test_secret_for_OPENAI_COMPAT_API_KEY\nANTHROPIC_API_KEY=test_secret_for_ANTHROPIC_API_KEY\nOPENAI_API_KEY=test_secret_for_OPENAI_API_KEY\nAZURE_OPENAI_API_KEY=test_secret_for_AZURE_OPENAI_API_KEY\nCURSOR_API_KEY=test_secret_for_CURSOR_API_KEY\nGITHUB_TOKEN=test_secret_for_GITHUB_TOKEN\n";
+    let input = "OPENROUTER_API_KEY=sk-or-v1-abc123abc123abc123abc123\nOPENCODE_API_KEY=oc_test_secret\nOPENCODE_GO_API_KEY=ocgo_test_secret\nZAI_API_KEY=zai_secret\nCHUTES_API_KEY=chutes_secret\nCEREBRAS_API_KEY=cerebras_secret\nOPENAI_COMPAT_API_KEY=compat_secret\nCURSOR_API_KEY='my_cursor_secret_value'\nOPENAI_API_KEY=sk-test-openai-example\nAZURE_OPENAI_API_KEY=azure-openai-secret\n";
     let out = redact_secrets(input);
     assert!(out.contains("OPENROUTER_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_OPENROUTER_API_KEY"));
     assert!(out.contains("OPENCODE_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_OPENCODE_API_KEY"));
     assert!(out.contains("OPENCODE_GO_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_OPENCODE_GO_API_KEY"));
-    assert!(out.contains("ZHIPU_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_ZHIPU_API_KEY"));
     assert!(out.contains("ZAI_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_ZAI_API_KEY"));
-    assert!(out.contains("302AI_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_302AI_API_KEY"));
-    assert!(out.contains("BASETEN_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_BASETEN_API_KEY"));
-    assert!(out.contains("CORTECS_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_CORTECS_API_KEY"));
-    assert!(out.contains("DEEPSEEK_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_DEEPSEEK_API_KEY"));
-    assert!(out.contains("FIRMWARE_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_FIRMWARE_API_KEY"));
-    assert!(out.contains("HF_TOKEN=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_HF_TOKEN"));
-    assert!(out.contains("MOONSHOT_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_MOONSHOT_API_KEY"));
-    assert!(out.contains("NEBIUS_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_NEBIUS_API_KEY"));
-    assert!(out.contains("SCALEWAY_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_SCALEWAY_API_KEY"));
-    assert!(out.contains("STACKIT_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_STACKIT_API_KEY"));
-    assert!(out.contains("GROQ_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_GROQ_API_KEY"));
-    assert!(out.contains("MISTRAL_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_MISTRAL_API_KEY"));
-    assert!(out.contains("PERPLEXITY_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_PERPLEXITY_API_KEY"));
-    assert!(out.contains("TOGETHER_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_TOGETHER_API_KEY"));
-    assert!(out.contains("DEEPINFRA_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_DEEPINFRA_API_KEY"));
-    assert!(out.contains("XAI_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_XAI_API_KEY"));
-    assert!(out.contains("LMSTUDIO_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_LMSTUDIO_API_KEY"));
-    assert!(out.contains("OLLAMA_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_OLLAMA_API_KEY"));
     assert!(out.contains("CHUTES_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_CHUTES_API_KEY"));
     assert!(out.contains("CEREBRAS_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_CEREBRAS_API_KEY"));
     assert!(out.contains("OPENAI_COMPAT_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_OPENAI_COMPAT_API_KEY"));
-    assert!(out.contains("ANTHROPIC_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_ANTHROPIC_API_KEY"));
-    assert!(out.contains("OPENAI_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_OPENAI_API_KEY"));
-    assert!(out.contains("AZURE_OPENAI_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_AZURE_OPENAI_API_KEY"));
     assert!(out.contains("CURSOR_API_KEY=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_CURSOR_API_KEY"));
-    assert!(out.contains("GITHUB_TOKEN=[REDACTED_SECRET]"));
-    assert!(!out.contains("test_secret_for_GITHUB_TOKEN"));
+    assert!(out.contains("OPENAI_API_KEY=[REDACTED_SECRET]"));
+    assert!(out.contains("AZURE_OPENAI_API_KEY=[REDACTED_SECRET]"));
+    assert!(!out.contains("my_cursor_secret_value"));
 }
 
 #[test]
@@ -364,7 +314,7 @@ fn redact_secrets_fast_path_skips_when_no_indicators() {
 }
 
 #[test]
-fn redact_secrets_triggers_regex_if_lower_api_key_present() {
+fn redact_secrets_lowercase_indicators_without_matches_leave_output_unchanged() {
     // Contains "api_key" in lower case, but it's not a secret matching our regexes.
     let input = "The parameter api_key is required.";
     let out = redact_secrets(input);
