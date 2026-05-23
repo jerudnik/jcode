@@ -84,6 +84,22 @@ impl Config {
             self.dictation.timeout_secs = parsed;
         }
 
+        // Tools
+        if let Ok(v) = std::env::var("JCODE_TOOL_PROFILE") {
+            self.tools.profile = v;
+        }
+        if let Ok(v) = std::env::var("JCODE_TOOLS") {
+            self.tools.enabled = parse_env_list(&v);
+        }
+        if let Ok(v) = std::env::var("JCODE_DISABLED_TOOLS") {
+            self.tools.disabled = parse_env_list(&v);
+        }
+        if let Ok(v) = std::env::var("JCODE_DISABLE_BASE_TOOLS")
+            && let Some(parsed) = parse_env_bool(&v)
+        {
+            self.tools.disable_base_tools = parsed;
+        }
+
         // Display
         if let Ok(v) = std::env::var("JCODE_DIFF_MODE") {
             match v.to_lowercase().as_str() {
@@ -425,6 +441,12 @@ impl Config {
             let trimmed = v.trim().to_string();
             if !trimmed.is_empty() {
                 self.provider.openai_reasoning_effort = Some(trimmed);
+            }
+        }
+        if let Ok(v) = std::env::var("JCODE_ANTHROPIC_REASONING_EFFORT") {
+            let trimmed = v.trim().to_string();
+            if !trimmed.is_empty() {
+                self.provider.anthropic_reasoning_effort = Some(trimmed);
             }
         }
         if let Ok(v) = std::env::var("JCODE_OPENAI_TRANSPORT") {
