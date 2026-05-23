@@ -34,7 +34,6 @@ async fn burst_attach_resumed_client(
             None,
             None,
             None,
-            None,
             Some(target_session_id.clone()),
             false,
             false,
@@ -109,7 +108,6 @@ async fn burst_attach_resumed_client_with_options(
     let subscribe_start = Instant::now();
     let subscribe_id = client
         .subscribe_with_info(
-            None,
             None,
             None,
             None,

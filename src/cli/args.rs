@@ -125,19 +125,7 @@ pub(crate) enum Command {
     Connect,
 
     /// Start a persistent conversational workspace co-manager session
-    Meta {
-        /// Open the meta co-manager in a stable Zellij tab/session
-        #[arg(long)]
-        zellij: bool,
-
-        /// Zellij session name to create/attach for the meta workspace
-        #[arg(long, default_value = "jcode-meta")]
-        zellij_session: String,
-
-        /// Zellij tab name for the meta co-manager
-        #[arg(long, default_value = "jcode-meta")]
-        tab: String,
-    },
+    Meta,
 
     /// Run a single message and exit
     Run {
@@ -156,7 +144,7 @@ pub(crate) enum Command {
     /// Login to a provider via OAuth, API key, or local credentials
     Login {
         /// Provider to log in to. Equivalent to --provider for this command, e.g. `jcode login google`.
-        #[arg(value_enum)]
+        #[arg(value_enum, id = "login_provider")]
         provider: Option<ProviderChoice>,
 
         /// Account label for multi-account support (stored labels are auto-numbered)

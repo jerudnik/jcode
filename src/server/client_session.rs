@@ -396,7 +396,6 @@ async fn ensure_client_swarm_member(
 pub(super) async fn handle_subscribe(
     id: u64,
     subscribe_working_dir: Option<String>,
-    terminal_env: Option<Vec<(String, String)>>,
     session_kind: Option<String>,
     selfdev: Option<bool>,
     register_mcp_tools: bool,
@@ -582,11 +581,6 @@ pub(super) async fn handle_subscribe(
         {
             broadcast_swarm_status(&new_id, swarm_members, swarms_by_id).await;
         }
-    }
-
-    if let Some(env) = terminal_env {
-        let mut agent_guard = agent.lock().await;
-        agent_guard.set_terminal_env(Some(env));
     }
 
     if let Some(kind) = session_kind

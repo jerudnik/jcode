@@ -81,7 +81,6 @@ async fn main() -> Result<()> {
         message_id: session_id.clone(),
         tool_call_id: String::new(),
         working_dir: Some(workspace.clone()),
-        terminal_env: None,
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,

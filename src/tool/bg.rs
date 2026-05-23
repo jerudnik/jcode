@@ -11,7 +11,6 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashSet;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 fn default_watch_notify() -> bool {
@@ -96,15 +95,6 @@ struct BgInput {
     /// Optional grace period for detached cancellation before SIGKILL
     #[serde(default)]
     graceful_timeout_ms: Option<u64>,
-    /// Direction for zellij pane creation: right or down
-    #[serde(default)]
-    direction: Option<String>,
-    /// Open the zellij pane as a floating pane
-    #[serde(default)]
-    floating: Option<bool>,
-    /// Close the zellij pane when the watcher command exits
-    #[serde(default)]
-    close_on_exit: Option<bool>,
 }
 
 fn infer_action_from_intent(intent: Option<&str>) -> Option<&'static str> {
@@ -147,123 +137,8 @@ fn resolve_action(params: &BgInput) -> Result<String> {
     }
 
     Err(anyhow::anyhow!(
-        "Missing required bg action. Use one of: list, status, output, tail, pane, cancel, cleanup, delivery, subscribe, wait. For example: bg action=\"wait\"."
+        "Missing required bg action. Use one of: list, status, output, tail, cancel, cleanup, delivery, subscribe, wait. For example: bg action=\"wait\"."
     ))
-}
-
-fn zellij_pane_script() -> &'static str {
-    r#"set -euo pipefail
-output_file="$1"
-status_file="$2"
-tail_lines="${3:-200}"
-task_id="${4:-unknown}"
-display_name="${5:-background task}"
-
-printf '\033]2;Jcode bg %s\007' "$task_id" || true
-echo "Jcode background task: $task_id · $display_name"
-echo "Output: $output_file"
-echo "Status: $status_file"
-echo
-mkdir -p "$(dirname "$output_file")"
-touch "$output_file"
-
-tail -n "$tail_lines" -F "$output_file" &
-tail_pid=$!
-cleanup() { kill "$tail_pid" >/dev/null 2>&1 || true; }
-trap cleanup EXIT INT TERM
-
-while true; do
-  if [ -f "$status_file" ] && ! grep -q '"status"[[:space:]]*:[[:space:]]*"running"' "$status_file"; then
-    break
-  fi
-  sleep 1
-done
-
-sleep 0.2
-cleanup
-wait "$tail_pid" >/dev/null 2>&1 || true
-echo
-echo "--- Final status ---"
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$status_file" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding='utf-8') as f:
-    status = json.load(f)
-print(f"status: {status.get('status')}")
-if status.get('exit_code') is not None:
-    print(f"exit_code: {status.get('exit_code')}")
-if status.get('error'):
-    print(f"error: {status.get('error')}")
-PY
-else
-  cat "$status_file"
-fi
-echo
-echo "Watcher finished. Press Enter to close this pane."
-read -r _ || true
-"#
-}
-
-fn open_zellij_task_pane(
-    manager: &background::BackgroundTaskManager,
-    task: &background::TaskStatusFile,
-    terminal_env: Option<&[(String, String)]>,
-    direction: Option<&str>,
-    floating: bool,
-    close_on_exit: bool,
-    tail_lines: usize,
-) -> Result<String> {
-    let zellij = std::env::var("JCODE_ZELLIJ_BIN").unwrap_or_else(|_| "zellij".to_string());
-    let output_file = manager.output_path_for(&task.task_id);
-    let status_file = manager.status_path_for(&task.task_id);
-    let display_name = crate::message::background_task_display_label(
-        &task.tool_name,
-        task.display_name.as_deref(),
-    );
-    let pane_name = format!("jcode-bg-{}", task.task_id);
-
-    let mut command = Command::new(zellij);
-    if let Some(env) = terminal_env {
-        command.envs(env.iter().map(|(key, value)| (key, value)));
-    }
-    command.args(["action", "new-pane", "--name", &pane_name]);
-    if let Some(direction) = direction
-        .map(str::trim)
-        .filter(|direction| matches!(*direction, "right" | "down"))
-    {
-        command.args(["--direction", direction]);
-    }
-    if floating {
-        command.arg("--floating");
-    }
-    if close_on_exit {
-        command.arg("--close-on-exit");
-    }
-    command.args([
-        "--",
-        "bash",
-        "-lc",
-        zellij_pane_script(),
-        "jcode-bg-pane",
-        output_file.to_string_lossy().as_ref(),
-        status_file.to_string_lossy().as_ref(),
-        &tail_lines.to_string(),
-        &task.task_id,
-        &display_name,
-    ]);
-
-    let output = command.output().map_err(|err| {
-        anyhow::anyhow!(
-            "Failed to run zellij. Is zellij installed and are you inside a zellij session? {err}"
-        )
-    })?;
-    if !output.status.success() {
-        return Err(anyhow::anyhow!(
-            "zellij failed to open a pane: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn status_label(status: &BackgroundTaskStatus) -> &'static str {
@@ -587,7 +462,7 @@ impl Tool for BgTool {
     }
 
     fn description(&self) -> &str {
-        "Manage background tasks. Prefer action='wait' over polling or sleeping. Use action='tail' or output with tail_lines for logs, action='pane' to open a zellij watcher pane, action='delivery' to change notify/wake behavior, and JCODE_CHECKPOINT/JCODE_PROGRESS from background commands for reliable wakeups."
+        "Manage background tasks. Prefer action='wait' over polling or sleeping. Use action='tail' or output with tail_lines for logs, action='delivery' to change notify/wake behavior, and JCODE_CHECKPOINT/JCODE_PROGRESS from background commands for reliable wakeups."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -598,7 +473,7 @@ impl Tool for BgTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["list", "status", "output", "tail", "pane", "cancel", "cleanup", "watch", "delivery", "subscribe", "wait"],
+                    "enum": ["list", "status", "output", "tail", "cancel", "cleanup", "watch", "delivery", "subscribe", "wait"],
                     "description": "Action. Prefer wait for blocking until completion/checkpoints; watch is a compatibility alias for delivery."
                 },
                 "task_id": { "type": "string", "description": "Task ID." },
@@ -622,10 +497,7 @@ impl Tool for BgTool {
                 "tail_lines": { "type": "integer", "description": "Return only the last N output lines for output/tail/wait preview." },
                 "lines": { "type": "integer", "description": "Alias for tail_lines." },
                 "include_output_preview": { "type": "boolean", "description": "When wait returns, include a recent output preview. Failed tasks include a preview by default." },
-                "graceful_timeout_ms": { "type": "integer", "description": "For cancel, grace period for detached process termination before force kill." },
-                "direction": { "type": "string", "enum": ["right", "down"], "description": "For action=pane, zellij pane direction. Defaults to zellij's biggest available space." },
-                "floating": { "type": "boolean", "description": "For action=pane, open a floating zellij pane." },
-                "close_on_exit": { "type": "boolean", "description": "For action=pane, close the pane automatically when the watcher exits." }
+                "graceful_timeout_ms": { "type": "integer", "description": "For cancel, grace period for detached process termination before force kill." }
             }
         })
     }
@@ -745,45 +617,6 @@ impl Tool for BgTool {
                         "truncated": truncated,
                         "output_bytes": output.len(),
                     })))
-            }
-
-            "pane" => {
-                let task_id = resolve_task_ids(manager, &ctx, &params, "pane", false)
-                    .await?
-                    .remove(0);
-                let task = manager
-                    .status(&task_id)
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Task not found: {}", task_id))?;
-                let tail = params.tail_lines.or(params.lines).unwrap_or(200);
-                let pane_id = open_zellij_task_pane(
-                    manager,
-                    &task,
-                    ctx.terminal_env.as_deref(),
-                    params.direction.as_deref(),
-                    params.floating.unwrap_or(false),
-                    params.close_on_exit.unwrap_or(false),
-                    tail,
-                )?;
-                Ok(ToolOutput::new(format!(
-                    "Opened zellij pane for background task {}{}.",
-                    task_id,
-                    if pane_id.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" ({pane_id})")
-                    }
-                ))
-                .with_title(format!("bg pane {}", task_id))
-                .with_metadata(json!({
-                    "task_id": task_id,
-                    "task": task_metadata(manager, &task),
-                    "pane_id": pane_id,
-                    "tail_lines": tail,
-                    "direction": params.direction,
-                    "floating": params.floating.unwrap_or(false),
-                    "close_on_exit": params.close_on_exit.unwrap_or(false),
-                })))
             }
 
             "cancel" => {
@@ -993,7 +826,7 @@ impl Tool for BgTool {
             }
 
             _ => Err(anyhow::anyhow!(
-                "Unknown action: {}. Valid actions: list, status, output, tail, pane, cancel, cleanup, watch, delivery, subscribe, wait",
+                "Unknown action: {}. Valid actions: list, status, output, tail, cancel, cleanup, watch, delivery, subscribe, wait",
                 action
             )),
         }
@@ -1015,24 +848,6 @@ mod tests {
         assert_eq!(branches[0]["type"], json!("string"));
         assert_eq!(branches[1]["type"], json!("array"));
         assert_eq!(branches[1]["items"]["type"], json!("string"));
-        Ok(())
-    }
-
-    #[test]
-    fn schema_includes_zellij_pane_action() -> Result<()> {
-        let schema = BgTool::new().parameters_schema();
-        let actions = schema["properties"]["action"]["enum"]
-            .as_array()
-            .ok_or_else(|| anyhow!("action should define enum values"))?;
-
-        assert!(actions.iter().any(|action| action == "pane"));
-        assert_eq!(schema["properties"]["direction"]["enum"][0], json!("right"));
-        assert_eq!(schema["properties"]["direction"]["enum"][1], json!("down"));
-        assert_eq!(schema["properties"]["floating"]["type"], json!("boolean"));
-        assert_eq!(
-            schema["properties"]["close_on_exit"]["type"],
-            json!("boolean")
-        );
         Ok(())
     }
 

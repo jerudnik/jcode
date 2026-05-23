@@ -59,14 +59,13 @@ impl Client {
 
     /// Subscribe to events
     pub async fn subscribe(&mut self) -> Result<u64> {
-        self.subscribe_with_info(None, None, None, None, None, false, false)
+        self.subscribe_with_info(None, None, None, None, false, false)
             .await
     }
 
     pub async fn subscribe_with_info(
         &mut self,
         working_dir: Option<String>,
-        terminal_env: Option<Vec<(String, String)>>,
         session_kind: Option<String>,
         selfdev: Option<bool>,
         target_session_id: Option<String>,
@@ -79,7 +78,6 @@ impl Client {
         let request = Request::Subscribe {
             id,
             working_dir,
-            terminal_env,
             session_kind,
             selfdev,
             target_session_id,

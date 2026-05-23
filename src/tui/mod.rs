@@ -1193,41 +1193,7 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
     false
 }
 
-const TERMINAL_CONTEXT_ENV_KEYS: &[&str] = &[
-    "ZELLIJ",
-    "ZELLIJ_SESSION_NAME",
-    "ZELLIJ_PANE_ID",
-    "ZELLIJ_SOCKET",
-    "TERM",
-    "TERM_PROGRAM",
-    "TERM_PROGRAM_VERSION",
-    "COLORTERM",
-    "KITTY_PID",
-    "KITTY_WINDOW_ID",
-    "WEZTERM_EXECUTABLE",
-    "WEZTERM_PANE",
-    "GHOSTTY_RESOURCES_DIR",
-    "GHOSTTY_BIN_DIR",
-];
-
-fn terminal_context_env() -> Option<Vec<(String, String)>> {
-    let values: Vec<(String, String)> = TERMINAL_CONTEXT_ENV_KEYS
-        .iter()
-        .filter_map(|key| {
-            std::env::var(key)
-                .ok()
-                .map(|value| ((*key).to_string(), value))
-        })
-        .collect();
-    (!values.is_empty()).then_some(values)
-}
-
-pub(crate) fn subscribe_metadata() -> (
-    Option<String>,
-    Option<Vec<(String, String)>>,
-    Option<String>,
-    Option<bool>,
-) {
+pub(crate) fn subscribe_metadata() -> (Option<String>, Option<String>, Option<bool>) {
     let working_dir = std::env::current_dir().ok();
     let working_dir_str = working_dir.as_ref().map(|p| p.display().to_string());
 
@@ -1245,7 +1211,6 @@ pub(crate) fn subscribe_metadata() -> (
 
     (
         working_dir_str,
-        terminal_context_env(),
         std::env::var("JCODE_SESSION_KIND")
             .ok()
             .filter(|value| !value.trim().is_empty()),

@@ -173,17 +173,6 @@ impl Agent {
         self.session.working_dir.as_deref()
     }
 
-    pub fn set_terminal_env(&mut self, terminal_env: Option<Vec<(String, String)>>) {
-        if terminal_env.is_some() {
-            self.session.terminal_env = terminal_env;
-            self.persist_session_best_effort("terminal env update");
-        }
-    }
-
-    pub fn terminal_env(&self) -> Option<Vec<(String, String)>> {
-        self.session.terminal_env.clone()
-    }
-
     pub fn set_session_kind(&mut self, kind: crate::session::SessionKind) {
         if self.session.kind != kind {
             self.session.kind = kind;

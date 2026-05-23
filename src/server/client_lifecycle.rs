@@ -1208,7 +1208,6 @@ pub(super) async fn handle_client(
             Request::Subscribe {
                 id,
                 working_dir: subscribe_working_dir,
-                terminal_env,
                 session_kind,
                 selfdev,
                 target_session_id,
@@ -1273,7 +1272,6 @@ pub(super) async fn handle_client(
                             handle_subscribe(
                                 id,
                                 subscribe_working_dir,
-                                terminal_env,
                                 session_kind,
                                 selfdev,
                                 false,
@@ -1311,7 +1309,6 @@ pub(super) async fn handle_client(
                         handle_subscribe(
                             id,
                             subscribe_working_dir,
-                            terminal_env,
                             session_kind,
                             selfdev,
                             true,
@@ -1340,7 +1337,6 @@ pub(super) async fn handle_client(
                     handle_subscribe(
                         id,
                         subscribe_working_dir,
-                        terminal_env,
                         session_kind,
                         selfdev,
                         true,

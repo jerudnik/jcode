@@ -323,7 +323,6 @@ impl WsTestClient {
         self.send_request(Request::Subscribe {
             id,
             working_dir: None,
-            terminal_env: None,
             session_kind: None,
             selfdev: None,
             target_session_id: None,

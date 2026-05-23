@@ -351,7 +351,6 @@ impl RawClient {
         self.send_request(Request::Subscribe {
             id,
             working_dir: Some(working_dir.display().to_string()),
-            terminal_env: None,
             session_kind: None,
             selfdev: None,
             target_session_id: None,
@@ -484,7 +483,6 @@ fn test_ctx(session_id: &str, working_dir: &Path) -> ToolContext {
         message_id: "msg-1".to_string(),
         tool_call_id: "call-1".to_string(),
         working_dir: Some(working_dir.to_path_buf()),
-        terminal_env: None,
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,
