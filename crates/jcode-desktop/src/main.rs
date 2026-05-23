@@ -36,14 +36,14 @@ use image::RgbaImage;
 use render_helpers::*;
 use session_launch::DesktopSessionStatus;
 use single_session::{
-    SINGLE_SESSION_ASSISTANT_FONT_FAMILY, SINGLE_SESSION_FONT_FAMILY,
-    SINGLE_SESSION_WELCOME_FONT_FAMILY, SelectionPoint, SingleSessionApp, SingleSessionLineStyle,
-    SingleSessionMessage, SingleSessionStyledLine, handwritten_welcome_phrase,
-    single_session_surface, single_session_typography, single_session_typography_for_scale,
+    SINGLE_SESSION_FONT_FAMILY, SINGLE_SESSION_WELCOME_FONT_FAMILY, SelectionPoint,
+    SingleSessionApp, SingleSessionLineStyle, SingleSessionMessage, SingleSessionStyledLine,
+    handwritten_welcome_phrase, single_session_surface, single_session_typography,
+    single_session_typography_for_scale,
 };
 use single_session_render::*;
 use wgpu::{CompositeAlphaMode, PresentMode, SurfaceError, TextureUsages};
-use winit::dpi::{LogicalSize, PhysicalSize};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -53,7 +53,7 @@ use workspace::{InputMode, KeyInput, KeyOutcome, PanelSizePreset, Workspace};
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -65,6 +65,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_WINDOW_WIDTH: f64 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f64 = 800.0;
+const DESKTOP_RELOAD_WINDOW_ENV: &str = "JCODE_DESKTOP_RELOAD_WINDOW";
+const DESKTOP_RELOAD_HANDOFF_READY_ENV: &str = "JCODE_DESKTOP_RELOAD_READY_FILE";
+const DESKTOP_RELOAD_HANDOFF_RELEASE_ENV: &str = "JCODE_DESKTOP_RELOAD_RELEASE_FILE";
+const DESKTOP_RELOAD_HANDOFF_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const DESKTOP_RELOAD_HANDOFF_TIMEOUT: Duration = Duration::from_secs(8);
+const DESKTOP_RELOAD_STARTUP_RELEASE_TIMEOUT: Duration = Duration::from_secs(3);
+const DESKTOP_RELOAD_MAX_RESTORED_DIMENSION: u32 = 32_768;
 const OUTER_PADDING: f32 = 8.0;
 const GAP: f32 = 6.0;
 const STATUS_BAR_HEIGHT: f32 = 30.0;
@@ -308,6 +315,17 @@ const TOOL_RUNNING_TEXT_COLOR: [f32; 4] = [0.045, 0.265, 0.640, 1.0];
 const TOOL_SUCCESS_TEXT_COLOR: [f32; 4] = [0.035, 0.360, 0.220, 1.0];
 const TOOL_FAILED_TEXT_COLOR: [f32; 4] = [0.560, 0.070, 0.095, 1.0];
 const TOOL_PENDING_TEXT_COLOR: [f32; 4] = [0.320, 0.345, 0.405, 1.0];
+const TOOL_CARD_BACKGROUND_COLOR: [f32; 4] = [0.985, 0.990, 1.000, 0.56];
+const TOOL_CARD_ACTIVE_BACKGROUND_COLOR: [f32; 4] = [0.890, 0.945, 1.000, 0.62];
+const TOOL_CARD_SUCCESS_BACKGROUND_COLOR: [f32; 4] = [0.875, 0.975, 0.925, 0.46];
+const TOOL_CARD_FAILED_BACKGROUND_COLOR: [f32; 4] = [1.000, 0.900, 0.910, 0.54];
+const TOOL_CARD_GROUP_BACKGROUND_COLOR: [f32; 4] = [0.945, 0.930, 1.000, 0.40];
+const TOOL_CARD_BORDER_COLOR: [f32; 4] = [0.105, 0.165, 0.295, 0.16];
+const TOOL_CARD_ACTIVE_BORDER_COLOR: [f32; 4] = [0.000, 0.260, 0.720, 0.28];
+const TOOL_TIMELINE_RAIL_COLOR: [f32; 4] = [0.105, 0.165, 0.295, 0.20];
+const TOOL_TIMELINE_ACTIVE_RAIL_COLOR: [f32; 4] = [0.000, 0.260, 0.720, 0.46];
+const TOOL_OUTPUT_DRAWER_COLOR: [f32; 4] = [0.030, 0.055, 0.095, 0.070];
+const TOOL_STATUS_CHIP_COLOR: [f32; 4] = [1.000, 1.000, 1.000, 0.42];
 const META_TEXT_COLOR: [f32; 4] = [0.095, 0.110, 0.155, 0.98];
 const CODE_TEXT_COLOR: [f32; 4] = [0.055, 0.065, 0.095, 1.0];
 const STATUS_TEXT_ACCENT_COLOR: [f32; 4] = [0.030, 0.125, 0.080, 1.0];
@@ -471,6 +489,7 @@ async fn run() -> Result<()> {
     let desktop_gallery = desktop_gallery_state.is_some();
     let desktop_mode = desktop_mode_from_args(args.iter().map(String::as_str));
     let resume_session_id = desktop_resume_session_id_from_args(args.iter().map(String::as_str));
+    let desktop_reload_startup = DesktopReloadStartup::from_env();
     emit_desktop_profile_event(
         "jcode-desktop-launch-profile",
         serde_json::json!({
@@ -485,12 +504,19 @@ async fn run() -> Result<()> {
         .context("failed to create event loop")?;
     let event_loop_proxy = event_loop.create_proxy();
     startup_trace.mark("event loop created");
-    let mut window_builder = WindowBuilder::new()
-        .with_title("Jcode Desktop")
-        .with_inner_size(LogicalSize::new(
+    let mut window_builder = WindowBuilder::new().with_title("Jcode Desktop");
+    if let Some(placement) = desktop_reload_startup.window_placement {
+        window_builder = placement.apply_to_window_builder(window_builder);
+    } else {
+        window_builder = window_builder.with_inner_size(LogicalSize::new(
             DEFAULT_WINDOW_WIDTH,
             DEFAULT_WINDOW_HEIGHT,
         ));
+    }
+
+    if desktop_reload_startup.hidden_until_handoff_release() {
+        window_builder = window_builder.with_visible(false);
+    }
 
     if fullscreen {
         window_builder = window_builder.with_fullscreen(Some(Fullscreen::Borderless(None)));
@@ -522,6 +548,12 @@ async fn run() -> Result<()> {
     window.set_title(&app.status_title());
     let mut canvas = Canvas::new(window.clone(), startup_trace).await?;
     startup_trace.mark("canvas ready");
+    if let Some(handoff) = desktop_reload_startup.handoff.as_ref() {
+        handoff.signal_ready_and_wait_for_release();
+        window.set_visible(true);
+        window.request_redraw();
+        startup_trace.mark("reload handoff released");
+    }
     let mut modifiers = ModifiersState::empty();
     let mut cursor_position = winit::dpi::PhysicalPosition::new(0.0, 0.0);
     let mut selecting_body = false;
@@ -545,6 +577,7 @@ async fn run() -> Result<()> {
     let mut pending_resize: Option<PhysicalSize<u32>> = None;
     let mut space_hold_started_at: Option<Instant> = None;
     let mut space_hold_consumed = false;
+    let mut desktop_clipboard = DesktopClipboard::default();
 
     if pending_workspace_startup_load {
         spawn_session_cards_load(
@@ -567,6 +600,7 @@ async fn run() -> Result<()> {
         let backend_wake = pending_backend_redraw_since
             .and(last_backend_redraw_request)
             .map(|last| last + BACKEND_REDRAW_FRAME_INTERVAL);
+        let hot_reload_wake = hot_reloader.next_wake(event_loop_now);
         let space_hold_wake = space_hold_started_at.and_then(|started_at| match &app {
             DesktopApp::Workspace(workspace) if !space_hold_consumed => {
                 Some(started_at + workspace.space_hold_toggle_duration())
@@ -576,6 +610,7 @@ async fn run() -> Result<()> {
         let wake = [
             default_wake,
             backend_wake,
+            hot_reload_wake,
             space_hold_wake,
             surface_timeout_redraw_at,
         ]
@@ -721,7 +756,12 @@ async fn run() -> Result<()> {
                             selecting_draft = false;
                             let selected = app.selected_single_session_draft_text();
                             if let Some(text) = selected {
-                                copy_text_to_clipboard(&text, "copied input selection", &mut app);
+                                copy_text_to_clipboard(
+                                    &mut desktop_clipboard,
+                                    &text,
+                                    "copied input selection",
+                                    &mut app,
+                                );
                             }
                             window.set_title(&app.status_title());
                             interaction_latency.mark("mouse_release", mouse_started);
@@ -735,7 +775,12 @@ async fn run() -> Result<()> {
                             selecting_body = false;
                             let selected = app.selected_single_session_text(window.inner_size());
                             if let Some(text) = selected {
-                                copy_text_to_clipboard(&text, "copied selection", &mut app);
+                                copy_text_to_clipboard(
+                                    &mut desktop_clipboard,
+                                    &text,
+                                    "copied selection",
+                                    &mut app,
+                                );
                             }
                             window.set_title(&app.status_title());
                             interaction_latency.mark("mouse_release", mouse_started);
@@ -812,7 +857,12 @@ async fn run() -> Result<()> {
                             if let DesktopApp::Workspace(workspace) = &app {
                                 queue_desktop_preferences_save(workspace, &preferences_save_tx);
                             }
-                            if let Err(error) =
+                            if app.promote_focused_workspace_session() {
+                                scroll_accumulator = ScrollLineAccumulator::default();
+                                scroll_metrics_cache = SingleSessionScrollMetricsCache::default();
+                                window.set_title(&app.status_title());
+                                window.request_redraw();
+                            } else if let Err(error) =
                                 session_launch::launch_validated_resume_session(&session_id, &title)
                             {
                                 desktop_log::error(format_args!(
@@ -913,7 +963,12 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::CopyLatestResponse(text) => {
-                            copy_text_to_clipboard(&text, "copied latest response", &mut app);
+                            copy_text_to_clipboard(
+                                &mut desktop_clipboard,
+                                &text,
+                                "copied latest response",
+                                &mut app,
+                            );
                             window.set_title(&app.status_title());
                             window.request_redraw();
                         }
@@ -921,12 +976,22 @@ async fn run() -> Result<()> {
                             text,
                             success_notice,
                         } => {
-                            copy_text_to_clipboard(&text, success_notice, &mut app);
+                            copy_text_to_clipboard(
+                                &mut desktop_clipboard,
+                                &text,
+                                success_notice,
+                                &mut app,
+                            );
                             window.set_title(&app.status_title());
                             window.request_redraw();
                         }
                         KeyOutcome::CutDraftToClipboard(text) => {
-                            copy_text_to_clipboard(&text, "cut input line", &mut app);
+                            copy_text_to_clipboard(
+                                &mut desktop_clipboard,
+                                &text,
+                                "cut input line",
+                                &mut app,
+                            );
                             window.set_title(&app.status_title());
                             window.request_redraw();
                         }
@@ -1121,7 +1186,7 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::AttachClipboardImage => {
-                            match clipboard_image_png_base64() {
+                            match clipboard_image_png_base64(&mut desktop_clipboard) {
                                 Ok((media_type, base64_data)) => {
                                     app.attach_clipboard_image(media_type, base64_data);
                                 }
@@ -1131,7 +1196,9 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::PasteText => {
-                            if let Err(error) = paste_clipboard_into_app(&mut app) {
+                            if let Err(error) =
+                                paste_clipboard_into_app(&mut desktop_clipboard, &mut app)
+                            {
                                 apply_single_session_error(&mut app, error);
                             }
                             window.set_title(&app.status_title());
@@ -1450,15 +1517,9 @@ async fn run() -> Result<()> {
                         window.request_redraw();
                     }
                 }
-                if let Some(relaunch) = hot_reloader.poll(&app) {
-                    if let Err(error) = relaunch.spawn() {
-                        desktop_log::error(format_args!(
-                            "jcode-desktop: failed to hot reload desktop: {error:#}"
-                        ));
-                    } else {
-                        target.exit();
-                        return;
-                    }
+                if hot_reloader.poll(&app, &window) {
+                    target.exit();
+                    return;
                 }
 
                 if surface_renderable && canvas.needs_initial_frame {
@@ -2198,27 +2259,28 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
                     serde_json::json!({"event": "text_replace", "chars": response.chars().count()})
                 );
             }
-            session_launch::DesktopSessionEvent::ToolStarted { name } => {
+            session_launch::DesktopSessionEvent::ToolStarted { id, name } => {
                 last_status = Some(format!("preparing tool {name}"));
                 println!(
                     "{}",
-                    serde_json::json!({"event": "tool_started", "name": name})
+                    serde_json::json!({"event": "tool_started", "id": id, "name": name})
                 );
             }
-            session_launch::DesktopSessionEvent::ToolExecuting { name } => {
+            session_launch::DesktopSessionEvent::ToolExecuting { id, name } => {
                 last_status = Some(format!("using tool {name}"));
                 println!(
                     "{}",
-                    serde_json::json!({"event": "tool_executing", "name": name})
+                    serde_json::json!({"event": "tool_executing", "id": id, "name": name})
                 );
             }
-            session_launch::DesktopSessionEvent::ToolInput { delta } => {
+            session_launch::DesktopSessionEvent::ToolInput { id, delta } => {
                 println!(
                     "{}",
-                    serde_json::json!({"event": "tool_input", "chars": delta.chars().count()})
+                    serde_json::json!({"event": "tool_input", "id": id, "chars": delta.chars().count()})
                 );
             }
             session_launch::DesktopSessionEvent::ToolFinished {
+                id,
                 name,
                 summary,
                 is_error,
@@ -2232,6 +2294,7 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
                     "{}",
                     serde_json::json!({
                         "event": "tool_finished",
+                        "id": id,
                         "name": name,
                         "summary": summary,
                         "is_error": is_error,
@@ -3518,6 +3581,7 @@ fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
     let (action_input_ms, action_input_checksum) = benchmark_phase(frames, |frame| {
         let events = (0..128)
             .map(|offset| session_launch::DesktopSessionEvent::ToolInput {
+                id: None,
                 delta: benchmark_typing_char(frame + offset).to_string(),
             })
             .collect::<Vec<_>>();
@@ -3529,6 +3593,7 @@ fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
     let mut action_app = desktop_scroll_benchmark_app_with_turns(64);
     action_app.scroll_body_to_bottom();
     action_app.apply_session_event(session_launch::DesktopSessionEvent::ToolStarted {
+        id: None,
         name: "bash".to_string(),
     });
     let mut action_font_system = benchmark_font_system();
@@ -3564,9 +3629,11 @@ fn run_scroll_render_benchmark(frames: usize) -> Result<()> {
     let (action_visible_ms, action_visible_checksum) = benchmark_phase(frames, |frame| {
         let phase_started = Instant::now();
         action_app.apply_session_event(session_launch::DesktopSessionEvent::ToolInput {
+            id: None,
             delta: format!(" chunk-{frame}"),
         });
         action_app.apply_session_event(session_launch::DesktopSessionEvent::ToolExecuting {
+            id: None,
             name: "bash".to_string(),
         });
         action_apply_ms += phase_started.elapsed().as_secs_f64() * 1000.0;
@@ -4008,6 +4075,27 @@ fn create_desktop_font_system() -> FontSystem {
         .db_mut()
         .load_font_data(include_bytes!("../assets/fonts/HomemadeApple-Regular.ttf").to_vec());
     font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/PatrickHand-Regular.ttf").to_vec());
+    font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/Gaegu-Regular.ttf").to_vec());
+    font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/Caveat-Regular.ttf").to_vec());
+    font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/IndieFlower-Regular.ttf").to_vec());
+    font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/GloriaHallelujah-Regular.ttf").to_vec());
+    font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/Handlee-Regular.ttf").to_vec());
+    font_system
+        .db_mut()
+        .load_font_data(include_bytes!("../assets/fonts/ReenieBeanie-Regular.ttf").to_vec());
+    font_system
 }
 
 fn spawn_desktop_font_system_loader() -> JoinHandle<FontSystem> {
@@ -4196,10 +4284,265 @@ fn desktop_resume_session_id_from_args<'a>(
     None
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DesktopReloadWindowPlacement {
+    position: Option<PhysicalPosition<i32>>,
+    inner_size: PhysicalSize<u32>,
+}
+
+impl DesktopReloadWindowPlacement {
+    fn from_window(window: &Window) -> Option<Self> {
+        let inner_size = window.inner_size();
+        if !desktop_reload_window_size_is_valid(inner_size) {
+            return None;
+        }
+        Some(Self {
+            position: window.outer_position().ok(),
+            inner_size,
+        })
+    }
+
+    fn from_env_value(raw: &str) -> Option<Self> {
+        let parts = raw.split(',').collect::<Vec<_>>();
+        if parts.len() != 4 {
+            return None;
+        }
+
+        let position = match (parts[0], parts[1]) {
+            ("_", "_") => None,
+            (x, y) => Some(PhysicalPosition::new(x.parse().ok()?, y.parse().ok()?)),
+        };
+        let inner_size = PhysicalSize::new(parts[2].parse().ok()?, parts[3].parse().ok()?);
+        if !desktop_reload_window_size_is_valid(inner_size) {
+            return None;
+        }
+        Some(Self {
+            position,
+            inner_size,
+        })
+    }
+
+    fn to_env_value(self) -> String {
+        let (x, y) = match self.position {
+            Some(position) => (position.x.to_string(), position.y.to_string()),
+            None => ("_".to_string(), "_".to_string()),
+        };
+        format!(
+            "{x},{y},{},{}",
+            self.inner_size.width, self.inner_size.height
+        )
+    }
+
+    fn apply_to_window_builder(self, mut window_builder: WindowBuilder) -> WindowBuilder {
+        window_builder = window_builder.with_inner_size(self.inner_size);
+        if let Some(position) = self.position {
+            window_builder = window_builder.with_position(position);
+        }
+        window_builder
+    }
+}
+
+fn desktop_reload_window_size_is_valid(size: PhysicalSize<u32>) -> bool {
+    (1..=DESKTOP_RELOAD_MAX_RESTORED_DIMENSION).contains(&size.width)
+        && (1..=DESKTOP_RELOAD_MAX_RESTORED_DIMENSION).contains(&size.height)
+}
+
+#[derive(Clone, Debug, Default)]
+struct DesktopReloadStartup {
+    window_placement: Option<DesktopReloadWindowPlacement>,
+    handoff: Option<DesktopReloadStartupHandoff>,
+}
+
+impl DesktopReloadStartup {
+    fn from_env() -> Self {
+        let raw_window_placement = std::env::var(DESKTOP_RELOAD_WINDOW_ENV).ok();
+        let ready_file = std::env::var_os(DESKTOP_RELOAD_HANDOFF_READY_ENV).map(PathBuf::from);
+        let release_file = std::env::var_os(DESKTOP_RELOAD_HANDOFF_RELEASE_ENV).map(PathBuf::from);
+        unsafe {
+            std::env::remove_var(DESKTOP_RELOAD_WINDOW_ENV);
+            std::env::remove_var(DESKTOP_RELOAD_HANDOFF_READY_ENV);
+            std::env::remove_var(DESKTOP_RELOAD_HANDOFF_RELEASE_ENV);
+        }
+
+        let window_placement = raw_window_placement.as_deref().and_then(|raw| {
+            let placement = DesktopReloadWindowPlacement::from_env_value(raw);
+            if placement.is_none() {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: ignoring invalid reload window placement {raw:?}"
+                ));
+            }
+            placement
+        });
+        let handoff = match (ready_file, release_file) {
+            (Some(ready_file), Some(release_file)) => Some(DesktopReloadStartupHandoff {
+                ready_file,
+                release_file,
+            }),
+            (None, None) => None,
+            _ => {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: ignoring incomplete reload handoff environment"
+                ));
+                None
+            }
+        };
+
+        Self {
+            window_placement,
+            handoff,
+        }
+    }
+
+    fn hidden_until_handoff_release(&self) -> bool {
+        self.handoff.is_some()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DesktopReloadStartupHandoff {
+    ready_file: PathBuf,
+    release_file: PathBuf,
+}
+
+impl DesktopReloadStartupHandoff {
+    fn signal_ready_and_wait_for_release(&self) {
+        if let Err(error) = write_desktop_reload_marker(&self.ready_file) {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: failed to signal reload readiness: {error:#}"
+            ));
+            return;
+        }
+
+        desktop_log::info(format_args!(
+            "jcode-desktop: reload child ready, waiting for parent release"
+        ));
+        let deadline = Instant::now() + DESKTOP_RELOAD_STARTUP_RELEASE_TIMEOUT;
+        while Instant::now() < deadline {
+            if self.release_file.exists() {
+                cleanup_desktop_reload_handoff_files(&self.ready_file, &self.release_file);
+                return;
+            }
+            std::thread::sleep(DESKTOP_RELOAD_HANDOFF_POLL_INTERVAL);
+        }
+
+        desktop_log::warn(format_args!(
+            "jcode-desktop: reload parent did not release handoff within {}ms; showing replacement window anyway",
+            DESKTOP_RELOAD_STARTUP_RELEASE_TIMEOUT.as_millis()
+        ));
+        cleanup_desktop_reload_handoff_files(&self.ready_file, &self.release_file);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DesktopReloadHandoff {
+    ready_file: PathBuf,
+    release_file: PathBuf,
+    window_placement: Option<DesktopReloadWindowPlacement>,
+}
+
+impl DesktopReloadHandoff {
+    fn new(window: &Window) -> Result<Self> {
+        let dir = desktop_reload_handoff_temp_dir();
+        fs::create_dir_all(&dir).with_context(|| {
+            format!(
+                "failed to create desktop reload handoff directory {}",
+                dir.display()
+            )
+        })?;
+        Ok(Self {
+            ready_file: dir.join("ready"),
+            release_file: dir.join("release"),
+            window_placement: DesktopReloadWindowPlacement::from_window(window),
+        })
+    }
+
+    fn apply_to_command(&self, command: &mut Command) {
+        if let Some(placement) = self.window_placement {
+            command.env(DESKTOP_RELOAD_WINDOW_ENV, placement.to_env_value());
+        }
+        command.env(DESKTOP_RELOAD_HANDOFF_READY_ENV, &self.ready_file);
+        command.env(DESKTOP_RELOAD_HANDOFF_RELEASE_ENV, &self.release_file);
+    }
+
+    fn watcher(&self) -> DesktopReloadHandoffWatcher {
+        DesktopReloadHandoffWatcher {
+            ready_file: self.ready_file.clone(),
+            release_file: self.release_file.clone(),
+            spawned_at: Instant::now(),
+        }
+    }
+
+    fn cleanup(&self) {
+        cleanup_desktop_reload_handoff_files(&self.ready_file, &self.release_file);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct DesktopReloadHandoffWatcher {
+    ready_file: PathBuf,
+    release_file: PathBuf,
+    spawned_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopReloadHandoffPoll {
+    Waiting,
+    Ready,
+    TimedOut,
+}
+
+impl DesktopReloadHandoffWatcher {
+    fn poll(&self) -> Result<DesktopReloadHandoffPoll> {
+        if self.ready_file.exists() {
+            write_desktop_reload_marker(&self.release_file)?;
+            return Ok(DesktopReloadHandoffPoll::Ready);
+        }
+        if self.spawned_at.elapsed() >= DESKTOP_RELOAD_HANDOFF_TIMEOUT {
+            return Ok(DesktopReloadHandoffPoll::TimedOut);
+        }
+        Ok(DesktopReloadHandoffPoll::Waiting)
+    }
+
+    fn cleanup(&self) {
+        cleanup_desktop_reload_handoff_files(&self.ready_file, &self.release_file);
+    }
+}
+
+fn desktop_reload_handoff_temp_dir() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "jcode-desktop-reload-{}-{nonce}",
+        std::process::id()
+    ))
+}
+
+fn write_desktop_reload_marker(path: &Path) -> Result<()> {
+    fs::write(path, format!("{}\n", std::process::id()))
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn cleanup_desktop_reload_handoff_files(ready_file: &Path, release_file: &Path) {
+    let _ = fs::remove_file(ready_file);
+    let _ = fs::remove_file(release_file);
+    if ready_file.parent() == release_file.parent()
+        && let Some(parent) = ready_file.parent()
+        && parent
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("jcode-desktop-reload-"))
+    {
+        let _ = fs::remove_dir(parent);
+    }
+}
+
 struct DesktopHotReloader {
     relaunch: Option<DesktopRelaunch>,
     observed_modified: Option<std::time::SystemTime>,
     last_checked: Instant,
+    pending_handoff: Option<DesktopReloadHandoffWatcher>,
 }
 
 impl DesktopHotReloader {
@@ -4214,24 +4557,85 @@ impl DesktopHotReloader {
             relaunch,
             observed_modified,
             last_checked: Instant::now(),
+            pending_handoff: None,
         }
     }
 
-    fn poll(&mut self, app: &DesktopApp) -> Option<DesktopRelaunch> {
+    fn next_wake(&self, now: Instant) -> Option<Instant> {
+        if self.pending_handoff.is_some() {
+            return Some(now + DESKTOP_RELOAD_HANDOFF_POLL_INTERVAL);
+        }
+        self.relaunch.as_ref()?;
+        Some(std::cmp::max(now, self.last_checked + Self::CHECK_INTERVAL))
+    }
+
+    fn poll(&mut self, app: &DesktopApp, window: &Window) -> bool {
+        if self.poll_pending_handoff() {
+            return true;
+        }
+        if self.pending_handoff.is_some() {
+            return false;
+        }
         if self.last_checked.elapsed() < Self::CHECK_INTERVAL {
-            return None;
+            return false;
         }
         self.last_checked = Instant::now();
 
-        let relaunch = self.relaunch.as_ref()?;
+        let Some(relaunch) = self.relaunch.as_ref() else {
+            return false;
+        };
         let binary = desktop_reload_binary_candidate(&relaunch.binary);
-        let current_modified = binary_modified_time(&binary)?;
+        let Some(current_modified) = binary_modified_time(&binary) else {
+            return false;
+        };
         let observed_modified = self.observed_modified;
         self.observed_modified = Some(current_modified);
         if observed_modified.is_some_and(|observed| current_modified > observed) {
-            return Some(relaunch.for_app(app, binary));
+            let relaunch = relaunch.for_app(app, binary);
+            match relaunch.spawn_for_window(window) {
+                Ok(Some(handoff)) => {
+                    self.pending_handoff = Some(handoff);
+                }
+                Ok(None) => return true,
+                Err(error) => {
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to hot reload desktop: {error:#}"
+                    ));
+                }
+            }
         }
-        None
+        false
+    }
+
+    fn poll_pending_handoff(&mut self) -> bool {
+        let Some(pending_handoff) = self.pending_handoff.as_ref() else {
+            return false;
+        };
+        match pending_handoff.poll() {
+            Ok(DesktopReloadHandoffPoll::Waiting) => false,
+            Ok(DesktopReloadHandoffPoll::Ready) => {
+                desktop_log::info(format_args!(
+                    "jcode-desktop: reload replacement is ready; exiting old process"
+                ));
+                true
+            }
+            Ok(DesktopReloadHandoffPoll::TimedOut) => {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: reload replacement did not become ready within {}ms; keeping old process alive",
+                    DESKTOP_RELOAD_HANDOFF_TIMEOUT.as_millis()
+                ));
+                if let Some(pending_handoff) = self.pending_handoff.take() {
+                    pending_handoff.cleanup();
+                }
+                false
+            }
+            Err(error) => {
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to release reload replacement: {error:#}"
+                ));
+                true
+            }
+        }
     }
 }
 
@@ -4258,17 +4662,42 @@ impl DesktopRelaunch {
         })
     }
 
-    fn spawn(&self) -> Result<()> {
+    fn spawn_for_window(&self, window: &Window) -> Result<Option<DesktopReloadHandoffWatcher>> {
+        let handoff = match DesktopReloadHandoff::new(window) {
+            Ok(handoff) => Some(handoff),
+            Err(error) => {
+                desktop_log::warn(format_args!(
+                    "jcode-desktop: reload handoff unavailable, falling back to immediate relaunch: {error:#}"
+                ));
+                None
+            }
+        };
         desktop_log::info(format_args!(
-            "jcode-desktop: hot reloading into {} with args {:?}",
+            "jcode-desktop: hot reloading into {} with args {:?}{}",
             self.binary.display(),
-            self.args
+            self.args,
+            if handoff.is_some() {
+                " using handoff"
+            } else {
+                ""
+            }
         ));
-        Command::new(&self.binary)
-            .args(&self.args)
-            .spawn()
-            .with_context(|| format!("failed to spawn {}", self.binary.display()))?;
-        Ok(())
+        let mut command = Command::new(&self.binary);
+        command.args(&self.args);
+        command.env_remove(DESKTOP_RELOAD_WINDOW_ENV);
+        command.env_remove(DESKTOP_RELOAD_HANDOFF_READY_ENV);
+        command.env_remove(DESKTOP_RELOAD_HANDOFF_RELEASE_ENV);
+        if let Some(handoff) = handoff.as_ref() {
+            handoff.apply_to_command(&mut command);
+        }
+        if let Err(error) = command.spawn() {
+            if let Some(handoff) = handoff.as_ref() {
+                handoff.cleanup();
+            }
+            return Err(error)
+                .with_context(|| format!("failed to spawn {}", self.binary.display()));
+        }
+        Ok(handoff.as_ref().map(DesktopReloadHandoff::watcher))
     }
 
     fn for_app(&self, app: &DesktopApp, binary: PathBuf) -> Self {
@@ -4469,6 +4898,21 @@ impl DesktopApp {
             Self::SingleSession(app) => app.handle_key(key),
             Self::Workspace(workspace) => workspace.handle_key(key),
         }
+    }
+
+    fn promote_focused_workspace_session(&mut self) -> bool {
+        let Self::Workspace(workspace) = self else {
+            return false;
+        };
+        let Some(card) = workspace.focused_session_card() else {
+            return false;
+        };
+        let session_id = card.session_id.clone();
+        let mut single_session = SingleSessionApp::new(Some(card));
+        single_session.initialize_resumed_session(&session_id);
+        single_session.hydrate_resumed_session_from_disk(&session_id);
+        *self = Self::SingleSession(single_session);
+        true
     }
 
     fn apply_session_event(&mut self, event: session_launch::DesktopSessionEvent) {
@@ -4695,6 +5139,10 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
     match key {
         Key::Named(NamedKey::Escape) => KeyInput::Escape,
         Key::Named(NamedKey::Space) => KeyInput::Character(" ".to_string()),
+        Key::Named(NamedKey::Copy) => KeyInput::CopyLatestResponse,
+        Key::Named(NamedKey::Cut) => KeyInput::CutInputLine,
+        Key::Named(NamedKey::Paste) => KeyInput::PasteText,
+        Key::Named(NamedKey::Undo) => KeyInput::UndoInput,
         Key::Named(NamedKey::Enter) if modifiers.control_key() => KeyInput::QueueDraft,
         Key::Named(NamedKey::Enter) if modifiers.shift_key() || modifiers.alt_key() => {
             KeyInput::Enter
@@ -4749,7 +5197,7 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
             KeyInput::DeleteToLineStart
         }
         Key::Character(text)
-            if modifiers.control_key()
+            if desktop_clipboard_shortcut_modifier(modifiers)
                 && modifiers.shift_key()
                 && text.eq_ignore_ascii_case("k") =>
         {
@@ -4761,21 +5209,25 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("w") => {
             KeyInput::DeletePreviousWord
         }
-        Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("x") => {
+        Key::Character(text)
+            if desktop_clipboard_shortcut_modifier(modifiers) && text.eq_ignore_ascii_case("x") =>
+        {
             KeyInput::CutInputLine
         }
-        Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("z") => {
+        Key::Character(text)
+            if desktop_clipboard_shortcut_modifier(modifiers) && text.eq_ignore_ascii_case("z") =>
+        {
             KeyInput::UndoInput
         }
         Key::Character(text)
-            if modifiers.control_key()
+            if desktop_clipboard_shortcut_modifier(modifiers)
                 && modifiers.shift_key()
                 && text.eq_ignore_ascii_case("c") =>
         {
             KeyInput::CopyLatestResponse
         }
         Key::Character(text)
-            if modifiers.control_key()
+            if desktop_clipboard_shortcut_modifier(modifiers)
                 && modifiers.shift_key()
                 && text.eq_ignore_ascii_case("t") =>
         {
@@ -4786,6 +5238,9 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
                 && (text.eq_ignore_ascii_case("c") || text.eq_ignore_ascii_case("d")) =>
         {
             KeyInput::CancelGeneration
+        }
+        Key::Character(text) if modifiers.super_key() && text.eq_ignore_ascii_case("c") => {
+            KeyInput::CopyLatestResponse
         }
         Key::Character(text) if modifiers.alt_key() && text.eq_ignore_ascii_case("b") => {
             KeyInput::MoveCursorWordLeft
@@ -4840,7 +5295,9 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
             KeyInput::AdjustTextScale(1)
         }
         Key::Character(text) if modifiers.control_key() && text == "0" => KeyInput::ResetTextScale,
-        Key::Character(text) if modifiers.control_key() && text.eq_ignore_ascii_case("v") => {
+        Key::Character(text)
+            if desktop_clipboard_shortcut_modifier(modifiers) && text.eq_ignore_ascii_case("v") =>
+        {
             KeyInput::PasteText
         }
         Key::Character(text)
@@ -4886,6 +5343,10 @@ fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
         Key::Character(text) => KeyInput::Character(text.to_string()),
         _ => KeyInput::Other,
     }
+}
+
+fn desktop_clipboard_shortcut_modifier(modifiers: ModifiersState) -> bool {
+    modifiers.control_key() || modifiers.super_key()
 }
 
 fn is_space_key(key: &Key) -> bool {
@@ -5008,6 +5469,7 @@ fn log_desktop_session_event_error(event: &session_launch::DesktopSessionEvent) 
             ));
         }
         session_launch::DesktopSessionEvent::ToolFinished {
+            id: _,
             name,
             summary,
             is_error: true,
@@ -5314,31 +5776,103 @@ fn apply_single_session_error(app: &mut DesktopApp, error: anyhow::Error) {
     )));
 }
 
-fn copy_text_to_clipboard(text: &str, success_notice: &'static str, app: &mut DesktopApp) {
-    match arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set_text(text.to_string())) {
+#[derive(Default)]
+struct DesktopClipboard {
+    clipboard: Option<arboard::Clipboard>,
+}
+
+impl DesktopClipboard {
+    fn clipboard(&mut self) -> Result<&mut arboard::Clipboard> {
+        if self.clipboard.is_none() {
+            self.clipboard = Some(arboard::Clipboard::new().context("failed to access clipboard")?);
+        }
+        self.clipboard
+            .as_mut()
+            .context("failed to retain clipboard handle")
+    }
+
+    fn set_text(&mut self, text: &str) -> Result<()> {
+        self.with_clipboard_retry("failed to set clipboard text", |clipboard| {
+            clipboard.set_text(text.to_string())
+        })
+    }
+
+    fn get_text(&mut self) -> Result<String> {
+        self.with_clipboard_retry("clipboard does not contain text", |clipboard| {
+            clipboard.get_text()
+        })
+    }
+
+    fn get_image(&mut self) -> Result<arboard::ImageData<'static>> {
+        self.with_clipboard_retry("clipboard does not contain an image", |clipboard| {
+            clipboard.get_image()
+        })
+    }
+
+    fn with_clipboard_retry<T>(
+        &mut self,
+        context: &'static str,
+        mut operation: impl FnMut(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+    ) -> Result<T> {
+        const CLIPBOARD_RETRY_ATTEMPTS: usize = 3;
+        const CLIPBOARD_RETRY_DELAY: Duration = Duration::from_millis(20);
+
+        for attempt in 0..CLIPBOARD_RETRY_ATTEMPTS {
+            let result = operation(self.clipboard()?);
+            match result {
+                Ok(value) => return Ok(value),
+                Err(error)
+                    if matches!(&error, arboard::Error::ClipboardOccupied)
+                        && attempt + 1 < CLIPBOARD_RETRY_ATTEMPTS =>
+                {
+                    std::thread::sleep(CLIPBOARD_RETRY_DELAY);
+                }
+                Err(error) => {
+                    if !matches!(
+                        &error,
+                        arboard::Error::ContentNotAvailable | arboard::Error::ClipboardOccupied
+                    ) {
+                        self.clipboard = None;
+                    }
+                    return Err(error).context(context);
+                }
+            }
+        }
+
+        anyhow::bail!("clipboard remained occupied after retrying")
+    }
+}
+
+fn copy_text_to_clipboard(
+    clipboard: &mut DesktopClipboard,
+    text: &str,
+    success_notice: &'static str,
+    app: &mut DesktopApp,
+) {
+    match clipboard.set_text(text) {
         Ok(()) => app.set_single_session_status_label(success_notice),
         Err(error) => {
             desktop_log::error(format_args!(
-                "jcode-desktop: failed to update clipboard after {success_notice}: {error}"
+                "jcode-desktop: failed to update clipboard after {success_notice}: {error:#}"
             ));
             app.apply_session_event(session_launch::DesktopSessionEvent::Error(format!(
-                "failed to update clipboard after {success_notice}: {error}"
+                "failed to update clipboard after {success_notice}: {error:#}"
             )));
         }
     }
 }
 
-fn paste_clipboard_into_app(app: &mut DesktopApp) -> Result<()> {
-    match clipboard_text() {
+fn paste_clipboard_into_app(clipboard: &mut DesktopClipboard, app: &mut DesktopApp) -> Result<()> {
+    match clipboard_text(clipboard) {
         Ok(text) => {
             if paste_clipboard_text(app, &text) || !app.accepts_clipboard_image_paste() {
                 return Ok(());
             }
-            paste_clipboard_image_into_app(app)
+            paste_clipboard_image_into_app(clipboard, app)
                 .with_context(|| "clipboard text was empty and no pasteable image was available")
         }
         Err(text_error) if app.accepts_clipboard_image_paste() => {
-            paste_clipboard_image_into_app(app)
+            paste_clipboard_image_into_app(clipboard, app)
                 .with_context(|| format!("clipboard did not contain pasteable text: {text_error}"))
         }
         Err(error) => Err(error),
@@ -5354,8 +5888,11 @@ fn paste_clipboard_text(app: &mut DesktopApp, text: &str) -> bool {
     true
 }
 
-fn paste_clipboard_image_into_app(app: &mut DesktopApp) -> Result<()> {
-    let (media_type, base64_data) = clipboard_image_png_base64()?;
+fn paste_clipboard_image_into_app(
+    clipboard: &mut DesktopClipboard,
+    app: &mut DesktopApp,
+) -> Result<()> {
+    let (media_type, base64_data) = clipboard_image_png_base64(clipboard)?;
     app.attach_clipboard_image(media_type, base64_data);
     Ok(())
 }
@@ -5364,11 +5901,8 @@ fn normalize_clipboard_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
 }
 
-fn clipboard_image_png_base64() -> Result<(String, String)> {
-    let mut clipboard = arboard::Clipboard::new().context("failed to access clipboard")?;
-    let image = clipboard
-        .get_image()
-        .context("clipboard does not contain an image")?;
+fn clipboard_image_png_base64(clipboard: &mut DesktopClipboard) -> Result<(String, String)> {
+    let image = clipboard.get_image()?;
     let width = u32::try_from(image.width).context("clipboard image is too wide")?;
     let height = u32::try_from(image.height).context("clipboard image is too tall")?;
     let rgba = image.bytes.into_owned();
@@ -5384,11 +5918,8 @@ fn clipboard_image_png_base64() -> Result<(String, String)> {
     ))
 }
 
-fn clipboard_text() -> Result<String> {
-    arboard::Clipboard::new()
-        .context("failed to access clipboard")?
-        .get_text()
-        .context("clipboard does not contain text")
+fn clipboard_text(clipboard: &mut DesktopClipboard) -> Result<String> {
+    clipboard.get_text()
 }
 
 #[derive(Clone, Debug, Default)]
