@@ -57,6 +57,105 @@ fn normalize_repaint_sensitive_notice_text(text: &str) -> String {
     text.replace("⚠️", "⚠")
 }
 
+fn command_suggestion_hint_line_count(suggestions: &[(String, &'static str)]) -> u16 {
+    if suggestions.is_empty() {
+        return 0;
+    }
+
+    if suggestions.len() == 1 {
+        1
+    } else {
+        suggestions.len().min(app::COMMAND_SUGGESTION_VISIBLE_LIMIT) as u16
+    }
+}
+
+fn command_suggestion_window_start(selected: usize, suggestion_count: usize) -> usize {
+    if suggestion_count <= app::COMMAND_SUGGESTION_VISIBLE_LIMIT {
+        0
+    } else {
+        selected
+            .saturating_add(1)
+            .saturating_sub(app::COMMAND_SUGGESTION_VISIBLE_LIMIT)
+            .min(suggestion_count.saturating_sub(app::COMMAND_SUGGESTION_VISIBLE_LIMIT))
+    }
+}
+
+fn should_render_suggestions_below_input(
+    input_area: Rect,
+    input_line_count: usize,
+    suggestion_line_count: usize,
+    terminal_height: u16,
+) -> bool {
+    suggestion_line_count > 0
+        && input_area.y.saturating_add(input_area.height) < terminal_height
+        && input_area
+            .y
+            .saturating_add(input_line_count as u16)
+            .saturating_add(suggestion_line_count as u16)
+            <= terminal_height
+}
+
+fn command_suggestion_lines(
+    app: &dyn TuiState,
+    suggestions: &[(String, &'static str)],
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if suggestions.len() == 1 {
+        let (cmd, desc) = &suggestions[0];
+        lines.push(Line::from(vec![
+            Span::styled(cmd.to_string(), Style::default().fg(rgb(255, 213, 128))),
+            Span::styled(
+                format!("  {}", desc),
+                Style::default().fg(rgb(255, 213, 128)),
+            ),
+        ]));
+    } else if !suggestions.is_empty() {
+        let selected = app
+            .command_suggestion_selected()
+            .min(suggestions.len().saturating_sub(1));
+        let window_start = command_suggestion_window_start(selected, suggestions.len());
+        let limited: Vec<_> = suggestions
+            .iter()
+            .skip(window_start)
+            .take(app::COMMAND_SUGGESTION_VISIBLE_LIMIT)
+            .collect();
+        let window_end = window_start + limited.len();
+        let more_count = suggestions.len().saturating_sub(window_end);
+        let selected_visible = selected.saturating_sub(window_start);
+
+        for (i, (cmd, desc)) in limited.iter().enumerate() {
+            let is_selected = i == selected_visible;
+            let description_style = if is_selected {
+                Style::default().fg(rgb(255, 213, 128))
+            } else {
+                Style::default().fg(dim_color())
+            };
+            let command_style = if is_selected {
+                Style::default().fg(rgb(255, 213, 128))
+            } else {
+                Style::default().fg(rgb(128, 203, 196))
+            };
+            let mut spans = Vec::new();
+            spans.push(Span::styled(cmd.to_string(), command_style));
+            spans.push(Span::styled(format!("  {}", desc), description_style));
+            if i == 0 && window_start > 0 {
+                spans.push(Span::styled(
+                    format!("  ↑{}", window_start),
+                    Style::default().fg(dim_color()),
+                ));
+            }
+            if i + 1 == limited.len() && more_count > 0 {
+                spans.push(Span::styled(
+                    format!("  +{} more", more_count),
+                    Style::default().fg(dim_color()),
+                ));
+            }
+            lines.push(Line::from(spans));
+        }
+    }
+    lines
+}
+
 pub(super) fn input_hint_line_height(app: &dyn TuiState) -> u16 {
     let suggestions = app.command_suggestions();
     let mode = composer_mode(app.input(), app.is_remote_mode());
@@ -64,15 +163,15 @@ pub(super) fn input_hint_line_height(app: &dyn TuiState) -> u16 {
         && matches!(mode, ComposerMode::SlashCommand | ComposerMode::Chat)
         && (matches!(mode, ComposerMode::SlashCommand) || !app.is_processing());
 
-    if has_suggestions
-        || shell_mode_hint(mode).is_some()
-        || app.next_prompt_new_session_armed()
-        || (app.is_processing() && !app.input().is_empty())
-    {
-        1
-    } else {
-        0
+    if has_suggestions {
+        return command_suggestion_hint_line_count(&suggestions);
     }
+
+    u16::from(
+        shell_mode_hint(mode).is_some()
+            || app.next_prompt_new_session_armed()
+            || (app.is_processing() && !app.input().is_empty()),
+    )
 }
 
 pub(super) fn send_mode_reserved_width(app: &dyn TuiState) -> usize {
@@ -777,6 +876,54 @@ mod tests {
     use ratatui::style::Modifier;
 
     #[test]
+    fn command_suggestion_hint_line_count_reserves_vertical_rows() {
+        let suggestions = vec![
+            ("/help".to_string(), "Show help"),
+            ("/history".to_string(), "Show history"),
+            ("/handoff".to_string(), "Prepare handoff"),
+            ("/health".to_string(), "Show health"),
+            ("/hide".to_string(), "Hide panel"),
+            ("/hello".to_string(), "Say hello"),
+            ("/hold".to_string(), "Hold state"),
+            ("/home".to_string(), "Go home"),
+            ("/hover".to_string(), "Show hover"),
+        ];
+
+        assert_eq!(
+            command_suggestion_hint_line_count(&suggestions),
+            app::COMMAND_SUGGESTION_VISIBLE_LIMIT as u16
+        );
+        assert_eq!(
+            command_suggestion_hint_line_count(&suggestions),
+            app::COMMAND_SUGGESTION_VISIBLE_LIMIT as u16
+        );
+        assert_eq!(command_suggestion_hint_line_count(&suggestions[..1]), 1);
+    }
+
+    #[test]
+    fn command_suggestion_window_start_scrolls_after_visible_limit() {
+        let limit = app::COMMAND_SUGGESTION_VISIBLE_LIMIT;
+        assert_eq!(command_suggestion_window_start(0, limit + 3), 0);
+        assert_eq!(command_suggestion_window_start(limit - 1, limit + 3), 0);
+        assert_eq!(command_suggestion_window_start(limit, limit + 3), 1);
+        assert_eq!(command_suggestion_window_start(limit + 2, limit + 3), 3);
+    }
+
+    #[test]
+    fn command_suggestions_render_below_when_terminal_space_remains() {
+        let input_area = Rect::new(0, 10, 80, 4);
+
+        assert!(should_render_suggestions_below_input(input_area, 1, 3, 20));
+    }
+
+    #[test]
+    fn command_suggestions_render_above_at_terminal_bottom() {
+        let input_area = Rect::new(0, 16, 80, 4);
+
+        assert!(!should_render_suggestions_below_input(input_area, 1, 3, 20));
+    }
+
+    #[test]
     fn batch_progress_spans_use_batch_chroma_for_initial_count() {
         let mut spans = Vec::new();
         let anim_color = rgb(12, 34, 56);
@@ -1275,53 +1422,9 @@ pub(super) fn draw_input(
     let mut lines: Vec<Line> = Vec::new();
     let mut hint_shown = false;
     let mut hint_line: Option<String> = None;
+    let mut suggestion_lines: Vec<Line> = Vec::new();
     if has_suggestions {
-        let input_trimmed = input_text.trim();
-        let exact_match = suggestions.iter().find(|(cmd, _)| cmd == input_trimmed);
-
-        if suggestions.len() == 1 || exact_match.is_some() {
-            let (cmd, desc) = exact_match.unwrap_or(&suggestions[0]);
-            let mut spans = vec![
-                Span::styled("  ", Style::default().fg(dim_color())),
-                Span::styled(cmd.to_string(), Style::default().fg(rgb(138, 180, 248))),
-                Span::styled(format!(" - {}", desc), Style::default().fg(dim_color())),
-            ];
-            if suggestions.len() > 1 {
-                spans.push(Span::styled(
-                    format!("  Tab: +{} more", suggestions.len() - 1),
-                    Style::default().fg(dim_color()),
-                ));
-            }
-            lines.push(Line::from(spans));
-        } else {
-            let max_suggestions = 5;
-            let limited: Vec<_> = suggestions.iter().take(max_suggestions).collect();
-            let more_count = suggestions.len().saturating_sub(max_suggestions);
-
-            let mut spans = vec![Span::styled("  Tab: ", Style::default().fg(dim_color()))];
-            for (i, (cmd, desc)) in limited.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled(" │ ", Style::default().fg(dim_color())));
-                }
-                spans.push(Span::styled(
-                    cmd.to_string(),
-                    Style::default().fg(rgb(138, 180, 248)),
-                ));
-                if i == 0 {
-                    spans.push(Span::styled(
-                        format!(" ({})", desc),
-                        Style::default().fg(dim_color()),
-                    ));
-                }
-            }
-            if more_count > 0 {
-                spans.push(Span::styled(
-                    format!(" (+{})", more_count),
-                    Style::default().fg(dim_color()),
-                ));
-            }
-            lines.push(Line::from(spans));
-        }
+        suggestion_lines = command_suggestion_lines(app, &suggestions);
     } else if let Some(shell_hint) = shell_mode_hint(mode) {
         hint_shown = true;
         hint_line = Some(shell_hint.trim().to_string());
@@ -1364,6 +1467,17 @@ pub(super) fn draw_input(
         );
     }
 
+    let render_suggestions_below = should_render_suggestions_below_input(
+        area,
+        all_lines.len().min(10),
+        suggestion_lines.len(),
+        frame.area().height,
+    );
+
+    if has_suggestions && !render_suggestions_below {
+        lines.extend(suggestion_lines.iter().cloned());
+    }
+
     let suggestions_offset = lines.len();
     let total_input_lines = all_lines.len();
     let visible_height = area.height as usize;
@@ -1383,6 +1497,15 @@ pub(super) fn draw_input(
         lines.push(line);
         if lines.len() >= visible_height {
             break;
+        }
+    }
+
+    if has_suggestions && render_suggestions_below {
+        for line in suggestion_lines {
+            if lines.len() >= visible_height {
+                break;
+            }
+            lines.push(line);
         }
     }
 

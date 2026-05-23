@@ -56,8 +56,8 @@ workspace_down = "alt+j"
 workspace_up = "alt+k"
 workspace_right = "alt+l"
 
-# /resume picker behavior. Options: "current-terminal" or "new-terminal".
-# Ctrl+Enter performs the alternate action.
+# /resume picker Enter behavior. Options: "current-terminal" or "new-terminal".
+# By default Enter resumes in this terminal; Ctrl+Enter performs the alternate action.
 session_picker_enter = "current-terminal"
 
 [dictation]
@@ -144,6 +144,8 @@ memory = true
 swarm = true
 # Inject timestamps into user messages and tool results sent to the model
 message_timestamps = true
+# Persist memory injections into session history instead of sending them as request-only ephemeral context
+persist_memory_injections = false
 # Update channel: "stable" (releases only) or "main" (latest commits on push)
 # Set to "main" for bleeding edge updates every time code is pushed
 update_channel = "stable"
