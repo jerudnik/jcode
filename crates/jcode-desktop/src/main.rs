@@ -340,7 +340,6 @@ const WELCOME_AURORA_VIOLET: [f32; 4] = [0.720, 0.360, 0.980, 0.125];
 const WELCOME_AURORA_MINT: [f32; 4] = [0.220, 0.840, 0.660, 0.115];
 const WELCOME_AURORA_WARM: [f32; 4] = [1.000, 0.620, 0.360, 0.075];
 const WELCOME_HANDWRITING_COLOR: [f32; 4] = [0.012, 0.080, 0.250, 0.94];
-const NATIVE_SPINNER_TRACK_COLOR: [f32; 4] = [0.055, 0.125, 0.270, 0.34];
 const NATIVE_SPINNER_HEAD_COLOR: [f32; 4] = [0.000, 0.260, 0.720, 1.0];
 const CODE_BLOCK_BACKGROUND_COLOR: [f32; 4] = [0.075, 0.095, 0.135, 0.075];
 const INLINE_CODE_BACKGROUND_COLOR: [f32; 4] = [0.075, 0.095, 0.135, 0.135];
@@ -1036,8 +1035,13 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::LoadSessionSwitcher => {
+                            let purpose = if app.is_workspace() {
+                                DesktopSessionCardsPurpose::WorkspaceRefresh
+                            } else {
+                                DesktopSessionCardsPurpose::SingleSessionSwitcher
+                            };
                             spawn_session_cards_load(
-                                DesktopSessionCardsPurpose::SingleSessionSwitcher,
+                                purpose,
                                 event_loop_proxy.clone(),
                                 Duration::ZERO,
                             );
@@ -1203,6 +1207,14 @@ async fn run() -> Result<()> {
                             }
                             window.set_title(&app.status_title());
                             window.request_redraw();
+                        }
+                        KeyOutcome::ForceReload => {
+                            if hot_reloader.force_reload(&app, &window) {
+                                target.exit();
+                            } else {
+                                window.set_title(&app.status_title());
+                                window.request_redraw();
+                            }
                         }
                         KeyOutcome::None => {}
                     }
@@ -2380,6 +2392,73 @@ fn run_headless_chat_smoke(message: String) -> Result<()> {
                         "is_password": is_password,
                         "tool_call_id": tool_call_id,
                     })
+                );
+            }
+            session_launch::DesktopSessionEvent::ReloadProgress {
+                step,
+                message,
+                success,
+                output,
+            } => {
+                last_status = Some(format!("reload {step}: {message}"));
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "reload_progress",
+                        "step": step,
+                        "message": message,
+                        "success": success,
+                        "output": output,
+                    })
+                );
+            }
+            session_launch::DesktopSessionEvent::RuntimeMetadata {
+                connection_type,
+                status_detail,
+                upstream_provider,
+            } => {
+                if let Some(status_detail) = &status_detail {
+                    last_status = Some(status_detail.clone());
+                }
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "runtime_metadata",
+                        "connection_type": connection_type,
+                        "status_detail": status_detail,
+                        "upstream_provider": upstream_provider,
+                    })
+                );
+            }
+            session_launch::DesktopSessionEvent::TokenUsage {
+                input,
+                output,
+                cache_read_input,
+                cache_creation_input,
+            } => {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "tokens",
+                        "input": input,
+                        "output": output,
+                        "cache_read_input": cache_read_input,
+                        "cache_creation_input": cache_creation_input,
+                    })
+                );
+            }
+            session_launch::DesktopSessionEvent::SystemNotice { title, message } => {
+                last_status = Some(title.clone());
+                println!(
+                    "{}",
+                    serde_json::json!({"event": "system_notice", "title": title, "message": message})
+                );
+            }
+            session_launch::DesktopSessionEvent::SessionCloseRequested { reason } => {
+                anyhow::bail!(
+                    "desktop chat smoke session close requested; session_id={}; reason={}",
+                    session_id.as_deref().unwrap_or("unknown"),
+                    reason
                 );
             }
             session_launch::DesktopSessionEvent::Done => {
@@ -4607,6 +4686,39 @@ impl DesktopHotReloader {
         false
     }
 
+    fn force_reload(&mut self, app: &DesktopApp, window: &Window) -> bool {
+        if self.poll_pending_handoff() {
+            return true;
+        }
+        if self.pending_handoff.is_some() {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: force reload requested while another reload handoff is pending"
+            ));
+            return false;
+        }
+        let Some(relaunch) = self.relaunch.as_ref() else {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: force reload requested but current process cannot be relaunched"
+            ));
+            return false;
+        };
+        let binary = desktop_reload_binary_candidate(&relaunch.binary);
+        let relaunch = relaunch.for_app(app, binary);
+        match relaunch.spawn_for_window(window) {
+            Ok(Some(handoff)) => {
+                self.pending_handoff = Some(handoff);
+                false
+            }
+            Ok(None) => true,
+            Err(error) => {
+                desktop_log::error(format_args!(
+                    "jcode-desktop: failed to force reload desktop: {error:#}"
+                ));
+                false
+            }
+        }
+    }
+
     fn poll_pending_handoff(&mut self) -> bool {
         let Some(pending_handoff) = self.pending_handoff.as_ref() else {
             return false;
@@ -4710,11 +4822,30 @@ impl DesktopRelaunch {
         }
 
         let mut args = desktop_args_without_resume(&self.args);
-        if let Some(session_id) = app.single_session_live_id() {
-            args.push(OsString::from("--resume"));
-            args.push(OsString::from(session_id));
+        match app {
+            DesktopApp::Workspace(_) => ensure_desktop_workspace_arg(&mut args),
+            DesktopApp::SingleSession(_) => {
+                if let Some(session_id) = app.single_session_live_id() {
+                    args.push(OsString::from("--resume"));
+                    args.push(OsString::from(session_id));
+                }
+            }
         }
         Self { binary, args }
+    }
+}
+
+fn ensure_desktop_workspace_arg(args: &mut Vec<OsString>) {
+    let has_mode_arg = args.iter().any(|arg| {
+        arg == "--workspace"
+            || arg == "--new"
+            || arg == "--resume"
+            || arg.to_str().is_some_and(|value| {
+                value.starts_with("--resume=") || value.starts_with("jcode://")
+            })
+    });
+    if !has_mode_arg {
+        args.push(OsString::from("--workspace"));
     }
 }
 
