@@ -249,8 +249,9 @@ fn create_mock_vscdb(dir: &std::path::Path, entries: &[(&str, &str)]) -> PathBuf
 
     for (key, value) in entries {
         let sql = format!(
-            "INSERT INTO ItemTable (key, value) VALUES ('{}', '{}');",
-            key, value
+            "INSERT INTO ItemTable (key, value) VALUES ({}, {});",
+            sqlite_string_literal(key),
+            sqlite_string_literal(value)
         );
         let status = std::process::Command::new("sqlite3")
             .arg(&db_path)
@@ -268,6 +269,24 @@ fn vscdb_read_access_token() {
     let db = create_mock_vscdb(dir.path(), &[("cursorAuth/accessToken", "tok_abc123xyz")]);
     let result = read_vscdb_key(&db, "cursorAuth/accessToken").unwrap();
     assert_eq!(result, "tok_abc123xyz");
+}
+
+#[test]
+fn vscdb_read_escapes_key_quotes() {
+    let dir = TempDir::new().unwrap();
+    let db = create_mock_vscdb(
+        dir.path(),
+        &[
+            ("cursorAuth/accessToken", "tok_abc123xyz"),
+            ("cursorAuth/access'Token", "quoted_key_token"),
+        ],
+    );
+
+    assert_eq!(
+        read_vscdb_key(&db, "cursorAuth/access'Token").unwrap(),
+        "quoted_key_token"
+    );
+    assert!(read_vscdb_key(&db, "missing' OR '1' = '1").is_err());
 }
 
 #[test]

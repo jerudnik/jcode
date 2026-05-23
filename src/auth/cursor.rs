@@ -255,9 +255,10 @@ fn cursor_vscdb_paths() -> Vec<PathBuf> {
 /// Read a key from a vscdb file using the sqlite3 CLI.
 fn read_vscdb_key(db_path: &PathBuf, key: &str) -> Result<String> {
     let mut command = Command::new("sqlite3");
+    let key_literal = sqlite_string_literal(key);
     command.arg(db_path).arg(format!(
-        "SELECT value FROM ItemTable WHERE key = '{}';",
-        key
+        "SELECT value FROM ItemTable WHERE key = {};",
+        key_literal
     ));
     let output = command_output_with_timeout(&mut command, CURSOR_EXTERNAL_COMMAND_TIMEOUT)
         .context("Failed to run sqlite3 (is it installed?)")?
@@ -273,6 +274,10 @@ fn read_vscdb_key(db_path: &PathBuf, key: &str) -> Result<String> {
         anyhow::bail!("Key '{}' not found or empty in {}", key, db_path.display());
     }
     Ok(value)
+}
+
+fn sqlite_string_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn command_output_with_timeout(command: &mut Command, timeout: Duration) -> Result<Option<Output>> {

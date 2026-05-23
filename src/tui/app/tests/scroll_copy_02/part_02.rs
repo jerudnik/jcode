@@ -103,7 +103,7 @@ fn test_expand_badge_shortcut_does_not_collapse_full_inline_diff() {
 
 fn make_edit_badge_test_app(
     old_line_count: usize,
-) -> (App, ratatui::Terminal<ratatui::backend::TestBackend>) {
+) -> (TestApp, ratatui::Terminal<ratatui::backend::TestBackend>) {
     let mut app = create_test_app();
     let old_string = (0..old_line_count)
         .map(|idx| format!("old line {idx}\n"))

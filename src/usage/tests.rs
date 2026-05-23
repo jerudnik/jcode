@@ -78,6 +78,74 @@ fn test_openai_usage_data_becomes_stale_when_reset_time_has_passed() {
 }
 
 #[test]
+fn cached_usage_returns_fresh_entries() {
+    let now = Instant::now();
+
+    let anthropic_key = "test-anthropic-fresh-cache-entry";
+    store_anthropic_usage(
+        anthropic_key.to_string(),
+        UsageData {
+            five_hour: 0.42,
+            fetched_at: Some(now),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        cached_anthropic_usage(anthropic_key).map(|usage| usage.five_hour),
+        Some(0.42)
+    );
+
+    let openai_key = "test-openai-fresh-cache-entry";
+    store_openai_usage(
+        openai_key.to_string(),
+        OpenAIUsageData {
+            five_hour: Some(OpenAIUsageWindow {
+                name: "5-hour".to_string(),
+                usage_ratio: 0.5,
+                resets_at: None,
+            }),
+            fetched_at: Some(now),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        cached_openai_usage(openai_key).and_then(|usage| usage.five_hour.map(|w| w.usage_ratio)),
+        Some(0.5)
+    );
+}
+
+#[test]
+fn cached_usage_skips_stale_entries() {
+    let stale_at = Instant::now() - CACHE_DURATION - std::time::Duration::from_secs(1);
+
+    let anthropic_key = "test-anthropic-stale-cache-entry";
+    store_anthropic_usage(
+        anthropic_key.to_string(),
+        UsageData {
+            five_hour: 0.42,
+            fetched_at: Some(stale_at),
+            ..Default::default()
+        },
+    );
+    assert!(cached_anthropic_usage(anthropic_key).is_none());
+
+    let openai_key = "test-openai-stale-cache-entry";
+    store_openai_usage(
+        openai_key.to_string(),
+        OpenAIUsageData {
+            five_hour: Some(OpenAIUsageWindow {
+                name: "5-hour".to_string(),
+                usage_ratio: 0.5,
+                resets_at: None,
+            }),
+            fetched_at: Some(stale_at),
+            ..Default::default()
+        },
+    );
+    assert!(cached_openai_usage(openai_key).is_none());
+}
+
+#[test]
 fn test_usage_data_display_snapshot_clears_passed_reset_window() {
     let data = UsageData {
         five_hour: 0.73,

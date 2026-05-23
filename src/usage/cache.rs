@@ -57,8 +57,12 @@ pub(super) fn openai_usage_cache_key(access_token: &str, account_label: Option<&
 pub(super) fn cached_anthropic_usage(cache_key: &str) -> Option<UsageData> {
     let cache = anthropic_usage_cache();
     let map = cache.lock().ok()?;
-    let cached = map.get(cache_key)?.clone();
-    (!cached.is_stale()).then_some(cached)
+    let cached = map.get(cache_key)?;
+    if cached.is_stale() {
+        None
+    } else {
+        Some(cached.clone())
+    }
 }
 
 pub(super) fn store_anthropic_usage(cache_key: String, data: UsageData) {
@@ -70,8 +74,12 @@ pub(super) fn store_anthropic_usage(cache_key: String, data: UsageData) {
 pub(super) fn cached_openai_usage(cache_key: &str) -> Option<OpenAIUsageData> {
     let cache = openai_usage_cache();
     let map = cache.lock().ok()?;
-    let cached = map.get(cache_key)?.clone();
-    (!cached.is_stale()).then_some(cached)
+    let cached = map.get(cache_key)?;
+    if cached.is_stale() {
+        None
+    } else {
+        Some(cached.clone())
+    }
 }
 
 pub(super) fn store_openai_usage(cache_key: String, data: OpenAIUsageData) {

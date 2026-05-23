@@ -229,6 +229,28 @@ fn redact_secrets_redacts_known_direct_token_formats() {
 }
 
 #[test]
+fn redact_secrets_redacts_all_direct_patterns() {
+    let tokens = [
+        "sk-ant-oat01-01234567890123456789",
+        "sk-ant-ort01-01234567890123456789",
+        "sk-or-v1-01234567890123456789",
+        "ghp_01234567890123456789",
+        "github_pat_01234567890123456789",
+        "ya29.01234567890123456789",
+        "AIza01234567890123456789",
+        "xoxb-0123456789",
+        "xoxp-0123456789",
+    ];
+    let input = tokens.join("\n");
+    let out = redact_secrets(&input);
+
+    for token in tokens {
+        assert!(!out.contains(token), "token was not redacted: {token}");
+    }
+    assert_eq!(out.matches("[REDACTED_SECRET]").count(), tokens.len());
+}
+
+#[test]
 fn redact_secrets_redacts_env_style_assignments() {
     let input = "OPENROUTER_API_KEY=sk-or-v1-abc123abc123abc123abc123\nOPENCODE_API_KEY=oc_test_secret\nOPENCODE_GO_API_KEY=ocgo_test_secret\nZAI_API_KEY=zai_secret\nCHUTES_API_KEY=chutes_secret\nCEREBRAS_API_KEY=cerebras_secret\nOPENAI_COMPAT_API_KEY=compat_secret\nCURSOR_API_KEY='my_cursor_secret_value'\nOPENAI_API_KEY=sk-test-openai-example\nAZURE_OPENAI_API_KEY=azure-openai-secret\n";
     let out = redact_secrets(input);
@@ -243,6 +265,57 @@ fn redact_secrets_redacts_env_style_assignments() {
     assert!(out.contains("OPENAI_API_KEY=[REDACTED_SECRET]"));
     assert!(out.contains("AZURE_OPENAI_API_KEY=[REDACTED_SECRET]"));
     assert!(!out.contains("my_cursor_secret_value"));
+}
+
+#[test]
+fn redact_secrets_redacts_all_env_style_assignments() {
+    let keys = [
+        "OPENROUTER_API_KEY",
+        "OPENCODE_API_KEY",
+        "OPENCODE_GO_API_KEY",
+        "ZHIPU_API_KEY",
+        "ZAI_API_KEY",
+        "302AI_API_KEY",
+        "BASETEN_API_KEY",
+        "CORTECS_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "FIRMWARE_API_KEY",
+        "HF_TOKEN",
+        "MOONSHOT_API_KEY",
+        "NEBIUS_API_KEY",
+        "SCALEWAY_API_KEY",
+        "STACKIT_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "TOGETHER_API_KEY",
+        "DEEPINFRA_API_KEY",
+        "XAI_API_KEY",
+        "LMSTUDIO_API_KEY",
+        "OLLAMA_API_KEY",
+        "CHUTES_API_KEY",
+        "CEREBRAS_API_KEY",
+        "OPENAI_COMPAT_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "CURSOR_API_KEY",
+        "GITHUB_TOKEN",
+    ];
+    let input = keys
+        .iter()
+        .map(|key| format!("{key}=test_secret_for_{key}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let out = redact_secrets(&input);
+
+    for key in keys {
+        assert!(
+            out.contains(&format!("{key}=[REDACTED_SECRET]")),
+            "assignment was not redacted for {key}: {out}"
+        );
+        assert!(!out.contains(&format!("test_secret_for_{key}")));
+    }
 }
 
 #[test]
@@ -268,6 +341,21 @@ fn redact_secrets_redacts_mixed_case_token_assignments() {
     let out = redact_secrets(input);
     assert!(out.contains("[REDACTED_SECRET]"));
     assert!(!out.contains("ya29.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"));
+}
+
+#[test]
+fn redact_secrets_fast_path_leaves_outputs_without_indicators_unchanged() {
+    let input = "This is a normal command output.\nIt has no keys.";
+    assert_eq!(redact_secrets(input), input);
+}
+
+#[test]
+fn redact_secrets_indicator_words_without_matches_leave_output_unchanged() {
+    let api_key_text = "The parameter api_key is required.";
+    assert_eq!(redact_secrets(api_key_text), api_key_text);
+
+    let token_text = "The token parameter is missing.";
+    assert_eq!(redact_secrets(token_text), token_text);
 }
 
 #[test]
