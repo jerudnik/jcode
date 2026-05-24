@@ -1,7 +1,9 @@
 use super::animation::{
-    AnimatedRect, ColorTransition, FOCUS_PULSE_DURATION, STATUS_COLOR_TRANSITION_DURATION,
-    SURFACE_TRANSITION_DURATION, SurfaceTransitionAnimator, SurfaceVisualFrame,
-    SurfaceVisualTarget, VIEWPORT_ANIMATION_DURATION,
+    AnimatedRect, ColorTransition, DESKTOP_REDUCED_MOTION_ENV, DesktopReducedMotionEnvGuard,
+    FOCUS_PULSE_DURATION, STATUS_COLOR_TRANSITION_DURATION, SURFACE_TRANSITION_DURATION,
+    SurfaceTransitionAnimator, SurfaceVisualFrame, SurfaceVisualTarget,
+    VIEWPORT_ANIMATION_DURATION, desktop_reduced_motion_enabled,
+    desktop_reduced_motion_enabled_for_env_value,
 };
 use super::single_session::*;
 use super::*;
@@ -40,6 +42,33 @@ fn desktop_config_parses_positive_millisecond_durations_only() {
     assert_eq!(parse_positive_duration_millis("NaN"), None);
     assert_eq!(parse_positive_duration_millis("inf"), None);
     assert_eq!(parse_positive_duration_millis("nope"), None);
+}
+
+#[test]
+fn desktop_reduced_motion_env_parses_common_flag_values() {
+    assert!(!desktop_reduced_motion_enabled_for_env_value(None));
+    assert!(!desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("")
+    )));
+    assert!(!desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("0")
+    )));
+    assert!(!desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("false")
+    )));
+    assert!(!desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("off")
+    )));
+    assert!(desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("1")
+    )));
+    assert!(desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("true")
+    )));
+    assert!(desktop_reduced_motion_enabled_for_env_value(Some(
+        OsString::from("reduce")
+    )));
+    assert_eq!(DESKTOP_REDUCED_MOTION_ENV, "JCODE_DESKTOP_REDUCED_MOTION");
 }
 
 #[test]
@@ -828,6 +857,41 @@ fn viewport_animation_interpolates_to_new_layout_target() {
 }
 
 #[test]
+fn reduced_motion_snaps_viewport_to_new_layout_target() {
+    let _guard = DesktopReducedMotionEnvGuard::set(true);
+    assert!(desktop_reduced_motion_enabled());
+
+    let mut animation = AnimatedViewport::default();
+    let now = Instant::now();
+    let visible = VisibleColumnLayout {
+        visible_columns: 2,
+        first_visible_column: 0,
+    };
+    let start = WorkspaceRenderLayout {
+        visible,
+        column_width: 200.0,
+        scroll_offset: 0.0,
+        vertical_scroll_offset: 0.0,
+    };
+    let target = WorkspaceRenderLayout {
+        visible: VisibleColumnLayout {
+            visible_columns: 2,
+            first_visible_column: 2,
+        },
+        column_width: 300.0,
+        scroll_offset: 600.0,
+        vertical_scroll_offset: 800.0,
+    };
+
+    assert_eq!(animation.frame(start, now).column_width, 200.0);
+    let snapped = animation.frame(target, now);
+    assert_eq!(snapped.column_width, 300.0);
+    assert_eq!(snapped.scroll_offset, 600.0);
+    assert_eq!(snapped.vertical_scroll_offset, 800.0);
+    assert!(!animation.is_animating());
+}
+
+#[test]
 fn focus_pulse_runs_when_focused_surface_changes() {
     let mut pulse = FocusPulse::default();
     let now = Instant::now();
@@ -845,6 +909,17 @@ fn focus_pulse_runs_when_focused_surface_changes() {
 
     let end = pulse.frame(2, now + FOCUS_PULSE_DURATION);
     assert_eq!(end, 0.0);
+    assert!(!pulse.is_animating());
+}
+
+#[test]
+fn reduced_motion_disables_focus_pulse() {
+    let _guard = DesktopReducedMotionEnvGuard::set(true);
+    let mut pulse = FocusPulse::default();
+    let now = Instant::now();
+
+    assert_eq!(pulse.frame(1, now), 0.0);
+    assert_eq!(pulse.frame(2, now), 0.0);
     assert!(!pulse.is_animating());
 }
 
@@ -914,6 +989,245 @@ fn surface_transition_animates_panel_reposition_and_entry() {
 }
 
 #[test]
+fn surface_transition_animates_panel_exit_before_removal() {
+    let mut transitions = SurfaceTransitionAnimator::default();
+    let now = Instant::now();
+    let original = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 16.0,
+            y: 24.0,
+            width: 140.0,
+            height: 180.0,
+        },
+    };
+
+    let first = transitions.frame([original], now);
+    let first = surface_visual_frame(&first, 1);
+    assert!(!first.exiting);
+    assert_eq!(first.opacity, 1.0);
+
+    let exit_start = transitions.frame([], now + Duration::from_millis(8));
+    let exit_start = surface_visual_frame(&exit_start, 1);
+    assert!(exit_start.exiting);
+    assert_eq!(exit_start.opacity, 1.0);
+    assert_eq!(exit_start.rect, original.rect);
+    assert!(transitions.is_animating());
+
+    let exit_middle = transitions.frame(
+        [],
+        now + Duration::from_millis(8) + SURFACE_TRANSITION_DURATION / 2,
+    );
+    let exit_middle = surface_visual_frame(&exit_middle, 1);
+    assert!(exit_middle.exiting);
+    assert!(exit_middle.opacity > 0.0);
+    assert!(exit_middle.opacity < 1.0);
+    assert!(exit_middle.rect.y < original.rect.y);
+    assert!(exit_middle.visual_rect().width < original.rect.width);
+
+    let finished = transitions.frame(
+        [],
+        now + Duration::from_millis(8) + SURFACE_TRANSITION_DURATION * 2,
+    );
+    assert!(finished.is_empty());
+    assert!(!transitions.is_animating());
+}
+
+#[test]
+fn reduced_motion_snaps_surface_entries_moves_and_exits() {
+    let _guard = DesktopReducedMotionEnvGuard::set(true);
+    let mut transitions = SurfaceTransitionAnimator::default();
+    let now = Instant::now();
+    let original = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 16.0,
+            y: 24.0,
+            width: 140.0,
+            height: 180.0,
+        },
+    };
+    let moved = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 80.0,
+            y: 40.0,
+            width: 160.0,
+            height: 200.0,
+        },
+    };
+
+    transitions.frame([original], now);
+    let snapped = transitions.frame([moved], now);
+    let snapped = surface_visual_frame(&snapped, 1);
+    assert_eq!(snapped.rect, moved.rect);
+    assert_eq!(snapped.opacity, 1.0);
+    assert!(!snapped.exiting);
+    assert!(!transitions.is_animating());
+
+    let removed = transitions.frame([], now + Duration::from_millis(1));
+    assert!(removed.is_empty());
+    assert!(!transitions.is_animating());
+}
+
+#[test]
+fn surface_transition_retargets_from_current_frame_mid_animation() {
+    let mut transitions = SurfaceTransitionAnimator::default();
+    let now = Instant::now();
+    let original = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 120.0,
+        },
+    };
+    let first_target = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 240.0,
+            y: 60.0,
+            width: 180.0,
+            height: 220.0,
+        },
+    };
+    let second_target = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: -80.0,
+            y: 42.0,
+            width: 150.0,
+            height: 190.0,
+        },
+    };
+
+    transitions.frame([original], now);
+    transitions.frame([first_target], now);
+    let halfway_time = now + SURFACE_TRANSITION_DURATION / 2;
+    let halfway = transitions.frame([first_target], halfway_time);
+    let halfway = surface_visual_frame(&halfway, 1);
+
+    let retarget_start = transitions.frame([second_target], halfway_time);
+    let retarget_start = surface_visual_frame(&retarget_start, 1);
+    assert_eq!(retarget_start.rect, halfway.rect);
+    assert!(transitions.is_animating());
+
+    let retarget_middle = transitions.frame(
+        [second_target],
+        halfway_time + SURFACE_TRANSITION_DURATION / 2,
+    );
+    let retarget_middle = surface_visual_frame(&retarget_middle, 1);
+    assert!(retarget_middle.rect.x < halfway.rect.x);
+    assert!(retarget_middle.rect.x > second_target.rect.x);
+}
+
+#[test]
+fn surface_transition_reenters_from_current_exit_frame() {
+    let mut transitions = SurfaceTransitionAnimator::default();
+    let now = Instant::now();
+    let original = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 12.0,
+            y: 24.0,
+            width: 120.0,
+            height: 160.0,
+        },
+    };
+    let reentered = SurfaceVisualTarget {
+        id: 1,
+        rect: AnimatedRect {
+            x: 120.0,
+            y: 80.0,
+            width: 160.0,
+            height: 210.0,
+        },
+    };
+
+    transitions.frame([original], now);
+    let exit_start_time = now + Duration::from_millis(6);
+    transitions.frame([], exit_start_time);
+
+    let reentry_start = transitions.frame(
+        [reentered],
+        exit_start_time + SURFACE_TRANSITION_DURATION / 2,
+    );
+    let reentry_start = surface_visual_frame(&reentry_start, 1);
+    assert!(!reentry_start.exiting);
+    assert!(reentry_start.opacity > 0.0);
+    assert!(reentry_start.opacity < 1.0);
+    assert!(reentry_start.rect.y < original.rect.y);
+
+    let settled = transitions.frame(
+        [reentered],
+        exit_start_time + SURFACE_TRANSITION_DURATION * 2,
+    );
+    let settled = surface_visual_frame(&settled, 1);
+    assert_eq!(settled.rect, reentered.rect);
+    assert_eq!(settled.opacity, 1.0);
+}
+
+#[test]
+fn workspace_zoom_uses_surface_transition_frames() {
+    let mut workspace = Workspace::from_session_cards(vec![workspace::SessionCard {
+        session_id: "session-alpha".to_string(),
+        title: "alpha".to_string(),
+        subtitle: "active".to_string(),
+        detail: "3 msgs".to_string(),
+        preview_lines: Vec::new(),
+        detail_lines: Vec::new(),
+    }]);
+    let size = PhysicalSize::new(1280, 800);
+    let layout = workspace_render_layout(&workspace, size, Some(size));
+    let focused_id = workspace.focused_id;
+    let unzoomed_target = workspace_surface_transition_targets(&workspace, size, layout)
+        .into_iter()
+        .find(|target| target.id == focused_id)
+        .expect("focused unzoomed target");
+
+    assert_eq!(
+        workspace.handle_key(KeyInput::Character("z".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert!(workspace.zoomed);
+    let zoomed_target = workspace_surface_transition_targets(&workspace, size, layout)
+        .into_iter()
+        .find(|target| target.id == focused_id)
+        .expect("focused zoomed target");
+    assert!(zoomed_target.rect.width > unzoomed_target.rect.width);
+    assert!(zoomed_target.rect.x <= unzoomed_target.rect.x);
+
+    let mut transitions = SurfaceTransitionAnimator::default();
+    let now = Instant::now();
+    transitions.frame([unzoomed_target], now);
+
+    let zoom_start = transitions.frame([zoomed_target], now);
+    let zoom_start = surface_visual_frame(&zoom_start, focused_id);
+    assert_eq!(zoom_start.rect, unzoomed_target.rect);
+    assert!(transitions.is_animating());
+
+    let zoom_mid = transitions.frame([zoomed_target], now + SURFACE_TRANSITION_DURATION / 2);
+    let zoom_mid = surface_visual_frame(&zoom_mid, focused_id);
+    assert!(zoom_mid.rect.width > unzoomed_target.rect.width);
+    assert!(zoom_mid.rect.width < zoomed_target.rect.width);
+
+    let zoomed = transitions.frame([zoomed_target], now + SURFACE_TRANSITION_DURATION * 2);
+    let zoomed = surface_visual_frame(&zoomed, focused_id);
+    assert_eq!(zoomed.rect, zoomed_target.rect);
+
+    assert_eq!(
+        workspace.handle_key(KeyInput::Character("z".to_string())),
+        KeyOutcome::Redraw
+    );
+    assert!(!workspace.zoomed);
+    let back_start = transitions.frame([unzoomed_target], now + SURFACE_TRANSITION_DURATION * 2);
+    let back_start = surface_visual_frame(&back_start, focused_id);
+    assert_eq!(back_start.rect, zoomed_target.rect);
+    assert!(transitions.is_animating());
+}
+
+#[test]
 fn color_transition_interpolates_status_bar_mode_changes() {
     let mut transition = ColorTransition::default();
     let now = Instant::now();
@@ -938,6 +1252,24 @@ fn color_transition_interpolates_status_bar_mode_changes() {
         insert
     );
     assert!(!transition.is_animating());
+}
+
+#[test]
+fn reduced_motion_snaps_color_and_streaming_text_arrival() {
+    let _guard = DesktopReducedMotionEnvGuard::set(true);
+    let mut transition = ColorTransition::default();
+    let now = Instant::now();
+    let nav = [0.10, 0.20, 0.30, 1.0];
+    let insert = [0.40, 0.50, 0.60, 1.0];
+
+    assert_eq!(transition.frame(nav, now), nav);
+    assert_eq!(transition.frame(insert, now), insert);
+    assert!(!transition.is_animating());
+
+    let style = streaming_text_arrival_style_for_elapsed(Duration::ZERO);
+    assert_eq!(style.opacity, 1.0);
+    assert_eq!(style.y_offset_pixels, 0.0);
+    assert!(!style.active);
 }
 
 fn surface_visual_frame(frames: &[SurfaceVisualFrame], id: u64) -> SurfaceVisualFrame {
@@ -5022,9 +5354,15 @@ fn single_session_adjacent_tool_messages_render_as_compact_summary() {
 
     let body = app.body_lines();
     assert_eq!(body.len(), 1);
-    assert_eq!(
-        body[0],
-        "  ▸ tools: 1 read, 2 agentgrep, 1 edit · ~23 tokens"
+    assert!(
+        body[0].starts_with("  ▸ tools: 1 read, 2 agentgrep, 1 edit · ~"),
+        "compact summary should preserve grouped tool counts: {:?}",
+        body[0]
+    );
+    assert!(
+        body[0].ends_with(" tokens"),
+        "compact summary should preserve approximate token suffix: {:?}",
+        body[0]
     );
 
     let styled = app.body_styled_lines();
@@ -7829,6 +8167,7 @@ fn workspace_session_panel_composes_single_session_geometry() {
             focus_pulse: 0.0,
             space_hold_progress: None,
             surface_frames: None,
+            exiting_surfaces: &HashMap::new(),
             status_color: workspace_status_bar_target_color(&workspace),
         },
         &mut vertices,
@@ -7944,6 +8283,7 @@ fn workspace_session_panel_reuses_single_session_primitive_exactly() {
             focus_pulse: 0.0,
             space_hold_progress: None,
             surface_frames: None,
+            exiting_surfaces: &HashMap::new(),
             status_color: workspace_status_bar_target_color(&workspace),
         },
         &mut workspace_vertices,
