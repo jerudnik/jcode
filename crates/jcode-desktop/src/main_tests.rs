@@ -42,7 +42,7 @@ fn desktop_config_parses_positive_millisecond_durations_only() {
 fn desktop_process_role_parses_internal_flags() {
     assert_eq!(
         desktop_process_role_from_args(["jcode-desktop"].into_iter()),
-        DesktopProcessRole::Standalone
+        DesktopProcessRole::StableHost
     );
     assert_eq!(
         desktop_process_role_from_args(["jcode-desktop", "--desktop-host"].into_iter()),
@@ -3611,8 +3611,8 @@ fn assistant_inline_code_pill_matches_glyphon_layout_after_narrow_wrap() {
     assert!(
         body_lines
             .iter()
-            .any(|line| line.text == "format inline code like a variable"),
-        "narrow fixture should exercise a line that glyphon used to re-wrap"
+            .any(|line| line.text.contains("format inline code")),
+        "narrow fixture should exercise wrapped prose before the inline-code row"
     );
     let code_line_index = body_lines
         .iter()
@@ -3688,6 +3688,31 @@ fn assistant_inline_code_pill_matches_glyphon_layout_after_narrow_wrap() {
             height: card_height,
         },
         "narrow inline code pill",
+    );
+}
+
+#[test]
+fn single_session_cached_body_layout_is_not_reused_across_width_resize() {
+    let wide = PhysicalSize::new(1600, 900);
+    let narrow = PhysicalSize::new(720, 900);
+    let height_only_resize = PhysicalSize::new(1600, 895);
+    let scale = 1.0;
+
+    assert!(
+        single_session_body_text_buffer_layout_compatible(
+            (wide.width, wide.height),
+            height_only_resize,
+            scale
+        ),
+        "minor height-only resizes that keep the same visible-line bucket may reuse cached body glyphs"
+    );
+    assert!(
+        !single_session_body_text_buffer_layout_compatible(
+            (wide.width, wide.height),
+            narrow,
+            scale
+        ),
+        "horizontal resizes must rebuild the body buffer so wrapping and text bounds match the new window width"
     );
 }
 
@@ -6309,6 +6334,18 @@ fn desktop_app_drains_session_events_into_visible_debug_snapshot() {
     assert_eq!(completed.status.as_deref(), Some("ready"));
     assert!(completed.body_text.contains("visible assistant response"));
     assert!(!completed.body_text.contains("assistant:"));
+}
+
+#[test]
+fn desktop_reload_notice_is_visible_without_replacing_window() {
+    let mut app = fresh_single_session_app();
+
+    show_desktop_reload_notice(&mut app);
+
+    let snapshot = app.debug_snapshot();
+    assert_eq!(snapshot.mode, "single_session");
+    assert_eq!(snapshot.status.as_deref(), Some("desktop UI reloaded"));
+    assert!(snapshot.body_text.contains("desktop UI reloaded"));
 }
 
 #[test]

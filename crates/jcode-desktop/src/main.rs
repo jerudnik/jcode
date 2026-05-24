@@ -26,7 +26,7 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use bytemuck::{Pod, Zeroable};
 use desktop_app_driver::{
-    DESKTOP_UI_SNAPSHOT_VERSION, DesktopAppDriver, DesktopSceneBuildContext,
+    DESKTOP_UI_SNAPSHOT_VERSION, DesktopAppDriver, DesktopAppRuntime, DesktopSceneBuildContext,
     DesktopSingleSessionSnapshot, DesktopSnapshotRestoreError, DesktopSurfaceSnapshot,
     DesktopUiSnapshot, DesktopWorkspaceSnapshot, DesktopWorkspaceSurfaceSnapshot,
 };
@@ -36,9 +36,9 @@ use desktop_ipc::{DesktopHostToWorkerEnvelope, write_desktop_ipc_frame};
 use desktop_protocol::{
     DesktopHostToWorkerMessage, DesktopInputEvent, DesktopKeyEvent, DesktopKeyModifiers,
     DesktopMouseButton, DesktopMouseEvent, DesktopProtocolEnvelope, DesktopSceneUpdate,
-    DesktopSessionEventBatchWire, DesktopSessionEventWire, DesktopWindowEvent, DesktopWindowState,
-    DesktopWorkerInit, DesktopWorkerMode, DesktopWorkerReady, DesktopWorkerShutdownReason,
-    DesktopWorkerToHostMessage,
+    DesktopSessionEventBatchWire, DesktopSessionEventWire, DesktopSnapshotResponse,
+    DesktopWindowEvent, DesktopWindowState, DesktopWorkerInit, DesktopWorkerMode,
+    DesktopWorkerReady, DesktopWorkerShutdownReason, DesktopWorkerToHostMessage,
 };
 use desktop_scene::{
     DesktopColor, DesktopDisplayCommand, DesktopRect as DesktopSceneRect, DesktopRectPaint,
@@ -584,6 +584,9 @@ async fn run() -> Result<()> {
     let mut scroll_accumulator = ScrollLineAccumulator::default();
     let mut scroll_metrics_cache = SingleSessionScrollMetricsCache::default();
     let mut hot_reloader = DesktopHotReloader::new(process_role.reload_strategy());
+    if process_role == DesktopProcessRole::StableHost {
+        hot_reloader.start_app_worker_for_current_binary(&app, &window, "stable host startup");
+    }
     let preferences_save_tx = spawn_desktop_preferences_saver();
     let mut power_inhibitor = power_inhibit::PowerInhibitor::new();
     let (session_event_tx, session_event_rx) = mpsc::channel();
@@ -601,7 +604,6 @@ async fn run() -> Result<()> {
     let mut space_hold_started_at: Option<Instant> = None;
     let mut space_hold_consumed = false;
     let mut desktop_clipboard = DesktopClipboard::default();
-    let mut latest_worker_scene: Option<DesktopScene> = None;
 
     if pending_workspace_startup_load {
         spawn_session_cards_load(
@@ -676,9 +678,24 @@ async fn run() -> Result<()> {
         ) {
             window.request_redraw();
         }
-        if let Some(scene) = hot_reloader.drain_app_worker_messages() {
-            latest_worker_scene = Some(scene);
+        let worker_drain = hot_reloader.drain_app_worker_messages();
+        if let Some(scene) = worker_drain.latest_scene {
+            // Keep receiving worker scenes so the IPC path stays exercised, but do
+            // not make them primary yet. The worker currently emits only the
+            // display-list skeleton, while the in-process host renderer still owns
+            // the complete desktop UI. Rendering the worker scene here regresses
+            // normal launches to a blank/gray window.
+            drop(scene);
             window.request_redraw();
+        }
+        if worker_drain.reload_requested {
+            show_desktop_reload_notice(&mut app);
+            window.set_title(&app.status_title());
+            window.request_redraw();
+            if hot_reloader.force_reload(&app, &window) {
+                target.exit();
+                return;
+            }
         }
 
         match event {
@@ -920,7 +937,6 @@ async fn run() -> Result<()> {
                             )),
                         );
                         window.request_redraw();
-                        return;
                     }
                     if key_input == KeyInput::RefreshSessions && app.is_workspace() {
                         spawn_session_cards_load(
@@ -1332,20 +1348,16 @@ async fn run() -> Result<()> {
                         window_size,
                         &mut scroll_metrics_cache,
                     );
-                    let render_result = if let Some(scene) = latest_worker_scene.as_ref() {
-                        canvas.render_scene(scene)
-                    } else {
-                        canvas.render(
+                    let render_result = canvas.render(
+                        &app,
+                        window.current_monitor().map(|monitor| monitor.size()),
+                        smooth_scroll_lines,
+                        workspace_space_hold_progress(
                             &app,
-                            window.current_monitor().map(|monitor| monitor.size()),
-                            smooth_scroll_lines,
-                            workspace_space_hold_progress(
-                                &app,
-                                space_hold_started_at,
-                                space_hold_consumed,
-                            ),
-                        )
-                    };
+                            space_hold_started_at,
+                            space_hold_consumed,
+                        ),
+                    );
                     match render_result {
                     Ok(frame) => {
                         surface_timeout_backoff.reset();
@@ -4495,6 +4507,13 @@ fn fresh_single_session_app() -> DesktopApp {
     DesktopApp::SingleSession(SingleSessionApp::new(None))
 }
 
+fn fresh_desktop_app_for_worker_mode(mode: DesktopWorkerMode) -> DesktopApp {
+    match mode {
+        DesktopWorkerMode::SingleSession => fresh_single_session_app(),
+        DesktopWorkerMode::Workspace => DesktopApp::Workspace(Workspace::loading_sessions()),
+    }
+}
+
 fn initial_single_session_app(resume_session_id: Option<&str>) -> DesktopApp {
     let Some(session_id) = resume_session_id else {
         return fresh_single_session_app();
@@ -4592,6 +4611,13 @@ fn run_desktop_app_worker_process(desktop_mode: DesktopMode) -> Result<()> {
 
     let stdin = std::io::stdin();
     let mut reader = BufReader::new(stdin.lock());
+    let mut runtime: Option<DesktopAppRuntime<DesktopApp>> = None;
+    let mut latest_window = DesktopWindowState {
+        width: DEFAULT_WINDOW_WIDTH as u32,
+        height: DEFAULT_WINDOW_HEIGHT as u32,
+        scale_factor: 1.0,
+        focused: true,
+    };
     let mut next_worker_sequence = 2;
     loop {
         let frame: Option<DesktopHostToWorkerEnvelope> =
@@ -4605,7 +4631,18 @@ fn run_desktop_app_worker_process(desktop_mode: DesktopMode) -> Result<()> {
             .context("host sent incompatible protocol frame")?;
         match frame.payload {
             DesktopHostToWorkerMessage::Initialize(init) => {
-                let scene = desktop_scene_for_worker_init(&init);
+                latest_window = init.window.clone();
+                let mut app = fresh_desktop_app_for_worker_mode(init.mode);
+                if let Some(snapshot) = init.snapshot.clone()
+                    && let Err(error) = app.restore_snapshot(snapshot)
+                {
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: app worker failed to restore host snapshot: {error:#}"
+                    ));
+                }
+                let app_runtime = DesktopAppRuntime::new(app);
+                let scene = desktop_scene_for_worker_runtime(&app_runtime, &latest_window);
+                runtime = Some(app_runtime);
                 let scene_update = DesktopProtocolEnvelope::new(
                     next_worker_sequence,
                     DesktopWorkerToHostMessage::Scene(DesktopSceneUpdate {
@@ -4618,9 +4655,22 @@ fn run_desktop_app_worker_process(desktop_mode: DesktopMode) -> Result<()> {
                     .context("failed to write worker initial scene")?;
             }
             DesktopHostToWorkerMessage::SnapshotRequest { request_id } => {
-                desktop_log::info(format_args!(
-                    "jcode-desktop: app worker received snapshot request {request_id} before full runtime is attached"
-                ));
+                if let Some(runtime) = runtime.as_ref() {
+                    let snapshot = DesktopProtocolEnvelope::new(
+                        next_worker_sequence,
+                        DesktopWorkerToHostMessage::Snapshot(DesktopSnapshotResponse {
+                            request_id,
+                            snapshot: runtime.snapshot(),
+                        }),
+                    );
+                    next_worker_sequence += 1;
+                    write_desktop_ipc_frame(&mut stdout, &snapshot)
+                        .context("failed to write worker snapshot response")?;
+                } else {
+                    desktop_log::info(format_args!(
+                        "jcode-desktop: app worker received snapshot request {request_id} before initialization"
+                    ));
+                }
             }
             DesktopHostToWorkerMessage::Shutdown {
                 reason:
@@ -4628,15 +4678,83 @@ fn run_desktop_app_worker_process(desktop_mode: DesktopMode) -> Result<()> {
                     | DesktopWorkerShutdownReason::Reload
                     | DesktopWorkerShutdownReason::ProtocolMismatch,
             } => break,
-            DesktopHostToWorkerMessage::Input(_)
-            | DesktopHostToWorkerMessage::SessionEvents(_)
-            | DesktopHostToWorkerMessage::MetricsAck { .. } => {}
+            DesktopHostToWorkerMessage::Input(input) => {
+                let mut changed = false;
+                match input {
+                    DesktopInputEvent::Key(key) => {
+                        if key.pressed
+                            && let Some(runtime) = runtime.as_mut()
+                        {
+                            let outcome =
+                                runtime.handle_key_input(desktop_key_event_to_key_input(&key));
+                            if matches!(outcome, KeyOutcome::ForceReload) {
+                                let reload_requested = DesktopProtocolEnvelope::new(
+                                    next_worker_sequence,
+                                    DesktopWorkerToHostMessage::ReloadRequested,
+                                );
+                                next_worker_sequence += 1;
+                                write_desktop_ipc_frame(&mut stdout, &reload_requested)
+                                    .context("failed to write worker reload request")?;
+                            } else {
+                                changed = true;
+                            }
+                        }
+                    }
+                    DesktopInputEvent::Window(DesktopWindowEvent::Resized {
+                        width,
+                        height,
+                        scale_factor,
+                    }) => {
+                        latest_window.width = width;
+                        latest_window.height = height;
+                        latest_window.scale_factor = scale_factor;
+                        changed = true;
+                    }
+                    DesktopInputEvent::Window(DesktopWindowEvent::Focused(focused)) => {
+                        latest_window.focused = focused;
+                    }
+                    DesktopInputEvent::Mouse(_) => {}
+                }
+                if changed && let Some(runtime) = runtime.as_ref() {
+                    write_worker_scene_update(
+                        &mut stdout,
+                        &mut next_worker_sequence,
+                        runtime,
+                        &latest_window,
+                    )
+                    .context("failed to write worker input scene")?;
+                }
+            }
+            DesktopHostToWorkerMessage::SessionEvents(batch) => {
+                let mut changed = false;
+                if let Some(runtime) = runtime.as_mut() {
+                    for event in batch.events {
+                        if let Some(session_event) =
+                            desktop_wire_session_event_to_runtime_event(event)
+                        {
+                            runtime.apply_session_event(session_event);
+                            changed = true;
+                        }
+                    }
+                }
+                if changed && let Some(runtime) = runtime.as_ref() {
+                    write_worker_scene_update(
+                        &mut stdout,
+                        &mut next_worker_sequence,
+                        runtime,
+                        &latest_window,
+                    )
+                    .context("failed to write worker session event scene")?;
+                }
+            }
+            DesktopHostToWorkerMessage::MetricsAck { .. } => {}
         }
     }
 
     Ok(())
 }
 
+#[cfg(test)]
 fn desktop_scene_for_worker_init(init: &DesktopWorkerInit) -> DesktopScene {
     let mut scene = DesktopScene::new(DesktopSceneViewport::new(
         init.window.width as f32,
@@ -4652,6 +4770,114 @@ fn desktop_scene_for_worker_init(init: &DesktopWorkerInit) -> DesktopScene {
         0.02, 0.024, 0.03, 1.0,
     )));
     scene
+}
+
+fn desktop_scene_for_worker_runtime(
+    runtime: &DesktopAppRuntime<DesktopApp>,
+    window: &DesktopWindowState,
+) -> DesktopScene {
+    let mut scene = DesktopScene::new(DesktopSceneViewport::new(
+        window.width as f32,
+        window.height as f32,
+        window.scale_factor,
+    ));
+    scene.push(DesktopDisplayCommand::Clear(DesktopColor::rgba(
+        0.02, 0.024, 0.03, 1.0,
+    )));
+    runtime.build_scene(scene)
+}
+
+fn write_worker_scene_update(
+    stdout: &mut impl Write,
+    next_worker_sequence: &mut u64,
+    runtime: &DesktopAppRuntime<DesktopApp>,
+    window: &DesktopWindowState,
+) -> Result<()> {
+    let scene = desktop_scene_for_worker_runtime(runtime, window);
+    let scene_update = DesktopProtocolEnvelope::new(
+        *next_worker_sequence,
+        DesktopWorkerToHostMessage::Scene(DesktopSceneUpdate {
+            animation_active: scene.metadata.animation_active,
+            scene,
+        }),
+    );
+    *next_worker_sequence += 1;
+    write_desktop_ipc_frame(stdout, &scene_update)?;
+    Ok(())
+}
+
+fn desktop_key_event_to_key_input(event: &DesktopKeyEvent) -> KeyInput {
+    let modifiers = desktop_key_modifiers_to_winit(event.modifiers);
+    let key = desktop_key_string_to_winit_key(&event.key, event.text.as_deref());
+    to_key_input(&key, modifiers)
+}
+
+fn desktop_key_modifiers_to_winit(modifiers: DesktopKeyModifiers) -> ModifiersState {
+    let mut state = ModifiersState::empty();
+    if modifiers.shift {
+        state |= ModifiersState::SHIFT;
+    }
+    if modifiers.ctrl {
+        state |= ModifiersState::CONTROL;
+    }
+    if modifiers.alt {
+        state |= ModifiersState::ALT;
+    }
+    if modifiers.super_key {
+        state |= ModifiersState::SUPER;
+    }
+    state
+}
+
+fn desktop_key_string_to_winit_key(key: &str, text: Option<&str>) -> Key {
+    match key {
+        "Escape" => Key::Named(NamedKey::Escape),
+        "Enter" => Key::Named(NamedKey::Enter),
+        "Tab" => Key::Named(NamedKey::Tab),
+        "Backspace" => Key::Named(NamedKey::Backspace),
+        "Delete" => Key::Named(NamedKey::Delete),
+        "PageUp" => Key::Named(NamedKey::PageUp),
+        "PageDown" => Key::Named(NamedKey::PageDown),
+        "ArrowUp" => Key::Named(NamedKey::ArrowUp),
+        "ArrowDown" => Key::Named(NamedKey::ArrowDown),
+        "ArrowLeft" => Key::Named(NamedKey::ArrowLeft),
+        "ArrowRight" => Key::Named(NamedKey::ArrowRight),
+        "Home" => Key::Named(NamedKey::Home),
+        "End" => Key::Named(NamedKey::End),
+        "Space" => Key::Named(NamedKey::Space),
+        _ => Key::Character(text.unwrap_or(key).to_string().into()),
+    }
+}
+
+fn desktop_wire_session_event_to_runtime_event(
+    event: DesktopSessionEventWire,
+) -> Option<session_launch::DesktopSessionEvent> {
+    match event {
+        DesktopSessionEventWire::Status { message } => Some(
+            session_launch::DesktopSessionEvent::Status(DesktopSessionStatus::external(message)),
+        ),
+        DesktopSessionEventWire::AssistantTextDelta { text } => {
+            Some(session_launch::DesktopSessionEvent::TextDelta(text))
+        }
+        DesktopSessionEventWire::ToolStarted { id, title } => {
+            Some(session_launch::DesktopSessionEvent::ToolStarted {
+                id: (!id.is_empty()).then_some(id),
+                name: title,
+            })
+        }
+        DesktopSessionEventWire::ToolFinished { id, title, success } => {
+            Some(session_launch::DesktopSessionEvent::ToolFinished {
+                id: (!id.is_empty()).then_some(id),
+                name: title,
+                summary: String::new(),
+                is_error: !success,
+            })
+        }
+        DesktopSessionEventWire::Error { message } => {
+            Some(session_launch::DesktopSessionEvent::Error(message))
+        }
+        DesktopSessionEventWire::RawJson { .. } => None,
+    }
 }
 
 fn desktop_mode_from_args<'a>(args: impl IntoIterator<Item = &'a str>) -> DesktopMode {
@@ -4687,7 +4913,7 @@ fn desktop_process_role_from_args<'a>(
             };
         }
     }
-    DesktopProcessRole::Standalone
+    DesktopProcessRole::StableHost
 }
 
 fn desktop_resume_session_id_from_args<'a>(
@@ -4968,6 +5194,12 @@ struct DesktopHotReloader {
     app_worker: Option<DesktopWorkerConnection>,
 }
 
+#[derive(Default)]
+struct DesktopWorkerDrain {
+    latest_scene: Option<DesktopScene>,
+    reload_requested: bool,
+}
+
 impl DesktopHotReloader {
     const CHECK_INTERVAL: Duration = Duration::from_millis(750);
 
@@ -4997,11 +5229,11 @@ impl DesktopHotReloader {
         Some(std::cmp::max(now, self.last_checked + Self::CHECK_INTERVAL))
     }
 
-    fn drain_app_worker_messages(&mut self) -> Option<DesktopScene> {
+    fn drain_app_worker_messages(&mut self) -> DesktopWorkerDrain {
         let Some(worker) = self.app_worker.as_ref() else {
-            return None;
+            return DesktopWorkerDrain::default();
         };
-        let mut latest_scene = None;
+        let mut drained = DesktopWorkerDrain::default();
         while let Some(message) = worker.try_recv() {
             match message {
                 Ok(DesktopWorkerToHostMessage::Ready(ready)) => {
@@ -5011,7 +5243,10 @@ impl DesktopHotReloader {
                     ));
                 }
                 Ok(DesktopWorkerToHostMessage::Scene(scene_update)) => {
-                    latest_scene = Some(scene_update.scene);
+                    drained.latest_scene = Some(scene_update.scene);
+                }
+                Ok(DesktopWorkerToHostMessage::ReloadRequested) => {
+                    drained.reload_requested = true;
                 }
                 Ok(DesktopWorkerToHostMessage::Snapshot(snapshot)) => {
                     desktop_log::info(format_args!(
@@ -5045,7 +5280,7 @@ impl DesktopHotReloader {
                 }
             }
         }
-        latest_scene
+        drained
     }
 
     fn has_app_worker(&self) -> bool {
@@ -5061,6 +5296,22 @@ impl DesktopHotReloader {
             return Ok(());
         };
         worker.send(message)
+    }
+
+    fn start_app_worker_for_current_binary(
+        &mut self,
+        app: &DesktopApp,
+        window: &Window,
+        reason: &'static str,
+    ) {
+        let Some(relaunch) = self.relaunch.clone() else {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: cannot start app worker for {reason}; current process cannot be relaunched"
+            ));
+            return;
+        };
+        let binary = desktop_reload_binary_candidate(&relaunch.binary);
+        self.restart_app_worker(app, window, &relaunch, binary, reason);
     }
 
     fn poll(&mut self, app: &DesktopApp, window: &Window) -> bool {
@@ -5959,6 +6210,10 @@ impl DesktopApp {
             },
         }
     }
+}
+
+fn show_desktop_reload_notice(app: &mut DesktopApp) {
+    app.set_single_session_status_label("desktop UI reloaded");
 }
 
 fn to_key_input(key: &Key, modifiers: ModifiersState) -> KeyInput {
