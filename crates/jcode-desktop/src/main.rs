@@ -21,7 +21,10 @@ mod single_session_render;
 mod workspace;
 
 use ab_glyph::{Font, FontArc, Glyph as AbGlyph, PxScale, ScaleFont, point};
-use animation::{AnimatedViewport, FocusPulse, VisibleColumnLayout, WorkspaceRenderLayout};
+use animation::{
+    AnimatedRect, AnimatedViewport, ColorTransition, FocusPulse, SurfaceTransitionAnimator,
+    SurfaceVisualFrame, SurfaceVisualTarget, VisibleColumnLayout, WorkspaceRenderLayout,
+};
 use anyhow::{Context, Result};
 use base64::Engine;
 use bytemuck::{Pod, Zeroable};
@@ -59,10 +62,10 @@ use image::RgbaImage;
 use render_helpers::*;
 use session_launch::DesktopSessionStatus;
 use single_session::{
-    SINGLE_SESSION_FONT_FAMILY, SINGLE_SESSION_WELCOME_FONT_FAMILY, SelectionPoint,
-    SingleSessionApp, SingleSessionLineStyle, SingleSessionMessage, SingleSessionStyledLine,
-    handwritten_welcome_phrase, single_session_surface, single_session_typography,
-    single_session_typography_for_scale,
+    ReasoningEffortCycleOutcome, SINGLE_SESSION_FONT_FAMILY, SINGLE_SESSION_WELCOME_FONT_FAMILY,
+    SelectionPoint, SingleSessionApp, SingleSessionLineStyle, SingleSessionMessage,
+    SingleSessionStyledLine, handwritten_welcome_phrase, single_session_surface,
+    single_session_typography, single_session_typography_for_scale,
 };
 use single_session_render::*;
 use wgpu::{CompositeAlphaMode, PresentMode, SurfaceError, TextureUsages};
@@ -81,7 +84,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -153,6 +156,7 @@ const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(150);
 const STREAMING_TEXT_FADE_START_OPACITY: f32 = 0.4;
 const STREAMING_TEXT_RISE_START_OFFSET_PIXELS: f32 = 3.5;
 const DESKTOP_ASYNC_JOB_LIMIT: usize = 12;
+const DESKTOP_REASONING_EFFORT_DEBOUNCE: Duration = Duration::from_millis(45);
 const PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY: usize = 1024;
 const PRIMITIVE_VERTEX_BUFFER_SHRINK_RATIO: usize = 4;
 const WORKSPACE_BASE_VERTEX_CAPACITY_HINT: usize = 512;
@@ -207,6 +211,129 @@ fn spawn_bounded_desktop_async_job(
         })
         .with_context(|| format!("failed to spawn {name}"))?;
     Ok(())
+}
+
+#[derive(Clone)]
+struct DesktopReasoningEffortRequestQueue {
+    request_tx: mpsc::Sender<DesktopReasoningEffortRequest>,
+    latest_generation: Arc<AtomicU64>,
+}
+
+struct DesktopReasoningEffortRequest {
+    generation: u64,
+    effort: String,
+    target_session_id: Option<String>,
+    event_tx: session_launch::DesktopSessionEventSender,
+}
+
+impl DesktopReasoningEffortRequestQueue {
+    fn request(
+        &self,
+        effort: String,
+        target_session_id: Option<String>,
+        event_tx: session_launch::DesktopSessionEventSender,
+    ) -> Result<()> {
+        let generation = self.latest_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        self.request_tx
+            .send(DesktopReasoningEffortRequest {
+                generation,
+                effort,
+                target_session_id,
+                event_tx,
+            })
+            .context("failed to queue desktop reasoning effort change")
+    }
+}
+
+fn spawn_desktop_reasoning_effort_request_queue() -> Result<DesktopReasoningEffortRequestQueue> {
+    let (request_tx, request_rx) = mpsc::channel();
+    let latest_generation = Arc::new(AtomicU64::new(0));
+    let worker_latest_generation = Arc::clone(&latest_generation);
+    std::thread::Builder::new()
+        .name("jcode-desktop-effort-queue".to_string())
+        .spawn(move || {
+            run_desktop_reasoning_effort_request_queue(request_rx, worker_latest_generation);
+        })
+        .context("failed to spawn desktop reasoning effort queue")?;
+    Ok(DesktopReasoningEffortRequestQueue {
+        request_tx,
+        latest_generation,
+    })
+}
+
+fn run_desktop_reasoning_effort_request_queue(
+    request_rx: mpsc::Receiver<DesktopReasoningEffortRequest>,
+    latest_generation: Arc<AtomicU64>,
+) {
+    while let Ok(mut request) = request_rx.recv() {
+        let mut coalesced = 0usize;
+        let mut disconnected = false;
+        loop {
+            match request_rx.recv_timeout(DESKTOP_REASONING_EFFORT_DEBOUNCE) {
+                Ok(next_request) => {
+                    request = next_request;
+                    coalesced += 1;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    disconnected = true;
+                    break;
+                }
+            }
+        }
+        if coalesced > 0 {
+            desktop_log::info(format_args!(
+                "jcode-desktop: coalesced {coalesced} superseded reasoning effort request(s); applying {}",
+                desktop_log::truncate_for_log(&request.effort, 64)
+            ));
+        }
+        apply_desktop_reasoning_effort_request(request, &latest_generation);
+        if disconnected {
+            break;
+        }
+    }
+}
+
+fn apply_desktop_reasoning_effort_request(
+    request: DesktopReasoningEffortRequest,
+    latest_generation: &AtomicU64,
+) {
+    let (response_tx, response_rx) = mpsc::channel();
+    let result = session_launch::set_reasoning_effort(
+        &request.effort,
+        request.target_session_id.as_deref(),
+        Some(response_tx),
+    );
+    let still_latest = latest_generation.load(Ordering::Acquire) == request.generation;
+    if still_latest {
+        for event in response_rx.try_iter() {
+            let _ = request.event_tx.send(event);
+        }
+        if let Err(error) = result {
+            desktop_log::error(format_args!(
+                "jcode-desktop: reasoning effort sync failed generation={} target_session={}: {error:#}",
+                request.generation,
+                request.target_session_id.as_deref().unwrap_or("<current>")
+            ));
+            let _ = request
+                .event_tx
+                .send(session_launch::DesktopSessionEvent::Status(
+                    DesktopSessionStatus::ReasoningEffortFailed(format!("{error:#}")),
+                ));
+        }
+    } else if let Err(error) = result {
+        desktop_log::warn(format_args!(
+            "jcode-desktop: stale reasoning effort sync failed generation={} target_session={}: {error:#}",
+            request.generation,
+            request.target_session_id.as_deref().unwrap_or("<current>")
+        ));
+    } else {
+        let dropped = response_rx.try_iter().count();
+        desktop_log::info(format_args!(
+            "jcode-desktop: dropped stale reasoning effort response generation={} event_count={dropped}",
+            request.generation
+        ));
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -591,6 +718,7 @@ async fn run() -> Result<()> {
     let mut power_inhibitor = power_inhibit::PowerInhibitor::new();
     let (session_event_tx, session_event_rx) = mpsc::channel();
     spawn_session_event_forwarder(session_event_rx, event_loop_proxy.clone());
+    let reasoning_effort_queue = spawn_desktop_reasoning_effort_request_queue()?;
     let mut recovery_scan_pending = app.is_single_session() && !desktop_gallery;
     let mut first_frame_presented = false;
     let mut first_content_frame_presented = false;
@@ -1115,16 +1243,20 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::CycleReasoningEffort(direction) => {
-                            if let Err(error) = session_launch::spawn_cycle_reasoning_effort(
-                                direction,
-                                app.single_session_live_id(),
-                                session_event_tx.clone(),
-                            ) {
-                                apply_single_session_error(&mut app, error);
-                            } else {
-                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
-                                    DesktopSessionStatus::SwitchingReasoningEffort,
-                                ));
+                            let target_session_id = app.single_session_live_id();
+                            let outcome = app.preview_single_session_reasoning_effort_cycle(direction);
+                            match outcome {
+                                ReasoningEffortCycleOutcome::Set(effort) => {
+                                    if let Err(error) = reasoning_effort_queue.request(
+                                        effort,
+                                        target_session_id,
+                                        session_event_tx.clone(),
+                                    ) {
+                                        apply_single_session_error(&mut app, error);
+                                    }
+                                }
+                                ReasoningEffortCycleOutcome::AlreadyAtLimit { .. }
+                                | ReasoningEffortCycleOutcome::Unavailable => {}
                             }
                             window.set_title(&app.status_title());
                             window.request_redraw();
@@ -1184,16 +1316,20 @@ async fn run() -> Result<()> {
                             window.request_redraw();
                         }
                         KeyOutcome::SetReasoningEffort(effort) => {
-                            if let Err(error) = session_launch::spawn_set_reasoning_effort(
-                                effort,
-                                app.single_session_live_id(),
-                                session_event_tx.clone(),
-                            ) {
-                                apply_single_session_error(&mut app, error);
-                            } else {
-                                app.apply_session_event(session_launch::DesktopSessionEvent::Status(
-                                    DesktopSessionStatus::SwitchingReasoningEffort,
-                                ));
+                            let target_session_id = app.single_session_live_id();
+                            match app.preview_single_session_reasoning_effort_set(&effort) {
+                                Some(effort) => {
+                                    if let Err(error) = reasoning_effort_queue.request(
+                                        effort,
+                                        target_session_id,
+                                        session_event_tx.clone(),
+                                    ) {
+                                        apply_single_session_error(&mut app, error);
+                                    }
+                                }
+                                None => app.set_single_session_status_label(
+                                    "thinking level is not available for this model",
+                                ),
                             }
                             window.set_title(&app.status_title());
                             window.request_redraw();
@@ -6004,6 +6140,23 @@ impl DesktopApp {
         }
     }
 
+    fn preview_single_session_reasoning_effort_cycle(
+        &mut self,
+        direction: i8,
+    ) -> ReasoningEffortCycleOutcome {
+        match self {
+            Self::SingleSession(app) => app.preview_reasoning_effort_cycle(direction),
+            Self::Workspace(_) => ReasoningEffortCycleOutcome::Unavailable,
+        }
+    }
+
+    fn preview_single_session_reasoning_effort_set(&mut self, effort: &str) -> Option<String> {
+        match self {
+            Self::SingleSession(app) => app.preview_reasoning_effort_set(effort),
+            Self::Workspace(_) => None,
+        }
+    }
+
     fn set_single_session_handle(&mut self, handle: session_launch::DesktopSessionHandle) {
         if let Self::SingleSession(app) = self {
             app.set_session_handle(handle);
@@ -8066,7 +8219,9 @@ struct Canvas {
     size: PhysicalSize<u32>,
     surface_zero_sized: bool,
     viewport_animation: AnimatedViewport,
+    surface_transitions: SurfaceTransitionAnimator,
     focus_pulse: FocusPulse,
+    status_color_transition: ColorTransition,
     primitive_vertex_buffer: Option<wgpu::Buffer>,
     primitive_vertex_capacity: usize,
     primitive_vertices_cache_key: Option<u64>,
@@ -8179,7 +8334,9 @@ impl Canvas {
             size,
             surface_zero_sized: !desktop_surface_size_is_renderable(initial_window_size),
             viewport_animation: AnimatedViewport::default(),
+            surface_transitions: SurfaceTransitionAnimator::default(),
             focus_pulse: FocusPulse::default(),
+            status_color_transition: ColorTransition::default(),
             primitive_vertex_buffer: None,
             primitive_vertex_capacity: 0,
             primitive_vertices_cache_key: None,
@@ -8987,11 +9144,31 @@ impl Canvas {
             };
         frame_profile.checkpoint("welcome_reveal");
 
-        let workspace_render_layout_for_frame = if let DesktopApp::Workspace(workspace) = app {
+        let (
+            workspace_render_layout_for_frame,
+            workspace_surface_frames_for_frame,
+            workspace_status_color_for_frame,
+        ) = if let DesktopApp::Workspace(workspace) = app {
             let target_layout = workspace_render_layout(workspace, self.size, monitor_size);
-            Some(self.viewport_animation.frame(target_layout, now))
+            let render_layout = self.viewport_animation.frame(target_layout, now);
+            let surface_targets =
+                workspace_surface_transition_targets(workspace, self.size, render_layout);
+            let surface_frames = WorkspaceSurfaceTransitionFrames::new(
+                self.surface_transitions.frame(surface_targets, now),
+                self.surface_transitions.is_animating(),
+            );
+            let status_color = self
+                .status_color_transition
+                .frame(workspace_status_bar_target_color(workspace), now);
+            (
+                Some(render_layout),
+                Some(surface_frames),
+                Some(status_color),
+            )
         } else {
-            None
+            self.surface_transitions.clear();
+            self.status_color_transition.clear();
+            (None, None, None)
         };
 
         let mut single_session_rendered_body_key = None;
@@ -9044,6 +9221,7 @@ impl Canvas {
                         workspace,
                         self.size,
                         render_layout,
+                        workspace_surface_frames_for_frame.as_ref(),
                         font_system,
                     );
                     if !workspace_text_panes.is_empty() {
@@ -9293,18 +9471,27 @@ impl Canvas {
                 let render_layout = workspace_render_layout_for_frame
                     .unwrap_or_else(|| workspace_render_layout(workspace, self.size, monitor_size));
                 let focus_pulse = self.focus_pulse.frame(workspace.focused_id, now);
-                let animation_active =
-                    self.viewport_animation.is_animating() || self.focus_pulse.is_animating();
+                let surface_transition_active = workspace_surface_frames_for_frame
+                    .as_ref()
+                    .is_some_and(|frames| frames.animating);
+                let animation_active = self.viewport_animation.is_animating()
+                    || self.focus_pulse.is_animating()
+                    || surface_transition_active
+                    || self.status_color_transition.is_animating();
                 reserve_workspace_vertex_capacity(
                     &mut self.primitive_workspace_vertices,
                     workspace,
                 );
+                let status_color = workspace_status_color_for_frame
+                    .unwrap_or_else(|| workspace_status_bar_target_color(workspace));
                 build_vertices_into(
                     workspace,
                     self.size,
                     render_layout,
                     focus_pulse,
                     workspace_space_hold_progress,
+                    workspace_surface_frames_for_frame.as_ref(),
+                    status_color,
                     &mut self.primitive_workspace_vertices,
                 );
                 (
@@ -10332,6 +10519,8 @@ fn build_vertices(
         render_layout,
         focus_pulse,
         space_hold_progress,
+        None,
+        workspace_status_bar_target_color(workspace),
         &mut vertices,
     );
     vertices
@@ -10358,6 +10547,99 @@ struct WorkspaceSingleSessionTextPane {
     size: PhysicalSize<u32>,
     rendered_body_lines: Vec<SingleSessionStyledLine>,
     buffers: Vec<Buffer>,
+}
+
+struct WorkspaceSurfaceTransitionFrames {
+    frames: Vec<SurfaceVisualFrame>,
+    animating: bool,
+}
+
+impl WorkspaceSurfaceTransitionFrames {
+    fn new(frames: Vec<SurfaceVisualFrame>, animating: bool) -> Self {
+        Self { frames, animating }
+    }
+
+    fn frame_for_surface(&self, surface_id: u64) -> Option<SurfaceVisualFrame> {
+        self.frames
+            .iter()
+            .copied()
+            .find(|frame| frame.id == surface_id)
+    }
+}
+
+fn workspace_transitioned_surface_rect(
+    frames: Option<&WorkspaceSurfaceTransitionFrames>,
+    surface_id: u64,
+    fallback: Rect,
+) -> Rect {
+    frames
+        .and_then(|frames| frames.frame_for_surface(surface_id))
+        .map(|frame| rect_from_animated_rect(frame.visual_rect()))
+        .unwrap_or(fallback)
+}
+
+fn workspace_transitioned_surface_opacity(
+    frames: Option<&WorkspaceSurfaceTransitionFrames>,
+    surface_id: u64,
+) -> f32 {
+    frames
+        .and_then(|frames| frames.frame_for_surface(surface_id))
+        .map(|frame| frame.opacity)
+        .unwrap_or(1.0)
+}
+
+fn animated_rect_from_rect(rect: Rect) -> AnimatedRect {
+    AnimatedRect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
+fn rect_from_animated_rect(rect: AnimatedRect) -> Rect {
+    Rect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
+fn workspace_surface_transition_targets(
+    workspace: &Workspace,
+    size: PhysicalSize<u32>,
+    render_layout: WorkspaceRenderLayout,
+) -> Vec<SurfaceVisualTarget> {
+    let mut targets = Vec::new();
+    if workspace.zoomed {
+        if let Some(surface) = workspace.focused_surface() {
+            targets.push(SurfaceVisualTarget {
+                id: surface.id,
+                rect: animated_rect_from_rect(Rect {
+                    x: OUTER_PADDING,
+                    y: STATUS_BAR_HEIGHT + OUTER_PADDING * 2.0,
+                    width: (size.width as f32 - OUTER_PADDING * 2.0).max(1.0),
+                    height: (size.height as f32 - STATUS_BAR_HEIGHT - OUTER_PADDING * 3.0).max(1.0),
+                }),
+            });
+        }
+        return targets;
+    }
+
+    for_each_visible_workspace_surface(
+        workspace,
+        size,
+        render_layout,
+        0.0,
+        |surface, rect, _, _| {
+            targets.push(SurfaceVisualTarget {
+                id: surface.id,
+                rect: animated_rect_from_rect(rect),
+            });
+        },
+    );
+    targets
 }
 
 fn workspace_panel_size(rect: Rect) -> PhysicalSize<u32> {
@@ -10391,6 +10673,7 @@ fn push_workspace_single_session_panel(
     rect: Rect,
     parent_size: PhysicalSize<u32>,
     focus_pulse: f32,
+    opacity: f32,
 ) {
     let panel_size = workspace_panel_size(rect);
     let rendered_body_lines = single_session_rendered_body_lines_for_tick(app, panel_size, 0);
@@ -10403,24 +10686,35 @@ fn push_workspace_single_session_panel(
         1.0,
         &rendered_body_lines,
     );
-    append_child_vertices_to_parent(vertices, &child_vertices, panel_size, rect, parent_size);
+    append_child_vertices_to_parent_with_opacity(
+        vertices,
+        &child_vertices,
+        panel_size,
+        rect,
+        parent_size,
+        opacity,
+    );
 }
 
-fn append_child_vertices_to_parent(
+fn append_child_vertices_to_parent_with_opacity(
     vertices: &mut Vec<Vertex>,
     child_vertices: &[Vertex],
     child_size: PhysicalSize<u32>,
     rect: Rect,
     parent_size: PhysicalSize<u32>,
+    opacity: f32,
 ) {
+    let opacity = opacity.clamp(0.0, 1.0);
     let child_width = child_size.width.max(1) as f32;
     let child_height = child_size.height.max(1) as f32;
     vertices.extend(child_vertices.iter().map(|vertex| {
         let child_x = (vertex.position[0] + 1.0) * 0.5 * child_width;
         let child_y = (1.0 - vertex.position[1]) * 0.5 * child_height;
+        let mut color = vertex.color;
+        color[3] *= opacity;
         Vertex {
             position: pixel_to_ndc([rect.x + child_x, rect.y + child_y], parent_size),
-            color: vertex.color,
+            color,
         }
     }));
 }
@@ -10468,6 +10762,7 @@ fn build_workspace_single_session_text_panes(
     workspace: &Workspace,
     size: PhysicalSize<u32>,
     render_layout: WorkspaceRenderLayout,
+    surface_frames: Option<&WorkspaceSurfaceTransitionFrames>,
     font_system: &mut FontSystem,
 ) -> Vec<WorkspaceSingleSessionTextPane> {
     let mut panes = Vec::new();
@@ -10476,12 +10771,13 @@ fn build_workspace_single_session_text_panes(
             && surface.kind == workspace::SurfaceKind::Session
             && let Some(app) = workspace_single_session_app_for_surface(workspace, surface)
         {
-            let rect = Rect {
+            let target_rect = Rect {
                 x: OUTER_PADDING,
                 y: STATUS_BAR_HEIGHT + OUTER_PADDING * 2.0,
                 width: (size.width as f32 - OUTER_PADDING * 2.0).max(1.0),
                 height: (size.height as f32 - STATUS_BAR_HEIGHT - OUTER_PADDING * 3.0).max(1.0),
             };
+            let rect = workspace_transitioned_surface_rect(surface_frames, surface.id, target_rect);
             let panel_size = workspace_panel_size(rect);
             let rendered_body_lines =
                 single_session_rendered_body_lines_for_tick(&app, panel_size, 0);
@@ -10509,13 +10805,14 @@ fn build_workspace_single_session_text_panes(
         size,
         render_layout,
         0.0,
-        |surface, rect, _, _| {
+        |surface, target_rect, _, _| {
             if surface.kind != workspace::SurfaceKind::Session {
                 return;
             }
             let Some(app) = workspace_single_session_app_for_surface(workspace, surface) else {
                 return;
             };
+            let rect = workspace_transitioned_surface_rect(surface_frames, surface.id, target_rect);
             let panel_size = workspace_panel_size(rect);
             let rendered_body_lines =
                 single_session_rendered_body_lines_for_tick(&app, panel_size, 0);
@@ -10599,6 +10896,8 @@ fn build_vertices_into(
     render_layout: WorkspaceRenderLayout,
     focus_pulse: f32,
     space_hold_progress: Option<f32>,
+    surface_frames: Option<&WorkspaceSurfaceTransitionFrames>,
+    status_color: [f32; 4],
     vertices: &mut Vec<Vertex>,
 ) {
     vertices.clear();
@@ -10620,10 +10919,6 @@ fn build_vertices_into(
         size,
     );
 
-    let status_color = match workspace.mode {
-        InputMode::Navigation => NAV_STATUS_COLOR,
-        InputMode::Insert => INSERT_STATUS_COLOR,
-    };
     let status_rect = Rect {
         x: OUTER_PADDING,
         y: OUTER_PADDING,
@@ -10647,16 +10942,26 @@ fn build_vertices_into(
 
     if workspace.zoomed {
         if let Some(surface) = workspace.focused_surface() {
-            let rect = Rect {
+            let target_rect = Rect {
                 x: OUTER_PADDING,
                 y: STATUS_BAR_HEIGHT + OUTER_PADDING * 2.0,
                 width: (width - OUTER_PADDING * 2.0).max(1.0),
                 height: (height - STATUS_BAR_HEIGHT - OUTER_PADDING * 3.0).max(1.0),
             };
+            let rect = workspace_transitioned_surface_rect(surface_frames, surface.id, target_rect);
+            let opacity = workspace_transitioned_surface_opacity(surface_frames, surface.id);
+            let start_index = vertices.len();
             if surface.kind == workspace::SurfaceKind::Session
                 && let Some(app) = workspace_single_session_app_for_surface(workspace, surface)
             {
-                push_workspace_single_session_panel(vertices, &app, rect, size, focus_pulse);
+                push_workspace_single_session_panel(
+                    vertices,
+                    &app,
+                    rect,
+                    size,
+                    focus_pulse,
+                    opacity,
+                );
             } else {
                 push_surface(vertices, rect, surface.color_index, true, focus_pulse, size);
                 let draft = focused_panel_draft(workspace, surface.id);
@@ -10669,6 +10974,7 @@ fn build_vertices_into(
                     workspace.detail_scroll,
                     draft.as_deref(),
                 );
+                multiply_vertex_alpha(&mut vertices[start_index..], opacity);
             }
         }
         if let Some(progress) = space_hold_progress {
@@ -10682,11 +10988,21 @@ fn build_vertices_into(
         size,
         render_layout,
         focus_pulse,
-        |surface, rect, focused, surface_pulse| {
+        |surface, target_rect, focused, surface_pulse| {
+            let rect = workspace_transitioned_surface_rect(surface_frames, surface.id, target_rect);
+            let opacity = workspace_transitioned_surface_opacity(surface_frames, surface.id);
+            let start_index = vertices.len();
             if surface.kind == workspace::SurfaceKind::Session
                 && let Some(app) = workspace_single_session_app_for_surface(workspace, surface)
             {
-                push_workspace_single_session_panel(vertices, &app, rect, size, surface_pulse);
+                push_workspace_single_session_panel(
+                    vertices,
+                    &app,
+                    rect,
+                    size,
+                    surface_pulse,
+                    opacity,
+                );
                 return;
             }
             push_surface(
@@ -10699,6 +11015,7 @@ fn build_vertices_into(
             );
             let draft = focused_panel_draft(workspace, surface.id);
             push_panel_contents(vertices, surface, rect, size, false, 0, draft.as_deref());
+            multiply_vertex_alpha(&mut vertices[start_index..], opacity);
         },
     );
 
@@ -10734,6 +11051,16 @@ fn push_space_hold_progress(vertices: &mut Vec<Vertex>, progress: f32, size: Phy
         SPACE_HOLD_PROGRESS_FILL_COLOR,
         size,
     );
+}
+
+fn multiply_vertex_alpha(vertices: &mut [Vertex], opacity: f32) {
+    let opacity = opacity.clamp(0.0, 1.0);
+    if opacity >= 0.999 {
+        return;
+    }
+    for vertex in vertices {
+        vertex.color[3] *= opacity;
+    }
 }
 
 fn workspace_render_layout(
@@ -10844,6 +11171,13 @@ fn workspace_status_text(workspace: &Workspace) -> String {
     };
     let panel_percent = (workspace.preferred_panel_screen_fraction() * 100.0).round() as u32;
     format!("{mode} P{panel_percent} {}", desktop_build_hash_label())
+}
+
+fn workspace_status_bar_target_color(workspace: &Workspace) -> [f32; 4] {
+    match workspace.mode {
+        InputMode::Navigation => NAV_STATUS_COLOR,
+        InputMode::Insert => INSERT_STATUS_COLOR,
+    }
 }
 
 fn desktop_build_hash_label() -> &'static str {

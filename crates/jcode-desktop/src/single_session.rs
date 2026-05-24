@@ -180,6 +180,10 @@ const DESKTOP_SLASH_COMMANDS: &[(&str, &str)] = &[
 ];
 pub(crate) const DESKTOP_SLASH_SUGGESTION_ROW_LIMIT: usize = 7;
 
+const DESKTOP_REASONING_EFFORTS_OPENAI: &[&str] = &["none", "low", "medium", "high", "xhigh"];
+const DESKTOP_REASONING_EFFORTS_ANTHROPIC_STANDARD: &[&str] = &["none", "low", "medium", "high"];
+const DESKTOP_REASONING_EFFORTS_DEEPSEEK: &[&str] = &["none", "low", "medium", "high", "max"];
+
 #[cfg_attr(test, allow(dead_code))]
 const INLINE_WIDGET_REVEAL_DURATION: Duration = Duration::from_millis(180);
 pub(crate) const MODEL_PICKER_INLINE_ROW_LIMIT: usize = 5;
@@ -515,6 +519,13 @@ pub(crate) enum SingleSessionOverlay {
         kind: InlineWidgetKind,
         mode: InlineWidgetMode,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ReasoningEffortCycleOutcome {
+    Set(String),
+    AlreadyAtLimit { effort: String, limit: &'static str },
+    Unavailable,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -1404,6 +1415,83 @@ impl SingleSessionApp {
         self.detail_scroll = 0;
     }
 
+    #[cfg(test)]
+    pub(crate) fn reasoning_effort(&self) -> Option<&str> {
+        self.runtime_settings.reasoning_effort.as_deref()
+    }
+
+    pub(crate) fn preview_reasoning_effort_set(&mut self, effort: &str) -> Option<String> {
+        let normalized = self.normalize_reasoning_effort_for_current_context(effort)?;
+        self.runtime_settings.reasoning_effort = Some(normalized.clone());
+        self.set_status_label(format!("thinking level: {normalized}"));
+        Some(normalized)
+    }
+
+    pub(crate) fn preview_reasoning_effort_cycle(
+        &mut self,
+        direction: i8,
+    ) -> ReasoningEffortCycleOutcome {
+        let efforts = self.available_reasoning_efforts_for_current_context();
+        if efforts.is_empty() {
+            self.set_status_label("thinking level is not available for this model");
+            return ReasoningEffortCycleOutcome::Unavailable;
+        }
+
+        let current = self.runtime_settings.reasoning_effort.as_deref();
+        let current_index = current
+            .and_then(|effort| efforts.iter().position(|candidate| *candidate == effort))
+            .unwrap_or(efforts.len() - 1);
+        let next_index = if direction > 0 {
+            (current_index + 1).min(efforts.len() - 1)
+        } else {
+            current_index.saturating_sub(1)
+        };
+        let next_effort = efforts[next_index];
+        if next_index == current_index {
+            let limit = if direction > 0 { "max" } else { "min" };
+            self.set_status_label(format!(
+                "thinking level: {next_effort} (already at {limit})"
+            ));
+            return ReasoningEffortCycleOutcome::AlreadyAtLimit {
+                effort: next_effort.to_string(),
+                limit,
+            };
+        }
+
+        self.runtime_settings.reasoning_effort = Some(next_effort.to_string());
+        self.set_status_label(format!("thinking level: {next_effort}"));
+        ReasoningEffortCycleOutcome::Set(next_effort.to_string())
+    }
+
+    fn normalize_reasoning_effort_for_current_context(&self, raw: &str) -> Option<String> {
+        let requested = raw.trim().to_ascii_lowercase();
+        if requested.is_empty() {
+            return None;
+        }
+        let efforts = self.available_reasoning_efforts_for_current_context();
+        if efforts.is_empty() {
+            return None;
+        }
+        if efforts.contains(&requested.as_str()) {
+            return Some(requested);
+        }
+        if requested == "max" && efforts.contains(&"xhigh") {
+            return Some("xhigh".to_string());
+        }
+        if requested == "xhigh" && efforts.contains(&"max") {
+            return Some("max".to_string());
+        }
+        efforts.last().map(|effort| (*effort).to_string())
+    }
+
+    fn available_reasoning_efforts_for_current_context(&self) -> &'static [&'static str] {
+        inferred_desktop_reasoning_efforts(
+            self.model_picker.provider_name.as_deref(),
+            self.model_picker.current_model.as_deref(),
+            self.runtime_settings.reasoning_effort.as_deref(),
+        )
+    }
+
     pub(crate) fn initialize_resumed_session(&mut self, session_id: &str) {
         self.live_session_id = Some(session_id.to_string());
         self.detail_scroll = 0;
@@ -1655,7 +1743,7 @@ impl SingleSessionApp {
             DesktopSessionStatus::ReasoningEffort(effort) => {
                 self.runtime_settings.reasoning_effort = Some(effort.clone());
                 self.messages.push(SingleSessionMessage::meta(format!(
-                    "reasoning effort set to {effort}"
+                    "thinking level set to {effort}"
                 )));
             }
             DesktopSessionStatus::ServiceTier(service_tier) => {
@@ -1790,6 +1878,9 @@ impl SingleSessionApp {
             KeyInput::CopyTranscript => self.copy_transcript(),
             KeyInput::ModelPickerMove(_) => KeyOutcome::None,
             KeyInput::CycleModel(direction) => KeyOutcome::CycleModel(direction),
+            KeyInput::CycleReasoningEffort(direction) => {
+                KeyOutcome::CycleReasoningEffort(direction)
+            }
             KeyInput::AttachClipboardImage => KeyOutcome::AttachClipboardImage,
             KeyInput::ClearAttachedImages => {
                 if self.clear_attached_images() {
@@ -2432,6 +2523,12 @@ impl SingleSessionApp {
             .slash_suggestions
             .selected
             .min(candidates.len().saturating_sub(1));
+        let usage_width = candidates
+            .iter()
+            .map(|(usage, _)| usage.chars().count())
+            .max()
+            .unwrap_or(0)
+            .clamp(10, 20);
         lines.extend(
             candidates
                 .into_iter()
@@ -2442,7 +2539,10 @@ impl SingleSessionApp {
                     } else {
                         SingleSessionLineStyle::Overlay
                     };
-                    styled_line(format!("  {usage:<24} {description}"), style)
+                    styled_line(
+                        format!(" {:<width$}  {}", usage, description, width = usage_width),
+                        style,
+                    )
                 }),
         );
         lines
@@ -3480,14 +3580,14 @@ impl SingleSessionApp {
                         .as_deref()
                         .unwrap_or("default");
                     self.set_status(SingleSessionStatus::Info(format!(
-                        "effort: {current} · use /effort <none|low|medium|high|xhigh>"
+                        "effort: {current} · use /effort <none|low|medium|high|xhigh|max>"
                     )));
                     KeyOutcome::Redraw
-                } else if matches!(args, "none" | "low" | "medium" | "high" | "xhigh") {
+                } else if matches!(args, "none" | "low" | "medium" | "high" | "xhigh" | "max") {
                     KeyOutcome::SetReasoningEffort(args.to_string())
                 } else {
                     self.set_status(SingleSessionStatus::Info(
-                        "usage: /effort <none|low|medium|high|xhigh>".to_string(),
+                        "usage: /effort <none|low|medium|high|xhigh|max>".to_string(),
                     ));
                     KeyOutcome::Redraw
                 }
@@ -4730,13 +4830,25 @@ fn session_switcher_styled_lines(
     } else {
         format!("{}/{}", visible.len(), switcher.sessions.len())
     };
+    let filter_label = if switcher.filter.trim().is_empty() {
+        "all".to_string()
+    } else {
+        format!("🔍 {}", switcher.filter.trim())
+    };
+    let selected_label = switcher
+        .selected_session()
+        .map(|session| compact_tool_text(&session.title, 44))
+        .unwrap_or_else(|| "no session selected".to_string());
     let mut lines = vec![
         styled_line(
-            "desktop session switcher",
+            format!(
+                "desktop session switcher · {} sessions · {} · {}",
+                session_count, filter_label, selected_label
+            ),
             SingleSessionLineStyle::OverlayTitle,
         ),
         styled_line(
-            "↑/↓ select · Tab/←/→ panes · PgUp/PgDn scroll · type filter · Enter resume here · Ctrl+Enter terminal · Ctrl+R reload · Ctrl+P/Esc close",
+            "↑/↓ select · type to filter · Tab/←/→ preview · PgUp/PgDn scroll · Enter resume here · Ctrl+Enter terminal · Ctrl+R reload · Esc close",
             SingleSessionLineStyle::Overlay,
         ),
         styled_line(
@@ -4776,9 +4888,10 @@ fn session_switcher_styled_lines(
         return lines;
     }
 
-    const ROW_LIMIT: usize = 16;
-    const LIST_COLUMNS: usize = 58;
-    const PREVIEW_COLUMNS: usize = 78;
+    const CARD_LIMIT: usize = 4;
+    const BODY_ROW_LIMIT: usize = 16;
+    const LIST_COLUMNS: usize = 62;
+    const PREVIEW_COLUMNS: usize = 88;
 
     let list_header = if switcher.focus == SessionSwitcherPane::Sessions {
         "sessions ›"
@@ -4792,75 +4905,112 @@ fn session_switcher_styled_lines(
     };
     lines.push(styled_line(
         format!(
-            "{} │ {}",
-            pad_columns(list_header, LIST_COLUMNS),
-            truncate_chars(preview_header, PREVIEW_COLUMNS)
+            "╭{}╮ ╭{}╮",
+            "─".repeat(LIST_COLUMNS + 2),
+            "─".repeat(PREVIEW_COLUMNS.min(86) + 2)
         ),
         SingleSessionLineStyle::OverlayTitle,
     ));
     lines.push(styled_line(
         format!(
-            "{}─┼─{}",
-            "─".repeat(LIST_COLUMNS),
-            "─".repeat(PREVIEW_COLUMNS.min(72))
+            "│ {} │ {} │",
+            pad_columns(
+                &format!("{list_header} · recent sessions, newest first"),
+                LIST_COLUMNS
+            ),
+            pad_columns(
+                &format!("{preview_header} · full selected-session preview"),
+                PREVIEW_COLUMNS.min(86)
+            )
         ),
-        SingleSessionLineStyle::Meta,
+        SingleSessionLineStyle::OverlayTitle,
     ));
 
-    let (window_start, row_indices) = switcher.visible_row_window(ROW_LIMIT);
+    let (window_start, row_indices) = switcher.visible_row_window(CARD_LIMIT);
+    let mut list_rows = Vec::new();
+    for (offset, index) in row_indices.iter().enumerate() {
+        if let Some(session) = switcher.sessions.get(*index) {
+            let position = window_start + offset;
+            list_rows.extend(session_switcher_list_card_lines(
+                switcher,
+                current_session_id,
+                position,
+                session,
+                LIST_COLUMNS,
+            ));
+        }
+    }
     let preview_lines = switcher
         .selected_session()
         .map(|session| session_switcher_preview_lines_for_session(&session))
-        .unwrap_or_else(|| vec!["No session selected".to_string()]);
+        .unwrap_or_else(|| {
+            vec![SessionSwitcherRenderedLine::new(
+                "No session selected".to_string(),
+                SingleSessionLineStyle::Meta,
+            )]
+        });
     let preview_scroll = switcher
         .preview_scroll
         .min(preview_lines.len().saturating_sub(1));
     let preview_visible = preview_lines
         .iter()
         .skip(preview_scroll)
-        .take(ROW_LIMIT)
+        .take(BODY_ROW_LIMIT)
         .cloned()
         .collect::<Vec<_>>();
-    let row_count = row_indices.len().max(preview_visible.len()).max(1);
+    let row_count = list_rows.len().max(preview_visible.len()).max(1);
 
     for row in 0..row_count {
-        let absolute_position = window_start + row;
-        let list_cell = row_indices
-            .get(row)
-            .and_then(|index| switcher.sessions.get(*index))
-            .map(|session| {
-                session_switcher_list_cell(
-                    switcher,
-                    current_session_id,
-                    absolute_position,
-                    session,
-                    LIST_COLUMNS,
-                )
-            })
-            .unwrap_or_else(|| " ".repeat(LIST_COLUMNS));
-        let preview_cell = preview_visible
-            .get(row)
-            .map(|line| truncate_chars(line, PREVIEW_COLUMNS))
-            .unwrap_or_default();
-        let selected_row = absolute_position == switcher.selected && row < row_indices.len();
+        let list_row = list_rows.get(row).cloned().unwrap_or_else(|| {
+            SessionSwitcherRenderedLine::new(
+                " ".repeat(LIST_COLUMNS),
+                SingleSessionLineStyle::Overlay,
+            )
+        });
+        let preview_cell = preview_visible.get(row).cloned().unwrap_or_else(|| {
+            SessionSwitcherRenderedLine::new(String::new(), SingleSessionLineStyle::Overlay)
+        });
+        let preview_has_semantic_style = matches!(
+            preview_cell.style,
+            SingleSessionLineStyle::User
+                | SingleSessionLineStyle::Assistant
+                | SingleSessionLineStyle::Tool
+                | SingleSessionLineStyle::Status
+                | SingleSessionLineStyle::OverlayTitle
+                | SingleSessionLineStyle::Error
+        );
+        let style = if list_row.style == SingleSessionLineStyle::OverlaySelection {
+            SingleSessionLineStyle::OverlaySelection
+        } else if preview_has_semantic_style {
+            preview_cell.style
+        } else if row >= list_rows.len() {
+            preview_cell.style
+        } else {
+            list_row.style
+        };
         lines.push(styled_line(
             format!(
-                "{} │ {}",
-                pad_columns(&list_cell, LIST_COLUMNS),
-                preview_cell
+                "│ {} │ {} │",
+                pad_columns(&list_row.text, LIST_COLUMNS),
+                pad_columns(&preview_cell.text, PREVIEW_COLUMNS.min(86))
             ),
-            if selected_row {
-                SingleSessionLineStyle::OverlaySelection
-            } else {
-                SingleSessionLineStyle::Overlay
-            },
+            style,
         ));
     }
+
+    lines.push(styled_line(
+        format!(
+            "╰{}╯ ╰{}╯",
+            "─".repeat(LIST_COLUMNS + 2),
+            "─".repeat(PREVIEW_COLUMNS.min(86) + 2)
+        ),
+        SingleSessionLineStyle::Meta,
+    ));
 
     if window_start + row_indices.len() < visible.len() {
         lines.push(styled_line(
             format!(
-                "… {} more sessions",
+                "… {} more sessions · keep pressing ↓ or type to filter",
                 visible.len() - window_start - row_indices.len()
             ),
             SingleSessionLineStyle::Overlay,
@@ -4881,6 +5031,21 @@ fn session_switcher_styled_lines(
     lines
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SessionSwitcherRenderedLine {
+    text: String,
+    style: SingleSessionLineStyle,
+}
+
+impl SessionSwitcherRenderedLine {
+    fn new(text: impl Into<String>, style: SingleSessionLineStyle) -> Self {
+        Self {
+            text: text.into(),
+            style,
+        }
+    }
+}
+
 fn session_switcher_focus_label(focus: SessionSwitcherPane) -> &'static str {
     match focus {
         SessionSwitcherPane::Sessions => "sessions",
@@ -4888,13 +5053,13 @@ fn session_switcher_focus_label(focus: SessionSwitcherPane) -> &'static str {
     }
 }
 
-fn session_switcher_list_cell(
+fn session_switcher_list_card_lines(
     switcher: &SessionSwitcherState,
     current_session_id: Option<&str>,
     position: usize,
     session: &workspace::SessionCard,
     width: usize,
-) -> String {
+) -> Vec<SessionSwitcherRenderedLine> {
     let selector = if position == switcher.selected {
         "›"
     } else {
@@ -4905,48 +5070,134 @@ fn session_switcher_list_cell(
     } else {
         " "
     };
+    let selected = position == switcher.selected;
+    let primary_style = if selected {
+        SingleSessionLineStyle::OverlaySelection
+    } else {
+        SingleSessionLineStyle::Overlay
+    };
+    let meta_style = if selected {
+        SingleSessionLineStyle::OverlaySelection
+    } else {
+        SingleSessionLineStyle::Meta
+    };
+    let preview_style = if selected {
+        SingleSessionLineStyle::OverlaySelection
+    } else {
+        SingleSessionLineStyle::Overlay
+    };
     let status = session_status_badge(session);
-    let line = format!(
-        "{selector} {current_marker} {} · {status} · {}",
-        session.title, session.detail
-    );
-    truncate_chars(&line, width)
+    let model = session_model_label(session).unwrap_or_else(|| "model unknown".to_string());
+    let preview = session
+        .preview_lines
+        .last()
+        .or_else(|| session.detail_lines.last())
+        .map(|line| session_switcher_compact_transcript_line(line, width.saturating_sub(8)))
+        .unwrap_or_else(|| "no transcript preview yet".to_string());
+    vec![
+        SessionSwitcherRenderedLine::new(
+            truncate_chars(
+                &format!(
+                    "{selector} {current_marker} {} {}",
+                    session_status_icon(session),
+                    session.title
+                ),
+                width,
+            ),
+            primary_style,
+        ),
+        SessionSwitcherRenderedLine::new(
+            truncate_chars(&format!("    {status} · {model}"), width),
+            meta_style,
+        ),
+        SessionSwitcherRenderedLine::new(
+            truncate_chars(&format!("    {}", session.detail), width),
+            meta_style,
+        ),
+        SessionSwitcherRenderedLine::new(
+            truncate_chars(&format!("    {preview}"), width),
+            preview_style,
+        ),
+    ]
 }
 
-fn session_switcher_preview_lines_for_session(session: &workspace::SessionCard) -> Vec<String> {
+fn session_switcher_preview_lines_for_session(
+    session: &workspace::SessionCard,
+) -> Vec<SessionSwitcherRenderedLine> {
     let mut lines = vec![
-        format!("{}", session.title),
-        format!("id: {}", session.session_id),
+        SessionSwitcherRenderedLine::new(
+            format!("{} {}", session_status_icon(session), session.title),
+            SingleSessionLineStyle::OverlayTitle,
+        ),
+        SessionSwitcherRenderedLine::new(
+            format!("id: {}", session.session_id),
+            SingleSessionLineStyle::Meta,
+        ),
     ];
     if !session.subtitle.is_empty() {
-        lines.push(session.subtitle.clone());
+        lines.push(SessionSwitcherRenderedLine::new(
+            format!("{}", session.subtitle),
+            SingleSessionLineStyle::Status,
+        ));
     }
     if !session.detail.is_empty() {
-        lines.push(session.detail.clone());
+        lines.push(SessionSwitcherRenderedLine::new(
+            session.detail.clone(),
+            SingleSessionLineStyle::Meta,
+        ));
     }
+    lines.push(SessionSwitcherRenderedLine::new(
+        "─".repeat(48),
+        SingleSessionLineStyle::Meta,
+    ));
     let transcript = if session.detail_lines.is_empty() {
         &session.preview_lines
     } else {
         &session.detail_lines
     };
     if transcript.is_empty() {
-        lines.push("no transcript preview available".to_string());
+        lines.push(SessionSwitcherRenderedLine::new(
+            "no transcript preview available".to_string(),
+            SingleSessionLineStyle::Meta,
+        ));
     } else {
-        lines.push("recent transcript".to_string());
-        lines.extend(transcript.iter().cloned());
+        lines.push(SessionSwitcherRenderedLine::new(
+            "recent transcript".to_string(),
+            SingleSessionLineStyle::OverlayTitle,
+        ));
+        let mut user_turn = 1usize;
+        for line in transcript {
+            lines.push(session_switcher_transcript_preview_line(
+                line,
+                &mut user_turn,
+            ));
+        }
     }
     lines
 }
 
 fn session_status_badge(session: &workspace::SessionCard) -> String {
-    let status = session
+    let status = session_status_label(session);
+    let icon = session_status_icon_for_label(status);
+    format!("{icon} {status}")
+}
+
+fn session_status_label(session: &workspace::SessionCard) -> &str {
+    session
         .subtitle
         .split('·')
         .next()
         .map(str::trim)
         .filter(|status| !status.is_empty())
-        .unwrap_or("unknown");
-    let icon = match status {
+        .unwrap_or("unknown")
+}
+
+fn session_status_icon(session: &workspace::SessionCard) -> &'static str {
+    session_status_icon_for_label(session_status_label(session))
+}
+
+fn session_status_icon_for_label(status: &str) -> &'static str {
+    match status {
         "active" => "▶",
         "closed" => "✓",
         "crashed" => "💥",
@@ -4954,8 +5205,81 @@ fn session_status_badge(session: &workspace::SessionCard) -> String {
         "compacted" => "📦",
         status if status.contains("error") => "✕",
         _ => "•",
+    }
+}
+
+fn session_model_label(session: &workspace::SessionCard) -> Option<String> {
+    session
+        .subtitle
+        .split('·')
+        .nth(1)
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn session_switcher_compact_transcript_line(line: &str, width: usize) -> String {
+    let (role, content) = session_switcher_split_preview_role(line);
+    let compact = match role {
+        Some("user") => format!("latest prompt: {content}"),
+        Some("asst" | "assistant") => format!("latest answer: {content}"),
+        Some("tool") => format!("tool: {content}"),
+        Some("sys" | "system") => format!("system: {content}"),
+        Some("task" | "background_task") => format!("task: {content}"),
+        Some("meta") => format!("meta: {content}"),
+        _ => line.trim().to_string(),
     };
-    format!("{icon} {status}")
+    truncate_chars(&compact, width)
+}
+
+fn session_switcher_transcript_preview_line(
+    line: &str,
+    user_turn: &mut usize,
+) -> SessionSwitcherRenderedLine {
+    let (role, content) = session_switcher_split_preview_role(line);
+    match role {
+        Some("user") => {
+            let rendered = format!("{}› {}", *user_turn, content);
+            *user_turn = (*user_turn).saturating_add(1);
+            SessionSwitcherRenderedLine::new(rendered, SingleSessionLineStyle::User)
+        }
+        Some("asst" | "assistant") => SessionSwitcherRenderedLine::new(
+            format!("assistant {content}"),
+            SingleSessionLineStyle::Assistant,
+        ),
+        Some("tool") => SessionSwitcherRenderedLine::new(
+            format!("tool {content}"),
+            SingleSessionLineStyle::Tool,
+        ),
+        Some("sys" | "system") => SessionSwitcherRenderedLine::new(
+            format!("system {content}"),
+            SingleSessionLineStyle::Meta,
+        ),
+        Some("task" | "background_task") => SessionSwitcherRenderedLine::new(
+            format!("task {content}"),
+            SingleSessionLineStyle::Meta,
+        ),
+        Some("meta") => SessionSwitcherRenderedLine::new(
+            format!("meta {content}"),
+            SingleSessionLineStyle::Meta,
+        ),
+        _ => SessionSwitcherRenderedLine::new(
+            line.trim().to_string(),
+            SingleSessionLineStyle::Overlay,
+        ),
+    }
+}
+
+fn session_switcher_split_preview_role(line: &str) -> (Option<&str>, &str) {
+    let trimmed = line.trim();
+    let Some((role, content)) = trimmed.split_once(char::is_whitespace) else {
+        return (None, trimmed);
+    };
+    match role {
+        "user" | "asst" | "assistant" | "tool" | "sys" | "system" | "task" | "background_task"
+        | "meta" => (Some(role), content.trim()),
+        _ => (None, trimmed),
+    }
 }
 
 fn pad_columns(text: &str, width: usize) -> String {
@@ -5346,6 +5670,43 @@ fn model_picker_current_label(provider_name: Option<&str>, current_model: Option
     }
 }
 
+fn inferred_desktop_reasoning_efforts(
+    provider_name: Option<&str>,
+    model_name: Option<&str>,
+    current_effort: Option<&str>,
+) -> &'static [&'static str] {
+    let provider = provider_name.unwrap_or_default().to_ascii_lowercase();
+    let model = model_name.unwrap_or_default().to_ascii_lowercase();
+    let current = current_effort.unwrap_or_default().to_ascii_lowercase();
+
+    if provider.contains("openrouter") {
+        if model.contains("deepseek") || current == "max" {
+            return DESKTOP_REASONING_EFFORTS_DEEPSEEK;
+        }
+        return DESKTOP_REASONING_EFFORTS_OPENAI;
+    }
+
+    if provider.contains("deepseek") || model.contains("deepseek") || current == "max" {
+        return DESKTOP_REASONING_EFFORTS_DEEPSEEK;
+    }
+
+    let is_anthropic = provider.contains("anthropic")
+        || provider.contains("claude")
+        || model.starts_with("claude-")
+        || model.contains("/claude-");
+    if is_anthropic {
+        if model.contains("claude-opus-4-7") || current == "xhigh" {
+            return DESKTOP_REASONING_EFFORTS_OPENAI;
+        }
+        return DESKTOP_REASONING_EFFORTS_ANTHROPIC_STANDARD;
+    }
+
+    // Before the model catalog arrives, the desktop may only know the current
+    // runtime setting. Keep the shortcut responsive by falling back to the
+    // common OpenAI/Anthropic order instead of doing a blocking history lookup.
+    DESKTOP_REASONING_EFFORTS_OPENAI
+}
+
 fn model_choice_search_text(choice: &DesktopModelChoice) -> String {
     format!(
         "{} {} {} {}",
@@ -5459,6 +5820,7 @@ const SINGLE_SESSION_HELP_SECTIONS: &[HelpSection] = &[
             ("Ctrl+M/N", "switch to next/previous model"),
             ("Ctrl+Tab", "switch to next model"),
             ("Ctrl+Shift+Tab", "switch to previous model"),
+            ("Alt+←/→", "change thinking level"),
             ("Ctrl+P/O", "open recent session switcher"),
             ("Ctrl+Shift+S", "toggle inline session info/stats"),
         ],
@@ -5482,7 +5844,7 @@ const SINGLE_SESSION_HELP_SECTIONS: &[HelpSection] = &[
             ("Ctrl+U/K", "delete to line start/end"),
             ("Ctrl+W/Ctrl+Backspace", "delete previous word"),
             ("Alt+Backspace", "delete previous word, terminal-style"),
-            ("Ctrl/Alt+←/→, Ctrl+B/F", "move by word"),
+            ("Ctrl+←/→, Ctrl+B/F", "move by word"),
             ("Alt+B/F", "move by word, terminal-style"),
             ("Alt+D", "delete next word"),
             ("Tab", "complete slash command suggestion"),
