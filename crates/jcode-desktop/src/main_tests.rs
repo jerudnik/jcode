@@ -3,6 +3,8 @@ use super::single_session::*;
 use super::*;
 use std::sync::Mutex;
 
+static DESKTOP_PREFS_ENV_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn desktop_frame_profile_is_opt_in_and_recognizes_trace_modes() {
     assert!(!desktop_frame_profile_enabled(None));
@@ -37,6 +39,206 @@ fn desktop_config_parses_positive_millisecond_durations_only() {
 }
 
 #[test]
+fn desktop_process_role_parses_internal_flags() {
+    assert_eq!(
+        desktop_process_role_from_args(["jcode-desktop"].into_iter()),
+        DesktopProcessRole::Standalone
+    );
+    assert_eq!(
+        desktop_process_role_from_args(["jcode-desktop", "--desktop-host"].into_iter()),
+        DesktopProcessRole::StableHost
+    );
+    assert_eq!(
+        desktop_process_role_from_args(["jcode-desktop", "--desktop-app-worker"].into_iter()),
+        DesktopProcessRole::AppWorker
+    );
+    assert_eq!(
+        desktop_process_role_from_args(
+            ["jcode-desktop", "--desktop-process-role=stable_host"].into_iter()
+        ),
+        DesktopProcessRole::StableHost
+    );
+    assert_eq!(
+        desktop_process_role_from_args(
+            ["jcode-desktop", "--desktop-process-role", "app-worker"].into_iter()
+        ),
+        DesktopProcessRole::AppWorker
+    );
+    assert_eq!(
+        DesktopProcessRole::Standalone.reload_strategy(),
+        DesktopReloadStrategy::FullProcessHandoff
+    );
+    assert_eq!(
+        DesktopProcessRole::StableHost.reload_strategy(),
+        DesktopReloadStrategy::AppWorkerRestart
+    );
+    assert_eq!(
+        DesktopProcessRole::AppWorker.reload_strategy(),
+        DesktopReloadStrategy::FullProcessHandoff
+    );
+}
+
+#[test]
+fn desktop_modes_map_to_worker_modes() {
+    assert_eq!(
+        DesktopMode::SingleSession.worker_mode(),
+        DesktopWorkerMode::SingleSession
+    );
+    assert_eq!(
+        DesktopMode::WorkspacePrototype.worker_mode(),
+        DesktopWorkerMode::Workspace
+    );
+}
+
+#[test]
+fn desktop_worker_init_builds_initial_scene_from_snapshot_and_window() {
+    let init = DesktopWorkerInit {
+        mode: DesktopWorkerMode::Workspace,
+        snapshot: Some(DesktopUiSnapshot::new(
+            "workspace",
+            "Workspace Title".to_string(),
+            None,
+            DesktopSurfaceSnapshot::Workspace(DesktopWorkspaceSnapshot {
+                input_mode: "normal".to_string(),
+                focused_surface_id: 1,
+                focused_session_id: None,
+                zoomed: false,
+                detail_scroll: 0,
+                draft: String::new(),
+                draft_cursor: 0,
+                pending_image_count: 0,
+                surfaces: Vec::new(),
+            }),
+        )),
+        window: DesktopWindowState {
+            width: 800,
+            height: 600,
+            scale_factor: 1.5,
+            focused: true,
+        },
+    };
+
+    let scene = desktop_scene_for_worker_init(&init);
+    assert_eq!(scene.viewport.size.width, 800.0);
+    assert_eq!(scene.viewport.size.height, 600.0);
+    assert_eq!(scene.viewport.scale_factor, 1.5);
+    assert_eq!(scene.metadata.title.as_deref(), Some("Workspace Title"));
+    assert!(scene.metadata.content_ready);
+    assert!(matches!(
+        scene.display_list.commands.as_slice(),
+        [DesktopDisplayCommand::Clear(_)]
+    ));
+}
+
+#[test]
+fn desktop_key_events_preserve_text_and_modifiers_for_worker_input() {
+    let key = desktop_key_event_from_winit(
+        &Key::Character("x".into()),
+        ModifiersState::SHIFT | ModifiersState::CONTROL,
+        true,
+    );
+    assert_eq!(key.key, "x");
+    assert_eq!(key.text.as_deref(), Some("x"));
+    assert!(key.pressed);
+    assert!(key.modifiers.shift);
+    assert!(key.modifiers.ctrl);
+    assert!(!key.modifiers.alt);
+    assert!(!key.modifiers.super_key);
+
+    let enter =
+        desktop_key_event_from_winit(&Key::Named(NamedKey::Enter), ModifiersState::empty(), true);
+    assert_eq!(enter.key, "Enter");
+    assert_eq!(enter.text, None);
+}
+
+#[test]
+fn desktop_mouse_wheel_events_convert_line_and_pixel_delta() {
+    assert_eq!(
+        desktop_mouse_wheel_event(MouseScrollDelta::LineDelta(1.0, -2.0)),
+        DesktopMouseEvent::Wheel {
+            delta_x: 1.0,
+            delta_y: -2.0,
+        }
+    );
+    assert_eq!(
+        desktop_mouse_wheel_event(MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+            3.0, -4.0
+        ))),
+        DesktopMouseEvent::Wheel {
+            delta_x: 3.0,
+            delta_y: -4.0,
+        }
+    );
+}
+
+#[test]
+fn desktop_session_events_convert_to_worker_wire_events() {
+    assert_eq!(
+        desktop_session_event_to_wire(&session_launch::DesktopSessionEvent::Status(
+            DesktopSessionStatus::external("thinking"),
+        )),
+        DesktopSessionEventWire::Status {
+            message: "thinking".to_string(),
+        }
+    );
+    assert_eq!(
+        desktop_session_event_to_wire(&session_launch::DesktopSessionEvent::TextDelta(
+            "hello".to_string(),
+        )),
+        DesktopSessionEventWire::AssistantTextDelta {
+            text: "hello".to_string(),
+        }
+    );
+    assert_eq!(
+        desktop_session_event_to_wire(&session_launch::DesktopSessionEvent::Done),
+        DesktopSessionEventWire::RawJson {
+            event_type: "done".to_string(),
+            payload: "Done".to_string(),
+        }
+    );
+}
+
+#[test]
+fn desktop_app_worker_relaunch_replaces_existing_process_role() {
+    let relaunch = DesktopRelaunch {
+        binary: PathBuf::from("/tmp/jcode-desktop"),
+        args: vec![
+            OsString::from("--workspace"),
+            OsString::from("--desktop-process-role=stable_host"),
+            OsString::from("--foo"),
+        ],
+    };
+
+    assert_eq!(
+        relaunch.for_app_worker().args,
+        vec![
+            OsString::from("--workspace"),
+            OsString::from("--foo"),
+            OsString::from("--desktop-process-role"),
+            OsString::from("app-worker"),
+        ]
+    );
+
+    let relaunch = DesktopRelaunch {
+        binary: PathBuf::from("/tmp/jcode-desktop"),
+        args: vec![
+            OsString::from("--desktop-process-role"),
+            OsString::from("stable-host"),
+            OsString::from("--desktop-app-worker"),
+            OsString::from("--new"),
+        ],
+    };
+    assert_eq!(
+        relaunch.for_app_worker().args,
+        vec![
+            OsString::from("--new"),
+            OsString::from("--desktop-process-role"),
+            OsString::from("app-worker"),
+        ]
+    );
+}
+
+#[test]
 fn desktop_platform_warnings_only_fire_for_less_supported_targets() {
     assert_eq!(
         desktop_platform_support_warning(DesktopPlatform::Linux),
@@ -48,6 +250,82 @@ fn desktop_platform_warnings_only_fire_for_less_supported_targets() {
     );
     assert!(desktop_platform_support_warning(DesktopPlatform::Windows).is_some());
     assert!(desktop_platform_support_warning(DesktopPlatform::Other).is_some());
+}
+
+#[test]
+fn desktop_scene_vertices_render_rectangles_and_clear_color() {
+    let mut scene = DesktopScene::default();
+    scene.push(DesktopDisplayCommand::Clear(DesktopColor::rgba(
+        0.1, 0.2, 0.3, 1.0,
+    )));
+    scene.push(DesktopDisplayCommand::Rect(DesktopRectPaint::filled(
+        DesktopSceneRect::new(10.0, 20.0, 30.0, 40.0),
+        DesktopColor::rgba(0.8, 0.7, 0.6, 1.0),
+    )));
+
+    let mut vertices = Vec::new();
+    let clear = desktop_scene_vertices(&scene, PhysicalSize::new(100, 100), &mut vertices)
+        .expect("clear color");
+
+    assert!((clear.r - 0.1).abs() < 0.000_001);
+    assert!((clear.g - 0.2).abs() < 0.000_001);
+    assert!((clear.b - 0.3).abs() < 0.000_001);
+    assert_eq!(clear.a, 1.0);
+    assert_eq!(vertices.len(), 6);
+    assert!(
+        vertices
+            .iter()
+            .all(|vertex| vertex.color == [0.8, 0.7, 0.6, 1.0])
+    );
+}
+
+#[test]
+fn desktop_scene_clear_resets_previous_vertices() {
+    let mut scene = DesktopScene::default();
+    scene.push(DesktopDisplayCommand::Rect(DesktopRectPaint::filled(
+        DesktopSceneRect::new(0.0, 0.0, 10.0, 10.0),
+        DesktopColor::rgba(1.0, 0.0, 0.0, 1.0),
+    )));
+    scene.push(DesktopDisplayCommand::Clear(DesktopColor::rgba(
+        0.0, 0.0, 0.0, 1.0,
+    )));
+
+    let mut vertices = Vec::new();
+    desktop_scene_vertices(&scene, PhysicalSize::new(100, 100), &mut vertices);
+
+    assert!(vertices.is_empty());
+}
+
+#[test]
+fn desktop_app_build_scene_adds_metadata_and_default_clear() {
+    let app = DesktopApp::SingleSession(SingleSessionApp::new(None));
+    let scene = app.build_scene(DesktopSceneBuildContext::new(DesktopScene::default()));
+
+    assert_eq!(scene.metadata.title, Some(app.status_title()));
+    assert!(scene.metadata.content_ready);
+    assert_eq!(scene.display_list.commands.len(), 1);
+    assert!(matches!(
+        scene.display_list.commands.first(),
+        Some(DesktopDisplayCommand::Clear(_))
+    ));
+}
+
+#[test]
+fn desktop_app_build_scene_preserves_existing_display_list() {
+    let app = DesktopApp::SingleSession(SingleSessionApp::new(None));
+    let mut scene = DesktopScene::default();
+    scene.push(DesktopDisplayCommand::Rect(DesktopRectPaint::filled(
+        DesktopSceneRect::new(1.0, 2.0, 3.0, 4.0),
+        DesktopColor::rgba(0.2, 0.3, 0.4, 1.0),
+    )));
+
+    let scene = app.build_scene(DesktopSceneBuildContext::new(scene));
+
+    assert_eq!(scene.display_list.commands.len(), 1);
+    assert!(matches!(
+        scene.display_list.commands.first(),
+        Some(DesktopDisplayCommand::Rect(_))
+    ));
 }
 
 #[test]
@@ -97,8 +375,7 @@ fn desktop_hot_reload_drops_resume_when_current_app_is_fresh() {
 
 #[test]
 fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-    let Ok(_guard) = ENV_LOCK.lock() else {
+    let Ok(_guard) = DESKTOP_PREFS_ENV_LOCK.lock() else {
         anyhow::bail!("desktop hot reload env lock poisoned");
     };
     let temp = unique_desktop_test_dir("desktop-hot-reload-workspace-state")?;
@@ -154,7 +431,15 @@ fn desktop_hot_reload_persists_workspace_focus_before_spawn() -> Result<()> {
 }
 
 #[test]
-fn desktop_hot_reload_restarts_default_launched_workspace_as_workspace() {
+fn desktop_hot_reload_restarts_default_launched_workspace_as_workspace() -> Result<()> {
+    let Ok(_guard) = DESKTOP_PREFS_ENV_LOCK.lock() else {
+        anyhow::bail!("desktop hot reload env lock poisoned");
+    };
+    let temp = unique_desktop_test_dir("desktop-hot-reload-default-workspace")?;
+    let state_path = temp.join("desktop-state.json");
+    unsafe {
+        std::env::set_var("JCODE_DESKTOP_STATE", &state_path);
+    }
     let relaunch = DesktopRelaunch {
         binary: PathBuf::from("/old/jcode-desktop"),
         args: Vec::new(),
@@ -174,6 +459,12 @@ fn desktop_hot_reload_restarts_default_launched_workspace_as_workspace() {
 
     assert_eq!(updated.binary, PathBuf::from("/new/jcode-desktop"));
     assert_eq!(updated.args, vec![OsString::from("--workspace")]);
+
+    unsafe {
+        std::env::remove_var("JCODE_DESKTOP_STATE");
+    }
+    std::fs::remove_dir_all(temp)?;
+    Ok(())
 }
 
 #[test]

@@ -1,12 +1,17 @@
 mod animation;
+mod desktop_app_driver;
 mod desktop_benchmark;
 mod desktop_config;
 mod desktop_gallery;
+mod desktop_ipc;
 mod desktop_log;
 mod desktop_prefs;
+mod desktop_protocol;
 mod desktop_rich_text;
+mod desktop_scene;
 mod desktop_session_events;
 mod desktop_ui_engine;
+mod desktop_worker_host;
 mod power_inhibit;
 mod render_helpers;
 mod session_data;
@@ -20,14 +25,32 @@ use animation::{AnimatedViewport, FocusPulse, VisibleColumnLayout, WorkspaceRend
 use anyhow::{Context, Result};
 use base64::Engine;
 use bytemuck::{Pod, Zeroable};
+use desktop_app_driver::{
+    DESKTOP_UI_SNAPSHOT_VERSION, DesktopAppDriver, DesktopSceneBuildContext,
+    DesktopSingleSessionSnapshot, DesktopSnapshotRestoreError, DesktopSurfaceSnapshot,
+    DesktopUiSnapshot, DesktopWorkspaceSnapshot, DesktopWorkspaceSurfaceSnapshot,
+};
 use desktop_benchmark::*;
 use desktop_config::*;
+use desktop_ipc::{DesktopHostToWorkerEnvelope, write_desktop_ipc_frame};
+use desktop_protocol::{
+    DesktopHostToWorkerMessage, DesktopInputEvent, DesktopKeyEvent, DesktopKeyModifiers,
+    DesktopMouseButton, DesktopMouseEvent, DesktopProtocolEnvelope, DesktopSceneUpdate,
+    DesktopSessionEventBatchWire, DesktopSessionEventWire, DesktopWindowEvent, DesktopWindowState,
+    DesktopWorkerInit, DesktopWorkerMode, DesktopWorkerReady, DesktopWorkerShutdownReason,
+    DesktopWorkerToHostMessage,
+};
+use desktop_scene::{
+    DesktopColor, DesktopDisplayCommand, DesktopRect as DesktopSceneRect, DesktopRectPaint,
+    DesktopScene, DesktopSceneViewport,
+};
 use desktop_session_events::{
     BACKEND_EVENT_FORWARD_INTERVAL, BACKEND_EVENT_FORWARD_MAX_PAYLOAD_BYTES,
     BACKEND_EVENT_FORWARD_MAX_RAW_EVENTS, DesktopSessionEventBatch,
     coalesce_desktop_session_events, collect_desktop_session_event_batch,
     spawn_session_event_forwarder,
 };
+use desktop_worker_host::DesktopWorkerConnection;
 use glyphon::{
     Attrs, Buffer, Color as TextColor, Family, FontSystem, Metrics, Resolution, Shaping,
     SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer, Wrap,
@@ -55,7 +78,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::hash::{Hash, Hasher};
-use std::io::Write;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -486,13 +509,18 @@ async fn run() -> Result<()> {
     let fullscreen = args.iter().any(|arg| arg == "--fullscreen");
     let desktop_gallery_state = desktop_gallery::state_from_args(&args);
     let desktop_gallery = desktop_gallery_state.is_some();
+    let process_role = desktop_process_role_from_args(args.iter().map(String::as_str));
     let desktop_mode = desktop_mode_from_args(args.iter().map(String::as_str));
+    if process_role == DesktopProcessRole::AppWorker {
+        return run_desktop_app_worker_process(desktop_mode);
+    }
     let resume_session_id = desktop_resume_session_id_from_args(args.iter().map(String::as_str));
     let desktop_reload_startup = DesktopReloadStartup::from_env();
     emit_desktop_profile_event(
         "jcode-desktop-launch-profile",
         serde_json::json!({
             "mode": desktop_mode.as_str(),
+            "process_role": process_role.as_str(),
             "version": desktop_header_version_label(),
             "build_hash": desktop_build_hash_label(),
             "pid": std::process::id(),
@@ -555,7 +583,7 @@ async fn run() -> Result<()> {
     let mut selecting_draft = false;
     let mut scroll_accumulator = ScrollLineAccumulator::default();
     let mut scroll_metrics_cache = SingleSessionScrollMetricsCache::default();
-    let mut hot_reloader = DesktopHotReloader::new();
+    let mut hot_reloader = DesktopHotReloader::new(process_role.reload_strategy());
     let preferences_save_tx = spawn_desktop_preferences_saver();
     let mut power_inhibitor = power_inhibit::PowerInhibitor::new();
     let (session_event_tx, session_event_rx) = mpsc::channel();
@@ -573,6 +601,7 @@ async fn run() -> Result<()> {
     let mut space_hold_started_at: Option<Instant> = None;
     let mut space_hold_consumed = false;
     let mut desktop_clipboard = DesktopClipboard::default();
+    let mut latest_worker_scene: Option<DesktopScene> = None;
 
     if pending_workspace_startup_load {
         spawn_session_cards_load(
@@ -647,22 +676,53 @@ async fn run() -> Result<()> {
         ) {
             window.request_redraw();
         }
+        if let Some(scene) = hot_reloader.drain_app_worker_messages() {
+            latest_worker_scene = Some(scene);
+            window.request_redraw();
+        }
 
         match event {
             Event::WindowEvent { event, window_id } if window_id == window.id() => match event {
                 WindowEvent::CloseRequested => target.exit(),
                 WindowEvent::Resized(size) => {
                     pending_resize = Some(size);
+                    forward_app_worker_input(
+                        &mut hot_reloader,
+                        DesktopInputEvent::Window(DesktopWindowEvent::Resized {
+                            width: size.width,
+                            height: size.height,
+                            scale_factor: window.scale_factor() as f32,
+                        }),
+                    );
                     window.request_redraw();
                 }
                 WindowEvent::ScaleFactorChanged { .. } => {
                     pending_resize = Some(window.inner_size());
+                    let size = window.inner_size();
+                    forward_app_worker_input(
+                        &mut hot_reloader,
+                        DesktopInputEvent::Window(DesktopWindowEvent::Resized {
+                            width: size.width,
+                            height: size.height,
+                            scale_factor: window.scale_factor() as f32,
+                        }),
+                    );
                     window.request_redraw();
+                }
+                WindowEvent::Focused(focused) => {
+                    forward_app_worker_input(
+                        &mut hot_reloader,
+                        DesktopInputEvent::Window(DesktopWindowEvent::Focused(focused)),
+                    );
                 }
                 WindowEvent::ModifiersChanged(new_modifiers) => {
                     modifiers = new_modifiers.state();
                 }
                 WindowEvent::MouseWheel { delta, phase, .. } => {
+                    forward_app_worker_input(
+                        &mut hot_reloader,
+                        DesktopInputEvent::Mouse(desktop_mouse_wheel_event(delta)),
+                    );
                     let size = window.inner_size();
                     let now = Instant::now();
                     let previous_smooth_scroll = app.single_session_smooth_scroll_lines(
@@ -696,6 +756,13 @@ async fn run() -> Result<()> {
                 WindowEvent::CursorMoved { position, .. } => {
                     let cursor_started = Instant::now();
                     cursor_position = position;
+                    forward_app_worker_input(
+                        &mut hot_reloader,
+                        DesktopInputEvent::Mouse(DesktopMouseEvent::Move {
+                            x: cursor_position.x as f32,
+                            y: cursor_position.y as f32,
+                        }),
+                    );
                     if selecting_draft
                         && app.update_single_session_draft_selection_at(
                             cursor_position.x as f32,
@@ -722,6 +789,13 @@ async fn run() -> Result<()> {
                     ..
                 } => {
                     let mouse_started = Instant::now();
+                    forward_app_worker_input(
+                        &mut hot_reloader,
+                        DesktopInputEvent::Mouse(DesktopMouseEvent::Button {
+                            button: DesktopMouseButton::Left,
+                            pressed: state == ElementState::Pressed,
+                        }),
+                    );
                     match state {
                         ElementState::Pressed => {
                         if app.begin_single_session_draft_selection_at(
@@ -836,6 +910,18 @@ async fn run() -> Result<()> {
                     let key_input = to_key_input(&event.logical_key, modifiers);
                     let key_debug = format!("{key_input:?}");
                     interaction_latency.mark("keyboard_input", keyboard_started);
+                    if hot_reloader.has_app_worker() {
+                        forward_app_worker_input(
+                            &mut hot_reloader,
+                            DesktopInputEvent::Key(desktop_key_event_from_winit(
+                                &event.logical_key,
+                                modifiers,
+                                true,
+                            )),
+                        );
+                        window.request_redraw();
+                        return;
+                    }
                     if key_input == KeyInput::RefreshSessions && app.is_workspace() {
                         spawn_session_cards_load(
                             DesktopSessionCardsPurpose::WorkspaceRefresh,
@@ -1246,12 +1332,21 @@ async fn run() -> Result<()> {
                         window_size,
                         &mut scroll_metrics_cache,
                     );
-                    match canvas.render(
-                        &app,
-                        window.current_monitor().map(|monitor| monitor.size()),
-                        smooth_scroll_lines,
-                        workspace_space_hold_progress(&app, space_hold_started_at, space_hold_consumed),
-                    ) {
+                    let render_result = if let Some(scene) = latest_worker_scene.as_ref() {
+                        canvas.render_scene(scene)
+                    } else {
+                        canvas.render(
+                            &app,
+                            window.current_monitor().map(|monitor| monitor.size()),
+                            smooth_scroll_lines,
+                            workspace_space_hold_progress(
+                                &app,
+                                space_hold_started_at,
+                                space_hold_consumed,
+                            ),
+                        )
+                    };
+                    match render_result {
                     Ok(frame) => {
                         surface_timeout_backoff.reset();
                         surface_timeout_redraw_at = None;
@@ -1435,6 +1530,7 @@ async fn run() -> Result<()> {
                 let raw_event_count = batch.raw_event_count;
                 let raw_payload_bytes = batch.raw_payload_bytes;
                 let forwarded_at = batch.forwarded_at;
+                forward_desktop_session_event_batch_to_worker(&mut hot_reloader, &batch);
                 let apply_stats = apply_desktop_session_event_batch_with_stats(&mut app, batch.events);
                 let ui_queue_delay = ui_received_at.saturating_duration_since(forwarded_at);
                 let mut redraw_requested = false;
@@ -1822,6 +1918,9 @@ const DESKTOP_HELP_LINES: &[&str] = &[
     "Options:",
     "  --fullscreen                 Start borderless fullscreen",
     "  --workspace                  Open the workspace prototype instead of the single-session chat",
+    "  --desktop-process-role ROLE  Internal: standalone, host, or worker",
+    "  --desktop-host               Internal alias for --desktop-process-role=host",
+    "  --desktop-app-worker         Internal alias for --desktop-process-role=worker",
     "  --startup-log                Print launch timing milestones to stderr",
     "  --startup-benchmark          Print launch timings and exit after the first frame",
     "  --capture-hero-animation DIR Write deterministic hero animation PNG frames and exit",
@@ -4429,6 +4528,36 @@ enum DesktopMode {
     WorkspacePrototype,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopProcessRole {
+    Standalone,
+    StableHost,
+    AppWorker,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopReloadStrategy {
+    FullProcessHandoff,
+    AppWorkerRestart,
+}
+
+impl DesktopProcessRole {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Standalone => "standalone",
+            Self::StableHost => "stable_host",
+            Self::AppWorker => "app_worker",
+        }
+    }
+
+    fn reload_strategy(self) -> DesktopReloadStrategy {
+        match self {
+            Self::Standalone | Self::AppWorker => DesktopReloadStrategy::FullProcessHandoff,
+            Self::StableHost => DesktopReloadStrategy::AppWorkerRestart,
+        }
+    }
+}
+
 impl DesktopMode {
     fn as_str(self) -> &'static str {
         match self {
@@ -4436,6 +4565,93 @@ impl DesktopMode {
             Self::WorkspacePrototype => "workspace",
         }
     }
+
+    fn worker_mode(self) -> DesktopWorkerMode {
+        match self {
+            Self::SingleSession => DesktopWorkerMode::SingleSession,
+            Self::WorkspacePrototype => DesktopWorkerMode::Workspace,
+        }
+    }
+}
+
+fn run_desktop_app_worker_process(desktop_mode: DesktopMode) -> Result<()> {
+    desktop_log::info(format_args!(
+        "jcode-desktop: app worker process started; pid={}",
+        std::process::id()
+    ));
+
+    let mut stdout = std::io::stdout().lock();
+    let ready = DesktopProtocolEnvelope::new(
+        1,
+        DesktopWorkerToHostMessage::Ready(DesktopWorkerReady {
+            worker_pid: std::process::id(),
+            mode: desktop_mode.worker_mode(),
+        }),
+    );
+    write_desktop_ipc_frame(&mut stdout, &ready).context("failed to write worker ready frame")?;
+
+    let stdin = std::io::stdin();
+    let mut reader = BufReader::new(stdin.lock());
+    let mut next_worker_sequence = 2;
+    loop {
+        let frame: Option<DesktopHostToWorkerEnvelope> =
+            desktop_ipc::read_desktop_ipc_frame(&mut reader)
+                .context("failed to read host frame")?;
+        let Some(frame) = frame else {
+            break;
+        };
+        frame
+            .validate_version()
+            .context("host sent incompatible protocol frame")?;
+        match frame.payload {
+            DesktopHostToWorkerMessage::Initialize(init) => {
+                let scene = desktop_scene_for_worker_init(&init);
+                let scene_update = DesktopProtocolEnvelope::new(
+                    next_worker_sequence,
+                    DesktopWorkerToHostMessage::Scene(DesktopSceneUpdate {
+                        animation_active: scene.metadata.animation_active,
+                        scene,
+                    }),
+                );
+                next_worker_sequence += 1;
+                write_desktop_ipc_frame(&mut stdout, &scene_update)
+                    .context("failed to write worker initial scene")?;
+            }
+            DesktopHostToWorkerMessage::SnapshotRequest { request_id } => {
+                desktop_log::info(format_args!(
+                    "jcode-desktop: app worker received snapshot request {request_id} before full runtime is attached"
+                ));
+            }
+            DesktopHostToWorkerMessage::Shutdown {
+                reason:
+                    DesktopWorkerShutdownReason::HostExit
+                    | DesktopWorkerShutdownReason::Reload
+                    | DesktopWorkerShutdownReason::ProtocolMismatch,
+            } => break,
+            DesktopHostToWorkerMessage::Input(_)
+            | DesktopHostToWorkerMessage::SessionEvents(_)
+            | DesktopHostToWorkerMessage::MetricsAck { .. } => {}
+        }
+    }
+
+    Ok(())
+}
+
+fn desktop_scene_for_worker_init(init: &DesktopWorkerInit) -> DesktopScene {
+    let mut scene = DesktopScene::new(DesktopSceneViewport::new(
+        init.window.width as f32,
+        init.window.height as f32,
+        init.window.scale_factor,
+    ));
+    scene.metadata.title = init
+        .snapshot
+        .as_ref()
+        .map(|snapshot| snapshot.title.clone());
+    scene.metadata.content_ready = init.snapshot.is_some();
+    scene.push(DesktopDisplayCommand::Clear(DesktopColor::rgba(
+        0.02, 0.024, 0.03, 1.0,
+    )));
+    scene
 }
 
 fn desktop_mode_from_args<'a>(args: impl IntoIterator<Item = &'a str>) -> DesktopMode {
@@ -4444,6 +4660,34 @@ fn desktop_mode_from_args<'a>(args: impl IntoIterator<Item = &'a str>) -> Deskto
     } else {
         DesktopMode::SingleSession
     }
+}
+
+fn desktop_process_role_from_args<'a>(
+    args: impl IntoIterator<Item = &'a str>,
+) -> DesktopProcessRole {
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        let role = arg
+            .strip_prefix("--desktop-process-role=")
+            .or_else(|| {
+                (arg == "--desktop-process-role")
+                    .then(|| args.next())
+                    .flatten()
+            })
+            .or_else(|| {
+                (arg == "--desktop-host")
+                    .then_some("host")
+                    .or_else(|| (arg == "--desktop-app-worker").then_some("worker"))
+            });
+        if let Some(role) = role {
+            return match role {
+                "host" | "stable-host" | "stable_host" => DesktopProcessRole::StableHost,
+                "worker" | "app-worker" | "app_worker" => DesktopProcessRole::AppWorker,
+                _ => DesktopProcessRole::Standalone,
+            };
+        }
+    }
+    DesktopProcessRole::Standalone
 }
 
 fn desktop_resume_session_id_from_args<'a>(
@@ -4717,24 +4961,28 @@ fn cleanup_desktop_reload_handoff_files(ready_file: &Path, release_file: &Path) 
 
 struct DesktopHotReloader {
     relaunch: Option<DesktopRelaunch>,
+    strategy: DesktopReloadStrategy,
     observed_modified: Option<std::time::SystemTime>,
     last_checked: Instant,
     pending_handoff: Option<DesktopReloadHandoffWatcher>,
+    app_worker: Option<DesktopWorkerConnection>,
 }
 
 impl DesktopHotReloader {
     const CHECK_INTERVAL: Duration = Duration::from_millis(750);
 
-    fn new() -> Self {
+    fn new(strategy: DesktopReloadStrategy) -> Self {
         let relaunch = DesktopRelaunch::from_current_process();
         let observed_modified = relaunch.as_ref().and_then(|relaunch| {
             binary_modified_time(&desktop_reload_binary_candidate(&relaunch.binary))
         });
         Self {
             relaunch,
+            strategy,
             observed_modified,
             last_checked: Instant::now(),
             pending_handoff: None,
+            app_worker: None,
         }
     }
 
@@ -4742,8 +4990,77 @@ impl DesktopHotReloader {
         if self.pending_handoff.is_some() {
             return Some(now + DESKTOP_RELOAD_HANDOFF_POLL_INTERVAL);
         }
+        if self.app_worker.is_some() {
+            return Some(now + DESKTOP_RELOAD_HANDOFF_POLL_INTERVAL);
+        }
         self.relaunch.as_ref()?;
         Some(std::cmp::max(now, self.last_checked + Self::CHECK_INTERVAL))
+    }
+
+    fn drain_app_worker_messages(&mut self) -> Option<DesktopScene> {
+        let Some(worker) = self.app_worker.as_ref() else {
+            return None;
+        };
+        let mut latest_scene = None;
+        while let Some(message) = worker.try_recv() {
+            match message {
+                Ok(DesktopWorkerToHostMessage::Ready(ready)) => {
+                    desktop_log::info(format_args!(
+                        "jcode-desktop: app worker ready; pid={} mode={:?}",
+                        ready.worker_pid, ready.mode
+                    ));
+                }
+                Ok(DesktopWorkerToHostMessage::Scene(scene_update)) => {
+                    latest_scene = Some(scene_update.scene);
+                }
+                Ok(DesktopWorkerToHostMessage::Snapshot(snapshot)) => {
+                    desktop_log::info(format_args!(
+                        "jcode-desktop: app worker snapshot response {}; mode={}",
+                        snapshot.request_id, snapshot.snapshot.mode
+                    ));
+                }
+                Ok(DesktopWorkerToHostMessage::Metrics(metrics)) => {
+                    desktop_log::info(format_args!(
+                        "jcode-desktop: app worker reported {} metric(s)",
+                        metrics.metrics.len()
+                    ));
+                }
+                Ok(DesktopWorkerToHostMessage::Log(log)) => {
+                    desktop_log::info(format_args!(
+                        "jcode-desktop: app worker log {:?}: {}",
+                        log.level, log.message
+                    ));
+                }
+                Ok(DesktopWorkerToHostMessage::Exited(exit)) => {
+                    desktop_log::warn(format_args!(
+                        "jcode-desktop: app worker exited code={:?} reason={:?}",
+                        exit.code, exit.reason
+                    ));
+                }
+                Err(error) => {
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to read app worker message: {error:#}"
+                    ));
+                    break;
+                }
+            }
+        }
+        latest_scene
+    }
+
+    fn has_app_worker(&self) -> bool {
+        self.app_worker.is_some()
+    }
+
+    fn send_app_worker_input(&mut self, input: DesktopInputEvent) -> Result<()> {
+        self.send_app_worker_message(DesktopHostToWorkerMessage::Input(input))
+    }
+
+    fn send_app_worker_message(&mut self, message: DesktopHostToWorkerMessage) -> Result<()> {
+        let Some(worker) = self.app_worker.as_mut() else {
+            return Ok(());
+        };
+        worker.send(message)
     }
 
     fn poll(&mut self, app: &DesktopApp, window: &Window) -> bool {
@@ -4758,7 +5075,7 @@ impl DesktopHotReloader {
         }
         self.last_checked = Instant::now();
 
-        let Some(relaunch) = self.relaunch.as_ref() else {
+        let Some(relaunch) = self.relaunch.clone() else {
             return false;
         };
         let binary = desktop_reload_binary_candidate(&relaunch.binary);
@@ -4768,18 +5085,7 @@ impl DesktopHotReloader {
         let observed_modified = self.observed_modified;
         self.observed_modified = Some(current_modified);
         if observed_modified.is_some_and(|observed| current_modified > observed) {
-            let relaunch = relaunch.for_app(app, binary);
-            match relaunch.spawn_for_window(window) {
-                Ok(Some(handoff)) => {
-                    self.pending_handoff = Some(handoff);
-                }
-                Ok(None) => return true,
-                Err(error) => {
-                    desktop_log::error(format_args!(
-                        "jcode-desktop: failed to hot reload desktop: {error:#}"
-                    ));
-                }
-            }
+            return self.reload_with_strategy(app, window, &relaunch, binary, "hot reload");
         }
         false
     }
@@ -4794,13 +5100,94 @@ impl DesktopHotReloader {
             ));
             return false;
         }
-        let Some(relaunch) = self.relaunch.as_ref() else {
+        let Some(relaunch) = self.relaunch.clone() else {
             desktop_log::warn(format_args!(
                 "jcode-desktop: force reload requested but current process cannot be relaunched"
             ));
             return false;
         };
         let binary = desktop_reload_binary_candidate(&relaunch.binary);
+        self.reload_with_strategy(app, window, &relaunch, binary, "force reload")
+    }
+
+    fn reload_with_strategy(
+        &mut self,
+        app: &DesktopApp,
+        window: &Window,
+        relaunch: &DesktopRelaunch,
+        binary: PathBuf,
+        reason: &'static str,
+    ) -> bool {
+        match self.strategy {
+            DesktopReloadStrategy::FullProcessHandoff => {
+                self.reload_full_process_handoff(app, window, relaunch, binary, reason)
+            }
+            DesktopReloadStrategy::AppWorkerRestart => {
+                desktop_log::info(format_args!(
+                    "jcode-desktop: {reason} requested app-worker restart; keeping stable host window alive"
+                ));
+                self.restart_app_worker(app, window, relaunch, binary, reason);
+                false
+            }
+        }
+    }
+
+    fn restart_app_worker(
+        &mut self,
+        app: &DesktopApp,
+        window: &Window,
+        relaunch: &DesktopRelaunch,
+        binary: PathBuf,
+        reason: &'static str,
+    ) {
+        if let Some(worker) = self.app_worker.take()
+            && let Err(error) = worker.kill()
+        {
+            desktop_log::warn(format_args!(
+                "jcode-desktop: failed to stop previous app worker before {reason}: {error:#}"
+            ));
+        }
+
+        let worker_relaunch = relaunch.for_app(app, binary).for_app_worker();
+        match worker_relaunch.spawn_app_worker() {
+            Ok(mut worker) => {
+                if let Err(error) =
+                    worker.send(DesktopHostToWorkerMessage::Initialize(DesktopWorkerInit {
+                        mode: desktop_worker_mode_for_app(app),
+                        snapshot: Some(app.snapshot()),
+                        window: desktop_window_state(window),
+                    }))
+                {
+                    desktop_log::error(format_args!(
+                        "jcode-desktop: failed to initialize app worker for {reason}: {error:#}"
+                    ));
+                    if let Err(kill_error) = worker.kill() {
+                        desktop_log::warn(format_args!(
+                            "jcode-desktop: failed to kill uninitialized app worker: {kill_error:#}"
+                        ));
+                    }
+                    return;
+                }
+                desktop_log::info(format_args!(
+                    "jcode-desktop: app worker restarted for {reason}; pid={}",
+                    worker.child_id()
+                ));
+                self.app_worker = Some(worker);
+            }
+            Err(error) => desktop_log::error(format_args!(
+                "jcode-desktop: failed to restart app worker for {reason}: {error:#}"
+            )),
+        }
+    }
+
+    fn reload_full_process_handoff(
+        &mut self,
+        app: &DesktopApp,
+        window: &Window,
+        relaunch: &DesktopRelaunch,
+        binary: PathBuf,
+        reason: &'static str,
+    ) -> bool {
         let relaunch = relaunch.for_app(app, binary);
         match relaunch.spawn_for_window(window) {
             Ok(Some(handoff)) => {
@@ -4810,7 +5197,7 @@ impl DesktopHotReloader {
             Ok(None) => true,
             Err(error) => {
                 desktop_log::error(format_args!(
-                    "jcode-desktop: failed to force reload desktop: {error:#}"
+                    "jcode-desktop: failed to {reason} desktop: {error:#}"
                 ));
                 false
             }
@@ -4846,6 +5233,23 @@ impl DesktopHotReloader {
                 true
             }
         }
+    }
+}
+
+fn desktop_worker_mode_for_app(app: &DesktopApp) -> DesktopWorkerMode {
+    match app {
+        DesktopApp::SingleSession(_) => DesktopWorkerMode::SingleSession,
+        DesktopApp::Workspace(_) => DesktopWorkerMode::Workspace,
+    }
+}
+
+fn desktop_window_state(window: &Window) -> DesktopWindowState {
+    let size = window.inner_size();
+    DesktopWindowState {
+        width: size.width,
+        height: size.height,
+        scale_factor: window.scale_factor() as f32,
+        focused: window.has_focus(),
     }
 }
 
@@ -4931,6 +5335,31 @@ impl DesktopRelaunch {
         }
         Self { binary, args }
     }
+
+    fn for_app_worker(&self) -> Self {
+        let mut args = desktop_args_without_process_role(&self.args);
+        args.push(OsString::from("--desktop-process-role"));
+        args.push(OsString::from("app-worker"));
+        Self {
+            binary: self.binary.clone(),
+            args,
+        }
+    }
+
+    fn spawn_app_worker(&self) -> Result<DesktopWorkerConnection> {
+        desktop_log::info(format_args!(
+            "jcode-desktop: spawning app worker {} with args {:?}",
+            self.binary.display(),
+            self.args
+        ));
+        let mut command = Command::new(&self.binary);
+        command.args(&self.args);
+        command.env_remove(DESKTOP_RELOAD_WINDOW_ENV);
+        command.env_remove(DESKTOP_RELOAD_HANDOFF_READY_ENV);
+        command.env_remove(DESKTOP_RELOAD_HANDOFF_RELEASE_ENV);
+        DesktopWorkerConnection::spawn(&mut command)
+            .with_context(|| format!("failed to spawn app worker {}", self.binary.display()))
+    }
 }
 
 fn ensure_desktop_workspace_arg(args: &mut Vec<OsString>) {
@@ -4968,6 +5397,174 @@ fn desktop_args_without_resume(args: &[OsString]) -> Vec<OsString> {
         filtered.push(arg.clone());
     }
     filtered
+}
+
+fn desktop_args_without_process_role(args: &[OsString]) -> Vec<OsString> {
+    let mut filtered = Vec::with_capacity(args.len());
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--desktop-process-role" {
+            skip_next = true;
+            continue;
+        }
+        if arg == "--desktop-host" || arg == "--desktop-app-worker" {
+            continue;
+        }
+        if arg
+            .to_str()
+            .is_some_and(|value| value.starts_with("--desktop-process-role="))
+        {
+            continue;
+        }
+        filtered.push(arg.clone());
+    }
+    filtered
+}
+
+fn desktop_key_event_from_winit(
+    key: &Key,
+    modifiers: ModifiersState,
+    pressed: bool,
+) -> DesktopKeyEvent {
+    DesktopKeyEvent {
+        key: desktop_key_name(key),
+        text: desktop_key_text(key),
+        pressed,
+        modifiers: desktop_key_modifiers(modifiers),
+    }
+}
+
+fn desktop_key_name(key: &Key) -> String {
+    match key {
+        Key::Character(value) => value.to_string(),
+        Key::Named(named) => format!("{named:?}"),
+        other => format!("{other:?}"),
+    }
+}
+
+fn desktop_key_text(key: &Key) -> Option<String> {
+    match key {
+        Key::Character(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn desktop_key_modifiers(modifiers: ModifiersState) -> DesktopKeyModifiers {
+    DesktopKeyModifiers {
+        shift: modifiers.shift_key(),
+        ctrl: modifiers.control_key(),
+        alt: modifiers.alt_key(),
+        super_key: modifiers.super_key(),
+    }
+}
+
+fn desktop_mouse_wheel_event(delta: MouseScrollDelta) -> DesktopMouseEvent {
+    let (delta_x, delta_y) = match delta {
+        MouseScrollDelta::LineDelta(x, y) => (x, y),
+        MouseScrollDelta::PixelDelta(position) => (position.x as f32, position.y as f32),
+    };
+    DesktopMouseEvent::Wheel { delta_x, delta_y }
+}
+
+fn forward_app_worker_input(hot_reloader: &mut DesktopHotReloader, input: DesktopInputEvent) {
+    if let Err(error) = hot_reloader.send_app_worker_input(input) {
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to forward input to app worker: {error:#}"
+        ));
+    }
+}
+
+fn forward_desktop_session_event_batch_to_worker(
+    hot_reloader: &mut DesktopHotReloader,
+    batch: &DesktopSessionEventBatch,
+) {
+    if !hot_reloader.has_app_worker() {
+        return;
+    }
+    let wire = DesktopSessionEventBatchWire {
+        events: batch
+            .events
+            .iter()
+            .map(desktop_session_event_to_wire)
+            .collect(),
+        raw_event_count: batch.raw_event_count,
+        raw_payload_bytes: batch.raw_payload_bytes,
+    };
+    if let Err(error) =
+        hot_reloader.send_app_worker_message(DesktopHostToWorkerMessage::SessionEvents(wire))
+    {
+        desktop_log::error(format_args!(
+            "jcode-desktop: failed to forward session events to app worker: {error:#}"
+        ));
+    }
+}
+
+fn desktop_session_event_to_wire(
+    event: &session_launch::DesktopSessionEvent,
+) -> DesktopSessionEventWire {
+    match event {
+        session_launch::DesktopSessionEvent::Status(status) => DesktopSessionEventWire::Status {
+            message: status.label(),
+        },
+        session_launch::DesktopSessionEvent::TextDelta(text)
+        | session_launch::DesktopSessionEvent::TextReplace(text) => {
+            DesktopSessionEventWire::AssistantTextDelta { text: text.clone() }
+        }
+        session_launch::DesktopSessionEvent::ToolStarted { id, name }
+        | session_launch::DesktopSessionEvent::ToolExecuting { id, name } => {
+            DesktopSessionEventWire::ToolStarted {
+                id: id.clone().unwrap_or_default(),
+                title: name.clone(),
+            }
+        }
+        session_launch::DesktopSessionEvent::ToolFinished {
+            id, name, is_error, ..
+        } => DesktopSessionEventWire::ToolFinished {
+            id: id.clone().unwrap_or_default(),
+            title: name.clone(),
+            success: !*is_error,
+        },
+        session_launch::DesktopSessionEvent::Error(message) => DesktopSessionEventWire::Error {
+            message: message.clone(),
+        },
+        other => DesktopSessionEventWire::RawJson {
+            event_type: desktop_session_event_type_name(other).to_string(),
+            payload: format!("{other:?}"),
+        },
+    }
+}
+
+fn desktop_session_event_type_name(event: &session_launch::DesktopSessionEvent) -> &'static str {
+    match event {
+        session_launch::DesktopSessionEvent::Status(_) => "status",
+        session_launch::DesktopSessionEvent::SessionStarted { .. } => "session_started",
+        session_launch::DesktopSessionEvent::SessionRenamed { .. } => "session_renamed",
+        session_launch::DesktopSessionEvent::TextDelta(_) => "text_delta",
+        session_launch::DesktopSessionEvent::TextReplace(_) => "text_replace",
+        session_launch::DesktopSessionEvent::ToolStarted { .. } => "tool_started",
+        session_launch::DesktopSessionEvent::ToolExecuting { .. } => "tool_executing",
+        session_launch::DesktopSessionEvent::ToolInput { .. } => "tool_input",
+        session_launch::DesktopSessionEvent::ToolFinished { .. } => "tool_finished",
+        session_launch::DesktopSessionEvent::ModelChanged { .. } => "model_changed",
+        session_launch::DesktopSessionEvent::ModelCatalog { .. } => "model_catalog",
+        session_launch::DesktopSessionEvent::ModelCatalogError { .. } => "model_catalog_error",
+        session_launch::DesktopSessionEvent::StdinRequest { .. } => "stdin_request",
+        session_launch::DesktopSessionEvent::ReloadProgress { .. } => "reload_progress",
+        session_launch::DesktopSessionEvent::RuntimeMetadata { .. } => "runtime_metadata",
+        session_launch::DesktopSessionEvent::TokenUsage { .. } => "token_usage",
+        session_launch::DesktopSessionEvent::SystemNotice { .. } => "system_notice",
+        session_launch::DesktopSessionEvent::SessionCloseRequested { .. } => {
+            "session_close_requested"
+        }
+        session_launch::DesktopSessionEvent::Reloading { .. } => "reloading",
+        session_launch::DesktopSessionEvent::Reloaded { .. } => "reloaded",
+        session_launch::DesktopSessionEvent::Done => "done",
+        session_launch::DesktopSessionEvent::Error(_) => "error",
+    }
 }
 
 fn desktop_reload_binary_candidate(invoked_binary: &Path) -> PathBuf {
@@ -5996,6 +6593,134 @@ fn apply_pending_session_events(
         events.push(event);
     }
     apply_desktop_session_event_batch(app, events)
+}
+
+impl DesktopAppDriver for DesktopApp {
+    type KeyInput = KeyInput;
+    type KeyOutcome = KeyOutcome;
+
+    fn mode(&self) -> &'static str {
+        DesktopApp::mode(self)
+    }
+
+    fn status_title(&self) -> String {
+        DesktopApp::status_title(self)
+    }
+
+    fn live_session_id(&self) -> Option<String> {
+        DesktopApp::single_session_live_id(self)
+    }
+
+    fn has_background_work(&self) -> bool {
+        DesktopApp::has_background_work(self)
+    }
+
+    fn has_frame_animation(&self) -> bool {
+        DesktopApp::has_frame_animation(self)
+    }
+
+    fn handle_key_input(&mut self, key: Self::KeyInput) -> Self::KeyOutcome {
+        DesktopApp::handle_key(self, key)
+    }
+
+    fn apply_session_event(&mut self, event: session_launch::DesktopSessionEvent) {
+        DesktopApp::apply_session_event(self, event);
+    }
+
+    fn build_scene(&self, context: DesktopSceneBuildContext) -> desktop_scene::DesktopScene {
+        desktop_app_scene(self, context.scene)
+    }
+
+    fn snapshot(&self) -> DesktopUiSnapshot {
+        DesktopUiSnapshot::new(
+            DesktopApp::mode(self),
+            DesktopApp::status_title(self),
+            DesktopApp::single_session_live_id(self),
+            desktop_surface_snapshot(self),
+        )
+    }
+
+    fn restore_snapshot(
+        &mut self,
+        snapshot: DesktopUiSnapshot,
+    ) -> Result<(), DesktopSnapshotRestoreError> {
+        if snapshot.version != DESKTOP_UI_SNAPSHOT_VERSION {
+            return Err(DesktopSnapshotRestoreError::UnsupportedVersion {
+                version: snapshot.version,
+            });
+        }
+        if snapshot.mode != DesktopApp::mode(self) {
+            return Err(DesktopSnapshotRestoreError::UnsupportedMode {
+                mode: snapshot.mode,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn desktop_app_scene(app: &DesktopApp, mut scene: DesktopScene) -> DesktopScene {
+    scene.metadata.title = Some(app.status_title());
+    scene.metadata.animation_active = app.has_frame_animation();
+    scene.metadata.content_ready = true;
+    if scene.display_list.commands.is_empty() {
+        scene.push(DesktopDisplayCommand::Clear(DesktopColor::from_array(
+            BACKGROUND_TOP_LEFT,
+        )));
+    }
+    scene
+}
+
+fn desktop_surface_snapshot(app: &DesktopApp) -> DesktopSurfaceSnapshot {
+    match app {
+        DesktopApp::SingleSession(single_session) => {
+            DesktopSurfaceSnapshot::SingleSession(DesktopSingleSessionSnapshot {
+                session_title: single_session
+                    .session
+                    .as_ref()
+                    .map(|session| session.title.clone()),
+                draft: single_session.draft.clone(),
+                draft_cursor: single_session.draft_cursor,
+                body_scroll_millis: (single_session.body_scroll_lines * 1000.0).round() as i32,
+                detail_scroll: single_session.detail_scroll,
+                show_help: single_session.show_help,
+                show_session_info: single_session.show_session_info,
+                pending_image_count: single_session.pending_images.len(),
+                model_picker_open: single_session.model_picker.open,
+                session_switcher_open: single_session.session_switcher.open,
+                stdin_response_active: single_session.stdin_response.is_some(),
+            })
+        }
+        DesktopApp::Workspace(workspace) => {
+            let focused_session_id = workspace
+                .surfaces
+                .iter()
+                .find(|surface| surface.id == workspace.focused_id)
+                .and_then(|surface| surface.session_id.clone());
+            DesktopSurfaceSnapshot::Workspace(DesktopWorkspaceSnapshot {
+                input_mode: format!("{:?}", workspace.mode),
+                focused_surface_id: workspace.focused_id,
+                focused_session_id,
+                zoomed: workspace.zoomed,
+                detail_scroll: workspace.detail_scroll,
+                draft: workspace.draft.clone(),
+                draft_cursor: workspace.draft_cursor,
+                pending_image_count: workspace.pending_images.len(),
+                surfaces: workspace
+                    .surfaces
+                    .iter()
+                    .map(|surface| DesktopWorkspaceSurfaceSnapshot {
+                        id: surface.id,
+                        kind: format!("{:?}", surface.kind),
+                        title: surface.title.clone(),
+                        session_id: surface.session_id.clone(),
+                        lane: surface.lane,
+                        column: surface.column,
+                        color_index: surface.color_index,
+                    })
+                    .collect(),
+            })
+        }
+    }
 }
 
 fn apply_single_session_error(app: &mut DesktopApp, error: anyhow::Error) {
@@ -7880,6 +8605,97 @@ impl Canvas {
         })
     }
 
+    #[allow(dead_code)]
+    fn render_scene(
+        &mut self,
+        scene: &DesktopScene,
+    ) -> std::result::Result<DesktopRenderFrameResult, SurfaceError> {
+        if !self.boot_frame_presented {
+            return self.render_boot_frame();
+        }
+
+        let mut frame_profile = DesktopFrameProfile::new();
+        let frame = self.surface.get_current_texture()?;
+        frame_profile.checkpoint("surface_acquire");
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("jcode-desktop-scene-render"),
+            });
+        frame_profile.checkpoint("frame_setup");
+
+        self.ensure_render_pipeline();
+        frame_profile.checkpoint("primitive_pipeline");
+        self.primitive_frame_vertices.clear();
+        let clear_color =
+            desktop_scene_vertices(scene, self.size, &mut self.primitive_frame_vertices)
+                .unwrap_or(CLEAR_COLOR);
+        let primitive_vertex_count = self.primitive_frame_vertices.len();
+        upload_primitive_vertices(
+            &self.device,
+            &self.queue,
+            &mut self.primitive_vertex_buffer,
+            &mut self.primitive_vertex_capacity,
+            &self.primitive_frame_vertices,
+        );
+        frame_profile.checkpoint("primitive_upload");
+
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("jcode-desktop-scene-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            if let Some(render_pipeline) = self.render_pipeline.as_ref() {
+                render_pass.set_pipeline(render_pipeline);
+            }
+            if primitive_vertex_count > 0
+                && let Some(vertex_buffer) = self.primitive_vertex_buffer.as_ref()
+            {
+                render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                render_pass.draw(0..primitive_vertex_count as u32, 0..1);
+            }
+        }
+        frame_profile.checkpoint("render_pass");
+
+        self.queue.submit(Some(encoder.finish()));
+        frame_profile.checkpoint("queue_submit");
+        frame.present();
+        frame_profile.checkpoint("present");
+        self.first_render_completed = true;
+        let frame_wall = frame_profile.total_duration();
+        let frame_cpu = frame_profile.cpu_duration();
+        let context = DesktopFrameContext {
+            mode: "scene",
+            smooth_scroll_lines: 0.0,
+            text_buffer_count: 0,
+            text_area_count: 0,
+            primitive_vertices: primitive_vertex_count,
+            text_prepared: false,
+            primitive_geometry_cache_hit: false,
+        };
+        self.frame_profiler.observe(frame_profile, context);
+        Ok(DesktopRenderFrameResult {
+            animation_active: scene.metadata.animation_active,
+            content_ready: scene.metadata.content_ready,
+            frame_wall,
+            frame_cpu,
+            context,
+        })
+    }
+
     fn render(
         &mut self,
         app: &DesktopApp,
@@ -8438,6 +9254,82 @@ fn upload_primitive_vertices(
 
     if let Some(vertex_buffer) = primitive_vertex_buffer.as_ref() {
         queue.write_buffer(vertex_buffer, 0, bytemuck::cast_slice(vertices));
+    }
+}
+
+fn desktop_scene_vertices(
+    scene: &DesktopScene,
+    size: PhysicalSize<u32>,
+    vertices: &mut Vec<Vertex>,
+) -> Option<wgpu::Color> {
+    vertices.clear();
+    let mut clear_color = None;
+    for command in &scene.display_list.commands {
+        match command {
+            DesktopDisplayCommand::Clear(color) => {
+                clear_color = Some(desktop_scene_clear_color(*color));
+                vertices.clear();
+            }
+            DesktopDisplayCommand::Rect(paint) => {
+                push_desktop_scene_rect(vertices, paint, size);
+            }
+            DesktopDisplayCommand::Text(_)
+            | DesktopDisplayCommand::Image(_)
+            | DesktopDisplayCommand::PushClip(_)
+            | DesktopDisplayCommand::PopClip
+            | DesktopDisplayCommand::PushLayer { .. }
+            | DesktopDisplayCommand::PopLayer => {}
+        }
+    }
+    clear_color
+}
+
+fn push_desktop_scene_rect(
+    vertices: &mut Vec<Vertex>,
+    paint: &DesktopRectPaint,
+    size: PhysicalSize<u32>,
+) {
+    if !paint.rect.is_renderable() || paint.fill.a <= 0.0 {
+        return;
+    }
+    let rect = rect_from_desktop_scene_rect(paint.rect);
+    let fill = paint.fill.to_array();
+    let radius = [
+        paint.radii.top_left,
+        paint.radii.top_right,
+        paint.radii.bottom_right,
+        paint.radii.bottom_left,
+    ]
+    .into_iter()
+    .fold(0.0_f32, f32::max);
+    if radius > 0.5 {
+        push_rounded_rect(vertices, rect, radius, fill, size);
+    } else {
+        push_rect(vertices, rect, fill, size);
+    }
+    if let Some(border) = paint.border
+        && border.width > 0.0
+        && border.color.a > 0.0
+    {
+        push_stroked_rect(vertices, rect, border.width, border.color.to_array(), size);
+    }
+}
+
+fn rect_from_desktop_scene_rect(rect: DesktopSceneRect) -> Rect {
+    Rect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
+fn desktop_scene_clear_color(color: DesktopColor) -> wgpu::Color {
+    wgpu::Color {
+        r: color.r as f64,
+        g: color.g as f64,
+        b: color.b as f64,
+        a: color.a as f64,
     }
 }
 
