@@ -1482,6 +1482,14 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
+                if app_mod::commands::handle_test_command(app, trimmed) {
+                    return Ok(());
+                }
+
+                if app_mod::commands::handle_mission_command(app, trimmed) {
+                    return Ok(());
+                }
+
                 if app_mod::commands::handle_goals_command(app, trimmed) {
                     return Ok(());
                 }

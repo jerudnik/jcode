@@ -22,8 +22,10 @@ mod workspace;
 
 use ab_glyph::{Font, FontArc, Glyph as AbGlyph, PxScale, ScaleFont, point};
 use animation::{
-    AnimatedRect, AnimatedViewport, ColorTransition, FocusPulse, SurfaceTransitionAnimator,
-    SurfaceVisualFrame, SurfaceVisualTarget, VisibleColumnLayout, WorkspaceRenderLayout,
+    APP_MODE_TRANSITION_DURATION, AnimatedRect, AnimatedViewport, ColorTransition, FocusPulse,
+    StatusTextTransition, StatusTextTransitionFrame, StatusTextVisualFrame,
+    SurfaceTransitionAnimator, SurfaceVisualFrame, SurfaceVisualTarget, VisibleColumnLayout,
+    WorkspaceRenderLayout,
 };
 use anyhow::{Context, Result};
 use base64::Engine;
@@ -148,6 +150,7 @@ const SCROLL_MOMENTUM_DECAY_PER_SECOND: f32 = 7.0;
 const SCROLL_MOMENTUM_MAX_VELOCITY: f32 = 72.0;
 const SCROLL_MOMENTUM_STOP_VELOCITY: f32 = 0.08;
 const SCROLL_FRAME_MAX_DT_SECONDS: f32 = 0.050;
+const SINGLE_SESSION_SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 const SINGLE_SESSION_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 8;
 const SINGLE_SESSION_BODY_TEXT_WINDOW_AFTER_LINES: usize = 16;
 const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_BEFORE_LINES: usize = 2;
@@ -155,6 +158,8 @@ const SINGLE_SESSION_STREAMING_BODY_TEXT_WINDOW_AFTER_LINES: usize = 4;
 const STREAMING_TEXT_FADE_DURATION: Duration = Duration::from_millis(150);
 const STREAMING_TEXT_FADE_START_OPACITY: f32 = 0.4;
 const STREAMING_TEXT_RISE_START_OFFSET_PIXELS: f32 = 3.5;
+const STREAMING_TEXT_HANDOFF_DURATION: Duration = Duration::from_millis(135);
+const STREAMING_TEXT_HANDOFF_START_OPACITY: f32 = 0.18;
 const DESKTOP_ASYNC_JOB_LIMIT: usize = 12;
 const PRIMITIVE_VERTEX_BUFFER_MIN_CAPACITY: usize = 1024;
 const PRIMITIVE_VERTEX_BUFFER_SHRINK_RATIO: usize = 4;
@@ -421,15 +426,67 @@ fn streaming_text_fade_start_after_len_change(
         return None;
     }
 
-    let response_changed = previous_len != next_len;
     let fade_active = current_started_at.is_some_and(|started_at| {
         now.saturating_duration_since(started_at) < STREAMING_TEXT_FADE_DURATION
     });
-    if response_changed && !fade_active {
+    if fade_active {
+        return current_started_at;
+    }
+
+    // Only fade in the beginning of a streaming response. Restarting after
+    // every slow delta dims the already-visible response and reads as flicker.
+    if previous_len == 0 && next_len > 0 {
         Some(now)
     } else {
-        current_started_at
+        None
     }
+}
+
+fn streaming_text_handoff_style_for_elapsed(elapsed: Duration) -> StreamingTextArrivalStyle {
+    if animation::desktop_reduced_motion_enabled() {
+        return StreamingTextArrivalStyle {
+            opacity: 0.0,
+            y_offset_pixels: 0.0,
+            active: false,
+        };
+    }
+
+    let progress =
+        (elapsed.as_secs_f32() / STREAMING_TEXT_HANDOFF_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+    if progress >= 1.0 {
+        return StreamingTextArrivalStyle {
+            opacity: 0.0,
+            y_offset_pixels: 0.0,
+            active: false,
+        };
+    }
+
+    let eased = animation::ease_out_cubic(progress);
+    StreamingTextArrivalStyle {
+        opacity: STREAMING_TEXT_HANDOFF_START_OPACITY * (1.0 - eased),
+        y_offset_pixels: 0.0,
+        active: true,
+    }
+}
+
+fn streaming_text_handoff_start_after_len_change(
+    previous_len: usize,
+    next_len: usize,
+    has_visible_streaming_buffer: bool,
+    current_started_at: Option<Instant>,
+    now: Instant,
+) -> Option<Instant> {
+    if animation::desktop_reduced_motion_enabled() || next_len > 0 {
+        return None;
+    }
+
+    if previous_len > 0 && has_visible_streaming_buffer {
+        return Some(now);
+    }
+
+    current_started_at.filter(|started_at| {
+        now.saturating_duration_since(*started_at) < STREAMING_TEXT_HANDOFF_DURATION
+    })
 }
 const DESKTOP_120FPS_FRAME_BUDGET: Duration = Duration::from_micros(8_333);
 const DESKTOP_PRESENT_STALL_BUDGET: Duration = Duration::from_millis(33);
@@ -4619,6 +4676,7 @@ fn benchmark_workspace_session_cards(count: usize) -> Vec<workspace::SessionCard
                     )
                 })
                 .collect(),
+            transcript_messages: Vec::new(),
         })
         .collect()
 }
@@ -7413,6 +7471,84 @@ impl ScrollLineAccumulator {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SingleSessionScrollMotionFrame {
+    visual_scroll_lines: f32,
+    smooth_scroll_lines: f32,
+    active: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SingleSessionScrollMotion {
+    initialized: bool,
+    start_lines: f32,
+    current_lines: f32,
+    target_lines: f32,
+    started_at: Option<Instant>,
+}
+
+impl SingleSessionScrollMotion {
+    fn frame(&mut self, target_lines: f32, now: Instant) -> SingleSessionScrollMotionFrame {
+        let target_lines = if target_lines.is_finite() {
+            target_lines.max(0.0)
+        } else {
+            0.0
+        };
+
+        if !self.initialized || animation::desktop_reduced_motion_enabled() {
+            self.initialized = true;
+            self.start_lines = target_lines;
+            self.current_lines = target_lines;
+            self.target_lines = target_lines;
+            self.started_at = None;
+            return SingleSessionScrollMotionFrame {
+                visual_scroll_lines: target_lines,
+                smooth_scroll_lines: 0.0,
+                active: false,
+            };
+        }
+
+        if (self.target_lines - target_lines).abs() >= SCROLL_FRACTIONAL_EPSILON {
+            self.start_lines = self.current_lines;
+            self.target_lines = target_lines;
+            self.started_at = Some(now);
+        }
+
+        if let Some(started_at) = self.started_at {
+            let progress = (now.saturating_duration_since(started_at).as_secs_f32()
+                / SINGLE_SESSION_SCROLL_ANIMATION_DURATION.as_secs_f32())
+            .clamp(0.0, 1.0);
+            let eased = animation::ease_out_cubic(progress);
+            self.current_lines = animation::lerp(self.start_lines, self.target_lines, eased);
+            if progress >= 1.0
+                || (self.current_lines - self.target_lines).abs() < SCROLL_FRACTIONAL_EPSILON
+            {
+                self.current_lines = self.target_lines;
+                self.started_at = None;
+            }
+        }
+
+        SingleSessionScrollMotionFrame {
+            visual_scroll_lines: self.current_lines,
+            smooth_scroll_lines: self.current_lines - target_lines,
+            active: self.is_active(),
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.started_at.is_some()
+            || (self.current_lines - self.target_lines).abs() >= SCROLL_FRACTIONAL_EPSILON
+    }
+
+    fn clear(&mut self) {
+        self.initialized = false;
+        self.start_lines = 0.0;
+        self.current_lines = 0.0;
+        self.target_lines = 0.0;
+        self.started_at = None;
+    }
+}
+
 #[cfg(test)]
 fn mouse_scroll_lines(delta: MouseScrollDelta) -> Option<f32> {
     ScrollLineAccumulator::default().scroll_lines(delta, Instant::now())
@@ -7605,6 +7741,11 @@ struct DesktopFrameContext {
     text_buffer_count: usize,
     text_area_count: usize,
     primitive_vertices: usize,
+    body_line_count: usize,
+    viewport_line_count: usize,
+    body_text_window_line_count: usize,
+    streaming_text_line_count: usize,
+    inline_widget_line_count: usize,
     text_prepared: bool,
     primitive_geometry_cache_hit: bool,
 }
@@ -7737,6 +7878,11 @@ impl DesktopFrameProfiler {
                     "text_buffer_count": worst.context.text_buffer_count,
                     "text_area_count": worst.context.text_area_count,
                     "primitive_vertices": worst.context.primitive_vertices,
+                    "body_line_count": worst.context.body_line_count,
+                    "viewport_line_count": worst.context.viewport_line_count,
+                    "body_text_window_line_count": worst.context.body_text_window_line_count,
+                    "streaming_text_line_count": worst.context.streaming_text_line_count,
+                    "inline_widget_line_count": worst.context.inline_widget_line_count,
                     "text_prepared": worst.context.text_prepared,
                     "primitive_geometry_cache_hit": worst.context.primitive_geometry_cache_hit,
                     "stages": worst.stages.iter().map(|stage| serde_json::json!({
@@ -7838,6 +7984,11 @@ impl DesktopInteractionLatencyProfiler {
                 "text_buffer_count": frame.context.text_buffer_count,
                 "text_area_count": frame.context.text_area_count,
                 "primitive_vertices": frame.context.primitive_vertices,
+                "body_line_count": frame.context.body_line_count,
+                "viewport_line_count": frame.context.viewport_line_count,
+                "body_text_window_line_count": frame.context.body_text_window_line_count,
+                "streaming_text_line_count": frame.context.streaming_text_line_count,
+                "inline_widget_line_count": frame.context.inline_widget_line_count,
                 "text_prepared": frame.context.text_prepared,
                 "stages": frame.stages.iter().map(|stage| serde_json::json!({
                     "name": stage.name,
@@ -8186,9 +8337,14 @@ fn single_session_streaming_primitive_geometry_cache_key(
     welcome_hero_reveal_progress: f32,
     tool_motion_cache_key: u64,
     inline_widget_list_reflow_cache_key: u64,
+    inline_widget_preview_pane_cache_key: u64,
     composer_motion_cache_key: u64,
+    attachment_chip_motion_cache_key: u64,
+    stdin_overlay_motion_cache_key: u64,
+    transcript_message_motion_cache_key: u64,
     transcript_motion_cache_key: u64,
     inline_markdown_motion_cache_key: u64,
+    activity_cue_motion_cache_key: u64,
     scrollbar_motion_cache_key: u64,
     body_key: Option<u64>,
     body_line_count: usize,
@@ -8217,9 +8373,14 @@ fn single_session_streaming_primitive_geometry_cache_key(
     welcome_hero_reveal_progress.to_bits().hash(&mut hasher);
     tool_motion_cache_key.hash(&mut hasher);
     inline_widget_list_reflow_cache_key.hash(&mut hasher);
+    inline_widget_preview_pane_cache_key.hash(&mut hasher);
     composer_motion_cache_key.hash(&mut hasher);
+    attachment_chip_motion_cache_key.hash(&mut hasher);
+    stdin_overlay_motion_cache_key.hash(&mut hasher);
+    transcript_message_motion_cache_key.hash(&mut hasher);
     transcript_motion_cache_key.hash(&mut hasher);
     inline_markdown_motion_cache_key.hash(&mut hasher);
+    activity_cue_motion_cache_key.hash(&mut hasher);
     scrollbar_motion_cache_key.hash(&mut hasher);
     spinner_tick.hash(&mut hasher);
     app.is_processing.hash(&mut hasher);
@@ -8237,6 +8398,123 @@ fn single_session_streaming_primitive_geometry_cache_key(
     body_key.hash(&mut hasher);
     body_line_count.hash(&mut hasher);
     Some(hasher.finish())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AppModeTransitionFrame {
+    previous_opacity: f32,
+    previous_scale: f32,
+    current_opacity: f32,
+    current_scale: f32,
+}
+
+#[derive(Default)]
+struct AppModeTransitionState {
+    last_mode: Option<&'static str>,
+    started_at: Option<Instant>,
+    previous_vertices: Vec<Vertex>,
+    last_vertices: Vec<Vertex>,
+}
+
+impl AppModeTransitionState {
+    fn frame(&mut self, mode: &'static str, now: Instant) -> Option<AppModeTransitionFrame> {
+        if animation::desktop_reduced_motion_enabled() {
+            self.last_mode = Some(mode);
+            self.started_at = None;
+            self.previous_vertices.clear();
+            return None;
+        }
+
+        match self.last_mode {
+            None => {
+                self.last_mode = Some(mode);
+                return None;
+            }
+            Some(previous_mode) if previous_mode != mode => {
+                self.last_mode = Some(mode);
+                self.previous_vertices.clear();
+                self.previous_vertices
+                    .extend_from_slice(&self.last_vertices);
+                self.started_at = (!self.previous_vertices.is_empty()).then_some(now);
+            }
+            Some(_) => {}
+        }
+
+        let started_at = self.started_at?;
+        let progress = (now.saturating_duration_since(started_at).as_secs_f32()
+            / APP_MODE_TRANSITION_DURATION.as_secs_f32())
+        .clamp(0.0, 1.0);
+        if progress >= 1.0 {
+            self.started_at = None;
+            self.previous_vertices.clear();
+            return None;
+        }
+
+        let eased = animation::ease_out_cubic(progress);
+        Some(AppModeTransitionFrame {
+            previous_opacity: 1.0 - eased,
+            previous_scale: animation::lerp(1.0, 0.985, eased),
+            current_opacity: eased,
+            current_scale: animation::lerp(0.985, 1.0, eased),
+        })
+    }
+
+    fn previous_vertices(&self) -> &[Vertex] {
+        &self.previous_vertices
+    }
+
+    fn remember_uploaded_vertices(&mut self, vertices: &[Vertex]) {
+        self.last_vertices.clear();
+        self.last_vertices.extend_from_slice(vertices);
+    }
+
+    fn clear(&mut self) {
+        self.last_mode = None;
+        self.started_at = None;
+        self.previous_vertices.clear();
+        self.last_vertices.clear();
+    }
+}
+
+fn compose_app_mode_transition_vertices(
+    output: &mut Vec<Vertex>,
+    previous_vertices: &[Vertex],
+    current_vertices: &[Vertex],
+    frame: AppModeTransitionFrame,
+) {
+    output.clear();
+    append_app_mode_transition_vertices(
+        output,
+        previous_vertices,
+        frame.previous_opacity,
+        frame.previous_scale,
+    );
+    append_app_mode_transition_vertices(
+        output,
+        current_vertices,
+        frame.current_opacity,
+        frame.current_scale,
+    );
+}
+
+fn append_app_mode_transition_vertices(
+    output: &mut Vec<Vertex>,
+    vertices: &[Vertex],
+    opacity: f32,
+    scale: f32,
+) {
+    let opacity = opacity.clamp(0.0, 1.0);
+    if opacity <= 0.001 {
+        return;
+    }
+    output.extend(vertices.iter().map(|vertex| {
+        let mut color = vertex.color;
+        color[3] *= opacity;
+        Vertex {
+            position: [vertex.position[0] * scale, vertex.position[1] * scale],
+            color,
+        }
+    }));
 }
 
 struct Canvas {
@@ -8262,11 +8540,16 @@ struct Canvas {
     workspace_surface_exit_cache: HashMap<u64, workspace::Surface>,
     focus_pulse: FocusPulse,
     status_color_transition: ColorTransition,
+    status_text_transition: StatusTextTransition,
     inline_widget_selection_motion: InlineWidgetSelectionMotionRegistry,
     inline_widget_list_reflow_motion: InlineWidgetListReflowMotionRegistry,
+    inline_widget_preview_pane_motion: InlineWidgetPreviewPaneMotionRegistry,
     composer_motion: ComposerMotionRegistry,
+    attachment_chip_motion: AttachmentChipMotionRegistry,
+    stdin_overlay_motion: StdinOverlayMotionRegistry,
     transcript_card_motion: TranscriptCardMotionRegistry,
     inline_markdown_pill_motion: InlineMarkdownPillMotionRegistry,
+    streaming_activity_cue_motion: StreamingActivityCueMotionRegistry,
     tool_card_motion: ToolCardMotionRegistry,
     single_session_scrollbar_motion: SingleSessionScrollbarMotionRegistry,
     primitive_vertex_buffer: Option<wgpu::Buffer>,
@@ -8275,6 +8558,10 @@ struct Canvas {
     primitive_vertices_cache: Vec<Vertex>,
     primitive_frame_vertices: Vec<Vertex>,
     primitive_workspace_vertices: Vec<Vertex>,
+    app_mode_transition: AppModeTransitionState,
+    app_mode_transition_vertices: Vec<Vertex>,
+    single_session_scroll_motion: SingleSessionScrollMotion,
+    transcript_message_motion: TranscriptMessageMotionRegistry,
     needs_initial_frame: bool,
     boot_frame_presented: bool,
     first_render_completed: bool,
@@ -8290,6 +8577,7 @@ struct Canvas {
     single_session_streaming_base_len: usize,
     single_session_streaming_response_len: usize,
     single_session_streaming_fade_started_at: Option<Instant>,
+    single_session_streaming_handoff_started_at: Option<Instant>,
     single_session_streaming_text_key: Option<u64>,
     single_session_streaming_text_start_line: Option<usize>,
     single_session_streaming_text_end_line: Option<usize>,
@@ -8385,11 +8673,16 @@ impl Canvas {
             workspace_surface_exit_cache: HashMap::new(),
             focus_pulse: FocusPulse::default(),
             status_color_transition: ColorTransition::default(),
+            status_text_transition: StatusTextTransition::default(),
             inline_widget_selection_motion: InlineWidgetSelectionMotionRegistry::default(),
             inline_widget_list_reflow_motion: InlineWidgetListReflowMotionRegistry::default(),
+            inline_widget_preview_pane_motion: InlineWidgetPreviewPaneMotionRegistry::default(),
             composer_motion: ComposerMotionRegistry::default(),
+            attachment_chip_motion: AttachmentChipMotionRegistry::default(),
+            stdin_overlay_motion: StdinOverlayMotionRegistry::default(),
             transcript_card_motion: TranscriptCardMotionRegistry::default(),
             inline_markdown_pill_motion: InlineMarkdownPillMotionRegistry::default(),
+            streaming_activity_cue_motion: StreamingActivityCueMotionRegistry::default(),
             tool_card_motion: ToolCardMotionRegistry::default(),
             single_session_scrollbar_motion: SingleSessionScrollbarMotionRegistry::default(),
             primitive_vertex_buffer: None,
@@ -8398,6 +8691,10 @@ impl Canvas {
             primitive_vertices_cache: Vec::new(),
             primitive_frame_vertices: Vec::new(),
             primitive_workspace_vertices: Vec::new(),
+            app_mode_transition: AppModeTransitionState::default(),
+            app_mode_transition_vertices: Vec::new(),
+            single_session_scroll_motion: SingleSessionScrollMotion::default(),
+            transcript_message_motion: TranscriptMessageMotionRegistry::default(),
             needs_initial_frame: true,
             boot_frame_presented: false,
             first_render_completed: false,
@@ -8413,6 +8710,7 @@ impl Canvas {
             single_session_streaming_base_len: 0,
             single_session_streaming_response_len: 0,
             single_session_streaming_fade_started_at: None,
+            single_session_streaming_handoff_started_at: None,
             single_session_streaming_text_key: None,
             single_session_streaming_text_start_line: None,
             single_session_streaming_text_end_line: None,
@@ -8460,6 +8758,13 @@ impl Canvas {
         self.primitive_vertices_cache_key = None;
         self.primitive_vertices_cache.clear();
         self.primitive_frame_vertices.clear();
+        self.app_mode_transition.clear();
+        self.app_mode_transition_vertices.clear();
+        self.single_session_scroll_motion.clear();
+        self.transcript_message_motion.clear();
+        self.inline_widget_preview_pane_motion.clear();
+        self.streaming_activity_cue_motion.clear();
+        self.single_session_streaming_handoff_started_at = None;
         self.first_render_completed = false;
         self.text_needs_prepare = true;
         if self.single_session_streaming_text_buffer.is_some() {
@@ -8660,11 +8965,19 @@ impl Canvas {
         let Some((start_line, end_line)) =
             self.single_session_streaming_visible_range(app, viewport)
         else {
+            if app.streaming_response.is_empty()
+                && self.single_session_streaming_handoff_started_at.is_some()
+                && self.single_session_streaming_text_buffer.is_some()
+            {
+                self.streaming_text_needs_prepare = true;
+                return;
+            }
             self.single_session_streaming_text_key = None;
             self.single_session_streaming_text_start_line = None;
             self.single_session_streaming_text_end_line = None;
             self.single_session_streaming_text_opacity_bits = None;
             self.single_session_streaming_text_buffer = None;
+            self.single_session_streaming_handoff_started_at = None;
             self.streaming_text_needs_prepare = false;
             return;
         };
@@ -8699,12 +9012,25 @@ impl Canvas {
     }
 
     fn update_single_session_streaming_fade(&mut self, app: &SingleSessionApp) {
+        let now = Instant::now();
+        let previous_len = self.single_session_streaming_response_len;
         let response_len = app.streaming_response.len();
+        let has_visible_streaming_buffer = self.single_session_streaming_text_buffer.is_some()
+            && self.single_session_streaming_text_start_line.is_some()
+            && self.single_session_streaming_text_end_line.is_some();
+        self.single_session_streaming_handoff_started_at =
+            streaming_text_handoff_start_after_len_change(
+                previous_len,
+                response_len,
+                has_visible_streaming_buffer,
+                self.single_session_streaming_handoff_started_at,
+                now,
+            );
         self.single_session_streaming_fade_started_at = streaming_text_fade_start_after_len_change(
-            self.single_session_streaming_response_len,
+            previous_len,
             response_len,
             self.single_session_streaming_fade_started_at,
-            Instant::now(),
+            now,
         );
         self.single_session_streaming_response_len = response_len;
     }
@@ -8713,6 +9039,22 @@ impl Canvas {
         &mut self,
         now: Instant,
     ) -> StreamingTextArrivalStyle {
+        if let Some(started_at) = self.single_session_streaming_handoff_started_at {
+            let style =
+                streaming_text_handoff_style_for_elapsed(now.saturating_duration_since(started_at));
+            if style.active {
+                return style;
+            }
+            self.single_session_streaming_handoff_started_at = None;
+            self.single_session_streaming_text_key = None;
+            self.single_session_streaming_text_start_line = None;
+            self.single_session_streaming_text_end_line = None;
+            self.single_session_streaming_text_opacity_bits = None;
+            self.single_session_streaming_text_buffer = None;
+            self.streaming_text_needs_prepare = false;
+            return style;
+        }
+
         let Some(started_at) = self.single_session_streaming_fade_started_at else {
             return StreamingTextArrivalStyle {
                 opacity: 1.0,
@@ -9059,6 +9401,11 @@ impl Canvas {
             text_buffer_count: 0,
             text_area_count: 0,
             primitive_vertices: 0,
+            body_line_count: 0,
+            viewport_line_count: 0,
+            body_text_window_line_count: 0,
+            streaming_text_line_count: 0,
+            inline_widget_line_count: 0,
             text_prepared: false,
             primitive_geometry_cache_hit: false,
         };
@@ -9152,6 +9499,11 @@ impl Canvas {
             text_buffer_count: 0,
             text_area_count: 0,
             primitive_vertices: primitive_vertex_count,
+            body_line_count: 0,
+            viewport_line_count: 0,
+            body_text_window_line_count: 0,
+            streaming_text_line_count: 0,
+            inline_widget_line_count: 0,
             text_prepared: false,
             primitive_geometry_cache_hit: false,
         };
@@ -9193,6 +9545,20 @@ impl Canvas {
         let spinner_tick = desktop_spinner_tick(now);
         frame_profile.checkpoint("frame_setup");
 
+        let scroll_motion_frame = if let DesktopApp::SingleSession(single_session) = app {
+            self.single_session_scroll_motion
+                .frame(single_session.body_scroll_lines, now)
+        } else {
+            self.single_session_scroll_motion.clear();
+            SingleSessionScrollMotionFrame {
+                visual_scroll_lines: 0.0,
+                smooth_scroll_lines: 0.0,
+                active: false,
+            }
+        };
+        let smooth_scroll_lines = smooth_scroll_lines + scroll_motion_frame.smooth_scroll_lines;
+        frame_profile.checkpoint("scroll_motion");
+
         let (welcome_hero_reveal_progress, welcome_hero_reveal_active) =
             if let DesktopApp::SingleSession(single_session) = app {
                 self.welcome_hero_reveal_progress(single_session, now)
@@ -9207,6 +9573,7 @@ impl Canvas {
             workspace_render_layout_for_frame,
             workspace_surface_frames_for_frame,
             workspace_status_color_for_frame,
+            workspace_status_text_frame,
         ) = if let DesktopApp::Workspace(workspace) = app {
             let target_layout = workspace_render_layout(workspace, self.size, monitor_size);
             let render_layout = self.viewport_animation.frame(target_layout, now);
@@ -9224,20 +9591,30 @@ impl Canvas {
             let status_color = self
                 .status_color_transition
                 .frame(workspace_status_bar_target_color(workspace), now);
+            let status_text_frame = self
+                .status_text_transition
+                .frame(workspace_status_text(workspace), now);
             (
                 Some(render_layout),
                 Some(surface_frames),
                 Some(status_color),
+                Some(status_text_frame),
             )
         } else {
             self.surface_transitions.clear();
             self.workspace_surface_exit_cache.clear();
             self.status_color_transition.clear();
-            (None, None, None)
+            self.status_text_transition.clear();
+            (None, None, None, None)
         };
 
         let mut single_session_rendered_body_key = None;
         let mut workspace_text_panes = Vec::new();
+        let mut body_line_count = 0usize;
+        let mut viewport_line_count = 0usize;
+        let mut body_text_window_line_count = 0usize;
+        let mut streaming_text_line_count = 0usize;
+        let mut inline_widget_line_count = 0usize;
         let defer_text_this_frame = self.defer_initial_text_frame;
         if defer_text_this_frame {
             self.defer_initial_text_frame = false;
@@ -9248,6 +9625,7 @@ impl Canvas {
             self.single_session_streaming_text_end_line = None;
             self.single_session_streaming_text_opacity_bits = None;
             self.single_session_streaming_text_buffer = None;
+            self.single_session_streaming_handoff_started_at = None;
             self.streaming_text_needs_prepare = false;
             self.single_session_body_text_scroll_start = None;
             self.single_session_body_text_window_start = None;
@@ -9256,6 +9634,8 @@ impl Canvas {
             let (rendered_body_key, rendered_body_changed) =
                 self.cached_single_session_body_lines(single_session, spinner_tick);
             single_session_rendered_body_key = Some(rendered_body_key);
+            body_line_count = self.single_session_body_lines.len();
+            inline_widget_line_count = single_session.render_inline_widget_visible_line_count();
             frame_profile.checkpoint("body_lines_cache");
             self.ensure_font_system();
             frame_profile.checkpoint("font_system");
@@ -9277,6 +9657,7 @@ impl Canvas {
             self.single_session_streaming_text_end_line = None;
             self.single_session_streaming_text_opacity_bits = None;
             self.single_session_streaming_text_buffer = None;
+            self.single_session_streaming_handoff_started_at = None;
             self.streaming_text_needs_prepare = false;
             self.single_session_body_text_scroll_start = None;
             self.single_session_body_text_window_start = None;
@@ -9328,12 +9709,24 @@ impl Canvas {
         let mut text_area_count = 0usize;
         let mut text_prepared = false;
         let single_session_viewport = if let DesktopApp::SingleSession(single_session) = app {
-            Some(single_session_body_viewport_from_lines(
+            let viewport = single_session_body_viewport_from_lines(
                 single_session,
                 self.size,
                 smooth_scroll_lines,
                 &self.single_session_body_lines,
-            ))
+            );
+            viewport_line_count = viewport.lines.len();
+            body_text_window_line_count = self
+                .single_session_body_text_window_start
+                .zip(self.single_session_body_text_window_end)
+                .map(|(start, end)| end.saturating_sub(start))
+                .unwrap_or_default();
+            streaming_text_line_count = self
+                .single_session_streaming_text_start_line
+                .zip(self.single_session_streaming_text_end_line)
+                .map(|(start, end)| end.saturating_sub(start))
+                .unwrap_or_default();
+            Some(viewport)
         } else {
             None
         };
@@ -9486,7 +9879,7 @@ impl Canvas {
         frame_profile.checkpoint("text_prepare_streaming");
 
         let mut primitive_geometry_cache_hit = false;
-        let (mut vertices, animation_active): (Cow<'_, [Vertex]>, bool) = match app {
+        let (mut vertices, mut animation_active): (Cow<'_, [Vertex]>, bool) = match app {
             DesktopApp::SingleSession(single_session) => {
                 let focus_pulse = self.focus_pulse.frame(1, now);
                 let inline_selection_motion = self
@@ -9495,7 +9888,16 @@ impl Canvas {
                 let inline_list_reflow_motion = self
                     .inline_widget_list_reflow_motion
                     .frame(single_session, now);
+                let inline_preview_pane_motion = self
+                    .inline_widget_preview_pane_motion
+                    .frame(single_session, now);
                 let composer_motion = self.composer_motion.frame(single_session, now);
+                let attachment_chip_motion = self.attachment_chip_motion.frame(single_session, now);
+                let stdin_overlay_motion = self.stdin_overlay_motion.frame(
+                    single_session,
+                    &self.single_session_body_lines,
+                    now,
+                );
                 let tool_motion_lines = single_session_viewport
                     .as_ref()
                     .map(|viewport| viewport.lines.as_slice())
@@ -9510,11 +9912,19 @@ impl Canvas {
                     transcript_line_height,
                     now,
                 );
+                let transcript_message_motion = self.transcript_message_motion.frame(
+                    tool_motion_lines,
+                    transcript_line_height,
+                    now,
+                );
                 let inline_markdown_motion = self.inline_markdown_pill_motion.frame(
                     tool_motion_lines,
                     transcript_line_height,
                     now,
                 );
+                let activity_cue_motion = self
+                    .streaming_activity_cue_motion
+                    .frame(single_session, now);
                 let tool_motion = self
                     .tool_card_motion
                     .frame(tool_motion_lines, now, spinner_tick);
@@ -9530,11 +9940,17 @@ impl Canvas {
                     || single_session.has_background_work()
                     || inline_selection_motion.is_active()
                     || inline_list_reflow_motion.is_active()
+                    || inline_preview_pane_motion.is_active()
                     || composer_motion.is_active()
+                    || attachment_chip_motion.is_active()
+                    || stdin_overlay_motion.is_active()
+                    || transcript_message_motion.is_active()
                     || transcript_motion.is_active()
                     || inline_markdown_motion.is_active()
+                    || activity_cue_motion.is_active()
                     || tool_motion.is_active()
                     || scrollbar_motion.is_active()
+                    || scroll_motion_frame.active
                     || welcome_hero_reveal_active
                     || streaming_text_arrival_style.active;
                 let geometry_cache_key = single_session_streaming_primitive_geometry_cache_key(
@@ -9546,9 +9962,14 @@ impl Canvas {
                     welcome_hero_reveal_progress,
                     tool_motion.cache_key(),
                     inline_list_reflow_motion.cache_key(),
+                    inline_preview_pane_motion.cache_key(),
                     composer_motion.cache_key(),
+                    attachment_chip_motion.cache_key(),
+                    stdin_overlay_motion.cache_key(),
+                    transcript_message_motion.cache_key(),
                     transcript_motion.cache_key(),
                     inline_markdown_motion.cache_key(),
+                    activity_cue_motion.cache_key(),
                     scrollbar_motion.cache_key(),
                     single_session_rendered_body_key,
                     self.single_session_body_lines.len(),
@@ -9569,9 +9990,14 @@ impl Canvas {
                                 &self.single_session_body_lines,
                                 Some(&inline_selection_motion),
                                 Some(&inline_list_reflow_motion),
+                                Some(&inline_preview_pane_motion),
                                 Some(&composer_motion),
+                                Some(&attachment_chip_motion),
+                                Some(&stdin_overlay_motion),
+                                Some(&transcript_message_motion),
                                 Some(&transcript_motion),
                                 Some(&inline_markdown_motion),
+                                Some(&activity_cue_motion),
                                 &tool_motion,
                                 Some(&scrollbar_motion),
                             );
@@ -9592,9 +10018,14 @@ impl Canvas {
                             &self.single_session_body_lines,
                             Some(&inline_selection_motion),
                             Some(&inline_list_reflow_motion),
+                            Some(&inline_preview_pane_motion),
                             Some(&composer_motion),
+                            Some(&attachment_chip_motion),
+                            Some(&stdin_overlay_motion),
+                            Some(&transcript_message_motion),
                             Some(&transcript_motion),
                             Some(&inline_markdown_motion),
+                            Some(&activity_cue_motion),
                             &tool_motion,
                             Some(&scrollbar_motion),
                         ),
@@ -9606,9 +10037,14 @@ impl Canvas {
             DesktopApp::Workspace(workspace) => {
                 self.inline_widget_selection_motion.clear();
                 self.inline_widget_list_reflow_motion.clear();
+                self.inline_widget_preview_pane_motion.clear();
                 self.composer_motion.clear();
+                self.attachment_chip_motion.clear();
+                self.stdin_overlay_motion.clear();
+                self.transcript_message_motion.clear();
                 self.transcript_card_motion.clear();
                 self.inline_markdown_pill_motion.clear();
+                self.streaming_activity_cue_motion.clear();
                 self.single_session_scrollbar_motion.clear();
                 self.primitive_vertices_cache_key = None;
                 let render_layout = workspace_render_layout_for_frame
@@ -9617,16 +10053,21 @@ impl Canvas {
                 let surface_transition_active = workspace_surface_frames_for_frame
                     .as_ref()
                     .is_some_and(|frames| frames.animating);
+                let status_text_active = workspace_status_text_frame
+                    .as_ref()
+                    .is_some_and(StatusTextTransitionFrame::is_active);
                 let animation_active = self.viewport_animation.is_animating()
                     || self.focus_pulse.is_animating()
                     || surface_transition_active
-                    || self.status_color_transition.is_animating();
+                    || self.status_color_transition.is_animating()
+                    || status_text_active;
                 reserve_workspace_vertex_capacity(
                     &mut self.primitive_workspace_vertices,
                     workspace,
                 );
                 let status_color = workspace_status_color_for_frame
                     .unwrap_or_else(|| workspace_status_bar_target_color(workspace));
+                let status_text_frame = workspace_status_text_frame.as_ref();
                 build_vertices_into(
                     WorkspaceVertexBuildParams {
                         workspace,
@@ -9637,6 +10078,7 @@ impl Canvas {
                         surface_frames: workspace_surface_frames_for_frame.as_ref(),
                         exiting_surfaces: &self.workspace_surface_exit_cache,
                         status_color,
+                        status_text_frame,
                     },
                     &mut self.primitive_workspace_vertices,
                 );
@@ -9672,6 +10114,22 @@ impl Canvas {
             }
         }
         frame_profile.checkpoint("caret");
+        if let Some(mode_transition_frame) = self.app_mode_transition.frame(app.mode(), now) {
+            let previous_vertices = self.app_mode_transition.previous_vertices().to_vec();
+            let current_vertices = vertices.as_ref().to_vec();
+            compose_app_mode_transition_vertices(
+                &mut self.app_mode_transition_vertices,
+                &previous_vertices,
+                &current_vertices,
+                mode_transition_frame,
+            );
+            vertices = Cow::Borrowed(self.app_mode_transition_vertices.as_slice());
+            animation_active = true;
+        }
+        let uploaded_vertices_snapshot = vertices.as_ref().to_vec();
+        self.app_mode_transition
+            .remember_uploaded_vertices(&uploaded_vertices_snapshot);
+        frame_profile.checkpoint("mode_transition");
         let primitive_vertex_count = vertices.len();
         upload_primitive_vertices(
             &self.device,
@@ -9802,6 +10260,11 @@ impl Canvas {
                 + usize::from(self.single_session_streaming_text_buffer.is_some()),
             text_area_count,
             primitive_vertices: primitive_vertex_count,
+            body_line_count,
+            viewport_line_count,
+            body_text_window_line_count,
+            streaming_text_line_count,
+            inline_widget_line_count,
             text_prepared,
             primitive_geometry_cache_hit,
         };
@@ -10672,6 +11135,7 @@ fn build_vertices(
             surface_frames: None,
             exiting_surfaces: &HashMap::new(),
             status_color: workspace_status_bar_target_color(workspace),
+            status_text_frame: None,
         },
         &mut vertices,
     );
@@ -11073,6 +11537,7 @@ struct WorkspaceVertexBuildParams<'a> {
     surface_frames: Option<&'a WorkspaceSurfaceTransitionFrames>,
     exiting_surfaces: &'a HashMap<u64, workspace::Surface>,
     status_color: [f32; 4],
+    status_text_frame: Option<&'a StatusTextTransitionFrame>,
 }
 
 fn build_vertices_into(params: WorkspaceVertexBuildParams<'_>, vertices: &mut Vec<Vertex>) {
@@ -11085,6 +11550,7 @@ fn build_vertices_into(params: WorkspaceVertexBuildParams<'_>, vertices: &mut Ve
         surface_frames,
         exiting_surfaces,
         status_color,
+        status_text_frame,
     } = params;
     vertices.clear();
     let width = size.width as f32;
@@ -11114,17 +11580,19 @@ fn build_vertices_into(params: WorkspaceVertexBuildParams<'_>, vertices: &mut Ve
     push_rounded_rect(vertices, status_rect, STATUS_RADIUS, status_color, size);
 
     let active_workspace = workspace.current_workspace();
-    let visible_layout = render_layout.visible;
     push_workspace_number(vertices, active_workspace, status_rect, size);
     push_status_preview(
         vertices,
         workspace,
         active_workspace,
-        visible_layout,
+        render_layout,
+        surface_frames,
+        exiting_surfaces,
+        focus_pulse,
         status_rect,
         size,
     );
-    push_status_text(vertices, workspace, status_rect, size);
+    push_status_text(vertices, workspace, status_rect, size, status_text_frame);
 
     if workspace.zoomed {
         if let Some(surface) = workspace.focused_surface() {
@@ -11356,19 +11824,45 @@ fn push_status_text(
     workspace: &Workspace,
     status_rect: Rect,
     size: PhysicalSize<u32>,
+    transition_frame: Option<&StatusTextTransitionFrame>,
 ) {
-    let text = workspace_status_text(workspace);
-    let text_width = bitmap_text_width(&text, BITMAP_TEXT_PIXEL);
+    let settled;
+    let frame = if let Some(frame) = transition_frame {
+        frame
+    } else {
+        settled = StatusTextTransitionFrame::settled(workspace_status_text(workspace));
+        &settled
+    };
+    if let Some(previous) = frame.previous.as_ref() {
+        push_status_text_visual(vertices, previous, status_rect, size);
+    }
+    push_status_text_visual(vertices, &frame.current, status_rect, size);
+}
+
+fn push_status_text_visual(
+    vertices: &mut Vec<Vertex>,
+    visual: &StatusTextVisualFrame,
+    status_rect: Rect,
+    size: PhysicalSize<u32>,
+) {
+    if visual.opacity <= 0.001 {
+        return;
+    }
+    let text_width = bitmap_text_width(&visual.text, BITMAP_TEXT_PIXEL);
     let x = status_rect.x + status_rect.width - STATUS_TEXT_RIGHT_PADDING - text_width;
-    let y = status_rect.y + (status_rect.height - bitmap_text_height(BITMAP_TEXT_PIXEL)) / 2.0;
+    let y = status_rect.y
+        + (status_rect.height - bitmap_text_height(BITMAP_TEXT_PIXEL)) / 2.0
+        + visual.y_offset_pixels;
     if x > status_rect.x {
+        let mut color = STATUS_TEXT_COLOR;
+        color[3] *= visual.opacity.clamp(0.0, 1.0);
         push_bitmap_text(
             vertices,
-            &text,
+            &visual.text,
             x,
             y,
             BITMAP_TEXT_PIXEL,
-            STATUS_TEXT_COLOR,
+            color,
             size,
             text_width,
         );

@@ -78,7 +78,14 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
     RegisteredCommand::public("/dictate", "Run configured external dictation command"),
     RegisteredCommand::public("/dictation", "Alias for /dictate"),
     RegisteredCommand::public("/memory", "Toggle memory feature"),
-    RegisteredCommand::public("/goals", "Open goals overview / resume tracked goals"),
+    RegisteredCommand::public("/test", "Verify a claim/current changes with layered tests"),
+    RegisteredCommand::public("/mission", "Set/show active autonomous mission"),
+    RegisteredCommand::public("/goal", "Alias for /mission"),
+    RegisteredCommand::public(
+        "/initiatives",
+        "Open initiatives overview / resume tracked initiatives",
+    ),
+    RegisteredCommand::public("/goals", "Legacy alias for /initiatives"),
     RegisteredCommand::public("/swarm", "Toggle swarm feature"),
     RegisteredCommand::public("/overnight", "Run a supervised overnight coordinator"),
     RegisteredCommand::public("/context", "Show the full session context snapshot"),
@@ -1263,6 +1270,11 @@ impl App {
                 | "/subscription"
                 | "/poke"
                 | "/memory"
+                | "/test"
+                | "/mission"
+                | "/goal"
+                | "/initiatives"
+                | "/initiatives show"
                 | "/goals"
                 | "/goals show"
                 | "/swarm"

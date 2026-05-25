@@ -52,11 +52,10 @@ pub fn header_session_color() -> Color {
 }
 
 // Spinner frames for animated status. Keep these single-cell because the fast
-// spinner-only renderer patches one status cell between full TUI redraws. The
-// grow/recede pulse mirrors the desktop streaming cue's dot/beam animation.
-const SPINNER_FRAMES: &[&str] = &["⠂", "⠆", "⠇", "⠧", "⠷", "⠧", "⠇", "⠆"];
+// spinner-only renderer patches one status cell between full TUI redraws. This
+// sequence should read as a circular spin, not a grow/recede pulse.
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const STATIC_ACTIVITY_INDICATOR: &str = "•";
-const TOOL_HALO_WIDTH: usize = 3;
 
 pub fn spinner_frame_index(elapsed: f32, fps: f32) -> usize {
     ((elapsed * fps) as usize) % SPINNER_FRAMES.len()
@@ -88,39 +87,6 @@ pub fn activity_indicator(
     } else {
         STATIC_ACTIVITY_INDICATOR
     }
-}
-
-pub fn animated_tool_halo_frame_index(elapsed: f32, enable_decorative_animations: bool) -> usize {
-    if enable_decorative_animations {
-        ((elapsed * 6.0) as usize) % TOOL_HALO_WIDTH
-    } else {
-        0
-    }
-}
-
-/// Matching left/right pulse used around active tool-call labels.
-pub fn animated_tool_halo_segments(
-    elapsed: f32,
-    enable_decorative_animations: bool,
-) -> (String, String) {
-    if !enable_decorative_animations {
-        return ("···".to_string(), "···".to_string());
-    }
-
-    let filled_pos = animated_tool_halo_frame_index(elapsed, true);
-    let left: String = (0..TOOL_HALO_WIDTH)
-        .map(|i| if i == filled_pos { '●' } else { '·' })
-        .collect();
-    let right: String = (0..TOOL_HALO_WIDTH)
-        .map(|i| {
-            if i == (TOOL_HALO_WIDTH - 1 - filled_pos) {
-                '●'
-            } else {
-                '·'
-            }
-        })
-        .collect();
-    (left, right)
 }
 
 /// Convert HSL to RGB (h in 0-360, s and l in 0-1)
@@ -223,4 +189,25 @@ pub fn animated_tool_color(elapsed: f32, enable_decorative_animations: bool) -> 
     let b = (220.0 + t * 35.0) as u8; // 220 -> 255
 
     rgb(r, g, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spinner_frames_are_circular_braille_sequence() {
+        assert_eq!(
+            SPINNER_FRAMES,
+            &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        );
+    }
+
+    #[test]
+    fn spinner_frame_wraps_at_sequence_length() {
+        let fps = 10.0;
+        assert_eq!(spinner_frame(0.0, fps), "⠋");
+        assert_eq!(spinner_frame(0.9, fps), "⠏");
+        assert_eq!(spinner_frame(1.0, fps), "⠋");
+    }
 }

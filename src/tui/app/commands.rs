@@ -282,6 +282,7 @@ pub(super) fn activate_auto_poke_local(app: &mut App) {
             app.streaming_output_tokens = 0;
             app.streaming_cache_read_tokens = None;
             app.streaming_cache_creation_tokens = None;
+            app.current_api_usage_recorded = false;
             app.upstream_provider = None;
             app.status_detail = None;
             app.streaming_tps_start = None;
@@ -1632,6 +1633,14 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
         return true;
     }
 
+    if handle_test_command(app, trimmed) {
+        return true;
+    }
+
+    if handle_mission_command(app, trimmed) {
+        return true;
+    }
+
     if handle_goals_command(app, trimmed) {
         return true;
     }
@@ -1960,7 +1969,15 @@ fn handle_selfdev_command(app: &mut App, trimmed: &str) -> bool {
 }
 
 pub(super) fn handle_goals_command(app: &mut App, trimmed: &str) -> bool {
-    if trimmed == "/goals" {
+    let Some(trimmed) = trimmed
+        .strip_prefix("/initiatives")
+        .or_else(|| trimmed.strip_prefix("/goals"))
+    else {
+        return false;
+    };
+    let trimmed = format!("/initiatives{}", trimmed);
+
+    if trimmed == "/initiatives" {
         match crate::goal::open_goals_overview_for_session(
             active_session_id(app).as_str(),
             active_working_dir(app).as_deref(),
@@ -1972,21 +1989,21 @@ pub(super) fn handle_goals_command(app: &mut App, trimmed: &str) -> bool {
                     .map(|goals| goals.len())
                     .unwrap_or(0);
                 app.push_display_message(DisplayMessage::system(format!(
-                    "Opened goals overview in the side panel ({} goal{}).",
+                    "Opened initiatives overview in the side panel ({} initiative{}).",
                     count,
                     if count == 1 { "" } else { "s" }
                 )));
-                app.set_status_notice("Goals");
+                app.set_status_notice("Initiatives");
             }
             Err(e) => app.push_display_message(DisplayMessage::error(format!(
-                "Failed to open goals overview: {}",
+                "Failed to open initiatives overview: {}",
                 e
             ))),
         }
         return true;
     }
 
-    if trimmed == "/goals resume" {
+    if trimmed == "/initiatives resume" {
         match crate::goal::resume_goal_for_session(
             active_session_id(app).as_str(),
             active_working_dir(app).as_deref(),
@@ -1994,29 +2011,29 @@ pub(super) fn handle_goals_command(app: &mut App, trimmed: &str) -> bool {
         ) {
             Ok(Some(result)) => {
                 app.set_side_panel_snapshot(result.snapshot);
-                let mut msg = format!("Resumed goal **{}**.", result.goal.title);
+                let mut msg = format!("Resumed initiative **{}**.", result.goal.title);
                 if let Some(next_step) = result.goal.next_steps.first() {
                     msg.push_str(&format!(" Next step: {}", next_step));
                 }
                 app.push_display_message(DisplayMessage::system(msg));
-                app.set_status_notice(format!("Goal: {}", result.goal.title));
+                app.set_status_notice(format!("Initiative: {}", result.goal.title));
             }
             Ok(None) => app.push_display_message(DisplayMessage::system(
-                "No resumable goals found for this session.".to_string(),
+                "No resumable initiatives found for this session.".to_string(),
             )),
             Err(e) => app.push_display_message(DisplayMessage::error(format!(
-                "Failed to resume goal: {}",
+                "Failed to resume initiative: {}",
                 e
             ))),
         }
         return true;
     }
 
-    if let Some(id) = trimmed.strip_prefix("/goals show ") {
+    if let Some(id) = trimmed.strip_prefix("/initiatives show ") {
         let id = id.trim();
         if id.is_empty() {
             app.push_display_message(DisplayMessage::error(
-                "Usage: `/goals show <id>`".to_string(),
+                "Usage: `/initiatives show <id>`".to_string(),
             ));
             return true;
         }
@@ -2029,28 +2046,214 @@ pub(super) fn handle_goals_command(app: &mut App, trimmed: &str) -> bool {
             Ok(Some(result)) => {
                 app.set_side_panel_snapshot(result.snapshot);
                 app.push_display_message(DisplayMessage::system(format!(
-                    "Opened goal **{}** in the side panel.",
+                    "Opened initiative **{}** in the side panel.",
                     result.goal.title
                 )));
-                app.set_status_notice(format!("Goal: {}", result.goal.title));
+                app.set_status_notice(format!("Initiative: {}", result.goal.title));
             }
-            Ok(None) => {
-                app.push_display_message(DisplayMessage::error(format!("Goal not found: {}", id)))
-            }
-            Err(e) => app
-                .push_display_message(DisplayMessage::error(format!("Failed to open goal: {}", e))),
+            Ok(None) => app.push_display_message(DisplayMessage::error(format!(
+                "Initiative not found: {}",
+                id
+            ))),
+            Err(e) => app.push_display_message(DisplayMessage::error(format!(
+                "Failed to open initiative: {}",
+                e
+            ))),
         }
         return true;
     }
 
-    if trimmed.starts_with("/goals ") {
+    if trimmed.starts_with("/initiatives ") {
         app.push_display_message(DisplayMessage::error(
-            "Usage: `/goals`, `/goals resume`, or `/goals show <id>`".to_string(),
+            "Usage: `/initiatives`, `/initiatives resume`, or `/initiatives show <id>`".to_string(),
         ));
         return true;
     }
 
-    false
+    true
+}
+
+pub(super) fn handle_mission_command(app: &mut App, trimmed: &str) -> bool {
+    let Some(rest) =
+        slash_command_rest(trimmed, "/mission").or_else(|| slash_command_rest(trimmed, "/goal"))
+    else {
+        return false;
+    };
+    let args = rest.trim();
+    let session_id = active_session_id(app);
+
+    let mut dispatch_prompt: Option<String> = None;
+    let result = match args {
+        "" | "status" => match crate::mission::load(&session_id) {
+            Ok(Some(mission)) => Ok(crate::mission::render_status(&mission)),
+            Ok(None) => Ok("No active mission. Usage: `/mission <objective>`".to_string()),
+            Err(e) => Err(e),
+        },
+        "pause" => mission_status_message(
+            &session_id,
+            crate::mission::MissionStatus::Paused,
+            "Mission paused.",
+        ),
+        "resume" => {
+            match crate::mission::update_status(&session_id, crate::mission::MissionStatus::Active)
+            {
+                Ok(Some(mission)) => {
+                    dispatch_prompt = Some(build_mission_dispatch_prompt(&mission, false));
+                    Ok("Mission resumed. Starting continuation now.".to_string())
+                }
+                Ok(None) => Ok("No active mission. Usage: `/mission <objective>`".to_string()),
+                Err(e) => Err(e),
+            }
+        }
+        "complete" => mission_status_message(
+            &session_id,
+            crate::mission::MissionStatus::Complete,
+            "Mission marked complete.",
+        ),
+        "clear" => crate::mission::clear(&session_id).map(|cleared| {
+            if cleared {
+                "Mission cleared.".to_string()
+            } else {
+                "No mission to clear.".to_string()
+            }
+        }),
+        _ if args.starts_with("checkpoint ") => {
+            let summary = args.trim_start_matches("checkpoint ").trim();
+            crate::mission::checkpoint(&session_id, summary).map(|mission| match mission {
+                Some(_) => "Mission checkpoint saved.".to_string(),
+                None => "No active mission. Usage: `/mission <objective>`".to_string(),
+            })
+        }
+        _ if args.starts_with("block ") => {
+            let reason = args.trim_start_matches("block ").trim();
+            crate::mission::checkpoint(&session_id, &format!("Blocked: {}", reason)).and_then(
+                |_| {
+                    mission_status_message(
+                        &session_id,
+                        crate::mission::MissionStatus::Blocked,
+                        "Mission marked blocked.",
+                    )
+                },
+            )
+        }
+        _ => crate::mission::set(&session_id, args).map(|mission| {
+            dispatch_prompt = Some(build_mission_dispatch_prompt(&mission, true));
+            format!(
+                "Mission set: **{}**\n\n{}\n\nStarting mission now.",
+                mission.objective, mission.long_horizon_intent
+            )
+        }),
+    };
+
+    match result {
+        Ok(message) => {
+            app.push_display_message(DisplayMessage::system(message));
+            if let Some(prompt) = dispatch_prompt {
+                queue_mission_dispatch(app, prompt);
+            }
+            app.set_status_notice("Mission");
+        }
+        Err(e) => app.push_display_message(DisplayMessage::error(format!("Mission error: {}", e))),
+    }
+    true
+}
+
+fn build_mission_dispatch_prompt(mission: &crate::mission::Mission, is_new: bool) -> String {
+    let action = if is_new { "Start" } else { "Continue" };
+    format!(
+        "{action} the active mission now.\n\nObjective: {}\n\nLong-horizon intent: {}\n\nOperate autonomously: create or refresh todos, expand semantically adjacent work, validate progress, and continue until complete, blocked, unsafe, paused, budget-limited, or a user decision is required. Before reporting completion, run maximum reasonable verification and provide evidence plus remaining gaps.",
+        mission.objective, mission.long_horizon_intent
+    )
+}
+
+fn queue_mission_dispatch(app: &mut App, prompt: String) {
+    app.queued_messages.push(prompt);
+    if app.is_processing {
+        app.set_status_notice("Queued mission");
+    } else {
+        app.pending_queued_dispatch = true;
+        app.set_status_notice("Starting mission");
+    }
+}
+
+pub(super) fn handle_test_command(app: &mut App, trimmed: &str) -> bool {
+    let Some(rest) = slash_command_rest(trimmed, "/test") else {
+        return false;
+    };
+    let claim = rest.trim();
+    if matches!(claim, "help" | "--help" | "-h") {
+        app.push_display_message(DisplayMessage::system(test_usage()));
+        return true;
+    }
+
+    let prompt = build_test_verification_prompt(claim);
+    app.queued_messages.push(prompt);
+    if app.is_processing {
+        app.push_display_message(DisplayMessage::system(
+            "Queued `/test`; verification will run after the current turn.".to_string(),
+        ));
+        app.set_status_notice("Queued /test");
+    } else {
+        app.pending_queued_dispatch = true;
+        app.push_display_message(DisplayMessage::system(
+            "Running `/test` verification orchestrator.".to_string(),
+        ));
+        app.set_status_notice("Running /test");
+    }
+    true
+}
+
+fn slash_command_rest<'a>(trimmed: &'a str, command: &str) -> Option<&'a str> {
+    if trimmed == command {
+        Some("")
+    } else {
+        trimmed.strip_prefix(&format!("{} ", command))
+    }
+}
+
+fn test_usage() -> String {
+    "Usage: `/test [claim|feature|current changes]`\n\nRuns a layered verification pass and returns evidence, confidence, and gaps."
+        .to_string()
+}
+
+fn build_test_verification_prompt(claim: &str) -> String {
+    let target = if claim.trim().is_empty() {
+        "the current changes and the likely user-facing behavior they affect"
+    } else {
+        claim.trim()
+    };
+    format!(
+        "Run Jcode's /test verification orchestrator for: {target}\n\n\
+Goal: become as sure as reasonably possible before the user checks manually. Do not stop at compile success. Build and execute a verification plan, update todos as needed, and finish with an evidence-backed proof packet.\n\n\
+Required verification layers to consider and run when applicable:\n\
+1. Reproduction-first: if this is a bug, create or identify the exact failing repro and prove it now passes.\n\
+2. Focused unit tests plus integration tests for real module boundaries.\n\
+3. End-to-end/user-flow smoke tests that mirror what the user would manually try.\n\
+4. Property-based tests, state-machine/model-based tests, fuzzing, and exhaustive enumeration for small state spaces.\n\
+5. Static analysis: formatting, type/check build, clippy/lints, dead code, schema/contract compatibility, secret/security scans, dependency/audit checks when available.\n\
+6. Regression strategy: adjacent feature sweep, old-vs-new differential checks, oracle/golden/snapshot comparisons, and metamorphic tests.\n\
+7. Robustness: fault injection/chaos for timeouts, network errors, corrupt storage, permission errors, restarts/resume, cancellation, and invalid inputs.\n\
+8. Concurrency/race/interrupt/multi-session stress plus soak/flakiness loops where risk exists.\n\
+9. Nonfunctional checks: performance/resource regressions, observability logs/events/telemetry, UX/accessibility, and security/safety boundaries.\n\n\
+Final proof packet required:\n\
+- Claim verified or not verified.\n\
+- Commands/tests/checks actually run and their results.\n\
+- E2E/manual-equivalent flows covered.\n\
+- Adjacent regressions considered.\n\
+- Remaining gaps or untested environments.\n\
+- Confidence level and why the user should or should not expect to hit another obvious error."
+    )
+}
+
+fn mission_status_message(
+    session_id: &str,
+    status: crate::mission::MissionStatus,
+    message: &str,
+) -> anyhow::Result<String> {
+    Ok(match crate::mission::update_status(session_id, status)? {
+        Some(_) => message.to_string(),
+        None => "No active mission. Usage: `/mission <objective>`".to_string(),
+    })
 }
 
 pub(super) fn active_session_id(app: &App) -> String {

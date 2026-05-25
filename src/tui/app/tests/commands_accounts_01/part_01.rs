@@ -510,6 +510,122 @@ fn test_goals_command_opens_overview_in_side_panel() {
 }
 
 #[test]
+fn test_mission_command_sets_and_shows_status() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let mut app = create_test_app();
+    app.input = "/mission make browser control reliable".to_string();
+    app.submit_input();
+    assert!(!app.is_processing, "/mission should queue before the event loop starts the turn");
+    assert!(app.pending_queued_dispatch, "/mission should dispatch immediately");
+    let queued = app.queued_messages.last().expect("missing mission kickoff prompt");
+    assert!(queued.contains("Start the active mission now"));
+    assert!(queued.contains("make browser control reliable"));
+    assert!(
+        app.display_messages()
+            .last()
+            .expect("missing mission set message")
+            .content
+            .contains("Mission set")
+    );
+
+    app.pending_queued_dispatch = false;
+    app.queued_messages.clear();
+
+    app.input = "/goal status".to_string();
+    app.submit_input();
+    assert!(!app.is_processing, "/goal status must not start a stuck Sending turn");
+    assert!(!app.pending_queued_dispatch, "/goal status must not queue dispatch");
+    let msg = app
+        .display_messages()
+        .last()
+        .expect("missing mission status message");
+    assert!(msg.content.contains("make browser control reliable"));
+    assert!(msg.content.contains("Long-horizon intent"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_goals_legacy_alias_is_not_captured_by_goal_mission_alias() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let mut app = create_test_app();
+    app.session.working_dir = Some(project.display().to_string());
+    app.input = "/goals".to_string();
+    app.submit_input();
+
+    assert_eq!(app.side_panel.focused_page_id.as_deref(), Some("goals"));
+    let mission = crate::mission::load(&app.session.id).expect("load mission");
+    assert!(mission.is_none(), "/goals should not create a mission named `s`");
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_mission_resume_dispatches_continuation() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let mut app = create_test_app();
+    crate::mission::set(&app.session.id, "make browser control reliable").expect("set mission");
+    crate::mission::update_status(&app.session.id, crate::mission::MissionStatus::Paused)
+        .expect("pause mission");
+
+    app.input = "/mission resume".to_string();
+    app.submit_input();
+
+    assert!(app.pending_queued_dispatch, "/mission resume should dispatch immediately");
+    let queued = app
+        .queued_messages
+        .last()
+        .expect("missing mission resume prompt");
+    assert!(queued.contains("Continue the active mission now"));
+    assert!(queued.contains("make browser control reliable"));
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_test_command_queues_layered_verification_prompt() {
+    let mut app = create_test_app();
+    app.input = "/test browser control is reliable".to_string();
+    app.submit_input();
+
+    assert!(app.pending_queued_dispatch);
+    let queued = app.queued_messages.last().expect("missing /test prompt");
+    assert!(queued.contains("browser control is reliable"));
+    assert!(queued.contains("Reproduction-first"));
+    assert!(queued.contains("End-to-end/user-flow smoke tests"));
+    assert!(queued.contains("Property-based tests"));
+    assert!(queued.contains("Static analysis"));
+    assert!(queued.contains("fault injection/chaos"));
+    assert!(queued.contains("Final proof packet"));
+}
+
+#[test]
 fn test_btw_command_requires_question() {
     let mut app = create_test_app();
     app.input = "/btw".to_string();

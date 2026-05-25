@@ -26,6 +26,10 @@ pub(crate) const MARKDOWN_TASK_OPEN_COLOR: [f32; 4] = [0.420, 0.320, 0.075, 0.98
 pub(crate) const MARKDOWN_STRIKE_TEXT_COLOR: [f32; 4] = [0.310, 0.330, 0.380, 0.880];
 pub(crate) const STREAMING_ACTIVITY_PILL_COLOR: [f32; 4] = [0.965, 0.985, 1.000, 0.58];
 pub(crate) const STREAMING_ACTIVITY_PILL_BORDER_COLOR: [f32; 4] = [0.000, 0.260, 0.720, 0.18];
+const STREAMING_ACTIVITY_CUE_ENTRY_DURATION: Duration = Duration::from_millis(145);
+const STREAMING_ACTIVITY_CUE_EXIT_DURATION: Duration = Duration::from_millis(130);
+const STREAMING_ACTIVITY_CUE_ENTRY_OFFSET_PIXELS: f32 = 7.0;
+const STREAMING_ACTIVITY_CUE_ENTRY_SCALE: f32 = 0.94;
 const INLINE_WIDGET_CARD_SHADOW_COLOR: [f32; 4] = [0.020, 0.035, 0.070, 0.080];
 pub(crate) const INLINE_WIDGET_CARD_BACKGROUND_COLOR: [f32; 4] = [0.992, 0.996, 1.000, 0.72];
 const INLINE_WIDGET_CARD_BORDER_COLOR: [f32; 4] = [0.105, 0.185, 0.360, 0.20];
@@ -50,12 +54,28 @@ const TRANSCRIPT_CARD_SHIFT_DURATION: Duration = Duration::from_millis(150);
 const TRANSCRIPT_CARD_EXIT_DURATION: Duration = Duration::from_millis(145);
 const TRANSCRIPT_CARD_ENTRY_OFFSET_PIXELS: f32 = 10.0;
 const TRANSCRIPT_CARD_ENTRY_SCALE: f32 = 0.988;
+const TRANSCRIPT_MESSAGE_ENTRY_DURATION: Duration = Duration::from_millis(150);
+const TRANSCRIPT_MESSAGE_SHIFT_DURATION: Duration = Duration::from_millis(135);
+const TRANSCRIPT_MESSAGE_ENTRY_OFFSET_PIXELS: f32 = 7.0;
+const TRANSCRIPT_MESSAGE_ENTRY_SCALE: f32 = 0.992;
+const TRANSCRIPT_MESSAGE_ASSISTANT_HIGHLIGHT_COLOR: [f32; 4] = [0.070, 0.125, 0.260, 0.038];
+const TRANSCRIPT_MESSAGE_USER_HIGHLIGHT_COLOR: [f32; 4] = [0.060, 0.210, 0.650, 0.058];
+const TRANSCRIPT_MESSAGE_META_HIGHLIGHT_COLOR: [f32; 4] = [0.075, 0.160, 0.260, 0.046];
+const TRANSCRIPT_MESSAGE_ERROR_HIGHLIGHT_COLOR: [f32; 4] = [0.700, 0.080, 0.100, 0.060];
+const TRANSCRIPT_MESSAGE_ACCENT_ALPHA_MULTIPLIER: f32 = 2.8;
 const INLINE_MARKDOWN_PILL_ENTRY_DURATION: Duration = Duration::from_millis(145);
 const INLINE_MARKDOWN_PILL_SHIFT_DURATION: Duration = Duration::from_millis(130);
 const INLINE_MARKDOWN_PILL_EXIT_DURATION: Duration = Duration::from_millis(125);
 const INLINE_MARKDOWN_PILL_ENTRY_OFFSET_PIXELS: f32 = 4.0;
 const INLINE_MARKDOWN_PILL_ENTRY_SCALE: f32 = 0.94;
 const INLINE_WIDGET_SELECTION_TRANSITION_DURATION: Duration = Duration::from_millis(135);
+const INLINE_WIDGET_PREVIEW_PANE_FOCUS_DURATION: Duration = Duration::from_millis(150);
+const INLINE_WIDGET_PREVIEW_PANE_CONTENT_DURATION: Duration = Duration::from_millis(145);
+pub(crate) const INLINE_WIDGET_PREVIEW_PANE_BACKGROUND_COLOR: [f32; 4] =
+    [0.968, 0.984, 1.000, 0.430];
+const INLINE_WIDGET_PREVIEW_PANE_BORDER_COLOR: [f32; 4] = [0.090, 0.205, 0.480, 0.180];
+pub(crate) const INLINE_WIDGET_PREVIEW_PANE_FOCUS_COLOR: [f32; 4] = [0.100, 0.340, 0.920, 0.180];
+const INLINE_WIDGET_PREVIEW_PANE_CONTENT_COLOR: [f32; 4] = [0.125, 0.420, 0.920, 0.105];
 const INLINE_WIDGET_LIST_REFLOW_ENTRY_DURATION: Duration = Duration::from_millis(145);
 const INLINE_WIDGET_LIST_REFLOW_SHIFT_DURATION: Duration = Duration::from_millis(145);
 const INLINE_WIDGET_LIST_REFLOW_EXIT_DURATION: Duration = Duration::from_millis(120);
@@ -66,6 +86,26 @@ pub(crate) const COMPOSER_FOCUS_RING_COLOR: [f32; 4] = [0.090, 0.250, 0.680, 0.1
 pub(crate) const COMPOSER_PLACEHOLDER_RAIL_COLOR: [f32; 4] = [0.105, 0.185, 0.360, 0.185];
 pub(crate) const COMPOSER_SUBMIT_READY_COLOR: [f32; 4] = [0.105, 0.355, 0.950, 0.700];
 pub(crate) const COMPOSER_SUBMIT_BUSY_COLOR: [f32; 4] = [0.055, 0.540, 0.360, 0.700];
+const ATTACHMENT_CHIP_ENTRY_DURATION: Duration = Duration::from_millis(150);
+const ATTACHMENT_CHIP_SHIFT_DURATION: Duration = Duration::from_millis(140);
+const ATTACHMENT_CHIP_EXIT_DURATION: Duration = Duration::from_millis(130);
+const ATTACHMENT_CHIP_WIDTH: f32 = 42.0;
+const ATTACHMENT_CHIP_HEIGHT: f32 = 20.0;
+const ATTACHMENT_CHIP_GAP: f32 = 6.0;
+const ATTACHMENT_CHIP_VISIBLE_LIMIT: usize = 4;
+pub(crate) const ATTACHMENT_CHIP_BACKGROUND_COLOR: [f32; 4] = [0.940, 0.972, 1.000, 0.720];
+pub(crate) const ATTACHMENT_CHIP_ACCENT_COLOR: [f32; 4] = [0.090, 0.355, 0.900, 0.620];
+pub(crate) const ATTACHMENT_CHIP_EXIT_COLOR: [f32; 4] = [0.530, 0.590, 0.690, 0.430];
+const STDIN_OVERLAY_ENTRY_DURATION: Duration = Duration::from_millis(165);
+const STDIN_OVERLAY_RESIZE_DURATION: Duration = Duration::from_millis(155);
+const STDIN_OVERLAY_EXIT_DURATION: Duration = Duration::from_millis(145);
+const STDIN_OVERLAY_ENTRY_OFFSET_PIXELS: f32 = 9.0;
+const STDIN_OVERLAY_ENTRY_SCALE: f32 = 0.985;
+pub(crate) const STDIN_OVERLAY_BACKGROUND_COLOR: [f32; 4] = [0.966, 0.982, 1.000, 0.640];
+pub(crate) const STDIN_OVERLAY_BORDER_COLOR: [f32; 4] = [0.085, 0.270, 0.760, 0.250];
+pub(crate) const STDIN_OVERLAY_INPUT_RAIL_COLOR: [f32; 4] = [0.115, 0.410, 0.940, 0.300];
+pub(crate) const STDIN_OVERLAY_SUBMIT_COLOR: [f32; 4] = [0.060, 0.500, 0.340, 0.660];
+pub(crate) const STDIN_OVERLAY_EXIT_COLOR: [f32; 4] = [0.500, 0.570, 0.680, 0.420];
 const TOOL_CARD_ENTRY_DURATION: Duration = Duration::from_millis(180);
 const TOOL_CARD_EXIT_DURATION: Duration = Duration::from_millis(160);
 const TOOL_CARD_STATE_TRANSITION_DURATION: Duration = Duration::from_millis(160);
@@ -91,6 +131,7 @@ pub(crate) struct SingleSessionTextKey {
     pub(crate) body: Vec<SingleSessionStyledLine>,
     pub(crate) inline_widget_kind: Option<InlineWidgetKind>,
     pub(crate) inline_widget: Vec<SingleSessionStyledLine>,
+    pub(crate) inline_widget_preview: Vec<SingleSessionStyledLine>,
     pub(crate) draft: String,
 }
 
@@ -180,7 +221,7 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         size,
     );
 
-    push_single_session_composer_chrome(&mut vertices, app, size, None);
+    push_single_session_composer_chrome(&mut vertices, app, size, None, None, None);
 
     let welcome_chrome_offset = if app.is_welcome_timeline_visible() {
         welcome_timeline_visual_offset_pixels(app, size, smooth_scroll_lines)
@@ -206,6 +247,23 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         welcome_chrome_offset,
         welcome_timeline_total_body_lines(app, size),
         None,
+        None,
+        None,
+    );
+    let rendered_body_lines = single_session_rendered_body_lines_for_tick(app, size, spinner_tick);
+    push_single_session_stdin_overlay(&mut vertices, app, size, &rendered_body_lines, None);
+    let viewport = single_session_body_viewport_from_lines(
+        app,
+        size,
+        smooth_scroll_lines,
+        &rendered_body_lines,
+    );
+    push_single_session_transcript_message_highlights_from_viewport(
+        &mut vertices,
+        app,
+        size,
+        &viewport,
+        rendered_body_lines.len(),
         None,
     );
     push_single_session_transcript_cards(
@@ -238,7 +296,7 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         smooth_scroll_lines,
     );
     if app.has_activity_indicator() {
-        push_streaming_activity_cue(&mut vertices, app, size, spinner_tick, None);
+        push_streaming_activity_cue(&mut vertices, app, size, spinner_tick, None, None);
     }
     push_single_session_selection(&mut vertices, app, size);
     push_single_session_scrollbar(
@@ -277,6 +335,11 @@ pub(crate) fn build_single_session_vertices_with_cached_body(
         None,
         None,
         None,
+        None,
+        None,
+        None,
+        None,
+        None,
     )
 }
 
@@ -291,9 +354,14 @@ pub(crate) fn build_single_session_vertices_with_cached_body_and_tool_motion(
     rendered_body_lines: &[SingleSessionStyledLine],
     inline_selection_motion: Option<&InlineWidgetSelectionMotionFrame>,
     inline_list_reflow_motion: Option<&InlineWidgetListReflowMotionFrame>,
+    inline_preview_pane_motion: Option<&InlineWidgetPreviewPaneMotionFrame>,
     composer_motion: Option<&ComposerMotionFrame>,
+    attachment_chip_motion: Option<&AttachmentChipMotionFrame>,
+    stdin_overlay_motion: Option<&StdinOverlayMotionFrame>,
+    transcript_message_motion: Option<&TranscriptMessageMotionFrame>,
     transcript_motion: Option<&TranscriptCardMotionFrame>,
     inline_markdown_motion: Option<&InlineMarkdownPillMotionFrame>,
+    activity_cue_motion: Option<&StreamingActivityCueMotionFrame>,
     tool_motion: &ToolCardMotionFrame,
     scrollbar_motion: Option<&SingleSessionScrollbarMotionFrame>,
 ) -> Vec<Vertex> {
@@ -307,9 +375,14 @@ pub(crate) fn build_single_session_vertices_with_cached_body_and_tool_motion(
         rendered_body_lines,
         inline_selection_motion,
         inline_list_reflow_motion,
+        inline_preview_pane_motion,
         composer_motion,
+        attachment_chip_motion,
+        stdin_overlay_motion,
+        transcript_message_motion,
         transcript_motion,
         inline_markdown_motion,
+        activity_cue_motion,
         Some(tool_motion),
         scrollbar_motion,
     )
@@ -326,9 +399,14 @@ fn build_single_session_vertices_with_cached_body_internal(
     rendered_body_lines: &[SingleSessionStyledLine],
     inline_selection_motion: Option<&InlineWidgetSelectionMotionFrame>,
     inline_list_reflow_motion: Option<&InlineWidgetListReflowMotionFrame>,
+    inline_preview_pane_motion: Option<&InlineWidgetPreviewPaneMotionFrame>,
     composer_motion: Option<&ComposerMotionFrame>,
+    attachment_chip_motion: Option<&AttachmentChipMotionFrame>,
+    stdin_overlay_motion: Option<&StdinOverlayMotionFrame>,
+    transcript_message_motion: Option<&TranscriptMessageMotionFrame>,
     transcript_motion: Option<&TranscriptCardMotionFrame>,
     inline_markdown_motion: Option<&InlineMarkdownPillMotionFrame>,
+    activity_cue_motion: Option<&StreamingActivityCueMotionFrame>,
     tool_motion: Option<&ToolCardMotionFrame>,
     scrollbar_motion: Option<&SingleSessionScrollbarMotionFrame>,
 ) -> Vec<Vertex> {
@@ -366,7 +444,15 @@ fn build_single_session_vertices_with_cached_body_internal(
         size,
     );
 
-    push_single_session_composer_chrome(&mut vertices, app, size, composer_motion);
+    let layout = single_session_layout_for_total_lines(app, size, rendered_body_lines.len());
+    push_single_session_composer_chrome(
+        &mut vertices,
+        app,
+        size,
+        composer_motion,
+        attachment_chip_motion,
+        Some(layout),
+    );
 
     let welcome_chrome_offset = if app.is_welcome_timeline_visible() {
         welcome_timeline_visual_offset_pixels_for_total_lines(
@@ -398,6 +484,15 @@ fn build_single_session_vertices_with_cached_body_internal(
         rendered_body_lines.len(),
         inline_selection_motion,
         inline_list_reflow_motion,
+        inline_preview_pane_motion,
+    );
+
+    push_single_session_stdin_overlay(
+        &mut vertices,
+        app,
+        size,
+        rendered_body_lines,
+        stdin_overlay_motion,
     );
 
     let viewport = single_session_body_viewport_from_lines(
@@ -405,6 +500,14 @@ fn build_single_session_vertices_with_cached_body_internal(
         size,
         smooth_scroll_lines,
         rendered_body_lines,
+    );
+    push_single_session_transcript_message_highlights_from_viewport(
+        &mut vertices,
+        app,
+        size,
+        &viewport,
+        rendered_body_lines.len(),
+        transcript_message_motion,
     );
     push_single_session_transcript_cards_from_viewport(
         &mut vertices,
@@ -438,8 +541,17 @@ fn build_single_session_vertices_with_cached_body_internal(
         &viewport,
         rendered_body_lines.len(),
     );
-    if app.has_activity_indicator() {
-        push_streaming_activity_cue(&mut vertices, app, size, spinner_tick, Some(&viewport));
+    if app.has_activity_indicator()
+        || activity_cue_motion.is_some_and(|motion| motion.exiting().is_some())
+    {
+        push_streaming_activity_cue(
+            &mut vertices,
+            app,
+            size,
+            spinner_tick,
+            Some(&viewport),
+            activity_cue_motion,
+        );
     }
     push_single_session_selection(&mut vertices, app, size);
     push_single_session_scrollbar_for_total_lines(
@@ -465,6 +577,125 @@ fn single_session_content_right(size: PhysicalSize<u32>) -> f32 {
 
 fn single_session_content_width(size: PhysicalSize<u32>) -> f32 {
     (single_session_content_right(size) - PANEL_TITLE_LEFT_PADDING).max(1.0)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SingleSessionLayoutMetrics {
+    body_line_height: f32,
+    composer_line_height: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SingleSessionLayout {
+    body: Rect,
+    draft_top: f32,
+    composer: Rect,
+    activity_lane: Option<Rect>,
+    metrics: SingleSessionLayoutMetrics,
+}
+
+impl SingleSessionLayout {
+    #[inline]
+    fn body_bottom(self) -> f32 {
+        rect_bottom(self.body)
+    }
+
+    #[inline]
+    fn body_text_bounds_bottom(self) -> i32 {
+        text_bounds_bottom(self.body_bottom())
+    }
+}
+
+fn single_session_layout_metrics(app: &SingleSessionApp) -> SingleSessionLayoutMetrics {
+    let typography = single_session_typography_for_scale(app.text_scale());
+    SingleSessionLayoutMetrics {
+        body_line_height: typography.body_size * typography.body_line_height,
+        composer_line_height: typography.code_size * typography.code_line_height,
+    }
+}
+
+fn single_session_layout_for_app(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+) -> SingleSessionLayout {
+    single_session_layout_from_bounds(
+        app,
+        size,
+        single_session_draft_top_for_app(app, size),
+        single_session_body_bottom_base_for_app(app, size),
+    )
+}
+
+fn single_session_layout_for_total_lines(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    total_lines: usize,
+) -> SingleSessionLayout {
+    single_session_layout_from_bounds(
+        app,
+        size,
+        single_session_draft_top_for_total_lines(app, size, total_lines),
+        single_session_body_bottom_base_for_total_lines(app, size, total_lines),
+    )
+}
+
+fn single_session_layout_from_bounds(
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    draft_top: f32,
+    body_base_bottom: f32,
+) -> SingleSessionLayout {
+    let metrics = single_session_layout_metrics(app);
+    let body_top = PANEL_BODY_TOP_PADDING;
+    let body_base_bottom = body_base_bottom.max(body_top);
+    let inline_widget_reserved_height = inline_widget_reserved_height(app);
+    let activity_reserved_height = streaming_activity_reserved_height(app);
+    let body_bottom =
+        (body_base_bottom - inline_widget_reserved_height - activity_reserved_height).max(body_top);
+    let activity_lane = (activity_reserved_height > 0.0).then(|| {
+        let activity_top = (body_base_bottom - activity_reserved_height).max(body_top);
+        Rect {
+            x: PANEL_TITLE_LEFT_PADDING,
+            y: activity_top,
+            width: single_session_content_width(size),
+            height: (body_base_bottom - activity_top).max(0.0),
+        }
+    });
+    let composer_target = composer_motion_target(app);
+    let composer_visual = ComposerMotionVisual::settled(composer_target);
+    let composer_height = single_session_composer_height(size, metrics, composer_visual);
+
+    SingleSessionLayout {
+        body: Rect {
+            x: PANEL_TITLE_LEFT_PADDING,
+            y: body_top,
+            width: single_session_content_width(size),
+            height: (body_bottom - body_top).max(0.0),
+        },
+        draft_top,
+        composer: Rect {
+            x: PANEL_TITLE_LEFT_PADDING - 10.0,
+            y: draft_top - 9.0,
+            width: single_session_content_width(size) + 20.0,
+            height: composer_height,
+        },
+        activity_lane,
+        metrics,
+    }
+}
+
+fn single_session_composer_height(
+    size: PhysicalSize<u32>,
+    metrics: SingleSessionLayoutMetrics,
+    visual: ComposerMotionVisual,
+) -> f32 {
+    (visual.height_lines.max(1.0) * metrics.composer_line_height + 18.0)
+        .min((size.height as f32 * 0.34).max(metrics.composer_line_height + 18.0))
+}
+
+#[inline]
+fn rect_bottom(rect: Rect) -> f32 {
+    rect.y + rect.height
 }
 
 #[cfg(test)]
@@ -704,26 +935,25 @@ fn push_single_session_composer_chrome(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
     composer_motion: Option<&ComposerMotionFrame>,
+    attachment_chip_motion: Option<&AttachmentChipMotionFrame>,
+    layout: Option<SingleSessionLayout>,
 ) {
     if welcome_status_lane_visible(app) {
         return;
     }
 
-    let typography = single_session_typography_for_scale(app.text_scale());
-    let line_height = typography.code_size * typography.code_line_height;
+    let typography = single_session_typography();
+    let layout = layout.unwrap_or_else(|| single_session_layout_for_app(app, size));
     let target = composer_motion_target(app);
     let visual = composer_motion
         .map(|frame| frame.visual())
         .unwrap_or_else(|| ComposerMotionVisual::settled(target));
-    let height = (visual.height_lines.max(1.0) * line_height + 18.0)
-        .min((size.height as f32 * 0.34).max(line_height + 18.0));
-    let draft_top = single_session_draft_top_for_app(app, size);
-    let content_width = single_session_content_width(size);
+    let line_height = layout.metrics.composer_line_height;
+    let draft_top = layout.draft_top;
+    let content_width = layout.body.width;
     let rect = Rect {
-        x: PANEL_TITLE_LEFT_PADDING - 10.0,
-        y: draft_top - 9.0,
-        width: content_width + 20.0,
-        height,
+        height: single_session_composer_height(size, layout.metrics, visual),
+        ..layout.composer
     };
     if rect.width <= 12.0 || rect.height <= 10.0 {
         return;
@@ -748,6 +978,8 @@ fn push_single_session_composer_chrome(
         visual.blocked_progress * 0.35,
     );
     push_rounded_rect(vertices, rect, radius, card_color, size);
+
+    push_single_session_attachment_chips(vertices, app, size, rect, attachment_chip_motion);
 
     let accent_alpha =
         (0.18 + 0.22 * visual.focus_opacity) * (1.0 - visual.blocked_progress * 0.55);
@@ -831,6 +1063,293 @@ fn push_single_session_composer_chrome(
             [1.0, 1.0, 1.0, arrow_alpha],
             size,
         );
+    }
+}
+
+fn push_single_session_attachment_chips(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    composer_rect: Rect,
+    attachment_chip_motion: Option<&AttachmentChipMotionFrame>,
+) {
+    let runs = attachment_chip_runs(&app.pending_images);
+    if runs.is_empty() && attachment_chip_motion.is_none_or(|motion| motion.exiting().is_empty()) {
+        return;
+    }
+
+    for run in runs {
+        let visual = attachment_chip_motion
+            .and_then(|motion| motion.visual_for_key(run.key))
+            .unwrap_or_else(AttachmentChipVisual::settled);
+        push_single_session_attachment_chip(vertices, composer_rect, run, visual, false, size);
+    }
+
+    if let Some(motion) = attachment_chip_motion {
+        for (run, visual) in motion.exiting() {
+            push_single_session_attachment_chip(vertices, composer_rect, *run, *visual, true, size);
+        }
+    }
+}
+
+fn push_single_session_attachment_chip(
+    vertices: &mut Vec<Vertex>,
+    composer_rect: Rect,
+    run: AttachmentChipRun,
+    visual: AttachmentChipVisual,
+    exiting: bool,
+    size: PhysicalSize<u32>,
+) {
+    if visual.opacity <= 0.001 || visual.scale <= 0.05 {
+        return;
+    }
+    let scaled_width = ATTACHMENT_CHIP_WIDTH * visual.scale;
+    let scaled_height = ATTACHMENT_CHIP_HEIGHT * visual.scale;
+    let step = ATTACHMENT_CHIP_WIDTH + ATTACHMENT_CHIP_GAP;
+    let x = composer_rect.x
+        + 18.0
+        + run.index as f32 * step
+        + visual.x_offset_pixels
+        + (ATTACHMENT_CHIP_WIDTH - scaled_width) * 0.5;
+    let y = (composer_rect.y - ATTACHMENT_CHIP_HEIGHT - 8.0).max(PANEL_BODY_TOP_PADDING + 8.0)
+        + visual.y_offset_pixels
+        + (ATTACHMENT_CHIP_HEIGHT - scaled_height) * 0.5;
+    let max_right = composer_rect.x + composer_rect.width - 16.0;
+    if x >= max_right || y >= composer_rect.y + composer_rect.height {
+        return;
+    }
+    let chip_rect = Rect {
+        x,
+        y,
+        width: scaled_width.min((max_right - x).max(0.0)),
+        height: scaled_height,
+    };
+    if chip_rect.width <= 5.0 || chip_rect.height <= 5.0 {
+        return;
+    }
+    let fill = if exiting {
+        ATTACHMENT_CHIP_EXIT_COLOR
+    } else {
+        ATTACHMENT_CHIP_BACKGROUND_COLOR
+    };
+    push_rounded_rect(
+        vertices,
+        chip_rect,
+        chip_rect.height * 0.5,
+        with_alpha(fill, fill[3] * visual.opacity),
+        size,
+    );
+    let accent_width = (chip_rect.height * 0.34).clamp(5.0, 8.0);
+    push_rounded_rect(
+        vertices,
+        Rect {
+            x: chip_rect.x + 5.0 * visual.scale,
+            y: chip_rect.y + (chip_rect.height - accent_width) * 0.5,
+            width: accent_width,
+            height: accent_width,
+        },
+        2.5 * visual.scale,
+        with_alpha(
+            ATTACHMENT_CHIP_ACCENT_COLOR,
+            ATTACHMENT_CHIP_ACCENT_COLOR[3] * visual.opacity,
+        ),
+        size,
+    );
+    push_rect(
+        vertices,
+        Rect {
+            x: chip_rect.x + chip_rect.width * 0.45,
+            y: chip_rect.y + chip_rect.height * 0.43,
+            width: chip_rect.width * 0.32,
+            height: 2.0 * visual.scale,
+        },
+        with_alpha(COMPOSER_FOCUS_RING_COLOR, 0.42 * visual.opacity),
+        size,
+    );
+}
+
+fn push_single_session_stdin_overlay(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    rendered_body_lines: &[SingleSessionStyledLine],
+    stdin_overlay_motion: Option<&StdinOverlayMotionFrame>,
+) {
+    let settled_current = stdin_overlay_target(app, rendered_body_lines)
+        .map(|target| (target, StdinOverlayVisual::settled(target)));
+    let current = stdin_overlay_motion
+        .and_then(|motion| motion.current)
+        .or(settled_current);
+    if let Some((target, visual)) = current {
+        push_single_session_stdin_overlay_visual(vertices, app, size, target, visual, false);
+    }
+    if let Some((target, visual)) = stdin_overlay_motion.and_then(|motion| motion.exiting) {
+        push_single_session_stdin_overlay_visual(vertices, app, size, target, visual, true);
+    }
+}
+
+fn push_single_session_stdin_overlay_visual(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    target: StdinOverlayTarget,
+    visual: StdinOverlayVisual,
+    exiting: bool,
+) {
+    if visual.opacity <= 0.001 || visual.scale <= 0.05 {
+        return;
+    }
+    let typography = single_session_typography_for_scale(app.text_scale());
+    let line_height = typography.body_size * typography.body_line_height;
+    let left = PANEL_TITLE_LEFT_PADDING - 10.0;
+    let width = single_session_content_width(size) + 20.0;
+    let body_top = single_session_body_top_for_app(app, size);
+    let body_bottom = single_session_body_bottom_for_total_lines(app, size, target.line_count);
+    let height = (visual.height_lines.max(1.0) * line_height + 18.0)
+        .min((body_bottom - body_top + 20.0).max(line_height + 18.0));
+    let rect = scaled_rect(
+        Rect {
+            x: left,
+            y: body_top - 8.0 + visual.y_offset_pixels,
+            width,
+            height,
+        },
+        visual.scale,
+    );
+    if rect.width <= 12.0 || rect.height <= 10.0 {
+        return;
+    }
+
+    let background = if exiting {
+        mix_color(
+            STDIN_OVERLAY_BACKGROUND_COLOR,
+            STDIN_OVERLAY_EXIT_COLOR,
+            0.42,
+        )
+    } else if target.password {
+        mix_color(
+            STDIN_OVERLAY_BACKGROUND_COLOR,
+            [0.990, 0.968, 1.000, 0.660],
+            0.36,
+        )
+    } else {
+        STDIN_OVERLAY_BACKGROUND_COLOR
+    };
+    push_rounded_rect(
+        vertices,
+        inset_rect(rect, 2.0),
+        15.0,
+        stdin_overlay_alpha([0.020, 0.035, 0.080, 0.070], visual.opacity),
+        size,
+    );
+    push_rounded_rect(
+        vertices,
+        rect,
+        14.0,
+        stdin_overlay_alpha(background, visual.opacity),
+        size,
+    );
+    push_rounded_rect(
+        vertices,
+        Rect {
+            x: rect.x + 7.0,
+            y: rect.y + 7.0,
+            width: 4.0,
+            height: (rect.height - 14.0).max(1.0),
+        },
+        2.0,
+        stdin_overlay_alpha(STDIN_OVERLAY_BORDER_COLOR, visual.opacity * 1.35),
+        size,
+    );
+    push_top_and_side_surface_outline(
+        vertices,
+        rect,
+        1.25,
+        stdin_overlay_alpha(STDIN_OVERLAY_BORDER_COLOR, visual.opacity),
+        size,
+    );
+
+    let input_top = body_top
+        + target.input_line_start as f32 * line_height
+        + visual.y_offset_pixels
+        + line_height * 0.12;
+    let input_height = (target.input_line_count as f32 * line_height - line_height * 0.24).max(8.0);
+    let input_rect = Rect {
+        x: rect.x + 16.0,
+        y: input_top.max(rect.y + 8.0).min(rect.y + rect.height - 10.0),
+        width: (rect.width - 32.0).max(1.0),
+        height: input_height.min((rect.y + rect.height - input_top - 8.0).max(8.0)),
+    };
+    push_rounded_rect(
+        vertices,
+        input_rect,
+        8.0,
+        stdin_overlay_alpha(
+            STDIN_OVERLAY_INPUT_RAIL_COLOR,
+            visual.opacity * (0.55 + 0.45 * visual.input_glow),
+        ),
+        size,
+    );
+
+    if visual.submit_opacity > 0.001 {
+        let pill_width = 44.0;
+        let pill_height = 20.0;
+        let pill = Rect {
+            x: rect.x + rect.width - pill_width - 13.0,
+            y: rect.y + rect.height - pill_height - 10.0,
+            width: pill_width,
+            height: pill_height,
+        };
+        push_rounded_rect(
+            vertices,
+            pill,
+            pill_height * 0.5,
+            stdin_overlay_alpha(
+                STDIN_OVERLAY_SUBMIT_COLOR,
+                visual.opacity * visual.submit_opacity,
+            ),
+            size,
+        );
+        let mark_alpha = visual.opacity * visual.submit_opacity * 0.74;
+        push_rect(
+            vertices,
+            Rect {
+                x: pill.x + pill.width * 0.30,
+                y: pill.y + pill.height * 0.50,
+                width: pill.width * 0.36,
+                height: 2.0,
+            },
+            [1.0, 1.0, 1.0, mark_alpha],
+            size,
+        );
+        push_rect(
+            vertices,
+            Rect {
+                x: pill.x + pill.width * 0.55,
+                y: pill.y + pill.height * 0.30,
+                width: 2.0,
+                height: pill.height * 0.42,
+            },
+            [1.0, 1.0, 1.0, mark_alpha],
+            size,
+        );
+    }
+}
+
+fn stdin_overlay_alpha(mut color: [f32; 4], opacity: f32) -> [f32; 4] {
+    color[3] = (color[3] * opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    color
+}
+
+fn scaled_rect(rect: Rect, scale: f32) -> Rect {
+    let scale = scale.clamp(0.01, 1.5);
+    let width = rect.width * scale;
+    let height = rect.height * scale;
+    Rect {
+        x: rect.x + (rect.width - width) * 0.5,
+        y: rect.y + (rect.height - height) * 0.5,
+        width,
+        height,
     }
 }
 
@@ -1048,6 +1567,7 @@ fn push_single_session_inline_widget_card(
     total_lines: usize,
     inline_selection_motion: Option<&InlineWidgetSelectionMotionFrame>,
     inline_list_reflow_motion: Option<&InlineWidgetListReflowMotionFrame>,
+    inline_preview_pane_motion: Option<&InlineWidgetPreviewPaneMotionFrame>,
 ) {
     let line_count = app.render_inline_widget_visible_line_count();
     if line_count == 0 {
@@ -1060,7 +1580,12 @@ fn push_single_session_inline_widget_card(
     }
 
     let typography = single_session_typography_for_scale(app.text_scale());
-    let body_bottom = single_session_body_bottom_for_total_lines(app, size, total_lines);
+    let session_layout = single_session_layout_for_total_lines(app, size, total_lines);
+    let body_bottom = session_layout.body_bottom();
+    let inline_bottom_limit = session_layout
+        .activity_lane
+        .map(|activity| activity.y)
+        .unwrap_or(session_layout.draft_top);
     let welcome_chrome_visible =
         welcome_timeline_chrome_visible(app, size, welcome_chrome_offset_pixels);
     let target_top = inline_widget_target_top(
@@ -1071,7 +1596,7 @@ fn push_single_session_inline_widget_card(
         welcome_chrome_offset_pixels,
     );
     let inline_lines = app.render_inline_widget_styled_lines();
-    let Some(layout) = inline_widget_card_layout(
+    let Some(layout) = inline_widget_card_layout_with_bottom_limit(
         size,
         app.render_inline_widget_kind(),
         &typography,
@@ -1084,6 +1609,7 @@ fn push_single_session_inline_widget_card(
         ),
         target_top,
         progress,
+        inline_bottom_limit,
     ) else {
         return;
     };
@@ -1145,6 +1671,31 @@ fn push_single_session_inline_widget_card(
         );
     }
 
+    if app.render_inline_widget_kind() == Some(InlineWidgetKind::ModelPicker) {
+        push_single_session_inline_widget_structured_chrome(
+            vertices,
+            app.render_inline_widget_kind(),
+            &inline_lines,
+            line_count,
+            &typography,
+            &layout,
+            progress,
+            size,
+        );
+    } else {
+        push_single_session_inline_widget_preview_panes(
+            vertices,
+            app.render_inline_widget_kind(),
+            &inline_lines,
+            line_count,
+            &typography,
+            &layout,
+            progress,
+            inline_preview_pane_motion,
+            size,
+        );
+    }
+
     push_single_session_inline_widget_list_reflow(
         vertices,
         app.render_inline_widget_kind(),
@@ -1166,6 +1717,1277 @@ fn push_single_session_inline_widget_card(
         &layout,
         progress,
         inline_selection_motion,
+        size,
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+struct InlineWidgetPreviewPaneGeometry {
+    sessions: Rect,
+    preview: Rect,
+    radius: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_single_session_inline_widget_preview_panes(
+    vertices: &mut Vec<Vertex>,
+    kind: Option<InlineWidgetKind>,
+    inline_lines: &[SingleSessionStyledLine],
+    line_count: usize,
+    typography: &SingleSessionTypography,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    inline_preview_pane_motion: Option<&InlineWidgetPreviewPaneMotionFrame>,
+    size: PhysicalSize<u32>,
+) {
+    let Some(geometry) =
+        inline_widget_preview_pane_geometry(kind, inline_lines, line_count, typography, layout)
+    else {
+        return;
+    };
+    let visual = inline_preview_pane_motion
+        .and_then(InlineWidgetPreviewPaneMotionFrame::visual)
+        .unwrap_or(InlineWidgetPreviewPaneVisual {
+            focus_pane_position: inline_widget_preview_pane_target(kind, inline_lines, line_count)
+                .map(|target| target.focus_pane as f32)
+                .unwrap_or_default(),
+            preview_opacity: 1.0,
+            preview_y_offset_pixels: 0.0,
+        });
+    let alpha = reveal_progress.clamp(0.0, 1.0);
+    if alpha <= 0.001 {
+        return;
+    }
+
+    for pane in [geometry.sessions, geometry.preview] {
+        push_rounded_rect(
+            vertices,
+            pane,
+            geometry.radius,
+            with_alpha(
+                INLINE_WIDGET_PREVIEW_PANE_BACKGROUND_COLOR,
+                INLINE_WIDGET_PREVIEW_PANE_BACKGROUND_COLOR[3] * alpha,
+            ),
+            size,
+        );
+        push_rounded_rect(
+            vertices,
+            inset_rect(pane, 0.8),
+            (geometry.radius - 1.0).max(1.0),
+            with_alpha(
+                INLINE_WIDGET_PREVIEW_PANE_BORDER_COLOR,
+                INLINE_WIDGET_PREVIEW_PANE_BORDER_COLOR[3] * alpha,
+            ),
+            size,
+        );
+    }
+
+    let content_rect = Rect {
+        x: geometry.preview.x + 5.0,
+        y: geometry.preview.y + 4.0 + visual.preview_y_offset_pixels,
+        width: (geometry.preview.width - 10.0).max(0.0),
+        height: (geometry.preview.height - 8.0).max(0.0),
+    };
+    push_rounded_rect(
+        vertices,
+        content_rect,
+        (geometry.radius - 2.0).max(1.0),
+        with_alpha(
+            INLINE_WIDGET_PREVIEW_PANE_CONTENT_COLOR,
+            INLINE_WIDGET_PREVIEW_PANE_CONTENT_COLOR[3] * alpha * visual.preview_opacity,
+        ),
+        size,
+    );
+
+    let focus_rect = interpolate_inline_widget_preview_pane_rect(
+        geometry.sessions,
+        geometry.preview,
+        visual.focus_pane_position,
+    );
+    push_rounded_rect(
+        vertices,
+        inset_rect(focus_rect, -1.4),
+        geometry.radius + 1.4,
+        with_alpha(
+            INLINE_WIDGET_PREVIEW_PANE_FOCUS_COLOR,
+            INLINE_WIDGET_PREVIEW_PANE_FOCUS_COLOR[3] * alpha,
+        ),
+        size,
+    );
+}
+
+fn inline_widget_preview_pane_geometry(
+    kind: Option<InlineWidgetKind>,
+    inline_lines: &[SingleSessionStyledLine],
+    line_count: usize,
+    typography: &SingleSessionTypography,
+    layout: &InlineWidgetCardLayout,
+) -> Option<InlineWidgetPreviewPaneGeometry> {
+    if kind != Some(InlineWidgetKind::SessionSwitcher) {
+        return None;
+    }
+    if line_count > 0
+        && let Some(columns) = session_switcher_split_columns(layout)
+    {
+        return Some(InlineWidgetPreviewPaneGeometry {
+            sessions: columns.rail,
+            preview: columns.preview,
+            radius: 13.0,
+        });
+    }
+    let visible_len = line_count.min(inline_lines.len());
+    let visible_lines = &inline_lines[..visible_len];
+    let header_line = visible_lines
+        .iter()
+        .position(|line| line.text.contains("sessions") && line.text.contains("preview"))?;
+    let end_line = visible_lines
+        .iter()
+        .enumerate()
+        .skip(header_line + 1)
+        .find_map(|(index, line)| {
+            (line.text.contains('╰') || line.text.contains("preview lines ")).then_some(index)
+        })
+        .unwrap_or(visible_len);
+
+    let line_height = inline_widget_line_height(kind, typography);
+    let top = layout.text_top + header_line as f32 * line_height - 2.0;
+    let bottom = (layout.text_top + end_line as f32 * line_height + 4.0)
+        .min(layout.visible_text_bottom)
+        .max(top + line_height);
+    let inner_left = layout.card.x + layout.padding_x * 0.72;
+    let inner_right = layout.card.x + layout.card.width - layout.padding_x * 0.72;
+    let inner_width = (inner_right - inner_left).max(1.0);
+    let gap = 10.0_f32.min(inner_width * 0.08);
+    let sessions_width = ((inner_width - gap) * 0.42).max(1.0);
+    let preview_width = (inner_width - gap - sessions_width).max(1.0);
+    let height = bottom - top;
+
+    Some(InlineWidgetPreviewPaneGeometry {
+        sessions: Rect {
+            x: inner_left,
+            y: top,
+            width: sessions_width,
+            height,
+        },
+        preview: Rect {
+            x: inner_left + sessions_width + gap,
+            y: top,
+            width: preview_width,
+            height,
+        },
+        radius: 13.0,
+    })
+}
+
+fn interpolate_inline_widget_preview_pane_rect(
+    sessions: Rect,
+    preview: Rect,
+    position: f32,
+) -> Rect {
+    let position = position.clamp(0.0, 1.0);
+    Rect {
+        x: lerp_f32(sessions.x, preview.x, position),
+        y: lerp_f32(sessions.y, preview.y, position),
+        width: lerp_f32(sessions.width, preview.width, position),
+        height: lerp_f32(sessions.height, preview.height, position),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_single_session_inline_widget_structured_chrome(
+    vertices: &mut Vec<Vertex>,
+    kind: Option<InlineWidgetKind>,
+    inline_lines: &[SingleSessionStyledLine],
+    line_count: usize,
+    typography: &SingleSessionTypography,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    match kind {
+        Some(InlineWidgetKind::ModelPicker) => push_inline_command_row_cards(
+            vertices,
+            kind,
+            inline_lines,
+            line_count,
+            typography,
+            layout,
+            reveal_progress,
+            size,
+        ),
+        Some(InlineWidgetKind::SessionSwitcher) => {
+            push_session_switcher_section_panels(
+                vertices,
+                inline_lines,
+                line_count,
+                typography,
+                layout,
+                reveal_progress,
+                size,
+            );
+            push_session_switcher_preview_bubbles(
+                vertices,
+                inline_lines,
+                line_count,
+                typography,
+                layout,
+                reveal_progress,
+                size,
+            );
+            push_inline_command_row_cards(
+                vertices,
+                kind,
+                inline_lines,
+                line_count,
+                typography,
+                layout,
+                reveal_progress,
+                size,
+            );
+        }
+        _ => {}
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_inline_command_row_cards(
+    vertices: &mut Vec<Vertex>,
+    kind: Option<InlineWidgetKind>,
+    inline_lines: &[SingleSessionStyledLine],
+    line_count: usize,
+    typography: &SingleSessionTypography,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    let line_height = inline_widget_line_height(kind, typography);
+    for run in inline_widget_list_row_runs(kind, inline_lines, line_count) {
+        let primary_text = inline_lines
+            .get(run.line)
+            .map(|line| line.text.as_str())
+            .unwrap_or_default();
+        let selected = inline_lines
+            .get(run.line)
+            .is_some_and(|line| line.style == SingleSessionLineStyle::OverlaySelection);
+        let palette = inline_command_row_palette(kind, primary_text, selected);
+        push_inline_command_row_card(
+            vertices,
+            kind,
+            run.line,
+            run.line_span,
+            palette,
+            line_height,
+            layout,
+            reveal_progress,
+            size,
+        );
+        push_inline_command_row_icon(
+            vertices,
+            kind,
+            run.line,
+            palette,
+            line_height,
+            layout,
+            reveal_progress,
+            size,
+        );
+
+        if selected {
+            push_inline_command_current_chip(
+                vertices,
+                kind,
+                primary_text,
+                run.line,
+                line_height,
+                layout,
+                reveal_progress,
+                size,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_inline_command_row_card(
+    vertices: &mut Vec<Vertex>,
+    kind: Option<InlineWidgetKind>,
+    line: usize,
+    line_span: usize,
+    palette: InlineCommandRowPalette,
+    line_height: f32,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    let is_session = matches!(kind, Some(InlineWidgetKind::SessionSwitcher));
+    let row_top = layout.text_top
+        + line as f32 * line_height
+        + if is_session {
+            INLINE_COMMAND_SESSION_ROW_TOP_INSET
+        } else {
+            -INLINE_COMMAND_ROW_GAP_Y
+        };
+    let row_height = (line_span as f32 * line_height
+        + if is_session {
+            -INLINE_COMMAND_SESSION_ROW_BOTTOM_INSET
+        } else {
+            INLINE_COMMAND_ROW_GAP_Y * 1.4
+        })
+    .max(line_height * 0.9);
+    let visible_height = (layout.visible_text_bottom - row_top).min(row_height);
+    let row_width = (layout.card.width - INLINE_COMMAND_ROW_INSET_X * 2.0).max(0.0);
+    if visible_height <= 4.0 || row_width <= 12.0 {
+        return;
+    }
+
+    let rect = if is_session {
+        session_switcher_split_columns(layout)
+            .map(|columns| Rect {
+                x: columns.rail.x + INLINE_COMMAND_ROW_INSET_X,
+                y: row_top,
+                width: (columns.rail.width - INLINE_COMMAND_ROW_INSET_X * 2.0).max(0.0),
+                height: visible_height,
+            })
+            .unwrap_or(Rect {
+                x: layout.card.x + INLINE_COMMAND_ROW_INSET_X,
+                y: row_top,
+                width: row_width,
+                height: visible_height,
+            })
+    } else {
+        Rect {
+            x: layout.card.x + INLINE_COMMAND_ROW_INSET_X,
+            y: row_top,
+            width: row_width,
+            height: visible_height,
+        }
+    };
+    if rect.width <= 12.0 {
+        return;
+    }
+    push_rounded_rect(
+        vertices,
+        rect,
+        INLINE_COMMAND_ROW_RADIUS,
+        with_alpha(palette.fill, palette.fill[3] * reveal_progress),
+        size,
+    );
+    push_rounded_rect_border(
+        vertices,
+        rect,
+        INLINE_COMMAND_ROW_RADIUS,
+        1.0,
+        with_alpha(palette.border, palette.border[3] * reveal_progress),
+        size,
+    );
+    if palette.selected {
+        push_rounded_rect(
+            vertices,
+            Rect {
+                x: rect.x + 6.0,
+                y: rect.y + 7.0,
+                width: 3.0,
+                height: (rect.height - 14.0).max(1.0),
+            },
+            2.0,
+            with_alpha(palette.accent, palette.accent[3] * reveal_progress),
+            size,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_inline_command_row_icon(
+    vertices: &mut Vec<Vertex>,
+    kind: Option<InlineWidgetKind>,
+    line: usize,
+    palette: InlineCommandRowPalette,
+    line_height: f32,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    let Some(icon) = palette.icon else {
+        return;
+    };
+    let is_session = matches!(kind, Some(InlineWidgetKind::SessionSwitcher));
+    let icon_size = if is_session { 19.0 } else { 17.0 };
+    let top = layout.text_top + line as f32 * line_height + if is_session { 10.0 } else { 4.0 };
+    let left = if is_session {
+        session_switcher_split_columns(layout)
+            .map(|columns| columns.rail.x + INLINE_COMMAND_ROW_INSET_X + 10.0)
+            .unwrap_or(layout.card.x + INLINE_COMMAND_ROW_INSET_X + 10.0)
+    } else {
+        layout.card.x + layout.card.width - INLINE_COMMAND_ROW_INSET_X - icon_size - 10.0
+    };
+    if top + icon_size > layout.visible_text_bottom || left + icon_size > layout.visible_text_right
+    {
+        return;
+    }
+    if is_session {
+        let halo = Rect {
+            x: left - 5.0,
+            y: top - 5.0,
+            width: icon_size + 10.0,
+            height: icon_size + 10.0,
+        };
+        push_rounded_rect(
+            vertices,
+            halo,
+            halo.height * 0.5,
+            with_alpha(
+                palette.icon_background,
+                palette.icon_background[3] * reveal_progress,
+            ),
+            size,
+        );
+    }
+    push_lucide_icon(
+        vertices,
+        icon,
+        Rect {
+            x: left,
+            y: top,
+            width: icon_size,
+            height: icon_size,
+        },
+        with_alpha(palette.icon_color, palette.icon_color[3] * reveal_progress),
+        if is_session { 1.75 } else { 1.55 },
+        size,
+    );
+}
+
+fn push_inline_command_current_chip(
+    vertices: &mut Vec<Vertex>,
+    kind: Option<InlineWidgetKind>,
+    primary_text: &str,
+    line: usize,
+    line_height: f32,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    let chip_width = (layout.card.width * 0.16).clamp(54.0, 98.0);
+    let chip_height = (line_height * 0.74).clamp(14.0, 22.0);
+    let x = if matches!(kind, Some(InlineWidgetKind::SessionSwitcher)) {
+        session_switcher_split_columns(layout)
+            .map(|columns| {
+                columns.rail.x + columns.rail.width - chip_width - INLINE_COMMAND_ROW_INSET_X - 10.0
+            })
+            .unwrap_or(
+                layout.card.x + layout.card.width - chip_width - INLINE_COMMAND_ROW_INSET_X - 10.0,
+            )
+    } else {
+        layout.card.x + layout.card.width - chip_width - INLINE_COMMAND_ROW_INSET_X - 10.0
+    };
+    let y = layout.text_top + line as f32 * line_height + (line_height - chip_height) * 0.5;
+    if x <= layout.text_left || y + chip_height > layout.visible_text_bottom {
+        return;
+    }
+    push_rounded_rect(
+        vertices,
+        Rect {
+            x,
+            y,
+            width: chip_width,
+            height: chip_height,
+        },
+        chip_height * 0.5,
+        with_alpha(
+            INLINE_COMMAND_CHIP_COLOR,
+            INLINE_COMMAND_CHIP_COLOR[3] * reveal_progress,
+        ),
+        size,
+    );
+    let chip_icon = if matches!(kind, Some(InlineWidgetKind::SessionSwitcher))
+        && resume_session_row_is_current(primary_text)
+    {
+        LucideIcon::BookmarkCheck
+    } else {
+        LucideIcon::CircleCheck
+    };
+    let icon_size = chip_height * 0.62;
+    push_lucide_icon(
+        vertices,
+        chip_icon,
+        Rect {
+            x: x + (chip_width - icon_size) * 0.5,
+            y: y + (chip_height - icon_size) * 0.5,
+            width: icon_size,
+            height: icon_size,
+        },
+        with_alpha(
+            INLINE_COMMAND_CHIP_ICON_COLOR,
+            INLINE_COMMAND_CHIP_ICON_COLOR[3] * reveal_progress,
+        ),
+        1.35,
+        size,
+    );
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LucideIcon {
+    Bot,
+    BookmarkCheck,
+    CircleCheck,
+    CirclePlay,
+    CircleX,
+    MessageSquare,
+    Package,
+    RefreshCw,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct InlineCommandRowPalette {
+    fill: [f32; 4],
+    border: [f32; 4],
+    accent: [f32; 4],
+    icon_background: [f32; 4],
+    icon_color: [f32; 4],
+    icon: Option<LucideIcon>,
+    selected: bool,
+}
+
+fn inline_command_row_palette(
+    kind: Option<InlineWidgetKind>,
+    primary_text: &str,
+    selected: bool,
+) -> InlineCommandRowPalette {
+    if matches!(kind, Some(InlineWidgetKind::SessionSwitcher)) {
+        return resume_session_row_palette(primary_text, selected);
+    }
+
+    InlineCommandRowPalette {
+        fill: if selected {
+            INLINE_COMMAND_ROW_SELECTED_COLOR
+        } else {
+            INLINE_COMMAND_ROW_BACKGROUND_COLOR
+        },
+        border: if selected {
+            INLINE_COMMAND_ROW_SELECTED_BORDER_COLOR
+        } else {
+            INLINE_COMMAND_ROW_BORDER_COLOR
+        },
+        accent: INLINE_COMMAND_ROW_ACCENT_COLOR,
+        icon_background: INLINE_COMMAND_MODEL_ICON_BACKGROUND_COLOR,
+        icon_color: INLINE_COMMAND_MODEL_ICON_COLOR,
+        icon: matches!(kind, Some(InlineWidgetKind::ModelPicker)).then_some(LucideIcon::Bot),
+        selected,
+    }
+}
+
+fn resume_session_row_palette(primary_text: &str, selected: bool) -> InlineCommandRowPalette {
+    let status = resume_session_status_from_row(primary_text);
+    let (fill, border, accent, icon_background, icon_color, icon) = match status {
+        "active" => (
+            RESUME_SESSION_ACTIVE_FILL,
+            RESUME_SESSION_ACTIVE_BORDER,
+            RESUME_SESSION_ACTIVE_ACCENT,
+            RESUME_SESSION_ACTIVE_ICON_BACKGROUND,
+            RESUME_SESSION_ACTIVE_ICON_COLOR,
+            LucideIcon::CirclePlay,
+        ),
+        "closed" | "done" | "finished" => (
+            RESUME_SESSION_CLOSED_FILL,
+            RESUME_SESSION_CLOSED_BORDER,
+            RESUME_SESSION_CLOSED_ACCENT,
+            RESUME_SESSION_CLOSED_ICON_BACKGROUND,
+            RESUME_SESSION_CLOSED_ICON_COLOR,
+            LucideIcon::CircleCheck,
+        ),
+        "crashed" | "failed" | "error" => (
+            RESUME_SESSION_ERROR_FILL,
+            RESUME_SESSION_ERROR_BORDER,
+            RESUME_SESSION_ERROR_ACCENT,
+            RESUME_SESSION_ERROR_ICON_BACKGROUND,
+            RESUME_SESSION_ERROR_ICON_COLOR,
+            LucideIcon::CircleX,
+        ),
+        "compacted" => (
+            RESUME_SESSION_SPECIAL_FILL,
+            RESUME_SESSION_SPECIAL_BORDER,
+            RESUME_SESSION_SPECIAL_ACCENT,
+            RESUME_SESSION_SPECIAL_ICON_BACKGROUND,
+            RESUME_SESSION_SPECIAL_ICON_COLOR,
+            LucideIcon::Package,
+        ),
+        "reloaded" => (
+            RESUME_SESSION_RELOADED_FILL,
+            RESUME_SESSION_RELOADED_BORDER,
+            RESUME_SESSION_RELOADED_ACCENT,
+            RESUME_SESSION_RELOADED_ICON_BACKGROUND,
+            RESUME_SESSION_RELOADED_ICON_COLOR,
+            LucideIcon::RefreshCw,
+        ),
+        _ => (
+            RESUME_SESSION_NEUTRAL_FILL,
+            RESUME_SESSION_NEUTRAL_BORDER,
+            RESUME_SESSION_NEUTRAL_ACCENT,
+            RESUME_SESSION_NEUTRAL_ICON_BACKGROUND,
+            RESUME_SESSION_NEUTRAL_ICON_COLOR,
+            LucideIcon::MessageSquare,
+        ),
+    };
+
+    InlineCommandRowPalette {
+        fill: if selected {
+            mix_rgba(fill, RESUME_SESSION_SELECTED_TINT, 0.58)
+        } else {
+            fill
+        },
+        border: if selected {
+            mix_rgba(border, RESUME_SESSION_SELECTED_BORDER_TINT, 0.46)
+        } else {
+            border
+        },
+        accent,
+        icon_background: if selected {
+            mix_rgba(icon_background, RESUME_SESSION_SELECTED_TINT, 0.28)
+        } else {
+            icon_background
+        },
+        icon_color,
+        icon: Some(icon),
+        selected,
+    }
+}
+
+fn resume_session_status_from_row(primary_text: &str) -> &str {
+    primary_text
+        .trim_start()
+        .split_once(" session ·")
+        .map(|(status, _)| status.trim())
+        .unwrap_or("unknown")
+}
+
+fn resume_session_row_is_current(primary_text: &str) -> bool {
+    primary_text.contains(" current ·")
+}
+
+fn mix_rgba(left: [f32; 4], right: [f32; 4], amount: f32) -> [f32; 4] {
+    let amount = amount.clamp(0.0, 1.0);
+    [
+        left[0] + (right[0] - left[0]) * amount,
+        left[1] + (right[1] - left[1]) * amount,
+        left[2] + (right[2] - left[2]) * amount,
+        left[3] + (right[3] - left[3]) * amount,
+    ]
+}
+
+fn push_lucide_icon(
+    vertices: &mut Vec<Vertex>,
+    icon: LucideIcon,
+    rect: Rect,
+    color: [f32; 4],
+    stroke_width: f32,
+    size: PhysicalSize<u32>,
+) {
+    if rect.width <= 1.0 || rect.height <= 1.0 || color[3] <= 0.0 {
+        return;
+    }
+
+    match icon {
+        LucideIcon::Bot => {
+            push_lucide_rect(
+                vertices,
+                rect,
+                [5.0, 7.0],
+                [19.0, 19.0],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [12.0, 3.5],
+                [12.0, 7.0],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [9.0, 3.5],
+                [15.0, 3.5],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [8.5, 12.0],
+                [8.6, 12.0],
+                color,
+                stroke_width * 2.0,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [15.4, 12.0],
+                [15.5, 12.0],
+                color,
+                stroke_width * 2.0,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [9.0, 16.0],
+                [15.0, 16.0],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::BookmarkCheck => {
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[
+                    [7.0, 4.0],
+                    [17.0, 4.0],
+                    [17.0, 20.0],
+                    [12.0, 17.0],
+                    [7.0, 20.0],
+                    [7.0, 4.0],
+                ],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[[9.3, 11.6], [11.2, 13.5], [15.0, 9.7]],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::CircleCheck => {
+            push_lucide_circle(vertices, rect, [12.0, 12.0], 8.2, color, stroke_width, size);
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[[8.3, 12.2], [10.8, 14.7], [15.9, 9.4]],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::CirclePlay => {
+            push_lucide_circle(vertices, rect, [12.0, 12.0], 8.2, color, stroke_width, size);
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[[10.2, 8.7], [15.9, 12.0], [10.2, 15.3], [10.2, 8.7]],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::CircleX => {
+            push_lucide_circle(vertices, rect, [12.0, 12.0], 8.2, color, stroke_width, size);
+            push_lucide_line(
+                vertices,
+                rect,
+                [9.2, 9.2],
+                [14.8, 14.8],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [14.8, 9.2],
+                [9.2, 14.8],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::MessageSquare => {
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[
+                    [5.0, 6.0],
+                    [19.0, 6.0],
+                    [19.0, 16.0],
+                    [13.0, 16.0],
+                    [8.0, 20.0],
+                    [8.0, 16.0],
+                    [5.0, 16.0],
+                    [5.0, 6.0],
+                ],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [8.5, 10.0],
+                [15.5, 10.0],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [8.5, 13.0],
+                [13.0, 13.0],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::Package => {
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[
+                    [12.0, 3.8],
+                    [19.0, 7.8],
+                    [19.0, 16.2],
+                    [12.0, 20.2],
+                    [5.0, 16.2],
+                    [5.0, 7.8],
+                    [12.0, 3.8],
+                ],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[[5.3, 8.0], [12.0, 12.0], [18.7, 8.0]],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_line(
+                vertices,
+                rect,
+                [12.0, 12.0],
+                [12.0, 20.0],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+        LucideIcon::RefreshCw => {
+            push_lucide_arc(
+                vertices,
+                rect,
+                [12.0, 12.0],
+                7.4,
+                -0.10,
+                3.55,
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_arc(
+                vertices,
+                rect,
+                [12.0, 12.0],
+                7.4,
+                3.05,
+                6.70,
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[[17.0, 4.2], [19.4, 7.0], [15.6, 7.2]],
+                color,
+                stroke_width,
+                size,
+            );
+            push_lucide_polyline(
+                vertices,
+                rect,
+                &[[7.0, 19.8], [4.6, 17.0], [8.4, 16.8]],
+                color,
+                stroke_width,
+                size,
+            );
+        }
+    }
+}
+
+fn lucide_point(rect: Rect, point: [f32; 2]) -> [f32; 2] {
+    [
+        rect.x + rect.width * point[0] / 24.0,
+        rect.y + rect.height * point[1] / 24.0,
+    ]
+}
+
+fn push_lucide_line(
+    vertices: &mut Vec<Vertex>,
+    rect: Rect,
+    a: [f32; 2],
+    b: [f32; 2],
+    color: [f32; 4],
+    stroke_width: f32,
+    size: PhysicalSize<u32>,
+) {
+    push_stroke_segment(
+        vertices,
+        lucide_point(rect, a),
+        lucide_point(rect, b),
+        stroke_width,
+        color,
+        size,
+    );
+}
+
+fn push_lucide_polyline(
+    vertices: &mut Vec<Vertex>,
+    rect: Rect,
+    points: &[[f32; 2]],
+    color: [f32; 4],
+    stroke_width: f32,
+    size: PhysicalSize<u32>,
+) {
+    for pair in points.windows(2) {
+        push_lucide_line(vertices, rect, pair[0], pair[1], color, stroke_width, size);
+    }
+}
+
+fn push_lucide_rect(
+    vertices: &mut Vec<Vertex>,
+    rect: Rect,
+    min: [f32; 2],
+    max: [f32; 2],
+    color: [f32; 4],
+    stroke_width: f32,
+    size: PhysicalSize<u32>,
+) {
+    push_lucide_polyline(
+        vertices,
+        rect,
+        &[
+            [min[0], min[1]],
+            [max[0], min[1]],
+            [max[0], max[1]],
+            [min[0], max[1]],
+            [min[0], min[1]],
+        ],
+        color,
+        stroke_width,
+        size,
+    );
+}
+
+fn push_lucide_circle(
+    vertices: &mut Vec<Vertex>,
+    rect: Rect,
+    center: [f32; 2],
+    radius: f32,
+    color: [f32; 4],
+    stroke_width: f32,
+    size: PhysicalSize<u32>,
+) {
+    push_lucide_arc(
+        vertices,
+        rect,
+        center,
+        radius,
+        0.0,
+        std::f32::consts::TAU,
+        color,
+        stroke_width,
+        size,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_lucide_arc(
+    vertices: &mut Vec<Vertex>,
+    rect: Rect,
+    center: [f32; 2],
+    radius: f32,
+    start_angle: f32,
+    end_angle: f32,
+    color: [f32; 4],
+    stroke_width: f32,
+    size: PhysicalSize<u32>,
+) {
+    const ICON_ARC_SEGMENTS: usize = 18;
+    let mut previous = None;
+    for step in 0..=ICON_ARC_SEGMENTS {
+        let t = step as f32 / ICON_ARC_SEGMENTS as f32;
+        let angle = start_angle + (end_angle - start_angle) * t;
+        let point = [
+            center[0] + radius * angle.cos(),
+            center[1] + radius * angle.sin(),
+        ];
+        if let Some(previous) = previous {
+            push_lucide_line(vertices, rect, previous, point, color, stroke_width, size);
+        }
+        previous = Some(point);
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SessionSwitcherSplitColumns {
+    rail: Rect,
+    preview: Rect,
+    gap: Rect,
+}
+
+fn session_switcher_split_columns(
+    layout: &InlineWidgetCardLayout,
+) -> Option<SessionSwitcherSplitColumns> {
+    let content_x = layout.card.x + layout.padding_x * 0.72;
+    let content_width = (layout.card.width - layout.padding_x * 1.44).max(0.0);
+    if content_width <= 260.0 {
+        return None;
+    }
+
+    let gap_width = (content_width * 0.018).clamp(9.0, 15.0);
+    let preferred_rail_width = (content_width * 0.38).clamp(250.0, 365.0);
+    let max_rail_width = (content_width - gap_width - 210.0)
+        .max(content_width * 0.42)
+        .min(content_width - gap_width - 96.0);
+    let rail_width = preferred_rail_width
+        .min(max_rail_width)
+        .max((content_width * 0.32).min(content_width - gap_width - 96.0));
+    let preview_width = content_width - rail_width - gap_width;
+    if rail_width <= 96.0 || preview_width <= 96.0 {
+        return None;
+    }
+
+    let y = layout.card.y + layout.padding_x * 0.18;
+    let height = (layout.card.height - layout.padding_x * 0.36).max(1.0);
+    let rail = Rect {
+        x: content_x,
+        y,
+        width: rail_width,
+        height,
+    };
+    let gap = Rect {
+        x: rail.x + rail.width,
+        y,
+        width: gap_width,
+        height,
+    };
+    let preview = Rect {
+        x: gap.x + gap.width,
+        y,
+        width: preview_width,
+        height,
+    };
+    Some(SessionSwitcherSplitColumns { rail, preview, gap })
+}
+
+fn session_switcher_split_panel_rects(
+    layout: &InlineWidgetCardLayout,
+    top: f32,
+    height: f32,
+) -> Option<(Rect, Rect, Rect)> {
+    let columns = session_switcher_split_columns(layout)?;
+    let bottom = (top + height).min(layout.visible_text_bottom);
+    if bottom <= top + 8.0 {
+        return None;
+    }
+    let height = bottom - top;
+    Some((
+        Rect {
+            y: top,
+            height,
+            ..columns.rail
+        },
+        Rect {
+            y: top,
+            height,
+            ..columns.preview
+        },
+        Rect {
+            y: top,
+            height,
+            ..columns.gap
+        },
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_session_switcher_section_panels(
+    vertices: &mut Vec<Vertex>,
+    inline_lines: &[SingleSessionStyledLine],
+    line_count: usize,
+    typography: &SingleSessionTypography,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    let visible_len = line_count.min(inline_lines.len());
+    let Some(sessions_header) = inline_lines[..visible_len]
+        .iter()
+        .position(|line| line.text.starts_with("Recent sessions"))
+    else {
+        return;
+    };
+    let preview_header = inline_lines[..visible_len]
+        .iter()
+        .position(|line| line.text.starts_with("Preview"));
+    let sessions_end = preview_header
+        .unwrap_or(visible_len)
+        .max(sessions_header + 1);
+    let line_height =
+        inline_widget_line_height(Some(InlineWidgetKind::SessionSwitcher), typography);
+
+    let top = layout.text_top + sessions_header as f32 * line_height - 7.0;
+    let height = (visible_len - sessions_header) as f32 * line_height + 12.0;
+    if let Some((rail, preview, gap)) = session_switcher_split_panel_rects(layout, top, height) {
+        push_rounded_rect(
+            vertices,
+            rail,
+            INLINE_COMMAND_ROW_RADIUS + 4.0,
+            with_alpha(
+                INLINE_COMMAND_SECTION_BACKGROUND_COLOR,
+                INLINE_COMMAND_SECTION_BACKGROUND_COLOR[3] * reveal_progress,
+            ),
+            size,
+        );
+        push_rounded_rect(
+            vertices,
+            preview,
+            INLINE_COMMAND_ROW_RADIUS + 4.0,
+            with_alpha(
+                INLINE_COMMAND_PREVIEW_BACKGROUND_COLOR,
+                INLINE_COMMAND_PREVIEW_BACKGROUND_COLOR[3] * reveal_progress,
+            ),
+            size,
+        );
+        push_rounded_rect(
+            vertices,
+            Rect {
+                x: gap.x + gap.width * 0.5 - 0.5,
+                y: gap.y + 9.0,
+                width: 1.0,
+                height: (gap.height - 18.0).max(1.0),
+            },
+            0.5,
+            with_alpha(
+                INLINE_COMMAND_SPLIT_DIVIDER_COLOR,
+                INLINE_COMMAND_SPLIT_DIVIDER_COLOR[3] * reveal_progress,
+            ),
+            size,
+        );
+    } else {
+        push_inline_command_section_panel(
+            vertices,
+            sessions_header,
+            sessions_end,
+            line_height,
+            layout,
+            INLINE_COMMAND_SECTION_BACKGROUND_COLOR,
+            reveal_progress,
+            size,
+        );
+        if let Some(preview_header) = preview_header {
+            push_inline_command_section_panel(
+                vertices,
+                preview_header,
+                visible_len,
+                line_height,
+                layout,
+                INLINE_COMMAND_PREVIEW_BACKGROUND_COLOR,
+                reveal_progress,
+                size,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_session_switcher_preview_bubbles(
+    vertices: &mut Vec<Vertex>,
+    inline_lines: &[SingleSessionStyledLine],
+    line_count: usize,
+    typography: &SingleSessionTypography,
+    layout: &InlineWidgetCardLayout,
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    let visible_len = line_count.min(inline_lines.len());
+    let Some(preview_header) = inline_lines[..visible_len]
+        .iter()
+        .position(|line| line.text.starts_with("Preview"))
+    else {
+        return;
+    };
+    let line_height =
+        inline_widget_line_height(Some(InlineWidgetKind::SessionSwitcher), typography);
+    let radius = (line_height * 0.12).clamp(2.5, 4.5);
+    let y = layout.text_top + preview_header as f32 * line_height + line_height * 0.44;
+    let right = layout.card.x + layout.card.width - layout.padding_x * 0.72;
+    if y + radius > layout.visible_text_bottom {
+        return;
+    }
+    for index in 0..3 {
+        let alpha_scale = 1.0 - index as f32 * 0.18;
+        push_rounded_rect(
+            vertices,
+            Rect {
+                x: right - (index as f32 + 1.0) * (radius * 2.7),
+                y: y - radius,
+                width: radius * 2.0,
+                height: radius * 2.0,
+            },
+            radius,
+            with_alpha(
+                INLINE_COMMAND_ROW_ACCENT_COLOR,
+                INLINE_COMMAND_ROW_ACCENT_COLOR[3] * reveal_progress * alpha_scale,
+            ),
+            size,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_inline_command_section_panel(
+    vertices: &mut Vec<Vertex>,
+    start_line: usize,
+    end_line: usize,
+    line_height: f32,
+    layout: &InlineWidgetCardLayout,
+    color: [f32; 4],
+    reveal_progress: f32,
+    size: PhysicalSize<u32>,
+) {
+    if end_line <= start_line {
+        return;
+    }
+    let top = layout.text_top + start_line as f32 * line_height - 7.0;
+    let height = (end_line - start_line) as f32 * line_height + 12.0;
+    let visible_height = (layout.visible_text_bottom - top).min(height);
+    if visible_height <= 8.0 {
+        return;
+    }
+    let rect = Rect {
+        x: layout.card.x + layout.padding_x * 0.42,
+        y: top,
+        width: (layout.card.width - layout.padding_x * 0.84).max(1.0),
+        height: visible_height,
+    };
+    push_rounded_rect(
+        vertices,
+        rect,
+        INLINE_COMMAND_ROW_RADIUS + 4.0,
+        with_alpha(color, color[3] * reveal_progress),
         size,
     );
 }
@@ -1310,6 +3132,55 @@ const SLASH_SUGGESTIONS_INLINE_CARD_PADDING_Y: f32 = 5.0;
 const SLASH_SUGGESTIONS_INLINE_CARD_RADIUS: f32 = 13.0;
 const SLASH_SUGGESTIONS_INLINE_SELECTION_RADIUS: f32 = 7.0;
 const SLASH_SUGGESTIONS_INLINE_FONT_SCALE: f32 = 0.88;
+const INLINE_COMMAND_ROW_RADIUS: f32 = 12.0;
+const INLINE_COMMAND_ROW_INSET_X: f32 = 9.0;
+const INLINE_COMMAND_ROW_GAP_Y: f32 = 4.0;
+const INLINE_COMMAND_ROW_BACKGROUND_COLOR: [f32; 4] = [0.972, 0.982, 1.000, 0.42];
+const INLINE_COMMAND_ROW_BORDER_COLOR: [f32; 4] = [0.080, 0.170, 0.420, 0.115];
+const INLINE_COMMAND_ROW_SELECTED_COLOR: [f32; 4] = [0.830, 0.900, 1.000, 0.58];
+const INLINE_COMMAND_ROW_SELECTED_BORDER_COLOR: [f32; 4] = [0.085, 0.300, 0.850, 0.30];
+const INLINE_COMMAND_ROW_ACCENT_COLOR: [f32; 4] = [0.100, 0.360, 0.940, 0.50];
+const INLINE_COMMAND_SECTION_BACKGROUND_COLOR: [f32; 4] = [0.955, 0.972, 1.000, 0.30];
+const INLINE_COMMAND_PREVIEW_BACKGROUND_COLOR: [f32; 4] = [0.985, 0.990, 1.000, 0.34];
+const INLINE_COMMAND_SPLIT_DIVIDER_COLOR: [f32; 4] = [0.120, 0.220, 0.440, 0.16];
+const INLINE_COMMAND_CHIP_COLOR: [f32; 4] = [0.900, 0.940, 1.000, 0.64];
+const INLINE_COMMAND_CHIP_ICON_COLOR: [f32; 4] = [0.085, 0.270, 0.760, 0.92];
+const INLINE_COMMAND_MODEL_ICON_BACKGROUND_COLOR: [f32; 4] = [0.890, 0.930, 1.000, 0.54];
+const INLINE_COMMAND_MODEL_ICON_COLOR: [f32; 4] = [0.080, 0.260, 0.720, 0.88];
+const INLINE_COMMAND_SESSION_ROW_TOP_INSET: f32 = 3.0;
+const INLINE_COMMAND_SESSION_ROW_BOTTOM_INSET: f32 = 10.0;
+const RESUME_SESSION_SELECTED_TINT: [f32; 4] = [0.835, 0.905, 1.000, 0.66];
+const RESUME_SESSION_SELECTED_BORDER_TINT: [f32; 4] = [0.075, 0.290, 0.900, 0.34];
+const RESUME_SESSION_ACTIVE_FILL: [f32; 4] = [0.925, 0.992, 0.955, 0.50];
+const RESUME_SESSION_ACTIVE_BORDER: [f32; 4] = [0.050, 0.530, 0.300, 0.22];
+const RESUME_SESSION_ACTIVE_ACCENT: [f32; 4] = [0.045, 0.650, 0.355, 0.62];
+const RESUME_SESSION_ACTIVE_ICON_BACKGROUND: [f32; 4] = [0.790, 0.970, 0.865, 0.54];
+const RESUME_SESSION_ACTIVE_ICON_COLOR: [f32; 4] = [0.025, 0.455, 0.250, 0.92];
+const RESUME_SESSION_CLOSED_FILL: [f32; 4] = [0.965, 0.978, 0.994, 0.46];
+const RESUME_SESSION_CLOSED_BORDER: [f32; 4] = [0.160, 0.235, 0.360, 0.16];
+const RESUME_SESSION_CLOSED_ACCENT: [f32; 4] = [0.290, 0.400, 0.560, 0.44];
+const RESUME_SESSION_CLOSED_ICON_BACKGROUND: [f32; 4] = [0.905, 0.935, 0.975, 0.50];
+const RESUME_SESSION_CLOSED_ICON_COLOR: [f32; 4] = [0.170, 0.260, 0.420, 0.82];
+const RESUME_SESSION_ERROR_FILL: [f32; 4] = [1.000, 0.930, 0.930, 0.50];
+const RESUME_SESSION_ERROR_BORDER: [f32; 4] = [0.760, 0.120, 0.160, 0.25];
+const RESUME_SESSION_ERROR_ACCENT: [f32; 4] = [0.850, 0.120, 0.180, 0.64];
+const RESUME_SESSION_ERROR_ICON_BACKGROUND: [f32; 4] = [1.000, 0.820, 0.835, 0.56];
+const RESUME_SESSION_ERROR_ICON_COLOR: [f32; 4] = [0.670, 0.060, 0.110, 0.92];
+const RESUME_SESSION_SPECIAL_FILL: [f32; 4] = [0.964, 0.940, 1.000, 0.50];
+const RESUME_SESSION_SPECIAL_BORDER: [f32; 4] = [0.405, 0.190, 0.780, 0.23];
+const RESUME_SESSION_SPECIAL_ACCENT: [f32; 4] = [0.500, 0.245, 0.900, 0.58];
+const RESUME_SESSION_SPECIAL_ICON_BACKGROUND: [f32; 4] = [0.900, 0.830, 1.000, 0.54];
+const RESUME_SESSION_SPECIAL_ICON_COLOR: [f32; 4] = [0.360, 0.150, 0.720, 0.90];
+const RESUME_SESSION_RELOADED_FILL: [f32; 4] = [0.930, 0.982, 1.000, 0.50];
+const RESUME_SESSION_RELOADED_BORDER: [f32; 4] = [0.050, 0.470, 0.680, 0.22];
+const RESUME_SESSION_RELOADED_ACCENT: [f32; 4] = [0.050, 0.520, 0.760, 0.56];
+const RESUME_SESSION_RELOADED_ICON_BACKGROUND: [f32; 4] = [0.800, 0.940, 1.000, 0.52];
+const RESUME_SESSION_RELOADED_ICON_COLOR: [f32; 4] = [0.035, 0.370, 0.620, 0.90];
+const RESUME_SESSION_NEUTRAL_FILL: [f32; 4] = [0.972, 0.982, 1.000, 0.44];
+const RESUME_SESSION_NEUTRAL_BORDER: [f32; 4] = [0.100, 0.170, 0.320, 0.14];
+const RESUME_SESSION_NEUTRAL_ACCENT: [f32; 4] = [0.135, 0.280, 0.620, 0.42];
+const RESUME_SESSION_NEUTRAL_ICON_BACKGROUND: [f32; 4] = [0.900, 0.930, 1.000, 0.46];
+const RESUME_SESSION_NEUTRAL_ICON_COLOR: [f32; 4] = [0.120, 0.220, 0.460, 0.82];
 
 #[derive(Clone, Copy, Debug)]
 struct InlineWidgetCardStyle {
@@ -1340,6 +3211,28 @@ fn inline_widget_card_layout(
     text_top: f32,
     progress: f32,
 ) -> Option<InlineWidgetCardLayout> {
+    inline_widget_card_layout_with_bottom_limit(
+        size,
+        kind,
+        typography,
+        line_count,
+        text_width,
+        text_top,
+        progress,
+        single_session_draft_top(size),
+    )
+}
+
+fn inline_widget_card_layout_with_bottom_limit(
+    size: PhysicalSize<u32>,
+    kind: Option<InlineWidgetKind>,
+    typography: &SingleSessionTypography,
+    line_count: usize,
+    text_width: f32,
+    text_top: f32,
+    progress: f32,
+    bottom_limit: f32,
+) -> Option<InlineWidgetCardLayout> {
     if line_count == 0 {
         return None;
     }
@@ -1358,11 +3251,31 @@ fn inline_widget_card_layout(
         .min(inline_widget_max_text_width_for_kind(kind, size))
         .max(1.0);
     let text_height = line_count as f32 * line_height;
+    let requested_card_height = text_height + padding_y * 2.0;
+    let card_y = (text_top - padding_y).max(PANEL_TITLE_TOP_PADDING);
+    let draft_top = single_session_draft_top(size);
+    let bottom_limit = bottom_limit.min(draft_top);
+    let constrained_by_bottom = bottom_limit < draft_top - 0.001;
+    let minimum_card_height = if constrained_by_bottom {
+        (line_height * 0.72).min(requested_card_height)
+    } else {
+        (line_height + padding_y * 2.0).min(requested_card_height)
+    };
+    let available_card_height = if constrained_by_bottom {
+        (bottom_limit - card_y).max(1.0)
+    } else {
+        (bottom_limit - card_y - 8.0).max(minimum_card_height)
+    };
+    let max_card_height = available_card_height
+        .min((size.height as f32 * 0.56).max(line_height * 3.0 + padding_y * 2.0));
+    let final_card_height = requested_card_height
+        .min(max_card_height)
+        .max(minimum_card_height.min(max_card_height));
     let final_card = Rect {
         x: (text_left - padding_x).max(0.0),
-        y: (text_top - padding_y).max(PANEL_TITLE_TOP_PADDING),
+        y: card_y,
         width: text_width + padding_x * 2.0,
-        height: text_height + padding_y * 2.0,
+        height: final_card_height,
     };
     let start_width = (line_height * 2.0).min(final_card.width);
     let start_height = (line_height * 0.72).min(final_card.height);
@@ -1797,46 +3710,267 @@ fn transparent(mut color: [f32; 4]) -> [f32; 4] {
     color
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StreamingActivityCueVisual {
+    opacity: f32,
+    y_offset_pixels: f32,
+    scale: f32,
+}
+
+impl StreamingActivityCueVisual {
+    fn settled() -> Self {
+        Self {
+            opacity: 1.0,
+            y_offset_pixels: 0.0,
+            scale: 1.0,
+        }
+    }
+
+    fn entry(progress: f32) -> Self {
+        let eased = ease_out_cubic_local(progress);
+        Self {
+            opacity: eased,
+            y_offset_pixels: STREAMING_ACTIVITY_CUE_ENTRY_OFFSET_PIXELS * (1.0 - eased),
+            scale: lerp_f32(STREAMING_ACTIVITY_CUE_ENTRY_SCALE, 1.0, eased),
+        }
+    }
+
+    fn exit(progress: f32) -> Self {
+        let eased = ease_out_cubic_local(progress);
+        Self {
+            opacity: 1.0 - eased,
+            y_offset_pixels: -STREAMING_ACTIVITY_CUE_ENTRY_OFFSET_PIXELS * 0.55 * eased,
+            scale: lerp_f32(1.0, 0.975, eased),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct StreamingActivityCueMotionFrame {
+    current: Option<StreamingActivityCueVisual>,
+    exiting: Option<StreamingActivityCueVisual>,
+    active: bool,
+    cache_key: u64,
+}
+
+impl StreamingActivityCueMotionFrame {
+    pub(crate) fn current(&self) -> Option<StreamingActivityCueVisual> {
+        self.current
+    }
+
+    pub(crate) fn exiting(&self) -> Option<StreamingActivityCueVisual> {
+        self.exiting
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub(crate) fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct StreamingActivityCueMotionRegistry {
+    initialized: bool,
+    visible: bool,
+    entered_at: Option<Instant>,
+    exiting_at: Option<Instant>,
+}
+
+impl StreamingActivityCueMotionRegistry {
+    pub(crate) fn frame(
+        &mut self,
+        app: &SingleSessionApp,
+        now: Instant,
+    ) -> StreamingActivityCueMotionFrame {
+        self.frame_for_visible(app.has_activity_indicator(), now)
+    }
+
+    fn frame_for_visible(
+        &mut self,
+        visible: bool,
+        now: Instant,
+    ) -> StreamingActivityCueMotionFrame {
+        let reduced_motion = crate::animation::desktop_reduced_motion_enabled();
+        if !self.initialized {
+            self.initialized = true;
+            self.visible = visible;
+            self.entered_at = None;
+            self.exiting_at = None;
+        } else if self.visible != visible {
+            if reduced_motion {
+                self.entered_at = None;
+                self.exiting_at = None;
+            } else if visible {
+                self.entered_at = Some(now);
+                self.exiting_at = None;
+            } else {
+                self.exiting_at = Some(now);
+                self.entered_at = None;
+            }
+            self.visible = visible;
+        }
+
+        if reduced_motion {
+            self.entered_at = None;
+            self.exiting_at = None;
+        }
+
+        let mut active = false;
+        let current = if visible {
+            let visual = if let Some(started_at) = self.entered_at {
+                let (progress, running) = timed_animation_progress(
+                    started_at,
+                    now,
+                    STREAMING_ACTIVITY_CUE_ENTRY_DURATION,
+                );
+                active |= running;
+                if running {
+                    StreamingActivityCueVisual::entry(progress)
+                } else {
+                    self.entered_at = None;
+                    StreamingActivityCueVisual::settled()
+                }
+            } else {
+                StreamingActivityCueVisual::settled()
+            };
+            Some(visual)
+        } else {
+            None
+        };
+
+        let exiting = if !visible {
+            self.exiting_at.and_then(|started_at| {
+                let (progress, running) =
+                    timed_animation_progress(started_at, now, STREAMING_ACTIVITY_CUE_EXIT_DURATION);
+                if running {
+                    active = true;
+                    Some(StreamingActivityCueVisual::exit(progress))
+                } else {
+                    self.exiting_at = None;
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
+        StreamingActivityCueMotionFrame {
+            current,
+            exiting,
+            active,
+            cache_key: streaming_activity_cue_motion_cache_key(current, exiting, active),
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.initialized = false;
+        self.visible = false;
+        self.entered_at = None;
+        self.exiting_at = None;
+    }
+}
+
+fn streaming_activity_cue_motion_cache_key(
+    current: Option<StreamingActivityCueVisual>,
+    exiting: Option<StreamingActivityCueVisual>,
+    active: bool,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    active.hash(&mut hasher);
+    current.is_some().hash(&mut hasher);
+    if let Some(visual) = current {
+        streaming_activity_cue_visual_hash(visual, &mut hasher);
+    }
+    exiting.is_some().hash(&mut hasher);
+    if let Some(visual) = exiting {
+        streaming_activity_cue_visual_hash(visual, &mut hasher);
+    }
+    hasher.finish()
+}
+
+fn streaming_activity_cue_visual_hash(
+    visual: StreamingActivityCueVisual,
+    hasher: &mut impl Hasher,
+) {
+    hash_f32(visual.opacity, hasher);
+    hash_f32(visual.y_offset_pixels, hasher);
+    hash_f32(visual.scale, hasher);
+}
+
 pub(crate) fn push_streaming_activity_cue(
     vertices: &mut Vec<Vertex>,
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
     tick: u64,
     viewport: Option<&SingleSessionBodyViewport>,
+    motion: Option<&StreamingActivityCueMotionFrame>,
 ) {
-    let typography = single_session_typography();
-    let line_height = typography.body_size * typography.body_line_height;
-    let body_top = single_session_body_top_for_app(app, size);
+    let current = if app.has_activity_indicator() {
+        Some(
+            motion
+                .and_then(StreamingActivityCueMotionFrame::current)
+                .unwrap_or_else(StreamingActivityCueVisual::settled),
+        )
+    } else {
+        None
+    };
+    let exiting = motion.and_then(StreamingActivityCueMotionFrame::exiting);
+    if current.is_none() && exiting.is_none() {
+        return;
+    }
+
+    if let Some(visual) = exiting {
+        push_streaming_activity_cue_visual(vertices, app, size, tick, viewport, visual);
+    }
+    if let Some(visual) = current {
+        push_streaming_activity_cue_visual(vertices, app, size, tick, viewport, visual);
+    }
+}
+
+fn push_streaming_activity_cue_visual(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    tick: u64,
+    viewport: Option<&SingleSessionBodyViewport>,
+    visual: StreamingActivityCueVisual,
+) {
+    if visual.opacity <= 0.001 || visual.scale <= 0.05 {
+        return;
+    }
+    let typography = single_session_typography_for_scale(app.text_scale());
     let viewport = viewport
         .cloned()
         .unwrap_or_else(|| single_session_body_viewport_for_tick(app, size, tick, 0.0));
-    let active_line_index = if app.streaming_response.is_empty() {
-        None
-    } else {
-        viewport.lines.len().checked_sub(1)
-    };
-
-    let cue_y = active_line_index
-        .map(|line_index| body_top + viewport.top_offset_pixels + line_index as f32 * line_height)
-        .filter(|y| *y >= PANEL_BODY_TOP_PADDING && *y <= single_session_body_bottom(size))
-        .unwrap_or_else(|| {
-            single_session_draft_top_for_app(app, size) - typography.body_size * 0.82
-        });
     let pill_width = (typography.body_size * 2.05).clamp(26.0, 34.0);
     let pill_height = (typography.body_size * 0.82).clamp(11.0, 15.0);
-    let cue_x = PANEL_TITLE_LEFT_PADDING;
-    let cue_y = cue_y + (line_height - pill_height) * 0.5;
+    let layout = single_session_layout_for_total_lines(app, size, viewport.total_lines);
+    let activity_lane = layout.activity_lane.unwrap_or(Rect {
+        x: PANEL_TITLE_LEFT_PADDING,
+        y: layout.body_bottom(),
+        width: layout.body.width,
+        height: (layout.draft_top - layout.body_bottom()).max(pill_height),
+    });
+    let cue_y = activity_lane.y + (activity_lane.height - pill_height).max(0.0) * 0.5;
+    let cue_x = activity_lane.x;
     let cue_rect = Rect {
         x: cue_x,
-        y: cue_y,
+        y: cue_y + visual.y_offset_pixels,
         width: pill_width,
         height: pill_height,
     };
+    let cue_rect = scaled_rect(cue_rect, visual.scale);
     push_rounded_rect(
         vertices,
         cue_rect,
         pill_height * 0.5,
-        STREAMING_ACTIVITY_PILL_COLOR,
+        with_alpha(
+            STREAMING_ACTIVITY_PILL_COLOR,
+            STREAMING_ACTIVITY_PILL_COLOR[3] * visual.opacity,
+        ),
         size,
     );
     push_rounded_rect_border(
@@ -1844,7 +3978,10 @@ pub(crate) fn push_streaming_activity_cue(
         cue_rect,
         pill_height * 0.5,
         1.0,
-        STREAMING_ACTIVITY_PILL_BORDER_COLOR,
+        with_alpha(
+            STREAMING_ACTIVITY_PILL_BORDER_COLOR,
+            STREAMING_ACTIVITY_PILL_BORDER_COLOR[3] * visual.opacity,
+        ),
         size,
     );
 
@@ -1862,7 +3999,7 @@ pub(crate) fn push_streaming_activity_cue(
         } else {
             0.46
         };
-        dot_color[3] = (base_alpha + 0.38 * dot_pulse).clamp(0.30, 0.86);
+        dot_color[3] = (base_alpha + 0.38 * dot_pulse).clamp(0.30, 0.86) * visual.opacity;
         push_rounded_rect(
             vertices,
             Rect {
@@ -1997,6 +4134,138 @@ impl InlineWidgetSelectionMotionRegistry {
         self.initialized = false;
         self.current = None;
         self.transition = None;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct InlineWidgetPreviewPaneTarget {
+    kind: InlineWidgetKind,
+    focus_pane: usize,
+    preview_key: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct InlineWidgetPreviewPaneVisual {
+    focus_pane_position: f32,
+    preview_opacity: f32,
+    preview_y_offset_pixels: f32,
+}
+
+impl InlineWidgetPreviewPaneVisual {
+    fn settled(target: InlineWidgetPreviewPaneTarget) -> Self {
+        Self {
+            focus_pane_position: target.focus_pane as f32,
+            preview_opacity: 1.0,
+            preview_y_offset_pixels: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct InlineWidgetPreviewPaneFocusTransition {
+    from_pane: usize,
+    started_at: Instant,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct InlineWidgetPreviewPaneMotionFrame {
+    visual: Option<InlineWidgetPreviewPaneVisual>,
+    active: bool,
+    cache_key: u64,
+}
+
+impl InlineWidgetPreviewPaneMotionFrame {
+    pub(crate) fn visual(&self) -> Option<InlineWidgetPreviewPaneVisual> {
+        self.visual
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub(crate) fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct InlineWidgetPreviewPaneMotionRegistry {
+    initialized: bool,
+    current: Option<InlineWidgetPreviewPaneTarget>,
+    focus_transition: Option<InlineWidgetPreviewPaneFocusTransition>,
+    content_started_at: Option<Instant>,
+}
+
+impl InlineWidgetPreviewPaneMotionRegistry {
+    pub(crate) fn frame(
+        &mut self,
+        app: &SingleSessionApp,
+        now: Instant,
+    ) -> InlineWidgetPreviewPaneMotionFrame {
+        let kind = app.render_inline_widget_kind();
+        let lines = app.render_inline_widget_styled_lines();
+        let visible_line_count = app.render_inline_widget_visible_line_count();
+        let target = inline_widget_preview_pane_target(kind, &lines, visible_line_count);
+        self.frame_for_target(target, now)
+    }
+
+    fn frame_for_target(
+        &mut self,
+        target: Option<InlineWidgetPreviewPaneTarget>,
+        now: Instant,
+    ) -> InlineWidgetPreviewPaneMotionFrame {
+        let Some(target) = target else {
+            self.clear();
+            return InlineWidgetPreviewPaneMotionFrame::default();
+        };
+
+        let reduced_motion = crate::animation::desktop_reduced_motion_enabled();
+        if !self.initialized {
+            self.initialized = true;
+            self.current = Some(target);
+            self.focus_transition = None;
+            self.content_started_at = None;
+        } else if self.current != Some(target) {
+            if reduced_motion {
+                self.focus_transition = None;
+                self.content_started_at = None;
+            } else if let Some(current) = self.current {
+                if current.focus_pane != target.focus_pane {
+                    self.focus_transition = Some(InlineWidgetPreviewPaneFocusTransition {
+                        from_pane: current.focus_pane,
+                        started_at: now,
+                    });
+                }
+                if current.preview_key != target.preview_key {
+                    self.content_started_at = Some(now);
+                }
+            }
+            self.current = Some(target);
+        }
+
+        if reduced_motion {
+            self.focus_transition = None;
+            self.content_started_at = None;
+        }
+
+        let (visual, active) = inline_widget_preview_pane_visual_from_state(
+            target,
+            &mut self.focus_transition,
+            &mut self.content_started_at,
+            now,
+        );
+        InlineWidgetPreviewPaneMotionFrame {
+            visual: Some(visual),
+            active,
+            cache_key: inline_widget_preview_pane_cache_key(Some(visual), active),
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.initialized = false;
+        self.current = None;
+        self.focus_transition = None;
+        self.content_started_at = None;
     }
 }
 
@@ -2353,6 +4622,420 @@ impl ComposerMotionRegistry {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AttachmentChipRun {
+    key: u64,
+    index: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct AttachmentChipVisual {
+    opacity: f32,
+    x_offset_pixels: f32,
+    y_offset_pixels: f32,
+    scale: f32,
+}
+
+impl AttachmentChipVisual {
+    fn settled() -> Self {
+        Self {
+            opacity: 1.0,
+            x_offset_pixels: 0.0,
+            y_offset_pixels: 0.0,
+            scale: 1.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AttachmentChipShift {
+    from_index: usize,
+    started_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AttachmentChipState {
+    run: AttachmentChipRun,
+    entered_at: Option<Instant>,
+    exiting_at: Option<Instant>,
+    shift: Option<AttachmentChipShift>,
+    last_seen_generation: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AttachmentChipMotionFrame {
+    visuals: HashMap<u64, AttachmentChipVisual>,
+    exiting: Vec<(AttachmentChipRun, AttachmentChipVisual)>,
+    active: bool,
+    cache_key: u64,
+}
+
+impl AttachmentChipMotionFrame {
+    fn visual_for_key(&self, key: u64) -> Option<AttachmentChipVisual> {
+        self.visuals.get(&key).copied()
+    }
+
+    fn exiting(&self) -> &[(AttachmentChipRun, AttachmentChipVisual)] {
+        &self.exiting
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub(crate) fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AttachmentChipMotionRegistry {
+    initialized: bool,
+    generation: u64,
+    states: HashMap<u64, AttachmentChipState>,
+}
+
+impl AttachmentChipMotionRegistry {
+    pub(crate) fn frame(
+        &mut self,
+        app: &SingleSessionApp,
+        now: Instant,
+    ) -> AttachmentChipMotionFrame {
+        self.frame_for_images(&app.pending_images, now)
+    }
+
+    fn frame_for_images(
+        &mut self,
+        images: &[(String, String)],
+        now: Instant,
+    ) -> AttachmentChipMotionFrame {
+        self.generation = self.generation.wrapping_add(1).max(1);
+        let generation = self.generation;
+        let reduced_motion = crate::animation::desktop_reduced_motion_enabled();
+        let animate_new_chips = self.initialized && !reduced_motion;
+        self.initialized = true;
+
+        let runs = attachment_chip_runs(images);
+        let mut visuals = HashMap::new();
+        let mut active = false;
+        for run in runs {
+            let state = self
+                .states
+                .entry(run.key)
+                .or_insert_with(|| AttachmentChipState {
+                    run,
+                    entered_at: animate_new_chips.then_some(now),
+                    exiting_at: None,
+                    shift: None,
+                    last_seen_generation: generation,
+                });
+            state.last_seen_generation = generation;
+            state.exiting_at = None;
+
+            if reduced_motion {
+                state.entered_at = None;
+                state.shift = None;
+            } else if state.run.index != run.index {
+                state.shift = Some(AttachmentChipShift {
+                    from_index: state.run.index,
+                    started_at: now,
+                });
+            }
+            state.run = run;
+
+            let (visual, visual_active) = attachment_chip_visual_from_state(state, now);
+            active |= visual_active;
+            if visual.opacity > 0.001 {
+                visuals.insert(run.key, visual);
+            }
+        }
+
+        let mut exiting = Vec::new();
+        if !reduced_motion {
+            for state in self.states.values_mut() {
+                if state.last_seen_generation == generation {
+                    continue;
+                }
+                let exiting_at = *state.exiting_at.get_or_insert(now);
+                let (progress, running) =
+                    timed_animation_progress(exiting_at, now, ATTACHMENT_CHIP_EXIT_DURATION);
+                if !running {
+                    continue;
+                }
+                state.last_seen_generation = generation;
+                active = true;
+                exiting.push((state.run, exiting_attachment_chip_visual(progress)));
+            }
+        }
+
+        self.states
+            .retain(|_, state| state.last_seen_generation == generation);
+
+        AttachmentChipMotionFrame {
+            cache_key: attachment_chip_motion_cache_key(&visuals, &exiting, active),
+            visuals,
+            exiting,
+            active,
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.initialized = false;
+        self.generation = 0;
+        self.states.clear();
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct StdinOverlayTarget {
+    key: u64,
+    line_count: usize,
+    input_line_start: usize,
+    input_line_count: usize,
+    password: bool,
+    has_input: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StdinOverlayVisual {
+    opacity: f32,
+    y_offset_pixels: f32,
+    scale: f32,
+    height_lines: f32,
+    input_glow: f32,
+    submit_opacity: f32,
+}
+
+impl StdinOverlayVisual {
+    fn settled(target: StdinOverlayTarget) -> Self {
+        Self {
+            opacity: 1.0,
+            y_offset_pixels: 0.0,
+            scale: 1.0,
+            height_lines: target.line_count.max(1) as f32,
+            input_glow: if target.has_input { 1.0 } else { 0.22 },
+            submit_opacity: if target.has_input { 1.0 } else { 0.0 },
+        }
+    }
+
+    fn entry(target: StdinOverlayTarget) -> Self {
+        let mut visual = Self::settled(target);
+        visual.opacity = 0.0;
+        visual.y_offset_pixels = STDIN_OVERLAY_ENTRY_OFFSET_PIXELS;
+        visual.scale = STDIN_OVERLAY_ENTRY_SCALE;
+        visual.input_glow = 0.0;
+        visual.submit_opacity = 0.0;
+        visual
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StdinOverlayTransition {
+    from: StdinOverlayVisual,
+    to: StdinOverlayVisual,
+    started_at: Instant,
+    duration: Duration,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StdinOverlayExit {
+    target: StdinOverlayTarget,
+    from: StdinOverlayVisual,
+    started_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StdinOverlayMotionFrame {
+    current: Option<(StdinOverlayTarget, StdinOverlayVisual)>,
+    exiting: Option<(StdinOverlayTarget, StdinOverlayVisual)>,
+    active: bool,
+    cache_key: u64,
+}
+
+impl StdinOverlayMotionFrame {
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub(crate) fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct StdinOverlayMotionRegistry {
+    initialized: bool,
+    target: Option<StdinOverlayTarget>,
+    visual: Option<StdinOverlayVisual>,
+    transition: Option<StdinOverlayTransition>,
+    exit: Option<StdinOverlayExit>,
+}
+
+impl StdinOverlayMotionRegistry {
+    pub(crate) fn frame(
+        &mut self,
+        app: &SingleSessionApp,
+        rendered_body_lines: &[SingleSessionStyledLine],
+        now: Instant,
+    ) -> StdinOverlayMotionFrame {
+        self.frame_for_target(stdin_overlay_target(app, rendered_body_lines), now)
+    }
+
+    fn frame_for_target(
+        &mut self,
+        target: Option<StdinOverlayTarget>,
+        now: Instant,
+    ) -> StdinOverlayMotionFrame {
+        let reduced_motion = crate::animation::desktop_reduced_motion_enabled();
+        if reduced_motion || !self.initialized {
+            self.initialized = true;
+            self.target = target;
+            self.visual = target.map(StdinOverlayVisual::settled);
+            self.transition = None;
+            self.exit = None;
+            return self.frame_from_state(false, now);
+        }
+
+        if self.target != target {
+            let from = self
+                .current_visual(now)
+                .or_else(|| {
+                    self.exit
+                        .map(|exit| stdin_overlay_exit_visual(exit.from, 0.0))
+                })
+                .unwrap_or_else(|| {
+                    target.map_or_else(
+                        || StdinOverlayVisual::entry(StdinOverlayTarget::empty()),
+                        StdinOverlayVisual::entry,
+                    )
+                });
+            match (self.target, target) {
+                (Some(previous), None) => {
+                    self.exit = Some(StdinOverlayExit {
+                        target: previous,
+                        from,
+                        started_at: now,
+                    });
+                    self.transition = None;
+                    self.visual = None;
+                    self.target = None;
+                }
+                (_, Some(next)) => {
+                    let entering = self.target.is_none() && self.exit.is_none();
+                    let entry_from = if entering {
+                        StdinOverlayVisual::entry(next)
+                    } else {
+                        from
+                    };
+                    self.exit = None;
+                    self.transition = Some(StdinOverlayTransition {
+                        from: entry_from,
+                        to: StdinOverlayVisual::settled(next),
+                        started_at: now,
+                        duration: if entering {
+                            STDIN_OVERLAY_ENTRY_DURATION
+                        } else {
+                            STDIN_OVERLAY_RESIZE_DURATION
+                        },
+                    });
+                    self.target = Some(next);
+                }
+                (None, None) => {}
+            }
+        }
+
+        self.frame_from_state(false, now)
+    }
+
+    fn frame_from_state(&mut self, mut active: bool, now: Instant) -> StdinOverlayMotionFrame {
+        let current = if let Some(target) = self.target {
+            let visual = if let Some(transition) = self.transition {
+                let (progress, running) =
+                    timed_animation_progress(transition.started_at, now, transition.duration);
+                active |= running;
+                if !running {
+                    self.transition = None;
+                    transition.to
+                } else {
+                    stdin_overlay_visual_lerp(
+                        transition.from,
+                        transition.to,
+                        ease_out_cubic_local(progress),
+                    )
+                }
+            } else {
+                self.visual
+                    .unwrap_or_else(|| StdinOverlayVisual::settled(target))
+            };
+            self.visual = Some(visual);
+            Some((target, visual))
+        } else {
+            None
+        };
+
+        let exiting = if let Some(exit) = self.exit {
+            let (progress, running) =
+                timed_animation_progress(exit.started_at, now, STDIN_OVERLAY_EXIT_DURATION);
+            if running {
+                active = true;
+                Some((exit.target, stdin_overlay_exit_visual(exit.from, progress)))
+            } else {
+                self.exit = None;
+                None
+            }
+        } else {
+            None
+        };
+
+        StdinOverlayMotionFrame {
+            current,
+            exiting,
+            active,
+            cache_key: stdin_overlay_motion_cache_key(current, exiting, active),
+        }
+    }
+
+    fn current_visual(&mut self, now: Instant) -> Option<StdinOverlayVisual> {
+        if let Some(transition) = self.transition {
+            let (progress, running) =
+                timed_animation_progress(transition.started_at, now, transition.duration);
+            if !running {
+                self.transition = None;
+                Some(transition.to)
+            } else {
+                Some(stdin_overlay_visual_lerp(
+                    transition.from,
+                    transition.to,
+                    ease_out_cubic_local(progress),
+                ))
+            }
+        } else {
+            self.visual
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.initialized = false;
+        self.target = None;
+        self.visual = None;
+        self.transition = None;
+        self.exit = None;
+    }
+}
+
+impl StdinOverlayTarget {
+    fn empty() -> Self {
+        Self {
+            key: 0,
+            line_count: 1,
+            input_line_start: 0,
+            input_line_count: 1,
+            password: false,
+            has_input: false,
+        }
+    }
+}
+
 impl Default for ComposerMotionTarget {
     fn default() -> Self {
         Self {
@@ -2366,13 +5049,13 @@ impl Default for ComposerMotionTarget {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TranscriptCardVisual {
+pub(crate) struct SurfaceMotionVisual {
     pub(crate) opacity: f32,
     pub(crate) y_offset_pixels: f32,
     pub(crate) scale: f32,
 }
 
-impl Default for TranscriptCardVisual {
+impl Default for SurfaceMotionVisual {
     fn default() -> Self {
         Self {
             opacity: 1.0,
@@ -2381,6 +5064,46 @@ impl Default for TranscriptCardVisual {
         }
     }
 }
+
+impl SurfaceMotionVisual {
+    fn entry(entry_offset_pixels: f32, entry_scale: f32, progress: f32) -> Self {
+        let eased = ease_out_cubic_local(progress);
+        Self {
+            opacity: eased,
+            y_offset_pixels: (1.0 - eased) * entry_offset_pixels,
+            scale: lerp_f32(entry_scale, 1.0, eased),
+        }
+    }
+
+    fn exit(
+        entry_offset_pixels: f32,
+        entry_scale: f32,
+        exit_offset_multiplier: f32,
+        exit_scale_multiplier: f32,
+        progress: f32,
+    ) -> Self {
+        let eased = ease_out_cubic_local(progress);
+        Self {
+            opacity: 1.0 - eased,
+            y_offset_pixels: -entry_offset_pixels * exit_offset_multiplier * eased,
+            scale: 1.0 - (1.0 - entry_scale) * exit_scale_multiplier * eased,
+        }
+    }
+
+    fn apply_line_shift(
+        &mut self,
+        from_line: usize,
+        to_line: usize,
+        line_height: f32,
+        progress: f32,
+    ) {
+        let eased = ease_out_cubic_local(progress);
+        let line_delta = from_line as f32 - to_line as f32;
+        self.y_offset_pixels += line_delta * line_height * (1.0 - eased);
+    }
+}
+
+pub(crate) type TranscriptCardVisual = SurfaceMotionVisual;
 
 #[derive(Clone, Copy, Debug)]
 struct TranscriptCardLineShift {
@@ -2424,6 +5147,65 @@ impl TranscriptCardMotionFrame {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum TranscriptMessageRole {
+    User,
+    Assistant,
+    Meta,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct TranscriptMessageRun {
+    line: usize,
+    line_count: usize,
+    role: TranscriptMessageRole,
+}
+
+pub(crate) type TranscriptMessageVisual = SurfaceMotionVisual;
+
+#[derive(Clone, Copy, Debug)]
+struct TranscriptMessageLineShift {
+    from_line: usize,
+    started_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TranscriptMessageMotionState {
+    run: TranscriptMessageRun,
+    entered_at: Option<Instant>,
+    line_shift: Option<TranscriptMessageLineShift>,
+    last_seen_generation: u64,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct TranscriptMessageMotionFrame {
+    visuals: HashMap<u64, TranscriptMessageVisual>,
+    active: bool,
+    cache_key: u64,
+}
+
+impl TranscriptMessageMotionFrame {
+    pub(crate) fn visual_for_key(&self, key: u64) -> Option<TranscriptMessageVisual> {
+        self.visuals.get(&key).copied()
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
+    pub(crate) fn cache_key(&self) -> u64 {
+        self.cache_key
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct TranscriptMessageMotionRegistry {
+    initialized: bool,
+    generation: u64,
+    states: HashMap<u64, TranscriptMessageMotionState>,
+}
+
 #[derive(Default)]
 pub(crate) struct TranscriptCardMotionRegistry {
     initialized: bool,
@@ -2445,22 +5227,7 @@ struct InlineMarkdownPillRun {
     kind: InlineMarkdownPillKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct InlineMarkdownPillVisual {
-    opacity: f32,
-    y_offset_pixels: f32,
-    scale: f32,
-}
-
-impl Default for InlineMarkdownPillVisual {
-    fn default() -> Self {
-        Self {
-            opacity: 1.0,
-            y_offset_pixels: 0.0,
-            scale: 1.0,
-        }
-    }
-}
+pub(crate) type InlineMarkdownPillVisual = SurfaceMotionVisual;
 
 #[derive(Clone, Copy, Debug)]
 struct InlineMarkdownPillLineShift {
@@ -2508,6 +5275,75 @@ pub(crate) struct InlineMarkdownPillMotionRegistry {
     initialized: bool,
     generation: u64,
     states: HashMap<u64, InlineMarkdownPillMotionState>,
+}
+
+impl TranscriptMessageMotionRegistry {
+    pub(crate) fn frame(
+        &mut self,
+        lines: &[SingleSessionStyledLine],
+        line_height: f32,
+        now: Instant,
+    ) -> TranscriptMessageMotionFrame {
+        self.generation = self.generation.wrapping_add(1).max(1);
+        let generation = self.generation;
+        let reduced_motion = crate::animation::desktop_reduced_motion_enabled();
+        let animate_new_messages = self.initialized && !reduced_motion;
+        self.initialized = true;
+
+        let mut visuals = HashMap::new();
+        let mut active = false;
+        let mut occurrences = HashMap::new();
+        for run in single_session_transcript_message_runs(lines) {
+            let key = transcript_message_motion_key(lines, &run, &mut occurrences);
+            let state = self
+                .states
+                .entry(key)
+                .or_insert_with(|| TranscriptMessageMotionState {
+                    run,
+                    entered_at: animate_new_messages.then_some(now),
+                    line_shift: None,
+                    last_seen_generation: generation,
+                });
+            state.last_seen_generation = generation;
+
+            if reduced_motion {
+                state.entered_at = None;
+                state.line_shift = None;
+            }
+
+            if state.run.line != run.line {
+                if reduced_motion {
+                    state.line_shift = None;
+                } else {
+                    state.line_shift = Some(TranscriptMessageLineShift {
+                        from_line: state.run.line,
+                        started_at: now,
+                    });
+                }
+            }
+            state.run = run;
+
+            let (visual, visual_active) =
+                transcript_message_visual_from_state(state, line_height, now);
+            active |= visual_active;
+            visuals.insert(key, visual);
+        }
+
+        self.states
+            .retain(|_, state| state.last_seen_generation == generation);
+
+        TranscriptMessageMotionFrame {
+            cache_key: transcript_message_motion_cache_key(&visuals, active),
+            visuals,
+            active,
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.initialized = false;
+        self.generation = 0;
+        self.states.clear();
+    }
 }
 
 impl TranscriptCardMotionRegistry {
@@ -3332,6 +6168,103 @@ fn inline_widget_selection_target(
     })
 }
 
+fn inline_widget_preview_pane_target(
+    kind: Option<InlineWidgetKind>,
+    lines: &[SingleSessionStyledLine],
+    visible_line_count: usize,
+) -> Option<InlineWidgetPreviewPaneTarget> {
+    let kind = kind?;
+    if kind != InlineWidgetKind::SessionSwitcher {
+        return None;
+    }
+    let visible_len = visible_line_count.min(lines.len());
+    let visible_lines = &lines[..visible_len];
+    let header_line = visible_lines
+        .iter()
+        .position(|line| line.text.contains("sessions") && line.text.contains("preview"))?;
+    let focus_pane = usize::from(visible_lines[header_line].text.contains("preview ›"));
+    let mut hasher = DefaultHasher::new();
+    kind.hash(&mut hasher);
+    for line in visible_lines.iter().skip(header_line + 1) {
+        if line.text.contains("preview lines ") {
+            break;
+        }
+        line.text.hash(&mut hasher);
+        line.style.hash(&mut hasher);
+    }
+    Some(InlineWidgetPreviewPaneTarget {
+        kind,
+        focus_pane,
+        preview_key: hasher.finish(),
+    })
+}
+
+fn inline_widget_preview_pane_visual_from_state(
+    target: InlineWidgetPreviewPaneTarget,
+    focus_transition: &mut Option<InlineWidgetPreviewPaneFocusTransition>,
+    content_started_at: &mut Option<Instant>,
+    now: Instant,
+) -> (InlineWidgetPreviewPaneVisual, bool) {
+    let settled = InlineWidgetPreviewPaneVisual::settled(target);
+    let mut active = false;
+    let mut focus_pane_position = settled.focus_pane_position;
+    if let Some(transition) = *focus_transition {
+        let (progress, running) = timed_animation_progress(
+            transition.started_at,
+            now,
+            INLINE_WIDGET_PREVIEW_PANE_FOCUS_DURATION,
+        );
+        let eased = ease_out_cubic_local(progress);
+        focus_pane_position =
+            lerp_f32(transition.from_pane as f32, target.focus_pane as f32, eased);
+        active |= running;
+        if !running {
+            *focus_transition = None;
+            focus_pane_position = target.focus_pane as f32;
+        }
+    }
+
+    let mut preview_opacity = settled.preview_opacity;
+    let mut preview_y_offset_pixels = settled.preview_y_offset_pixels;
+    if let Some(started_at) = *content_started_at {
+        let (progress, running) =
+            timed_animation_progress(started_at, now, INLINE_WIDGET_PREVIEW_PANE_CONTENT_DURATION);
+        let eased = ease_out_cubic_local(progress);
+        preview_opacity = 0.35 + 0.65 * eased;
+        preview_y_offset_pixels = 5.0 * (1.0 - eased);
+        active |= running;
+        if !running {
+            *content_started_at = None;
+            preview_opacity = 1.0;
+            preview_y_offset_pixels = 0.0;
+        }
+    }
+
+    (
+        InlineWidgetPreviewPaneVisual {
+            focus_pane_position,
+            preview_opacity,
+            preview_y_offset_pixels,
+        },
+        active,
+    )
+}
+
+fn inline_widget_preview_pane_cache_key(
+    visual: Option<InlineWidgetPreviewPaneVisual>,
+    active: bool,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    active.hash(&mut hasher);
+    visual.is_some().hash(&mut hasher);
+    if let Some(visual) = visual {
+        hash_f32(visual.focus_pane_position, &mut hasher);
+        hash_f32(visual.preview_opacity, &mut hasher);
+        hash_f32(visual.preview_y_offset_pixels, &mut hasher);
+    }
+    hasher.finish()
+}
+
 fn inline_widget_list_row_runs(
     kind: Option<InlineWidgetKind>,
     lines: &[SingleSessionStyledLine],
@@ -3388,18 +6321,38 @@ fn inline_widget_list_row_runs(
             }
         }
         InlineWidgetKind::SessionSwitcher => {
-            for line in 0..visible_len {
-                if lines[line].text.starts_with("│ ")
-                    && lines[line].style != SingleSessionLineStyle::OverlayTitle
-                {
+            let mut line = 0;
+            while line < visible_len {
+                if lines[line].text.starts_with("Preview") {
+                    break;
+                }
+                let looks_like_session_card = matches!(
+                    lines[line].style,
+                    SingleSessionLineStyle::OverlaySelection | SingleSessionLineStyle::Overlay
+                ) && lines[line].text.contains(" session ·")
+                    && line + 1 < visible_len
+                    && lines[line + 1].text.trim_start().starts_with("Status ");
+                if looks_like_session_card {
+                    let mut span = 1;
+                    while line + span < visible_len
+                        && span < 4
+                        && !lines[line + span].text.starts_with("Preview")
+                        && lines[line + span].style != SingleSessionLineStyle::Blank
+                        && lines[line + span].style != SingleSessionLineStyle::OverlayTitle
+                    {
+                        span += 1;
+                    }
                     push_inline_widget_list_row_run(
                         &mut runs,
                         &mut occurrences,
                         kind,
                         lines,
                         line,
-                        1,
+                        span,
                     );
+                    line += span;
+                } else {
+                    line += 1;
                 }
             }
         }
@@ -3418,12 +6371,7 @@ fn push_inline_widget_list_row_run(
     line_span: usize,
 ) {
     let base_key = inline_widget_list_row_base_key(kind, lines, line, line_span);
-    let occurrence = occurrences.entry(base_key).or_insert(0);
-    let mut hasher = DefaultHasher::new();
-    base_key.hash(&mut hasher);
-    occurrence.hash(&mut hasher);
-    let key = hasher.finish();
-    *occurrence += 1;
+    let key = motion_occurrence_key(base_key, occurrences);
     runs.push(InlineWidgetListRowRun {
         kind,
         key,
@@ -3548,9 +6496,7 @@ fn inline_widget_list_reflow_cache_key(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     active.hash(&mut hasher);
-    let mut entries = visuals.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| **key);
-    for (key, visual) in entries {
+    for (key, visual) in sorted_u64_visual_entries(visuals) {
         key.hash(&mut hasher);
         hash_f32(visual.opacity, &mut hasher);
         hash_f32(visual.y_offset_lines, &mut hasher);
@@ -3612,6 +6558,197 @@ fn composer_motion_cache_key(
     hash_f32(visual.submit_scale, &mut hasher);
     hash_f32(visual.processing_progress, &mut hasher);
     hasher.finish()
+}
+
+fn attachment_chip_runs(images: &[(String, String)]) -> Vec<AttachmentChipRun> {
+    let mut runs = Vec::new();
+    let mut occurrences = HashMap::new();
+    for (index, (media_type, base64_data)) in images
+        .iter()
+        .take(ATTACHMENT_CHIP_VISIBLE_LIMIT)
+        .enumerate()
+    {
+        let base_key = attachment_chip_base_key(media_type, base64_data);
+        let key = motion_occurrence_key(base_key, &mut occurrences);
+        runs.push(AttachmentChipRun { key, index });
+    }
+    runs
+}
+
+fn attachment_chip_base_key(media_type: &str, base64_data: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    media_type.hash(&mut hasher);
+    base64_data.len().hash(&mut hasher);
+    let bytes = base64_data.as_bytes();
+    let sample = bytes.len().min(48);
+    bytes[..sample].hash(&mut hasher);
+    if bytes.len() > sample {
+        bytes[bytes.len() - sample..].hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn attachment_chip_visual_from_state(
+    state: &mut AttachmentChipState,
+    now: Instant,
+) -> (AttachmentChipVisual, bool) {
+    let mut visual = AttachmentChipVisual::settled();
+    let mut active = false;
+
+    if let Some(entered_at) = state.entered_at {
+        let (progress, running) =
+            timed_animation_progress(entered_at, now, ATTACHMENT_CHIP_ENTRY_DURATION);
+        let eased = ease_out_cubic_local(progress);
+        visual.opacity = eased;
+        visual.y_offset_pixels += 5.0 * (1.0 - eased);
+        visual.scale *= 0.90 + 0.10 * eased;
+        active |= running;
+        if !running {
+            state.entered_at = None;
+        }
+    }
+
+    if let Some(shift) = state.shift {
+        let (progress, running) =
+            timed_animation_progress(shift.started_at, now, ATTACHMENT_CHIP_SHIFT_DURATION);
+        let eased = ease_out_cubic_local(progress);
+        let index_delta = shift.from_index as f32 - state.run.index as f32;
+        visual.x_offset_pixels +=
+            index_delta * (ATTACHMENT_CHIP_WIDTH + ATTACHMENT_CHIP_GAP) * (1.0 - eased);
+        active |= running;
+        if !running {
+            state.shift = None;
+        }
+    }
+
+    (visual, active)
+}
+
+fn exiting_attachment_chip_visual(progress: f32) -> AttachmentChipVisual {
+    let eased = ease_out_cubic_local(progress);
+    AttachmentChipVisual {
+        opacity: 1.0 - eased,
+        x_offset_pixels: 0.0,
+        y_offset_pixels: -5.0 * eased,
+        scale: 1.0 - 0.08 * eased,
+    }
+}
+
+fn attachment_chip_motion_cache_key(
+    visuals: &HashMap<u64, AttachmentChipVisual>,
+    exiting: &[(AttachmentChipRun, AttachmentChipVisual)],
+    active: bool,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    active.hash(&mut hasher);
+    for (key, visual) in sorted_u64_visual_entries(visuals) {
+        key.hash(&mut hasher);
+        hash_f32(visual.opacity, &mut hasher);
+        hash_f32(visual.x_offset_pixels, &mut hasher);
+        hash_f32(visual.y_offset_pixels, &mut hasher);
+        hash_f32(visual.scale, &mut hasher);
+    }
+    for (run, visual) in exiting {
+        run.key.hash(&mut hasher);
+        run.index.hash(&mut hasher);
+        hash_f32(visual.opacity, &mut hasher);
+        hash_f32(visual.x_offset_pixels, &mut hasher);
+        hash_f32(visual.y_offset_pixels, &mut hasher);
+        hash_f32(visual.scale, &mut hasher);
+    }
+    hasher.finish()
+}
+
+fn stdin_overlay_target(
+    app: &SingleSessionApp,
+    rendered_body_lines: &[SingleSessionStyledLine],
+) -> Option<StdinOverlayTarget> {
+    let state = app.stdin_response.as_ref()?;
+    let mut hasher = DefaultHasher::new();
+    state.request_id.hash(&mut hasher);
+    state.prompt.hash(&mut hasher);
+    state.tool_call_id.hash(&mut hasher);
+    state.is_password.hash(&mut hasher);
+    let key = hasher.finish();
+    let input_line_start = rendered_body_lines
+        .iter()
+        .position(|line| line.style == SingleSessionLineStyle::OverlaySelection)
+        .unwrap_or_else(|| rendered_body_lines.len().saturating_sub(1));
+    let input_line_count = rendered_body_lines
+        .get(input_line_start..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|line| line.style == SingleSessionLineStyle::OverlaySelection)
+        .count()
+        .max(1);
+    Some(StdinOverlayTarget {
+        key,
+        line_count: rendered_body_lines.len().max(1),
+        input_line_start,
+        input_line_count,
+        password: state.is_password,
+        has_input: !state.input.is_empty(),
+    })
+}
+
+fn stdin_overlay_visual_lerp(
+    from: StdinOverlayVisual,
+    to: StdinOverlayVisual,
+    progress: f32,
+) -> StdinOverlayVisual {
+    StdinOverlayVisual {
+        opacity: lerp_f32(from.opacity, to.opacity, progress),
+        y_offset_pixels: lerp_f32(from.y_offset_pixels, to.y_offset_pixels, progress),
+        scale: lerp_f32(from.scale, to.scale, progress),
+        height_lines: lerp_f32(from.height_lines, to.height_lines, progress),
+        input_glow: lerp_f32(from.input_glow, to.input_glow, progress),
+        submit_opacity: lerp_f32(from.submit_opacity, to.submit_opacity, progress),
+    }
+}
+
+fn stdin_overlay_exit_visual(from: StdinOverlayVisual, progress: f32) -> StdinOverlayVisual {
+    let eased = ease_out_cubic_local(progress);
+    StdinOverlayVisual {
+        opacity: from.opacity * (1.0 - eased),
+        y_offset_pixels: from.y_offset_pixels - STDIN_OVERLAY_ENTRY_OFFSET_PIXELS * 0.55 * eased,
+        scale: from.scale * (1.0 - (1.0 - STDIN_OVERLAY_ENTRY_SCALE) * eased),
+        height_lines: from.height_lines,
+        input_glow: from.input_glow * (1.0 - eased * 0.45),
+        submit_opacity: (from.submit_opacity + 0.35 * (1.0 - eased)).clamp(0.0, 1.0),
+    }
+}
+
+fn stdin_overlay_motion_cache_key(
+    current: Option<(StdinOverlayTarget, StdinOverlayVisual)>,
+    exiting: Option<(StdinOverlayTarget, StdinOverlayVisual)>,
+    active: bool,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    active.hash(&mut hasher);
+    current.is_some().hash(&mut hasher);
+    if let Some((target, visual)) = current {
+        stdin_overlay_target_hash(target, &mut hasher);
+        stdin_overlay_visual_hash(visual, &mut hasher);
+    }
+    exiting.is_some().hash(&mut hasher);
+    if let Some((target, visual)) = exiting {
+        stdin_overlay_target_hash(target, &mut hasher);
+        stdin_overlay_visual_hash(visual, &mut hasher);
+    }
+    hasher.finish()
+}
+
+fn stdin_overlay_target_hash(target: StdinOverlayTarget, hasher: &mut impl Hasher) {
+    target.hash(hasher);
+}
+
+fn stdin_overlay_visual_hash(visual: StdinOverlayVisual, hasher: &mut impl Hasher) {
+    hash_f32(visual.opacity, hasher);
+    hash_f32(visual.y_offset_pixels, hasher);
+    hash_f32(visual.scale, hasher);
+    hash_f32(visual.height_lines, hasher);
+    hash_f32(visual.input_glow, hasher);
+    hash_f32(visual.submit_opacity, hasher);
 }
 
 fn tool_card_palette(state: SingleSessionToolVisualState, active: bool) -> ToolCardPalette {
@@ -3708,6 +6845,46 @@ fn hash_f32(value: f32, hasher: &mut impl Hasher) {
     value.to_bits().hash(hasher);
 }
 
+fn motion_occurrence_key(base_key: u64, occurrences: &mut HashMap<u64, usize>) -> u64 {
+    let occurrence = occurrences.entry(base_key).or_insert(0);
+    let occurrence_index = *occurrence;
+    *occurrence += 1;
+
+    let mut hasher = DefaultHasher::new();
+    base_key.hash(&mut hasher);
+    occurrence_index.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn sorted_u64_visual_entries<V>(visuals: &HashMap<u64, V>) -> Vec<(&u64, &V)> {
+    let mut entries = visuals.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| **key);
+    entries
+}
+
+fn hash_surface_motion_visual(visual: SurfaceMotionVisual, hasher: &mut impl Hasher) {
+    hash_f32(visual.opacity, hasher);
+    hash_f32(visual.y_offset_pixels, hasher);
+    hash_f32(visual.scale, hasher);
+}
+
+fn surface_motion_visual_rect(rect: Rect, visual: SurfaceMotionVisual) -> Rect {
+    let scale = visual.scale.clamp(0.01, 1.5);
+    let width = rect.width * scale;
+    let height = rect.height * scale;
+    Rect {
+        x: rect.x + (rect.width - width) * 0.5,
+        y: rect.y + (rect.height - height) * 0.5 + visual.y_offset_pixels,
+        width,
+        height,
+    }
+}
+
+fn surface_motion_alpha(mut color: [f32; 4], opacity: f32) -> [f32; 4] {
+    color[3] *= opacity.clamp(0.0, 1.0);
+    color
+}
+
 fn transcript_card_visual_from_state(
     state: &mut TranscriptCardMotionState,
     line_height: f32,
@@ -3719,10 +6896,11 @@ fn transcript_card_visual_from_state(
     if let Some(entered_at) = state.entered_at {
         let (progress, running) =
             timed_animation_progress(entered_at, now, TRANSCRIPT_CARD_ENTRY_DURATION);
-        let eased = ease_out_cubic_local(progress);
-        visual.opacity = eased;
-        visual.y_offset_pixels += (1.0 - eased) * TRANSCRIPT_CARD_ENTRY_OFFSET_PIXELS;
-        visual.scale = TRANSCRIPT_CARD_ENTRY_SCALE + (1.0 - TRANSCRIPT_CARD_ENTRY_SCALE) * eased;
+        visual = SurfaceMotionVisual::entry(
+            TRANSCRIPT_CARD_ENTRY_OFFSET_PIXELS,
+            TRANSCRIPT_CARD_ENTRY_SCALE,
+            progress,
+        );
         active |= running;
         if !running {
             state.entered_at = None;
@@ -3732,9 +6910,42 @@ fn transcript_card_visual_from_state(
     if let Some(shift) = state.line_shift {
         let (progress, running) =
             timed_animation_progress(shift.started_at, now, TRANSCRIPT_CARD_SHIFT_DURATION);
-        let eased = ease_out_cubic_local(progress);
-        let line_delta = shift.from_line as f32 - state.line as f32;
-        visual.y_offset_pixels += line_delta * line_height * (1.0 - eased);
+        visual.apply_line_shift(shift.from_line, state.line, line_height, progress);
+        active |= running;
+        if !running {
+            state.line_shift = None;
+        }
+    }
+
+    (visual, active)
+}
+
+fn transcript_message_visual_from_state(
+    state: &mut TranscriptMessageMotionState,
+    line_height: f32,
+    now: Instant,
+) -> (TranscriptMessageVisual, bool) {
+    let mut visual = TranscriptMessageVisual::default();
+    let mut active = false;
+
+    if let Some(entered_at) = state.entered_at {
+        let (progress, running) =
+            timed_animation_progress(entered_at, now, TRANSCRIPT_MESSAGE_ENTRY_DURATION);
+        visual = SurfaceMotionVisual::entry(
+            TRANSCRIPT_MESSAGE_ENTRY_OFFSET_PIXELS,
+            TRANSCRIPT_MESSAGE_ENTRY_SCALE,
+            progress,
+        );
+        active |= running;
+        if !running {
+            state.entered_at = None;
+        }
+    }
+
+    if let Some(shift) = state.line_shift {
+        let (progress, running) =
+            timed_animation_progress(shift.started_at, now, TRANSCRIPT_MESSAGE_SHIFT_DURATION);
+        visual.apply_line_shift(shift.from_line, state.run.line, line_height, progress);
         active |= running;
         if !running {
             state.line_shift = None;
@@ -3745,12 +6956,13 @@ fn transcript_card_visual_from_state(
 }
 
 fn exiting_transcript_card_visual(progress: f32) -> TranscriptCardVisual {
-    let eased = ease_out_cubic_local(progress);
-    TranscriptCardVisual {
-        opacity: 1.0 - eased,
-        y_offset_pixels: -TRANSCRIPT_CARD_ENTRY_OFFSET_PIXELS * 0.42 * eased,
-        scale: 1.0 - (1.0 - TRANSCRIPT_CARD_ENTRY_SCALE) * 1.35 * eased,
-    }
+    SurfaceMotionVisual::exit(
+        TRANSCRIPT_CARD_ENTRY_OFFSET_PIXELS,
+        TRANSCRIPT_CARD_ENTRY_SCALE,
+        0.42,
+        1.35,
+        progress,
+    )
 }
 
 fn inline_markdown_pill_visual_from_state(
@@ -3764,11 +6976,11 @@ fn inline_markdown_pill_visual_from_state(
     if let Some(entered_at) = state.entered_at {
         let (progress, running) =
             timed_animation_progress(entered_at, now, INLINE_MARKDOWN_PILL_ENTRY_DURATION);
-        let eased = ease_out_cubic_local(progress);
-        visual.opacity = eased;
-        visual.y_offset_pixels += (1.0 - eased) * INLINE_MARKDOWN_PILL_ENTRY_OFFSET_PIXELS;
-        visual.scale =
-            INLINE_MARKDOWN_PILL_ENTRY_SCALE + (1.0 - INLINE_MARKDOWN_PILL_ENTRY_SCALE) * eased;
+        visual = SurfaceMotionVisual::entry(
+            INLINE_MARKDOWN_PILL_ENTRY_OFFSET_PIXELS,
+            INLINE_MARKDOWN_PILL_ENTRY_SCALE,
+            progress,
+        );
         active |= running;
         if !running {
             state.entered_at = None;
@@ -3778,9 +6990,7 @@ fn inline_markdown_pill_visual_from_state(
     if let Some(shift) = state.line_shift {
         let (progress, running) =
             timed_animation_progress(shift.started_at, now, INLINE_MARKDOWN_PILL_SHIFT_DURATION);
-        let eased = ease_out_cubic_local(progress);
-        let line_delta = shift.from_line as f32 - state.run.line as f32;
-        visual.y_offset_pixels += line_delta * line_height * (1.0 - eased);
+        visual.apply_line_shift(shift.from_line, state.run.line, line_height, progress);
         active |= running;
         if !running {
             state.line_shift = None;
@@ -3791,46 +7001,68 @@ fn inline_markdown_pill_visual_from_state(
 }
 
 fn exiting_inline_markdown_pill_visual(progress: f32) -> InlineMarkdownPillVisual {
-    let eased = ease_out_cubic_local(progress);
-    InlineMarkdownPillVisual {
-        opacity: 1.0 - eased,
-        y_offset_pixels: -INLINE_MARKDOWN_PILL_ENTRY_OFFSET_PIXELS * 0.55 * eased,
-        scale: 1.0 - (1.0 - INLINE_MARKDOWN_PILL_ENTRY_SCALE) * eased,
-    }
+    SurfaceMotionVisual::exit(
+        INLINE_MARKDOWN_PILL_ENTRY_OFFSET_PIXELS,
+        INLINE_MARKDOWN_PILL_ENTRY_SCALE,
+        0.55,
+        1.0,
+        progress,
+    )
 }
 
 fn transcript_card_visual_rect(rect: Rect, visual: TranscriptCardVisual) -> Rect {
-    let scale = visual.scale.clamp(0.01, 1.5);
-    let width = rect.width * scale;
-    let height = rect.height * scale;
-    Rect {
-        x: rect.x + (rect.width - width) * 0.5,
-        y: rect.y + (rect.height - height) * 0.5 + visual.y_offset_pixels,
-        width,
-        height,
-    }
+    surface_motion_visual_rect(rect, visual)
 }
 
-fn transcript_card_alpha(mut color: [f32; 4], opacity: f32) -> [f32; 4] {
-    color[3] *= opacity.clamp(0.0, 1.0);
-    color
+fn transcript_card_alpha(color: [f32; 4], opacity: f32) -> [f32; 4] {
+    surface_motion_alpha(color, opacity)
 }
 
 fn inline_markdown_pill_visual_rect(rect: Rect, visual: InlineMarkdownPillVisual) -> Rect {
-    let scale = visual.scale.clamp(0.01, 1.5);
-    let width = rect.width * scale;
-    let height = rect.height * scale;
-    Rect {
-        x: rect.x + (rect.width - width) * 0.5,
-        y: rect.y + (rect.height - height) * 0.5 + visual.y_offset_pixels,
-        width,
-        height,
-    }
+    surface_motion_visual_rect(rect, visual)
 }
 
-fn inline_markdown_pill_alpha(mut color: [f32; 4], opacity: f32) -> [f32; 4] {
-    color[3] *= opacity.clamp(0.0, 1.0);
-    color
+fn inline_markdown_pill_alpha(color: [f32; 4], opacity: f32) -> [f32; 4] {
+    surface_motion_alpha(color, opacity)
+}
+
+fn transcript_message_motion_key(
+    lines: &[SingleSessionStyledLine],
+    run: &TranscriptMessageRun,
+    occurrences: &mut HashMap<u64, usize>,
+) -> u64 {
+    let base_key = transcript_message_motion_base_key(lines, run);
+    motion_occurrence_key(base_key, occurrences)
+}
+
+fn transcript_message_motion_base_key(
+    lines: &[SingleSessionStyledLine],
+    run: &TranscriptMessageRun,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    run.role.hash(&mut hasher);
+    run.line_count.hash(&mut hasher);
+    let end = run.line.saturating_add(run.line_count).min(lines.len());
+    for line in &lines[run.line.min(lines.len())..end] {
+        line.style.hash(&mut hasher);
+        line.text.hash(&mut hasher);
+        line.inline_spans.hash(&mut hasher);
+        line.tool.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn transcript_message_motion_cache_key(
+    visuals: &HashMap<u64, TranscriptMessageVisual>,
+    active: bool,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    active.hash(&mut hasher);
+    for (key, visual) in sorted_u64_visual_entries(visuals) {
+        key.hash(&mut hasher);
+        hash_surface_motion_visual(*visual, &mut hasher);
+    }
+    hasher.finish()
 }
 
 fn transcript_card_motion_key(
@@ -3839,12 +7071,7 @@ fn transcript_card_motion_key(
     occurrences: &mut HashMap<u64, usize>,
 ) -> u64 {
     let base_key = transcript_card_motion_base_key(lines, run);
-    let occurrence = occurrences.entry(base_key).or_insert(0);
-    let mut hasher = DefaultHasher::new();
-    base_key.hash(&mut hasher);
-    occurrence.hash(&mut hasher);
-    *occurrence += 1;
-    hasher.finish()
+    motion_occurrence_key(base_key, occurrences)
 }
 
 fn transcript_card_motion_base_key(
@@ -3870,21 +7097,15 @@ fn transcript_card_motion_cache_key(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     active.hash(&mut hasher);
-    let mut entries = visuals.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| **key);
-    for (key, visual) in entries {
+    for (key, visual) in sorted_u64_visual_entries(visuals) {
         key.hash(&mut hasher);
-        hash_f32(visual.opacity, &mut hasher);
-        hash_f32(visual.y_offset_pixels, &mut hasher);
-        hash_f32(visual.scale, &mut hasher);
+        hash_surface_motion_visual(*visual, &mut hasher);
     }
     for (run, visual) in exiting {
         run.line.hash(&mut hasher);
         run.line_count.hash(&mut hasher);
         run.style.hash(&mut hasher);
-        hash_f32(visual.opacity, &mut hasher);
-        hash_f32(visual.y_offset_pixels, &mut hasher);
-        hash_f32(visual.scale, &mut hasher);
+        hash_surface_motion_visual(*visual, &mut hasher);
     }
     hasher.finish()
 }
@@ -3895,12 +7116,7 @@ fn inline_markdown_pill_motion_key(
     occurrences: &mut HashMap<u64, usize>,
 ) -> u64 {
     let base_key = inline_markdown_pill_motion_base_key(lines, run);
-    let occurrence = occurrences.entry(base_key).or_insert(0);
-    let mut hasher = DefaultHasher::new();
-    base_key.hash(&mut hasher);
-    occurrence.hash(&mut hasher);
-    *occurrence += 1;
-    hasher.finish()
+    motion_occurrence_key(base_key, occurrences)
 }
 
 fn inline_markdown_pill_motion_base_key(
@@ -3926,19 +7142,13 @@ fn inline_markdown_pill_motion_cache_key(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     active.hash(&mut hasher);
-    let mut entries = visuals.iter().collect::<Vec<_>>();
-    entries.sort_by_key(|(key, _)| **key);
-    for (key, visual) in entries {
+    for (key, visual) in sorted_u64_visual_entries(visuals) {
         key.hash(&mut hasher);
-        hash_f32(visual.opacity, &mut hasher);
-        hash_f32(visual.y_offset_pixels, &mut hasher);
-        hash_f32(visual.scale, &mut hasher);
+        hash_surface_motion_visual(*visual, &mut hasher);
     }
     for (run, visual) in exiting {
         run.hash(&mut hasher);
-        hash_f32(visual.opacity, &mut hasher);
-        hash_f32(visual.y_offset_pixels, &mut hasher);
-        hash_f32(visual.scale, &mut hasher);
+        hash_surface_motion_visual(*visual, &mut hasher);
     }
     hasher.finish()
 }
@@ -4013,6 +7223,111 @@ fn push_single_session_transcript_cards_from_viewport(
             );
         }
     }
+}
+
+fn push_single_session_transcript_message_highlights_from_viewport(
+    vertices: &mut Vec<Vertex>,
+    app: &SingleSessionApp,
+    size: PhysicalSize<u32>,
+    viewport: &SingleSessionBodyViewport,
+    total_lines: usize,
+    message_motion: Option<&TranscriptMessageMotionFrame>,
+) {
+    if app.messages.is_empty() && app.streaming_response.is_empty() && app.error.is_none() {
+        return;
+    }
+
+    let typography = single_session_typography_for_scale(app.text_scale());
+    let line_height = typography.body_size * typography.body_line_height;
+    let width = (single_session_content_right(size) - (PANEL_TITLE_LEFT_PADDING - 7.0)).max(1.0);
+    let body_top = single_session_body_top_for_app(app, size);
+    let body_bottom = single_session_body_bottom_for_total_lines(app, size, total_lines);
+
+    let mut occurrences = HashMap::new();
+    for run in single_session_transcript_message_runs(&viewport.lines) {
+        let motion_key = transcript_message_motion_key(&viewport.lines, &run, &mut occurrences);
+        let visual = message_motion
+            .and_then(|motion| motion.visual_for_key(motion_key))
+            .unwrap_or_default();
+        push_single_session_transcript_message_highlight(
+            vertices,
+            run,
+            visual,
+            TranscriptCardGeometryContext {
+                size,
+                line_height,
+                width,
+                body_top,
+                body_bottom,
+                top_offset_pixels: viewport.top_offset_pixels,
+            },
+        );
+    }
+}
+
+fn push_single_session_transcript_message_highlight(
+    vertices: &mut Vec<Vertex>,
+    run: TranscriptMessageRun,
+    visual: TranscriptMessageVisual,
+    context: TranscriptCardGeometryContext,
+) {
+    if visual.opacity <= 0.001 {
+        return;
+    }
+    let Some(color) = transcript_message_highlight_color(run.role) else {
+        return;
+    };
+    let rect = Rect {
+        x: PANEL_TITLE_LEFT_PADDING - 7.0,
+        y: context.body_top
+            + context.top_offset_pixels
+            + run.line as f32 * context.line_height
+            + 2.0,
+        width: context.width,
+        height: (run.line_count as f32 * context.line_height - 4.0).max(1.0),
+    };
+    let rect = transcript_message_visual_rect(rect, visual);
+    let Some(rect) = clip_rect_to_vertical_bounds(rect, context.body_top, context.body_bottom)
+    else {
+        return;
+    };
+    let opacity = visual.opacity.clamp(0.0, 1.0);
+    push_rounded_rect(
+        vertices,
+        rect,
+        8.0,
+        transcript_message_alpha(color, opacity),
+        context.size,
+    );
+    push_rounded_rect(
+        vertices,
+        Rect {
+            x: rect.x,
+            y: rect.y + 2.0,
+            width: 2.2,
+            height: (rect.height - 4.0).max(1.0),
+        },
+        1.1,
+        transcript_message_alpha(color, opacity * TRANSCRIPT_MESSAGE_ACCENT_ALPHA_MULTIPLIER),
+        context.size,
+    );
+}
+
+fn transcript_message_highlight_color(role: TranscriptMessageRole) -> Option<[f32; 4]> {
+    Some(match role {
+        TranscriptMessageRole::User => TRANSCRIPT_MESSAGE_USER_HIGHLIGHT_COLOR,
+        TranscriptMessageRole::Assistant => TRANSCRIPT_MESSAGE_ASSISTANT_HIGHLIGHT_COLOR,
+        TranscriptMessageRole::Meta => TRANSCRIPT_MESSAGE_META_HIGHLIGHT_COLOR,
+        TranscriptMessageRole::Error => TRANSCRIPT_MESSAGE_ERROR_HIGHLIGHT_COLOR,
+    })
+}
+
+fn transcript_message_visual_rect(rect: Rect, visual: TranscriptMessageVisual) -> Rect {
+    surface_motion_visual_rect(rect, visual)
+}
+
+fn transcript_message_alpha(color: [f32; 4], opacity: f32) -> [f32; 4] {
+    surface_motion_alpha(color, opacity)
 }
 
 #[derive(Clone, Copy)]
@@ -5258,6 +8573,75 @@ pub(crate) fn single_session_transcript_card_runs(
     runs
 }
 
+pub(crate) fn single_session_transcript_message_runs(
+    lines: &[SingleSessionStyledLine],
+) -> Vec<TranscriptMessageRun> {
+    let mut runs = Vec::new();
+    let mut current: Option<TranscriptMessageRun> = None;
+
+    for (line, styled_line) in lines.iter().enumerate() {
+        let Some(role) = transcript_message_role_for_style(styled_line.style) else {
+            if let Some(run) = current.take() {
+                runs.push(run);
+            }
+            continue;
+        };
+
+        match &mut current {
+            Some(run) if run.role == role && run.line + run.line_count == line => {
+                run.line_count += 1;
+            }
+            Some(run) => {
+                runs.push(*run);
+                current = Some(TranscriptMessageRun {
+                    line,
+                    line_count: 1,
+                    role,
+                });
+            }
+            None => {
+                current = Some(TranscriptMessageRun {
+                    line,
+                    line_count: 1,
+                    role,
+                });
+            }
+        }
+    }
+
+    if let Some(run) = current {
+        runs.push(run);
+    }
+    runs
+}
+
+fn transcript_message_role_for_style(
+    style: SingleSessionLineStyle,
+) -> Option<TranscriptMessageRole> {
+    match style {
+        SingleSessionLineStyle::User | SingleSessionLineStyle::UserContinuation => {
+            Some(TranscriptMessageRole::User)
+        }
+        SingleSessionLineStyle::Assistant
+        | SingleSessionLineStyle::AssistantHeading
+        | SingleSessionLineStyle::AssistantQuote
+        | SingleSessionLineStyle::AssistantTable
+        | SingleSessionLineStyle::AssistantLink
+        | SingleSessionLineStyle::AssistantMedia
+        | SingleSessionLineStyle::CodeHeader
+        | SingleSessionLineStyle::Code => Some(TranscriptMessageRole::Assistant),
+        SingleSessionLineStyle::Meta | SingleSessionLineStyle::Status => {
+            Some(TranscriptMessageRole::Meta)
+        }
+        SingleSessionLineStyle::Error => Some(TranscriptMessageRole::Error),
+        SingleSessionLineStyle::Tool
+        | SingleSessionLineStyle::OverlayTitle
+        | SingleSessionLineStyle::Overlay
+        | SingleSessionLineStyle::OverlaySelection
+        | SingleSessionLineStyle::Blank => None,
+    }
+}
+
 fn single_session_line_card_color(style: SingleSessionLineStyle) -> Option<[f32; 4]> {
     match style {
         SingleSessionLineStyle::AssistantHeading => Some(MARKDOWN_HEADING_BACKGROUND_COLOR),
@@ -5282,7 +8666,7 @@ fn push_single_session_selection(
         return;
     }
 
-    let typography = single_session_typography();
+    let typography = single_session_typography_for_scale(app.text_scale());
     let line_height = typography.body_size * typography.body_line_height;
     let char_width = single_session_body_char_width();
     let visible_lines = single_session_visible_body(app, size);
@@ -5362,7 +8746,7 @@ pub(crate) fn push_single_session_caret(
 pub(crate) struct CaretPosition {
     pub(crate) x: f32,
     pub(crate) y: f32,
-    height: f32,
+    pub(crate) height: f32,
 }
 
 pub(crate) fn glyphon_draft_caret_position(
@@ -5370,7 +8754,7 @@ pub(crate) fn glyphon_draft_caret_position(
     draft_buffer: &Buffer,
     size: PhysicalSize<u32>,
 ) -> Option<CaretPosition> {
-    let typography = single_session_typography();
+    let typography = single_session_typography_for_scale(app.text_scale());
     let target = app.composer_cursor_line_byte_index();
     let target_line = target.0;
     let target_index = target.1;
@@ -5419,11 +8803,11 @@ pub(crate) fn glyphon_draft_caret_position(
     fallback
 }
 
-fn approximate_draft_caret_position(
+pub(crate) fn approximate_draft_caret_position(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
 ) -> CaretPosition {
-    let typography = single_session_typography();
+    let typography = single_session_typography_for_scale(app.text_scale());
     let line_height = typography.code_size * typography.code_line_height;
     let draft_top = single_session_draft_top_for_app(app, size);
     let (cursor_line, cursor_column) = app.draft_cursor_line_col();
@@ -5690,6 +9074,48 @@ pub(crate) fn single_session_text_key_for_tick_with_rendered_body(
     )
 }
 
+fn inline_widget_split_preview_start(
+    kind: Option<InlineWidgetKind>,
+    lines: &[SingleSessionStyledLine],
+) -> Option<usize> {
+    if kind != Some(InlineWidgetKind::SessionSwitcher) {
+        return None;
+    }
+    lines
+        .iter()
+        .position(|line| line.text.starts_with("Preview"))
+}
+
+fn inline_widget_split_primary_lines(
+    kind: Option<InlineWidgetKind>,
+    lines: Vec<SingleSessionStyledLine>,
+) -> Vec<SingleSessionStyledLine> {
+    let Some(preview_start) = inline_widget_split_preview_start(kind, &lines) else {
+        return lines;
+    };
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            if index < preview_start {
+                line
+            } else {
+                blank_render_line()
+            }
+        })
+        .collect()
+}
+
+fn inline_widget_split_preview_lines(
+    kind: Option<InlineWidgetKind>,
+    lines: &[SingleSessionStyledLine],
+) -> Vec<SingleSessionStyledLine> {
+    let Some(preview_start) = inline_widget_split_preview_start(kind, lines) else {
+        return Vec::new();
+    };
+    lines[preview_start..].to_vec()
+}
+
 fn single_session_text_key_for_body_lines(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
@@ -5721,6 +9147,11 @@ fn single_session_text_key_for_body_lines(
     } else {
         (String::new(), Vec::new())
     };
+    let inline_widget_kind = app.render_inline_widget_kind();
+    let inline_widget = app.render_inline_widget_styled_lines();
+    let inline_widget_preview =
+        inline_widget_split_preview_lines(inline_widget_kind, &inline_widget);
+    let inline_widget = inline_widget_split_primary_lines(inline_widget_kind, inline_widget);
     SingleSessionTextKey {
         size: (size.width, size.height),
         fresh_welcome_visible: welcome_chrome_visible,
@@ -5747,8 +9178,9 @@ fn single_session_text_key_for_body_lines(
         user_font_family: single_session_user_font_family(),
         assistant_font_family: single_session_assistant_font_family(),
         body,
-        inline_widget_kind: app.render_inline_widget_kind(),
-        inline_widget: app.render_inline_widget_styled_lines(),
+        inline_widget_kind,
+        inline_widget,
+        inline_widget_preview,
         draft: if welcome_input_visible {
             visualize_composer_whitespace(&app.composer_text())
         } else {
@@ -5866,12 +9298,18 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
         single_session_body_text_buffer_from_lines(font_system, &key.body, size, text_scale)
     });
 
-    let inline_widget_width = if key.inline_widget.is_empty() {
+    let inline_widget_line_count = inline_widget_visual_line_count(
+        key.inline_widget_kind,
+        &key.inline_widget,
+        &key.inline_widget_preview,
+    );
+    let inline_widget_width = if inline_widget_line_count == 0 {
         content_width
     } else {
-        inline_widget_text_width_for_lines(
+        inline_widget_text_width_for_split_buffers(
             key.inline_widget_kind,
             &key.inline_widget,
+            &key.inline_widget_preview,
             size,
             text_scale,
         )
@@ -5885,8 +9323,16 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
             inline_widget_line_height(key.inline_widget_kind, &typography);
         prompt_height
             .max(size.height as f32)
-            .max(key.inline_widget.len() as f32 * inline_widget_line_height)
+            .max(inline_widget_line_count as f32 * inline_widget_line_height)
     };
+    let (inline_widget_primary_width, inline_widget_preview_width) =
+        inline_widget_split_text_widths(
+            key.inline_widget_kind,
+            &typography,
+            size,
+            inline_widget_line_count,
+            inline_widget_width,
+        );
     let inline_widget_buffer = take_reusable(
         &mut old_buffers,
         4,
@@ -5910,9 +9356,40 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
             &key.inline_widget,
             inline_widget_font_size,
             inline_widget_line_height,
-            inline_widget_width,
+            inline_widget_primary_width,
             inline_widget_height,
             inline_widget_wrap,
+        )
+    });
+
+    let inline_widget_preview_buffer = take_reusable(
+        &mut old_buffers,
+        7,
+        exact_previous.is_some_and(|previous| {
+            previous.inline_widget_preview == key.inline_widget_preview
+                && previous.inline_widget_kind == key.inline_widget_kind
+        }),
+    )
+    .unwrap_or_else(|| {
+        let inline_widget_font_size = inline_widget_font_size(key.inline_widget_kind, &typography);
+        let inline_widget_line_height =
+            inline_widget_line_height(key.inline_widget_kind, &typography);
+        let inline_widget_preview_height = inline_widget_estimated_wrapped_text_height(
+            key.inline_widget_kind,
+            &key.inline_widget_preview,
+            inline_widget_preview_width,
+            &typography,
+        )
+        .min(inline_widget_height)
+        .max(inline_widget_line_height);
+        single_session_styled_text_buffer(
+            font_system,
+            &key.inline_widget_preview,
+            inline_widget_font_size,
+            inline_widget_line_height,
+            inline_widget_preview_width,
+            inline_widget_preview_height,
+            Wrap::Word,
         )
     });
 
@@ -5995,7 +9472,103 @@ fn single_session_text_buffers_from_key_reusing_unchanged_from_options(
         inline_widget_buffer,
         hero_buffer,
         welcome_hint_buffer,
+        inline_widget_preview_buffer,
     ]
+}
+
+fn inline_widget_visual_line_count(
+    kind: Option<InlineWidgetKind>,
+    primary: &[SingleSessionStyledLine],
+    preview: &[SingleSessionStyledLine],
+) -> usize {
+    if kind != Some(InlineWidgetKind::SessionSwitcher) || preview.is_empty() {
+        return primary.len();
+    }
+    primary.len().max(preview.len())
+}
+
+fn inline_widget_text_width_for_split_buffers(
+    kind: Option<InlineWidgetKind>,
+    primary: &[SingleSessionStyledLine],
+    preview: &[SingleSessionStyledLine],
+    size: PhysicalSize<u32>,
+    ui_scale: f32,
+) -> f32 {
+    if kind != Some(InlineWidgetKind::SessionSwitcher) || preview.is_empty() {
+        return inline_widget_text_width_for_lines(kind, primary, size, ui_scale);
+    }
+
+    let typography = single_session_typography_for_scale(ui_scale);
+    let average_char_width = inline_widget_font_size(kind, &typography) * 0.57;
+    let max_columns = primary
+        .iter()
+        .chain(preview.iter())
+        .map(|line| inline_widget_visual_columns(&line.text))
+        .max()
+        .unwrap_or_default() as f32;
+    (max_columns * average_char_width)
+        .ceil()
+        .min(inline_widget_max_text_width_for_kind(kind, size))
+}
+
+fn inline_widget_estimated_wrapped_text_height(
+    kind: Option<InlineWidgetKind>,
+    lines: &[SingleSessionStyledLine],
+    width: f32,
+    typography: &SingleSessionTypography,
+) -> f32 {
+    let line_height = inline_widget_line_height(kind, typography);
+    if lines.is_empty() {
+        return line_height;
+    }
+
+    let average_char_width = inline_widget_font_size(kind, typography) * 0.57;
+    let columns_per_line = (width / average_char_width).floor().max(1.0) as usize;
+    let visual_lines = lines
+        .iter()
+        .map(|line| {
+            inline_widget_visual_columns(&line.text)
+                .max(1)
+                .div_ceil(columns_per_line)
+        })
+        .sum::<usize>();
+
+    // glyphon::Buffer::shape_until_scroll is intentionally viewport-limited;
+    // leave a small amount of slack so the last row is shaped even when glyph
+    // metrics or word wrapping round up slightly differently than this cheap
+    // column estimate. This keeps split previews compact without restoring the
+    // old full-window buffer height.
+    visual_lines.saturating_add(2) as f32 * line_height
+}
+
+fn inline_widget_split_text_widths(
+    kind: Option<InlineWidgetKind>,
+    typography: &SingleSessionTypography,
+    size: PhysicalSize<u32>,
+    line_count: usize,
+    full_text_width: f32,
+) -> (f32, f32) {
+    if kind != Some(InlineWidgetKind::SessionSwitcher) || line_count == 0 {
+        return (full_text_width, 1.0);
+    }
+    let Some(layout) = inline_widget_card_layout(
+        size,
+        kind,
+        typography,
+        line_count,
+        full_text_width,
+        PANEL_TITLE_TOP_PADDING,
+        1.0,
+    ) else {
+        return (full_text_width, full_text_width);
+    };
+    let Some(columns) = session_switcher_split_columns(&layout) else {
+        return (full_text_width, full_text_width);
+    };
+    (
+        (columns.rail.width - INLINE_COMMAND_ROW_INSET_X * 2.0).max(1.0),
+        (columns.preview.width - layout.padding_x * 1.8).max(1.0),
+    )
 }
 
 pub(crate) fn single_session_body_text_buffer_from_lines(
@@ -6131,12 +9704,10 @@ pub(crate) fn single_session_body_viewport_from_lines(
     smooth_scroll_lines: f32,
     lines: &[SingleSessionStyledLine],
 ) -> SingleSessionBodyViewport {
-    let typography = single_session_typography_for_scale(app.text_scale());
-    let line_height = typography.body_size * typography.body_line_height;
-    let body_top = single_session_body_top_for_app(app, size);
     let total_lines = lines.len();
-    let body_bottom = single_session_body_bottom_for_total_lines(app, size, total_lines);
-    let available_height = (body_bottom - body_top).max(line_height);
+    let layout = single_session_layout_for_total_lines(app, size, total_lines);
+    let line_height = layout.metrics.body_line_height;
+    let available_height = layout.body.height.max(line_height);
     let visible_lines = ((available_height / line_height).floor() as usize).max(1);
     if lines.len() <= visible_lines {
         return SingleSessionBodyViewport {
@@ -6547,11 +10118,6 @@ fn single_session_body_bottom_base_for_app(app: &SingleSessionApp, size: Physica
     single_session_body_bottom(size)
 }
 
-fn single_session_body_bottom_for_app(app: &SingleSessionApp, size: PhysicalSize<u32>) -> f32 {
-    (single_session_body_bottom_base_for_app(app, size) - inline_widget_reserved_height(app))
-        .max(single_session_body_top_for_app(app, size))
-}
-
 fn single_session_body_bottom_base_for_total_lines(
     app: &SingleSessionApp,
     size: PhysicalSize<u32>,
@@ -6571,9 +10137,16 @@ pub(crate) fn single_session_body_bottom_for_total_lines(
     size: PhysicalSize<u32>,
     total_lines: usize,
 ) -> f32 {
-    (single_session_body_bottom_base_for_total_lines(app, size, total_lines)
-        - inline_widget_reserved_height(app))
-    .max(single_session_body_top_for_app(app, size))
+    single_session_layout_for_total_lines(app, size, total_lines).body_bottom()
+}
+
+fn streaming_activity_reserved_height(app: &SingleSessionApp) -> f32 {
+    if !app.has_activity_indicator() {
+        return 0.0;
+    }
+
+    let typography = single_session_typography_for_scale(app.text_scale());
+    typography.body_size * typography.body_line_height
 }
 
 fn inline_widget_visible_text_height(app: &SingleSessionApp) -> f32 {
@@ -7633,15 +11206,16 @@ pub(crate) fn single_session_text_areas_for_app_with_scroll<'a>(
 ) -> Vec<TextArea<'a>> {
     let inline_widget_kind = app.render_inline_widget_kind();
     let inline_widget_lines = app.render_inline_widget_styled_lines();
+    let inline_widget_preview_start_line =
+        inline_widget_split_preview_start(inline_widget_kind, &inline_widget_lines);
     let inline_widget_text_width = inline_widget_text_width_for_lines(
         inline_widget_kind,
         &inline_widget_lines,
         size,
         app.text_scale(),
     );
-    let body_top_offset_pixels =
-        single_session_body_viewport_for_tick(app, size, tick, smooth_scroll_lines)
-            .top_offset_pixels;
+    let viewport = single_session_body_viewport_for_tick(app, size, tick, smooth_scroll_lines);
+    let layout = single_session_layout_for_total_lines(app, size, viewport.total_lines);
     let welcome_chrome_offset_pixels =
         welcome_timeline_visual_offset_pixels(app, size, smooth_scroll_lines);
     let welcome_chrome_visible =
@@ -7651,13 +11225,18 @@ pub(crate) fn single_session_text_areas_for_app_with_scroll<'a>(
         size,
         welcome_chrome_visible,
         false,
-        body_top_offset_pixels,
-        single_session_body_top_for_app(app, size),
-        text_bounds_bottom(single_session_body_bottom_for_app(app, size)),
+        viewport.top_offset_pixels,
+        layout.body.y,
+        layout.body_text_bounds_bottom(),
         app.render_inline_widget_visible_line_count(),
         inline_widget_kind,
+        inline_widget_preview_start_line,
         inline_widget_text_width,
-        single_session_draft_top_for_app(app, size),
+        layout
+            .activity_lane
+            .map(|activity| activity.y)
+            .unwrap_or(layout.draft_top),
+        layout.draft_top,
         welcome_chrome_offset_pixels,
         welcome_status_lane_visible(app),
         app.is_fresh_welcome_visible() && app.draft.is_empty(),
@@ -7717,6 +11296,8 @@ pub(crate) fn single_session_text_areas_for_app_with_cached_body_viewport_and_re
 ) -> Vec<TextArea<'a>> {
     let inline_widget_kind = app.render_inline_widget_kind();
     let inline_widget_lines = app.render_inline_widget_styled_lines();
+    let inline_widget_preview_start_line =
+        inline_widget_split_preview_start(inline_widget_kind, &inline_widget_lines);
     let inline_widget_text_width = inline_widget_text_width_for_lines(
         inline_widget_kind,
         &inline_widget_lines,
@@ -7729,6 +11310,7 @@ pub(crate) fn single_session_text_areas_for_app_with_cached_body_viewport_and_re
         smooth_scroll_lines,
         viewport.total_lines,
     );
+    let layout = single_session_layout_for_total_lines(app, size, viewport.total_lines);
     let welcome_chrome_visible =
         welcome_timeline_chrome_visible(app, size, welcome_chrome_offset_pixels);
     single_session_text_areas_for_state(
@@ -7737,16 +11319,17 @@ pub(crate) fn single_session_text_areas_for_app_with_cached_body_viewport_and_re
         welcome_chrome_visible,
         false,
         viewport.top_offset_pixels,
-        single_session_body_top_for_app(app, size),
-        text_bounds_bottom(single_session_body_bottom_for_total_lines(
-            app,
-            size,
-            viewport.total_lines,
-        )),
+        layout.body.y,
+        layout.body_text_bounds_bottom(),
         app.render_inline_widget_visible_line_count(),
         inline_widget_kind,
+        inline_widget_preview_start_line,
         inline_widget_text_width,
-        single_session_draft_top_for_total_lines(app, size, viewport.total_lines),
+        layout
+            .activity_lane
+            .map(|activity| activity.y)
+            .unwrap_or(layout.draft_top),
+        layout.draft_top,
         welcome_chrome_offset_pixels,
         welcome_status_lane_visible(app),
         app.is_fresh_welcome_visible() && app.draft.is_empty(),
@@ -7766,11 +11349,11 @@ pub(crate) fn single_session_streaming_text_area_for_cached_body_viewport<'a>(
     opacity: f32,
     y_offset_pixels: f32,
 ) -> TextArea<'a> {
-    let typography = single_session_typography_for_scale(app.text_scale());
-    let line_height = typography.body_size * typography.body_line_height;
+    let layout = single_session_layout_for_total_lines(app, size, viewport.total_lines);
+    let line_height = layout.metrics.body_line_height;
     let left = PANEL_TITLE_LEFT_PADDING;
     let right = single_session_content_right(size) as i32;
-    let body_top = single_session_body_top_for_app(app, size);
+    let body_top = layout.body.y;
     let top = body_top
         + viewport.top_offset_pixels
         + streaming_start_line.saturating_sub(viewport.start_line) as f32 * line_height
@@ -7784,11 +11367,7 @@ pub(crate) fn single_session_streaming_text_area_for_cached_body_viewport<'a>(
             left: 0,
             top: body_top as i32,
             right,
-            bottom: text_bounds_bottom(single_session_body_bottom_for_total_lines(
-                app,
-                size,
-                viewport.total_lines,
-            )),
+            bottom: layout.body_text_bounds_bottom(),
         },
         default_color: text_color([
             ASSISTANT_TEXT_COLOR[0],
@@ -7814,7 +11393,9 @@ pub(crate) fn single_session_text_areas_for_fresh_state(
         text_bounds_bottom(single_session_body_bottom(size)),
         0,
         None,
+        None,
         0.0,
+        single_session_draft_top_for_fresh_state(size, fresh_welcome_visible),
         single_session_draft_top_for_fresh_state(size, fresh_welcome_visible),
         0.0,
         false,
@@ -7842,7 +11423,9 @@ pub(crate) fn single_session_text_areas_for_state(
     body_bottom: i32,
     inline_widget_line_count: usize,
     inline_widget_kind: Option<InlineWidgetKind>,
+    inline_widget_preview_start_line: Option<usize>,
     inline_widget_text_width: f32,
+    inline_widget_bottom_limit: f32,
     draft_top: f32,
     welcome_chrome_offset_pixels: f32,
     status_lane_visible: bool,
@@ -7901,7 +11484,7 @@ pub(crate) fn single_session_text_areas_for_state(
             welcome_chrome_visible,
             welcome_chrome_offset_pixels,
         );
-        inline_widget_card_layout(
+        inline_widget_card_layout_with_bottom_limit(
             size,
             inline_widget_kind,
             &typography,
@@ -7909,6 +11492,7 @@ pub(crate) fn single_session_text_areas_for_state(
             inline_widget_text_width,
             target_top,
             inline_widget_reveal_progress,
+            inline_widget_bottom_limit,
         )
     } else {
         None
@@ -8021,8 +11605,13 @@ pub(crate) fn single_session_text_areas_for_state(
         && let Some(buffer) = buffers.get(4)
         && let Some(layout) = inline_widget_layout
     {
-        let inline_bounds_right = layout
-            .visible_text_right
+        let split_columns = (inline_widget_kind == Some(InlineWidgetKind::SessionSwitcher))
+            .then(|| session_switcher_split_columns(&layout))
+            .flatten();
+        let rail_bounds_right = split_columns
+            .map(|columns| columns.rail.x + columns.rail.width - layout.padding_x * 0.75);
+        let inline_bounds_right = rail_bounds_right
+            .unwrap_or(layout.visible_text_right)
             .min(right as f32)
             .max(layout.text_left);
         let inline_bounds_bottom = layout
@@ -8043,6 +11632,66 @@ pub(crate) fn single_session_text_areas_for_state(
                 },
                 default_color: text_color(ASSISTANT_TEXT_COLOR),
             });
+        }
+        if inline_widget_kind == Some(InlineWidgetKind::SessionSwitcher)
+            && let Some(preview_buffer) = buffers.get(7)
+        {
+            let columns = split_columns.unwrap_or_else(|| {
+                let fallback_gap = (layout.card.width * 0.018).clamp(9.0, 15.0);
+                let rail_width = (layout.card.width * 0.38).clamp(220.0, layout.card.width * 0.55);
+                let rail = Rect {
+                    x: layout.card.x + layout.padding_x * 0.72,
+                    y: layout.card.y + layout.padding_x * 0.18,
+                    width: rail_width,
+                    height: (layout.card.height - layout.padding_x * 0.36).max(1.0),
+                };
+                let gap = Rect {
+                    x: rail.x + rail.width,
+                    y: rail.y,
+                    width: fallback_gap,
+                    height: rail.height,
+                };
+                let preview = Rect {
+                    x: gap.x + gap.width,
+                    y: rail.y,
+                    width: (layout.card.x + layout.card.width
+                        - gap.x
+                        - gap.width
+                        - layout.padding_x * 0.72)
+                        .max(96.0),
+                    height: rail.height,
+                };
+                SessionSwitcherSplitColumns { rail, preview, gap }
+            });
+            let preview_left = columns.preview.x + layout.padding_x * 0.95;
+            let preview_right = (columns.preview.x + columns.preview.width
+                - layout.padding_x * 0.85)
+                .min(right as f32)
+                .max(preview_left);
+            let preview_top = (layout.text_top
+                + inline_widget_preview_start_line.unwrap_or(0) as f32
+                    * inline_widget_line_height(inline_widget_kind, &typography))
+            .max(columns.preview.y + 8.0);
+            let preview_bottom = layout
+                .visible_text_bottom
+                .min(columns.preview.y + columns.preview.height - 8.0)
+                .min(draft_top)
+                .max(preview_top + 1.0);
+            if preview_right > preview_left {
+                areas.push(TextArea {
+                    buffer: preview_buffer,
+                    left: preview_left,
+                    top: preview_top,
+                    scale: 1.0,
+                    bounds: TextBounds {
+                        left: preview_left as i32,
+                        top: preview_top as i32,
+                        right: preview_right as i32,
+                        bottom: preview_bottom as i32,
+                    },
+                    default_color: text_color(ASSISTANT_TEXT_COLOR),
+                });
+            }
         }
     }
 
@@ -8141,6 +11790,23 @@ mod tests {
         panic!("missing transcript card run at line {target_line}");
     }
 
+    fn test_transcript_message_visual_for_line(
+        frame: &TranscriptMessageMotionFrame,
+        lines: &[SingleSessionStyledLine],
+        target_line: usize,
+    ) -> TranscriptMessageVisual {
+        let mut occurrences = HashMap::new();
+        for run in single_session_transcript_message_runs(lines) {
+            let key = transcript_message_motion_key(lines, &run, &mut occurrences);
+            if run.line == target_line {
+                return frame
+                    .visual_for_key(key)
+                    .expect("transcript message visual");
+            }
+        }
+        panic!("missing transcript message run at line {target_line}");
+    }
+
     fn test_inline_markdown_pill_visual_for_line(
         frame: &InlineMarkdownPillMotionFrame,
         lines: &[SingleSessionStyledLine],
@@ -8179,13 +11845,217 @@ mod tests {
         panic!("missing inline widget reflow row containing {needle}");
     }
 
+    fn test_attachment_chip_visual_for_index(
+        frame: &AttachmentChipMotionFrame,
+        images: &[(String, String)],
+        index: usize,
+    ) -> AttachmentChipVisual {
+        let run = attachment_chip_runs(images)
+            .into_iter()
+            .find(|run| run.index == index)
+            .expect("attachment chip run");
+        frame
+            .visual_for_key(run.key)
+            .expect("attachment chip visual")
+    }
+
+    fn test_session_card(session_id: &str, title: &str) -> SessionCard {
+        SessionCard {
+            session_id: session_id.to_string(),
+            title: title.to_string(),
+            subtitle: "active · test-model".to_string(),
+            detail: "3 msgs · just now · jcode".to_string(),
+            preview_lines: vec![
+                "Prompt 1  inspect compact desktop geometry".to_string(),
+                "Assistant  layout lanes should stay separated".to_string(),
+            ],
+            detail_lines: vec![
+                "Prompt 1  inspect compact desktop geometry".to_string(),
+                "Assistant  layout lanes should stay separated".to_string(),
+            ],
+            transcript_messages: Vec::new(),
+        }
+    }
+
+    fn assert_single_session_layout_invariants(app: &SingleSessionApp, size: PhysicalSize<u32>) {
+        let total_lines = welcome_timeline_total_body_lines(app, size).max(1);
+        let layout = single_session_layout_for_total_lines(app, size, total_lines);
+        let base_bottom = single_session_body_bottom_base_for_total_lines(app, size, total_lines);
+
+        assert!(
+            layout.body.width >= 1.0,
+            "body width should be renderable: {layout:?}"
+        );
+        assert!(
+            layout.body.y >= PANEL_BODY_TOP_PADDING - 0.001,
+            "body starts above panel lane: {layout:?}"
+        );
+        assert!(
+            layout.body.height >= 0.0,
+            "body height should never be negative: {layout:?}"
+        );
+        assert!(
+            layout.body_bottom() <= base_bottom + 0.001,
+            "body exceeds reserved bottom: {layout:?}, base_bottom={base_bottom}"
+        );
+        assert!(
+            layout.composer.y >= layout.draft_top - 9.001,
+            "composer y should derive from draft lane: {layout:?}"
+        );
+        assert!(
+            layout.composer.width >= layout.body.width,
+            "composer should cover body width: {layout:?}"
+        );
+        if let Some(activity) = layout.activity_lane {
+            assert!(
+                layout.body_bottom() <= activity.y + 0.001,
+                "activity overlaps body: {layout:?}"
+            );
+            assert!(
+                rect_bottom(activity) <= base_bottom + 0.001,
+                "activity exceeds base bottom: {layout:?}, base_bottom={base_bottom}"
+            );
+            assert!(
+                activity.height >= 0.0,
+                "activity height should not be negative: {layout:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn single_session_layout_lanes_do_not_overlap_across_common_states() {
+        let sizes = [
+            PhysicalSize::new(360, 260),
+            PhysicalSize::new(900, 700),
+            PhysicalSize::new(1440, 1000),
+        ];
+
+        for size in sizes {
+            let idle = SingleSessionApp::new(None);
+            assert_single_session_layout_invariants(&idle, size);
+
+            let mut streaming = SingleSessionApp::new(None);
+            streaming.apply_session_event(session_launch::DesktopSessionEvent::TextDelta(
+                "streaming response".to_string(),
+            ));
+            assert_single_session_layout_invariants(&streaming, size);
+
+            let mut with_images = SingleSessionApp::new(None);
+            with_images
+                .pending_images
+                .push(("/tmp/a.png".to_string(), "a".to_string()));
+            with_images
+                .pending_images
+                .push(("/tmp/b.png".to_string(), "b".to_string()));
+            assert_single_session_layout_invariants(&with_images, size);
+
+            let mut multiline = SingleSessionApp::new(None);
+            multiline.draft = "first\nsecond\nthird".to_string();
+            multiline.draft_cursor = multiline.draft.len();
+            assert_single_session_layout_invariants(&multiline, size);
+        }
+    }
+
+    #[test]
+    fn small_window_inline_activity_and_composer_lanes_do_not_overlap() {
+        let size = PhysicalSize::new(520, 320);
+        let mut app = SingleSessionApp::new(Some(test_session_card(
+            "current-session",
+            "current compact session",
+        )));
+        assert_eq!(
+            app.handle_key(KeyInput::OpenSessionSwitcher),
+            KeyOutcome::LoadSessionSwitcher
+        );
+        app.apply_session_switcher_cards(
+            (0..6)
+                .map(|index| {
+                    test_session_card(
+                        &format!("resume-session-{index}"),
+                        &format!("resume compact session {index}"),
+                    )
+                })
+                .collect(),
+        );
+        app.draft = "first line\nsecond line\nthird line".to_string();
+        app.draft_cursor = app.draft.len();
+        app.apply_session_event(session_launch::DesktopSessionEvent::TextDelta(
+            "streaming response while the resume picker is open".to_string(),
+        ));
+
+        assert!(app.has_activity_indicator());
+        assert_eq!(
+            app.render_inline_widget_kind(),
+            Some(InlineWidgetKind::SessionSwitcher)
+        );
+        assert_single_session_layout_invariants(&app, size);
+
+        let total_lines = welcome_timeline_total_body_lines(&app, size).max(1);
+        let layout = single_session_layout_for_total_lines(&app, size, total_lines);
+        let activity = layout.activity_lane.expect("streaming activity lane");
+        let inline_lines = app.render_inline_widget_styled_lines();
+        let inline_kind = app.render_inline_widget_kind();
+        let typography = single_session_typography_for_scale(app.text_scale());
+        let inline_width =
+            inline_widget_text_width_for_lines(inline_kind, &inline_lines, size, app.text_scale());
+        let inline_layout = inline_widget_card_layout_with_bottom_limit(
+            size,
+            inline_kind,
+            &typography,
+            app.render_inline_widget_visible_line_count(),
+            inline_width,
+            inline_widget_target_top(size, app.text_scale(), layout.body_bottom(), false, 0.0),
+            app.render_inline_widget_reveal_progress(),
+            activity.y,
+        )
+        .expect("inline widget card layout");
+
+        assert!(
+            inline_layout.text_top >= layout.body_bottom() + INLINE_WIDGET_BODY_GAP - 0.001,
+            "inline text should start below the body: layout={layout:?}, inline={inline_layout:?}"
+        );
+        assert!(
+            rect_bottom(inline_layout.card) <= activity.y + 0.001,
+            "inline card should stay above the activity lane: activity={activity:?}, inline={inline_layout:?}"
+        );
+        assert!(
+            rect_bottom(activity) <= layout.composer.y + 0.001,
+            "activity lane should stay above composer chrome: layout={layout:?}, activity={activity:?}"
+        );
+        assert!(
+            rect_bottom(inline_layout.card) <= layout.draft_top - 7.5,
+            "inline card should leave the composer lane clear: layout={layout:?}, inline={inline_layout:?}"
+        );
+
+        if let Some(columns) = session_switcher_split_columns(&inline_layout) {
+            assert!(
+                columns.rail.x + columns.rail.width <= columns.gap.x + 0.001,
+                "session rail should not overlap split gap: {columns:?}"
+            );
+            assert!(
+                columns.gap.x + columns.gap.width <= columns.preview.x + 0.001,
+                "split gap should not overlap preview pane: {columns:?}"
+            );
+            assert!(
+                columns.preview.x + columns.preview.width
+                    <= inline_layout.card.x + inline_layout.card.width + 0.001,
+                "preview pane should stay inside inline card: columns={columns:?}, inline={inline_layout:?}"
+            );
+        }
+
+        assert!(
+            !build_single_session_vertices(&app, size, 0.0, 0).is_empty(),
+            "compact combined state should render primitives"
+        );
+    }
+
     #[test]
     fn inline_widget_selection_target_detects_widget_row_shapes() {
         let model_lines = vec![
             SingleSessionStyledLine::new("title", SingleSessionLineStyle::OverlayTitle),
             SingleSessionStyledLine::new("filter", SingleSessionLineStyle::Overlay),
-            SingleSessionStyledLine::new("› gpt", SingleSessionLineStyle::OverlaySelection),
-            SingleSessionStyledLine::new("  provider · detail", SingleSessionLineStyle::Meta),
+            SingleSessionStyledLine::new("gpt", SingleSessionLineStyle::OverlaySelection),
+            SingleSessionStyledLine::new("provider · detail", SingleSessionLineStyle::Meta),
             SingleSessionStyledLine::new("footer", SingleSessionLineStyle::Overlay),
         ];
         assert_eq!(
@@ -8204,10 +12074,22 @@ mod tests {
         let session_lines = vec![
             SingleSessionStyledLine::new("header", SingleSessionLineStyle::OverlayTitle),
             SingleSessionStyledLine::new("body", SingleSessionLineStyle::Overlay),
-            SingleSessionStyledLine::new("› session", SingleSessionLineStyle::OverlaySelection),
-            SingleSessionStyledLine::new("  model", SingleSessionLineStyle::OverlaySelection),
-            SingleSessionStyledLine::new("  detail", SingleSessionLineStyle::OverlaySelection),
-            SingleSessionStyledLine::new("  preview", SingleSessionLineStyle::OverlaySelection),
+            SingleSessionStyledLine::new(
+                "active session · current · alpha",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new(
+                "Status active · Model test-model",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new(
+                "2 msgs · alpha-workspace",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new(
+                "latest prompt: hello",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
             SingleSessionStyledLine::new("next", SingleSessionLineStyle::Overlay),
         ];
         assert_eq!(
@@ -8222,6 +12104,409 @@ mod tests {
                 line_span: 4,
             })
         );
+    }
+
+    fn vertex_count_for_color(vertices: &[Vertex], color: [f32; 4]) -> usize {
+        vertices
+            .iter()
+            .filter(|vertex| vertex.color == color)
+            .count()
+    }
+
+    #[test]
+    fn inline_widget_command_palettes_draw_structured_cards_not_text_boxes() {
+        let size = PhysicalSize::new(1000, 720);
+        let typography = single_session_typography_for_scale(1.0);
+        let model_lines = vec![
+            SingleSessionStyledLine::new("Model picker", SingleSessionLineStyle::OverlayTitle),
+            SingleSessionStyledLine::new("type to filter", SingleSessionLineStyle::Overlay),
+            SingleSessionStyledLine::new("gpt-5.4", SingleSessionLineStyle::OverlaySelection),
+            SingleSessionStyledLine::new("OpenAI · chat · available", SingleSessionLineStyle::Meta),
+            SingleSessionStyledLine::new("claude-sonnet", SingleSessionLineStyle::Overlay),
+            SingleSessionStyledLine::new(
+                "Anthropic · chat · available",
+                SingleSessionLineStyle::Meta,
+            ),
+        ];
+        let model_layout = inline_widget_card_layout(
+            size,
+            Some(InlineWidgetKind::ModelPicker),
+            &typography,
+            model_lines.len(),
+            520.0,
+            130.0,
+            1.0,
+        )
+        .expect("model picker layout");
+        let mut model_vertices = Vec::new();
+        push_single_session_inline_widget_structured_chrome(
+            &mut model_vertices,
+            Some(InlineWidgetKind::ModelPicker),
+            &model_lines,
+            model_lines.len(),
+            &typography,
+            &model_layout,
+            1.0,
+            size,
+        );
+        assert!(
+            vertex_count_for_color(&model_vertices, INLINE_COMMAND_ROW_SELECTED_COLOR) > 0,
+            "selected model row should be a rendered rounded card"
+        );
+        assert!(
+            vertex_count_for_color(&model_vertices, INLINE_COMMAND_ROW_BACKGROUND_COLOR) > 0,
+            "unselected model row should be a rendered rounded card"
+        );
+        assert!(
+            vertex_count_for_color(&model_vertices, INLINE_COMMAND_ROW_ACCENT_COLOR) > 0,
+            "selected model row should use a rendered accent rail instead of selector text"
+        );
+
+        let session_lines = vec![
+            SingleSessionStyledLine::new("Resume sessions", SingleSessionLineStyle::OverlayTitle),
+            SingleSessionStyledLine::new(
+                "Recent sessions · focused · newest first",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new(
+                "active session · current · alpha",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new(
+                "Status active · Model test-model",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new(
+                "2 msgs · alpha-workspace",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new(
+                "latest prompt: hello",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new("", SingleSessionLineStyle::Blank),
+            SingleSessionStyledLine::new(
+                "Preview · selected session transcript",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new("Prompt 1  hello", SingleSessionLineStyle::User),
+        ];
+        let session_layout = inline_widget_card_layout(
+            size,
+            Some(InlineWidgetKind::SessionSwitcher),
+            &typography,
+            session_lines.len(),
+            760.0,
+            80.0,
+            1.0,
+        )
+        .expect("session switcher layout");
+        let mut session_vertices = Vec::new();
+        push_single_session_inline_widget_structured_chrome(
+            &mut session_vertices,
+            Some(InlineWidgetKind::SessionSwitcher),
+            &session_lines,
+            session_lines.len(),
+            &typography,
+            &session_layout,
+            1.0,
+            size,
+        );
+        assert!(
+            vertex_count_for_color(&session_vertices, INLINE_COMMAND_SECTION_BACKGROUND_COLOR) > 0,
+            "resume list section should be a rendered panel"
+        );
+        assert!(
+            vertex_count_for_color(&session_vertices, INLINE_COMMAND_PREVIEW_BACKGROUND_COLOR) > 0,
+            "resume preview section should be a rendered panel"
+        );
+        let selected_resume_fill =
+            resume_session_row_palette("active session · current · alpha", true).fill;
+        assert!(
+            vertex_count_for_color(&session_vertices, selected_resume_fill) > 0,
+            "selected resume row should be a rendered status card"
+        );
+    }
+
+    #[test]
+    fn inline_widget_card_layout_clamps_tall_command_palettes_above_composer() {
+        let size = PhysicalSize::new(920, 500);
+        let typography = single_session_typography_for_scale(1.0);
+        let line_height =
+            inline_widget_line_height(Some(InlineWidgetKind::SessionSwitcher), &typography);
+        let layout = inline_widget_card_layout(
+            size,
+            Some(InlineWidgetKind::SessionSwitcher),
+            &typography,
+            80,
+            1400.0,
+            92.0,
+            1.0,
+        )
+        .expect("session switcher layout");
+        let draft_top = single_session_draft_top(size);
+        assert!(layout.card.y >= PANEL_TITLE_TOP_PADDING);
+        assert!(
+            layout.card.y + layout.card.height <= draft_top - 7.5,
+            "inline card should leave the composer lane clear: card_bottom={} draft_top={}",
+            layout.card.y + layout.card.height,
+            draft_top
+        );
+        assert!(
+            layout.card.height <= size.height as f32 * 0.56 + 0.1,
+            "tall resume preview should be capped to a desktop palette height"
+        );
+        assert!(layout.visible_text_bottom <= draft_top);
+        assert!(
+            layout.visible_text_bottom < layout.text_top + line_height * 80.0,
+            "oversized session lists should clip inside the card instead of growing into the composer"
+        );
+    }
+
+    #[test]
+    fn inline_widget_preview_pane_target_tracks_focus_and_preview_content() {
+        let sessions_focused = vec![
+            SingleSessionStyledLine::new(
+                "desktop session switcher",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new("filter", SingleSessionLineStyle::Overlay),
+            SingleSessionStyledLine::new("", SingleSessionLineStyle::Blank),
+            SingleSessionStyledLine::new(
+                "│ sessions › · recent │ preview · full selected-session preview │",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new(
+                "│ alpha │ assistant answer │",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new("╰────╯ ╰────╯", SingleSessionLineStyle::Meta),
+        ];
+        let preview_focused = vec![
+            SingleSessionStyledLine::new(
+                "desktop session switcher",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new("filter", SingleSessionLineStyle::Overlay),
+            SingleSessionStyledLine::new("", SingleSessionLineStyle::Blank),
+            SingleSessionStyledLine::new(
+                "│ sessions · recent │ preview › · full selected-session preview │",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new(
+                "│ alpha │ assistant answer │",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new("╰────╯ ╰────╯", SingleSessionLineStyle::Meta),
+        ];
+        let changed_preview = vec![
+            SingleSessionStyledLine::new(
+                "desktop session switcher",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new("filter", SingleSessionLineStyle::Overlay),
+            SingleSessionStyledLine::new("", SingleSessionLineStyle::Blank),
+            SingleSessionStyledLine::new(
+                "│ sessions · recent │ preview › · full selected-session preview │",
+                SingleSessionLineStyle::OverlayTitle,
+            ),
+            SingleSessionStyledLine::new(
+                "│ beta │ user different prompt │",
+                SingleSessionLineStyle::OverlaySelection,
+            ),
+            SingleSessionStyledLine::new("╰────╯ ╰────╯", SingleSessionLineStyle::Meta),
+        ];
+
+        let sessions_target = inline_widget_preview_pane_target(
+            Some(InlineWidgetKind::SessionSwitcher),
+            &sessions_focused,
+            sessions_focused.len(),
+        )
+        .expect("session switcher preview target");
+        let preview_target = inline_widget_preview_pane_target(
+            Some(InlineWidgetKind::SessionSwitcher),
+            &preview_focused,
+            preview_focused.len(),
+        )
+        .expect("preview focused target");
+        let changed_target = inline_widget_preview_pane_target(
+            Some(InlineWidgetKind::SessionSwitcher),
+            &changed_preview,
+            changed_preview.len(),
+        )
+        .expect("changed preview target");
+
+        assert_eq!(sessions_target.focus_pane, 0);
+        assert_eq!(preview_target.focus_pane, 1);
+        assert_ne!(preview_target.preview_key, changed_target.preview_key);
+        assert!(
+            inline_widget_preview_pane_target(
+                Some(InlineWidgetKind::ModelPicker),
+                &preview_focused,
+                preview_focused.len(),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn inline_widget_preview_pane_motion_animates_focus_and_content_changes() {
+        let mut registry = InlineWidgetPreviewPaneMotionRegistry::default();
+        let now = Instant::now();
+        let sessions_target = InlineWidgetPreviewPaneTarget {
+            kind: InlineWidgetKind::SessionSwitcher,
+            focus_pane: 0,
+            preview_key: 10,
+        };
+        let preview_target = InlineWidgetPreviewPaneTarget {
+            kind: InlineWidgetKind::SessionSwitcher,
+            focus_pane: 1,
+            preview_key: 10,
+        };
+        let changed_preview_target = InlineWidgetPreviewPaneTarget {
+            kind: InlineWidgetKind::SessionSwitcher,
+            focus_pane: 1,
+            preview_key: 42,
+        };
+
+        let initial = registry.frame_for_target(Some(sessions_target), now);
+        assert!(!initial.is_active());
+        assert_eq!(
+            initial.visual(),
+            Some(InlineWidgetPreviewPaneVisual::settled(sessions_target))
+        );
+
+        let focus_start =
+            registry.frame_for_target(Some(preview_target), now + Duration::from_millis(6));
+        let focus_start_visual = focus_start.visual().expect("preview focus visual");
+        assert!(focus_start.is_active());
+        assert_eq!(focus_start_visual.focus_pane_position, 0.0);
+
+        let focus = registry.frame_for_target(
+            Some(preview_target),
+            now + Duration::from_millis(6) + INLINE_WIDGET_PREVIEW_PANE_FOCUS_DURATION / 2,
+        );
+        let focus_visual = focus.visual().expect("preview focus visual");
+        assert!(focus.is_active());
+        assert!(focus_visual.focus_pane_position > 0.0);
+        assert!(focus_visual.focus_pane_position < 1.0);
+        assert_eq!(focus_visual.preview_opacity, 1.0);
+
+        let settled_focus = registry.frame_for_target(
+            Some(preview_target),
+            now + INLINE_WIDGET_PREVIEW_PANE_FOCUS_DURATION * 2,
+        );
+        assert!(!settled_focus.is_active());
+
+        let content = registry.frame_for_target(
+            Some(changed_preview_target),
+            now + INLINE_WIDGET_PREVIEW_PANE_FOCUS_DURATION * 2 + Duration::from_millis(4),
+        );
+        let content_visual = content.visual().expect("preview content visual");
+        assert!(content.is_active());
+        assert_eq!(content_visual.focus_pane_position, 1.0);
+        assert!(content_visual.preview_opacity < 0.5);
+        assert!(content_visual.preview_y_offset_pixels > 3.0);
+
+        let settled_content = registry.frame_for_target(
+            Some(changed_preview_target),
+            now + INLINE_WIDGET_PREVIEW_PANE_FOCUS_DURATION * 2
+                + INLINE_WIDGET_PREVIEW_PANE_CONTENT_DURATION * 2,
+        );
+        assert!(!settled_content.is_active());
+        assert_eq!(
+            settled_content.visual(),
+            Some(InlineWidgetPreviewPaneVisual::settled(
+                changed_preview_target
+            ))
+        );
+    }
+
+    #[test]
+    fn streaming_activity_cue_motion_animates_entry_and_exit() {
+        let mut registry = StreamingActivityCueMotionRegistry::default();
+        let now = Instant::now();
+
+        let idle = registry.frame_for_visible(false, now);
+        assert!(!idle.is_active());
+        assert!(idle.current().is_none());
+        assert!(idle.exiting().is_none());
+
+        let entry_start = registry.frame_for_visible(true, now + Duration::from_millis(8));
+        let entry_start_visual = entry_start.current().expect("activity entry visual");
+        assert!(entry_start.is_active());
+        assert!(entry_start_visual.opacity <= 0.001);
+        assert!(entry_start_visual.y_offset_pixels > 0.0);
+        assert!(entry_start_visual.scale < 1.0);
+
+        let entry_mid = registry.frame_for_visible(
+            true,
+            now + Duration::from_millis(8) + STREAMING_ACTIVITY_CUE_ENTRY_DURATION / 2,
+        );
+        let entry_mid_visual = entry_mid.current().expect("activity entry visual");
+        assert!(entry_mid.is_active());
+        assert!(entry_mid_visual.opacity > 0.0);
+        assert!(entry_mid_visual.opacity < 1.0);
+
+        let settled = registry.frame_for_visible(
+            true,
+            now + Duration::from_millis(8) + STREAMING_ACTIVITY_CUE_ENTRY_DURATION * 2,
+        );
+        assert!(!settled.is_active());
+        assert_eq!(
+            settled.current(),
+            Some(StreamingActivityCueVisual::settled())
+        );
+
+        let exit_start = registry.frame_for_visible(
+            false,
+            now + Duration::from_millis(8) + STREAMING_ACTIVITY_CUE_ENTRY_DURATION * 3,
+        );
+        let exit_start_visual = exit_start.exiting().expect("activity exit visual");
+        assert!(exit_start.is_active());
+        assert_eq!(exit_start.current(), None);
+        assert!(exit_start_visual.opacity > 0.99);
+
+        let exit_mid = registry.frame_for_visible(
+            false,
+            now + Duration::from_millis(8)
+                + STREAMING_ACTIVITY_CUE_ENTRY_DURATION * 3
+                + STREAMING_ACTIVITY_CUE_EXIT_DURATION / 2,
+        );
+        let exit_mid_visual = exit_mid.exiting().expect("activity exit visual");
+        assert!(exit_mid.is_active());
+        assert!(exit_mid_visual.opacity > 0.0);
+        assert!(exit_mid_visual.opacity < 1.0);
+        assert!(exit_mid_visual.y_offset_pixels < 0.0);
+
+        let exit_done = registry.frame_for_visible(
+            false,
+            now + Duration::from_millis(8)
+                + STREAMING_ACTIVITY_CUE_ENTRY_DURATION * 3
+                + STREAMING_ACTIVITY_CUE_EXIT_DURATION * 2,
+        );
+        assert!(!exit_done.is_active());
+        assert!(exit_done.exiting().is_none());
+    }
+
+    #[test]
+    fn reduced_motion_snaps_streaming_activity_cue_motion() {
+        let _guard = crate::animation::DesktopReducedMotionEnvGuard::set(true);
+        let mut registry = StreamingActivityCueMotionRegistry::default();
+        let now = Instant::now();
+
+        assert!(!registry.frame_for_visible(false, now).is_active());
+        let visible = registry.frame_for_visible(true, now + Duration::from_millis(1));
+        assert!(!visible.is_active());
+        assert_eq!(
+            visible.current(),
+            Some(StreamingActivityCueVisual::settled())
+        );
+
+        let hidden = registry.frame_for_visible(false, now + Duration::from_millis(2));
+        assert!(!hidden.is_active());
+        assert!(hidden.current().is_none());
+        assert!(hidden.exiting().is_none());
     }
 
     #[test]
@@ -8421,6 +12706,200 @@ mod tests {
         assert!(blocked_mid.visual().focus_opacity < 1.0);
         assert!(blocked_mid.visual().blocked_progress > 0.0);
         assert!(blocked_mid.visual().processing_progress > 0.0);
+    }
+
+    #[test]
+    fn attachment_chip_motion_animates_entry_shift_and_exit() {
+        let mut registry = AttachmentChipMotionRegistry::default();
+        let now = Instant::now();
+        let empty: Vec<(String, String)> = Vec::new();
+        let first = vec![("image/png".to_string(), "aaa111".to_string())];
+        let second = ("image/jpeg".to_string(), "bbb222".to_string());
+        let two = vec![first[0].clone(), second.clone()];
+        let remaining = vec![second];
+
+        let initial = registry.frame_for_images(&empty, now);
+        assert!(!initial.is_active());
+
+        let entry_start_time = now + Duration::from_millis(5);
+        let entry_start = registry.frame_for_images(&first, entry_start_time);
+        assert!(entry_start.is_active());
+        let entry_mid = registry.frame_for_images(
+            &first,
+            entry_start_time + ATTACHMENT_CHIP_ENTRY_DURATION / 2,
+        );
+        let entry_visual = test_attachment_chip_visual_for_index(&entry_mid, &first, 0);
+        assert!(entry_mid.is_active());
+        assert!(entry_visual.opacity > 0.0 && entry_visual.opacity < 1.0);
+        assert!(entry_visual.y_offset_pixels > 0.0);
+        assert!(entry_visual.scale > 0.90 && entry_visual.scale < 1.0);
+
+        let settled_time = entry_start_time + ATTACHMENT_CHIP_ENTRY_DURATION * 2;
+        let settled = registry.frame_for_images(&two, settled_time);
+        assert!(settled.is_active());
+        let settled =
+            registry.frame_for_images(&two, settled_time + ATTACHMENT_CHIP_ENTRY_DURATION * 2);
+        assert!(!settled.is_active());
+
+        let remove_time =
+            settled_time + ATTACHMENT_CHIP_ENTRY_DURATION * 2 + Duration::from_millis(5);
+        let removal = registry.frame_for_images(&remaining, remove_time);
+        assert!(removal.is_active());
+        assert_eq!(removal.exiting().len(), 1);
+        assert!(removal.exiting()[0].1.opacity > 0.9);
+        let shifted = test_attachment_chip_visual_for_index(&removal, &remaining, 0);
+        assert!(shifted.x_offset_pixels > (ATTACHMENT_CHIP_WIDTH + ATTACHMENT_CHIP_GAP) * 0.9);
+    }
+
+    #[test]
+    fn stdin_overlay_motion_animates_entry_resize_and_exit() {
+        let mut registry = StdinOverlayMotionRegistry::default();
+        let now = Instant::now();
+        let empty = registry.frame_for_target(None, now);
+        assert!(!empty.is_active());
+        assert!(empty.current.is_none());
+        assert!(empty.exiting.is_none());
+
+        let requested = StdinOverlayTarget {
+            key: 42,
+            line_count: 8,
+            input_line_start: 5,
+            input_line_count: 1,
+            password: true,
+            has_input: false,
+        };
+        let entry_at = now + Duration::from_millis(5);
+        let entry = registry.frame_for_target(Some(requested), entry_at);
+        assert!(entry.is_active());
+        let (_, entry_visual) = entry.current.expect("entry overlay visual");
+        assert_eq!(entry_visual.opacity, 0.0);
+        assert!(entry_visual.y_offset_pixels > 0.0);
+        assert!(entry_visual.scale < 1.0);
+
+        let entry_mid =
+            registry.frame_for_target(Some(requested), entry_at + STDIN_OVERLAY_ENTRY_DURATION / 2);
+        let (_, entry_mid_visual) = entry_mid.current.expect("mid entry overlay visual");
+        assert!(entry_mid.is_active());
+        assert!(entry_mid_visual.opacity > 0.0 && entry_mid_visual.opacity < 1.0);
+        assert!(entry_mid_visual.y_offset_pixels > 0.0);
+
+        let settled =
+            registry.frame_for_target(Some(requested), entry_at + STDIN_OVERLAY_ENTRY_DURATION * 2);
+        assert!(!settled.is_active());
+        assert_eq!(
+            settled.current.expect("settled overlay visual").1,
+            StdinOverlayVisual::settled(requested)
+        );
+
+        let resized = StdinOverlayTarget {
+            line_count: 11,
+            input_line_count: 3,
+            has_input: true,
+            ..requested
+        };
+        let resize_at = entry_at + STDIN_OVERLAY_ENTRY_DURATION * 2 + Duration::from_millis(5);
+        let resize = registry.frame_for_target(Some(resized), resize_at);
+        assert!(resize.is_active());
+        let resize_mid =
+            registry.frame_for_target(Some(resized), resize_at + STDIN_OVERLAY_RESIZE_DURATION / 2);
+        let (_, resize_visual) = resize_mid.current.expect("resize overlay visual");
+        assert!(resize_visual.height_lines > requested.line_count as f32);
+        assert!(resize_visual.height_lines < resized.line_count as f32);
+        assert!(resize_visual.input_glow > 0.22);
+        assert!(resize_visual.submit_opacity > 0.0);
+
+        let exit_at = resize_at + STDIN_OVERLAY_RESIZE_DURATION * 2 + Duration::from_millis(5);
+        let exit = registry.frame_for_target(None, exit_at);
+        assert!(exit.is_active());
+        assert!(exit.current.is_none());
+        let (_, exit_visual) = exit.exiting.expect("exit overlay visual");
+        assert!(exit_visual.opacity > 0.9);
+        assert!(exit_visual.submit_opacity > 0.0);
+
+        let exit_mid = registry.frame_for_target(None, exit_at + STDIN_OVERLAY_EXIT_DURATION / 2);
+        let (_, exit_mid_visual) = exit_mid.exiting.expect("mid exit overlay visual");
+        assert!(exit_mid.is_active());
+        assert!(exit_mid_visual.opacity > 0.0 && exit_mid_visual.opacity < 1.0);
+        assert!(exit_mid_visual.y_offset_pixels < 0.0);
+    }
+
+    #[test]
+    fn transcript_message_motion_animates_entry_and_layout_shift() {
+        let mut registry = TranscriptMessageMotionRegistry::default();
+        let now = Instant::now();
+        let line_height = 26.0;
+        let user = SingleSessionStyledLine::new("1  hello", SingleSessionLineStyle::User);
+        let spacer = SingleSessionStyledLine::new("", SingleSessionLineStyle::Blank);
+        let assistant = SingleSessionStyledLine::new("answer", SingleSessionLineStyle::Assistant);
+        let intro = SingleSessionStyledLine::new("notice", SingleSessionLineStyle::Meta);
+
+        let initial = registry.frame(std::slice::from_ref(&user), line_height, now);
+        let initial_visual =
+            test_transcript_message_visual_for_line(&initial, std::slice::from_ref(&user), 0);
+        assert_eq!(initial_visual, TranscriptMessageVisual::default());
+        assert!(!initial.is_active());
+
+        let lines = vec![user.clone(), spacer.clone(), assistant];
+        let entry = registry.frame(&lines, line_height, now + Duration::from_millis(5));
+        let entry_visual = test_transcript_message_visual_for_line(&entry, &lines, 2);
+        assert!(entry.is_active());
+        assert_eq!(entry_visual.opacity, 0.0);
+        assert!(entry_visual.y_offset_pixels > 0.0);
+        assert!(entry_visual.scale < 1.0);
+
+        let shifted_lines = vec![intro, user.clone(), spacer];
+        let shift = registry.frame(&shifted_lines, line_height, now + Duration::from_millis(10));
+        let shift_visual = test_transcript_message_visual_for_line(&shift, &shifted_lines, 1);
+        assert!(shift.is_active());
+        assert!(shift_visual.y_offset_pixels < -line_height * 0.9);
+
+        let settled = registry.frame(
+            &shifted_lines,
+            line_height,
+            now + Duration::from_millis(10) + TRANSCRIPT_MESSAGE_SHIFT_DURATION * 2,
+        );
+        let settled_visual = test_transcript_message_visual_for_line(&settled, &shifted_lines, 1);
+        assert_eq!(settled_visual.y_offset_pixels, 0.0);
+        assert_eq!(settled_visual.opacity, 1.0);
+        assert!(!settled.is_active());
+    }
+
+    #[test]
+    fn transcript_message_runs_group_roles_and_skip_tool_chrome() {
+        let lines = vec![
+            SingleSessionStyledLine::new("1  hello", SingleSessionLineStyle::User),
+            SingleSessionStyledLine::new("   again", SingleSessionLineStyle::UserContinuation),
+            SingleSessionStyledLine::new("tool", SingleSessionLineStyle::Tool),
+            SingleSessionStyledLine::new("answer", SingleSessionLineStyle::Assistant),
+            SingleSessionStyledLine::new("meta", SingleSessionLineStyle::Meta),
+        ];
+
+        let runs = single_session_transcript_message_runs(&lines);
+        assert_eq!(runs.len(), 3);
+        assert_eq!(runs[0].line, 0);
+        assert_eq!(runs[0].line_count, 2);
+        assert_eq!(runs[0].role, TranscriptMessageRole::User);
+        assert_eq!(runs[1].line, 3);
+        assert_eq!(runs[1].role, TranscriptMessageRole::Assistant);
+        assert_eq!(runs[2].line, 4);
+        assert_eq!(runs[2].role, TranscriptMessageRole::Meta);
+    }
+
+    #[test]
+    fn reduced_motion_snaps_transcript_message_motion() {
+        let _guard = crate::animation::DesktopReducedMotionEnvGuard::set(true);
+        let mut registry = TranscriptMessageMotionRegistry::default();
+        let now = Instant::now();
+        let user = SingleSessionStyledLine::new("1  hello", SingleSessionLineStyle::User);
+        let assistant = SingleSessionStyledLine::new("answer", SingleSessionLineStyle::Assistant);
+
+        registry.frame(std::slice::from_ref(&user), 24.0, now);
+        let lines = vec![user, assistant];
+        let frame = registry.frame(&lines, 24.0, now + Duration::from_millis(5));
+        let visual = test_transcript_message_visual_for_line(&frame, &lines, 1);
+
+        assert_eq!(visual, TranscriptMessageVisual::default());
+        assert!(!frame.is_active());
     }
 
     #[test]
@@ -9066,6 +13545,7 @@ mod tests {
             detail: "3 msgs · just now · jcode".to_string(),
             preview_lines: vec!["user hello from resume picker".to_string()],
             detail_lines: vec!["user hello from resume picker".to_string()],
+            transcript_messages: Vec::new(),
         }]);
         assert!(
             app.inline_widget_styled_lines()
@@ -9087,6 +13567,54 @@ mod tests {
         assert!(
             rendered_inline_text.contains("visible resume row"),
             "desktop text buffer should shape session rows, got:\n{rendered_inline_text}"
+        );
+
+        let rendered_preview_text = buffers
+            .get(7)
+            .expect("split preview buffer should be present")
+            .layout_runs()
+            .map(|run| run.text.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            rendered_preview_text.contains("Preview"),
+            "split preview buffer should shape preview rows, got:\n{rendered_preview_text}"
+        );
+        assert!(
+            rendered_preview_text.contains("hello from resume picker"),
+            "split preview buffer should contain preview content, got:\n{rendered_preview_text}"
+        );
+
+        let areas = single_session_text_areas_for_app(&app, &buffers, size);
+        let inline_area = areas
+            .iter()
+            .find(|area| std::ptr::eq(area.buffer, &buffers[4]))
+            .expect("primary inline widget text area");
+        let preview_area = areas
+            .iter()
+            .find(|area| std::ptr::eq(area.buffer, &buffers[7]))
+            .expect("split preview text area");
+        let preview_start_line = inline_widget_split_preview_start(
+            app.render_inline_widget_kind(),
+            &app.render_inline_widget_styled_lines(),
+        )
+        .expect("session switcher preview start line");
+        let typography = single_session_typography_for_scale(app.text_scale());
+        let expected_preview_top = inline_area.top
+            + preview_start_line as f32
+                * inline_widget_line_height(app.render_inline_widget_kind(), &typography);
+        assert!(
+            (preview_area.top - expected_preview_top).abs() <= 1.0,
+            "compact preview buffer should be positioned at its visual row offset: inline_top={}, preview_top={}, expected={}",
+            inline_area.top,
+            preview_area.top,
+            expected_preview_top
+        );
+        assert!(
+            (preview_area.top - preview_area.bounds.top as f32).abs() <= 1.0,
+            "compact preview buffer should not rely on clipped leading blank rows: top={}, bounds_top={}",
+            preview_area.top,
+            preview_area.bounds.top
         );
     }
 }
