@@ -512,7 +512,7 @@ pub(crate) enum InlineWidgetMode {
     Interactive,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum InlineWidgetKind {
     HotkeyHelp,
     SessionInfo,
@@ -698,6 +698,7 @@ pub(crate) enum SingleSessionLineStyle {
     AssistantQuote,
     AssistantTable,
     AssistantLink,
+    AssistantMedia,
     CodeHeader,
     Code,
     User,
@@ -6598,7 +6599,7 @@ impl AssistantMarkdownRenderer {
             self.current.push_str(&image.dest_url);
         }
         if self.current_style == SingleSessionLineStyle::Assistant {
-            self.line_style_override = Some(SingleSessionLineStyle::AssistantLink);
+            self.line_style_override = Some(SingleSessionLineStyle::AssistantMedia);
         }
     }
 
