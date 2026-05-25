@@ -190,7 +190,7 @@ pub fn ensure_dir(path: &Path) -> Result<()> {
 }
 
 pub fn write_text_secret(path: &Path, content: &str) -> Result<()> {
-    write_bytes_inner(path, content.as_bytes(), true)?;
+    write_bytes_inner(path, content.as_bytes(), true, true)?;
     if let Some(parent) = path.parent() {
         jcode_core::fs::set_directory_permissions_owner_only(parent)?;
     }
@@ -227,11 +227,11 @@ pub fn upsert_env_file_value(path: &Path, env_key: &str, value: Option<&str>) ->
 }
 
 pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<()> {
-    write_json_inner(path, value, true)
+    write_json_inner(path, value, true, false)
 }
 
 pub fn write_json_secret<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<()> {
-    write_json_inner(path, value, true)?;
+    write_json_inner(path, value, true, true)?;
     if let Some(parent) = path.parent() {
         jcode_core::fs::set_directory_permissions_owner_only(parent)?;
     }
@@ -243,15 +243,15 @@ pub fn write_json_secret<T: Serialize + ?Sized>(path: &Path, value: &T) -> Resul
 /// durability on power loss is not critical (e.g., session saves during tool execution).
 /// Data is still safe against process crashes (atomic rename protects against partial writes).
 pub fn write_json_fast<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<()> {
-    write_json_inner(path, value, false)
+    write_json_inner(path, value, false, false)
 }
 
-fn write_json_inner<T: Serialize + ?Sized>(path: &Path, value: &T, durable: bool) -> Result<()> {
+fn write_json_inner<T: Serialize + ?Sized>(path: &Path, value: &T, durable: bool, secret: bool) -> Result<()> {
     let bytes = serde_json::to_vec(value)?;
-    write_bytes_inner(path, &bytes, durable)
+    write_bytes_inner(path, &bytes, durable, secret)
 }
 
-fn write_bytes_inner(path: &Path, bytes: &[u8], durable: bool) -> Result<()> {
+fn write_bytes_inner(path: &Path, bytes: &[u8], durable: bool, secret: bool) -> Result<()> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
     }
@@ -261,7 +261,16 @@ fn write_bytes_inner(path: &Path, bytes: &[u8], durable: bool) -> Result<()> {
     let tmp_path = path.with_extension(format!("tmp.{}.{}", pid, nonce));
 
     let result = (|| -> Result<()> {
-        let file = std::fs::File::create(&tmp_path)?;
+        let mut open_options = std::fs::OpenOptions::new();
+        open_options.write(true).create(true).truncate(true);
+
+        #[cfg(unix)]
+        if secret {
+            use std::os::unix::fs::OpenOptionsExt;
+            open_options.mode(0o600);
+        }
+
+        let file = open_options.open(&tmp_path)?;
         let mut writer = std::io::BufWriter::new(file);
         writer.write_all(bytes)?;
         let file = writer
