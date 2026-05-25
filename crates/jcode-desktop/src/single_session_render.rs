@@ -190,6 +190,7 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
     let width = size.width as f32;
     let height = size.height as f32;
     let mut vertices = Vec::new();
+    let rendered_body_lines = single_session_rendered_body_lines_for_tick(app, size, spinner_tick);
 
     push_gradient_rect(
         &mut vertices,
@@ -221,10 +222,16 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         size,
     );
 
-    push_single_session_composer_chrome(&mut vertices, app, size, None, None, None);
+    let layout = single_session_layout_for_total_lines(app, size, rendered_body_lines.len());
+    push_single_session_composer_chrome(&mut vertices, app, size, None, None, Some(layout));
 
     let welcome_chrome_offset = if app.is_welcome_timeline_visible() {
-        welcome_timeline_visual_offset_pixels(app, size, smooth_scroll_lines)
+        welcome_timeline_visual_offset_pixels_for_total_lines(
+            app,
+            size,
+            smooth_scroll_lines,
+            rendered_body_lines.len(),
+        )
     } else {
         0.0
     };
@@ -245,12 +252,11 @@ pub(crate) fn build_single_session_vertices_with_scroll_and_reveal(
         app,
         size,
         welcome_chrome_offset,
-        welcome_timeline_total_body_lines(app, size),
+        rendered_body_lines.len(),
         None,
         None,
         None,
     );
-    let rendered_body_lines = single_session_rendered_body_lines_for_tick(app, size, spinner_tick);
     push_single_session_stdin_overlay(&mut vertices, app, size, &rendered_body_lines, None);
     let viewport = single_session_body_viewport_from_lines(
         app,
@@ -682,6 +688,24 @@ fn single_session_layout_from_bounds(
         activity_lane,
         metrics,
     }
+}
+
+fn inline_widget_bottom_limit_for_layout(
+    app: &SingleSessionApp,
+    layout: SingleSessionLayout,
+    welcome_chrome_visible: bool,
+) -> f32 {
+    if welcome_chrome_visible
+        && app.render_inline_widget_line_count() > 0
+        && !app.has_welcome_timeline_transcript()
+    {
+        return layout.draft_top;
+    }
+
+    layout
+        .activity_lane
+        .map(|activity| activity.y)
+        .unwrap_or(layout.draft_top)
 }
 
 fn single_session_composer_height(
@@ -1582,12 +1606,10 @@ fn push_single_session_inline_widget_card(
     let typography = single_session_typography_for_scale(app.text_scale());
     let session_layout = single_session_layout_for_total_lines(app, size, total_lines);
     let body_bottom = session_layout.body_bottom();
-    let inline_bottom_limit = session_layout
-        .activity_lane
-        .map(|activity| activity.y)
-        .unwrap_or(session_layout.draft_top);
     let welcome_chrome_visible =
         welcome_timeline_chrome_visible(app, size, welcome_chrome_offset_pixels);
+    let inline_bottom_limit =
+        inline_widget_bottom_limit_for_layout(app, session_layout, welcome_chrome_visible);
     let target_top = inline_widget_target_top(
         size,
         app.text_scale(),
@@ -9825,12 +9847,11 @@ pub(crate) fn single_session_streaming_response_rendered_body_line_count(
     }
     let separator = usize::from(!app.messages.is_empty());
     separator
-        + single_session_wrapped_body_lines(
+        + single_session_wrapped_body_line_count(
             app.streaming_response_styled_lines(),
             size,
             app.text_scale(),
         )
-        .len()
 }
 
 fn blank_render_line() -> SingleSessionStyledLine {
@@ -9856,6 +9877,18 @@ fn single_session_wrapped_body_lines(
     }
 
     wrapped
+}
+
+fn single_session_wrapped_body_line_count(
+    lines: Vec<SingleSessionStyledLine>,
+    size: PhysicalSize<u32>,
+    text_scale: f32,
+) -> usize {
+    let max_columns = single_session_body_max_columns(size, text_scale);
+    lines
+        .iter()
+        .map(|line| wrapped_body_line_count(line, max_columns))
+        .sum()
 }
 
 fn single_session_wrapped_body_lines_ref(
@@ -9928,7 +9961,25 @@ fn push_wrapped_body_line_owned(
     line: SingleSessionStyledLine,
     max_columns: usize,
 ) {
-    if line.text.is_empty() || !text_exceeds_columns(&line.text, max_columns) {
+    if line.text.is_empty() {
+        wrapped.push(line);
+        return;
+    }
+    if line.inline_spans.is_empty() && line.text.is_ascii() {
+        if line.text.len() <= max_columns.max(1) {
+            wrapped.push(line);
+        } else {
+            push_wrapped_ascii_body_line_parts(
+                wrapped,
+                &line.text,
+                line.style,
+                line.tool.as_ref(),
+                max_columns,
+            );
+        }
+        return;
+    }
+    if !text_exceeds_columns(&line.text, max_columns) {
         wrapped.push(line);
         return;
     }
@@ -9947,7 +9998,25 @@ fn push_wrapped_body_line_ref(
     line: &SingleSessionStyledLine,
     max_columns: usize,
 ) {
-    if line.text.is_empty() || !text_exceeds_columns(&line.text, max_columns) {
+    if line.text.is_empty() {
+        wrapped.push(line.clone());
+        return;
+    }
+    if line.inline_spans.is_empty() && line.text.is_ascii() {
+        if line.text.len() <= max_columns.max(1) {
+            wrapped.push(line.clone());
+        } else {
+            push_wrapped_ascii_body_line_parts(
+                wrapped,
+                &line.text,
+                line.style,
+                line.tool.as_ref(),
+                max_columns,
+            );
+        }
+        return;
+    }
+    if !text_exceeds_columns(&line.text, max_columns) {
         wrapped.push(line.clone());
         return;
     }
@@ -9959,6 +10028,34 @@ fn push_wrapped_body_line_ref(
         line.tool.as_ref(),
         max_columns,
     );
+}
+
+fn wrapped_body_line_count(line: &SingleSessionStyledLine, max_columns: usize) -> usize {
+    if line.text.is_empty() {
+        return 1;
+    }
+    if line.inline_spans.is_empty() && line.text.is_ascii() {
+        return wrapped_ascii_body_line_count(&line.text, max_columns);
+    }
+    if !text_exceeds_columns(&line.text, max_columns) {
+        return 1;
+    }
+    wrapped_body_line_text_count(&line.text, &line.inline_spans, max_columns)
+}
+
+fn wrapped_ascii_body_line_count(text: &str, max_columns: usize) -> usize {
+    let max_columns = max_columns.max(1);
+    let trimmed_end = text.trim_end().len();
+    let mut remaining = &text[..trimmed_end];
+    let mut count = 1usize;
+
+    while remaining.len() > max_columns {
+        let split = ascii_word_wrap_split_index(remaining, max_columns);
+        remaining = remaining[split..].trim_start();
+        count += 1;
+    }
+
+    count
 }
 
 fn push_wrapped_body_line_parts(
@@ -9974,6 +10071,32 @@ fn push_wrapped_body_line_parts(
         line.tool = tool.cloned();
         wrapped.push(line);
     }
+}
+
+fn push_wrapped_ascii_body_line_parts(
+    wrapped: &mut Vec<SingleSessionStyledLine>,
+    text: &str,
+    style: SingleSessionLineStyle,
+    tool: Option<&SingleSessionToolLineMetadata>,
+    max_columns: usize,
+) {
+    let max_columns = max_columns.max(1);
+    let trimmed_end = text.trim_end().len();
+    let mut remaining = &text[..trimmed_end];
+
+    while remaining.len() > max_columns {
+        let split = ascii_word_wrap_split_index(remaining, max_columns);
+        let line = remaining[..split].trim_end();
+        let mut wrapped_line = SingleSessionStyledLine::new(line.to_string(), style);
+        wrapped_line.tool = tool.cloned();
+        wrapped.push(wrapped_line);
+
+        remaining = remaining[split..].trim_start();
+    }
+
+    let mut wrapped_line = SingleSessionStyledLine::new(remaining.to_string(), style);
+    wrapped_line.tool = tool.cloned();
+    wrapped.push(wrapped_line);
 }
 
 fn single_session_body_max_columns(size: PhysicalSize<u32>, text_scale: f32) -> usize {
@@ -10020,11 +10143,36 @@ fn wrap_body_line_text_with_spans(
     lines
 }
 
+fn wrapped_body_line_text_count(
+    text: &str,
+    inline_spans: &[SingleSessionInlineSpan],
+    max_columns: usize,
+) -> usize {
+    let max_columns = max_columns.max(1);
+    let trimmed_end =
+        single_session_trimmed_line_end_preserving_inline_code_whitespace(text, inline_spans);
+    let mut remaining = &text[..trimmed_end];
+    let mut count = 1usize;
+
+    while text_exceeds_columns(remaining, max_columns) {
+        let split = word_wrap_split_index(remaining, max_columns);
+        let (_, rest) = remaining.split_at(split);
+        remaining = rest.trim_start();
+        count += 1;
+    }
+
+    count
+}
+
 fn inline_spans_for_wrapped_range(
     inline_spans: &[SingleSessionInlineSpan],
     start: usize,
     end: usize,
 ) -> Vec<SingleSessionInlineSpan> {
+    if inline_spans.is_empty() {
+        return Vec::new();
+    }
+
     inline_spans
         .iter()
         .filter_map(|span| {
@@ -10040,15 +10188,33 @@ fn inline_spans_for_wrapped_range(
 }
 
 fn text_exceeds_columns(text: &str, max_columns: usize) -> bool {
+    if text.is_ascii() {
+        return text.len() > max_columns.max(1);
+    }
+
     text.chars().nth(max_columns.max(1)).is_some()
 }
 
 fn word_wrap_split_index(text: &str, max_columns: usize) -> usize {
+    let max_columns = max_columns.max(1);
+    if text.is_ascii() {
+        return ascii_word_wrap_split_index(text, max_columns);
+    }
+
     let hard_split = byte_index_at_char_limit(text, max_columns);
     text[..hard_split]
         .char_indices()
         .rev()
         .find_map(|(index, ch)| ch.is_whitespace().then_some(index))
+        .filter(|index| *index > 0)
+        .unwrap_or(hard_split)
+}
+
+fn ascii_word_wrap_split_index(text: &str, max_columns: usize) -> usize {
+    let hard_split = text.len().min(max_columns.max(1));
+    text.as_bytes()[..hard_split]
+        .iter()
+        .rposition(u8::is_ascii_whitespace)
         .filter(|index| *index > 0)
         .unwrap_or(hard_split)
 }
@@ -10124,7 +10290,7 @@ fn single_session_body_bottom_base_for_total_lines(
     total_lines: usize,
 ) -> f32 {
     if app.is_welcome_timeline_visible() {
-        return (welcome_timeline_draft_top_for_total_lines(app, size, total_lines)
+        return (single_session_draft_top_for_total_lines(app, size, total_lines)
             - welcome_timeline_body_draft_gap())
         .max(single_session_body_top_for_app(app, size));
     }
@@ -11232,10 +11398,7 @@ pub(crate) fn single_session_text_areas_for_app_with_scroll<'a>(
         inline_widget_kind,
         inline_widget_preview_start_line,
         inline_widget_text_width,
-        layout
-            .activity_lane
-            .map(|activity| activity.y)
-            .unwrap_or(layout.draft_top),
+        inline_widget_bottom_limit_for_layout(app, layout, welcome_chrome_visible),
         layout.draft_top,
         welcome_chrome_offset_pixels,
         welcome_status_lane_visible(app),
@@ -11325,10 +11488,7 @@ pub(crate) fn single_session_text_areas_for_app_with_cached_body_viewport_and_re
         inline_widget_kind,
         inline_widget_preview_start_line,
         inline_widget_text_width,
-        layout
-            .activity_lane
-            .map(|activity| activity.y)
-            .unwrap_or(layout.draft_top),
+        inline_widget_bottom_limit_for_layout(app, layout, welcome_chrome_visible),
         layout.draft_top,
         welcome_chrome_offset_pixels,
         welcome_status_lane_visible(app),
@@ -12047,6 +12207,46 @@ mod tests {
             !build_single_session_vertices(&app, size, 0.0, 0).is_empty(),
             "compact combined state should render primitives"
         );
+    }
+
+    #[test]
+    fn body_wrap_ascii_fast_path_preserves_word_boundaries() {
+        assert!(!text_exceeds_columns("0123456789", 10));
+        assert!(text_exceeds_columns("0123456789a", 10));
+        assert_eq!(word_wrap_split_index("alpha beta gamma", 10), 5);
+        assert_eq!(word_wrap_split_index("abcdefghijk", 10), 10);
+    }
+
+    #[test]
+    fn body_wrap_unicode_path_keeps_character_boundaries() {
+        assert!(!text_exceeds_columns("你好世界", 4));
+        assert!(text_exceeds_columns("你好世界a", 4));
+        assert_eq!(word_wrap_split_index("你好 abc", 3), "你好".len());
+        assert_eq!(byte_index_at_char_limit("你好abc", 2), "你好".len());
+    }
+
+    #[test]
+    fn body_wrap_line_count_matches_wrapped_output_without_allocating_lines() {
+        let cases = [
+            SingleSessionStyledLine::new("alpha beta gamma", SingleSessionLineStyle::Assistant),
+            SingleSessionStyledLine::new("abcdefghijk", SingleSessionLineStyle::Assistant),
+            SingleSessionStyledLine::new("你好 abc", SingleSessionLineStyle::Assistant),
+            SingleSessionStyledLine::with_inline_spans(
+                "code span keeps trailing spaces   ".to_string(),
+                SingleSessionLineStyle::Assistant,
+                vec![SingleSessionInlineSpan {
+                    start: 0,
+                    end: "code span keeps trailing spaces   ".len(),
+                    kind: SingleSessionInlineSpanKind::Code,
+                }],
+            ),
+        ];
+
+        for line in cases {
+            let mut wrapped = Vec::new();
+            push_wrapped_body_line_ref(&mut wrapped, &line, 10);
+            assert_eq!(wrapped_body_line_count(&line, 10), wrapped.len());
+        }
     }
 
     #[test]
