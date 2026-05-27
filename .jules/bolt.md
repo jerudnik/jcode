@@ -1,0 +1,3 @@
+## 2024-05-27 - Zero-allocation BFS traversal in Memory Graph
+**Learning:** In highly connected graphs like `MemoryGraph`, string cloning during graph traversal (`cascade_retrieve`) causes unnecessary allocations. Rust's borrow checker can be satisfied by collecting raw references (`&str`) from existing Maps into tracking data structures (`HashMap`, `HashSet`, `VecDeque`) and doing a single string conversion loop at the very end.
+**Action:** Always prefer borrowing from the root data structure (or a slice) instead of `clone()` inside hot inner loops (especially `while let`/BFS structures) or `.to_vec()` that duplicates lists of items solely to appease the borrow checker during mutation of a disjoint field.

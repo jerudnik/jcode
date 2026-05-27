@@ -552,32 +552,34 @@ impl MemoryGraph {
     ) -> Vec<(String, f32)> {
         self.metadata.retrieval_count += 1;
 
-        let mut visited: HashSet<String> = HashSet::new();
-        let mut results: HashMap<String, f32> = HashMap::new();
-        let mut queue: VecDeque<(String, f32, usize)> = VecDeque::new();
+        let mut visited: HashSet<&str> = HashSet::new();
+        let mut results: HashMap<&str, f32> = HashMap::new();
+        let mut queue: VecDeque<(&str, f32, usize)> = VecDeque::new();
 
         // Initialize with seeds
         for (id, score) in seed_ids.iter().zip(seed_scores.iter()) {
             if self.memories.contains_key(id) {
-                queue.push_back((id.clone(), *score, 0));
-                results.insert(id.clone(), *score);
+                queue.push_back((id.as_str(), *score, 0));
+                results.insert(id.as_str(), *score);
             }
         }
 
         // BFS traversal
         while let Some((node_id, score, depth)) = queue.pop_front() {
-            if visited.contains(&node_id) {
+            if visited.contains(node_id) {
                 continue;
             }
-            visited.insert(node_id.clone());
+            visited.insert(node_id);
 
             if depth >= max_depth {
                 continue;
             }
 
-            // Traverse edges from this node
-            for edge in self.get_edges(&node_id).to_vec() {
-                let target = &edge.target;
+            // ⚡ Bolt: Zero-allocation edge traversal
+            // Fetch the slice instead of converting to Vec to avoid cloning the string ids.
+            let edges = self.get_edges(node_id);
+            for edge in edges {
+                let target = edge.target.as_str();
 
                 // Skip if already visited
                 if visited.contains(target) {
@@ -591,12 +593,13 @@ impl MemoryGraph {
 
                 // If target is a tag, find all memories with this tag
                 if target.starts_with("tag:") {
-                    for source_id in self.get_incoming(target).iter() {
-                        let source_id = source_id.to_string();
-                        if !visited.contains(&source_id) && self.memories.contains_key(&source_id) {
-                            let existing = results.get(&source_id).copied().unwrap_or(0.0);
+                    let incoming = self.get_incoming(target);
+                    for source_id in incoming {
+
+                        if !visited.contains(source_id) && self.memories.contains_key(source_id) {
+                            let existing = results.get(source_id).copied().unwrap_or(0.0);
                             if new_score > existing {
-                                results.insert(source_id.clone(), new_score);
+                                results.insert(source_id, new_score);
                                 queue.push_back((source_id, new_score, depth + 1));
                             }
                         }
@@ -606,15 +609,16 @@ impl MemoryGraph {
                 else if self.memories.contains_key(target) {
                     let existing = results.get(target).copied().unwrap_or(0.0);
                     if new_score > existing {
-                        results.insert(target.clone(), new_score);
-                        queue.push_back((target.clone(), new_score, depth + 1));
+                        results.insert(target, new_score);
+                        queue.push_back((target, new_score, depth + 1));
                     }
                 }
             }
         }
 
         // Keep only the top-scoring results
-        top_k_scored(results, max_results)
+        let string_results: HashMap<String, f32> = results.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+        top_k_scored(string_results, max_results)
     }
 
     // ==================== Migration ====================
