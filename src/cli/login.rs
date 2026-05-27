@@ -1178,9 +1178,7 @@ async fn login_google_flow(
                     eprintln!("  (looks like: 123456789-abc.apps.googleusercontent.com)\n");
                     eprint!("> ");
                     io::stdout().flush()?;
-                    let mut client_id = String::new();
-                    io::stdin().read_line(&mut client_id)?;
-                    let client_id = client_id.trim().to_string();
+                    let client_id = read_secret_line()?;
 
                     if client_id.is_empty() {
                         anyhow::bail!("No client ID provided.");
@@ -1190,9 +1188,7 @@ async fn login_google_flow(
                     eprintln!("  (looks like: GOCSPX-...)\n");
                     eprint!("> ");
                     io::stdout().flush()?;
-                    let mut client_secret = String::new();
-                    io::stdin().read_line(&mut client_secret)?;
-                    let client_secret = client_secret.trim().to_string();
+                    let client_secret = read_secret_line()?;
 
                     if client_secret.is_empty() {
                         anyhow::bail!("No client secret provided.");
@@ -1299,9 +1295,7 @@ async fn login_google_flow(
                     eprintln!("Paste your Client ID:");
                     eprint!("> ");
                     io::stdout().flush()?;
-                    let mut client_id = String::new();
-                    io::stdin().read_line(&mut client_id)?;
-                    let client_id = client_id.trim().to_string();
+                    let client_id = read_secret_line()?;
 
                     if client_id.is_empty() {
                         anyhow::bail!("No client ID provided.");
@@ -1310,9 +1304,7 @@ async fn login_google_flow(
                     eprintln!("\nPaste your Client Secret:");
                     eprint!("> ");
                     io::stdout().flush()?;
-                    let mut client_secret = String::new();
-                    io::stdin().read_line(&mut client_secret)?;
-                    let client_secret = client_secret.trim().to_string();
+                    let client_secret = read_secret_line()?;
 
                     if client_secret.is_empty() {
                         anyhow::bail!("No client secret provided.");

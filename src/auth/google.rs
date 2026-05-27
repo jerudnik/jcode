@@ -226,8 +226,7 @@ fn read_manual_callback_code(expected_state: &str) -> Result<String> {
     eprint!("> ");
     std::io::stdout().flush()?;
 
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    let input = crate::cli::login::read_secret_line()?;
     let trimmed = input.trim();
     if trimmed.is_empty() {
         anyhow::bail!("No callback URL entered.");

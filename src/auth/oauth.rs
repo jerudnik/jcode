@@ -507,8 +507,7 @@ pub async fn login_claude(no_browser: bool) -> Result<OAuthTokens> {
         eprintln!("Paste the authorization code (or callback URL) here:\n");
         eprint!("> ");
         std::io::stdout().flush()?;
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
+        let input = crate::cli::login::read_secret_line()?;
         let trimmed = input.trim();
         if trimmed.is_empty() {
             anyhow::bail!("No authorization code entered.");
@@ -538,8 +537,7 @@ pub async fn login_claude(no_browser: bool) -> Result<OAuthTokens> {
     eprint!("> ");
     std::io::stdout().flush()?;
 
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    let input = crate::cli::login::read_secret_line()?;
     let trimmed = input.trim();
     if trimmed.is_empty() {
         anyhow::bail!("No authorization code entered.");
@@ -897,8 +895,7 @@ pub async fn login_openai(no_browser: bool) -> Result<OAuthTokens> {
     eprintln!("Paste the full callback URL (or query string) here:\n");
     eprint!("> ");
     std::io::stdout().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
+    let input = crate::cli::login::read_secret_line()?;
     let trimmed = input.trim();
     if trimmed.is_empty() {
         anyhow::bail!("No callback URL entered.");
