@@ -811,6 +811,34 @@ pub(super) fn handle_help_command(app: &mut App, trimmed: &str) -> bool {
     false
 }
 
+pub(super) fn handle_model_status_command(app: &mut App, trimmed: &str) -> bool {
+    let Some(rest) = slash_command_rest(trimmed, "/provider-test-coverage")
+        .or_else(|| slash_command_rest(trimmed, "/model-status"))
+    else {
+        return false;
+    };
+
+    let mut parts = rest.split_whitespace();
+    let provider = parts
+        .next()
+        .map(str::to_string)
+        .unwrap_or_else(|| app.provider_name().to_string());
+    let explicit_model = parts.collect::<Vec<_>>().join(" ");
+    let model = if explicit_model.trim().is_empty() {
+        app.provider_model()
+    } else {
+        explicit_model
+    };
+
+    app.model_status_content = build_model_status_report(&provider, &model);
+    app.model_status_scroll = Some(0);
+    true
+}
+
+fn build_model_status_report(provider_query: &str, model_query: &str) -> String {
+    crate::live_tests::format_provider_test_coverage_report(provider_query, model_query, None)
+}
+
 pub(super) fn handle_ssh_command(app: &mut App, trimmed: &str) -> bool {
     let Some(rest) = trimmed.strip_prefix("/ssh") else {
         return false;
