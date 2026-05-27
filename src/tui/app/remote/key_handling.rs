@@ -294,11 +294,15 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
-    if modifiers.contains(KeyModifiers::ALT) && matches!(code, KeyCode::Char('m')) {
+    if crate::tui::keybind::matches_side_panel_toggle_key(code, modifiers) {
         app.toggle_side_panel();
         return Ok(());
     }
-    if modifiers.contains(KeyModifiers::ALT) && matches!(code, KeyCode::Char('t')) {
+    let macos_option_shortcut =
+        crate::tui::keybind::shortcut_char_for_macos_option_key(code, modifiers);
+    if (modifiers.contains(KeyModifiers::ALT) && matches!(code, KeyCode::Char('t')))
+        || macos_option_shortcut == Some('t')
+    {
         app.toggle_diagram_pane_position();
         return Ok(());
     }
@@ -320,7 +324,9 @@ async fn handle_remote_key_internal(
         apply_remote_effort_direction(app, remote, direction).await?;
         return Ok(());
     }
-    if modifiers.contains(KeyModifiers::ALT) && matches!(code, KeyCode::Char('s')) {
+    if (modifiers.contains(KeyModifiers::ALT) && matches!(code, KeyCode::Char('s')))
+        || macos_option_shortcut == Some('s')
+    {
         app.toggle_typing_scroll_lock();
         return Ok(());
     }
@@ -337,8 +343,9 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
-    if modifiers.contains(KeyModifiers::ALT) {
-        match code {
+    if modifiers.contains(KeyModifiers::ALT) || macos_option_shortcut.is_some() {
+        let alt_code = macos_option_shortcut.map(KeyCode::Char).unwrap_or(code);
+        match alt_code {
             KeyCode::Char('b') => {
                 if matches!(app.status, ProcessingStatus::RunningTool(_)) {
                     remote.background_tool().await?;
@@ -375,6 +382,11 @@ async fn handle_remote_key_internal(
             }
             _ => {}
         }
+    }
+
+    if modifiers.contains(KeyModifiers::SUPER) && matches!(code, KeyCode::Backspace) {
+        input::delete_input_to_start(app);
+        return Ok(());
     }
 
     if app.handle_command_suggestion_key(code, modifiers) {
@@ -499,7 +511,7 @@ async fn handle_remote_key_internal(
                 return Ok(());
             }
             KeyCode::Char('e') => {
-                app.cursor_pos = app.input.len();
+                input::edit_input_in_external_editor(app);
                 return Ok(());
             }
             KeyCode::Char('f') => {
@@ -596,7 +608,13 @@ async fn handle_remote_key_internal(
                 let had_pending = app.retrieve_pending_message_for_edit();
                 if had_pending {
                     let _ = remote.cancel_soft_interrupts().await;
+                } else {
+                    input::handle_prompt_history_navigation(app, code, modifiers);
                 }
+                return Ok(());
+            }
+            KeyCode::Down => {
+                input::handle_prompt_history_navigation(app, code, modifiers);
                 return Ok(());
             }
             _ => {}

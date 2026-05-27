@@ -348,6 +348,20 @@ fn test_handle_key_ctrl_backspace_csi_u_char_fallback_deletes_word() {
 }
 
 #[test]
+fn test_handle_key_super_backspace_deletes_to_start() {
+    let mut app = create_test_app();
+    app.set_input_for_test("hello world again");
+
+    app.handle_key(KeyCode::Left, KeyModifiers::CONTROL)
+        .unwrap();
+    app.handle_key(KeyCode::Backspace, KeyModifiers::SUPER)
+        .unwrap();
+
+    assert_eq!(app.input(), "again");
+    assert_eq!(app.cursor_pos(), 0);
+}
+
+#[test]
 fn test_handle_key_ctrl_h_does_not_insert_text() {
     let mut app = create_test_app();
     app.set_input_for_test("hello");
@@ -877,9 +891,7 @@ fn test_retrieve_pending_message_edits_queued_message() {
     assert_eq!(app.queued_count(), 1);
     assert!(app.input().is_empty());
 
-    // Pending messages can still be retrieved for editing through the helper;
-    // Ctrl+Up is now reserved for explicit prompt-history navigation.
-    app.retrieve_pending_message_for_edit();
+    app.handle_key(KeyCode::Up, KeyModifiers::CONTROL).unwrap();
 
     assert_eq!(app.queued_count(), 0);
     assert_eq!(app.input(), "hello");

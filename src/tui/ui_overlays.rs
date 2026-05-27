@@ -346,7 +346,7 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
     )));
     lines.push(Line::from(""));
     lines.push(key_entry(
-        "Alt+M",
+        crate::tui::keybind::side_panel_toggle_key_label(),
         "Toggle side panel (or diagram pane if empty)",
     ));
     lines.push(key_entry("Alt+T", "Toggle diagram position (side/top)"));
@@ -374,11 +374,13 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
         "Quit (press twice to confirm)",
     ));
     lines.push(key_entry("Ctrl+X", "Cut entire input line to clipboard"));
+    lines.push(key_entry("Ctrl+E", "Edit prompt in $EDITOR"));
     lines.push(key_entry(
         "Ctrl+A",
         "Copy visible chat viewport plus nearby context",
     ));
     lines.push(key_entry("Ctrl+U", "Clear input line"));
+    lines.push(key_entry("Cmd/Super+Backspace", "Delete to start of input"));
     lines.push(key_entry("Ctrl+S", "Stash / pop input (save for later)"));
     lines.push(key_entry("Ctrl+Backspace", "Delete previous word in input"));
     lines.push(key_entry("Ctrl+B / Ctrl+F", "Move by word left / right"));
