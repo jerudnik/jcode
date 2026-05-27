@@ -1018,18 +1018,26 @@ impl App {
             return false;
         }
 
-        let incomplete = super::commands::incomplete_poke_todos(self);
+        let todos = super::commands::poke_todos(self);
+        let incomplete: Vec<_> = todos
+            .iter()
+            .filter(|todo| super::commands::is_incomplete_poke_todo(todo))
+            .cloned()
+            .collect();
         if incomplete.is_empty() {
-            let had_todos = crate::todo::todos_exist(&super::commands::active_session_id(self))
-                .unwrap_or(false);
             self.auto_poke_incomplete_todos = false;
-            if !had_todos {
+            if todos.is_empty() {
                 return false;
             }
             self.push_display_message(DisplayMessage::system(
-                "✅ Todos complete. Auto-poke finished.".to_string(),
+                "✅ Todos complete. Auto-poke finished; queued hidden confidence reminder."
+                    .to_string(),
             ));
-            return false;
+            self.hidden_queued_system_messages.push(
+                super::commands::build_todo_confidence_summary_message(&todos),
+            );
+            self.pending_queued_dispatch = true;
+            return true;
         }
 
         self.push_display_message(DisplayMessage::system(format!(
@@ -1558,6 +1566,12 @@ pub(super) fn handle_visible_copy_shortcut(
     let macos_option_shift =
         crate::tui::keybind::shortcut_char_for_macos_option_shift_key(code, modifiers).is_some();
     if !explicit_shift && !implicit_shift && !macos_option_shift {
+        // Some terminals report Alt+Shift+E as Alt+lowercase `e` with no
+        // explicit SHIFT modifier. Keep the relaxed fallback scoped to the
+        // expand badge so plain Alt+letter copy shortcuts do not become active.
+        if c.eq_ignore_ascii_case(&'e') && handle_expand_edit_badge_shortcut(app, c) {
+            return true;
+        }
         return false;
     }
 
@@ -1601,11 +1615,21 @@ fn handle_expand_edit_badge_shortcut(app: &mut App, key: char) -> bool {
         return false;
     }
 
+    let visible_expand_badge = crate::tui::ui::visible_expand_edit_badge();
+    let has_edit_tool_message = app.display_edit_tool_message_count > 0
+        || app.display_messages.iter().any(|message| {
+            message
+                .tool_data
+                .as_ref()
+                .map(|tool| crate::tui::ui::tools_ui::is_edit_tool_name(&tool.name))
+                .unwrap_or(false)
+        });
+
     // The inline edit badge is rendered from the inline diff mode itself, while
     // opening it from other diff modes requires at least one edit tool message.
     // Keep this predicate in one place so the [Alt] [⇧] [E] badge uses the same
     // shortcut path as visible copy badges without falling through to copy key E.
-    if !app.diff_mode.is_inline() && app.display_edit_tool_message_count == 0 {
+    if !visible_expand_badge && !app.diff_mode.is_inline() && !has_edit_tool_message {
         return false;
     }
 
