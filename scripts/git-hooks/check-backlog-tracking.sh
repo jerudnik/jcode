@@ -23,11 +23,39 @@
 # pass --strict, set EXIT_ON_FINDING=1, or change the final `exit 0` below
 # to `exit "$rc"`.
 #
-# Opt-out: if the offending line OR the line immediately preceding it
-# contains one of these markers (case-insensitive), the line is ignored:
-#   <!-- backlog-tracking-ignore -->
-#   # backlog-tracking-ignore
-#   // backlog-tracking-ignore
+# Opt-out mechanisms (any one is sufficient):
+#
+#   1. Line-level: the offending line OR the line immediately preceding it
+#      contains one of these markers (case-insensitive):
+#        <!-- backlog-tracking-ignore -->
+#        # backlog-tracking-ignore
+#        // backlog-tracking-ignore
+#
+#   2. File-level: any line in the first 15 lines of the file contains the
+#      file-scope marker (case-insensitive):
+#        <!-- backlog-tracking-ignore-file -->
+#        # backlog-tracking-ignore-file
+#        // backlog-tracking-ignore-file
+#      Use this for meta-documentation that intentionally contains the
+#      patterns this hook looks for (e.g. AGENTS.md describing Backlog.md).
+#
+#   3. Code-fence aware: in Markdown files (*.md), lines inside fenced
+#      code blocks (``` ... ``` or ~~~ ... ~~~) are skipped. Documentation
+#      examples that show TODO comments or checklists are not actionable.
+#
+#   4. Comment-context required: TODO/FIXME/HACK/XXX markers are only
+#      flagged when they appear in a comment context (line starts with
+#      //, #, *, <!--, /*, or `- ` and the marker is followed by `:`,
+#      `(`, or `!`). This excludes Rust identifiers like `todo()`,
+#      `TodoStore`, `set_todos`, and file paths like `todo.rs`.
+#
+#   5. Inline tracked-TODO form: the line contains `TODO(TASK-NN):`,
+#      `FIXME(TASK-NN):`, `HACK(TASK-NN):`, or `XXX(TASK-NN):`. This is
+#      the idiomatic Rust/C++ convention for a TODO that already has a
+#      tracked backlog ticket. Example:
+#        // TODO(TASK-47): implement with windows-sys crate
+#      Alternatively use a separate `Tracked in: TASK-NN` line above or
+#      on the same line as the marker.
 #
 # Dependencies: POSIX sh, git, ripgrep (rg).
 
@@ -106,10 +134,34 @@ path_excluded() {
 
 # Patterns (PCRE2 / rg).
 PAT_CHECKBOX='^\s*-\s*\[\s\]'
+# Comment-context-bounded TODO/FIXME/HACK/XXX marker. Requires the marker to
+# appear inside a comment-like prefix (//, #, *, /*, <!--, leading `-` in
+# Markdown, or as the literal first word of the line), AND to be followed by
+# `:`, `(`, or `!` so we skip identifier uses like `todo_view`, `todo()`,
+# `TodoStore`, file paths like `todo.rs`, and prose like "list of todos".
+# Each branch is anchored at start-of-line (with optional indent) so we are
+# certain we are in a real comment context, not arbitrary string content.
 # backlog-tracking-ignore
-PAT_TODO='(?i)\b(todo|fixme|hack|xxx)\b'
+PAT_TODO='(?i)^\s*(?://+|#+|<!--|/\*|\*\s|-\s)\s*\(?\s*\b(TODO|FIXME|HACK|XXX)\b\s*[:!(]'
 PAT_TRACKED_EMPTY='^\s*Tracked in:\s*$'
-PAT_IGNORE='(?i)backlog-tracking-ignore'
+# Two-tier ignore semantics:
+#
+# PAT_IGNORE_LINE: applies only to the offending line itself. Includes the
+#   inline tracked-TODO form `TODO(TASK-NN):`, which is a per-line opt-out
+#   and must NOT bleed into surrounding lines (otherwise a tracked TODO on
+#   line N would silently suppress an untracked TODO on line N+1).
+#
+# PAT_IGNORE_BLOCK: applies to the offending line OR the line immediately
+#   preceding it. Limited to explicit block-style markers that the author
+#   typed deliberately to suppress a following finding.
+#
+#   1. Explicit ignore marker: `backlog-tracking-ignore` (line-level) or
+#      `backlog-tracking-ignore-file` (whole-file, matched separately).
+#   2. Positive tracking pointer: `Tracked in: TASK-NN`.
+PAT_IGNORE_BLOCK='(?i)(backlog-tracking-ignore(?!-file)|Tracked in:\s*TASK-\d+)'
+#   3. Inline tracked-TODO form: `TODO(TASK-NN):` etc. (per-line only).
+PAT_IGNORE_LINE='(?i)(backlog-tracking-ignore(?!-file)|Tracked in:\s*TASK-\d+|\b(TODO|FIXME|HACK|XXX)\(TASK-\d+\))'
+PAT_IGNORE_FILE='(?i)backlog-tracking-ignore-file'
 
 emit() {
   # emit <file> <line> <reason> <content>
@@ -118,15 +170,48 @@ emit() {
   printf 'x\n' >>"$FINDINGS_FILE"
 }
 
-has_ignore() {
-  printf '%s' "$1" | rg -q -P "$PAT_IGNORE"
+has_ignore_line() {
+  printf '%s' "$1" | rg -q -P "$PAT_IGNORE_LINE"
+}
+
+has_ignore_block() {
+  printf '%s' "$1" | rg -q -P "$PAT_IGNORE_BLOCK"
+}
+
+# file_has_ignore <file>
+# True iff one of the first 15 lines of the file contains the file-scope
+# opt-out marker. Cheap: we read at most 15 lines via `head`.
+file_has_ignore() {
+  [ -f "$1" ] || return 1
+  head -n 15 "$1" 2>/dev/null | rg -q -P "$PAT_IGNORE_FILE"
+}
+
+# is_markdown <file>
+is_markdown() {
+  case "$1" in
+    *.md|*.markdown) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# update_fence_state <prev_state:0|1> <line>
+# Toggles fence state when a line opens or closes a Markdown code fence.
+# Recognized fences: ``` or ~~~ (3+ backticks/tildes), as the first non-
+# whitespace content of the line. Returns the new state on stdout.
+update_fence_state() {
+  state=$1; line=$2
+  if printf '%s' "$line" | rg -q -P '^\s*(```+|~~~+)'; then
+    if [ "$state" = "1" ]; then printf '0'; else printf '1'; fi
+  else
+    printf '%s' "$state"
+  fi
 }
 
 # inspect_line <file> <lineno> <content> <prev_line>
 inspect_line() {
   file=$1; lineno=$2; content=$3; prev=$4
-  if has_ignore "$content"; then return 0; fi
-  if [ -n "$prev" ] && has_ignore "$prev"; then return 0; fi
+  if has_ignore_line "$content"; then return 0; fi
+  if [ -n "$prev" ] && has_ignore_block "$prev"; then return 0; fi
   if printf '%s' "$content" | rg -q -P "$PAT_CHECKBOX"; then
     emit "$file" "$lineno" "new unchecked checklist item" "$content"
     return 0
@@ -141,10 +226,30 @@ inspect_line() {
   fi
 }
 
+# compute_fence_lines <markdown_file>
+# Emits a newline-separated list of 1-indexed line numbers that fall inside
+# Markdown fenced code blocks (``` or ~~~). Toggling, opening fence and
+# closing fence inclusive (we want to suppress findings on the fence line
+# itself too, e.g. when a code block starts with `\`\`\`text` containing a
+# TODO marker on the immediately following line).
+compute_fence_lines() {
+  f=$1
+  [ -f "$f" ] || return 0
+  awk '
+    /^[[:space:]]*(```+|~~~+)/ {
+      inside = !inside
+      print NR
+      next
+    }
+    { if (inside) print NR }
+  ' "$f" 2>/dev/null
+}
+
 scan_staged() {
   cur_file=""
   cur_lineno=0
   prev_line=""
+  cur_fence_lines=""
   # -U0: no surrounding context so every `+` is a real addition.
   git diff --cached -U0 --no-color --diff-filter=AM | while IFS= read -r raw; do
     case "$raw" in
@@ -152,8 +257,17 @@ scan_staged() {
         cur_file=${raw#+++ b/}
         cur_lineno=0
         prev_line=""
+        cur_fence_lines=""
         if path_excluded "$cur_file"; then
           cur_file=""
+        elif file_has_ignore "$cur_file"; then
+          # Whole file is opted out; ignore all hunks in it.
+          cur_file=""
+        elif is_markdown "$cur_file"; then
+          # Precompute fenced-code line numbers once per file. Joining with
+          # a space and matching with a sentinel keeps the membership test
+          # POSIX-shell-portable and fast for small N.
+          cur_fence_lines=" $(compute_fence_lines "$cur_file" | tr '\n' ' ')"
         fi
         ;;
       '+++ /dev/null'|'--- '*)
@@ -172,7 +286,12 @@ scan_staged() {
       '+'*)
         content=${raw#+}
         if [ -n "$cur_file" ] && ext_match "$cur_file"; then
-          inspect_line "$cur_file" "$cur_lineno" "$content" "$prev_line"
+          if [ -n "$cur_fence_lines" ] && \
+             printf '%s' "$cur_fence_lines" | rg -qF " $cur_lineno "; then
+            : # fenced code block in Markdown; skip
+          else
+            inspect_line "$cur_file" "$cur_lineno" "$content" "$prev_line"
+          fi
         fi
         prev_line=$content
         cur_lineno=$((cur_lineno + 1))
@@ -186,10 +305,18 @@ scan_staged() {
 
 # scan_file_with_context <file>
 # Use rg to find candidate lines, then re-read previous physical line for
-# the context-sensitive ignore marker.
+# the context-sensitive ignore marker. For Markdown files, skip lines that
+# fall inside fenced code blocks.
 scan_file_with_context() {
   f=$1
   [ -f "$f" ] || return 0
+  if file_has_ignore "$f"; then
+    return 0
+  fi
+  fence_lines=""
+  if is_markdown "$f"; then
+    fence_lines=" $(compute_fence_lines "$f" | tr '\n' ' ')"
+  fi
   rg -n --no-heading -P \
      -e "$PAT_CHECKBOX" \
      -e "$PAT_TODO" \
@@ -199,6 +326,10 @@ scan_file_with_context() {
     case "$lineno" in
       ''|*[!0-9]*) continue ;;
     esac
+    if [ -n "$fence_lines" ] && \
+       printf '%s' "$fence_lines" | rg -qF " $lineno "; then
+      continue
+    fi
     prev=""
     if [ "$lineno" -gt 1 ]; then
       prev=$(sed -n "$((lineno - 1))p" "$f" 2>/dev/null || true)

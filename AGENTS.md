@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+<!-- backlog-tracking-ignore-file: this document describes how to use jcode  -->
+<!-- and Backlog.md; code-fence examples may legitimately contain TODO/FIXME -->
+<!-- markers and unchecked `- [ ]` items as illustrations, not real tasks.   -->
+
 ## Development Workflow
 
 - **Commit as you go** - Make small, focused commits after completing each feature or fix

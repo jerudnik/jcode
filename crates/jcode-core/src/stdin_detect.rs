@@ -408,7 +408,8 @@ mod windows {
         // a console handle and its thread is in a wait state via
         // WaitForSingleObject with zero timeout on the process handle
 
-        // TODO: implement with windows-sys crate
+        // TODO(TASK-47): implement with windows-sys crate
+        // Tracked in: TASK-47 (Implement Windows stdin detection using windows-sys)
         // - OpenProcess(PROCESS_QUERY_INFORMATION, pid)
         // - NtQuerySystemInformation for thread states
         // - Check for KWAIT_REASON::WrUserRequest on stdin handle

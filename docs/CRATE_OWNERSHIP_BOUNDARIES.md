@@ -1,5 +1,9 @@
 # Crate Ownership and Modularization Boundaries
 
+<!-- backlog-tracking-ignore-file: this document is a static decision rubric; -->
+<!-- its unchecked `- [ ]` items are checklist questions per move, not       -->
+<!-- backlog tasks. Real follow-ups live in .backlog/tasks/.                 -->
+
 This document defines the target structure for keeping `jcode` modular without turning shared crates into a dumping ground. It is intentionally practical: use it when deciding whether to move a type, helper, or behavior out of the root crate.
 
 ## Goals
