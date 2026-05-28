@@ -254,43 +254,15 @@ mod tests {
 
     #[test]
     fn workspace_change_invalidates_fingerprint() {
-        let a = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "p",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
-        let b = IsolationKey::new(
-            "s",
-            &ws("/tmp/b"),
-            "p",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
+        let a = IsolationKey::new("s", &ws("/tmp/a"), "p", "m", 1, TrustTier::Trusted);
+        let b = IsolationKey::new("s", &ws("/tmp/b"), "p", "m", 1, TrustTier::Trusted);
         assert_ne!(a.fingerprint(), b.fingerprint());
     }
 
     #[test]
     fn provider_change_invalidates_fingerprint() {
-        let a = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "anthropic",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
-        let b = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "openrouter",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
+        let a = IsolationKey::new("s", &ws("/tmp/a"), "anthropic", "m", 1, TrustTier::Trusted);
+        let b = IsolationKey::new("s", &ws("/tmp/a"), "openrouter", "m", 1, TrustTier::Trusted);
         assert_ne!(a.fingerprint(), b.fingerprint());
     }
 
@@ -317,35 +289,14 @@ mod tests {
 
     #[test]
     fn trust_tier_change_invalidates_fingerprint() {
-        let a = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "p",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
-        let b = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "p",
-            "m",
-            1,
-            TrustTier::LowTrust,
-        );
+        let a = IsolationKey::new("s", &ws("/tmp/a"), "p", "m", 1, TrustTier::Trusted);
+        let b = IsolationKey::new("s", &ws("/tmp/a"), "p", "m", 1, TrustTier::LowTrust);
         assert_ne!(a.fingerprint(), b.fingerprint());
     }
 
     #[test]
     fn schema_version_change_invalidates_fingerprint() {
-        let a = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "p",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
+        let a = IsolationKey::new("s", &ws("/tmp/a"), "p", "m", 1, TrustTier::Trusted);
         let mut b = a.clone();
         b.schema_version = SCHEMA_VERSION.wrapping_add(1);
         assert_ne!(a.fingerprint(), b.fingerprint());
@@ -353,14 +304,7 @@ mod tests {
 
     #[test]
     fn content_hash_changes_fingerprint_but_not_context() {
-        let mut a = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "p",
-            "m",
-            1,
-            TrustTier::Trusted,
-        );
+        let mut a = IsolationKey::new("s", &ws("/tmp/a"), "p", "m", 1, TrustTier::Trusted);
         let original_ctx = a.context_fingerprint();
         let original_fp = a.fingerprint();
         a.content_hash = 2;
@@ -370,14 +314,7 @@ mod tests {
 
     #[test]
     fn fingerprint_with_content_matches_full_fingerprint_for_same_content() {
-        let a = IsolationKey::new(
-            "s",
-            &ws("/tmp/a"),
-            "p",
-            "m",
-            123,
-            TrustTier::Trusted,
-        );
+        let a = IsolationKey::new("s", &ws("/tmp/a"), "p", "m", 123, TrustTier::Trusted);
         // The two helpers compute over different inputs (full struct vs.
         // context+content composition), so they should not be equal — but
         // they should each be stable across calls.

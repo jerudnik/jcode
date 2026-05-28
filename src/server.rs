@@ -1,5 +1,6 @@
 mod await_members_state;
 mod background_tasks;
+mod cache_invalidation;
 mod client_actions;
 mod client_api;
 mod client_comm;
@@ -10,7 +11,6 @@ mod client_disconnect_cleanup;
 mod client_lifecycle;
 mod client_lifecycle_logging;
 mod client_lightweight_control;
-mod cache_invalidation;
 mod client_session;
 mod client_state;
 mod client_writer;

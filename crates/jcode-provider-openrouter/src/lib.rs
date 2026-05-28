@@ -231,8 +231,9 @@ struct EndpointsDiskCacheMemoEntry {
     cache: Option<EndpointsDiskCache>,
 }
 
-static ENDPOINTS_DISK_CACHE_MEMO: LazyLock<Mutex<HashMap<OrCacheKey, EndpointsDiskCacheMemoEntry>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ENDPOINTS_DISK_CACHE_MEMO: LazyLock<
+    Mutex<HashMap<OrCacheKey, EndpointsDiskCacheMemoEntry>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Drop every entry from both the model-catalog disk-cache memo
 /// (`DISK_CACHE_MEMO`) and the per-model endpoints disk-cache memo
