@@ -478,7 +478,7 @@ def public_benchmark_blocks() -> list[Block]:
     blocks = [
         Block(
             id="bench-user", kind="user", trust="verified",
-            content="Terminal benchmark task TASK-27: preserve early intent, inspect src/agent/context_pruning.rs, do not push, and report acceptance criteria status.",
+            content="Terminal benchmark task TASK-27 on serious-callers-only: preserve early intent, inspect src/agent/context_pruning.rs, do not push, and report acceptance criteria status.",
         ),
         Block(
             id="bench-needle", kind="file", path="README.md", trust="verified",
