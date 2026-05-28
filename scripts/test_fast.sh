@@ -8,6 +8,10 @@ run_cargo() {
   (cd "$repo_root" && "$cargo_exec" "$@")
 }
 
+echo "=== Fast script regression tests ==="
+python3 "$repo_root/tests/test_dev_cargo.py"
+echo ""
+
 echo "=== Fast test loop (lib + bins) ==="
 run_cargo test --lib --bins "$@"
 
