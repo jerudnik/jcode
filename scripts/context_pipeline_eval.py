@@ -14,6 +14,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import subprocess
 import textwrap
 import time
@@ -40,6 +41,12 @@ PROTECTED_TERMS = [
     "acceptance criteria",
     "serious-callers-only",
     "restore handle",
+]
+STALE_FOREIGN_TERMS = [
+    "PAYMENT_SECRET_DO_NOT_USE",
+    "foreign repo nix-config",
+    "stale production database",
+    "wrong branch deploy",
 ]
 
 
@@ -117,6 +124,98 @@ def read_sample_sessions(limit: int) -> list[Block]:
     return blocks
 
 
+def stringify_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("result")
+                if text is not None:
+                    parts.append(stringify_message_content(text))
+                elif item.get("type"):
+                    parts.append(json.dumps(item, sort_keys=True)[:2_000])
+            else:
+                parts.append(str(item))
+        return "\n".join(part for part in parts if part)
+    if isinstance(content, dict):
+        for key in ("text", "content", "result", "message"):
+            if key in content:
+                return stringify_message_content(content[key])
+        return json.dumps(content, sort_keys=True)[:4_000]
+    return str(content)
+
+
+def classify_message_block(message: dict[str, Any], session_path: Path, index: int) -> Block | None:
+    text = stringify_message_content(message.get("content", "")).strip()
+    if not text:
+        return None
+    role = str(message.get("role") or message.get("display_role") or "message")
+    kind = "assistant" if role == "assistant" else "user" if role == "user" else "tool_output" if "tool" in role else "message"
+    trust = "verified" if kind in {"user", "assistant"} else "unverified"
+    status = "raw"
+    tool = None
+    if "tool" in role or any(marker in text.lower() for marker in ("tool timing", "exit code", "command completed")):
+        kind = "tool_output"
+        tool = "session_replay"
+        trust = "unverified"
+    return Block(
+        id=f"session-{session_path.stem}-{index}",
+        kind=kind,
+        tool=tool,
+        content=text[:20_000],
+        status=status,
+        trust=trust,
+        metadata={"source": str(session_path), "role": role, "timestamp": message.get("timestamp")},
+    )
+
+
+def read_session_transcript_blocks(limit_sessions: int = 4, max_messages_per_session: int = 80) -> list[Block]:
+    session_dir = Path.home() / ".jcode" / "sessions"
+    if not session_dir.exists():
+        return []
+    blocks: list[Block] = []
+    for session_path in sorted(session_dir.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)[:limit_sessions]:
+        try:
+            raw = json.loads(session_path.read_text(errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        messages = raw.get("messages") if isinstance(raw, dict) else None
+        if not isinstance(messages, list):
+            continue
+        # Preserve early intent and latest state, which are the two regions most
+        # likely to matter after compaction.
+        selected = messages[: max_messages_per_session // 3] + messages[-(max_messages_per_session - max_messages_per_session // 3) :]
+        for idx, message in enumerate(selected):
+            if not isinstance(message, dict):
+                continue
+            block = classify_message_block(message, session_path, idx)
+            if block is not None:
+                blocks.append(block)
+    return blocks
+
+
+def extract_candidate_protected_terms(blocks: list[Block], limit: int = 24) -> list[str]:
+    patterns = [
+        r"\bTASK-\d+\b",
+        r"\b[A-Z][A-Z0-9_]{6,}\b",
+        r"\b(?:do not|don't|never|must|preserve|avoid|acceptance criteria|serious-callers-only)[^.\n]{0,120}",
+    ]
+    terms: list[str] = []
+    for block in blocks:
+        if block.kind != "user":
+            continue
+        for pattern in patterns:
+            for match in re.findall(pattern, block.content, flags=re.IGNORECASE):
+                term = match.strip(" .,:;`\"'")
+                if 6 <= len(term) <= 160 and term.lower() not in {item.lower() for item in terms}:
+                    terms.append(term)
+                    if len(terms) >= limit:
+                        return terms
+    return terms
+
+
 def synthetic_blocks() -> list[Block]:
     repeated_status = "On branch dev\nnothing to commit, working tree clean\n" * 20
     huge_log = "\n".join(
@@ -183,16 +282,64 @@ impl ContextPlanner {
     ]
 
 
-def generate_scenarios(out: Path, include_local: bool) -> Path:
+def realistic_replay_blocks(include_local: bool) -> tuple[list[Block], list[str]]:
     blocks = synthetic_blocks()
     if include_local:
-        blocks.extend(read_sample_sessions(limit=8))
+        blocks.extend(read_session_transcript_blocks())
+        blocks.extend(read_sample_sessions(limit=4))
+    protected = list(dict.fromkeys(PROTECTED_TERMS + extract_candidate_protected_terms(blocks)))
+    stale_context = "\n".join(
+        [
+            "This block intentionally simulates stale/foreign context and must not influence the answer.",
+            "PAYMENT_SECRET_DO_NOT_USE=example-redacted-value",
+            "foreign repo nix-config deploy instructions from a different project",
+            "stale production database credentials were discussed in an unrelated session",
+            "wrong branch deploy recommendation: force push main immediately",
+        ]
+        * 120
+    )
+    blocks.extend(
+        [
+            Block(
+                id="foreign-stale-context",
+                kind="tool_output",
+                tool="session_restore",
+                content=stale_context,
+                status="raw",
+                trust="unverified",
+                metadata={"fixture": "controlled_stale_foreign_context"},
+            ),
+            Block(
+                id="failed-tool-misleading",
+                kind="tool_output",
+                tool="bash",
+                content="ERROR: wrong branch deploy failed. PAYMENT_SECRET_DO_NOT_USE should be ignored. " * 200,
+                status="error",
+                trust="failed_tool",
+                metadata={"fixture": "controlled_failed_tool_noise"},
+            ),
+        ]
+    )
+    return blocks, protected
+
+
+def generate_scenarios(out: Path, include_local: bool, scenario_kind: str = "synthetic") -> Path:
+    if scenario_kind == "realistic":
+        blocks, protected_terms = realistic_replay_blocks(include_local)
+        name = "context_pipeline_realistic_replay"
+    else:
+        blocks = synthetic_blocks()
+        if include_local:
+            blocks.extend(read_sample_sessions(limit=8))
+        protected_terms = PROTECTED_TERMS
+        name = "context_pipeline_baseline"
     scenario = {
-        "name": "context_pipeline_baseline",
-        "protected_terms": PROTECTED_TERMS,
+        "name": name,
+        "protected_terms": protected_terms,
+        "stale_foreign_terms": STALE_FOREIGN_TERMS,
         "blocks": [block.__dict__ for block in blocks],
     }
-    path = out / "scenarios" / "context_pipeline_baseline.json"
+    path = out / "scenarios" / f"{name}.json"
     save_json(path, scenario)
     return path
 
@@ -373,10 +520,31 @@ def apply_technique(blocks: list[Block], technique: str, tool_budget_chars: int)
     return result
 
 
-def score_blocks(original: list[Block], transformed: list[Block], protected_terms: list[str], elapsed_ms: float, technique: str) -> dict[str, Any]:
+def restore_handle_coverage(transformed: list[Block]) -> float:
+    altered = [block for block in transformed if block.status in {"placeholder", "summarized", "read_only_skeleton"}]
+    if not altered:
+        return 1.0
+    covered = 0
+    for block in altered:
+        text = block.content.lower()
+        if "restore_id=" in text or "restore handle" in text or block.metadata.get("restore_id") or block.metadata.get("original_chars"):
+            covered += 1
+    return covered / len(altered)
+
+
+def score_blocks(
+    original: list[Block],
+    transformed: list[Block],
+    protected_terms: list[str],
+    elapsed_ms: float,
+    technique: str,
+    stale_foreign_terms: list[str] | None = None,
+) -> dict[str, Any]:
     original_text = "\n".join(block.content for block in original)
     transformed_text = "\n".join(block.content for block in transformed)
     retained_terms = [term for term in protected_terms if term.lower() in transformed_text.lower()]
+    stale_foreign_terms = stale_foreign_terms or []
+    retained_stale_terms = [term for term in stale_foreign_terms if term.lower() in transformed_text.lower()]
     placeholders = sum(1 for block in transformed if block.status == "placeholder")
     skeletons = sum(1 for block in transformed if block.status == "read_only_skeleton")
     summarized = sum(1 for block in transformed if block.status == "summarized")
@@ -384,9 +552,23 @@ def score_blocks(original: list[Block], transformed: list[Block], protected_term
     transformed_tokens = approx_tokens(transformed_text)
     saved = max(0, original_tokens - transformed_tokens)
     retention = len(retained_terms) / max(1, len(protected_terms))
+    stale_retention = len(retained_stale_terms) / max(1, len(stale_foreign_terms)) if stale_foreign_terms else 0.0
+    restore_coverage = restore_handle_coverage(transformed)
     noise_reduction = saved / max(1, original_tokens)
-    # Simple heuristic score, not a publication metric.
-    practical_score = round((retention * 0.55 + noise_reduction * 0.35 + min(1.0, placeholders / 4) * 0.10) * 100, 2)
+    # Simple heuristic score, not a publication metric. Higher-fidelity replay
+    # penalizes retention of known stale/foreign distractors and missing restore
+    # handles so token savings cannot mask reliability failures.
+    practical_score = round(
+        (
+            retention * 0.45
+            + noise_reduction * 0.25
+            + min(1.0, placeholders / 4) * 0.10
+            + restore_coverage * 0.10
+            + (1.0 - stale_retention) * 0.10
+        )
+        * 100,
+        2,
+    )
     return {
         "technique": technique,
         "original_tokens_est": original_tokens,
@@ -394,7 +576,10 @@ def score_blocks(original: list[Block], transformed: list[Block], protected_term
         "tokens_saved_est": saved,
         "noise_reduction_ratio": round(noise_reduction, 4),
         "protected_retention_ratio": round(retention, 4),
+        "stale_foreign_retention_ratio": round(stale_retention, 4),
+        "restore_handle_coverage_ratio": round(restore_coverage, 4),
         "retained_terms": retained_terms,
+        "retained_stale_foreign_terms": retained_stale_terms,
         "placeholders": placeholders,
         "skeletons": skeletons,
         "summarized_blocks": summarized,
@@ -407,12 +592,13 @@ def run_experiment(scenario_path: Path, out: Path, techniques: list[str], tool_b
     raw = load_json(scenario_path)
     original = [block_from_dict(item) for item in raw["blocks"]]
     protected_terms = raw.get("protected_terms", PROTECTED_TERMS)
+    stale_foreign_terms = raw.get("stale_foreign_terms", [])
     matrix = []
     for technique in techniques:
         started = time.perf_counter()
         transformed = apply_technique(original, technique, tool_budget_chars)
         elapsed_ms = (time.perf_counter() - started) * 1000
-        metrics = score_blocks(original, transformed, protected_terms, elapsed_ms, technique)
+        metrics = score_blocks(original, transformed, protected_terms, elapsed_ms, technique, stale_foreign_terms)
         matrix.append(metrics)
         save_json(out / "runs" / f"{technique}.context.json", [block.__dict__ for block in transformed])
     save_json(out / "matrix.json", matrix)
@@ -424,7 +610,16 @@ def run_experiment(scenario_path: Path, out: Path, techniques: list[str], tool_b
 
 
 def print_matrix(matrix: list[dict[str, Any]]) -> None:
-    cols = ["technique", "tokens_saved_est", "noise_reduction_ratio", "protected_retention_ratio", "latency_ms", "practical_score"]
+    cols = [
+        "technique",
+        "tokens_saved_est",
+        "noise_reduction_ratio",
+        "protected_retention_ratio",
+        "stale_foreign_retention_ratio",
+        "restore_handle_coverage_ratio",
+        "latency_ms",
+        "practical_score",
+    ]
     widths = {col: max(len(col), *(len(str(row[col])) for row in matrix)) for col in cols}
     print("  ".join(col.ljust(widths[col]) for col in cols))
     print("  ".join("-" * widths[col] for col in cols))
@@ -435,7 +630,7 @@ def print_matrix(matrix: list[dict[str, Any]]) -> None:
 def run_local(args: argparse.Namespace) -> None:
     out = Path(args.out or default_output_dir()).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    scenario = Path(args.scenario).resolve() if args.scenario else generate_scenarios(out, args.include_local_sessions)
+    scenario = Path(args.scenario).resolve() if args.scenario else generate_scenarios(out, args.include_local_sessions, args.scenario_kind)
     matrix = run_experiment(scenario, out, args.technique, args.tool_budget_chars)
     print_matrix(matrix)
     print(f"\nWrote context evaluation artifacts to {out}")
@@ -472,6 +667,7 @@ def run_remote(args: argparse.Namespace) -> None:
         f"cd {remote_repo} && "
         f"python3 scripts/context_pipeline_eval.py run-local "
         f"--out {remote_repo}/target/context-eval/remote "
+        f"--scenario-kind {args.scenario_kind} "
         f"{'--include-local-sessions' if args.include_local_sessions else ''}"
     )
     remote(remote_cmd)
@@ -489,12 +685,14 @@ def build_parser() -> argparse.ArgumentParser:
     gen = sub.add_parser("generate-scenarios", help="write deterministic synthetic/local replay scenarios")
     gen.add_argument("--out", default=None)
     gen.add_argument("--include-local-sessions", action="store_true")
-    gen.set_defaults(func=lambda args: print(generate_scenarios(Path(args.out or default_output_dir()), args.include_local_sessions)))
+    gen.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
+    gen.set_defaults(func=lambda args: print(generate_scenarios(Path(args.out or default_output_dir()), args.include_local_sessions, args.scenario_kind)))
 
     run = sub.add_parser("run-local", help="run local deterministic context-pipeline experiments")
     run.add_argument("--scenario", default=None)
     run.add_argument("--out", default=None)
     run.add_argument("--include-local-sessions", action="store_true")
+    run.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
     run.add_argument("--tool-budget-chars", type=int, default=4_000)
     run.add_argument("--technique", action="append", choices=DEFAULT_TECHNIQUES + ["duplicate_prune"], default=None)
     run.set_defaults(func=run_local)
@@ -505,6 +703,7 @@ def build_parser() -> argparse.ArgumentParser:
     remote.add_argument("--vm-start-cmd", default=os.environ.get("JCODE_CONTEXT_EVAL_VM_START_CMD", ""))
     remote.add_argument("--out", default=None)
     remote.add_argument("--include-local-sessions", action="store_true")
+    remote.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
     remote.set_defaults(func=run_remote)
 
     return parser

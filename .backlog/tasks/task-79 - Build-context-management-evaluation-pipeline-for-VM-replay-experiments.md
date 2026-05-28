@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@jcode'
 created_date: '2026-05-28 12:32'
-updated_date: '2026-05-28 12:36'
+updated_date: '2026-05-28 13:09'
 labels:
   - context
   - evaluation
@@ -59,6 +59,8 @@ Create a deterministic experimental pipeline for evaluating candidate context-ma
 Implemented the first deterministic harness version with local scenario generation, prototype transforms, metrics, CSV/JSON artifacts, and remote SSH/rsync execution.
 
 Validated non-interactive SSH to `serious-callers-only` and completed a remote smoke run using `/tmp/jcode-context-eval-smoke` as the staging directory.
+
+Added and validated higher-fidelity realistic replay mode. Local realistic run: combined_p0 score 79.67, trust_quarantine 77.98, boundary_gate 71.03, tool_budget 58.2. Remote serious-callers-only realistic run: combined_p0 score 79.96, trust_quarantine 78.37, boundary_gate 71.03, tool_budget 58.28. The ranking broadly holds, but trust quarantine appears more important than raw budgeting for reliability.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -86,4 +88,6 @@ Validation:
 - `git diff --check`
 - `ssh -o BatchMode=yes -o ConnectTimeout=5 serious-callers-only 'echo context-eval-ssh-ok'`
 - `python3 scripts/context_pipeline_eval.py run-remote --host serious-callers-only --remote-dir /tmp/jcode-context-eval-smoke --out target/context-eval/remote-smoke`
+
+Follow-up higher-fidelity evaluation mode added: realistic scenarios now sample recent JCODE session snapshots, preserve early intent plus latest state, inject controlled stale/foreign distractors, and score stale/foreign retention plus restore-handle coverage. Local and serious-callers-only smoke runs kept combined_p0 first, moved trust_quarantine close behind, and showed that tool_budget alone preserves stale distractors despite token savings.
 <!-- SECTION:FINAL_SUMMARY:END -->

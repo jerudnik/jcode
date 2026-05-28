@@ -35,6 +35,16 @@ To include local JCODE log snippets from `~/.jcode/logs`:
 python3 scripts/context_pipeline_eval.py run-local --include-local-sessions
 ```
 
+To use the higher-fidelity replay fixture, which samples recent
+`~/.jcode/sessions/*.json` messages, preserves early intent plus latest state,
+and injects controlled stale/foreign distractors:
+
+```bash
+python3 scripts/context_pipeline_eval.py run-local \
+  --scenario-kind realistic \
+  --include-local-sessions
+```
+
 Outputs are written under:
 
 ```text
@@ -50,6 +60,8 @@ The terminal table includes:
 - estimated tokens saved,
 - noise-reduction ratio,
 - protected-term retention ratio,
+- stale/foreign distractor retention ratio,
+- restore-handle coverage ratio,
 - transform latency,
 - a simple heuristic practical score.
 
@@ -62,6 +74,17 @@ Basic remote run:
 ```bash
 python3 scripts/context_pipeline_eval.py run-remote \
   --host serious-callers-only
+```
+
+Higher-fidelity remote replay run:
+
+```bash
+python3 scripts/context_pipeline_eval.py run-remote \
+  --host serious-callers-only \
+  --remote-dir /tmp/jcode-context-eval-realistic \
+  --out target/context-eval/realistic-remote \
+  --scenario-kind realistic \
+  --include-local-sessions
 ```
 
 With a host-side VM/provision command:
@@ -113,6 +136,7 @@ Good candidates should show:
 - meaningful token/noise reduction,
 - very low transform latency,
 - clear restore handles or placeholders for omitted content,
+- low or zero retention of controlled stale/foreign distractors,
 - simple implementation path and low persistent-state burden.
 
 A technique should be deferred if it:
@@ -134,7 +158,31 @@ Initial pragmatic thresholds:
 | Boundary check latency | `< 5ms` per file/tool output in microbenchmarks |
 | Noise reduction on noisy scenarios | `>= 0.30` |
 | Restore handle coverage for placeholders | `100%` |
+| Controlled stale/foreign retention | `0.0` when the scenario includes distractors |
 | Snapshot determinism | stable across repeated runs |
+
+## Higher-fidelity replay smoke result
+
+The first realistic local and remote smoke runs sampled recent JCODE session
+snapshots and injected controlled stale/foreign context. The top-level result
+held, but the ranking became more informative:
+
+- `combined_p0` remained the top candidate.
+- `trust_quarantine` moved close to `combined_p0` because it removed the
+  controlled stale/foreign terms while preserving protected terms.
+- `boundary_gate` reduced noise but still retained some stale/foreign terms in
+  smaller distractor blocks.
+- `tool_budget` saved tokens but preserved all controlled stale/foreign terms,
+  so it should not ship alone as a reliability feature.
+
+Representative remote run on `serious-callers-only`:
+
+| Technique | Saved tokens est. | Noise reduction | Protected retention | Stale/foreign retention | Score |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `combined_p0` | 35087 | 0.1984 | 1.0 | 0.0 | 79.96 |
+| `trust_quarantine` | 23823 | 0.1347 | 1.0 | 0.0 | 78.37 |
+| `boundary_gate` | 24985 | 0.1413 | 1.0 | 0.5 | 71.03 |
+| `tool_budget` | 23236 | 0.1314 | 1.0 | 1.0 | 58.28 |
 
 ## Next improvements
 
