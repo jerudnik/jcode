@@ -11,6 +11,7 @@ pub(super) struct PruneStats {
     pub duplicate_tool_results: usize,
     pub superseded_failed_results: usize,
     pub stale_error_inputs: usize,
+    pub provenance_routed_blocks: usize,
     pub chars_saved: usize,
 }
 
@@ -22,6 +23,7 @@ pub(super) fn prune_provider_messages(messages: &mut [Message]) -> PruneStats {
 
     stats.chars_saved += prune_duplicate_tool_results(messages, &mut stats);
     stats.chars_saved += prune_superseded_failed_results(messages, &mut stats);
+    stats.chars_saved += route_low_trust_context(messages, &mut stats);
     stats.chars_saved += prune_stale_error_inputs(messages, &mut stats);
     stats
 }
@@ -178,6 +180,159 @@ fn prune_stale_error_inputs(messages: &mut [Message], stats: &mut PruneStats) ->
         }
     }
     saved
+}
+
+fn route_low_trust_context(messages: &mut [Message], stats: &mut PruneStats) -> usize {
+    let protected_start = messages.len().saturating_sub(RECENT_MESSAGES_TO_PROTECT);
+    let mut tool_name_by_id: HashMap<String, String> = HashMap::new();
+    let mut saved = 0usize;
+
+    for (message_idx, message) in messages.iter_mut().enumerate() {
+        for block in &mut message.content {
+            match block {
+                ContentBlock::ToolUse { id, name, .. } => {
+                    tool_name_by_id.insert(id.clone(), name.clone());
+                }
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error,
+                } if message_idx < protected_start => {
+                    let tool_name = tool_name_by_id.get(tool_use_id).map(String::as_str);
+                    if !should_route_tool_result(content, *is_error == Some(true), tool_name) {
+                        continue;
+                    }
+                    let old_len = content.len();
+                    let replacement = restore_placeholder(
+                        "provenance_routed_low_trust_tool_result",
+                        tool_name,
+                        None,
+                        content,
+                    );
+                    if replacement.len() < old_len {
+                        *content = replacement;
+                        saved = saved.saturating_add(old_len.saturating_sub(content.len()));
+                        stats.provenance_routed_blocks += 1;
+                    }
+                }
+                ContentBlock::Text { text, .. } if message_idx < protected_start => {
+                    if !should_route_assistant_text(
+                        message.role == crate::message::Role::Assistant,
+                        text,
+                    ) {
+                        continue;
+                    }
+                    let old_len = text.len();
+                    let replacement = restore_placeholder(
+                        "provenance_routed_speculative_or_stale_assistant_text",
+                        None,
+                        None,
+                        text,
+                    );
+                    if replacement.len() < old_len {
+                        *text = replacement;
+                        saved = saved.saturating_add(old_len.saturating_sub(text.len()));
+                        stats.provenance_routed_blocks += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    saved
+}
+
+fn should_route_tool_result(content: &str, is_error: bool, tool_name: Option<&str>) -> bool {
+    if is_error && content.len() > 400 {
+        return true;
+    }
+    let lower = content.to_ascii_lowercase();
+    let stale_or_foreign = [
+        "stale/foreign",
+        "foreign repo",
+        "wrong branch deploy",
+        "stale production database",
+        "payment_secret_do_not_use",
+        "session_restore",
+        "restored session",
+        "cached provider prefix",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle));
+    let risky_tool = matches!(
+        tool_name,
+        Some("session_restore" | "provider_payload_cache" | "repo_map")
+    );
+    (stale_or_foreign || risky_tool) && content.len() > 200
+}
+
+fn should_route_assistant_text(is_assistant: bool, text: &str) -> bool {
+    if !is_assistant || text.len() <= 300 {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    [
+        "speculative",
+        "maybe the root cause",
+        "later disproven",
+        "wrong branch deploy",
+        "stale production database",
+        "payment_secret_do_not_use",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn restore_placeholder(
+    reason: &str,
+    tool_name: Option<&str>,
+    path: Option<&str>,
+    original: &str,
+) -> String {
+    let restore_id = stable_text_id("restore", original);
+    let protected = protected_snippets(original);
+    let protected_text = if protected.is_empty() {
+        "none".to_string()
+    } else {
+        protected.join(" | ")
+    };
+    format!(
+        "[jcode context placeholder: reason={reason}; trust=low; status=omitted; tool={}; path={}; chars={}; restore_id={restore_id}; protected_snippets={protected_text}]",
+        tool_name.unwrap_or("-"),
+        path.unwrap_or("-"),
+        original.len(),
+    )
+}
+
+fn protected_snippets(text: &str) -> Vec<String> {
+    let mut snippets = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        if trimmed.len() <= 180
+            && (lower.contains("task-")
+                || lower.contains("do not")
+                || lower.contains("must")
+                || lower.contains("acceptance criteria")
+                || lower.contains("restore handle")
+                || lower.contains("src/")
+                || lower.contains("context_pruning.rs"))
+            && !snippets.iter().any(|existing| existing == trimmed)
+        {
+            snippets.push(trimmed.to_string());
+            if snippets.len() >= 6 {
+                break;
+            }
+        }
+    }
+    snippets
+}
+
+fn stable_text_id(prefix: &str, text: &str) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{prefix}-{:016x}", hasher.finish())
 }
 
 fn stable_tool_signature(name: &str, input: &serde_json::Value) -> u64 {
@@ -344,6 +499,68 @@ mod tests {
             ContentBlock::ToolResult { content, .. } => {
                 assert!(content.contains("failed tool output omitted"));
             }
+            other => panic!("unexpected block: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn routes_old_stale_restored_context_with_restore_metadata() {
+        let stale = [
+            "This restored session block is stale/foreign and should not steer the answer.",
+            "TASK-88 must preserve acceptance criteria and src/agent/context_pruning.rs.",
+            "PAYMENT_SECRET_DO_NOT_USE wrong branch deploy stale production database.",
+        ]
+        .join("\n")
+        .repeat(80);
+        let mut messages = vec![
+            Message::user("TASK-88: do not drop protected user intent"),
+            assistant_tool("restore", "session_restore", json!({ "session": "old" })),
+            tool_result("restore", &stale, false),
+        ];
+        messages.extend((0..13).map(|idx| Message::assistant_text(&format!("filler {idx}"))));
+
+        let stats = prune_provider_messages(&mut messages);
+
+        assert_eq!(stats.provenance_routed_blocks, 1);
+        assert!(stats.chars_saved > 0);
+        match &messages[2].content[0] {
+            ContentBlock::ToolResult { content, .. } => {
+                assert!(content.contains("restore_id=restore-"));
+                assert!(content.contains("protected_snippets="));
+                assert!(content.contains("TASK-88 must preserve acceptance criteria"));
+                assert!(content.contains("context_pruning.rs"));
+                assert!(!content.contains("PAYMENT_SECRET_DO_NOT_USE wrong branch deploy"));
+            }
+            other => panic!("unexpected block: {other:?}"),
+        }
+        match &messages[0].content[0] {
+            ContentBlock::Text { text, .. } => {
+                assert_eq!(text, "TASK-88: do not drop protected user intent");
+            }
+            other => panic!("unexpected block: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn routes_old_speculative_assistant_text_but_keeps_recent_text() {
+        let speculative = "Maybe the root cause is provider auth. This is speculative and later disproven. wrong branch deploy ".repeat(80);
+        let mut messages = vec![Message::assistant_text(&speculative)];
+        messages.extend((0..13).map(|idx| Message::assistant_text(&format!("filler {idx}"))));
+        messages.push(Message::assistant_text(&speculative));
+
+        let stats = prune_provider_messages(&mut messages);
+
+        assert_eq!(stats.provenance_routed_blocks, 1);
+        match &messages[0].content[0] {
+            ContentBlock::Text { text, .. } => {
+                assert!(text.contains("provenance_routed_speculative_or_stale_assistant_text"));
+                assert!(text.contains("restore_id=restore-"));
+                assert!(!text.contains("wrong branch deploy wrong branch deploy"));
+            }
+            other => panic!("unexpected block: {other:?}"),
+        }
+        match messages.last().unwrap().content.first().unwrap() {
+            ContentBlock::Text { text, .. } => assert_eq!(text, &speculative),
             other => panic!("unexpected block: {other:?}"),
         }
     }

@@ -910,3 +910,23 @@ Remote SCO confirmation broadly matched controls, cache-confusion, synthetic, an
 5. Add `cache_isolation` inside cache layers specifically: repo maps, skeletons, token estimates, embeddings/retrieval, prompt projections, provider payloads, and tool/result caches.
 6. Add `goal_task_ledger`, `attention_index`, `pinned_spans`, and `scratchpad` only as downstream salience/continuity layers after pruning/quarantine, not as safety controls by themselves.
 7. Treat `recency_importance` and `memory_ttl` as secondary ranking/memory hygiene features rather than primary reliability gates.
+
+## TASK-88 runtime hardening implementation notes
+
+TASK-88 moved the first TASK-87 recommendation into the runtime provider-message projection path in `src/agent/context_pruning.rs`.
+
+Runtime behavior added:
+
+- Old low-trust tool results are replaced with compact provenance placeholders when they are stale/foreign, restored-session/provider-cache-like, repo-map-like, or old failed outputs.
+- Old speculative assistant text is replaced when it contains stale/speculative markers such as `speculative`, `later disproven`, `wrong branch deploy`, or stale production-database language.
+- Placeholders include `reason`, `trust=low`, `status=omitted`, `tool`, original character count, a deterministic `restore_id`, and short protected snippets.
+- Protected snippets preserve short lines mentioning task IDs, `do not`/`must` constraints, acceptance criteria, restore handles, `src/` paths, and `context_pruning.rs`.
+- The most recent provider-visible messages remain protected by the existing recent-message window.
+
+Validation:
+
+- `cargo test --profile selfdev -p jcode context_pruning -- --nocapture`
+- `python3 scripts/context_eval_matrix.py --mode local --scenario-kind negative --scenario-kind cache_confusion --scenario-kind public_benchmark --include-local-sessions false --tool-budget-chars 1200 --repetitions 1 --technique baseline --technique supersession_prune --technique provenance_routing --technique lazy_restore_handles --technique combined_p0 --out target/context-eval-matrix/task88-regression`
+- `git diff --check`
+
+The deterministic regression retained the known TASK-87 caveat: public-benchmark protected retention still needs a future protected-span-aware summarizer, but negative and cache-confusion controls passed for the recommended techniques while baseline failed as expected.
