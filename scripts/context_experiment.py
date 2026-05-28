@@ -123,7 +123,7 @@ def artifact_entry(path: Path) -> dict[str, Any]:
 
 def collect_artifacts(artifacts_dir: Path) -> dict[str, Any]:
     artifacts: dict[str, Any] = {}
-    for name in ("matrix.json", "matrix.csv"):
+    for name in ("matrix.json", "matrix.csv", "summary.json", "summary.csv", "all_rows.json", "all_rows.csv"):
         path = artifacts_dir / name
         if path.exists():
             artifacts[name] = artifact_entry(path)
@@ -141,6 +141,8 @@ def collect_artifacts(artifacts_dir: Path) -> dict[str, Any]:
 
 def infer_techniques(artifacts_dir: Path) -> list[str]:
     matrix_path = artifacts_dir / "matrix.json"
+    if not matrix_path.exists():
+        matrix_path = artifacts_dir / "summary.json"
     if matrix_path.exists():
         raw = load_json(matrix_path)
         if isinstance(raw, list):
@@ -153,19 +155,25 @@ def infer_techniques(artifacts_dir: Path) -> list[str]:
 
 def infer_metrics(artifacts_dir: Path) -> dict[str, Any]:
     matrix_path = artifacts_dir / "matrix.json"
+    repeated_summary = False
+    if not matrix_path.exists():
+        matrix_path = artifacts_dir / "summary.json"
+        repeated_summary = matrix_path.exists()
     if not matrix_path.exists():
         return {"matrix_rows": 0, "best_technique": None}
     raw = load_json(matrix_path)
     if not isinstance(raw, list):
         return {"matrix_rows": 0, "best_technique": None}
     best = None
+    score_key = "practical_score_mean" if repeated_summary else "practical_score"
     for row in raw:
-        if isinstance(row, dict) and (best is None or row.get("practical_score", -1) > best.get("practical_score", -1)):
+        if isinstance(row, dict) and (best is None or row.get(score_key, -1) > best.get(score_key, -1)):
             best = row
     return {
         "matrix_rows": len(raw),
         "best_technique": best.get("technique") if best else None,
-        "best_practical_score": best.get("practical_score") if best else None,
+        "best_practical_score": best.get(score_key) if best else None,
+        "repeated_matrix": repeated_summary,
     }
 
 

@@ -86,6 +86,47 @@ def find_default_model_dir(root: Path) -> Path | None:
     return matches[0].parent if matches else None
 
 
+def find_default_matrix_path(root: Path) -> Path:
+    """Return the deterministic matrix artifact for either single or repeated runs."""
+    for name in ("matrix.json", "summary.json", "all_rows.json"):
+        candidate = root / name
+        if candidate.exists():
+            return candidate
+    raise ReportError(f"missing required artifact: expected matrix.json, summary.json, or all_rows.json under {root}")
+
+
+def normalize_deterministic_rows(rows: list[dict[str, Any]], source_name: str) -> list[dict[str, Any]]:
+    """Normalize context_pipeline_eval and context_eval_matrix rows for reporting.
+
+    Single-run artifacts use base metric names such as `practical_score`.
+    Repeated matrix summaries use aggregate names such as `practical_score_mean`
+    and `stale_foreign_retention_ratio_max`. Preserve the original keys while
+    filling the base names consumed by the report gates and tables.
+    """
+    if source_name == "summary.json":
+        normalized: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            for field in DETERMINISTIC_FIELDS:
+                if field in item:
+                    continue
+                if field == "practical_score":
+                    item[field] = item.get("practical_score_mean")
+                elif field == "latency_ms":
+                    item[field] = item.get("latency_ms_max", item.get("latency_ms_mean"))
+                elif field == "protected_retention_ratio":
+                    item[field] = item.get("protected_retention_ratio_min", item.get("protected_retention_ratio_mean"))
+                elif field == "stale_foreign_retention_ratio":
+                    item[field] = item.get("stale_foreign_retention_ratio_max", item.get("stale_foreign_retention_ratio_mean"))
+                elif field == "restore_handle_coverage_ratio":
+                    item[field] = item.get("restore_handle_coverage_ratio_min", item.get("restore_handle_coverage_ratio_mean"))
+                else:
+                    item[field] = item.get(f"{field}_mean")
+            normalized.append(item)
+        return normalized
+    return rows
+
+
 def summarize_model_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -260,10 +301,11 @@ code {{ background: #f5f5f5; padding: 0.1rem 0.25rem; }}
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     artifacts = Path(args.artifacts).resolve()
-    matrix_path = Path(args.matrix).resolve() if args.matrix else artifacts / "matrix.json"
+    matrix_path = Path(args.matrix).resolve() if args.matrix else find_default_matrix_path(artifacts)
     deterministic = load_json(matrix_path)
     if not isinstance(deterministic, list):
         raise ReportError(f"matrix artifact must be a JSON list: {matrix_path}")
+    deterministic = normalize_deterministic_rows(deterministic, matrix_path.name)
     deterministic = sorted(deterministic, key=lambda row: as_float(row.get("practical_score")), reverse=True)
 
     model_dir = Path(args.model_eval).resolve() if args.model_eval else find_default_model_dir(artifacts)
@@ -287,7 +329,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--artifacts", required=True, help="Context eval artifact root containing matrix.json")
+    parser.add_argument("--artifacts", required=True, help="Context eval artifact root containing matrix.json, summary.json, or all_rows.json")
     parser.add_argument("--out", default=None, help="Output directory for report.md/report.html, defaults to artifacts/report")
     parser.add_argument("--matrix", default=None, help="Override deterministic matrix.json path")
     parser.add_argument("--model-eval", default=None, help="Optional model_eval directory containing results.json")
