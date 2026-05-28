@@ -24,6 +24,10 @@ nix shell $HOME/infrastructure/nix-config#agents --command bash -c '<pipeline>'
 
 Prefer built-in Jcode tools first for files, code search, edits, browser use, and web search. Use the toolbox when a specialized CLI is better.
 
+## Cache behavior
+
+The fleet Attic cache on SMFS is normally used automatically by Nix through the active substituter config. If a large first run still fetches/builds, the path is probably missing from Attic; warm it once from a host with the Attic push hook/token, then future runs should substitute from SMFS.
+
 ## Tools by job
 
 - Docs/reference: `ctx7`, `manix`, `cht-sh` (`cht.sh`), `tealdeer` (`tldr`), `nix-search-cli` (`nix-search`), `nix-index`.
