@@ -351,3 +351,119 @@ Easy first patches suggested by the swarm:
 3. Add cache-tracker reason categories for known intentional prefix rewrites.
 4. Add synthetic cross-project cache canary fixtures to the eval harness.
 5. Add tests for cross-project prompt/static cache boundaries.
+
+## Experiment battery and decision rubric
+
+A second research pass focused on datasets, experimental design, and valuation
+criteria. The recommended battery is staged so we can reject unsafe techniques
+early before spending effort on expensive provider or benchmark runs.
+
+### Dataset and benchmark shortlist
+
+| Source | Best use | Integration effort | Caveats |
+| --- | --- | --- | --- |
+| First-party synthetic canaries | Exact tests for protected facts, stale/foreign facts, cross-project cache leakage, duplicate tools, restore handles, and deterministic ordering. | Low | Must avoid overfitting; keep fixtures small and adversarial. |
+| Realistic local JCODE replay | JCODE-specific regressions from `~/.jcode/sessions` plus injected canaries. | Low to medium | Private/local data only; do not vendor logs. |
+| Terminal-Bench style tasks | End-to-end terminal agent task completion under context variants. | Medium | Slower and environment-sensitive; useful after deterministic gates pass. |
+| SWE-bench Lite/Verified style issue fixtures | Repository/task continuity, code-edit relevance, and stale context contamination. | Medium to high | More expensive and may require harness adaptation; licensing/version should be verified before vendoring. |
+| RULER / needle-in-a-haystack style long-context tasks | Long-context retention, retrieval, and attention degradation. | Low to medium | Synthetic; good for controlled stress but not sufficient alone. |
+| LongBench / NoLiMa-style long-context QA | Attention and retrieval behavior under distractors. | Medium | Less coding-agent-specific. |
+| RepoBench-style code retrieval/completion | Codebase context selection and repository-aware retrieval. | Medium | May need adaptation to JCODE tool/prompt format. |
+| ToolBench / WebArena / OSWorld / AgentBench-style suites | Multi-tool and agentic task behavior under context/cache changes. | High | Broad agent benchmarks can be noisy and costly; defer until core gates are stable. |
+
+Public stale/foreign cache-leakage datasets are immature, so the battery should
+start with first-party synthetic isolation canaries and JCODE replay fixtures,
+then graduate only surviving candidates to public benchmarks.
+
+### Recommended experiment battery
+
+1. **Static transform regression**
+   - Run synthetic fixtures through each prototype transform.
+   - Assert exact protected retention, stale/foreign removal, restore-handle
+     coverage, and stable output hashes.
+2. **Cross-project cache canary**
+   - Create two fake projects with overlapping filenames, symbols, and task IDs
+     but conflicting protected facts.
+   - Prime caches from project A, switch to project B, and assert zero foreign
+     cache hits or answer contamination.
+3. **Counterfactual stale-context replay**
+   - Replay realistic sessions with injected stale plans, failed tool outputs,
+     and superseded hypotheses.
+   - Score stale retention, supersession correctness, and protected-goal
+     retention.
+4. **A/B provider-payload comparison**
+   - Render canonical baseline payload and candidate payload from the same
+     transcript.
+   - Diff ordering, protected spans, omitted artifacts, cache fingerprints, and
+     tool/schema/system prompt hashes before any model call.
+5. **Question-answerability probes**
+   - Attach deterministic questions to each fixture, with expected and forbidden
+     answers, e.g. “What task are we working on?” and “Which repo does this fact
+     belong to?”
+   - Use exact/regex scoring first; add model-as-judge only as a later optional
+     layer.
+6. **Ablation matrix**
+   - Evaluate each technique alone and in combinations: gatekeeping,
+     quarantine, goal ledger, supersession, attention preamble, lazy restore,
+     cache namespace, and cache provenance.
+   - Keep combinations small enough to identify which component causes wins or
+     regressions.
+7. **Repeated deterministic seeds**
+   - Run each fixture multiple times and assert stable output hashes and stable
+     metrics. Any nondeterminism blocks runtime adoption.
+8. **Graduation benchmarks**
+   - For candidates passing deterministic gates, run a small Terminal-Bench or
+     SWE-bench-style subset and compare task pass rate, contamination, latency,
+     and token cost.
+
+### Go/no-go valuation rubric
+
+Score candidates from `0` to `5` per category, multiply by weight, then apply
+the hard gates below. Token savings alone should never justify a candidate that
+hurts reliability.
+
+| Criterion | Weight | High score means |
+| --- | ---: | --- |
+| Correctness / reliability impact | 25% | Prevents real failures: protected facts survive, stale/foreign content and false cache hits disappear. |
+| User-visible benefit | 15% | Fewer wrong answers, better continuity, lower latency, fewer repeated context mistakes. |
+| Implementation effort | 12% | Small, localized, incremental implementation with limited migrations. |
+| Runtime cost | 10% | Low transform/cache overhead and no visible UI/provider delay. |
+| Maintenance risk | 10% | Clear schema/versioning story, few hidden couplings, low dependency risk. |
+| Observability | 10% | Fingerprints, provenance, reason categories, logs, and replay artifacts make failures debuggable. |
+| Regression risk | 10% | Low chance of dropping needed context, poisoning cache behavior, or destabilizing prompts. |
+| Reversibility | 8% | Feature-flagged, fallbackable, and rollback-safe with cache invalidation escape hatches. |
+
+Hard gates before scoring:
+
+- Protected instruction/task retention `>= 0.98` and protected answerability
+  `>= 0.95`.
+- Cross-project leakage rate, false cache-hit rate, and provider/protected-fact
+  stale-hit rate are all `0.0` for cache-related candidates.
+- Typical transform latency `< 20ms`, p95 `< 100ms`, unless explicitly outside
+  the hot path.
+- Deterministic snapshot/replay/property test story exists.
+- Sufficient observability exists to diagnose wrong inclusion/exclusion.
+- No irreversible or migration-heavy design without a separate migration plan.
+
+Decision thresholds after hard gates:
+
+| Decision | Weighted score |
+| --- | ---: |
+| Go / implement now | `>= 4.0 / 5` |
+| Cache isolation Go | `>= 4.2 / 5` |
+| Prototype first | `3.25 - 3.99` |
+| Defer | `2.5 - 3.24` |
+| No-Go | `< 2.5` |
+
+### Immediate evaluation build-out
+
+The next harness extension should add:
+
+- `cache_cross_project` synthetic fixture with two fake repos and conflicting
+  task/file facts.
+- Fixture-level `questions` with `expected` and `forbidden` answer patterns.
+- Output-hash determinism checks across repeated runs.
+- Per-candidate valuation rows alongside `matrix.csv`, including estimated
+  implementation effort, runtime cost, observability, and reversibility.
+- Optional benchmark adapters kept out of the hot path until deterministic
+  gates pass.

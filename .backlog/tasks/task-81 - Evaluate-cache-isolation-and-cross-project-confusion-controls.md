@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@jcode'
 created_date: '2026-05-28 13:35'
-updated_date: '2026-05-28 13:41'
+updated_date: '2026-05-28 13:46'
 labels:
   - context
   - evaluation
@@ -36,4 +36,6 @@ Investigate whether shared caches can cause cross-project context confusion, sta
 
 <!-- SECTION:NOTES:BEGIN -->
 Research swarm refinement: cache risks categorized across repo maps, skeletons/summaries, token estimates, embeddings/retrieval, prompt projections/compaction, provider payload cache, tool/result caches, UI/render caches, and external API caches. Recommended structured keys with project_namespace, source/content/transform/environment identity; two-level cache design with global content-addressed blobs plus project/session namespace manifests; zero cross-project leakage/false hits as hard requirements. Added taxonomy, metrics, and JCODE integration points to docs/CONTEXT_PIPELINE_EVAL.md.
+
+Second swarm added cache experiment gates: cache_cross_project fixture, zero cross-project leakage/false hits/provider protected-fact stale hits, hit quality parity against recompute, invalidation recall, miss penalty, and cache size growth thresholds. Consolidated in docs/CONTEXT_PIPELINE_EVAL.md.
 <!-- SECTION:NOTES:END -->

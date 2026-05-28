@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@jcode'
 created_date: '2026-05-28 13:23'
-updated_date: '2026-05-28 13:41'
+updated_date: '2026-05-28 13:46'
 labels:
   - context
   - evaluation
@@ -52,4 +52,6 @@ Proposed near-term prototype batch: goal/task retention ledger, supersession pru
 Consolidation done: the candidate list and recommended next prototype batch have been copied into docs/CONTEXT_PIPELINE_EVAL.md under 'Pending prototype/evaluation ledger', so TASK-79/doc remains the single main place to track completed results plus pending targets.
 
 Research swarm refinement: prioritize canonical goal/task ledger from user/backlog/tool-success facts, runtime supersession pruning extending src/agent/context_pruning.rs, deterministic attention preamble/context index, lazy restore handles with content hashes/trust/supersession metadata, and source-bound supersedable protected spans. Added methodology thresholds to docs/CONTEXT_PIPELINE_EVAL.md.
+
+Second swarm added experiment battery guidance: first-party synthetic canaries, realistic local JCODE replay, public benchmark graduation with Terminal-Bench/SWE-bench/RULER/LongBench/RepoBench/agent suites, A/B provider payload comparison, answerability probes, ablation matrix, repeated deterministic seeds, and a weighted go/no-go rubric. Consolidated in docs/CONTEXT_PIPELINE_EVAL.md.
 <!-- SECTION:NOTES:END -->
