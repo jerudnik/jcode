@@ -930,3 +930,59 @@ Validation:
 - `git diff --check`
 
 The deterministic regression retained the known TASK-87 caveat: public-benchmark protected retention still needs a future protected-span-aware summarizer, but negative and cache-confusion controls passed for the recommended techniques while baseline failed as expected.
+
+## TASK-89 runtime cache isolation implementation notes
+
+TASK-89 moved the `cache_isolation` recommendation from the eval-only `cache_confusion` finding into every runtime cache layer that stores provider/projection-sensitive data, so resuming a session, switching workspaces, or changing provider/model can never bleed foreign content into projection.
+
+Shared contract (new `jcode-cache-isolation` crate):
+
+- `IsolationKey { session_id, workspace_root_canonical, provider, model, content_hash, trust_tier, schema_version }` with stable BLAKE3-based fingerprint.
+- `canonicalize_workspace_root()` so `/foo` and `/private/foo` (macOS symlink) cannot return the same hit.
+- `TrustTier` enum and crate-level `SCHEMA_VERSION` constant: bumping the constant invalidates every layer simultaneously (one-knob recovery).
+
+Runtime caches routed through the contract:
+
+- `semantic_embed_cache` (compaction): keyed on `(embedding_model, embedding_dim, SCHEMA_VERSION)` via an embedding-context fingerprint. Per-session isolation comes from the per-session `CompactionManager` instance plus `reset_provider_session()` clearing on switches.
+- `GraphCache` (repo map): folds `SCHEMA_VERSION` into `(PathBuf, schema_version)`.
+- `MESSAGE_CACHE` (TUI render): extended with `isolation_fp` derived from session+workspace+SCHEMA_VERSION since it is render-only.
+- `openrouter` `DISK_CACHE_MEMO` / `ENDPOINTS_DISK_CACHE_MEMO`: wrapped in `OrCacheKey { path, schema_version }`.
+
+Explicit invalidation hooks (`src/server/cache_invalidation.rs`):
+
+- `clear_message_cache`, `clear_message_cache_for_isolation`, `clear_graph_cache`, `clear_disk_cache_memos` public APIs.
+- Wired into `handle_resume_session` (session-resume hook) and `apply_set_model` (provider/model-change hook).
+- `semantic_embed_cache` already covered by `CompactionManager::reset()` on `reset_provider_session`.
+
+Eval coverage (extended in TASK-89 AC#5):
+
+- Three new runtime-cache fixtures in `scripts/context_pipeline_eval.py::cache_confusion_blocks()` mirror the IsolationKey contract: `cache-foreign-isolation-fp-message-cache` (foreign `isolation_fp`), `cache-foreign-embedding-context-semantic` (foreign `embedding_context_fp`), `cache-stale-schema-version-openrouter` (stale `schema_version`). Each is neutral on `current_project` / `current_session` / `project_namespace` so only the runtime-axis filter rejects it.
+- The `cache_isolation` technique branch now applies a `runtime_axis_mismatch` filter gated on `active_*` sentinel keys, so other scenarios stay bit-identical.
+- Result on `cache_confusion` (matrix `target/context-eval-matrix/task89-ac5/`): `cache_isolation` reaches `stale_foreign_retention_ratio_max=0.0`, `practical_score_mean=99.48`, `passes_reliability_gates=True` across all 6 cells; baseline stays at `1.0` / `55.0` / `False`.
+
+Validation:
+
+- `cargo test --profile selfdev -p jcode-cache-isolation` (11/11), `-p jcode-tui-messages cache::` (6/6), `-p jcode-provider-openrouter` (6/6), `-p jcode-compaction-core semantic_cache` (1/1), `-p jcode memory::cache::` (2/2).
+- `scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode` clean in ~1m.
+
+## TASK-90 public_benchmark protected-retention plateau
+
+TASK-87/88/89 all left `protected_retention_ratio_min = 0.875` on `public_benchmark` across every technique (including baseline). TASK-90 identified the cause as a fixture omission, not a runtime limitation: the universal `PROTECTED_TERMS` list contains `serious-callers-only` (the SCO host name added in TASK-87) and every other scenario fixture mentions it exactly once, but `public_benchmark_blocks()` never did. The metric had a hard 7/8 ceiling by construction.
+
+Fix:
+
+- Added `on serious-callers-only` to the verified-trust `bench-user` prompt in `scripts/context_pipeline_eval.py::public_benchmark_blocks()`. Contextually plausible (the benchmark replays a session that ran on SCO).
+
+Result (matrix `target/context-eval-matrix/task90-pre/` vs `task90-post/`, 108 cells per side):
+
+- `public_benchmark`: baseline / cache_isolation / combined_p0 all move `protected_retention_ratio_min` from 0.875 to 1.0. `combined_p0` newly crosses `passes_reliability_gates` (False -> True) with `practical_score_mean` 73.19 -> 78.8 — the first technique to actually pass the public_benchmark reliability gate.
+- 90 other-scenario cells (oracle, negative, synthetic, realistic, cache_confusion) bit-identical pre/post on every gate metric. Fix is fully scoped to the one fixture.
+
+The TASK-87/88 caveat about the `public_benchmark` plateau is therefore closed; the remaining `cache_isolation`-vs-baseline parity on `public_benchmark` is correct (that scenario tests stale-content rejection in general, not runtime cache isolation specifically; `cache_confusion` is the dedicated runtime-cache scenario).
+
+## Runtime-enforced vs eval-only technique status (as of TASK-90)
+
+- `provenance_routing`, `supersession_prune`, `lazy_restore_handles` (basic), `combined_p0`: runtime-enforced in `src/agent/context_pruning.rs` (TASK-88).
+- `cache_isolation`: runtime-enforced across `message_render` / `semantic_embed` / repo-map `GraphCache` / openrouter disk memos (TASK-89). Other cache types (skeletons/summaries, token estimates, tool/result caches, non-openrouter external API caches) still eval-only; tracked by TASK-81 (trimmed).
+- `protected_spans` (lazy-restore variant): still eval-only. Was originally reserved for TASK-90 but TASK-90 was repurposed to the fixture trim. The lazy-restore-with-protected-span work is currently un-IDed.
+- `goal_task_ledger`, `attention_index`, `pinned_spans`, `scratchpad`, `recency_importance`, `memory_ttl`: still eval-only / not started.

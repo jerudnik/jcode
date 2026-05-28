@@ -1,5 +1,23 @@
 # Resume jcode context-hardening implementation
 
+> **Status update (2026-05-28, post-handoff):** TASK-89 (`cache_isolation`
+> across runtime cache layers) shipped as planned in this document, see
+> `docs/CONTEXT_PIPELINE_EVAL.md` "TASK-89 runtime cache isolation
+> implementation notes" for the actual outcome and the `jcode-cache-isolation`
+> crate. TASK-90 was **repurposed**: it became the `public_benchmark`
+> protected-retention fixture trim (see same doc, "TASK-90 public_benchmark
+> protected-retention plateau") because the 0.875 plateau turned out to be a
+> fixture omission, not a runtime limitation, and closing it unblocked
+> `combined_p0` passing the public_benchmark reliability gate. The
+> "protected-span-aware lazy restore" work described in the TASK-90 section
+> below is therefore **un-IDed and unstarted**; it remains a valid next
+> candidate but is no longer reserved under TASK-90. TASK-81 has been
+> trimmed to track only the cache types not yet routed through
+> `IsolationKey` (skeletons/summaries, token estimates, tool/result caches,
+> non-openrouter external API caches) plus a reusable cache-metrics harness.
+> Everything below this banner is the original pre-flight prompt, preserved
+> for historical context.
+
 ## Repository and starting state
 
 - Workspace: `/Users/jrudnik/labs/jcode`
