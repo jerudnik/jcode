@@ -3,7 +3,7 @@ id: TASK-90
 title: >-
   Close protected-retention plateau on public_benchmark scenario (TASK-88/89
   follow-up)
-status: In Progress
+status: Done
 assignee:
   - '@jcode'
 created_date: '2026-05-28 16:32'
