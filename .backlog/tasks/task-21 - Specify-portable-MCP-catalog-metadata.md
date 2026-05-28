@@ -4,9 +4,15 @@ title: Specify portable MCP catalog metadata
 status: To Do
 assignee: []
 created_date: '2026-05-27 17:54'
+updated_date: '2026-05-28 04:57'
 labels:
   - planning
   - mcp
+  - architecture
+  - catalog
+  - metadata
+  - security
+  - portability
 milestone: m-0
 dependencies:
   - TASK-1
@@ -14,6 +20,10 @@ dependencies:
 references:
   - docs/
   - AGENTS.md
+  - >-
+    .backlog/tasks/task-21 -
+    Specify-portable-MCP-catalog-metadata.md:31@0aea41ac
+  - 'commit:0aea41ac'
 documentation:
   - backlog/docs/planning/doc-1 - Agents-flake-transition-roadmap.md
 priority: medium

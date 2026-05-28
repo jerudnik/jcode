@@ -4,12 +4,22 @@ title: Complete global skill discovery and skill-manager compatibility
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - reliability
+  - compatibility
+  - skills
+  - skill-discovery
+  - UX
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/158'
+  - >-
+    .backlog/tasks/task-9 -
+    Complete-global-skill-discovery-and-skill-manager-compatibility.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 9000
 ---

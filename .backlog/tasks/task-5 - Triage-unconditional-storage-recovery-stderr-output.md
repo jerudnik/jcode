@@ -4,12 +4,21 @@ title: Triage unconditional storage recovery stderr output
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:38'
+updated_date: '2026-05-28 04:57'
 labels:
   - storage
   - ux
+  - reliability
+  - diagnostics
+  - logging
+  - UX
 dependencies: []
 references:
   - crates/jcode-storage/src/lib.rs
+  - >-
+    .backlog/tasks/task-5 -
+    Triage-unconditional-storage-recovery-stderr-output.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: low
 ordinal: 5000
 ---

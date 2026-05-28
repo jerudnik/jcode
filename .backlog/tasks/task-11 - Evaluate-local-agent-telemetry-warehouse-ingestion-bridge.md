@@ -4,12 +4,22 @@ title: Evaluate local agent telemetry warehouse ingestion bridge
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - privacy
+  - telemetry
+  - observability
+  - reliability
+  - opt-in
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/210'
+  - >-
+    .backlog/tasks/task-11 -
+    Evaluate-local-agent-telemetry-warehouse-ingestion-bridge.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: low
 ordinal: 11000
 ---

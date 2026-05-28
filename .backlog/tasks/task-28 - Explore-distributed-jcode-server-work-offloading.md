@@ -4,16 +4,26 @@ title: Explore distributed jcode server work offloading
 status: To Do
 assignee: []
 created_date: '2026-05-28 00:41'
-updated_date: '2026-05-28 00:49'
+updated_date: '2026-05-28 04:57'
 labels:
   - exploratory
   - architecture
   - distributed
+  - performance
+  - scalability
+  - security
+  - reliability
+  - offloading
+  - server
 dependencies: []
 references:
   - README.md
   - crates
   - jcode-build-support/src/lib.rs
+  - >-
+    .backlog/tasks/task-28 -
+    Explore-distributed-jcode-server-work-offloading.md:29@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 22000
 ---

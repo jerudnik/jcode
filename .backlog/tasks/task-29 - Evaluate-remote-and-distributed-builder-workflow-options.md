@@ -4,16 +4,26 @@ title: Evaluate remote and distributed builder workflow options
 status: To Do
 assignee: []
 created_date: '2026-05-28 00:41'
-updated_date: '2026-05-28 00:49'
+updated_date: '2026-05-28 04:57'
 labels:
   - exploratory
   - builds
   - performance
+  - CI
+  - build
+  - remote-build
+  - distributed-build
+  - nix
+  - cargo
 dependencies: []
 references:
   - AGENTS.md
   - scripts/remote_config.sh
   - docs/COMPILE_PERFORMANCE_PLAN.md
+  - >-
+    .backlog/tasks/task-29 -
+    Evaluate-remote-and-distributed-builder-workflow-options.md:29@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 23000
 ---

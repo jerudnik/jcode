@@ -4,14 +4,25 @@ title: Explore context-aware natural-language shell and text completions
 status: To Do
 assignee: []
 created_date: '2026-05-28 00:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - exploratory
   - ux
   - completion
+  - feature
+  - UX
+  - security
+  - performance
+  - shell
+  - nlp
 dependencies: []
 references:
   - crates
   - README.md
+  - >-
+    .backlog/tasks/task-30 -
+    Explore-context-aware-natural-language-shell-and-text-completions.md:27@0aea41ac
+  - 'commit:0aea41ac'
 priority: low
 ordinal: 24000
 ---

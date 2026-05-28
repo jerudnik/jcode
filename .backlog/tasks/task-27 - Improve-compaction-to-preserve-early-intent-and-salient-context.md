@@ -4,15 +4,24 @@ title: Improve compaction to preserve early intent and salient context
 status: To Do
 assignee: []
 created_date: '2026-05-28 00:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - exploratory
   - compaction
   - context
+  - reliability
+  - context-preservation
+  - session
+  - salience
 dependencies: []
 references:
   - crates/jcode-compaction-core/src/lib.rs
   - src
   - README.md
+  - >-
+    .backlog/tasks/task-27 -
+    Improve-compaction-to-preserve-early-intent-and-salient-context.md:28@0aea41ac
+  - 'commit:0aea41ac'
 priority: high
 ordinal: 21000
 ---

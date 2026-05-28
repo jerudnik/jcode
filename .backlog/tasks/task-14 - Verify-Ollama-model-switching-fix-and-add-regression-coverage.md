@@ -4,12 +4,22 @@ title: Verify Ollama model switching fix and add regression coverage
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - reliability
+  - regression-coverage
+  - ollama
+  - model-picker
+  - local-models
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/157'
+  - >-
+    .backlog/tasks/task-14 -
+    Verify-Ollama-model-switching-fix-and-add-regression-coverage.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 14000
 ---

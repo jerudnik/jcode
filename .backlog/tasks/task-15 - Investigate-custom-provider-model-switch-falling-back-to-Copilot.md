@@ -4,12 +4,23 @@ title: Investigate custom provider model switch falling back to Copilot
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - reliability
+  - auth
+  - provider
+  - model-picker
+  - copilot
+  - routing
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/154'
+  - >-
+    .backlog/tasks/task-15 -
+    Investigate-custom-provider-model-switch-falling-back-to-Copilot.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 15000
 ---

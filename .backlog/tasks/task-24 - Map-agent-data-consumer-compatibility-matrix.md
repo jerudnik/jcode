@@ -4,13 +4,22 @@ title: Map agent-data consumer compatibility matrix
 status: To Do
 assignee: []
 created_date: '2026-05-28 00:32'
+updated_date: '2026-05-28 04:57'
 labels:
   - planning
   - compatibility
+  - architecture
+  - consumers
+  - matrix
+  - docs
 dependencies: []
 references:
   - AGENTS.md
   - .jcode/skills/devshell-workflow/SKILL.md
+  - >-
+    .backlog/tasks/task-24 -
+    Map-agent-data-consumer-compatibility-matrix.md:28@0aea41ac
+  - 'commit:0aea41ac'
 documentation:
   - backlog/docs/planning/doc-1 - Agents-flake-transition-roadmap.md
 priority: medium

@@ -4,12 +4,19 @@ title: Design and implement ACP support
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - feature
+  - protocol
+  - acp
+  - reliability
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/127'
+  - '.backlog/tasks/task-10 - Design-and-implement-ACP-support.md:25@0aea41ac'
+  - 'commit:0aea41ac'
 priority: low
 ordinal: 10000
 ---

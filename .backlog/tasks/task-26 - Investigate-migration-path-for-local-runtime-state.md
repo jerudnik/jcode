@@ -4,14 +4,26 @@ title: Investigate migration path for local runtime state
 status: To Do
 assignee: []
 created_date: '2026-05-28 00:32'
+updated_date: '2026-05-28 04:57'
 labels:
   - planning
   - migration
   - hygiene
+  - reliability
+  - security
+  - runtime-state
+  - launchers
+  - caches
+  - logs
+  - auth-tokens
 dependencies: []
 references:
   - .gitignore
   - AGENTS.md
+  - >-
+    .backlog/tasks/task-26 -
+    Investigate-migration-path-for-local-runtime-state.md:29@0aea41ac
+  - 'commit:0aea41ac'
 documentation:
   - backlog/docs/planning/doc-1 - Agents-flake-transition-roadmap.md
 priority: high

@@ -4,14 +4,20 @@ title: Replace ad-hoc backlog and quality docs with Backlog.md tasks
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:38'
-updated_date: '2026-05-18 04:38'
+updated_date: '2026-05-28 04:57'
 labels:
   - docs
   - backlog
   - process
+  - code-quality
+  - migration
 dependencies: []
 references:
   - docs/CODE_QUALITY_TODO.md
+  - >-
+    .backlog/tasks/task-3 -
+    Replace-ad-hoc-backlog-and-quality-docs-with-Backlog.md-tasks.md:27@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 3000
 ---

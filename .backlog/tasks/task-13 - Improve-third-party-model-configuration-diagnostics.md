@@ -4,12 +4,22 @@ title: Improve third-party model configuration diagnostics
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - reliability
+  - diagnostics
+  - provider
+  - third-party
+  - configuration
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/204'
+  - >-
+    .backlog/tasks/task-13 -
+    Improve-third-party-model-configuration-diagnostics.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 13000
 ---

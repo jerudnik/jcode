@@ -4,15 +4,25 @@ title: Plan eventual nix-config flake input migration
 status: To Do
 assignee: []
 created_date: '2026-05-27 17:54'
+updated_date: '2026-05-28 04:57'
 labels:
   - planning
   - migration
+  - CI
+  - release
+  - nix
+  - flake-inputs
+  - compatibility
 milestone: m-3
 dependencies:
   - TASK-5
 references:
   - /Users/jrudnik/infrastructure/nix-config/flake.nix
   - /Users/jrudnik/infrastructure/nix-config/flake.lock
+  - >-
+    .backlog/tasks/task-22 -
+    Plan-eventual-nix-config-flake-input-migration.md:30@0aea41ac
+  - 'commit:0aea41ac'
 documentation:
   - backlog/docs/planning/doc-1 - Agents-flake-transition-roadmap.md
 priority: medium

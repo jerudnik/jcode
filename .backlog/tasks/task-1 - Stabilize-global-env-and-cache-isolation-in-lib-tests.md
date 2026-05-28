@@ -4,13 +4,23 @@ title: Stabilize global env and cache isolation in lib tests
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:38'
+updated_date: '2026-05-28 04:56'
 labels:
   - tests
   - reliability
+  - CI
+  - isolation
+  - env
+  - cache
+  - flaky
 dependencies: []
 references:
   - src/tui/app/tests
   - src/provider
+  - >-
+    .backlog/tasks/task-1 -
+    Stabilize-global-env-and-cache-isolation-in-lib-tests.md:26@0aea41ac
+  - 'commit:0aea41ac'
 priority: high
 ordinal: 1000
 ---

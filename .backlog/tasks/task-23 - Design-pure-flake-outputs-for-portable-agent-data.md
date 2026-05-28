@@ -4,9 +4,15 @@ title: Design pure flake outputs for portable agent data
 status: To Do
 assignee: []
 created_date: '2026-05-27 17:54'
+updated_date: '2026-05-28 04:57'
 labels:
   - planning
   - flake
+  - architecture
+  - nix
+  - outputs
+  - portability
+  - security
 milestone: m-0
 dependencies:
   - TASK-1
@@ -14,6 +20,10 @@ dependencies:
 references:
   - flake.nix
   - docs/
+  - >-
+    .backlog/tasks/task-23 -
+    Design-pure-flake-outputs-for-portable-agent-data.md:31@0aea41ac
+  - 'commit:0aea41ac'
 documentation:
   - backlog/docs/planning/doc-1 - Agents-flake-transition-roadmap.md
 priority: medium

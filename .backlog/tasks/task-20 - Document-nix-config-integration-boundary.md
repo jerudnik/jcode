@@ -4,9 +4,15 @@ title: Document nix-config integration boundary
 status: To Do
 assignee: []
 created_date: '2026-05-27 17:54'
+updated_date: '2026-05-28 04:57'
 labels:
   - planning
   - nix-config
+  - security
+  - architecture
+  - docs
+  - boundaries
+  - secrets
 milestone: m-3
 dependencies:
   - TASK-3
@@ -14,6 +20,10 @@ dependencies:
 references:
   - AGENTS.md
   - /Users/jrudnik/infrastructure/nix-config/modules/ai/home-manager/skills/
+  - >-
+    .backlog/tasks/task-20 -
+    Document-nix-config-integration-boundary.md:31@0aea41ac
+  - 'commit:0aea41ac'
 documentation:
   - backlog/docs/planning/doc-1 - Agents-flake-transition-roadmap.md
 priority: high

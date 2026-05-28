@@ -4,12 +4,23 @@ title: Improve Windows first-run and setup documentation
 status: To Do
 assignee: []
 created_date: '2026-05-18 04:41'
+updated_date: '2026-05-28 04:57'
 labels:
   - upstream
   - owner-interest
+  - docs
+  - reliability
+  - windows
+  - first-run
+  - terminals
+  - reconnect
 dependencies: []
 references:
   - 'https://github.com/1jehuang/jcode/issues/145'
+  - >-
+    .backlog/tasks/task-16 -
+    Improve-Windows-first-run-and-setup-documentation.md:25@0aea41ac
+  - 'commit:0aea41ac'
 priority: medium
 ordinal: 16000
 ---
