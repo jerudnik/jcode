@@ -28,6 +28,17 @@ Prefer built-in Jcode tools first for files, code search, edits, browser use, an
 
 The fleet Attic cache on SMFS is normally used automatically by Nix through the active substituter config. If a large first run still fetches/builds, the path is probably missing from Attic; warm it once from a host with the Attic push hook/token, then future runs should substitute from SMFS.
 
+Cache warm/check pattern:
+
+```bash
+tool=parallel-cli
+nix build --no-link --print-out-paths $HOME/infrastructure/nix-config#apps.$(nix eval --impure --raw --expr builtins.currentSystem).$tool.program
+nix show-config | rg 'substituters|trusted-public-keys'
+curl -fsS "http://10.201.0.3:8083/main/<store-hash>.narinfo"
+```
+
+Use the evaluated store path basename before the first `-` as `<store-hash>`.
+
 ## Tools by job
 
 - Docs/reference: `ctx7`, `manix`, `cht-sh` (`cht.sh`), `tealdeer` (`tldr`), `nix-search-cli` (`nix-search`), `nix-index`.
@@ -59,6 +70,23 @@ nix run $HOME/infrastructure/nix-config#zat -- src/main.rs
 nix run $HOME/infrastructure/nix-config#yj -- -tj < file.toml
 nix run $HOME/infrastructure/nix-config#jo -- key=value ok=true
 ```
+
+## Bounded smoke test pattern
+
+```bash
+for spec in \
+  'ctx7 --help' 'manix --help' 'cht-sh --help' 'tealdeer --help' \
+  'nix-search-cli --help' 'nix-index --help' 'firecrawl --help' \
+  'agent-browser --help' 'ddgr --help' 'repomix --help' \
+  'ripgrep-all --help' 'gh --version' 'yj --help' 'jo -v' 'stdbuf --help'
+do
+  set -- $spec
+  timeout 45s nix run $HOME/infrastructure/nix-config#$1 -- ${@:2} >/tmp/toolbox-$1.out 2>&1 \
+    || echo "check $1: rc=$?"
+done
+```
+
+Test `zat` with a supported source file, not `--help`; test `parallel-cli` separately because its first run may need a large cache warm/build.
 
 ## Guardrails
 
