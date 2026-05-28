@@ -393,6 +393,7 @@ pub fn build_emergency_summary_text(
     if let Some(existing) = existing_summary
         && !existing.is_empty()
     {
+        let existing = without_prior_emergency_markers(existing);
         if existing.len() > MAX_EXISTING_SUMMARY_CHARS_IN_EMERGENCY {
             summary_parts.push(format!(
                 "{}\n\n[Previous summary truncated from {} chars during emergency compaction]",
@@ -435,6 +436,14 @@ pub fn build_emergency_summary_text(
     }
 
     summary_parts.join("\n\n")
+}
+
+fn without_prior_emergency_markers(summary: &str) -> String {
+    summary
+        .split("\n\n")
+        .filter(|paragraph| !paragraph.contains("[Emergency compaction]"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn collect_emergency_summary_hints(
@@ -658,6 +667,23 @@ mod tests {
         assert!(summary.contains("Tools used: read"));
         assert!(summary.contains("Files referenced: Cargo.toml, src/compaction.rs"));
         assert!(!summary.contains("https://example.com"));
+    }
+
+    #[test]
+    fn emergency_summary_replaces_prior_marker() {
+        let existing = "## Previous Conversation Summary\n\nImportant retained context\n\n**[Emergency compaction]**: 94 messages were dropped to recover from context overflow. The conversation had ~155k tokens which exceeded the 128k limit.";
+        let summary = build_emergency_summary_text(
+            Some(existing),
+            6,
+            149_000,
+            128_000,
+            &[Message::user("Edited src/compaction.rs")],
+        );
+
+        assert!(summary.contains("Important retained context"));
+        assert!(summary.contains("6 messages were dropped"));
+        assert_eq!(summary.matches("[Emergency compaction]").count(), 1);
+        assert!(!summary.contains("94 messages were dropped"));
     }
 
     #[test]

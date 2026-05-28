@@ -637,12 +637,14 @@ fn test_hard_compact_twice() {
         "compacted_count should increase"
     );
 
-    // Summary should mention both compactions
+    // Summary should mention the latest emergency compaction without carrying
+    // the previous marker forward indefinitely.
     let api_messages = manager.messages_for_api_with(&messages);
     assert!(api_messages.len() < messages.len());
     match &api_messages[0].content[0] {
         ContentBlock::Text { text, .. } => {
             assert!(text.contains("Emergency compaction"));
+            assert_eq!(text.matches("[Emergency compaction]").count(), 1);
         }
         _ => panic!("expected summary"),
     }
