@@ -443,6 +443,11 @@ pub const fn embedding_dim() -> usize {
     backend::embedding_dim()
 }
 
+/// Stable identifier for the embedding backend currently in use. Folded into
+/// the semantic compaction cache key so a future swap of the embedding model
+/// deterministically invalidates entries cached under the old backend.
+pub const MODEL_NAME: &str = backend::MODEL_NAME;
+
 #[cfg(test)]
 mod tests {
     use super::*;

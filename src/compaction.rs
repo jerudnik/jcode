@@ -35,8 +35,22 @@ pub use jcode_compaction_core::{
     TOKEN_HISTORY_WINDOW, build_compaction_prompt, build_emergency_summary_text,
     compacted_summary_text_block, content_char_count, emergency_truncate_tool_results,
     estimate_compaction_tokens, mean_embedding, message_char_count, safe_compaction_cutoff,
-    semantic_cache_key, semantic_goal_text, semantic_message_text, summary_payload_char_count,
+    semantic_cache_key_with_context, semantic_goal_text, semantic_message_text,
+    summary_payload_char_count,
 };
+
+/// Compute the embedding-context fingerprint for the locally-loaded embedding
+/// backend. This is folded into `semantic_embed_cache` keys via
+/// [`semantic_cache_key_with_context`] so a future swap of the embedding model,
+/// a change in its output dim, or a bump of
+/// `jcode_cache_isolation::SCHEMA_VERSION` deterministically invalidates the
+/// cache without any explicit `clear()` call.
+fn current_embedding_context_fingerprint() -> u64 {
+    jcode_compaction_core::embedding_context_fingerprint(
+        crate::embedding::MODEL_NAME,
+        crate::embedding::embedding_dim(),
+    )
+}
 
 /// Result from background compaction task
 struct CompactionResult {
@@ -132,10 +146,21 @@ pub struct CompactionManager {
     /// Local cache for semantic compaction embeddings keyed by truncated-text hash.
     /// Stores both successful embeddings and failed lookups (`None`) so repeated
     /// semantic scans do not redo the same work.
+    ///
+    /// Keys are derived via [`semantic_cache_key_with_context`] using
+    /// [`Self::embedding_context_fp`] so a switch in embedding backend
+    /// (model name / output dim) or a bump of
+    /// `jcode_cache_isolation::SCHEMA_VERSION` invalidates stale entries
+    /// without an explicit `clear()`.
     semantic_embed_cache: HashMap<u64, (Option<Vec<f32>>, u64)>,
 
     /// Monotonic recency counter for the semantic embedding cache LRU.
     semantic_embed_cache_counter: u64,
+
+    /// Cached embedding-context fingerprint for the currently-loaded embedding
+    /// backend. Lazily computed on first use; recomputed on `reset()` and on
+    /// `restore_persisted_state()` to track backend swaps across sessions.
+    semantic_embed_cache_context_fp: u64,
 }
 
 impl CompactionManager {
@@ -162,6 +187,7 @@ impl CompactionManager {
             embedding_history: VecDeque::with_capacity(EMBEDDING_HISTORY_WINDOW + 1),
             semantic_embed_cache: HashMap::with_capacity(SEMANTIC_EMBED_CACHE_CAPACITY),
             semantic_embed_cache_counter: 0,
+            semantic_embed_cache_context_fp: current_embedding_context_fingerprint(),
         }
     }
 
@@ -269,6 +295,7 @@ impl CompactionManager {
         self.embedding_history.clear();
         self.semantic_embed_cache.clear();
         self.semantic_embed_cache_counter = 0;
+        self.semantic_embed_cache_context_fp = current_embedding_context_fingerprint();
         self.total_turns = total_messages;
         self.compacted_count = state.compacted_count.min(total_messages);
         self.active_message_chars = 0;
@@ -1269,7 +1296,19 @@ impl CompactionManager {
     }
 
     fn cached_semantic_embedding(&mut self, text: &str) -> Option<Vec<f32>> {
-        let key = semantic_cache_key(text);
+        // Defensive: if the embedding backend changed since this manager was
+        // constructed (e.g. SCHEMA_VERSION bump, future runtime model swap),
+        // drop the entire cache before serving any hit. Keys would already
+        // differ via semantic_cache_key_with_context, but clearing avoids
+        // stale entries lingering until LRU eviction.
+        let current_fp = current_embedding_context_fingerprint();
+        if current_fp != self.semantic_embed_cache_context_fp {
+            self.semantic_embed_cache.clear();
+            self.semantic_embed_cache_counter = 0;
+            self.semantic_embed_cache_context_fp = current_fp;
+        }
+
+        let key = semantic_cache_key_with_context(text, self.semantic_embed_cache_context_fp);
 
         if let Some((cached, recency)) = self.semantic_embed_cache.get_mut(&key) {
             let counter = self.semantic_embed_cache_counter;

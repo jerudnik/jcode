@@ -375,8 +375,31 @@ pub fn push_semantic_excerpt(target: &mut String, source: &str, max_chars: usize
 }
 
 pub fn semantic_cache_key(text: &str) -> u64 {
+    semantic_cache_key_with_context(text, 0)
+}
+
+/// Compute a `semantic_embed_cache` key that includes an `embedding_context`
+/// fingerprint so a switch to a different embedding model, embedding dim, or
+/// `IsolationKey::SCHEMA_VERSION` deterministically invalidates prior entries.
+///
+/// Callers should pass the value of [`embedding_context_fingerprint`] for the
+/// currently-loaded embedding backend.
+pub fn semantic_cache_key_with_context(text: &str, embedding_context: u64) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    embedding_context.hash(&mut hasher);
     text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Fingerprint the embedding context (model name + output dim + cache-isolation
+/// schema version) so the semantic embedding cache safely shares a single
+/// keyspace across multiple sessions / managers in the same process.
+pub fn embedding_context_fingerprint(embedding_model: &str, embedding_dim: usize) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    "jcode-compaction-core::embedding_context::v1".hash(&mut hasher);
+    jcode_cache_isolation::SCHEMA_VERSION.hash(&mut hasher);
+    embedding_model.hash(&mut hasher);
+    embedding_dim.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -642,6 +665,36 @@ mod tests {
         assert_eq!(semantic_message_text(&message), "hello world");
         assert_eq!(semantic_goal_text(&[message]), "hello world tool output");
         assert_eq!(semantic_cache_key("stable"), semantic_cache_key("stable"));
+    }
+
+    #[test]
+    fn semantic_cache_key_isolates_by_embedding_context() {
+        let fp_a = embedding_context_fingerprint("all-MiniLM-L6-v2", 384);
+        let fp_b = embedding_context_fingerprint("text-embedding-3-small", 1536);
+        let fp_c = embedding_context_fingerprint("all-MiniLM-L6-v2", 768);
+
+        assert_ne!(
+            fp_a, fp_b,
+            "different embedding model must change embedding_context_fingerprint"
+        );
+        assert_ne!(
+            fp_a, fp_c,
+            "different embedding dim must change embedding_context_fingerprint"
+        );
+
+        let k_a = semantic_cache_key_with_context("hello", fp_a);
+        let k_b = semantic_cache_key_with_context("hello", fp_b);
+        let k_c = semantic_cache_key_with_context("hello", fp_c);
+        let k_a_again = semantic_cache_key_with_context("hello", fp_a);
+
+        assert_eq!(k_a, k_a_again, "same context+text must yield same key");
+        assert_ne!(k_a, k_b, "model switch must change semantic cache key");
+        assert_ne!(k_a, k_c, "dim switch must change semantic cache key");
+        assert_ne!(
+            k_a,
+            semantic_cache_key_with_context("hello!", fp_a),
+            "text change must still change key"
+        );
     }
 
     #[test]

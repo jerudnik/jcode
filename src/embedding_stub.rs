@@ -231,3 +231,9 @@ pub fn is_model_available() -> bool {
 pub const fn embedding_dim() -> usize {
     384
 }
+
+/// Stable identifier for the (stub) embedding backend; surfaces the same
+/// constant as the real backend so consumers can call `embedding::MODEL_NAME`
+/// regardless of feature gating. Folded into the semantic compaction cache key
+/// so any backend swap deterministically invalidates entries.
+pub const MODEL_NAME: &str = "stub-embedding-disabled";

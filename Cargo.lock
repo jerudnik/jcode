@@ -3443,6 +3443,7 @@ version = "0.1.0"
 name = "jcode-compaction-core"
 version = "0.1.0"
 dependencies = [
+ "jcode-cache-isolation",
  "jcode-message-types",
  "serde_json",
 ]
