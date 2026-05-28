@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@jcode'
 created_date: '2026-05-28 15:41'
-updated_date: '2026-05-28 16:09'
+updated_date: '2026-05-28 16:18'
 labels:
   - context
   - compaction
@@ -40,7 +40,7 @@ Apply the cache_isolation technique selected by TASK-87 to runtime caches. TASK-
 <!-- AC:BEGIN -->
 - [x] #1 Introduce a shared cache IsolationKey type (or equivalent helper) containing session_id, canonicalized workspace_root, provider, model, content_hash, trust_tier, and schema_version; runtime caches that store provider/projection-sensitive data use it as their key prefix.
 - [x] #2 Runtime caches affected (semantic_embed_cache in src/compaction.rs, GraphCache in src/memory/cache.rs, message render cache in crates/jcode-tui-messages/src/cache.rs, openrouter DISK_CACHE_MEMO/ENDPOINTS_DISK_CACHE_MEMO in crates/jcode-provider-openrouter/src/lib.rs) miss on session/workspace/provider mismatch instead of returning foreign entries.
-- [ ] #3 Cache eviction policy: explicit invalidation on session resume, workspace switch, and provider/model change events, plus existing TTL/LRU bounds preserved.
+- [x] #3 Cache eviction policy: explicit invalidation on session resume, workspace switch, and provider/model change events, plus existing TTL/LRU bounds preserved.
 - [ ] #4 Unit tests per touched cache assert key composition and miss-on-mismatch for session/workspace/provider/trust_tier; one integration-style test simulates a session resume across two workspaces and confirms no foreign content reaches projection.
 - [ ] #5 scripts/context_pipeline_eval.py cache_confusion scenario is extended to exercise the runtime cache path (not just message pruning) and the deterministic eval matrix shows cache_confusion passes without regressing negative or public_benchmark scenarios.
 - [ ] #6 Selfdev TUI build + reload succeed; cargo fmt and targeted tests pass; the protected-retention caveat from TASK-88 is not regressed by this change.
@@ -91,4 +91,6 @@ AC#2 done across four commits:
 - dc751843 GraphCache (LOW defensive: path+schema)
 - 9a2fb88f openrouter DISK_CACHE_MEMO + ENDPOINTS_DISK_CACHE_MEMO (LOW defensive: path+schema)
 Each commit includes a new unit test asserting Eq/Hash isolation across the relevant axes; jcode-tui-messages 7/7, jcode-compaction-core 10/10, jcode memory:: 24/24, jcode-provider-openrouter 5/5 pass.
+
+AC#3 done in de640cf6: added clear_message_cache (+_for_isolation), clear_graph_cache, clear_disk_cache_memos; wired via new src/server/cache_invalidation.rs at handle_resume_session and apply_set_model. semantic_embed_cache already covered by CompactionManager::reset() on reset_provider_session. Tests: jcode-tui-messages 5/5, jcode memory::cache:: 2/2, jcode-provider-openrouter 6/6 pass.
 <!-- SECTION:NOTES:END -->

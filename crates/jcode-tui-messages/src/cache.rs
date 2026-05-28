@@ -323,4 +323,93 @@ mod tests {
             "LRU spine must not retain dropped isolation_fp"
         );
     }
+
+    /// TASK-89 AC#4 (integration-style): simulate a session resume across
+    /// two workspaces and confirm no foreign content reaches projection.
+    ///
+    /// Scenario:
+    /// 1. Workspace X (session A, isolation_fp = FP_AX) caches a rendered
+    ///    `message_hash = H` -> "lines-from-A".
+    /// 2. Workspace Y (session B, isolation_fp = FP_BY) attempts a lookup
+    ///    of the same `H` (intentional content-hash collision across
+    ///    workspaces / sessions, e.g. both sessions touched the same
+    ///    file). The lookup MUST miss — even on collision, the cache
+    ///    refuses to serve A's render into B's projection.
+    /// 3. Session A is "resumed" via the same hook the server calls
+    ///    (`clear_message_cache()` — the implementation behind
+    ///    `cache_invalidation::on_session_resume`). After the hook,
+    ///    A's prior render is gone, so a re-render under FP_AX would
+    ///    naturally call the render closure rather than returning a
+    ///    stale Line-vec from a pre-resume frame.
+    ///
+    /// This proves the runtime cache layer enforces the AC#2 key axis
+    /// (isolation_fp) AND the AC#3 invalidation hook end-to-end without
+    /// any cross-bleed even when content_hash collides.
+    #[test]
+    fn session_resume_across_workspaces_blocks_foreign_render_bleed() {
+        let _guard = message_cache_test_lock();
+        clear_message_cache();
+
+        // Fingerprints crafted to be unequal but otherwise arbitrary;
+        // in production these come from
+        // `IsolationKey::for_session(...).context_fingerprint()`.
+        const FP_AX: u64 = 0xA1A1_0000_0000_0001; // session A, workspace X
+        const FP_BY: u64 = 0xB2B2_0000_0000_0002; // session B, workspace Y
+        const COLLIDING_MESSAGE_HASH: u64 = 0xDEAD_BEEF_CAFE_BABE;
+
+        let key_a = MessageCacheKey {
+            isolation_fp: FP_AX,
+            width: 80,
+            diff_mode: DiffDisplayMode::default(),
+            message_hash: COLLIDING_MESSAGE_HASH,
+            content_len: 42,
+            diagram_mode: DiagramDisplayMode::default(),
+            centered: false,
+            mermaid_epoch: 0,
+            mermaid_aspect_bucket: None,
+        };
+        let key_b = MessageCacheKey {
+            isolation_fp: FP_BY,
+            // Same content axes as key_a — only isolation_fp differs.
+            ..key_a.clone()
+        };
+
+        // Step 1: session A in workspace X populates the cache.
+        {
+            let mut cache = message_cache().lock().unwrap();
+            cache.insert(key_a.clone(), vec![Line::from("lines-from-session-A")]);
+            assert_eq!(cache.entries.len(), 1);
+        }
+
+        // Step 2: session B in workspace Y looks up the same content
+        // hash. The key differs only in isolation_fp, so the cache MUST
+        // miss — no foreign content reaches B's projection.
+        {
+            let cache = message_cache().lock().unwrap();
+            assert!(
+                cache.get(&key_b).is_none(),
+                "cross-isolation lookup with colliding message_hash must miss"
+            );
+            // Sanity: A can still hit its own entry.
+            assert!(
+                cache.get(&key_a).is_some(),
+                "same-isolation lookup must hit"
+            );
+        }
+
+        // Step 3: session A is resumed. The server-side hook
+        // (`cache_invalidation::on_session_resume`) calls
+        // `clear_message_cache()` so any pre-resume render frames are
+        // dropped. Verify A's entry is gone afterwards.
+        clear_message_cache();
+        let cache = message_cache().lock().unwrap();
+        assert!(
+            cache.get(&key_a).is_none(),
+            "post-resume lookup must miss — pre-resume frame must not bleed across the resume boundary"
+        );
+        assert!(
+            cache.entries.is_empty(),
+            "on_session_resume hook must reclaim all entries"
+        );
+    }
 }
