@@ -42,6 +42,7 @@ pub use activity::{
     get_activity, pipeline_start, pipeline_update, record_injected_prompt, set_state,
 };
 use cache::{cache_graph, cached_graph};
+pub use cache::clear_graph_cache;
 #[cfg(test)]
 use pending::insert_pending_memory_for_test;
 pub use pending::{

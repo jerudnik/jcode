@@ -850,6 +850,14 @@ pub(super) async fn handle_resume_session(
     event_counter: &Arc<std::sync::atomic::AtomicU64>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
 ) -> Result<Arc<Mutex<Agent>>> {
+    // TASK-89 AC#3: drop per-session render and per-path graph cache entries
+    // before we begin the resume handshake. Keys carry an `isolation_fp` /
+    // `schema_version` so stale entries from the prior session id are
+    // already unreachable, but eager invalidation here keeps memory
+    // pressure proportional to the active session and makes the
+    // invalidation contract observable at a single call site.
+    crate::server::cache_invalidation::on_session_resume();
+
     let resume_start = Instant::now();
     let incoming_client_instance_id = client_instance_id.map(str::to_string);
     crate::logging::event_info(

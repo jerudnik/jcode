@@ -4,8 +4,8 @@ mod prepared;
 mod wrapped_line_map;
 
 pub use cache::{
-    MessageCacheContext, centered_wrap_width, get_cached_message_lines,
-    left_pad_lines_for_centered_mode,
+    MessageCacheContext, centered_wrap_width, clear_message_cache,
+    clear_message_cache_for_isolation, get_cached_message_lines, left_pad_lines_for_centered_mode,
 };
 pub use message::{
     DisplayMessage, TranscriptPreviewLabels, display_messages_from_rendered_messages,

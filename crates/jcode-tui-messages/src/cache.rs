@@ -143,6 +143,47 @@ where
     lines
 }
 
+/// Drop every entry from the static `MESSAGE_CACHE`.
+///
+/// Used by the TUI backend as an explicit invalidation hook on
+/// session-resume / workspace-switch / provider-or-model-change events
+/// (TASK-89 AC#3). Entries from a previous session/workspace would
+/// otherwise linger until they were naturally evicted by the LRU bound
+/// (`MESSAGE_CACHE_LIMIT`). Stale entries are already _safe_ — they can
+/// only be served back when the caller's `MessageCacheContext.isolation_fp`
+/// happens to match, which by construction (TASK-89 AC#2) only occurs
+/// inside the same (session, workspace) — but eager clearing keeps memory
+/// pressure proportional to the active session and makes the invariant
+/// easy to reason about.
+///
+/// Cheap: takes the cache mutex once and drops both the `HashMap` and the
+/// `VecDeque` LRU spine.
+pub fn clear_message_cache() {
+    let mut cache = match message_cache().lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache.entries.clear();
+    cache.order.clear();
+}
+
+/// Drop every entry from the static `MESSAGE_CACHE` whose
+/// `isolation_fp` matches `isolation_fp`.
+///
+/// Surgical sibling of `clear_message_cache` for the workspace-switch hook
+/// (TASK-89 AC#3): when switching _away from_ a known prior workspace we
+/// want to drop only its entries and leave entries for the now-active
+/// workspace intact. Compute `isolation_fp` from the prior
+/// `IsolationKey::context_fingerprint()`.
+pub fn clear_message_cache_for_isolation(isolation_fp: u64) {
+    let mut cache = match message_cache().lock() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache.entries.retain(|k, _| k.isolation_fp != isolation_fp);
+    cache.order.retain(|k| k.isolation_fp != isolation_fp);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +237,90 @@ mod tests {
         assert_eq!(map.get(&b), Some(&"session-B"));
         // sanity: same-fp lookup hits the existing entry
         assert_eq!(map.get(&a2), Some(&"session-A"));
+    }
+
+    fn dummy_key(isolation_fp: u64) -> MessageCacheKey {
+        MessageCacheKey {
+            isolation_fp,
+            width: 80,
+            diff_mode: DiffDisplayMode::default(),
+            message_hash: 0xABCD,
+            content_len: 1,
+            diagram_mode: DiagramDisplayMode::default(),
+            centered: false,
+            mermaid_epoch: 0,
+            mermaid_aspect_bucket: None,
+        }
+    }
+
+    /// Serialize tests that mutate the process-wide `MESSAGE_CACHE`
+    /// static so cargo's default parallel test runner cannot interleave
+    /// them and observe each other's leftover entries.
+    fn message_cache_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// TASK-89 AC#3: `clear_message_cache` must drop every entry from
+    /// the static MESSAGE_CACHE regardless of `isolation_fp` so a
+    /// session-resume or process-wide invalidation event reliably
+    /// reclaims memory.
+    #[test]
+    fn clear_message_cache_drops_all_entries() {
+        let _guard = message_cache_test_lock();
+        // Reset baseline; another test may have left entries behind.
+        clear_message_cache();
+        {
+            let mut cache = message_cache().lock().unwrap();
+            cache.insert(dummy_key(1), vec![Line::from("a")]);
+            cache.insert(dummy_key(2), vec![Line::from("b")]);
+            assert_eq!(cache.entries.len(), 2);
+            assert_eq!(cache.order.len(), 2);
+        }
+        clear_message_cache();
+        let cache = message_cache().lock().unwrap();
+        assert!(cache.entries.is_empty(), "entries map must be empty");
+        assert!(cache.order.is_empty(), "LRU spine must be empty");
+    }
+
+    /// TASK-89 AC#3: `clear_message_cache_for_isolation` must drop only
+    /// entries whose `isolation_fp` matches the supplied value and leave
+    /// every other entry intact — the surgical workspace-switch sibling
+    /// of `clear_message_cache`.
+    #[test]
+    fn clear_message_cache_for_isolation_drops_only_matching_fp() {
+        let _guard = message_cache_test_lock();
+        clear_message_cache();
+        {
+            let mut cache = message_cache().lock().unwrap();
+            cache.insert(dummy_key(11), vec![Line::from("keep")]);
+            cache.insert(dummy_key(22), vec![Line::from("drop")]);
+            cache.insert(dummy_key(33), vec![Line::from("keep")]);
+            assert_eq!(cache.entries.len(), 3);
+        }
+        clear_message_cache_for_isolation(22);
+        let cache = message_cache().lock().unwrap();
+        assert_eq!(cache.entries.len(), 2, "only one entry should be dropped");
+        assert!(
+            cache.entries.contains_key(&dummy_key(11)),
+            "isolation_fp=11 entry must survive"
+        );
+        assert!(
+            cache.entries.contains_key(&dummy_key(33)),
+            "isolation_fp=33 entry must survive"
+        );
+        assert!(
+            !cache.entries.contains_key(&dummy_key(22)),
+            "isolation_fp=22 entry must be evicted"
+        );
+        assert_eq!(
+            cache.order.len(),
+            2,
+            "LRU spine must mirror entries map after surgical clear"
+        );
+        assert!(
+            cache.order.iter().all(|k| k.isolation_fp != 22),
+            "LRU spine must not retain dropped isolation_fp"
+        );
     }
 }

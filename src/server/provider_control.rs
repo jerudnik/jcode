@@ -475,6 +475,15 @@ fn apply_set_model(
         let result = agent.set_model(&model);
         if result.is_ok() {
             agent.reset_provider_session();
+            // TASK-89 AC#3: a successful model change shifts the active
+            // provider/model namespace and any downstream
+            // provider-specific render or disk-cache memo entries are
+            // now cold. The semantic-embed cache is invalidated
+            // separately by `CompactionManager::reset()` via the
+            // `reset_provider_session` path above; here we drop the
+            // openrouter disk-cache memos and TUI render cache as
+            // defense in depth.
+            crate::server::cache_invalidation::on_provider_or_model_change();
         }
         result.map(|_| (agent.provider_model(), agent.provider_name()))
     };

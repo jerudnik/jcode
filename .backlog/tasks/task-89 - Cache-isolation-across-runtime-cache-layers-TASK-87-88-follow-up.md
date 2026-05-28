@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@jcode'
 created_date: '2026-05-28 15:41'
-updated_date: '2026-05-28 15:41'
+updated_date: '2026-05-28 16:09'
 labels:
   - context
   - compaction
@@ -38,8 +38,8 @@ Apply the cache_isolation technique selected by TASK-87 to runtime caches. TASK-
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Introduce a shared cache IsolationKey type (or equivalent helper) containing session_id, canonicalized workspace_root, provider, model, content_hash, trust_tier, and schema_version; runtime caches that store provider/projection-sensitive data use it as their key prefix.
-- [ ] #2 Runtime caches affected (semantic_embed_cache in src/compaction.rs, GraphCache in src/memory/cache.rs, message render cache in crates/jcode-tui-messages/src/cache.rs, openrouter DISK_CACHE_MEMO/ENDPOINTS_DISK_CACHE_MEMO in crates/jcode-provider-openrouter/src/lib.rs) miss on session/workspace/provider mismatch instead of returning foreign entries.
+- [x] #1 Introduce a shared cache IsolationKey type (or equivalent helper) containing session_id, canonicalized workspace_root, provider, model, content_hash, trust_tier, and schema_version; runtime caches that store provider/projection-sensitive data use it as their key prefix.
+- [x] #2 Runtime caches affected (semantic_embed_cache in src/compaction.rs, GraphCache in src/memory/cache.rs, message render cache in crates/jcode-tui-messages/src/cache.rs, openrouter DISK_CACHE_MEMO/ENDPOINTS_DISK_CACHE_MEMO in crates/jcode-provider-openrouter/src/lib.rs) miss on session/workspace/provider mismatch instead of returning foreign entries.
 - [ ] #3 Cache eviction policy: explicit invalidation on session resume, workspace switch, and provider/model change events, plus existing TTL/LRU bounds preserved.
 - [ ] #4 Unit tests per touched cache assert key composition and miss-on-mismatch for session/workspace/provider/trust_tier; one integration-style test simulates a session resume across two workspaces and confirms no foreign content reaches projection.
 - [ ] #5 scripts/context_pipeline_eval.py cache_confusion scenario is extended to exercise the runtime cache path (not just message pruning) and the deterministic eval matrix shows cache_confusion passes without regressing negative or public_benchmark scenarios.
@@ -80,3 +80,15 @@ Apply the cache_isolation technique selected by TASK-87 to runtime caches. TASK-
 7. Selfdev TUI build + reload using selfdev build target=tui, then selfdev reload; verify the binary still works on a smoke session.
 8. Commit incrementally per acceptance criterion, push at the end. Update task with notes and final summary.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC#1 done in a668b9b8 (jcode-cache-isolation crate).
+AC#2 done across four commits:
+- 65d2c119 semantic_embed_cache (HIGH, provider context: session+workspace+provider+model+trust_tier+schema)
+- 86583a13 MESSAGE_CACHE (MED, render-only: session+workspace+schema)
+- dc751843 GraphCache (LOW defensive: path+schema)
+- 9a2fb88f openrouter DISK_CACHE_MEMO + ENDPOINTS_DISK_CACHE_MEMO (LOW defensive: path+schema)
+Each commit includes a new unit test asserting Eq/Hash isolation across the relevant axes; jcode-tui-messages 7/7, jcode-compaction-core 10/10, jcode memory:: 24/24, jcode-provider-openrouter 5/5 pass.
+<!-- SECTION:NOTES:END -->

@@ -234,6 +234,26 @@ struct EndpointsDiskCacheMemoEntry {
 static ENDPOINTS_DISK_CACHE_MEMO: LazyLock<Mutex<HashMap<OrCacheKey, EndpointsDiskCacheMemoEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Drop every entry from both the model-catalog disk-cache memo
+/// (`DISK_CACHE_MEMO`) and the per-model endpoints disk-cache memo
+/// (`ENDPOINTS_DISK_CACHE_MEMO`).
+///
+/// Explicit invalidation hook (TASK-89 AC#3) for provider/model-change
+/// events. Disk files themselves are untouched; the next read will refault
+/// from disk and rehydrate the memo. Use this when the active provider
+/// namespace or model changes inside a long-lived process so that stale
+/// in-memory entries (which would be filtered by `OrCacheKey`'s
+/// `schema_version` only on contract bump) do not accumulate across
+/// switches.
+pub fn clear_disk_cache_memos() {
+    if let Ok(mut memo) = DISK_CACHE_MEMO.lock() {
+        memo.clear();
+    }
+    if let Ok(mut memo) = ENDPOINTS_DISK_CACHE_MEMO.lock() {
+        memo.clear();
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct ModelsCache {
     pub models: Vec<ModelInfo>,
@@ -837,6 +857,59 @@ mod tests {
         assert_eq!(m.get(&a), Some(&"session-a"));
         assert_eq!(m.get(&b), Some(&"session-b"));
         assert_eq!(m.len(), 2);
+    }
+
+    /// TASK-89 AC#3: `clear_disk_cache_memos` must drop every entry
+    /// from both the model-catalog memo (`DISK_CACHE_MEMO`) and the
+    /// per-model endpoints memo (`ENDPOINTS_DISK_CACHE_MEMO`) so the
+    /// provider/model-change hook reliably reclaims the in-process
+    /// memoization layer. The on-disk files themselves are not touched
+    /// by the hook (verified implicitly: this test only manipulates
+    /// in-process state).
+    #[test]
+    fn clear_disk_cache_memos_drops_both_memos() {
+        // Serialize against concurrent tests that touch the same statics.
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+        clear_disk_cache_memos();
+        {
+            let mut models = DISK_CACHE_MEMO.lock().unwrap();
+            models.insert(
+                OrCacheKey::for_path(PathBuf::from("/tmp/jcode-test-or-models-a.json")),
+                DiskCacheMemoEntry {
+                    modified_at: None,
+                    cache: None,
+                },
+            );
+            models.insert(
+                OrCacheKey::for_path(PathBuf::from("/tmp/jcode-test-or-models-b.json")),
+                DiskCacheMemoEntry {
+                    modified_at: None,
+                    cache: None,
+                },
+            );
+            assert_eq!(models.len(), 2);
+
+            let mut endpoints = ENDPOINTS_DISK_CACHE_MEMO.lock().unwrap();
+            endpoints.insert(
+                OrCacheKey::for_path(PathBuf::from("/tmp/jcode-test-or-endpoints-a.json")),
+                EndpointsDiskCacheMemoEntry {
+                    modified_at: None,
+                    cache: None,
+                },
+            );
+            assert_eq!(endpoints.len(), 1);
+        }
+        clear_disk_cache_memos();
+        assert!(
+            DISK_CACHE_MEMO.lock().unwrap().is_empty(),
+            "DISK_CACHE_MEMO must be empty after clear"
+        );
+        assert!(
+            ENDPOINTS_DISK_CACHE_MEMO.lock().unwrap().is_empty(),
+            "ENDPOINTS_DISK_CACHE_MEMO must be empty after clear"
+        );
     }
 
     #[test]
