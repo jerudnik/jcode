@@ -216,3 +216,138 @@ Recommended next prototype batch: goal/task retention ledger,
 contradiction/supersession pruning, attention preamble/context index, and lazy
 restore handles. These are low-risk enough to simulate in the current harness
 and directly measurable with the realistic replay fixture.
+
+## Research swarm findings for TASK-79 through TASK-81
+
+A focused research pass over TASK-79, TASK-80, and TASK-81 refined the next
+implementation/evaluation targets.
+
+### Context-management patterns to prototype next
+
+- **Goal/task retention ledger**: generate a canonical block from user/backlog
+  and successful tool facts containing current objective, task IDs, acceptance
+  criteria, explicit constraints, `do not` rules, current plan state, and
+  validation obligations. Do not derive it from speculative assistant text.
+- **Supersession pruning**: extend existing runtime pruning in
+  `src/agent/context_pruning.rs` from duplicate/failed tool-result cases into
+  evidence chains: older failed read/edit/build results superseded by later
+  success, hypotheses invalidated by later tool output, and older plan/task
+  state superseded by newer backlog status.
+- **Attention preamble/context index**: prepend a deterministic, fixed-budget
+  index with current objective, critical constraints, relevant files/tasks,
+  omitted artifact restore IDs, and known stale/quarantined content.
+- **Lazy restore handles**: strengthen placeholders with restore ID, kind,
+  path/tool, content hash, byte/token count, trust tier, and supersession
+  status. Expand only when the current turn references a matching file path,
+  tool ID, symbol, restore ID, or quoted omitted phrase.
+- **Pinned facts/protected spans**: pin exact user instructions, task IDs, file
+  paths, decisions, safety constraints, and explicit `never`/`do not`/`must`
+  statements, but keep pins source-bound and supersedable to avoid stale pins.
+
+### Evaluation methodology refinements
+
+Use three fixture tiers so results do not overfit synthetic canaries:
+
+| Tier | Purpose | Fixture shape | Scoring |
+| --- | --- | --- | --- |
+| Synthetic canaries | Deterministic unit/regression checks | Hand-built blocks with protected terms, stale terms, cross-project distractors, large logs, duplicate tools, and cache entries. | Exact-match and structural metrics. |
+| Realistic local replay | JCODE-specific reliability | Recent session snapshots, early user intent, latest state, controlled stale/foreign injections. | Retention, stale-hit rate, answerability. |
+| Public benchmark replay | External validity | Terminal-Bench style terminal tasks, SWE-bench Lite/Verified style issue fixtures, and RULER-style long-context needles. | Task pass rate, exactness, contamination checks. |
+
+Additional target thresholds from the research pass:
+
+| Metric | Suggested threshold |
+| --- | --- |
+| Protected instruction/task retention | `>= 0.98` |
+| Protected answerability | `>= 0.95` |
+| Synthetic stale/foreign retention | `0.0` |
+| Realistic stale retention | `< 0.02` |
+| Realistic foreign retention | `< 0.01` |
+| Stale answer contamination | `0.0` for P0 candidates |
+| Restore precision | `>= 0.90` |
+| Restore recall | `>= 0.98` |
+| Ordering stability | `100%` deterministic output hash across repeated runs |
+| Transform latency | `< 20ms` typical, `< 100ms` p95 per fixture |
+
+### Cache isolation and cross-project confusion controls
+
+Shared caches can cause reliability failures even when cache hit rate is high.
+The research pass categorized cache risks and required isolation fields:
+
+| Cache type | Main risk | Required isolation fields |
+| --- | --- | --- |
+| Repo maps / code indexes | Symbols or files from another checkout appear relevant. | Canonical repo ID, worktree root hash, VCS remote, commit/tree hash, branch, index schema. |
+| Skeletons / summaries | Stale or foreign file summaries survive edits. | File content hash, file path, parser version, summary prompt/version, repo namespace. |
+| Token estimates | Wrong budgeting from provider/model/tokenizer mismatch. | Provider, model, tokenizer version, message format version. |
+| Embeddings / retrieval | Similar but unrelated project facts retrieved. | Repo namespace, source URI, content hash, embedding model/version, chunker version, trust tier. |
+| Prompt projections / compaction outputs | Old instructions or other project task IDs reused. | Session ID, task ID, context recipe version, source message hashes, compaction version. |
+| Provider payload cache | Append-only prefix breaks or wrong cached prefix assumed. | Provider, model, system prompt hash, tools schema hash, message prefix hash, cache policy. |
+| Tool/result caches | Tool output from wrong cwd/env reused. | Cwd/repo ID, command/tool name, args hash, env allowlist hash, input file hashes, TTL. |
+| UI/render caches | Visual state from wrong project/session shown. | Session ID, surface ID, content hash, schema/theme/version. |
+| External API caches | GitHub/issue/model data stale or wrong account/repo. | Account, repo, endpoint, query params, auth identity fingerprint, synced_at, TTL. |
+
+Recommended structured cache-key shape:
+
+```text
+cache_key = hash(
+  cache_kind,
+  schema_version,
+  jcode_version_or_cache_format_version,
+  project_namespace,
+  source_identity,
+  content_identity,
+  transform_identity,
+  environment_identity
+)
+```
+
+Prefer a two-level design:
+
+1. **Global content-addressed blob store** only for outputs that are pure
+   functions of content plus transform version.
+2. **Project/session namespace manifests** for lookup eligibility, provenance,
+   TTL, invalidation, and trust tier. Cross-project reads should be rejected by
+   default unless the entry is explicitly `global-safe`.
+
+Cache evaluation metrics:
+
+| Metric | Suggested threshold |
+| --- | --- |
+| Cross-project leakage rate | `0.0` |
+| False cache-hit rate | `0.0` |
+| Stale-hit rate | `< 0.5%` generally, `0.0` for protected facts/provider payloads |
+| Hit quality versus recompute | `>= 0.99` protected answerability parity |
+| Invalidation recall | `>= 0.99` |
+| Miss penalty from stricter isolation | `< 10%` p50, `< 20%` p95 |
+| Cache size growth | `< 1.5x` unless hit quality improves materially |
+
+### JCODE integration points identified
+
+- `src/agent/context_pruning.rs`: extend current pruning rules into
+  supersession and protected-span tests.
+- `src/agent/compaction.rs` and `crates/jcode-compaction-core/src/lib.rs`:
+  add context recipe/version/provenance fields and avoid persistent use of
+  non-provenance-bearing semantic keys.
+- `src/session.rs` and `src/prompt.rs`: carry project/session/task identity into
+  context projection and prompt assembly.
+- `src/cache_tracker.rs`: extend provider prompt-cache observability with
+  project/session/provider/model/system/tool-schema fingerprints and reason
+  categories for intentional rewrites.
+- Provider payload renderers in `crates/jcode-provider-core/src/lib.rs`,
+  `crates/jcode-provider-openai/src/request.rs`, `src/provider/anthropic.rs`,
+  `src/provider/openai.rs`, and `src/provider/openrouter_provider_impl.rs`:
+  log deterministic projection fingerprints around provider payload construction.
+- `src/tool/agentgrep/context.rs`: audit repo/search context projection and
+  ensure repo identity is part of cache/retrieval provenance.
+- UI cache references such as `crates/jcode-tui-messages/src/cache.rs`,
+  `src/tui/ui_messages_cache.rs`, and `crates/jcode-tui-mermaid/src/mermaid_cache_*`
+  are lower-risk but should still be scoped by session/surface/content hash.
+
+Easy first patches suggested by the swarm:
+
+1. Add projection fingerprint logging around provider payload construction.
+2. Assert working-directory/project identity in session context and cache
+   signatures.
+3. Add cache-tracker reason categories for known intentional prefix rewrites.
+4. Add synthetic cross-project cache canary fixtures to the eval harness.
+5. Add tests for cross-project prompt/static cache boundaries.
