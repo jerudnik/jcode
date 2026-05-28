@@ -83,6 +83,8 @@ mod tests {
             content: format!("task {id}"),
             status: status.to_string(),
             priority: "high".to_string(),
+            confidence: None,
+            completion_confidence: None,
             blocked_by: Vec::new(),
             assigned_to: None,
         }
