@@ -59,6 +59,15 @@ STALE_FOREIGN_TERMS = [
     "foreign repo nix-config",
     "stale production database",
     "wrong branch deploy",
+    # TASK-89 AC#5: runtime cache layer markers. A `cache_isolation`
+    # implementation must additionally drop entries whose IsolationKey
+    # axes (isolation_fp, embedding_context_fp, schema_version,
+    # provider/model) do not match the active session, even when the
+    # block's metadata flags (current_project, current_session) would
+    # otherwise look benign.
+    "foreign_isolation_fp_render",
+    "foreign_embedding_context_fp",
+    "stale_schema_version_openrouter_memo",
 ]
 
 
@@ -404,6 +413,63 @@ def cache_confusion_blocks() -> list[Block]:
             content=("stale production database cached provider prefix from old session wrong branch deploy " * 160),
             metadata={"session_id": "other-session", "cache_type": "provider_payload", "current_session": False},
         ),
+        # TASK-89 AC#5: runtime cache layer fixtures. Each block looks
+        # benign on the project_namespace / current_project / current_session
+        # axes (so the legacy filter would pass them through) but carries
+        # an IsolationKey axis that does not match the active session.
+        # A `cache_isolation` implementation that mirrors the runtime
+        # contract MUST drop these even though the metadata flags are
+        # neutral.
+        Block(
+            id="cache-foreign-isolation-fp-message-cache",
+            kind="tool_output",
+            tool="message_render_cache",
+            trust="unverified",
+            status="raw",
+            content=(
+                "foreign_isolation_fp_render rendered Line-vec from session=A workspace=X "
+                "served back into session=B workspace=Y on message_hash collision " * 60
+            ),
+            metadata={
+                "cache_type": "message_render_cache",
+                "isolation_fp": 0xA1A1_0000_0000_0001,
+                "active_isolation_fp": 0xB2B2_0000_0000_0002,
+                # Intentionally NOT flagged via current_project/current_session
+                # so only the runtime-axis filter can reject it.
+            },
+        ),
+        Block(
+            id="cache-foreign-embedding-context-semantic",
+            kind="tool_output",
+            tool="semantic_embed_cache",
+            trust="unverified",
+            status="raw",
+            content=(
+                "foreign_embedding_context_fp Vec<f32> cached against embedding_model=text-embedding-3-small "
+                "embedding_dim=1536 served into a session running all-MiniLM-L6-v2 dim=384 " * 50
+            ),
+            metadata={
+                "cache_type": "semantic_embed_cache",
+                "embedding_context_fp": 0xCAFE_BABE_DEAD_BEEF,
+                "active_embedding_context_fp": 0x1234_5678_9ABC_DEF0,
+            },
+        ),
+        Block(
+            id="cache-stale-schema-version-openrouter",
+            kind="tool_output",
+            tool="openrouter_disk_memo",
+            trust="unverified",
+            status="raw",
+            content=(
+                "stale_schema_version_openrouter_memo cached ModelInfo catalog from SCHEMA_VERSION=N-1 "
+                "after a one-knob bump of jcode_cache_isolation::SCHEMA_VERSION to N " * 40
+            ),
+            metadata={
+                "cache_type": "openrouter_disk_memo",
+                "schema_version": 0,
+                "active_schema_version": 1,
+            },
+        ),
     ])
     return blocks
 
@@ -741,8 +807,33 @@ def apply_technique(blocks: list[Block], technique: str, tool_budget_chars: int)
     if technique == "cache_isolation":
         isolated = []
         for block in result:
-            foreign_project = block.metadata.get("current_project") is False or block.metadata.get("current_session") is False
-            if foreign_project or (block.metadata.get("project_namespace") not in (None, "jcode")):
+            md = block.metadata
+            foreign_project = md.get("current_project") is False or md.get("current_session") is False
+            namespace_mismatch = md.get("project_namespace") not in (None, "jcode")
+            # TASK-89 AC#5: also reject blocks whose runtime IsolationKey
+            # axes do not match the active session. These axes mirror the
+            # actual runtime cache contract:
+            #   - MESSAGE_CACHE keys on isolation_fp (session+workspace+
+            #     SCHEMA_VERSION). A mismatch means the rendered Line-vec
+            #     is from a foreign (session, workspace) and must not be
+            #     served back.
+            #   - semantic_embed_cache keys on embedding_context_fp
+            #     (embedding_model + embedding_dim + SCHEMA_VERSION). A
+            #     mismatch means the cached Vec<f32> was computed under a
+            #     different embedding backend.
+            #   - openrouter DISK_CACHE_MEMO / ENDPOINTS_DISK_CACHE_MEMO
+            #     fold SCHEMA_VERSION into OrCacheKey. A mismatch means
+            #     the cache-isolation contract has been bumped since the
+            #     memoized entry was populated.
+            # `active_*` keys are present on cache_confusion fixtures so
+            # the eval can compare against a known-good axis; when absent
+            # the block is treated as having no opinion on that axis.
+            runtime_axis_mismatch = (
+                ("active_isolation_fp" in md and md.get("isolation_fp") != md.get("active_isolation_fp"))
+                or ("active_embedding_context_fp" in md and md.get("embedding_context_fp") != md.get("active_embedding_context_fp"))
+                or ("active_schema_version" in md and md.get("schema_version") != md.get("active_schema_version"))
+            )
+            if foreign_project or namespace_mismatch or runtime_axis_mismatch:
                 isolated.append(placeholder(block, "cache_namespace_mismatch"))
             else:
                 isolated.append(block)
