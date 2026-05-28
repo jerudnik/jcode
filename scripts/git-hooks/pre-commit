@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# pre-commit hook: warn-only Backlog.md tracking-divergence check.
+#
+# Installed by scripts/install_git_hooks.sh as a symlink into .git/hooks/.
+# Never blocks the commit. To make it blocking globally, set
+# EXIT_ON_FINDING=1 in your shell environment.
+
+set -u
+
+# Resolve to repo root so we work even when git invokes us elsewhere.
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$REPO_ROOT" ]; then
+  exit 0
+fi
+
+CHECK="$REPO_ROOT/scripts/git-hooks/check-backlog-tracking.sh"
+if [ ! -x "$CHECK" ]; then
+  printf '[backlog-tracking] warn: %s not executable; skipping check\n' "$CHECK" >&2
+  exit 0
+fi
+
+# Run the check on staged changes. Warn-only.
+"$CHECK" || true
+
+exit 0

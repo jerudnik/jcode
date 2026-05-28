@@ -652,6 +652,26 @@ Notes:
 
 ---
 
+## Git hooks
+
+Optional warn-only pre-commit hook that flags newly added unchecked
+<!-- backlog-tracking-ignore -->
+checklists and unguarded `TODO`/`FIXME`/`HACK`/`XXX` markers so they get
+filed as [Backlog.md](https://backlog.md) tasks instead of drifting in
+docs and code. Install with:
+
+```sh
+bash scripts/install_git_hooks.sh
+```
+
+The hook never blocks a commit. Add `<!-- backlog-tracking-ignore -->`
+(or `# backlog-tracking-ignore` / `// backlog-tracking-ignore`) on the
+same or preceding line to opt out a specific occurrence. See
+[scripts/git-hooks/README.md](scripts/git-hooks/README.md) for the CI
+flags (`--all`, `--strict`) and full details.
+
+---
+
 ## Detailed Installation
 
 ### Setup
