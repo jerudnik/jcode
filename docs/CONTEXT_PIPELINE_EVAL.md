@@ -467,3 +467,108 @@ The next harness extension should add:
   implementation effort, runtime cost, observability, and reversibility.
 - Optional benchmark adapters kept out of the hot path until deterministic
   gates pass.
+
+## Repeated SCO/VM experiment matrix runner
+
+`scripts/context_eval_matrix.py` wraps `scripts/context_pipeline_eval.py` to run
+the same candidates repeatedly under an assumption matrix. Use it when deciding
+whether a technique is stable enough to implement, not for quick smoke checks.
+
+Local minimal matrix:
+
+```bash
+python3 scripts/context_eval_matrix.py \
+  --mode local \
+  --scenario-kind synthetic \
+  --include-local-sessions false \
+  --tool-budget-chars 4000 \
+  --repetitions 2 \
+  --out target/context-eval-matrix/local-smoke
+```
+
+Remote minimal matrix on `serious-callers-only`:
+
+```bash
+python3 scripts/context_eval_matrix.py \
+  --mode remote \
+  --host serious-callers-only \
+  --remote-dir /tmp/jcode-context-eval-matrix \
+  --scenario-kind realistic \
+  --include-local-sessions true \
+  --tool-budget-chars 4000 \
+  --repetitions 2 \
+  --out target/context-eval-matrix/sco-realistic-smoke
+```
+
+Remote VM/provision hook:
+
+```bash
+JCODE_CONTEXT_EVAL_VM_START_CMD='your-idempotent-vm-start-command' \
+python3 scripts/context_eval_matrix.py \
+  --mode remote \
+  --host serious-callers-only \
+  --remote-dir /tmp/jcode-context-eval-matrix-vm \
+  --scenario-kind synthetic \
+  --scenario-kind realistic \
+  --include-local-sessions false \
+  --include-local-sessions true \
+  --tool-budget-chars 2000 \
+  --tool-budget-chars 4000 \
+  --tool-budget-chars 8000 \
+  --repetitions 5
+```
+
+The matrix dimensions are:
+
+- `--scenario-kind`: repeatable `synthetic` and/or `realistic`.
+- `--include-local-sessions`: repeatable `true` and/or `false`.
+- `--tool-budget-chars`: repeatable integer budgets.
+- `--repetitions`: repeated runs for each assumption tuple.
+- `--technique`: optional repeatable subset of techniques; defaults to all.
+
+Output layout:
+
+```text
+target/context-eval-matrix/<run>/
+  assumptions.json
+  run_config.json
+  runs/<assumption-id>/
+    assumption.json
+    matrix.csv
+    matrix.json
+    annotated_matrix.json
+    runs/<technique>.context.json
+  all_rows.csv
+  all_rows.json
+  summary.csv
+  summary.json
+```
+
+`summary.csv` aggregates each technique/assumption tuple with
+mean/min/max/stdev for numeric metrics. `passes_reliability_gates` currently
+requires:
+
+- minimum protected retention `>= 0.98`,
+- minimum restore-handle coverage `>= 1.0`,
+- maximum stale/foreign retention `<= 0.0`,
+- maximum latency `< 100ms`.
+
+Suggested data-gathering sequence:
+
+1. Local synthetic smoke: one budget, two repetitions.
+2. SCO synthetic matrix: budgets `2000`, `4000`, `8000`, three repetitions.
+3. SCO realistic matrix with local sessions: budgets `2000`, `4000`, `8000`,
+   five repetitions.
+4. VM-backed run using `JCODE_CONTEXT_EVAL_VM_START_CMD` once an isolated VM
+   start/reset command is available.
+5. Only candidates passing deterministic gates graduate to Terminal-Bench or
+   SWE-bench-style runs.
+
+Interpretation guidance:
+
+- High mean score is insufficient if min protected retention fails.
+- High token savings are suspicious if stale/foreign retention is non-zero.
+- Large stdev suggests nondeterminism or fixture sensitivity and should block
+  runtime changes until explained.
+- Cache-isolation candidates should use stricter gates than generic pruning:
+  cross-project leakage and false hits must remain exactly zero.

@@ -668,8 +668,11 @@ def run_remote(args: argparse.Namespace) -> None:
         f"python3 scripts/context_pipeline_eval.py run-local "
         f"--out {remote_repo}/target/context-eval/remote "
         f"--scenario-kind {args.scenario_kind} "
+        f"--tool-budget-chars {args.tool_budget_chars} "
         f"{'--include-local-sessions' if args.include_local_sessions else ''}"
     )
+    if args.technique:
+        remote_cmd += " " + " ".join(f"--technique {technique}" for technique in args.technique)
     remote(remote_cmd)
 
     out = Path(args.out or (local_root / "target" / "context-eval" / f"remote-{host}"))
@@ -704,6 +707,8 @@ def build_parser() -> argparse.ArgumentParser:
     remote.add_argument("--out", default=None)
     remote.add_argument("--include-local-sessions", action="store_true")
     remote.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
+    remote.add_argument("--tool-budget-chars", type=int, default=4_000)
+    remote.add_argument("--technique", action="append", choices=DEFAULT_TECHNIQUES + ["duplicate_prune"], default=None)
     remote.set_defaults(func=run_remote)
 
     return parser
