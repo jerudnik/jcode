@@ -48,6 +48,7 @@ IGNORE_MARKER = "backlog-tracking-ignore"
 
 # Stopwords for Jaccard topic comparison. Conservative list; the goal is to
 # strip out filler words and Backlog tagging noise that don't carry signal.
+# <!-- backlog-tracking-ignore --> (literals below are stopwords, not actionable markers)
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from",
     "has", "have", "in", "is", "it", "its", "of", "on", "or", "that", "the",
