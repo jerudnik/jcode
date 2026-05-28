@@ -572,3 +572,109 @@ Interpretation guidance:
   runtime changes until explained.
 - Cache-isolation candidates should use stricter gates than generic pruning:
   cross-project leakage and false hits must remain exactly zero.
+
+## Opt-in real-model evaluation
+
+The deterministic harness is the first gate. To test whether transformed
+payloads actually steer a model correctly, use `scripts/context_model_eval.py`
+against existing `*.context.json` artifacts. This phase is intentionally opt-in
+because it spends provider tokens and introduces provider variance.
+
+OpenAI-compatible smoke:
+
+```bash
+OPENAI_API_KEY=... \
+python3 scripts/context_model_eval.py \
+  --artifacts target/context-eval-matrix/sco-smoke \
+  --provider openai \
+  --model gpt-4o-mini \
+  --technique baseline \
+  --technique combined_p0 \
+  --max-contexts 2 \
+  --max-calls 4 \
+  --out target/context-eval-model/sco-smoke-openai
+```
+
+JCODE subscription-backed smoke using `jcode run`:
+
+```bash
+python3 scripts/context_model_eval.py \
+  --artifacts target/context-eval-matrix/sco-smoke \
+  --provider jcode-run \
+  --jcode-provider openai \
+  --model gpt-5.5 \
+  --technique baseline \
+  --technique combined_p0 \
+  --max-contexts 2 \
+  --max-calls 4 \
+  --out target/context-eval-model/sco-smoke-jcode-run
+```
+
+`jcode-run` is the easiest path for subscription-backed tokens because it uses
+the existing JCODE CLI auth flow instead of requiring raw API keys.
+
+Anthropic smoke:
+
+```bash
+ANTHROPIC_API_KEY=... \
+python3 scripts/context_model_eval.py \
+  --artifacts target/context-eval-matrix/sco-smoke \
+  --provider anthropic \
+  --api-key-env ANTHROPIC_API_KEY \
+  --base-url https://api.anthropic.com/v1 \
+  --model claude-3-5-haiku-latest \
+  --max-contexts 2 \
+  --max-calls 4
+```
+
+OpenRouter or another OpenAI-compatible endpoint:
+
+```bash
+OPENROUTER_API_KEY=... \
+python3 scripts/context_model_eval.py \
+  --artifacts target/context-eval-matrix/sco-smoke \
+  --provider openrouter \
+  --api-key-env OPENROUTER_API_KEY \
+  --base-url https://openrouter.ai/api/v1 \
+  --model openai/gpt-4o-mini
+```
+
+Environment-variable defaults:
+
+| Variable | Purpose |
+| --- | --- |
+| `JCODE_CONTEXT_MODEL_EVAL_PROVIDER` | `openai`, `openrouter`, `openai-compatible`, or `anthropic`. |
+| `JCODE_CONTEXT_MODEL_EVAL_MODEL` | Model name. |
+| `JCODE_CONTEXT_MODEL_EVAL_BASE_URL` | API base URL. |
+| `JCODE_CONTEXT_MODEL_EVAL_API_KEY_ENV` | Name of env var containing the API key. |
+| `JCODE_CONTEXT_MODEL_EVAL_JCODE_BIN` | `jcode` binary for `--provider jcode-run`. |
+| `JCODE_CONTEXT_MODEL_EVAL_JCODE_PROVIDER` | JCODE provider passed to `jcode run -p`. |
+
+Safety and cost controls:
+
+- API keys are read from environment variables and are not written to outputs.
+- `--max-calls` caps total provider calls.
+- `--max-contexts` caps context artifacts read.
+- `--max-context-chars` truncates oversized contexts before the provider call.
+- `--max-output-tokens` defaults to a small response budget.
+- Outputs include prompts only indirectly through context file references;
+  responses are stored for audit in `results.csv/json` and `responses/*.json`.
+
+The default questions check active-task answerability, stale/foreign
+contamination, and restore-handle awareness. For more precise benchmark runs,
+pass a custom JSON question list with fields:
+
+```json
+[
+  {
+    "id": "task_identity",
+    "prompt": "What task are we working on?",
+    "expected_any": ["TASK-83"],
+    "forbidden_any": ["nix-config", "wrong branch deploy"]
+  }
+]
+```
+
+Interpret model-eval results only after deterministic gates pass. A candidate
+that fails protected retention or cache isolation should not be rescued by a
+single favorable model response.
