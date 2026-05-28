@@ -186,8 +186,33 @@ Representative remote run on `serious-callers-only`:
 
 ## Next improvements
 
+- Extend the prototype matrix with the pending candidates below. These are
+  tracked from TASK-80 but consolidated here so the implemented results and
+  pending experiments stay in one evaluation ledger.
 - Add real transcript parsers once stable session schemas are confirmed.
 - Add public SWE-bench/Terminal-Bench style fixture ingestion.
 - Add runtime jcode provider-payload capture mode for true replay experiments.
 - Add implementation-burden fields to `matrix.csv` once prototype-to-runtime diffs are estimated.
 - Add a small HTML/Markdown report generator for reviewer-friendly summaries.
+
+## Pending prototype/evaluation ledger
+
+| Candidate | Reliability goal | Suggested metric | Initial priority |
+| --- | --- | --- | --- |
+| Goal/task retention ledger | Preserve active objective, constraints, acceptance criteria, and `do not` rules under compaction/pruning. | Protected goal/constraint retention after aggressive budgets and realistic replay. | P0 |
+| Contradiction/supersession pruning | Remove stale hypotheses or older instructions invalidated by later evidence. | Disproven-claim retention, superseded-block removal, false-positive pruning rate. | P0 |
+| Attention preamble/context index | Make important facts salient before long context payloads. | Protected fact answerability, ordering stability, preamble token overhead. | P0 |
+| Lazy restore handles with targeted expansion | Omit large artifacts safely and restore only when the current turn references them. | Restore precision/recall, handle coverage, token savings, latency. | P0 |
+| Pinned facts/protected spans | Make user instructions, task IDs, file paths, decisions, and safety constraints non-prunable unless superseded. | Pinned-span survival and accidental stale-pin retention. | P1 |
+| Recency plus importance scoring | Rank blocks by role, recency, explicit constraints, task references, and tool success/failure. | Useful-context retention at fixed budgets, stale/foreign retention. | P1 |
+| Context provenance/trust routing | Keep verified user/task/tool-success facts distinct from failed tools, logs, and speculative assistant text. | Foreign/stale retention and hallucination-trigger reduction. | P1 |
+| Working-state scratchpad | Preserve compact task continuity without replaying stale reasoning-like context. | Continuity after compaction, scratchpad drift, protected-fact consistency. | P2 |
+| Session-local fact memory | Store short-lived facts bounded to one session/task before considering global memory. | Source-bound recall precision, leakage across sessions/tasks. | P2 |
+| TTL/expiry for inferred facts | Prevent stale inferred facts from living indefinitely. | Expired-fact retention and still-valid fact loss. | P2 |
+| Source-bound memories | Scope memories to repo/session/task provenance. | Cross-repo leakage rate and relevant memory recall. | P2 |
+| Conflict-aware memory retrieval | Return memories with conflict labels instead of blindly injecting them. | Conflict detection precision/recall and answer contamination rate. | P2 |
+
+Recommended next prototype batch: goal/task retention ledger,
+contradiction/supersession pruning, attention preamble/context index, and lazy
+restore handles. These are low-risk enough to simulate in the current harness
+and directly measurable with the realistic replay fixture.

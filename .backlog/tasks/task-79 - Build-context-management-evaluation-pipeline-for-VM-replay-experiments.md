@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@jcode'
 created_date: '2026-05-28 12:32'
-updated_date: '2026-05-28 13:09'
+updated_date: '2026-05-28 13:33'
 labels:
   - context
   - evaluation
@@ -61,6 +61,8 @@ Implemented the first deterministic harness version with local scenario generati
 Validated non-interactive SSH to `serious-callers-only` and completed a remote smoke run using `/tmp/jcode-context-eval-smoke` as the staging directory.
 
 Added and validated higher-fidelity realistic replay mode. Local realistic run: combined_p0 score 79.67, trust_quarantine 77.98, boundary_gate 71.03, tool_budget 58.2. Remote serious-callers-only realistic run: combined_p0 score 79.96, trust_quarantine 78.37, boundary_gate 71.03, tool_budget 58.28. The ranking broadly holds, but trust quarantine appears more important than raw budgeting for reliability.
+
+Consolidated pending context-management prototype targets from TASK-80 into docs/CONTEXT_PIPELINE_EVAL.md as the main evaluation ledger. Pending candidates now sit alongside prior results: goal/task retention ledger, supersession pruning, attention preamble/context index, lazy restore handles, pinned spans, recency/importance scoring, provenance/trust routing, scratchpad, and memory-adjacent session-local/TTL/source-bound/conflict-aware experiments.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -90,4 +92,6 @@ Validation:
 - `python3 scripts/context_pipeline_eval.py run-remote --host serious-callers-only --remote-dir /tmp/jcode-context-eval-smoke --out target/context-eval/remote-smoke`
 
 Follow-up higher-fidelity evaluation mode added: realistic scenarios now sample recent JCODE session snapshots, preserve early intent plus latest state, inject controlled stale/foreign distractors, and score stale/foreign retention plus restore-handle coverage. Local and serious-callers-only smoke runs kept combined_p0 first, moved trust_quarantine close behind, and showed that tool_budget alone preserves stale distractors despite token savings.
+
+Consolidated the pending prototype/evaluation backlog into the main context pipeline evaluation document so completed results and next targets remain in one place. TASK-80 remains the follow-up planning pointer, while docs/CONTEXT_PIPELINE_EVAL.md now carries the unified pending prototype ledger and recommended next batch.
 <!-- SECTION:FINAL_SUMMARY:END -->
