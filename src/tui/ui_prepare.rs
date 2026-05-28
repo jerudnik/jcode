@@ -691,6 +691,7 @@ pub(super) fn prepare_body_incremental(
             "assistant" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -732,7 +733,7 @@ pub(super) fn prepare_body_incremental(
             "tool" => {
                 let tool_start_line = new_lines.len();
                 let cached =
-                    get_cached_message_lines(msg, width, app.diff_mode(), render_tool_message);
+                    get_cached_message_lines(app, msg, width, app.diff_mode(), render_tool_message);
                 if let Some(target) = tool_message_copy_target(msg, cached.len()) {
                     new_copy_targets.push(offset_copy_target(target, tool_start_line));
                 }
@@ -785,6 +786,7 @@ pub(super) fn prepare_body_incremental(
             "system" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -799,6 +801,7 @@ pub(super) fn prepare_body_incremental(
             "background_task" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -813,6 +816,7 @@ pub(super) fn prepare_body_incremental(
             "swarm" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -872,6 +876,7 @@ pub(super) fn prepare_body_incremental(
             "usage" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -886,6 +891,7 @@ pub(super) fn prepare_body_incremental(
             "overnight" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -1129,6 +1135,7 @@ pub(super) fn prepare_body(
             "assistant" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -1204,7 +1211,7 @@ pub(super) fn prepare_body(
             "tool" => {
                 let tool_start_line = lines.len();
                 let cached =
-                    get_cached_message_lines(msg, width, app.diff_mode(), render_tool_message);
+                    get_cached_message_lines(app, msg, width, app.diff_mode(), render_tool_message);
                 if let Some(target) = tool_message_copy_target(msg, cached.len()) {
                     copy_targets.push(offset_copy_target(target, tool_start_line));
                 }
@@ -1261,6 +1268,7 @@ pub(super) fn prepare_body(
             "system" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -1275,6 +1283,7 @@ pub(super) fn prepare_body(
             "background_task" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -1289,6 +1298,7 @@ pub(super) fn prepare_body(
             "swarm" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -1348,6 +1358,7 @@ pub(super) fn prepare_body(
             "usage" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),
@@ -1362,6 +1373,7 @@ pub(super) fn prepare_body(
             "overnight" => {
                 let content_width = width.saturating_sub(4);
                 let cached = get_cached_message_lines(
+                    app,
                     msg,
                     content_width,
                     app.diff_mode(),

@@ -7,6 +7,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct MessageCacheKey {
+    /// Fingerprint of the runtime isolation context (session + workspace +
+    /// SCHEMA_VERSION). Folded into the key so two sessions or two workspaces
+    /// served by the same long-lived TUI process never share a render-cache
+    /// hit, even when their (message_hash, width, content_len, ...) tuples
+    /// otherwise collide.
+    ///
+    /// MESSAGE_CACHE is render-only so trust_tier / provider / model are
+    /// intentionally not folded in here (caller passes `0` for those via
+    /// IsolationKey::context_fingerprint).
+    isolation_fp: u64,
     width: u16,
     diff_mode: DiffDisplayMode,
     message_hash: u64,
@@ -63,6 +73,12 @@ pub struct MessageCacheContext {
     pub centered: bool,
     pub mermaid_epoch: u64,
     pub mermaid_aspect_bucket: Option<u16>,
+    /// Fingerprint of the (session, workspace) pair this render is for.
+    /// Compute with `IsolationKey::for_session(...).context_fingerprint()`
+    /// (or equivalent). The render cache folds this into every lookup so a
+    /// long-lived TUI process cannot serve a Line-vec rendered for session
+    /// A or workspace X to session B or workspace Y on a hash collision.
+    pub isolation_fp: u64,
 }
 
 pub fn left_pad_lines_for_centered_mode(lines: &mut [Line<'static>], width: u16) {
@@ -103,6 +119,7 @@ where
     }
 
     let key = MessageCacheKey {
+        isolation_fp: context.isolation_fp,
         width,
         diff_mode,
         message_hash: msg.stable_cache_hash(),
@@ -143,5 +160,41 @@ mod tests {
         left_pad_lines_for_centered_mode(&mut lines, 9);
         assert_eq!(lines[0].to_string(), "   abc");
         assert_eq!(lines[0].alignment, Some(Alignment::Left));
+    }
+
+    /// TASK-89 AC#2/AC#4: a different `isolation_fp` must produce a different
+    /// `MessageCacheKey`, so the static MESSAGE_CACHE never serves a render
+    /// from session/workspace A back to session/workspace B even when every
+    /// other key component (message_hash, width, diff_mode, content_len,
+    /// diagram_mode, centered, mermaid_*) matches.
+    #[test]
+    fn message_cache_key_isolates_by_isolation_fp() {
+        fn key(isolation_fp: u64) -> MessageCacheKey {
+            MessageCacheKey {
+                isolation_fp,
+                width: 80,
+                diff_mode: DiffDisplayMode::default(),
+                message_hash: 0xDEAD_BEEF,
+                content_len: 42,
+                diagram_mode: DiagramDisplayMode::default(),
+                centered: false,
+                mermaid_epoch: 0,
+                mermaid_aspect_bucket: None,
+            }
+        }
+        let a = key(1);
+        let b = key(2);
+        let a2 = key(1);
+        assert_ne!(a, b, "different isolation_fp must produce different keys");
+        assert_eq!(a, a2, "same isolation_fp must produce equal keys");
+
+        use std::collections::HashMap;
+        let mut map: HashMap<MessageCacheKey, &'static str> = HashMap::new();
+        map.insert(a.clone(), "session-A");
+        map.insert(b.clone(), "session-B");
+        assert_eq!(map.get(&a), Some(&"session-A"));
+        assert_eq!(map.get(&b), Some(&"session-B"));
+        // sanity: same-fp lookup hits the existing entry
+        assert_eq!(map.get(&a2), Some(&"session-A"));
     }
 }
