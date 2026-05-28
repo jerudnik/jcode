@@ -1,6 +1,6 @@
 ---
 name: self-improvement-loop
-description: Use for implementation, debugging, hygiene, or planning tasks where the agent should iteratively inspect, reproduce or measure, implement, critically review, validate, and record/commit results.
+description: Use for implementation, debugging, hygiene, research, or planning tasks where the agent should iteratively inspect, reproduce or measure, implement, self-evaluate, research, validate, and record/commit results.
 allowed-tools: bash, read, write, edit, multiedit, apply_patch, grep, agentgrep, batch, todo, selfdev
 ---
 
@@ -30,12 +30,19 @@ Use this skill when taking a task from intent to a verified, recorded outcome.
    - Look for stale assumptions, adjacent regressions, edge cases, and scope creep.
    - Prefer follow-up tasks over expanding scope silently.
 
-5. **Validate broadly enough**
+5. **Self-evaluate, research, and steer the next pass**
+   - Score the current answer/change against the objective evidence: what is proven, uncertain, missing, or overfit?
+   - If uncertainty remains, research deliberately before another implementation pass. Prefer `/agent-toolbox` tools via `nix run $HOME/infrastructure/nix-config#<tool> -- ...` for specialized docs, web, code-intel, and data shaping.
+   - Add deterministic state checks: inspect files, diffs, logs, command output, tests, cache hits, process state, or rendered artifacts instead of relying on impressions.
+   - Tighten the next prompt/plan/steering instruction from those checks: name the exact hypothesis, evidence target, command, file, or invariant for the next loop.
+   - Iterate in the spirit of AutoResearch: generate, check, critique, research, and steer until the result converges or a blocker is explicit.
+
+6. **Validate broadly enough**
    - Run targeted validation first.
    - Then run relevant broader tests, checks, or builds.
    - For jcode code changes, prefer `selfdev build` before completion and reload after a clean committed build when appropriate.
 
-6. **Record and close**
+7. **Record and close**
    - Update Backlog notes, acceptance criteria, Definition of Done, modified files, and final summary as applicable.
    - Commit and push focused changes.
    - Confirm clean git state and no unintended active tasks.
@@ -48,8 +55,9 @@ Self-improvement loop:
 2. Reproduce or measure the current failure/invariant.
 3. Implement the smallest maintainable fix.
 4. Critically review completeness and edge cases.
-5. Run targeted and relevant broader validation.
-6. Record final summary, commit, push, and rebuild/reload if needed.
+5. Self-evaluate, research with agent-toolbox when useful, check deterministic state, and steer the next pass.
+6. Run targeted and relevant broader validation.
+7. Record final summary, commit, push, and rebuild/reload if needed.
 ```
 
 ## Guardrails
