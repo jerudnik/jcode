@@ -27,8 +27,8 @@ Prefer built-in Jcode tools first for files, code search, edits, browser use, an
 ## Tools by job
 
 - Docs/reference: `ctx7`, `manix`, `cht-sh` (`cht.sh`), `tealdeer` (`tldr`), `nix-search-cli` (`nix-search`), `nix-index`.
-- Web/research: `firecrawl`, `agent-browser`, `ddgr`, `parallel-cli`.
-- Code intel: `repomix`, `ripgrep-all` (`rga`), `gh`, `zat`.
+- Web/research: `firecrawl`, `agent-browser`, `ddgr`, `parallel-cli` (large first-run closure; expect Nix fetch/build time).
+- Code intel: `repomix`, `ripgrep-all` (`rga`), `gh`, `zat` (pass a supported source file, not `--help`).
 - Data shaping: `yj`, `jo`, `stdbuf`.
 
 ## Good patterns
@@ -49,6 +49,7 @@ nix run $HOME/infrastructure/nix-config#firecrawl -- --help
 # Repo/package context for LLMs or archive/PDF search
 nix run $HOME/infrastructure/nix-config#repomix -- --help
 nix run $HOME/infrastructure/nix-config#ripgrep-all -- 'pattern' .
+nix run $HOME/infrastructure/nix-config#zat -- src/main.rs
 
 # JSON/YAML/TOML/HCL conversion and JSON construction
 nix run $HOME/infrastructure/nix-config#yj -- -tj < file.toml
