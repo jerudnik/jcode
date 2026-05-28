@@ -209,8 +209,9 @@ openai_reasoning_effort = "low"
 # (higher speed, higher usage). Set to "off" to disable.
 openai_service_tier = "priority"
 # Preserve provider-native reasoning/thinking for future-turn context when supported.
+# Disabled by default in this fork while reasoning replay quality and isolation are evaluated.
 # Applies to OpenRouter, Anthropic, and OpenAI native reasoning replay. Display is separate.
-preserve_reasoning_context = true
+preserve_reasoning_context = false
 # Cross-provider failover when the same prompt would be resent elsewhere.
 # countdown = 3-second countdown before retrying on another provider; press Esc to cancel (default)
 # manual = show a notice and let you switch yourself

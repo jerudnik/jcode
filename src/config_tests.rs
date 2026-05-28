@@ -30,8 +30,8 @@ fn test_openai_fast_mode_defaults_to_priority() {
 }
 
 #[test]
-fn preserve_reasoning_context_defaults_to_enabled() {
-    assert!(ProviderConfig::default().preserve_reasoning_context);
+fn preserve_reasoning_context_defaults_to_disabled() {
+    assert!(!ProviderConfig::default().preserve_reasoning_context);
 }
 
 #[test]

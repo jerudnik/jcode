@@ -717,7 +717,7 @@ impl Default for ProviderConfig {
             openai_service_tier: Some("priority".to_string()),
             openai_native_compaction_mode: "auto".to_string(),
             openai_native_compaction_threshold_tokens: 200_000,
-            preserve_reasoning_context: true,
+            preserve_reasoning_context: false,
             cross_provider_failover: CrossProviderFailoverMode::Countdown,
             same_provider_account_failover: true,
             copilot_premium: None,
