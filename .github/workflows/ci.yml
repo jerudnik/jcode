@@ -66,6 +66,29 @@ jobs:
         shell: bash
         run: python3 scripts/check_swallowed_error_budget.py
 
+      - name: Enforce Backlog.md tracking-divergence baseline
+        shell: bash
+        run: |
+          # Warn-only locally; strict in CI. Baseline is 0 findings as of
+          # commit 0678cd8d; any new TODO/FIXME/checklist must either be
+          # filed as a Backlog.md task and referenced as `Tracked in:
+          # TASK-NN` (or `TODO(TASK-NN):` inline), or carry an explicit
+          # `backlog-tracking-ignore` marker. See scripts/git-hooks/README.md.
+          scripts/git-hooks/check-backlog-tracking.sh --all --strict
+
+      - name: Audit Backlog.md pointer integrity
+        shell: bash
+        run: |
+          # Bidirectional verifier: confirms every `Tracked in: TASK-NN`
+          # pointer in docs/source resolves to a real, open backlog task,
+          # and that those tasks back-reference the file in their
+          # `references:` frontmatter. The `check` subcommand exits
+          # non-zero only on existence failures (dead pointers / typos);
+          # topical-overlap and weak-link findings remain warnings so
+          # legitimate cross-references are not over-policed in CI. See
+          # scripts/backlog_pointer_verify.py.
+          python3 scripts/backlog_pointer_verify.py check
+
   mobile-simulator:
     name: Mobile Simulator (Linux)
     runs-on: ubuntu-latest

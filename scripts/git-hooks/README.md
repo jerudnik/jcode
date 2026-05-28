@@ -77,3 +77,24 @@ exclusion.
 
 POSIX `sh`, `git`, and [ripgrep](https://github.com/BurntSushi/ripgrep)
 (`rg`). All three are already required elsewhere in the repo workflow.
+
+### CI enforcement
+
+The `quality` job in `.github/workflows/ci.yml` runs two related gates
+against every push and PR targeting `main`/`master`:
+
+1. `scripts/git-hooks/check-backlog-tracking.sh --all --strict` fails
+   on any new TODO/FIXME/HACK/XXX, unchecked checklist, or empty
+   `Tracked in:` pointer that lacks one of the documented opt-out
+   mechanisms.
+
+2. `python3 scripts/backlog_pointer_verify.py check` is a bidirectional
+   verifier that fails on dead pointers (typo'd or missing `TASK-NN`
+   references). Topic-overlap warnings remain warnings so legitimate
+   cross-references are not over-policed; see
+   [`scripts/backlog_pointer_verify.py`](../backlog_pointer_verify.py).
+
+The local pre-commit hook stays warn-only so developers get fast
+feedback without blocking commits mid-work. The CI gates ensure the
+baseline (0 findings as of commit `0678cd8d`) cannot regress at merge
+time.
