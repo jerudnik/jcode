@@ -310,6 +310,50 @@ fn desktop_event_parser_maps_streaming_server_events() {
         })
     );
     assert_eq!(
+        desktop_event_from_server_value(&json!({"type": "message_end"})),
+        None,
+        "message completion is represented by streaming state and should not add timeline noise"
+    );
+    assert_eq!(
+        desktop_event_from_server_value(&json!({
+            "type": "kv_cache_request",
+            "status": "started"
+        })),
+        None,
+        "KV cache bookkeeping is internal and should not appear as a system notice"
+    );
+    for event_type in [
+        "batch_progress",
+        "mcp_status",
+        "memory_injected",
+        "memory_activity",
+        "notification",
+        "compaction",
+        "soft_interrupt_injected",
+        "side_panel_state",
+        "swarm_status",
+        "swarm_plan",
+        "swarm_plan_proposal",
+        "transcript",
+        "input_shell_result",
+        "split_response",
+        "compacted_history",
+        "comm_request",
+        "comm_response",
+        "comm_status",
+        "comm_presence",
+    ] {
+        assert_eq!(
+            desktop_event_from_server_value(&json!({
+                "type": event_type,
+                "message": "should not render",
+                "status": "running"
+            })),
+            None,
+            "{event_type} is internal protocol state and should not render into desktop chat"
+        );
+    }
+    assert_eq!(
         desktop_event_from_server_value(
             &json!({"type": "connection_type", "connection": "websocket"})
         ),
@@ -353,6 +397,21 @@ fn desktop_session_handle_sends_stdin_response_command() {
         Ok(DesktopSessionCommand::StdinResponse {
             request_id: "stdin-1".to_string(),
             input: "secret".to_string()
+        })
+    );
+}
+
+#[test]
+fn desktop_session_handle_sends_reasoning_effort_command() {
+    let (command_tx, command_rx) = mpsc::channel();
+    let handle = DesktopSessionHandle { command_tx };
+
+    handle.set_reasoning_effort("high".to_string()).unwrap();
+
+    assert_eq!(
+        command_rx.try_recv(),
+        Ok(DesktopSessionCommand::SetReasoningEffort {
+            effort: "high".to_string()
         })
     );
 }

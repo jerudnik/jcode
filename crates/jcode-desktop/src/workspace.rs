@@ -94,7 +94,6 @@ pub enum KeyInput {
     OpenSessionSwitcher,
     ModelPickerMove(i32),
     CycleModel(i8),
-    #[allow(dead_code)]
     CycleReasoningEffort(i8),
     AttachClipboardImage,
     ClearAttachedImages,
@@ -149,7 +148,6 @@ pub enum KeyOutcome {
     RenameSession(Option<String>),
     ClearServerSession,
     CycleModel(i8),
-    #[allow(dead_code)]
     CycleReasoningEffort(i8),
     SendStdinResponse {
         request_id: String,
@@ -166,6 +164,12 @@ pub enum KeyOutcome {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionTranscriptMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionCard {
     pub session_id: String,
     pub title: String,
@@ -173,6 +177,7 @@ pub struct SessionCard {
     pub detail: String,
     pub preview_lines: Vec<String>,
     pub detail_lines: Vec<String>,
+    pub transcript_messages: Vec<SessionTranscriptMessage>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -208,6 +213,7 @@ pub struct Surface {
     pub title: String,
     pub body_lines: Vec<String>,
     pub detail_lines: Vec<String>,
+    pub transcript_messages: Vec<SessionTranscriptMessage>,
     pub session_id: Option<String>,
     /// Vertical Niri-style workspace index. Each workspace is rendered as one
     /// full-height horizontal strip of columns.
@@ -224,6 +230,7 @@ impl Surface {
             title: title.into(),
             body_lines: Vec::new(),
             detail_lines: Vec::new(),
+            transcript_messages: Vec::new(),
             session_id: None,
             lane,
             column,
@@ -251,6 +258,7 @@ impl Surface {
             title: card.title,
             body_lines,
             detail_lines,
+            transcript_messages: card.transcript_messages,
             session_id: Some(card.session_id),
             lane,
             column,
@@ -264,6 +272,7 @@ impl Surface {
         self.title = updated.title;
         self.body_lines = updated.body_lines;
         self.detail_lines = updated.detail_lines;
+        self.transcript_messages = updated.transcript_messages;
         self.session_id = updated.session_id;
     }
 
@@ -288,6 +297,7 @@ impl Surface {
                 .skip(1)
                 .cloned()
                 .collect(),
+            transcript_messages: self.transcript_messages.clone(),
         })
     }
 
@@ -298,6 +308,7 @@ impl Surface {
             title: format!("workspace {lane}"),
             body_lines: Vec::new(),
             detail_lines: Vec::new(),
+            transcript_messages: Vec::new(),
             session_id: None,
             lane,
             column,
@@ -317,6 +328,7 @@ impl Surface {
             title: title.into(),
             body_lines,
             detail_lines: Vec::new(),
+            transcript_messages: Vec::new(),
             session_id: None,
             lane: 0,
             column: 0,
@@ -1554,7 +1566,7 @@ fn fuzzy_slash_completion(needle: &str, completions: &[&'static str]) -> Option<
     matches.sort_by(|a, b| {
         a.0.cmp(&b.0)
             .then_with(|| a.1.cmp(&b.1))
-            .then_with(|| a.2.cmp(&b.2))
+            .then_with(|| a.2.cmp(b.2))
     });
     matches.first().map(|(_, _, command)| *command)
 }

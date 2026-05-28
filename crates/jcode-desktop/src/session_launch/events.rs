@@ -220,10 +220,7 @@ pub(super) fn desktop_event_from_server_value(value: &Value) -> Option<DesktopSe
                 .unwrap_or("server requested the session be closed")
                 .to_string(),
         }),
-        "message_end" => Some(DesktopSessionEvent::SystemNotice {
-            title: "message complete".to_string(),
-            message: None,
-        }),
+        "message_end" | "kv_cache_request" => None,
         "generated_image" => Some(DesktopSessionEvent::SystemNotice {
             title: "generated image".to_string(),
             message: optional_server_str(value, "path")
@@ -231,8 +228,12 @@ pub(super) fn desktop_event_from_server_value(value: &Value) -> Option<DesktopSe
                 .or_else(|| optional_server_str(value, "output_format"))
                 .map(ToOwned::to_owned),
         }),
+        // These are internal/protocol-side events used by the TUI, swarm,
+        // memory, side-panel, communication, or background-task systems. They
+        // can arrive interleaved with assistant text while the model streams,
+        // but they are not assistant-visible transcript content and should not
+        // become desktop chat rows.
         "batch_progress"
-        | "kv_cache_request"
         | "mcp_status"
         | "memory_injected"
         | "memory_activity"
@@ -250,16 +251,7 @@ pub(super) fn desktop_event_from_server_value(value: &Value) -> Option<DesktopSe
         | "comm_request"
         | "comm_response"
         | "comm_status"
-        | "comm_presence" => {
-            let event_type = value
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or("server event");
-            Some(DesktopSessionEvent::SystemNotice {
-                title: event_type.replace('_', " "),
-                message: server_notice_message(value),
-            })
-        }
+        | "comm_presence" => None,
         "reloading" => Some(DesktopSessionEvent::Reloading {
             new_socket: value
                 .get("new_socket")
@@ -280,12 +272,6 @@ pub(super) fn desktop_event_from_server_value(value: &Value) -> Option<DesktopSe
 
 fn server_u64(value: &Value, field: &str) -> Option<u64> {
     value.get(field).and_then(Value::as_u64)
-}
-
-fn server_notice_message(value: &Value) -> Option<String> {
-    ["message", "detail", "status", "summary", "result", "path"]
-        .iter()
-        .find_map(|field| optional_server_str(value, field).map(ToOwned::to_owned))
 }
 
 fn non_empty_server_str<'a>(value: &'a Value, field: &str) -> Option<&'a str> {
@@ -330,21 +316,6 @@ pub(super) fn model_catalog_event_from_server_value(value: &Value) -> Option<Des
             .filter(|mode| !mode.trim().is_empty())
             .map(ToOwned::to_owned),
     })
-}
-
-pub(super) fn history_reasoning_effort_from_server_value(value: &Value) -> Option<String> {
-    value
-        .get("reasoning_effort")
-        .and_then(Value::as_str)
-        .or_else(|| value.get("openai_reasoning_effort").and_then(Value::as_str))
-        .or_else(|| {
-            value
-                .get("provider_config")
-                .and_then(|config| config.get("openai_reasoning_effort"))
-                .and_then(Value::as_str)
-        })
-        .filter(|effort| !effort.trim().is_empty())
-        .map(ToOwned::to_owned)
 }
 
 pub(super) fn model_choices_from_server_value(value: &Value) -> Vec<DesktopModelChoice> {

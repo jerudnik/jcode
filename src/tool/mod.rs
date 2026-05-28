@@ -47,6 +47,7 @@ use tokio::sync::RwLock;
 pub(crate) use jcode_tool_core::intent_schema_property;
 pub use jcode_tool_core::{StdinInputRequest, Tool, ToolContext, ToolExecutionMode};
 pub use jcode_tool_types::{ToolImage, ToolOutput};
+pub(crate) use session_search::spawn_recent_index_warmup;
 
 #[derive(Clone, Debug, Default)]
 struct SessionToolPolicy {
@@ -224,7 +225,12 @@ impl Registry {
                 session_search::SessionSearchTool::new,
             );
             Self::insert_tool_timed(&mut m, &mut timings, "memory", memory::MemoryTool::new);
-            Self::insert_tool_timed(&mut m, &mut timings, "goal", goal::GoalTool::new);
+            Self::insert_tool_timed(
+                &mut m,
+                &mut timings,
+                "initiative",
+                goal::InitiativeTool::new,
+            );
             Self::insert_tool_timed(&mut m, &mut timings, "gmail", gmail::GmailTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "schedule", ambient::ScheduleTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "selfdev", selfdev::SelfDevTool::new);

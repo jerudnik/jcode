@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use anyhow::Result;
+use std::io::IsTerminal;
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Instant;
 
@@ -324,6 +325,39 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                     .await?;
             }
         },
+        Some(Command::ProviderTestCoverage {
+            provider_query,
+            model_query,
+            coverage_file,
+            coverage_limit,
+        }) => {
+            let coverage_path = coverage_file.as_deref().map(std::path::Path::new);
+            let colorize = std::io::stdout().is_terminal()
+                && std::env::var_os("NO_COLOR").is_none()
+                && std::env::var_os("JCODE_NO_COLOR").is_none();
+            if let Some(provider) = provider_query {
+                let model = model_query
+                    .or_else(|| args.model.clone())
+                    .unwrap_or_else(|| "*".to_string());
+                let report = crate::live_tests::format_provider_test_coverage_report(
+                    &provider,
+                    &model,
+                    coverage_path,
+                );
+                print_provider_test_coverage_report(&report, colorize);
+            } else {
+                let (coverage, path) = crate::live_tests::load_coverage(coverage_path)?;
+                let summary = crate::live_tests::strict_live_provider_model_coverage_summary(
+                    &coverage,
+                    path.display().to_string(),
+                );
+                let report = crate::live_tests::format_strict_live_provider_model_coverage_summary(
+                    &summary,
+                    coverage_limit,
+                );
+                print_provider_test_coverage_report(&report, colorize);
+            }
+        }
         Some(Command::AuthTest {
             login,
             all_configured,
@@ -333,6 +367,7 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
             json,
             output,
             coverage,
+            context_audit,
             coverage_file,
             coverage_limit,
         }) => {
@@ -343,6 +378,14 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                     coverage_file.as_deref(),
                     coverage_limit,
                 )?;
+            } else if context_audit {
+                commands::run_auth_test_context_audit_command(
+                    &args.provider,
+                    all_configured,
+                    json,
+                    output.as_deref(),
+                )
+                .await?;
             } else {
                 commands::run_auth_test_command(
                     &args.provider,
@@ -568,6 +611,17 @@ async fn run_default_command(args: Args) -> Result<()> {
     .await?;
 
     Ok(())
+}
+
+fn print_provider_test_coverage_report(report: &str, colorize: bool) {
+    if colorize {
+        print!(
+            "{}",
+            crate::live_tests::colorize_provider_test_coverage_output(report)
+        );
+    } else {
+        print!("{}", report);
+    }
 }
 
 pub(crate) async fn server_is_running() -> bool {

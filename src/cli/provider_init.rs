@@ -28,6 +28,8 @@ pub(crate) use external_auth::{
 pub enum ProviderChoice {
     Jcode,
     Claude,
+    #[value(alias = "claude-api", alias = "anthropic-key", alias = "claude-key")]
+    AnthropicApi,
     #[deprecated(
         note = "Claude Code CLI subprocess transport is deprecated; use ProviderChoice::Claude for native Anthropic OAuth/API transport"
     )]
@@ -124,6 +126,7 @@ impl ProviderChoice {
         match self {
             Self::Jcode => "jcode",
             Self::Claude => "claude",
+            Self::AnthropicApi => "anthropic-api",
             Self::ClaudeSubprocess => "claude-subprocess",
             Self::Openai => "openai",
             Self::OpenaiApi => "openai-api",
@@ -181,6 +184,10 @@ const PROVIDER_CHOICE_LOGIN_PROVIDERS: &[(ProviderChoice, LoginProviderDescripto
     (
         ProviderChoice::Claude,
         crate::provider_catalog::CLAUDE_LOGIN_PROVIDER,
+    ),
+    (
+        ProviderChoice::AnthropicApi,
+        crate::provider_catalog::ANTHROPIC_API_LOGIN_PROVIDER,
     ),
     (
         ProviderChoice::ClaudeSubprocess,
@@ -641,6 +648,9 @@ fn provider_login_hint_for_api_key_env(env_key: &str) -> String {
 }
 
 fn ensure_external_api_key_auth_allowed_for_explicit_choice(env_key: &str) -> Result<()> {
+    if direct_api_key_configured_for_env(env_key) {
+        return Ok(());
+    }
     let Some(source) = auth::external::preferred_unconsented_api_key_source_for_env(env_key) else {
         return Ok(());
     };
@@ -664,6 +674,47 @@ fn ensure_external_api_key_auth_allowed_for_explicit_choice(env_key: &str) -> Re
         provider_name,
         login_hint
     )
+}
+
+fn direct_api_key_configured_for_env(env_key: &str) -> bool {
+    let env_key = env_key.trim();
+    if env_key.is_empty() {
+        return false;
+    }
+    if std::env::var(env_key)
+        .ok()
+        .map(|key| !key.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    crate::provider_catalog::openai_compatible_profiles()
+        .iter()
+        .filter_map(|profile| {
+            let resolved = resolve_openai_compatible_profile(*profile);
+            (resolved.api_key_env == env_key).then_some(resolved.env_file)
+        })
+        .any(|env_file| direct_env_file_contains_key(env_key, &env_file))
+}
+
+fn direct_env_file_contains_key(env_key: &str, env_file: &str) -> bool {
+    if !crate::provider_catalog::is_safe_env_file_name(env_file) {
+        return false;
+    }
+    let Some(config_dir) = crate::storage::app_config_dir().ok() else {
+        return false;
+    };
+    let path = config_dir.join(env_file);
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let prefix = format!("{}=", env_key);
+    content.lines().any(|line| {
+        line.strip_prefix(&prefix)
+            .map(|key| !key.trim().trim_matches('"').trim_matches('\'').is_empty())
+            .unwrap_or(false)
+    })
 }
 
 fn maybe_enable_external_api_key_auth_for_auto(has_other_provider: bool) -> Result<bool> {
@@ -1160,7 +1211,7 @@ pub async fn login_and_bootstrap_provider(
             Arc::new(provider::MultiProvider::new())
         }
         LoginProviderTarget::Jcode => Arc::new(provider::jcode::JcodeProvider::new()),
-        LoginProviderTarget::Claude => {
+        LoginProviderTarget::Claude | LoginProviderTarget::ClaudeApiKey => {
             disable_subscription_runtime_mode();
             Arc::new(provider::MultiProvider::new())
         }
@@ -1310,6 +1361,13 @@ async fn init_provider_with_options(
             disable_subscription_runtime_mode();
             ensure_claude_auth_allowed_for_explicit_choice()?;
             init_notice("Using Claude (provider locked)");
+            lock_model_provider("claude");
+            Arc::new(provider::MultiProvider::with_preference_fast(false))
+        }
+        ProviderChoice::AnthropicApi => {
+            disable_subscription_runtime_mode();
+            ensure_external_api_key_auth_allowed_for_explicit_choice("ANTHROPIC_API_KEY")?;
+            init_notice("Using Anthropic API key provider (provider locked)");
             lock_model_provider("claude");
             Arc::new(provider::MultiProvider::with_preference_fast(false))
         }

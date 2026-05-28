@@ -306,7 +306,7 @@ pub(crate) enum Command {
         r#type: bool,
     },
 
-    /// Set up a global hotkey (Alt+;) to launch jcode
+    /// Set up the platform global hotkey to launch jcode
     SetupHotkey {
         /// Internal: run as the macOS hotkey listener process.
         #[arg(long, hide = true)]
@@ -377,6 +377,26 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Model(ModelCommand),
 
+    /// Show live verification coverage. With no provider/model, prints the full coverage summary.
+    #[command(name = "provider-test-coverage", alias = "model-status")]
+    ProviderTestCoverage {
+        /// Provider to look up. Omit provider and model to print the full coverage summary.
+        #[arg(value_name = "PROVIDER")]
+        provider_query: Option<String>,
+
+        /// Model to look up. Defaults to the global --model value only when PROVIDER is supplied.
+        #[arg(value_name = "MODEL")]
+        model_query: Option<String>,
+
+        /// Read coverage from this JSON file instead of the default live-test coverage ledger
+        #[arg(long)]
+        coverage_file: Option<String>,
+
+        /// Maximum uncovered provider/model gaps to show in the full summary
+        #[arg(long, default_value_t = 50)]
+        coverage_limit: usize,
+    },
+
     /// Test authentication end-to-end: login (optional), credential probe, refresh, and provider smoke
     AuthTest {
         /// Run the provider login flow before validation (interactive/browser-based)
@@ -410,6 +430,10 @@ pub(crate) enum Command {
         /// Show strict live provider/model E2E coverage instead of running auth tests
         #[arg(long, conflicts_with_all = ["login", "all_configured", "no_smoke", "no_tool_smoke", "prompt"])]
         coverage: bool,
+
+        /// Fetch live model catalogs and verify context-window resolution for each model with metadata
+        #[arg(long, conflicts_with_all = ["login", "no_smoke", "no_tool_smoke", "prompt", "coverage"])]
+        context_audit: bool,
 
         /// Read coverage from this JSON file instead of the default live-test coverage ledger
         #[arg(long, requires = "coverage")]

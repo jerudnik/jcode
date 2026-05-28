@@ -175,6 +175,63 @@ fn test_help_topic_shows_command_details() {
 }
 
 #[test]
+fn test_help_topic_shows_provider_test_coverage_command_details() {
+    let mut app = create_test_app();
+    app.input = "/help provider-test-coverage".to_string();
+    app.submit_input();
+
+    let msg = app
+        .display_messages()
+        .last()
+        .expect("missing help response");
+    assert_eq!(msg.role, "system");
+    assert!(msg.content.contains("`/provider-test-coverage`"));
+    assert!(msg.content.contains("live verification evidence"));
+    assert!(msg.content.contains("readiness gaps"));
+}
+
+#[test]
+fn slash_provider_test_coverage_without_args_shows_cli_style_summary() {
+    let mut app = create_test_app();
+    app.input = "/provider-test-coverage".to_string();
+    app.submit_input();
+
+    assert!(app.model_status_scroll.is_some());
+    assert!(
+        app.model_status_content
+            .starts_with("Live provider/model E2E coverage"),
+        "unexpected content: {}",
+        app.model_status_content
+    );
+    assert!(
+        app.model_status_content.contains("Coverage:")
+            || app
+                .model_status_content
+                .contains("Status: no verification ledger found"),
+        "unexpected content: {}",
+        app.model_status_content
+    );
+}
+
+#[test]
+fn slash_provider_test_coverage_with_args_shows_provider_detail() {
+    let mut app = create_test_app();
+    app.input = "/provider-test-coverage fpt FPT.AI-KIE-v1.7".to_string();
+    app.submit_input();
+
+    assert!(app.model_status_scroll.is_some());
+    assert!(
+        app.model_status_content
+            .starts_with("# Provider test coverage")
+    );
+    assert!(app.model_status_content.contains("Provider: `fpt`"));
+    assert!(
+        app.model_status_content
+            .contains("Model: `FPT.AI-KIE-v1.7`")
+    );
+}
+
+#[test]
 fn test_help_topic_shows_btw_command_details() {
     let mut app = create_test_app();
     app.input = "/help btw".to_string();
@@ -507,6 +564,102 @@ fn test_goals_command_opens_overview_in_side_panel() {
     } else {
         crate::env::remove_var("JCODE_HOME");
     }
+}
+
+#[test]
+fn test_mission_and_goal_commands_are_disabled() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let mut app = create_test_app();
+    app.input = "/mission make browser control reliable".to_string();
+    app.submit_input();
+    assert!(!app.is_processing, "/mission must not start a turn");
+    assert!(
+        !app.pending_queued_dispatch,
+        "/mission must not queue dispatch"
+    );
+    assert!(
+        app.queued_messages.is_empty(),
+        "/mission must not queue prompts"
+    );
+    assert!(
+        crate::mission::load(&app.session.id)
+            .expect("load mission")
+            .is_none(),
+        "/mission must not create a mission"
+    );
+
+    app.input = "/goal status".to_string();
+    app.submit_input();
+    assert!(!app.is_processing, "/goal must not start a turn");
+    assert!(
+        !app.pending_queued_dispatch,
+        "/goal must not queue dispatch"
+    );
+    assert!(
+        app.queued_messages.is_empty(),
+        "/goal must not queue prompts"
+    );
+    assert!(
+        crate::mission::load(&app.session.id)
+            .expect("load mission")
+            .is_none(),
+        "/goal must not create a mission"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_goals_legacy_alias_is_not_captured_by_goal_mission_alias() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).expect("project dir");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let mut app = create_test_app();
+    app.session.working_dir = Some(project.display().to_string());
+    app.input = "/goals".to_string();
+    app.submit_input();
+
+    assert_eq!(app.side_panel.focused_page_id.as_deref(), Some("goals"));
+    let mission = crate::mission::load(&app.session.id).expect("load mission");
+    assert!(
+        mission.is_none(),
+        "/goals should not create a mission named `s`"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+}
+
+#[test]
+fn test_test_command_queues_layered_verification_prompt() {
+    let mut app = create_test_app();
+    app.input = "/test browser control is reliable".to_string();
+    app.submit_input();
+
+    assert!(app.pending_queued_dispatch);
+    let queued = app.queued_messages.last().expect("missing /test prompt");
+    assert!(queued.contains("browser control is reliable"));
+    assert!(queued.contains("Reproduction-first"));
+    assert!(queued.contains("End-to-end/user-flow smoke tests"));
+    assert!(queued.contains("Property-based tests"));
+    assert!(queued.contains("Static analysis"));
+    assert!(queued.contains("fault injection/chaos"));
+    assert!(queued.contains("Final proof packet"));
 }
 
 #[test]
