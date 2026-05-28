@@ -28,8 +28,18 @@ DEFAULT_TECHNIQUES = [
     "trust_quarantine",
     "rust_skeleton",
     "combined_p0",
+    "goal_task_ledger",
+    "supersession_prune",
+    "attention_index",
+    "lazy_restore_handles",
+    "pinned_spans",
+    "recency_importance",
+    "provenance_routing",
+    "scratchpad",
+    "memory_ttl",
+    "cache_isolation",
 ]
-SCENARIO_KINDS = ("oracle", "negative", "synthetic", "realistic")
+SCENARIO_KINDS = ("oracle", "negative", "synthetic", "realistic", "cache_confusion", "public_benchmark")
 DEFAULT_HOST = "serious-callers-only"
 NUMERIC_FIELDS = [
     "original_tokens_est",

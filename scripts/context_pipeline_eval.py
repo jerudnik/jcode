@@ -33,8 +33,19 @@ DEFAULT_TECHNIQUES = [
     "trust_quarantine",
     "rust_skeleton",
     "combined_p0",
+    # Remaining TASK-80/TASK-81 prototypes.
+    "goal_task_ledger",
+    "supersession_prune",
+    "attention_index",
+    "lazy_restore_handles",
+    "pinned_spans",
+    "recency_importance",
+    "provenance_routing",
+    "scratchpad",
+    "memory_ttl",
+    "cache_isolation",
 ]
-SCENARIO_KINDS = ("oracle", "negative", "synthetic", "realistic")
+SCENARIO_KINDS = ("oracle", "negative", "synthetic", "realistic", "cache_confusion", "public_benchmark")
 PROTECTED_TERMS = [
     "TASK-27",
     "do not push",
@@ -373,6 +384,51 @@ def realistic_replay_blocks(include_local: bool) -> tuple[list[Block], list[str]
     return blocks, protected
 
 
+
+def cache_confusion_blocks() -> list[Block]:
+    blocks = oracle_control_blocks()
+    blocks.extend([
+        Block(
+            id="cache-alpha-current", kind="tool_output", tool="repo_map", trust="verified",
+            content="repo=jcode project_namespace=jcode commit=HEAD TASK-27 restore handle current context_pruning.rs src/agent/context_pruning.rs",
+            metadata={"project_namespace": "jcode", "cache_type": "repo_map", "current_project": True},
+        ),
+        Block(
+            id="cache-beta-foreign", kind="tool_output", tool="repo_map", trust="unverified",
+            content=("repo=nix-config project_namespace=nix-config foreign repo nix-config wrong branch deploy PAYMENT_SECRET_DO_NOT_USE " * 180),
+            metadata={"project_namespace": "nix-config", "cache_type": "repo_map", "current_project": False},
+        ),
+        Block(
+            id="cache-stale-provider-payload", kind="tool_output", tool="provider_payload_cache", trust="unverified",
+            status="raw",
+            content=("stale production database cached provider prefix from old session wrong branch deploy " * 160),
+            metadata={"session_id": "other-session", "cache_type": "provider_payload", "current_session": False},
+        ),
+    ])
+    return blocks
+
+
+def public_benchmark_blocks() -> list[Block]:
+    blocks = [
+        Block(
+            id="bench-user", kind="user", trust="verified",
+            content="Terminal benchmark task TASK-27: preserve early intent, inspect src/agent/context_pruning.rs, do not push, and report acceptance criteria status.",
+        ),
+        Block(
+            id="bench-needle", kind="file", path="README.md", trust="verified",
+            content=("noise line\n" * 600) + "RULER_NEEDLE: restore handle must survive public benchmark replay\n" + ("noise tail\n" * 600),
+        ),
+        Block(
+            id="bench-swe-issue", kind="tool_output", tool="issue_fixture", trust="verified",
+            content="SWE-style issue: context pruning must not drop protected task constraints or current file paths.",
+        ),
+        Block(
+            id="bench-foreign", kind="assistant", trust="speculative",
+            content=("Speculative stale production database hypothesis from unrelated benchmark. PAYMENT_SECRET_DO_NOT_USE wrong branch deploy. " * 100),
+        ),
+    ]
+    return blocks
+
 def generate_scenarios(out: Path, include_local: bool, scenario_kind: str = "synthetic") -> Path:
     if scenario_kind == "oracle":
         blocks = oracle_control_blocks()
@@ -388,6 +444,16 @@ def generate_scenarios(out: Path, include_local: bool, scenario_kind: str = "syn
         blocks, protected_terms = realistic_replay_blocks(include_local)
         stale_foreign_terms = STALE_FOREIGN_TERMS
         name = "context_pipeline_realistic_replay"
+    elif scenario_kind == "cache_confusion":
+        blocks = cache_confusion_blocks()
+        protected_terms = PROTECTED_TERMS + ["project_namespace=jcode", "context_pruning.rs"]
+        stale_foreign_terms = STALE_FOREIGN_TERMS
+        name = "context_pipeline_cache_confusion"
+    elif scenario_kind == "public_benchmark":
+        blocks = public_benchmark_blocks()
+        protected_terms = PROTECTED_TERMS + ["RULER_NEEDLE", "src/agent/context_pruning.rs"]
+        stale_foreign_terms = STALE_FOREIGN_TERMS
+        name = "context_pipeline_public_benchmark"
     else:
         blocks = synthetic_blocks()
         if include_local:
@@ -526,6 +592,66 @@ def render_xml(blocks: Iterable[Block]) -> list[Block]:
     return rendered
 
 
+
+def extract_goal_lines(blocks: list[Block]) -> list[str]:
+    patterns = ("task-", "do not", "must", "preserve", "acceptance criteria", "restore handle", "serious-callers-only")
+    lines: list[str] = []
+    for block in blocks:
+        if block.kind in {"user", "tool_output"} and block.trust == "verified":
+            for line in re.split(r"[\n.]", block.content):
+                clean = line.strip()
+                if 8 <= len(clean) <= 220 and any(p in clean.lower() for p in patterns):
+                    if clean not in lines:
+                        lines.append(clean)
+    return lines[:12]
+
+
+def prepend_block(blocks: list[Block], block: Block) -> list[Block]:
+    return [block] + blocks
+
+
+def build_goal_ledger(blocks: list[Block]) -> Block:
+    lines = extract_goal_lines(blocks) or ["Preserve active objective, constraints, acceptance criteria, and do-not rules."]
+    content = "CONTEXT_GOAL_TASK_LEDGER\n" + "\n".join(f"- {line}" for line in lines)
+    return Block(id="derived-goal-task-ledger", kind="ledger", content=content, status="derived", trust="verified")
+
+
+def build_attention_index(blocks: list[Block]) -> Block:
+    paths = sorted({b.path for b in blocks if b.path})[:10]
+    handles = [b.metadata.get("restore_id") for b in blocks if b.metadata.get("restore_id")]
+    stale_ids = [b.id for b in blocks if b.trust in {"speculative", "failed_tool", "unverified"}][:10]
+    content = "CONTEXT_INDEX\nObjectives:\n" + "\n".join(f"- {x}" for x in extract_goal_lines(blocks)[:8])
+    content += "\nRelevant paths:\n" + "\n".join(f"- {p}" for p in paths)
+    content += "\nRestore handles:\n" + "\n".join(f"- {h}" for h in handles if h)
+    content += "\nQuarantined/stale candidate block ids:\n" + "\n".join(f"- {i}" for i in stale_ids)
+    return Block(id="derived-attention-index", kind="index", content=content, status="derived", trust="verified")
+
+
+def build_scratchpad(blocks: list[Block]) -> Block:
+    content = "WORKING_STATE_SCRATCHPAD\n" + "\n".join(f"- {x}" for x in extract_goal_lines(blocks)[:10])
+    content += "\n- Scratchpad regenerated from verified user/task/tool-success facts only."
+    return Block(id="derived-scratchpad", kind="scratchpad", content=content, status="derived", trust="verified")
+
+
+def pinned_copy(blocks: list[Block]) -> Block:
+    pins = extract_goal_lines(blocks)
+    return Block(id="derived-pinned-spans", kind="pins", content="PINNED_PROTECTED_SPANS\n" + "\n".join(f"- {x}" for x in pins), status="derived", trust="verified")
+
+
+def is_superseded(block: Block) -> bool:
+    txt = block.content.lower()
+    return block.status == "error" or block.trust in {"speculative", "failed_tool"} or "later disproven" in txt or "wrong branch deploy" in txt
+
+
+def importance_score(block: Block, idx: int, total: int) -> float:
+    score = idx / max(1, total - 1) * 0.25
+    if block.kind == "user": score += 1.0
+    if block.trust == "verified": score += 0.45
+    if any(t in block.content.lower() for t in ("task-", "do not", "must", "acceptance criteria", "restore handle")): score += 0.5
+    if block.status in {"placeholder", "summarized"}: score += 0.1
+    if block.trust in {"unverified", "failed_tool", "speculative"}: score -= 0.7
+    return score
+
 def apply_technique(blocks: list[Block], technique: str, tool_budget_chars: int) -> list[Block]:
     result = [Block(**block.__dict__) for block in blocks]
 
@@ -575,6 +701,52 @@ def apply_technique(blocks: list[Block], technique: str, tool_budget_chars: int)
 
     if technique in ("rust_skeleton", "combined_p0"):
         result = [skeletonize_rust(block) for block in result]
+
+    if technique == "goal_task_ledger":
+        result = prepend_block(result, build_goal_ledger(result))
+
+    if technique == "supersession_prune":
+        result = [placeholder(block, "superseded_by_later_verified_context") if is_superseded(block) and block.chars > 120 else block for block in result]
+
+    if technique == "lazy_restore_handles":
+        result = [placeholder(block, "lazy_restore_handle_large_or_untrusted") if (block.chars > tool_budget_chars or block.trust in {"unverified", "failed_tool", "speculative"}) and block.kind != "user" else block for block in result]
+
+    if technique == "pinned_spans":
+        result = prepend_block(result, pinned_copy(result))
+
+    if technique == "recency_importance":
+        total = len(result)
+        ranked = sorted(enumerate(result), key=lambda item: importance_score(item[1], item[0], total), reverse=True)
+        kept_ids = {block.id for _, block in ranked[: max(3, int(total * 0.55))]}
+        result = [block if block.id in kept_ids else placeholder(block, "low_recency_importance_score") for block in result]
+
+    if technique == "provenance_routing":
+        routed = []
+        for block in result:
+            if block.trust in {"unverified", "failed_tool", "speculative"} and block.kind != "user":
+                routed.append(placeholder(block, f"provenance_routed_{block.trust}"))
+            else:
+                routed.append(block)
+        result = render_xml(routed)
+
+    if technique == "attention_index":
+        result = prepend_block(result, build_attention_index(result))
+
+    if technique == "scratchpad":
+        result = [build_scratchpad(result)] + [b for b in result if b.kind in {"user", "file"} or (b.trust == "verified" and b.chars < tool_budget_chars)]
+
+    if technique == "memory_ttl":
+        result = [placeholder(block, "expired_or_source_bound_memory") if block.trust in {"unverified", "speculative"} or block.metadata.get("current_session") is False else block for block in result]
+
+    if technique == "cache_isolation":
+        isolated = []
+        for block in result:
+            foreign_project = block.metadata.get("current_project") is False or block.metadata.get("current_session") is False
+            if foreign_project or (block.metadata.get("project_namespace") not in (None, "jcode")):
+                isolated.append(placeholder(block, "cache_namespace_mismatch"))
+            else:
+                isolated.append(block)
+        result = isolated
 
     if technique in ("stable_tiering", "combined_p0"):
         result = render_xml(result)

@@ -844,3 +844,69 @@ pass a custom JSON question list with fields:
 Interpret model-eval results only after deterministic gates pass. A candidate
 that fails protected retention or cache isolation should not be rescued by a
 single favorable model response.
+
+## TASK-87 full remaining-technique assessment
+
+TASK-87 extended the deterministic harness to cover the remaining TASK-80/TASK-81 approaches and added two stress scenario kinds:
+
+- `cache_confusion`: current-project cache entries mixed with foreign repo-map and stale provider-payload cache entries.
+- `public_benchmark`: Terminal-Bench/SWE-style/RULER-style synthetic replay with a long-context needle and unrelated stale benchmark contamination.
+
+New prototype techniques:
+
+- `goal_task_ledger`
+- `supersession_prune`
+- `attention_index`
+- `lazy_restore_handles`
+- `pinned_spans`
+- `recency_importance`
+- `provenance_routing`
+- `scratchpad`
+- `memory_ttl`
+- `cache_isolation`
+
+Main local assessment artifact: `target/context-eval-matrix/task87-full-rerun`.
+It contains 576 rows: 6 scenario kinds, local-session replay on/off, 2 tool budgets, 2 repetitions, and 12 techniques including `baseline` and `combined_p0` controls.
+
+Cross-host confirmation artifact: `target/context-eval-matrix/task87-sco-confirm`.
+It contains 144 rows: the same 6 scenario kinds, local-session replay on/off, one tool budget, one repetition, and the same 12 techniques run remotely through `serious-callers-only`.
+
+Shareable reports were generated at:
+
+- `target/context-eval-matrix/task87-full-rerun/report/report.md`
+- `target/context-eval-matrix/task87-full-rerun/report/report.html`
+- `target/context-eval-matrix/task87-sco-confirm/report/report.md`
+- `target/context-eval-matrix/task87-sco-confirm/report/report.html`
+
+Secret-scan note: scanning the raw local-session replay artifacts intentionally found sentinel-secret strings inside private local replay blocks. Treat raw TASK-87 artifact directories as non-shareable. The generated aggregate report directories were scanned separately with zero findings.
+
+### TASK-87 result summary
+
+Local full matrix pass counts across 48 assumptions per technique:
+
+| Technique | Passes | Max stale/foreign retention | Min protected retention | Mean practical score | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `lazy_restore_handles` | 36/48 | 0.75 | 0.625 | 86.25 | Best overall score, excellent on synthetic/negative/cache controls, but public-benchmark protected-needle retention and local-session contamination need fixes before runtime adoption. |
+| `combined_p0` | 36/48 | 0.75 | 0.875 | 85.08 | Strongest balanced current pipeline; still fails local-session realistic contamination and public-benchmark protected retention. |
+| `provenance_routing` | 36/48 | 0.75 | 0.875 | 80.10 | Good general quarantine behavior; needs local-session leakage hardening. |
+| `supersession_prune` | 36/48 | 0.25 | 0.875 | 79.24 | Best at reducing local-session realistic stale retention among single techniques; attractive low-risk next runtime candidate. |
+| `scratchpad` | 36/48 | 0.75 | 0.875 | 78.32 | Useful continuity primitive but not safe alone; should be regenerated from stronger provenance/quarantine filters. |
+| `memory_ttl` | 32/48 | 0.75 | 0.875 | 78.53 | Helps memory/cache-like stale facts, but TTL/source scoping alone does not solve realistic local-session contamination. |
+| `recency_importance` | 28/48 | 1.00 | 0.875 | 75.74 | Good cache/synthetic behavior but unsafe alone on negative and realistic contaminated contexts. |
+| `cache_isolation` | 24/48 | 1.00 | 0.875 | 64.39 | Correctly addresses cache-confusion fixture, but intentionally does not solve non-cache contamination. Use only as a targeted cache layer. |
+| `attention_index` | 16/48 | 1.00 | 0.875 | 57.81 | Salience-only technique. Preserves/organizes facts but does not remove contamination; use only after pruning/quarantine. |
+| `goal_task_ledger` | 16/48 | 1.00 | 0.875 | 57.81 | Good continuity aid but no pruning benefit by itself. |
+| `pinned_spans` | 16/48 | 1.00 | 0.875 | 57.81 | Good protection primitive but dangerous alone because stale/foreign content remains. Needs source-bound and supersedable pins. |
+| `baseline` | 16/48 | 1.00 | 0.875 | 57.81 | Control confirmed: passes clean/synthetic cases but fails negative/cache/realistic/public contamination. |
+
+Remote SCO confirmation broadly matched controls, cache-confusion, synthetic, and public-benchmark findings. It differed on `realistic + include_local_sessions`: SCO did not reproduce the same local-session stale retention seen on this workstation because the host has different/private session logs. Treat this as evidence that host-local replay is a necessary evaluation tier, not as a contradiction.
+
+### Recommended order after TASK-87
+
+1. Strengthen `combined_p0` with explicit supersession pruning and lazy restore metadata.
+2. Implement `supersession_prune` first as a low-risk runtime change around failed tools, speculative assistant hypotheses, older backlog/task states, and known stale session-restore blocks.
+3. Add `lazy_restore_handles` only with protected-span-aware summarization so public-benchmark needles and file paths cannot be dropped.
+4. Add `provenance_routing` as the generalized trust-tier foundation for logs, failed tools, speculative assistant content, and restored sessions.
+5. Add `cache_isolation` inside cache layers specifically: repo maps, skeletons, token estimates, embeddings/retrieval, prompt projections, provider payloads, and tool/result caches.
+6. Add `goal_task_ledger`, `attention_index`, `pinned_spans`, and `scratchpad` only as downstream salience/continuity layers after pruning/quarantine, not as safety controls by themselves.
+7. Treat `recency_importance` and `memory_ttl` as secondary ranking/memory hygiene features rather than primary reliability gates.
