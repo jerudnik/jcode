@@ -12,6 +12,10 @@ echo "=== Fast script regression tests ==="
 python3 "$repo_root/tests/test_dev_cargo.py"
 echo ""
 
+echo "=== Agent content validation ==="
+python3 "$repo_root/scripts/validate_agent_content.py"
+echo ""
+
 echo "=== Fast test loop (lib + bins) ==="
 run_cargo test --lib --bins "$@"
 

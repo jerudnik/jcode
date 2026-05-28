@@ -42,6 +42,10 @@ jobs:
       - name: Run clippy with warnings denied
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Validate portable agent content
+        shell: bash
+        run: python3 scripts/validate_agent_content.py
+
       - name: Enforce warning budget
         shell: bash
         run: scripts/check_warning_budget.sh
