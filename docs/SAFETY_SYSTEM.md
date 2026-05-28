@@ -511,19 +511,19 @@ pub enum Urgency {
 Tracking has moved to Backlog.md. Open work, grouped by phase:
 
 ### Phase 1: Foundation
-Action classifier (tier 1/2/3 lookup), review queue (persistent storage), `request_permission` tool for agents, transcript logger, basic session summary generation. Tracked in: TASK-49
+Action classifier (tier 1/2/3 lookup), review queue (persistent storage), `request_permission` tool for agents, transcript logger, basic session summary generation. Tracked in: TASK-65
 
 ### Phase 2: Notification Channels
-Desktop notifications (notify-send / Wayland), email notifications (SMTP), webhook support, notification batching and quiet hours, SMS (Twilio or similar). Tracked in: TASK-50
+Desktop notifications (notify-send / Wayland), email notifications (SMTP), webhook support, notification batching and quiet hours, SMS (Twilio or similar). Tracked in: TASK-66
 
 ### Phase 3: Review Interfaces
-TUI review panel, CLI commands (`jcode safety review/list/approve/deny/log`), email approve/deny links (relay service). Tracked in: TASK-51
+TUI review panel, CLI commands (`jcode safety review/list/approve/deny/log`), email approve/deny links (relay service). Tracked in: TASK-67
 
 ### Phase 4: Configuration
-`[safety]` config section, custom classification rules (promote/demote actions), per-project overrides, notification channel configuration. Tracked in: TASK-52
+`[safety]` config section, custom classification rules (promote/demote actions), per-project overrides, notification channel configuration. Tracked in: TASK-68
 
 ### Phase 5: Intelligence
-Decision history tracking, pattern detection (auto-suggest promotions), urgency inference from context. Tracked in: TASK-53
+Decision history tracking, pattern detection (auto-suggest promotions), urgency inference from context. Tracked in: TASK-69
 
 ---
 

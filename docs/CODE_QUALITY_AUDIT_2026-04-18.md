@@ -557,13 +557,13 @@ Path-classified counts below are approximate. Inline `#[cfg(test)]` modules insi
 
 Remediation is tracked in Backlog.md. The audit themes map to:
 
-- Mega-file/function splits in server, provider, and TUI modules. Tracked in: TASK-31, TASK-32, TASK-33
-- Extract context/request structs to retire `too_many_arguments` suppressions. Tracked in: TASK-34
-- Move inline tests out of production mega-files. Tracked in: TASK-35
-- Reduce production `unwrap`/`expect`/`panic!` in tool, auth, server, build, and provider code. Tracked in: TASK-36
+- Mega-file/function splits in server, provider, and TUI modules. Tracked in: TASK-35, TASK-37, TASK-38, TASK-39
+- Extract context/request structs to retire `too_many_arguments` suppressions. Tracked in: TASK-40
+- Move inline tests out of production mega-files. Tracked in: TASK-41
+- Reduce production `unwrap`/`expect`/`panic!` in tool, auth, server, build, and provider code. Tracked in: TASK-32
 - Continue splitting TUI render/event-handling functions. Tracked in: TASK-37
-- Burn down remaining `allow(...)` suppression surface. Tracked in: TASK-38
-- Convert remaining repo TODO/FIXME markers in `src/` into Backlog.md tasks or resolve them. Tracked in: TASK-39
+- Burn down remaining `allow(...)` suppression surface. Tracked in: TASK-40
+- Convert remaining repo TODO/FIXME markers in `src/` into Backlog.md tasks or resolve them. Tracked in: TASK-71
 
 1. split `src/server/comm_control.rs`, `src/server/client_lifecycle.rs`, `src/provider/mod.rs`, `src/provider/openai.rs`, and TUI remote/input modules
 2. extract context/request structs to eliminate `too_many_arguments` suppressions in server paths

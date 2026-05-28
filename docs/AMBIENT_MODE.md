@@ -925,19 +925,19 @@ This is a distributed systems problem that will be addressed once ambient is sta
 Tracking has moved to Backlog.md. Open work, grouped by phase:
 
 ### Phase 1: Foundation
-Ambient agent loop (spawn, run, sleep), single-instance guard, basic scheduling (fixed interval with max ceiling), provider selection chain (OpenAI OAuth → Anthropic OAuth → pay-per-token opt-in → disabled), configuration (`[ambient]` section in config), storage layout. Tracked in: TASK-54
+Ambient agent loop (spawn, run, sleep), single-instance guard, basic scheduling (fixed interval with max ceiling), provider selection chain (OpenAI OAuth → Anthropic OAuth → pay-per-token opt-in → disabled), configuration (`[ambient]` section in config), storage layout. Tracked in: TASK-56, TASK-57
 
 ### Phase 2: Memory Consolidation — Garden
-Full graph-wide dedup scan, fact verification against codebase, retroactive session extraction (crashed/missed sessions), pruning dead memories (low confidence + low strength), relationship discovery across sessions, embedding backfill, contradiction resolution. Tracked in: TASK-55
+Full graph-wide dedup scan, fact verification against codebase, retroactive session extraction (crashed/missed sessions), pruning dead memories (low confidence + low strength), relationship discovery across sessions, embedding backfill, contradiction resolution. Tracked in: TASK-62, TASK-63
 
 ### Phase 3: Scheduling
-`schedule_ambient` tool for agent self-scheduling, scheduled queue (persistent, with context), adaptive resource calculator, usage history tracking, rate limit awareness (from provider response headers), event triggers (session close, crash, git push), active session detection → pause/throttle. Tracked in: TASK-56
+`schedule_ambient` tool for agent self-scheduling, scheduled queue (persistent, with context), adaptive resource calculator, usage history tracking, rate limit awareness (from provider response headers), event triggers (session close, crash, git push), active session detection → pause/throttle. Tracked in: TASK-58, TASK-61
 
 ### Phase 4: Proactive Work
-Scout: analyze recent sessions + git history, infer user priorities from memories, identify actionable work, execute on separate branch, report results. Tracked in: TASK-57
+Scout: analyze recent sessions + git history, infer user priorities from memories, identify actionable work, execute on separate branch, report results. Tracked in: TASK-59
 
 ### Phase 5: Info Widget
-Ambient status display in TUI, queue preview, last cycle summary, next wake estimate, budget bar (user vs ambient vs remaining). Tracked in: TASK-58
+Ambient status display in TUI, queue preview, last cycle summary, next wake estimate, budget bar (user vs ambient vs remaining). Tracked in: TASK-60
 
 ---
 

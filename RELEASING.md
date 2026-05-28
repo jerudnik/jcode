@@ -158,4 +158,4 @@ The bottleneck is compiling jcode itself (120k lines of Rust). Dependencies are 
 - Splitting into workspace crates would allow partial recompilation (~1 min for small changes)
 - A 20+ core machine on LAN (not Tailscale) would cut build time to ~40-50s
 
-Build-perf follow-ups (workspace split, faster cross builds, `build.rs` timestamp churn) are tracked in Backlog.md. Tracked in: TASK-60
+Build-perf follow-ups (workspace split, faster cross builds, `build.rs` timestamp churn) are tracked in Backlog.md. Tracked in: TASK-51, TASK-76, TASK-77

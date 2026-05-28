@@ -739,7 +739,7 @@ memory { action: "tag", id: "...", tags: ["new", "tags"] }
 - [x] Provenance tracking
 - [x] Feedback loops (boost on use, decay on rejection)
 
-Open items in Phase 6: negative memories and trigger patterns, procedural memory support, temporal awareness. Tracked in: TASK-47
+Open items in Phase 6: negative memories and trigger patterns, procedural memory support, temporal awareness. Tracked in: TASK-64
 
 ### Phase 7: Full Integration ✅
 - [x] End-of-session extraction
@@ -761,7 +761,7 @@ Lightweight consolidation that runs in the memory sidecar after returning result
 
 Full graph-wide consolidation that runs during ambient mode background cycles. See [AMBIENT_MODE.md](./AMBIENT_MODE.md) for the ambient mode design.
 
-Open items: graph-wide similarity-based memory merging, redundancy detection and deduplication (beyond sidecar's local scope), contradiction resolution (across full graph, not just retrieved set), fact verification against codebase (check if factual memories are still true), retroactive session extraction (crashed/missed sessions), cluster reorganization, weak memory pruning (confidence < 0.05 AND strength <= 1), relationship discovery across sessions, embedding backfill for memories missing embeddings, knowledge graph optimization. Tracked in: TASK-48
+Open items: graph-wide similarity-based memory merging, redundancy detection and deduplication (beyond sidecar's local scope), contradiction resolution (across full graph, not just retrieved set), fact verification against codebase (check if factual memories are still true), retroactive session extraction (crashed/missed sessions), cluster reorganization, weak memory pruning (confidence < 0.05 AND strength <= 1), relationship discovery across sessions, embedding backfill for memories missing embeddings, knowledge graph optimization. Tracked in: TASK-62, TASK-63
 
 ---
 
