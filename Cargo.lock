@@ -3301,6 +3301,7 @@ dependencies = [
  "jcode-background-types",
  "jcode-batch-types",
  "jcode-build-support",
+ "jcode-cache-isolation",
  "jcode-compaction-core",
  "jcode-config-types",
  "jcode-core",
@@ -3433,6 +3434,10 @@ dependencies = [
  "serde_json",
  "tempfile",
 ]
+
+[[package]]
+name = "jcode-cache-isolation"
+version = "0.1.0"
 
 [[package]]
 name = "jcode-compaction-core"
@@ -3656,6 +3661,7 @@ name = "jcode-provider-openrouter"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "jcode-cache-isolation",
  "serde",
  "serde_json",
 ]
@@ -3796,6 +3802,7 @@ dependencies = [
 name = "jcode-tui-messages"
 version = "0.1.0"
 dependencies = [
+ "jcode-cache-isolation",
  "jcode-config-types",
  "jcode-message-types",
  "jcode-session-types",
