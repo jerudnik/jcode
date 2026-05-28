@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@jcode'
 created_date: '2026-05-28 00:41'
-updated_date: '2026-05-28 12:14'
+updated_date: '2026-05-28 12:18'
 labels:
   - exploratory
   - compaction
@@ -27,6 +27,11 @@ references:
   - 'https://doi.org/10.48550/arxiv.2406.11927'
   - 'https://doi.org/10.1145/3643991.3644897'
   - 'https://doi.org/10.48550/arxiv.2410.18251'
+  - >-
+    https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
+  - 'https://www.langchain.com/blog/context-engineering-for-agents'
+  - 'https://developers.openai.com/cookbook/examples/agents_sdk/session_memory'
+  - 'https://aider.chat/2023/10/22/repomap.html'
 priority: high
 ordinal: 21000
 ---
@@ -65,6 +70,8 @@ Wrote consolidated Serena memory `compaction/dcp_research_task27` with DCP desig
 Tracked follow-up Rust-native context-intake suggestions in Serena memory `compaction/dcp_research_task27`, emphasizing low-overhead boundary inspection, structured placeholders, skeleton fallback, lazy repo maps, provider-aware token estimates, and ledger metrics.
 
 Tracked final research-backed context-management suggestions in Serena memory `compaction/dcp_research_task27`, retaining deterministic graph/retrieval/pruning ideas and deferring heavyweight ML/model-architecture approaches.
+
+Ran an agent-toolbox/web exploratory pass over Anthropic, LangChain, OpenAI cookbook, Aider repo-map, and search results. Tracked additional low-risk context-management candidates in Serena memory `compaction/dcp_research_task27`.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -83,4 +90,6 @@ Research sources included DCP docs, source structure, public issues/PRs/releases
 Follow-up context-intake suggestions were appended to Serena memory `compaction/dcp_research_task27`: boundary inspector for file reads/tool outputs, structured placeholders with restore handles, Rust/tree-sitter skeleton fallback for oversized source files, cached/lazy repo context map, provider-aware token estimation, and context-intake ledger metrics.
 
 Additional research-backed ideas were appended to Serena memory `compaction/dcp_research_task27`: typed/code-aware retrieval before materialization, function/block-level graph retrieval, iterative retrieval-generation loops, deterministic entropy/repetition pruning for verbose logs, and call/reference graph edges as optional salience signals. Deferred model-architecture early exiting and heavy ML compressors/pruners from the near-term path.
+
+Agent-toolbox exploratory search additions were appended to Serena memory `compaction/dcp_research_task27`: just-in-time context references, tool-output contracts with budgets/pagination, context quarantine/trust tiers, dynamic toolset/context selection, stable context ordering for prompt caching/debuggability, scratchpad/offloaded working state with explicit selection, and context-failure taxonomy labels. Marketing-only compression claims and heavyweight learned frameworks were deferred.
 <!-- SECTION:FINAL_SUMMARY:END -->
