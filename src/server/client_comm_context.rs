@@ -255,10 +255,6 @@ pub(super) async fn handle_comm_list(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "list-swarms enumeration requires cross-cutting reads over members, swarms, plans, coordinators"
-)]
 pub(super) async fn handle_comm_list_swarms(
     id: u64,
     _req_session_id: String,

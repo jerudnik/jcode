@@ -102,13 +102,12 @@ fn prune_duplicate_tool_results(messages: &mut [Message], stats: &mut PruneStats
                     is_error,
                     ..
                 } if is_error != &Some(true) => {
-                    if let Some(signature) = tool_signature_by_id.get(tool_use_id).copied() {
-                        if let Some(previous) =
+                    if let Some(signature) = tool_signature_by_id.get(tool_use_id).copied()
+                        && let Some(previous) =
                             latest_result_for_signature.insert(signature, (message_idx, block_idx))
-                            && previous.0 < protected_start
-                        {
-                            duplicate_results.push(previous);
-                        }
+                        && previous.0 < protected_start
+                    {
+                        duplicate_results.push(previous);
                     }
                 }
                 _ => {}

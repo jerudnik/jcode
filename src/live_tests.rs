@@ -769,16 +769,8 @@ impl LiveProviderModelCoveragePair {
             .any(|passed| passed == checkpoint)
         {
             Some(LiveVerificationStageStatus::Passed)
-        } else if let Some(status) = self.non_passing_checkpoints.get(checkpoint) {
-            Some(status.clone())
-        } else if self
-            .missing_checkpoints
-            .iter()
-            .any(|missing| missing == checkpoint)
-        {
-            None
         } else {
-            None
+            self.non_passing_checkpoints.get(checkpoint).cloned()
         }
     }
 }
@@ -840,6 +832,10 @@ pub struct LiveProviderModelCoverageSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issue_driven_targets: Vec<IssueDrivenLiveProviderTargetSummary>,
 }
+
+type ProviderCoverageTotals = (usize, usize, Vec<String>, usize, usize, usize);
+type CoverageCheckpointKey = (String, String, String, Vec<String>);
+type LatestCoverageEntryRef<'a> = (&'a String, &'a LiveVerificationCoverageEntry);
 
 fn update_coverage(event: &LiveVerificationEvent, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -1231,8 +1227,7 @@ pub fn strict_live_provider_model_coverage_summary(
     let mut covered_pairs = Vec::new();
     let mut uncovered_pairs = Vec::new();
     let mut provider_labels = BTreeMap::new();
-    let mut provider_totals: BTreeMap<String, (usize, usize, Vec<String>, usize, usize, usize)> =
-        BTreeMap::new();
+    let mut provider_totals: BTreeMap<String, ProviderCoverageTotals> = BTreeMap::new();
 
     for pair in builders
         .into_values()
@@ -1343,8 +1338,8 @@ fn latest_coverage_entries_by_provider_model_test(
     coverage: &LiveVerificationCoverage,
 ) -> BTreeMap<String, &LiveVerificationCoverageEntry> {
     let mut latest_by_target_and_checkpoints: BTreeMap<
-        (String, String, String, Vec<String>),
-        (&String, &LiveVerificationCoverageEntry),
+        CoverageCheckpointKey,
+        LatestCoverageEntryRef<'_>,
     > = BTreeMap::new();
     for (key, entry) in &coverage.latest {
         let provider_identity =

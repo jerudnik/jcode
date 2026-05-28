@@ -246,7 +246,12 @@ pub fn write_json_fast<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<
     write_json_inner(path, value, false, false)
 }
 
-fn write_json_inner<T: Serialize + ?Sized>(path: &Path, value: &T, durable: bool, secret: bool) -> Result<()> {
+fn write_json_inner<T: Serialize + ?Sized>(
+    path: &Path,
+    value: &T,
+    durable: bool,
+    secret: bool,
+) -> Result<()> {
     let bytes = serde_json::to_vec(value)?;
     write_bytes_inner(path, &bytes, durable, secret)
 }
