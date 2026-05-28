@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@jcode'
 created_date: '2026-05-28 00:41'
-updated_date: '2026-05-28 12:07'
+updated_date: '2026-05-28 12:14'
 labels:
   - exploratory
   - compaction
@@ -24,6 +24,9 @@ references:
     Improve-compaction-to-preserve-early-intent-and-salient-context.md:28@0aea41ac
   - 'commit:0aea41ac'
   - 'https://github.com/Opencode-DCP/opencode-dynamic-context-pruning'
+  - 'https://doi.org/10.48550/arxiv.2406.11927'
+  - 'https://doi.org/10.1145/3643991.3644897'
+  - 'https://doi.org/10.48550/arxiv.2410.18251'
 priority: high
 ordinal: 21000
 ---
@@ -60,6 +63,8 @@ Dispatched four subagents covering DCP documentation, DCP code, public issues/di
 Wrote consolidated Serena memory `compaction/dcp_research_task27` with DCP design findings, JCODE opportunities, failure-mode cautions, salience signals, regression fixtures, and phased implementation recommendations.
 
 Tracked follow-up Rust-native context-intake suggestions in Serena memory `compaction/dcp_research_task27`, emphasizing low-overhead boundary inspection, structured placeholders, skeleton fallback, lazy repo maps, provider-aware token estimates, and ledger metrics.
+
+Tracked final research-backed context-management suggestions in Serena memory `compaction/dcp_research_task27`, retaining deterministic graph/retrieval/pruning ideas and deferring heavyweight ML/model-architecture approaches.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -76,4 +81,6 @@ Findings:
 Research sources included DCP docs, source structure, public issues/PRs/releases, and local JCODE compaction surfaces.
 
 Follow-up context-intake suggestions were appended to Serena memory `compaction/dcp_research_task27`: boundary inspector for file reads/tool outputs, structured placeholders with restore handles, Rust/tree-sitter skeleton fallback for oversized source files, cached/lazy repo context map, provider-aware token estimation, and context-intake ledger metrics.
+
+Additional research-backed ideas were appended to Serena memory `compaction/dcp_research_task27`: typed/code-aware retrieval before materialization, function/block-level graph retrieval, iterative retrieval-generation loops, deterministic entropy/repetition pruning for verbose logs, and call/reference graph edges as optional salience signals. Deferred model-architecture early exiting and heavy ML compressors/pruners from the near-term path.
 <!-- SECTION:FINAL_SUMMARY:END -->
