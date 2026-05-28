@@ -118,6 +118,8 @@ These metrics should be checked repeatedly during the program:
 
 ## Phase 0: Prevent Further Decay
 
+Tracked in: TASK-40
+
 **Objective:** stop quality from getting worse.
 
 Tasks:
@@ -135,6 +137,8 @@ Success criteria:
 
 ## Phase 1: Warning and Dead-Code Burn-Down
 
+Tracked in: TASK-41
+
 **Objective:** restore signal quality in builds.
 
 Tasks:
@@ -150,6 +154,8 @@ Success criteria:
 - dead-code suppression becomes the exception, not the default
 
 ## Phase 2: Decompose the Biggest Files
+
+Tracked in: TASK-31, TASK-32, TASK-33
 
 **Objective:** eliminate the primary maintainability hazard.
 
@@ -178,6 +184,8 @@ Success criteria:
 
 ## Phase 3: Strengthen Error Handling
 
+Tracked in: TASK-36
+
 **Objective:** make failure modes explicit and recoverable.
 
 Tasks:
@@ -193,6 +201,8 @@ Success criteria:
 - clearer logs and more diagnosable failures
 
 ## Phase 4: Rebalance the Test Pyramid
+
+Tracked in: TASK-42
 
 **Objective:** make failures faster, narrower, and more actionable.
 
@@ -211,6 +221,8 @@ Success criteria:
 
 ## Phase 5: Reliability and Performance Guardrails
 
+Tracked in: TASK-70, TASK-71, TASK-72, TASK-73
+
 **Objective:** keep architectural quality aligned with runtime quality.
 
 Tasks:
@@ -226,6 +238,8 @@ Success criteria:
 - long-running behavior is measurably stable
 
 ## Phase 6: Finish the Ratchet
+
+Tracked in: TASK-38
 
 **Objective:** make quality self-sustaining.
 

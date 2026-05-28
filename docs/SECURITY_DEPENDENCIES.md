@@ -21,12 +21,13 @@ It is not an allowlist. It is a triage record so advisories are visible and acti
 
 ## Priority order
 
-1. `rustls-webpki` TLS advisories via rustls stack
-2. `lexical-core` via `imap-proto`
-3. `lettre` if Jcode ever enables `boring-tls`
-4. `lru` via `ratatui`
-5. `bincode` via `syntect`
-6. `paste` / `rand` via multiple transitive dependencies
+Tracking has moved to Backlog.md. The remediation work for each advisory cluster is filed as:
+
+- `rustls-webpki` TLS advisories via the rustls stack. Tracked in: TASK-45
+- `lexical-core` via `imap-proto` (and broader IMAP isolation/replacement). Tracked in: TASK-46
+- `lru`, `paste`, `rand` via `ratatui` / `ratatui-image` upgrades. Tracked in: TASK-44
+- `bincode` via `syntect`. Tracked in: TASK-43
+- `lettre` Boring TLS advisory remains in `scripts/security_preflight.sh` ignore list; revisit after upstream patch.
 
 ## Notes
 

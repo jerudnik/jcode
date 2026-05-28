@@ -1,5 +1,7 @@
 # Code Quality Audit - 2026-04-18
 
+<!-- backlog-tracking-ignore: audit inventory references TODO/FIXME/HACK as scan targets, not as live trackers; remediation is filed under TASK-31..TASK-42 and TASK-61. -->
+
 This report inventories the repo-wide code-quality issues detectable with static scanning and targeted structural heuristics. It is intended as a comprehensive backlog seed, not just a shortlist.
 
 ## Scope and method
@@ -552,6 +554,16 @@ Path-classified counts below are approximate. Inline `#[cfg(test)]` modules insi
 8. **Burn down deferred work markers.** There are not many TODO/FIXME markers, which is good, but the remaining ones should still be converted into issues or resolved.
 
 ## Suggested execution order
+
+Remediation is tracked in Backlog.md. The audit themes map to:
+
+- Mega-file/function splits in server, provider, and TUI modules. Tracked in: TASK-31, TASK-32, TASK-33
+- Extract context/request structs to retire `too_many_arguments` suppressions. Tracked in: TASK-34
+- Move inline tests out of production mega-files. Tracked in: TASK-35
+- Reduce production `unwrap`/`expect`/`panic!` in tool, auth, server, build, and provider code. Tracked in: TASK-36
+- Continue splitting TUI render/event-handling functions. Tracked in: TASK-37
+- Burn down remaining `allow(...)` suppression surface. Tracked in: TASK-38
+- Convert remaining repo TODO/FIXME markers in `src/` into Backlog.md tasks or resolve them. Tracked in: TASK-39
 
 1. split `src/server/comm_control.rs`, `src/server/client_lifecycle.rs`, `src/provider/mod.rs`, `src/provider/openai.rs`, and TUI remote/input modules
 2. extract context/request structs to eliminate `too_many_arguments` suppressions in server paths

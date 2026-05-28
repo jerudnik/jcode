@@ -315,8 +315,4 @@ Eight-direction disposition:
 7. Add validation filters for known conflict areas: implemented as a runbook matrix and helper-printed guidance; changed-path-driven automatic validation remains future work.
 8. Consider a fork-custom feature/config flag: deferred/rejected for this iteration because current evidence is docs/process/tooling-only, not shipped runtime or build-time behavior. Revisit only when a concrete maintenance packet identifies behavior that cannot be preserved through records, review policy, rerere audit, and validation filters.
 
-Remaining follow-ups for a future loop:
-- Optionally add a changed-path classifier to `scripts/upstream_sync.sh` that turns actual candidate diffs into concrete validation command suggestions without running broad checks unexpectedly.
-- Consider switching dirty-worktree parsing to porcelain `-z` for unusual paths and stronger rename/copy handling.
-- Add real patch records under `docs/fork-patches/` only when a concrete fork-only runtime or build-time customization is identified.
-- Keep the existing CI workflow as the authoritative automated sync path; use the local helper for planning/candidate setup and manual audit only.
+Remaining follow-ups for a future loop are now tracked in Backlog.md (changed-path classifier for `scripts/upstream_sync.sh`, porcelain `-z` parsing, real fork-only patch records, CI workflow as authoritative automated sync path). Tracked in: TASK-59

@@ -679,6 +679,7 @@ graph TD
 
 The agent uses memories, recent sessions, and git history to identify useful work:
 
+<!-- backlog-tracking-ignore: mermaid label, not a real marker -->
 ```mermaid
 graph LR
     subgraph "Context Gathering"
@@ -921,45 +922,22 @@ This is a distributed systems problem that will be addressed once ambient is sta
 
 ## Implementation Phases
 
+Tracking has moved to Backlog.md. Open work, grouped by phase:
+
 ### Phase 1: Foundation
-- [ ] Ambient agent loop (spawn, run, sleep)
-- [ ] Single-instance guard
-- [ ] Basic scheduling (fixed interval with max ceiling)
-- [ ] Provider selection chain (OpenAI OAuth → Anthropic OAuth → pay-per-token opt-in → disabled)
-- [ ] Configuration (`[ambient]` section in config)
-- [ ] Storage layout
+Ambient agent loop (spawn, run, sleep), single-instance guard, basic scheduling (fixed interval with max ceiling), provider selection chain (OpenAI OAuth → Anthropic OAuth → pay-per-token opt-in → disabled), configuration (`[ambient]` section in config), storage layout. Tracked in: TASK-54
 
 ### Phase 2: Memory Consolidation — Garden
-- [ ] Full graph-wide dedup scan
-- [ ] Fact verification against codebase
-- [ ] Retroactive session extraction (crashed/missed sessions)
-- [ ] Pruning dead memories (low confidence + low strength)
-- [ ] Relationship discovery across sessions
-- [ ] Embedding backfill
-- [ ] Contradiction resolution
+Full graph-wide dedup scan, fact verification against codebase, retroactive session extraction (crashed/missed sessions), pruning dead memories (low confidence + low strength), relationship discovery across sessions, embedding backfill, contradiction resolution. Tracked in: TASK-55
 
 ### Phase 3: Scheduling
-- [ ] `schedule_ambient` tool for agent self-scheduling
-- [ ] Scheduled queue (persistent, with context)
-- [ ] Adaptive resource calculator
-- [ ] Usage history tracking
-- [ ] Rate limit awareness (from provider response headers)
-- [ ] Event triggers (session close, crash, git push)
-- [ ] Active session detection → pause/throttle
+`schedule_ambient` tool for agent self-scheduling, scheduled queue (persistent, with context), adaptive resource calculator, usage history tracking, rate limit awareness (from provider response headers), event triggers (session close, crash, git push), active session detection → pause/throttle. Tracked in: TASK-56
 
 ### Phase 4: Proactive Work
-- [ ] Scout: analyze recent sessions + git history
-- [ ] Infer user priorities from memories
-- [ ] Identify actionable work
-- [ ] Execute on separate branch
-- [ ] Report results
+Scout: analyze recent sessions + git history, infer user priorities from memories, identify actionable work, execute on separate branch, report results. Tracked in: TASK-57
 
 ### Phase 5: Info Widget
-- [ ] Ambient status display in TUI
-- [ ] Queue preview
-- [ ] Last cycle summary
-- [ ] Next wake estimate
-- [ ] Budget bar (user vs ambient vs remaining)
+Ambient status display in TUI, queue preview, last cycle summary, next wake estimate, budget bar (user vs ambient vs remaining). Tracked in: TASK-58
 
 ---
 

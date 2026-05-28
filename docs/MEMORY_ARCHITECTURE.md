@@ -736,11 +736,10 @@ memory { action: "tag", id: "...", tags: ["new", "tags"] }
 
 ### Phase 6: Advanced Features ✅
 - [x] Confidence decay system (time-based with category-specific half-lives)
-- [ ] Negative memories and trigger patterns
-- [ ] Procedural memory support
 - [x] Provenance tracking
 - [x] Feedback loops (boost on use, decay on rejection)
-- [ ] Temporal awareness
+
+Open items in Phase 6: negative memories and trigger patterns, procedural memory support, temporal awareness. Tracked in: TASK-47
 
 ### Phase 7: Full Integration ✅
 - [x] End-of-session extraction
@@ -762,16 +761,7 @@ Lightweight consolidation that runs in the memory sidecar after returning result
 
 Full graph-wide consolidation that runs during ambient mode background cycles. See [AMBIENT_MODE.md](./AMBIENT_MODE.md) for the ambient mode design.
 
-- [ ] Graph-wide similarity-based memory merging
-- [ ] Redundancy detection and deduplication (beyond sidecar's local scope)
-- [ ] Contradiction resolution (across full graph, not just retrieved set)
-- [ ] Fact verification against codebase (check if factual memories are still true)
-- [ ] Retroactive session extraction (crashed/missed sessions)
-- [ ] Cluster reorganization
-- [ ] Weak memory pruning (confidence < 0.05 AND strength <= 1)
-- [ ] Relationship discovery across sessions
-- [ ] Embedding backfill for memories missing embeddings
-- [ ] Knowledge graph optimization
+Open items: graph-wide similarity-based memory merging, redundancy detection and deduplication (beyond sidecar's local scope), contradiction resolution (across full graph, not just retrieved set), fact verification against codebase (check if factual memories are still true), retroactive session extraction (crashed/missed sessions), cluster reorganization, weak memory pruning (confidence < 0.05 AND strength <= 1), relationship discovery across sessions, embedding backfill for memories missing embeddings, knowledge graph optimization. Tracked in: TASK-48
 
 ---
 
@@ -799,7 +789,7 @@ Before storing any memory, scan for:
 
 ## Future: Memory Consolidation (Sleep-Like Processing)
 
-> **Status:** TODO - Design pending
+> **Status:** Design pending. Tracked in: TASK-48
 
 Similar to how humans consolidate memories during sleep, jcode can run background consolidation to optimize the memory graph:
 
