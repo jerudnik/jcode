@@ -14,6 +14,16 @@
 - **Bump version for releases** - Update version in `Cargo.toml` when making releases. When cutting a new release, look at all the changes that happened since the last release and determine what the version bump should be ie patch or minor, etc. 
 - **Remote builds available** - Use `scripts/remote_build.sh` to offload heavy cargo work to another machine. If your build is terminated, likely is because there are not enough resources on this machine to build. use remote build in that case. Try checking the resource avaliablity on the machine before you run a build. 
 
+## Current Project State
+
+- Source package version in `Cargo.toml` is currently `0.14.3`; installed or self-dev launchers may report a separate dev build hash.
+- This repo is a Rust 2024 Cargo workspace centered on the `jcode` TUI/CLI binary in `src/main.rs`, with domain crates under `crates/` for providers, tools, storage, compaction, swarms, TUI surfaces, update/self-dev support, mobile, and desktop.
+- The live Backlog.md store is `.backlog/` in this checkout. Use `backlog task list --plain`, `backlog task <id> --plain`, and Backlog.md CLI/MCP mutation commands from the repository root. Never edit `.backlog/tasks/*.md` directly.
+- Active work themes include provider setup/auth/model UX, compaction quality, dependency-security upgrades, CI quality guardrails, ambient mode, safety-system phases, code-quality decomposition, Windows setup, MCP/nix-config integration boundaries, and future build/offload work.
+- Current CI quality guardrails include formatting, all-target/all-feature check and clippy, portable agent-content validation, warning/size/panic/swallowed-error budgets, strict Backlog.md tracking-divergence checks, and Backlog.md pointer-integrity checks.
+- Runtime logs, installs, caches, tokens, databases, and service state belong outside the repo under user-local locations such as `~/.jcode/` or platform equivalents. Keep host deployment policy in consumer repos such as nix-config.
+- Keep `docs/PROJECT_STATE.md`, AGENTS guidance, Serena memories, and `.backlog/` task status synchronized when project direction changes.
+
 ## Dev Shell
 
 - Use `/devshell-workflow` for dev shell setup, non-interactive Cargo/Nix commands, and hook execution guidance.
@@ -67,7 +77,7 @@ remains fully synchronized and up-to-date.
 
 ### Key Understanding
 
-- **Tasks** live in `backlog/tasks/` as `task-<id> - <title>.md` files
+- In this repo, **tasks** live in `.backlog/tasks/` as `task-<id> - <title>.md` files. Other Backlog.md projects may use `backlog/tasks/`.
 - **You interact via CLI only**: `backlog task create`, `backlog task edit`, etc.
 - **Use `--plain` flag** for AI-friendly output when viewing/listing
 - **Never bypass the CLI** - It handles Git, metadata, file naming, and relationships
@@ -93,10 +103,10 @@ remains fully synchronized and up-to-date.
 
 ### 📖 **UNDERSTANDING** (What you'll see when reading)
 
-- Markdown task files live under **`backlog/tasks/`** (drafts under **`backlog/drafts/`**)
+- Markdown task files live under **`.backlog/tasks/`** in this repo (drafts under **`.backlog/drafts/`**). Some Backlog.md projects use `backlog/` instead.
 - Files are named: `task-<id> - <title>.md` (e.g., `task-42 - Add GraphQL resolver.md`)
-- Project documentation is in **`backlog/docs/`**
-- Project decisions are in **`backlog/decisions/`**
+- Backlog-managed project documentation is in **`.backlog/docs/`**
+- Backlog-managed project decisions are in **`.backlog/decisions/`**
 
 ### 🔧 **ACTING** (How to change things)
 

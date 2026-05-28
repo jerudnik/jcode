@@ -641,6 +641,7 @@ Notes:
 
 - [Ambient Mode / OpenClaw](docs/AMBIENT_MODE.md)
 - [Browser Provider Protocol](docs/BROWSER_PROVIDER_PROTOCOL.md)
+- [Current Project State](docs/PROJECT_STATE.md)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE.md)
 - [Swarm Architecture](docs/SWARM_ARCHITECTURE.md)
 - [Server Architecture](docs/SERVER_ARCHITECTURE.md)
@@ -669,6 +670,10 @@ The hook never blocks a commit. Add `<!-- backlog-tracking-ignore -->`
 same or preceding line to opt out a specific occurrence. See
 [scripts/git-hooks/README.md](scripts/git-hooks/README.md) for the CI
 flags (`--all`, `--strict`) and full details.
+
+Active repo work is tracked in `.backlog/`; use `backlog task list --plain`
+for the live board. See [Current Project State](docs/PROJECT_STATE.md) for the
+latest documentation snapshot.
 
 ---
 

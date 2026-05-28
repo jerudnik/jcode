@@ -1,6 +1,6 @@
 # Code Quality Program Todo List
 
-This file used to track the execution backlog for the code-quality uplift program described in `docs/CODE_QUALITY_10_10_PLAN.md`. Active tracking has moved to Backlog.md. The historical execution log (with per-phase completion notes from the 2026-03 through 2026-05 cleanup waves) is preserved in git history at commit 0aea41ac and earlier.
+This file used to track the execution backlog for the code-quality uplift program described in `docs/CODE_QUALITY_10_10_PLAN.md`. Active tracking has moved to Backlog.md under `.backlog/`. The historical execution log (with per-phase completion notes from the 2026-03 through 2026-05 cleanup waves) is preserved in git history at commit 0aea41ac and earlier.
 
 For the durable design and phase definitions, see `docs/CODE_QUALITY_10_10_PLAN.md`. For the underlying audit, see `docs/CODE_QUALITY_AUDIT_2026-04-18.md`.
 
