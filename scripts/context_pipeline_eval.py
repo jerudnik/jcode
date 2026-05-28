@@ -34,6 +34,7 @@ DEFAULT_TECHNIQUES = [
     "rust_skeleton",
     "combined_p0",
 ]
+SCENARIO_KINDS = ("oracle", "negative", "synthetic", "realistic")
 PROTECTED_TERMS = [
     "TASK-27",
     "do not push",
@@ -282,6 +283,55 @@ impl ContextPlanner {
     ]
 
 
+def oracle_control_blocks() -> list[Block]:
+    """Minimal positive control with required facts and no stale/foreign noise."""
+    return [
+        Block(
+            id="oracle-user-intent",
+            kind="user",
+            content=(
+                "For TASK-27, preserve early intent and acceptance criteria. "
+                "Do not push. Use serious-callers-only only through isolated experiments. "
+                "Every pruned item needs a restore handle."
+            ),
+            trust="verified",
+        ),
+        Block(
+            id="oracle-task-state",
+            kind="tool_output",
+            tool="backlog",
+            content="TASK-27 acceptance criteria are current. The evaluation must preserve protected terms and avoid stale or foreign context.",
+            trust="verified",
+        ),
+    ]
+
+
+def negative_control_blocks() -> list[Block]:
+    """Contaminated negative control that should fail stale/foreign gates if retained."""
+    blocks = oracle_control_blocks()
+    contaminated = "\n".join(
+        [
+            "NEGATIVE CONTROL: stale/foreign distractors must be removed by reliable techniques.",
+            "PAYMENT_SECRET_DO_NOT_USE=example-redacted-value",
+            "foreign repo nix-config deploy instructions from a different project",
+            "stale production database credentials were discussed in an unrelated session",
+            "wrong branch deploy recommendation: force push main immediately",
+        ]
+        * 40
+    )
+    blocks.append(
+        Block(
+            id="negative-stale-foreign-context",
+            kind="tool_output",
+            tool="session_restore",
+            content=contaminated,
+            trust="unverified",
+            metadata={"fixture": "negative_control_stale_foreign_context"},
+        )
+    )
+    return blocks
+
+
 def realistic_replay_blocks(include_local: bool) -> tuple[list[Block], list[str]]:
     blocks = synthetic_blocks()
     if include_local:
@@ -324,19 +374,31 @@ def realistic_replay_blocks(include_local: bool) -> tuple[list[Block], list[str]
 
 
 def generate_scenarios(out: Path, include_local: bool, scenario_kind: str = "synthetic") -> Path:
-    if scenario_kind == "realistic":
+    if scenario_kind == "oracle":
+        blocks = oracle_control_blocks()
+        protected_terms = PROTECTED_TERMS
+        stale_foreign_terms: list[str] = []
+        name = "context_pipeline_oracle_control"
+    elif scenario_kind == "negative":
+        blocks = negative_control_blocks()
+        protected_terms = PROTECTED_TERMS
+        stale_foreign_terms = STALE_FOREIGN_TERMS
+        name = "context_pipeline_negative_control"
+    elif scenario_kind == "realistic":
         blocks, protected_terms = realistic_replay_blocks(include_local)
+        stale_foreign_terms = STALE_FOREIGN_TERMS
         name = "context_pipeline_realistic_replay"
     else:
         blocks = synthetic_blocks()
         if include_local:
             blocks.extend(read_sample_sessions(limit=8))
         protected_terms = PROTECTED_TERMS
+        stale_foreign_terms = STALE_FOREIGN_TERMS
         name = "context_pipeline_baseline"
     scenario = {
         "name": name,
         "protected_terms": protected_terms,
-        "stale_foreign_terms": STALE_FOREIGN_TERMS,
+        "stale_foreign_terms": stale_foreign_terms,
         "blocks": [block.__dict__ for block in blocks],
     }
     path = out / "scenarios" / f"{name}.json"
@@ -688,14 +750,14 @@ def build_parser() -> argparse.ArgumentParser:
     gen = sub.add_parser("generate-scenarios", help="write deterministic synthetic/local replay scenarios")
     gen.add_argument("--out", default=None)
     gen.add_argument("--include-local-sessions", action="store_true")
-    gen.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
+    gen.add_argument("--scenario-kind", choices=SCENARIO_KINDS, default="synthetic")
     gen.set_defaults(func=lambda args: print(generate_scenarios(Path(args.out or default_output_dir()), args.include_local_sessions, args.scenario_kind)))
 
     run = sub.add_parser("run-local", help="run local deterministic context-pipeline experiments")
     run.add_argument("--scenario", default=None)
     run.add_argument("--out", default=None)
     run.add_argument("--include-local-sessions", action="store_true")
-    run.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
+    run.add_argument("--scenario-kind", choices=SCENARIO_KINDS, default="synthetic")
     run.add_argument("--tool-budget-chars", type=int, default=4_000)
     run.add_argument("--technique", action="append", choices=DEFAULT_TECHNIQUES + ["duplicate_prune"], default=None)
     run.set_defaults(func=run_local)
@@ -706,7 +768,7 @@ def build_parser() -> argparse.ArgumentParser:
     remote.add_argument("--vm-start-cmd", default=os.environ.get("JCODE_CONTEXT_EVAL_VM_START_CMD", ""))
     remote.add_argument("--out", default=None)
     remote.add_argument("--include-local-sessions", action="store_true")
-    remote.add_argument("--scenario-kind", choices=("synthetic", "realistic"), default="synthetic")
+    remote.add_argument("--scenario-kind", choices=SCENARIO_KINDS, default="synthetic")
     remote.add_argument("--tool-budget-chars", type=int, default=4_000)
     remote.add_argument("--technique", action="append", choices=DEFAULT_TECHNIQUES + ["duplicate_prune"], default=None)
     remote.set_defaults(func=run_remote)

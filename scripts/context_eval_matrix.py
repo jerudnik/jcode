@@ -29,6 +29,7 @@ DEFAULT_TECHNIQUES = [
     "rust_skeleton",
     "combined_p0",
 ]
+SCENARIO_KINDS = ("oracle", "negative", "synthetic", "realistic")
 DEFAULT_HOST = "serious-callers-only"
 NUMERIC_FIELDS = [
     "original_tokens_est",
@@ -267,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vm-start-cmd", default=os.environ.get("JCODE_CONTEXT_EVAL_VM_START_CMD", ""))
     parser.add_argument("--out", default=None)
     parser.add_argument("--repetitions", type=int, default=3)
-    parser.add_argument("--scenario-kind", action="append", choices=("synthetic", "realistic"), default=None)
+    parser.add_argument("--scenario-kind", action="append", choices=SCENARIO_KINDS, default=None)
     parser.add_argument("--include-local-sessions", dest="include_local_sessions", action="append", choices=("true", "false"), default=None)
     parser.add_argument("--tool-budget-chars", action="append", type=int, default=None)
     parser.add_argument("--technique", action="append", choices=DEFAULT_TECHNIQUES, default=None)
@@ -278,7 +279,7 @@ def build_parser() -> argparse.ArgumentParser:
 def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     if args.repetitions < 1:
         raise SystemExit("--repetitions must be >= 1")
-    args.scenario_kind = args.scenario_kind or ["synthetic", "realistic"]
+    args.scenario_kind = args.scenario_kind or ["oracle", "negative", "synthetic", "realistic"]
     args.include_local_sessions = [value == "true" for value in (args.include_local_sessions or ["false", "true"])]
     args.tool_budget_chars = args.tool_budget_chars or [2_000, 4_000, 8_000]
     return args
