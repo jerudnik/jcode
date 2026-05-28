@@ -55,6 +55,32 @@ target/context-eval/<timestamp>/
   matrix.csv
 ```
 
+For repeatable experiment tracking, create a manifest before or after a run and
+register completed artifact directories in a JSONL registry:
+
+```bash
+python3 scripts/context_experiment.py create-manifest \
+  --out target/context-eval/manifest.json \
+  --title "combined-p0 realistic replay" \
+  --scenario-kind realistic \
+  --include-local-sessions \
+  --artifacts-dir target/context-eval/<timestamp>
+
+python3 scripts/context_experiment.py validate-manifest \
+  target/context-eval/manifest.json
+
+python3 scripts/context_experiment.py register-run \
+  --manifest target/context-eval/manifest.json \
+  --artifacts-dir target/context-eval/<timestamp>
+
+python3 scripts/context_experiment.py list-runs
+```
+
+The manifest records git/environment metadata, scenario settings, expected or
+inferred techniques, and artifact checksums. The run registry defaults to
+`target/context-eval/run_registry.jsonl` and stores per-run artifact fingerprints
+plus summary metrics such as the best practical score technique.
+
 The terminal table includes:
 
 - estimated tokens saved,
@@ -572,6 +598,146 @@ Interpretation guidance:
   runtime changes until explained.
 - Cache-isolation candidates should use stricter gates than generic pruning:
   cross-project leakage and false hits must remain exactly zero.
+
+
+## Experiment infrastructure contracts
+
+TASK-84 treats the current scripts as an experiment support layer, not just
+one-off prototypes. The contracts below are the minimum glue needed before
+context/cache candidates graduate to broader testing.
+
+### Manifests and registry
+
+`scripts/context_experiment.py` records context-eval runs without making model
+calls or mutating JCODE runtime state. Use it after a deterministic run to create
+a manifest, validate it, and append the completed run to the JSONL registry.
+
+```bash
+python3 scripts/context_experiment.py create-manifest \
+  --out target/context-eval/my-run/manifest.json \
+  --title "Context cache isolation smoke" \
+  --scenario-kind synthetic \
+  --tool-budget-chars 4000 \
+  --artifacts-dir target/context-eval/my-run
+
+python3 scripts/context_experiment.py validate-manifest \
+  target/context-eval/my-run/manifest.json
+
+python3 scripts/context_experiment.py register-run \
+  --manifest target/context-eval/my-run/manifest.json \
+  --artifacts-dir target/context-eval/my-run \
+  --registry target/context-eval/run_registry.jsonl \
+  --status completed
+
+python3 scripts/context_experiment.py list-runs \
+  --registry target/context-eval/run_registry.jsonl
+```
+
+The helper fingerprints common artifacts from `matrix.json`, `matrix.csv`,
+`scenarios/*.json`, `runs/*.context.json`, and optional `model_eval/*.json`. It
+also captures git branch/commit/dirty state, Python/platform metadata, pipeline
+settings, techniques, owner, and notes. Treat these fields as the minimum
+registry key for comparing or re-running results:
+
+| Field | Why it matters |
+| --- | --- |
+| `experiment_id`, manifest path, and manifest SHA-256 | Stable handle for reports and follow-up tasks. |
+| Git commit, branch, and dirty-state flag | Prevents mixing results from different code. |
+| Scenario kind, local-session inclusion, budgets, repetitions, techniques | Defines the assumption tuple. |
+| Artifact paths, byte sizes, and SHA-256 hashes | Allows deterministic replay and fixture drift detection. |
+| Python version, platform, and host | Explains reproducibility differences. |
+| Registry status and notes | Records whether the run is planned, running, completed, or failed. |
+
+The default registry is `target/context-eval/run_registry.jsonl`. Keep it
+append-only for completed runs. If a run is superseded, register a new run and
+record the relationship in `--note`; do not rewrite historical metrics.
+
+### Reports and recommendations
+
+`scripts/context_experiment_report.py` renders Markdown and/or HTML reports from
+existing artifacts. Reports should be generated from deterministic artifacts
+first, with model-eval data included only after deterministic gates pass.
+
+```bash
+python3 scripts/context_experiment_report.py \
+  --artifacts target/context-eval/my-run \
+  --format both \
+  --out target/context-eval/my-run/report
+```
+
+The report consumes `matrix.json` by default and auto-detects
+`model_eval/results.json` when present. It summarizes deterministic/model
+results, gate failures, and a recommendation. Gate thresholds can be tightened or
+relaxed with `--min-protected-retention`, `--max-stale-retention`,
+`--min-restore-coverage`, and `--min-model-pass-rate`.
+
+A report is ready for review when it includes:
+
+- manifest/registry identity and git commit,
+- the exact command or command template used,
+- deterministic gate outcomes and top failures,
+- model-eval results only if deterministic gates passed first,
+- a recommendation per candidate or candidate set,
+- redaction-scan result and any intentionally withheld artifact paths.
+
+The report renderer should remain a thin view over `matrix.json` and optional
+`model_eval/results.json`; it should not recompute metrics differently from the
+underlying scripts.
+
+### Fixtures and determinism
+
+Fixture tiers should stay explicit and hashable:
+
+- **Synthetic fixtures**: deterministic canaries for protected terms, stale or
+  foreign distractors, duplicate tools, large outputs, and restore handles.
+- **Cache cross-project fixtures**: two or more fake repos with overlapping file
+  names, symbols, task IDs, and conflicting protected facts. These are the
+  cheapest way to catch foreign cache hits before runtime integration.
+- **Realistic replay fixtures**: opt-in local session samples plus controlled
+  injected stale/foreign blocks. Do not vendor private logs.
+- **Public benchmark fixtures**: only after deterministic gates pass and license
+  or dataset versioning is documented in the manifest.
+
+Determinism checks should compare repeated output hashes for scenario files,
+`*.context.json` transformed artifacts, `matrix.json`, and `summary.json`. Any
+output that includes timestamps, absolute temp paths, or host-specific paths
+should either normalize those fields before hashing or list them under an
+`ignored_fields` section in the manifest. A candidate with unexplained hash drift
+should not move into runtime code even if the mean score is high.
+
+### Redaction scanning before sharing artifacts
+
+Artifact directories can contain local-session snippets, model prompts, and model
+responses, so scan before publishing, committing, or pasting reports. Use the
+TASK-84 scanner for context-eval artifacts and keep the broader repository
+preflight for normal source-tree checks:
+
+```bash
+python3 scripts/context_artifact_secret_scan.py \
+  target/context-eval/my-run \
+  target/context-eval/my-run/report \
+  --out target/context-eval/my-run/secret_scan
+
+./scripts/security_preflight.sh
+```
+
+The scanner writes `findings.json` plus `summary.txt`, redacts matched values in
+its own output, and exits non-zero when high-severity findings remain after
+allowlist and minimum-length filtering. Use `--allowlist <json-list>` only for
+documented synthetic canaries or known benign hashes, and prefer allowlisting
+SHA-256 or SHA-256-16 hashes over literal values.
+
+Treat a scanner hit as blocking unless it is a documented synthetic canary such
+as `PAYMENT_SECRET_DO_NOT_USE=example-redacted-value`. Reports should record the
+scanner command and whether any files were omitted, redacted, or kept because
+they matched an allowlisted synthetic fixture.
+
+### Low-risk infra gap
+
+The most useful small follow-up is wiring `context_experiment_report.py` and
+`context_artifact_secret_scan.py` together so report generation can optionally
+scan the exact files it links and stamp the scan summary into `report.md`. This
+keeps sharing checks reproducible without changing runtime context code.
 
 ## Opt-in real-model evaluation
 
