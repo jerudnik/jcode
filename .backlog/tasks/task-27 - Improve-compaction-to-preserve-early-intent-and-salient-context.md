@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@jcode'
 created_date: '2026-05-28 00:41'
-updated_date: '2026-05-28 11:58'
+updated_date: '2026-05-28 12:07'
 labels:
   - exploratory
   - compaction
@@ -58,6 +58,8 @@ Started DCP comparative research and added the upstream DCP repository as a refe
 Dispatched four subagents covering DCP documentation, DCP code, public issues/discussions/releases, and local JCODE compaction integration points.
 
 Wrote consolidated Serena memory `compaction/dcp_research_task27` with DCP design findings, JCODE opportunities, failure-mode cautions, salience signals, regression fixtures, and phased implementation recommendations.
+
+Tracked follow-up Rust-native context-intake suggestions in Serena memory `compaction/dcp_research_task27`, emphasizing low-overhead boundary inspection, structured placeholders, skeleton fallback, lazy repo maps, provider-aware token estimates, and ledger metrics.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -72,4 +74,6 @@ Findings:
 - DCP issue history warns against fragile model-facing boundary IDs, non-durable compaction metadata, opaque threshold triggers, provider-specific reasoning metadata leaks, and complex block lifecycle bugs.
 
 Research sources included DCP docs, source structure, public issues/PRs/releases, and local JCODE compaction surfaces.
+
+Follow-up context-intake suggestions were appended to Serena memory `compaction/dcp_research_task27`: boundary inspector for file reads/tool outputs, structured placeholders with restore handles, Rust/tree-sitter skeleton fallback for oversized source files, cached/lazy repo context map, provider-aware token estimation, and context-intake ledger metrics.
 <!-- SECTION:FINAL_SUMMARY:END -->
