@@ -188,7 +188,35 @@ struct DiskCacheMemoEntry {
     cache: Option<DiskCache>,
 }
 
-static DISK_CACHE_MEMO: LazyLock<Mutex<HashMap<PathBuf, DiskCacheMemoEntry>>> =
+/// Composite key for the in-process memo of the openrouter on-disk model
+/// catalog cache.
+///
+/// The `path` already encodes the cache namespace (per-provider /
+/// per-api-base via `cache_path_for_namespace`), so cross-provider
+/// confusion is prevented at the path level. `schema_version`
+/// (`jcode_cache_isolation::SCHEMA_VERSION`) is folded in as a defensive
+/// second axis so a one-knob bump of the cache-isolation contract atomically
+/// invalidates every memoized entry across the long-lived process without
+/// requiring a path-level migration or a manual cache wipe.
+///
+/// See TASK-89: openrouter disk-memos are the LOW-risk defensive layer; the
+/// on-disk mtime check (`modified_at`) remains the primary correctness guard.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct OrCacheKey {
+    path: PathBuf,
+    schema_version: u32,
+}
+
+impl OrCacheKey {
+    fn for_path(path: PathBuf) -> Self {
+        Self {
+            path,
+            schema_version: jcode_cache_isolation::SCHEMA_VERSION,
+        }
+    }
+}
+
+static DISK_CACHE_MEMO: LazyLock<Mutex<HashMap<OrCacheKey, DiskCacheMemoEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,7 +231,7 @@ struct EndpointsDiskCacheMemoEntry {
     cache: Option<EndpointsDiskCache>,
 }
 
-static ENDPOINTS_DISK_CACHE_MEMO: LazyLock<Mutex<HashMap<PathBuf, EndpointsDiskCacheMemoEntry>>> =
+static ENDPOINTS_DISK_CACHE_MEMO: LazyLock<Mutex<HashMap<OrCacheKey, EndpointsDiskCacheMemoEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Default, Clone)]
@@ -378,7 +406,7 @@ fn load_disk_cache_entry_from_path(path: PathBuf) -> Option<DiskCache> {
     let modified_at = disk_cache_modified_at(&path);
 
     if let Ok(memo) = DISK_CACHE_MEMO.lock()
-        && let Some(entry) = memo.get(&path)
+        && let Some(entry) = memo.get(&OrCacheKey::for_path(path.clone()))
         && entry.modified_at == modified_at
     {
         return fresh_disk_cache(entry.cache.clone());
@@ -390,7 +418,7 @@ fn load_disk_cache_entry_from_path(path: PathBuf) -> Option<DiskCache> {
 
     if let Ok(mut memo) = DISK_CACHE_MEMO.lock() {
         memo.insert(
-            path,
+            OrCacheKey::for_path(path),
             DiskCacheMemoEntry {
                 modified_at,
                 cache: loaded.clone(),
@@ -523,7 +551,7 @@ fn save_disk_cache_with_source_to_path(
 
     if let Ok(mut memo) = DISK_CACHE_MEMO.lock() {
         memo.insert(
-            path.clone(),
+            OrCacheKey::for_path(path.clone()),
             DiskCacheMemoEntry {
                 modified_at: disk_cache_modified_at(&path),
                 cache: Some(cache),
@@ -546,7 +574,7 @@ pub fn load_endpoints_disk_cache_public(model: &str) -> Option<(Vec<EndpointInfo
     let path = endpoints_cache_path(model);
     let modified_at = disk_cache_modified_at(&path);
     let cache = if let Ok(memo) = ENDPOINTS_DISK_CACHE_MEMO.lock()
-        && let Some(entry) = memo.get(&path)
+        && let Some(entry) = memo.get(&OrCacheKey::for_path(path.clone()))
         && entry.modified_at == modified_at
     {
         entry.cache.clone()?
@@ -556,7 +584,7 @@ pub fn load_endpoints_disk_cache_public(model: &str) -> Option<(Vec<EndpointInfo
             .and_then(|content| serde_json::from_str::<EndpointsDiskCache>(&content).ok());
         if let Ok(mut memo) = ENDPOINTS_DISK_CACHE_MEMO.lock() {
             memo.insert(
-                path.clone(),
+                OrCacheKey::for_path(path.clone()),
                 EndpointsDiskCacheMemoEntry {
                     modified_at,
                     cache: loaded.clone(),
@@ -580,7 +608,7 @@ pub fn load_endpoints_disk_cache(model: &str) -> Option<Vec<EndpointInfo>> {
     let path = endpoints_cache_path(model);
     let modified_at = disk_cache_modified_at(&path);
     let cache = if let Ok(memo) = ENDPOINTS_DISK_CACHE_MEMO.lock()
-        && let Some(entry) = memo.get(&path)
+        && let Some(entry) = memo.get(&OrCacheKey::for_path(path.clone()))
         && entry.modified_at == modified_at
     {
         entry.cache.clone()?
@@ -590,7 +618,7 @@ pub fn load_endpoints_disk_cache(model: &str) -> Option<Vec<EndpointInfo>> {
             .and_then(|content| serde_json::from_str::<EndpointsDiskCache>(&content).ok());
         if let Ok(mut memo) = ENDPOINTS_DISK_CACHE_MEMO.lock() {
             memo.insert(
-                path.clone(),
+                OrCacheKey::for_path(path.clone()),
                 EndpointsDiskCacheMemoEntry {
                     modified_at,
                     cache: loaded.clone(),
@@ -629,7 +657,7 @@ pub fn save_endpoints_disk_cache(model: &str, endpoints: &[EndpointInfo]) {
 
     if let Ok(mut memo) = ENDPOINTS_DISK_CACHE_MEMO.lock() {
         memo.insert(
-            path.clone(),
+            OrCacheKey::for_path(path.clone()),
             EndpointsDiskCacheMemoEntry {
                 modified_at: disk_cache_modified_at(&path),
                 cache: Some(cache),
@@ -779,6 +807,37 @@ pub fn rank_providers_from_endpoints(endpoints: &[EndpointInfo]) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// TASK-89 AC#2/AC#4 (openrouter disk-memo defensive layer):
+    /// the same on-disk path with a different `schema_version` must produce
+    /// a distinct `OrCacheKey`, so a bump of
+    /// `jcode_cache_isolation::SCHEMA_VERSION` atomically invalidates every
+    /// memoized disk-cache entry across the long-lived process without a
+    /// path-level migration. Equal `(path, schema_version)` pairs must hit.
+    #[test]
+    fn or_cache_key_isolates_by_schema_version() {
+        let p = PathBuf::from("/tmp/jcode-test-openrouter-cache.json");
+        let a = OrCacheKey {
+            path: p.clone(),
+            schema_version: jcode_cache_isolation::SCHEMA_VERSION,
+        };
+        let b = OrCacheKey {
+            path: p.clone(),
+            schema_version: jcode_cache_isolation::SCHEMA_VERSION.wrapping_add(1),
+        };
+        let a2 = OrCacheKey::for_path(p);
+        assert_eq!(a, a2);
+        assert_ne!(a, b);
+
+        // HashMap round-trip: distinct fingerprints must not alias.
+        use std::collections::HashMap;
+        let mut m: HashMap<OrCacheKey, &'static str> = HashMap::new();
+        m.insert(a.clone(), "session-a");
+        m.insert(b.clone(), "session-b");
+        assert_eq!(m.get(&a), Some(&"session-a"));
+        assert_eq!(m.get(&b), Some(&"session-b"));
+        assert_eq!(m.len(), 2);
+    }
 
     #[test]
     fn parse_model_spec_handles_provider_aliases_and_auto() {
