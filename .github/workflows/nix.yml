@@ -1,0 +1,121 @@
+name: Nix
+
+# Builds, checks, and caches the jcode flake across all supported Nix
+# platforms. Pushes successful build outputs to a public Cachix cache so
+# downstream consumers never have to rebuild from source.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/nix.yml"
+  pull_request:
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/nix.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: nix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.system }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-latest
+          - system: x86_64-darwin
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      HAS_CACHIX: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cachix (public binary cache)
+        # Only runs once the cache exists and CACHIX_AUTH_TOKEN is configured;
+        # until then CI builds straight from source without a cache step.
+        if: env.HAS_CACHIX == 'true'
+        uses: cachix/cachix-action@v15
+        with:
+          name: jcode
+          # Pushes are gated on the auth token. Pull requests from forks omit it
+          # and simply consume the cache read-only (safe to expose publicly).
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Never push partial/uncacheable paths; only signed build outputs.
+          skipPush: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: Build package
+        run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs
+
+      - name: Smoke test binary
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        run: |
+          ./result/bin/jcode --version
+
+  checks:
+    name: flake checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HAS_CACHIX: ${{ secrets.CACHIX_AUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cachix (public binary cache)
+        if: env.HAS_CACHIX == 'true'
+        uses: cachix/cachix-action@v15
+        with:
+          name: jcode
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+
+      - name: nix flake check
+        run: nix flake check --print-build-logs
+
+  lock:
+    name: flake.lock freshness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Verify flake.lock is committed and evaluates
+        run: |
+          nix flake metadata --json > /dev/null
+          if [ -n "$(git status --porcelain flake.lock)" ]; then
+            echo "flake.lock is out of date; run 'nix flake update' and commit." >&2
+            exit 1
+          fi
