@@ -771,6 +771,67 @@ Then symlink to your PATH:
 scripts/install_release.sh
 ```
 
+### Nix (flake)
+
+This fork ships a [Nix flake](flake.nix) built with
+[crane](https://github.com/ipetkov/crane) and
+[flake-parts](https://flake.parts), with a public
+[Cachix](https://app.cachix.org/cache/jerudnik-jcode) binary cache so you skip
+the ~20 min cold compile.
+
+Run it directly without installing:
+
+```bash
+nix run github:jerudnik/jcode
+```
+
+Add the binary cache (so prebuilt outputs are fetched instead of compiled). The
+flake also advertises this via `nixConfig`, so `nix run`/`nix build` will offer
+to use it automatically:
+
+```nix
+# nix.conf / nixpkgs.config
+nix.settings = {
+  substituters = [ "https://jerudnik-jcode.cachix.org" ];
+  trusted-public-keys = [
+    "jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ="
+  ];
+};
+```
+
+Consume it as a flake input with the home-manager module:
+
+```nix
+{
+  inputs.jcode.url = "github:jerudnik/jcode";
+
+  # In your home-manager configuration:
+  imports = [ inputs.jcode.homeModules.default ];
+  programs.jcode.enable = true;
+}
+```
+
+Or pull just the package via the overlay:
+
+```nix
+nixpkgs.overlays = [ inputs.jcode.overlays.default ];
+# environment.systemPackages = [ pkgs.jcode ];
+```
+
+Exposed flake outputs (across `aarch64`/`x86_64` × `darwin`/`linux`):
+
+| Output | Description |
+|---|---|
+| `packages.{default,jcode}` | The `jcode` binary built with crane |
+| `apps.default` | `nix run` entry point |
+| `overlays.default` | Adds `pkgs.jcode` to nixpkgs |
+| `homeModules.default` | Home Manager module (`programs.jcode`) |
+| `devShells.default` | Contributor shell (cargo, nextest, audit, watch) |
+| `checks` | Reproducible Nix build gate (`nix flake check`) |
+| `formatter` | `nixfmt-rfc-style` |
+
+See [docs/NIX.md](docs/NIX.md) for details.
+
 ### Platform Support
 
 | Platform | Status |
