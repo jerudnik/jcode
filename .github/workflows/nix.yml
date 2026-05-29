@@ -104,6 +104,20 @@ jobs:
       - name: nix flake check
         run: nix flake check --print-build-logs
 
+  audit:
+    name: cargo audit (advisory, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Advisories in transitive deps should surface as a warning, not block
+    # merges of unrelated changes. This job reports findings without failing CI.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: cargo audit
+        run: nix run nixpkgs#cargo-audit -- audit
+
   lock:
     name: flake.lock freshness
     if: github.event_name == 'pull_request'
