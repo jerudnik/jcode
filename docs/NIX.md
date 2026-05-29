@@ -27,38 +27,36 @@ nix build github:jerudnik/jcode
 
 ## Binary cache (skip building from source)
 
-> **Status: not yet enabled.** The cache config is staged but disabled until the
-> `jerudnik-jcode` Cachix cache is created. Until then, `nix build` compiles the
-> ~60-crate workspace from source. Follow "Enabling the cache" below to turn it
-> on.
-
-Once a public Cachix cache serves prebuilt outputs, add it once and Nix will
-pull binaries instead of compiling:
+A public Cachix cache (`jerudnik-jcode`) serves prebuilt outputs. Add it once
+and Nix will pull binaries instead of compiling the ~60-crate workspace:
 
 ```nix
 nix.settings = {
-  substituters = [ "https://jcode.cachix.org" ];
+  substituters = [ "https://jerudnik-jcode.cachix.org" ];
   trusted-public-keys = [
-    "jcode.cachix.org-1:<PUBLIC_KEY>="
+    "jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ="
   ];
 };
 ```
+
+The flake also declares this cache in `nixConfig`, so `nix run`/`nix build`
+against the flake URL will offer to use it automatically (consumers opt in with
+`--accept-flake-config`).
 
 The cache only ever stores `nix build` outputs (signed with a key whose private
 half lives solely in CI secrets). It is safe to expose publicly and safe for
 others to consume.
 
-### Enabling the cache (maintainers)
+### Maintaining the cache
 
-1. Create the cache: `cachix create jerudnik-jcode` (or via the Cachix web UI).
-2. Copy the public key it prints.
-3. Uncomment the `nixConfig` block in `flake.nix` and paste the key.
-4. Update the placeholder key in this doc.
-5. Add the `CACHIX_AUTH_TOKEN` repo secret so CI (`.github/workflows/nix.yml`)
-   can push build outputs.
+CI (`.github/workflows/nix.yml`) pushes successful build outputs automatically
+once the `CACHIX_AUTH_TOKEN` repo secret is set. To set up or re-key:
 
-After that, `nix run`/`nix build` against the flake URL will offer to use the
-cache automatically (consumers opt in with `--accept-flake-config`).
+1. The cache is `jerudnik-jcode` on Cachix.
+2. Generate a push auth token in the Cachix UI and store it as the
+   `CACHIX_AUTH_TOKEN` GitHub Actions secret.
+3. If the signing key is ever rotated, update the public key in `flake.nix`
+   (the `nixConfig` block) and in this doc.
 
 ## Use as a flake input
 
