@@ -66,7 +66,7 @@ jobs:
         if: env.HAS_CACHIX == 'true'
         uses: cachix/cachix-action@v15
         with:
-          name: jcode
+          name: jerudnik-jcode
           # Pushes are gated on the auth token. Pull requests from forks omit it
           # and simply consume the cache read-only (safe to expose publicly).
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -97,7 +97,7 @@ jobs:
         if: env.HAS_CACHIX == 'true'
         uses: cachix/cachix-action@v15
         with:
-          name: jcode
+          name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           skipPush: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
 

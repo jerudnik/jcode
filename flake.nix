@@ -23,14 +23,14 @@
   #
   # This is intentionally commented out until the cache actually exists, so a
   # fresh clone never points consumers at a dead substituter or an unverifiable
-  # key. To enable: create the `jcode` Cachix cache, then uncomment this block
+  # key. To enable: create the `jerudnik-jcode` Cachix cache, then uncomment
   # and paste the real public key (see docs/NIX.md). Consumers opt in with
   # `--accept-flake-config` or by adding the substituter to their own config.
   #
   # nixConfig = {
-  #   extra-substituters = [ "https://jcode.cachix.org" ];
+  #   extra-substituters = [ "https://jerudnik-jcode.cachix.org" ];
   #   extra-trusted-public-keys = [
-  #     "jcode.cachix.org-1:<PUBLIC_KEY>="
+  #     "jerudnik-jcode.cachix.org-1:<PUBLIC_KEY>="
   #   ];
   # };
 
