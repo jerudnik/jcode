@@ -12,11 +12,6 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
-    advisory-db = {
-      url = "github:rustsec/advisory-db";
-      flake = false;
-    };
   };
 
   # Public, safe-to-share binary cache for prebuilt outputs.
@@ -88,34 +83,6 @@
             # (a clean checkout). Dirty/path trees fall back to the package default.
             gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or "nix";
           };
-
-          # Shared crane args for the `checks` so they reuse the dep build.
-          checkSrc = lib.fileset.toSource {
-            root = ./.;
-            fileset = lib.fileset.unions [
-              ./Cargo.toml
-              ./Cargo.lock
-              ./src
-              ./crates
-            ];
-          };
-          commonCheckArgs = {
-            src = checkSrc;
-            pname = "jcode";
-            inherit version;
-            strictDeps = true;
-            nativeBuildInputs = [
-              pkgs.pkg-config
-              pkgs.cmake
-              pkgs.perl
-            ];
-            buildInputs = lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ];
-            JCODE_BUILD_SEMVER = version;
-            JCODE_BUILD_GIT_HASH = "nix";
-            JCODE_BUILD_GIT_DATE = "1970-01-01T00:00:00+00:00";
-            JCODE_BUILD_GIT_DIRTY = "false";
-          };
-          cargoArtifacts = craneLib.buildDepsOnly commonCheckArgs;
         in
         {
           _module.args.pkgs = pkgs;
@@ -130,26 +97,18 @@
             program = lib.getExe jcode;
           };
 
-          # CI gates. Built with `nix flake check`; reuse cached dep artifacts.
+          # CI gates run by `nix flake check`. We intentionally do NOT duplicate
+          # clippy/rustfmt/test here: those are owned by the upstream `ci.yml`
+          # against its pinned `stable` toolchain. Re-running them through the
+          # flake's rust-overlay toolchain only produces spurious version-skew
+          # failures. Dependency security auditing runs as a separate,
+          # non-blocking CI job (advisories in transitive deps should surface
+          # without permanently reddening every build). The flake's job here is
+          # to prove the package *builds* reproducibly under Nix.
           checks = {
+            # Reuses the package derivation: `nix flake check` fails if the
+            # workspace does not build reproducibly under Nix.
             inherit jcode;
-
-            jcode-clippy = craneLib.cargoClippy (
-              commonCheckArgs
-              // {
-                inherit cargoArtifacts;
-                cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-              }
-            );
-
-            jcode-fmt = craneLib.cargoFmt {
-              inherit (commonCheckArgs) src pname;
-            };
-
-            jcode-audit = craneLib.cargoAudit {
-              inherit (commonCheckArgs) src;
-              inherit (inputs) advisory-db;
-            };
           };
 
           devShells.default = craneLib.devShell {
