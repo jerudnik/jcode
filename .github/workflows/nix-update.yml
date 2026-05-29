@@ -1,0 +1,31 @@
+name: Update flake.lock
+
+# Weekly automated dependency bump for the Nix flake inputs. Opens a PR so the
+# Nix CI (build + checks across all platforms) gates the update before merge.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Update flake.lock and open PR
+        uses: DeterminateSystems/update-flake-lock@main
+        with:
+          pr-title: "chore(nix): update flake.lock"
+          pr-labels: |
+            dependencies
+            nix
+          commit-msg: "chore(nix): update flake.lock"
