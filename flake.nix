@@ -21,18 +21,16 @@
 
   # Public, safe-to-share binary cache for prebuilt outputs.
   #
-  # This is intentionally commented out until the cache actually exists, so a
-  # fresh clone never points consumers at a dead substituter or an unverifiable
-  # key. To enable: create the `jerudnik-jcode` Cachix cache, then uncomment
-  # and paste the real public key (see docs/NIX.md). Consumers opt in with
-  # `--accept-flake-config` or by adding the substituter to their own config.
-  #
-  # nixConfig = {
-  #   extra-substituters = [ "https://jerudnik-jcode.cachix.org" ];
-  #   extra-trusted-public-keys = [
-  #     "jerudnik-jcode.cachix.org-1:<PUBLIC_KEY>="
-  #   ];
-  # };
+  # Only `nix build` outputs land here, signed with a key whose private half
+  # lives solely in CI secrets / Cachix. It is safe to expose publicly and safe
+  # for others to consume. Consumers opt in with `--accept-flake-config` or by
+  # adding the substituter to their own nix config (see docs/NIX.md).
+  nixConfig = {
+    extra-substituters = [ "https://jerudnik-jcode.cachix.org" ];
+    extra-trusted-public-keys = [
+      "jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ="
+    ];
+  };
 
   outputs =
     inputs@{ flake-parts, ... }:
