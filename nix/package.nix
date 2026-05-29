@@ -58,11 +58,9 @@ let
     ];
 
     # `openssl` (via openssl-sys) is required on Linux, where stdenv does not
-    # provide it implicitly; macOS resolves it differently so it is only pulled
-    # in where needed. pkg-config (above) locates it.
-    buildInputs =
-      [ openssl ]
-      ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
+    # provide it implicitly. Keeping it unconditional is harmless on Darwin and
+    # avoids target-specific native dependency gaps. pkg-config (above) locates it.
+    buildInputs = [ openssl ] ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
 
     # Reproducible build metadata: jcode-build-meta/build.rs reads these env
     # vars instead of invoking git, and JCODE_BUILD_SEMVER pins the version so
@@ -99,7 +97,7 @@ craneLib.buildPackage (
     meta = {
       description = "Coding agent harness with a blazing-fast TUI, multi-model support, swarm coordination, and tool orchestration";
       homepage = "https://github.com/jerudnik/jcode";
-      license = lib.licenses.asl20;
+      license = lib.licenses.mit;
       mainProgram = "jcode";
       platforms = lib.platforms.linux ++ lib.platforms.darwin;
     };

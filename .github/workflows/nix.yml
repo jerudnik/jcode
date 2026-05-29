@@ -6,7 +6,7 @@ name: Nix
 
 on:
   push:
-    branches: [main]
+    branches: [nix-flake, dev]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -17,6 +17,7 @@ on:
       - "src/**"
       - ".github/workflows/nix.yml"
   pull_request:
+    branches: [nix-flake, dev]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -69,7 +70,7 @@ jobs:
           # and simply consume the cache read-only (safe to expose publicly).
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           # Never push partial/uncacheable paths; only signed build outputs.
-          skipPush: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+          skipPush: ${{ github.event_name == 'pull_request' || !(github.ref == 'refs/heads/nix-flake' || github.ref == 'refs/heads/dev') }}
 
       - name: Build package
         run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs
@@ -97,7 +98,7 @@ jobs:
         with:
           name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+          skipPush: ${{ github.event_name == 'pull_request' || !(github.ref == 'refs/heads/nix-flake' || github.ref == 'refs/heads/dev') }}
 
       - name: nix flake check
         run: nix flake check --print-build-logs

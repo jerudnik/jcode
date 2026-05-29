@@ -773,7 +773,7 @@ scripts/install_release.sh
 
 ### Nix (flake)
 
-This fork ships a [Nix flake](flake.nix) built with
+This fork's `nix-flake` branch ships a [Nix flake](flake.nix) built with
 [crane](https://github.com/ipetkov/crane) and
 [flake-parts](https://flake.parts), with a public
 [Cachix](https://app.cachix.org/cache/jerudnik-jcode) binary cache so you skip
@@ -782,7 +782,7 @@ the ~20 min cold compile.
 Run it directly without installing:
 
 ```bash
-nix run github:jerudnik/jcode
+nix run github:jerudnik/jcode/nix-flake
 ```
 
 Add the binary cache (so prebuilt outputs are fetched instead of compiled). The
@@ -803,10 +803,10 @@ Consume it as a flake input with the home-manager module:
 
 ```nix
 {
-  inputs.jcode.url = "github:jerudnik/jcode";
+  inputs.jcode.url = "github:jerudnik/jcode/nix-flake";
 
   # In your home-manager configuration:
-  imports = [ inputs.jcode.homeModules.default ];
+  imports = [ inputs.jcode.homeManagerModules.default ];
   programs.jcode.enable = true;
 }
 ```
@@ -818,14 +818,14 @@ nixpkgs.overlays = [ inputs.jcode.overlays.default ];
 # environment.systemPackages = [ pkgs.jcode ];
 ```
 
-Exposed flake outputs (across `aarch64`/`x86_64` × `darwin`/`linux`):
+Exposed flake outputs (for `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`):
 
 | Output | Description |
 |---|---|
 | `packages.{default,jcode}` | The `jcode` binary built with crane |
 | `apps.default` | `nix run` entry point |
 | `overlays.default` | Adds `pkgs.jcode` to nixpkgs |
-| `homeModules.default` | Home Manager module (`programs.jcode`) |
+| `homeManagerModules.default` | Home Manager module (`programs.jcode`) |
 | `devShells.default` | Contributor shell (cargo, nextest, audit, watch) |
 | `checks` | Reproducible Nix build gate (`nix flake check`) |
 | `formatter` | `nixfmt-rfc-style` |
@@ -837,7 +837,7 @@ See [docs/NIX.md](docs/NIX.md) for details.
 | Platform | Status |
 |---|---|
 | **Linux** x86_64 / aarch64 | Fully supported |
-| **macOS** Apple Silicon & Intel | Supported |
+| **macOS** Apple Silicon | Supported |
 | **Windows** x86_64 | Supported (native + WSL2) |
 | **Termux** aarch64 / x86_64 | Supported with `pkg install glibc patchelf` |
 

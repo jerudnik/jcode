@@ -13,6 +13,19 @@
 let
   cfg = config.programs.jcode;
   tomlFormat = pkgs.formats.toml { };
+  managesConfig = cfg.configFile != null || cfg.settings != { };
+  configTargetIsValid = cfg.home == null || !(lib.hasPrefix "/" cfg.home);
+  configTarget =
+    if cfg.home == null then
+      ".jcode/config.toml"
+    else if lib.hasPrefix "~/" cfg.home then
+      "${lib.removePrefix "~/" cfg.home}/config.toml"
+    else if lib.hasPrefix "$HOME/" cfg.home then
+      "${lib.removePrefix "$HOME/" cfg.home}/config.toml"
+    else if lib.hasPrefix "/" cfg.home then
+      "__invalid_absolute_jcode_home__/config.toml"
+    else
+      "${cfg.home}/config.toml";
 in
 {
   options.programs.jcode = {
@@ -70,6 +83,10 @@ in
         assertion = !(cfg.configFile != null && cfg.settings != { });
         message = "programs.jcode: set either `settings` or `configFile`, not both.";
       }
+      {
+        assertion = !managesConfig || configTargetIsValid;
+        message = "programs.jcode: when managing config.toml, `home` must be null, home-relative (for example `~/.jcode`), or relative to the Home Manager home directory.";
+      }
     ];
 
     home.packages = [ cfg.package ];
@@ -80,12 +97,12 @@ in
 
     # jcode reads `~/.jcode/config.toml` (or `$JCODE_HOME/config.toml`). We only
     # manage it when the user opts in via `configFile` or `settings`.
-    home.file.".jcode/config.toml" =
-      if cfg.configFile != null then
-        { source = cfg.configFile; }
-      else
-        lib.mkIf (cfg.settings != { }) {
-          source = tomlFormat.generate "jcode-config.toml" cfg.settings;
-        };
+    home.file = lib.mkIf managesConfig {
+      ${configTarget} =
+        if cfg.configFile != null then
+          { source = cfg.configFile; }
+        else
+          { source = tomlFormat.generate "jcode-config.toml" cfg.settings; };
+    };
   };
 }

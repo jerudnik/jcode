@@ -1,7 +1,8 @@
 name: Update flake.lock
 
-# Weekly automated dependency bump for the Nix flake inputs. Opens a PR so the
-# Nix CI (build + checks across all platforms) gates the update before merge.
+# Weekly automated dependency bump for the Nix flake inputs. The repository's
+# default branch is reserved as an upstream mirror, so updates are opened against
+# the Nix packaging branch explicitly.
 
 on:
   schedule:
@@ -16,16 +17,43 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: nix-flake
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Update flake.lock and open PR
-        uses: DeterminateSystems/update-flake-lock@main
-        with:
-          pr-title: "chore(nix): update flake.lock"
-          pr-labels: |
-            dependencies
-            nix
-          commit-msg: "chore(nix): update flake.lock"
+      - name: Update flake.lock
+        run: nix flake update
+
+      - name: Open pull request against nix-flake
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- flake.lock; then
+            echo "flake.lock is already up to date."
+            exit 0
+          fi
+
+          branch="automation/update-flake-lock"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add flake.lock
+          git commit -m "chore(nix): update flake.lock"
+          git push --force-with-lease origin "$branch"
+
+          existing_pr="$(gh pr list --head "$branch" --base nix-flake --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --base nix-flake \
+              --title "chore(nix): update flake.lock" \
+              --body "Automated weekly Nix flake input update."
+          else
+            gh pr create \
+              --base nix-flake \
+              --head "$branch" \
+              --title "chore(nix): update flake.lock" \
+              --body "Automated weekly Nix flake input update."
+          fi
