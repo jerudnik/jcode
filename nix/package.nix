@@ -13,6 +13,7 @@
   pkg-config,
   cmake,
   perl,
+  openssl,
   libiconv,
   # Build metadata. Defaults keep the sandboxed build reproducible because
   # jcode's build.rs shells out to `git` (unavailable in the Nix sandbox) and
@@ -56,7 +57,12 @@ let
       perl # required by aws-lc-sys (rustls aws_lc_rs backend)
     ];
 
-    buildInputs = lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
+    # `openssl` (via openssl-sys) is required on Linux, where stdenv does not
+    # provide it implicitly; macOS resolves it differently so it is only pulled
+    # in where needed. pkg-config (above) locates it.
+    buildInputs =
+      [ openssl ]
+      ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
 
     # Reproducible build metadata: jcode-build-meta/build.rs reads these env
     # vars instead of invoking git, and JCODE_BUILD_SEMVER pins the version so
