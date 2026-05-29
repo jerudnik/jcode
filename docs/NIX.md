@@ -28,7 +28,7 @@ nix build github:jerudnik/jcode
 ## Binary cache (skip building from source)
 
 > **Status: not yet enabled.** The cache config is staged but disabled until the
-> `jcode` Cachix cache is created. Until then, `nix build` compiles the
+> `jerudnik-jcode` Cachix cache is created. Until then, `nix build` compiles the
 > ~60-crate workspace from source. Follow "Enabling the cache" below to turn it
 > on.
 
@@ -50,7 +50,7 @@ others to consume.
 
 ### Enabling the cache (maintainers)
 
-1. Create the cache: `cachix create jcode` (or via the Cachix web UI).
+1. Create the cache: `cachix create jerudnik-jcode` (or via the Cachix web UI).
 2. Copy the public key it prints.
 3. Uncomment the `nixConfig` block in `flake.nix` and paste the key.
 4. Update the placeholder key in this doc.
