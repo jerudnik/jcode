@@ -81,6 +81,7 @@ impl Agent {
                 messages_with_memory.len(),
                 tools.len()
             ));
+            self.report_herdr_session("working", "thinking");
             let api_start = Instant::now();
 
             // Publish status for TUI to show during Task execution
@@ -969,6 +970,7 @@ impl Agent {
                 }));
 
                 logging::info(&format!("Tool starting: {}", tc.name));
+                self.report_herdr_tool(&tc.name);
                 let tool_start = Instant::now();
 
                 // Publish status for TUI to show during Task execution

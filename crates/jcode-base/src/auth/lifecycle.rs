@@ -67,13 +67,31 @@ pub struct AuthCatalogInvariantReport {
     pub selectable_provider_routes: usize,
     pub selected_model: Option<String>,
     pub selected_model_matches_provider_route: bool,
+    /// Whether the session's selected model resolves to *any* available route in
+    /// the post-auth catalog, regardless of which provider serves it. This is
+    /// what distinguishes a deliberate multi-provider selection (auth OpenAI
+    /// while staying on `claude-opus-4-8`) from a genuinely orphaned/stale model.
+    pub selected_model_available_route: bool,
     pub route_sample: Vec<String>,
 }
 
 impl AuthCatalogInvariantReport {
     pub fn ok(&self) -> bool {
-        !self.applicable
-            || (self.selectable_provider_routes > 0 && self.selected_model_matches_provider_route)
+        if !self.applicable {
+            return true;
+        }
+        // The just-authed provider must contribute at least one selectable
+        // route; zero routes means a stale/empty/wrong catalog for it.
+        if self.selectable_provider_routes == 0 {
+            return false;
+        }
+        // Healthy when the session's selected model resolves to a real available
+        // route. Requiring that model to belong to the just-authed provider is
+        // wrong for multi-provider workspaces: authenticating one provider while
+        // staying on another provider's still-valid model (e.g. logging in
+        // OpenAI while remaining on `claude-opus-4-8`) is an intended workflow,
+        // not a degraded catalog.
+        self.selected_model_matches_provider_route || self.selected_model_available_route
     }
 
     pub fn warning_message(&self) -> Option<String> {
@@ -92,8 +110,16 @@ impl AuthCatalogInvariantReport {
         } else {
             self.route_sample.join(", ")
         };
+        if self.selectable_provider_routes == 0 {
+            return Some(format!(
+                "\n\n**Auth Model Catalog Warning**\n\nExpected selectable {provider} model routes after auth, but found {} matching route(s). Selected model: `{selected}`. Matching route sample: {sample}.",
+                self.selectable_provider_routes
+            ));
+        }
+        // Routes exist for the authed provider, but the active model is not one
+        // of them and no longer resolves to any available route at all.
         Some(format!(
-            "\n\n**Auth Model Catalog Warning**\n\nExpected selectable {provider} model routes after auth, but found {} matching route(s). Selected model: `{selected}`. Matching route sample: {sample}.",
+            "\n\n**Auth Model Catalog Warning**\n\n{provider} exposed {} selectable model route(s) after auth, but the active model `{selected}` no longer resolves to any available route. Matching route sample: {sample}.",
             self.selectable_provider_routes
         ))
     }
@@ -119,6 +145,15 @@ pub fn validate_catalog_invariants(
     let selected_model_matches_provider_route = selected_model
         .as_ref()
         .is_some_and(|selected| matching_routes.iter().any(|route| route.model == *selected));
+    // The selected model may legitimately belong to a *different* provider (a
+    // multi-provider workspace authenticating one provider while staying on
+    // another). Treat that as healthy as long as the model still resolves to an
+    // available route somewhere in the post-auth catalog.
+    let selected_model_available_route = selected_model.as_ref().is_some_and(|selected| {
+        routes
+            .iter()
+            .any(|route| route.available && route.model == *selected)
+    });
     let route_sample = matching_routes
         .iter()
         .take(5)
@@ -132,6 +167,7 @@ pub fn validate_catalog_invariants(
         selectable_provider_routes: matching_routes.len(),
         selected_model,
         selected_model_matches_provider_route,
+        selected_model_available_route,
         route_sample,
     }
 }
@@ -1583,6 +1619,67 @@ mod tests {
         let warning = report.warning_message().expect("warning expected");
         assert!(warning.contains("Expected selectable Cerebras model routes"));
         assert!(warning.contains("Selected model: `gpt-5.5`"));
+    }
+
+    #[test]
+    fn catalog_invariants_pass_when_authing_one_provider_while_on_another_providers_model() {
+        // Regression: logging in OpenAI (which exposes several selectable OAuth
+        // routes) while the session deliberately stays on `claude-opus-4-8`
+        // must NOT warn. The authed provider has routes and the active model
+        // still resolves to an available route, so the catalog is healthy.
+        let activation = AuthActivationResult {
+            provider_id: Some("openai".to_string()),
+            provider_label: Some("OpenAI".to_string()),
+            activated_model: None,
+            expected_runtime: None,
+            expected_catalog_namespace: None,
+        };
+        let routes = vec![
+            route("gpt-5.5", "OpenAI", "openai-oauth", true),
+            route("gpt-5.4", "OpenAI", "openai-oauth", true),
+            route("gpt-5.4-mini", "OpenAI", "openai-oauth", true),
+            route("claude-opus-4-8", "Anthropic", "claude-oauth", true),
+        ];
+
+        let report = validate_catalog_invariants(&activation, Some("claude-opus-4-8"), &routes);
+
+        assert!(
+            report.ok(),
+            "multi-provider selection should not warn: {:?}",
+            report.warning_message()
+        );
+        assert_eq!(report.selectable_provider_routes, 3);
+        assert!(!report.selected_model_matches_provider_route);
+        assert!(report.selected_model_available_route);
+        assert!(report.warning_message().is_none());
+    }
+
+    #[test]
+    fn catalog_invariants_warn_when_authed_provider_has_routes_but_model_is_orphaned() {
+        // The authed provider exposes routes, but the active model resolves to
+        // no available route anywhere (e.g. a removed/renamed model). This is a
+        // genuinely degraded state and should still warn, with the routes>0
+        // phrasing rather than the "found 0 matching route(s)" phrasing.
+        let activation = AuthActivationResult {
+            provider_id: Some("openai".to_string()),
+            provider_label: Some("OpenAI".to_string()),
+            activated_model: None,
+            expected_runtime: None,
+            expected_catalog_namespace: None,
+        };
+        let routes = vec![
+            route("gpt-5.5", "OpenAI", "openai-oauth", true),
+            route("gpt-5.4", "OpenAI", "openai-oauth", true),
+        ];
+
+        let report = validate_catalog_invariants(&activation, Some("retired-model-x"), &routes);
+
+        assert!(!report.ok());
+        assert_eq!(report.selectable_provider_routes, 2);
+        assert!(!report.selected_model_available_route);
+        let warning = report.warning_message().expect("warning expected");
+        assert!(warning.contains("OpenAI exposed 2 selectable model route(s)"));
+        assert!(warning.contains("`retired-model-x` no longer resolves"));
     }
 
     #[test]

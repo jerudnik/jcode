@@ -3,6 +3,7 @@ use super::provider_init::ProviderChoice;
 use crate::protocol::{Request, ServerEvent};
 use crate::transport::{ReadHalf, WriteHalf};
 use anyhow::{Context, Result};
+use jcode_provider_core::{ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -92,6 +93,45 @@ struct DaemonSession {
     prompt_running: AtomicBool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AcpSessionConfig {
+    provider: ProviderChoice,
+    model: Option<String>,
+    tool_profile: String,
+}
+
+impl AcpSessionConfig {
+    fn new(
+        provider: ProviderChoice,
+        model: Option<String>,
+        tool_profile: impl Into<String>,
+    ) -> Self {
+        Self {
+            provider,
+            model,
+            tool_profile: normalize_tool_profile(&tool_profile.into()).to_string(),
+        }
+    }
+
+    fn model_value(&self) -> &str {
+        self.model.as_deref().unwrap_or("auto")
+    }
+}
+
+struct AcpSession {
+    daemon: Arc<DaemonSession>,
+    config: Mutex<AcpSessionConfig>,
+}
+
+impl AcpSession {
+    fn new(daemon: DaemonSession, config: AcpSessionConfig) -> Self {
+        Self {
+            daemon: Arc::new(daemon),
+            config: Mutex::new(config),
+        }
+    }
+}
+
 impl DaemonSession {
     fn new(session_id: String, reader: ReadHalf, writer: WriteHalf, next_request_id: u64) -> Self {
         Self {
@@ -133,11 +173,12 @@ impl DaemonSession {
 #[derive(Clone)]
 struct AcpRuntime {
     stdout: Arc<Mutex<tokio::io::Stdout>>,
-    sessions: Arc<Mutex<HashMap<String, Arc<DaemonSession>>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
     profile: AcpProfile,
     provider_choice: ProviderChoice,
     model: Option<String>,
     provider_profile: Option<String>,
+    default_tool_profile: String,
 }
 
 impl AcpRuntime {
@@ -146,6 +187,7 @@ impl AcpRuntime {
         provider_choice: ProviderChoice,
         model: Option<String>,
         provider_profile: Option<String>,
+        default_tool_profile: String,
     ) -> Self {
         Self {
             stdout: Arc::new(Mutex::new(tokio::io::stdout())),
@@ -154,7 +196,16 @@ impl AcpRuntime {
             provider_choice,
             model,
             provider_profile,
+            default_tool_profile: normalize_tool_profile(&default_tool_profile).to_string(),
         }
+    }
+
+    fn default_session_config(&self) -> AcpSessionConfig {
+        AcpSessionConfig::new(
+            self.provider_choice,
+            self.model.clone(),
+            self.default_tool_profile.clone(),
+        )
     }
 
     async fn run(self) -> Result<()> {
@@ -212,6 +263,8 @@ impl AcpRuntime {
             "session/new" => self.handle_session_new(message).await?,
             "session/load" => self.handle_session_load(message, true).await?,
             "session/resume" => self.handle_session_load(message, false).await?,
+            "session/set_config_option" => self.handle_session_set_config_option(message).await?,
+            "session/set_mode" => self.handle_session_set_mode(message).await?,
             "session/prompt" => self.handle_session_prompt(message).await?,
             "session/cancel" => self.handle_session_cancel(message).await?,
             "session/close" => self.handle_session_close(message).await?,
@@ -261,11 +314,12 @@ impl AcpRuntime {
         match self.create_new_session(cwd).await {
             Ok(session) => {
                 let session_id = session.session_id.clone();
-                self.sessions
-                    .lock()
-                    .await
-                    .insert(session_id.clone(), Arc::new(session));
-                self.write_result(id, json!({ "sessionId": session_id }))
+                let config = self.default_session_config();
+                self.sessions.lock().await.insert(
+                    session_id.clone(),
+                    Arc::new(AcpSession::new(session, config.clone())),
+                );
+                self.write_result(id, session_setup_result(Some(&session_id), &config))
                     .await?;
             }
             Err(err) => {
@@ -315,11 +369,13 @@ impl AcpRuntime {
             .await
         {
             Ok(session) => {
-                self.sessions
-                    .lock()
-                    .await
-                    .insert(session.session_id.clone(), Arc::new(session));
-                self.write_result(id, json!({})).await?;
+                let config = self.default_session_config();
+                self.sessions.lock().await.insert(
+                    session.session_id.clone(),
+                    Arc::new(AcpSession::new(session, config.clone())),
+                );
+                self.write_result(id, session_setup_result(None, &config))
+                    .await?;
             }
             Err(err) => {
                 self.write_error_value(
@@ -330,6 +386,116 @@ impl AcpRuntime {
                 .await?;
             }
         }
+        Ok(())
+    }
+
+    async fn handle_session_set_config_option(&self, message: JsonRpcMessage) -> Result<()> {
+        let Some(id) = message.id else {
+            return Ok(());
+        };
+        let session_id = match required_session_id(&message.params) {
+            Ok(session_id) => session_id,
+            Err(err) => {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+        };
+        let config_id = match required_string_param(&message.params, "configId") {
+            Ok(value) => value,
+            Err(err) => {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+        };
+        let value = match required_string_param(&message.params, "value") {
+            Ok(value) => value,
+            Err(err) => {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        let session = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&session_id).cloned()
+        };
+        let Some(session) = session else {
+            self.write_error_value(
+                id,
+                JSONRPC_INVALID_PARAMS,
+                format!("Unknown ACP session id: {session_id}"),
+            )
+            .await?;
+            return Ok(());
+        };
+
+        let config = {
+            let mut config = session.config.lock().await;
+            if let Err(err) = apply_config_option(&mut config, &config_id, &value) {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+            config.clone()
+        };
+
+        self.write_result(id, json!({ "configOptions": config_options(&config) }))
+            .await?;
+        Ok(())
+    }
+
+    async fn handle_session_set_mode(&self, message: JsonRpcMessage) -> Result<()> {
+        let Some(id) = message.id else {
+            return Ok(());
+        };
+        let session_id = match required_session_id(&message.params) {
+            Ok(session_id) => session_id,
+            Err(err) => {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+        };
+        let mode_id = match required_string_param(&message.params, "modeId") {
+            Ok(value) => value,
+            Err(err) => {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+        };
+        let session = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(&session_id).cloned()
+        };
+        let Some(session) = session else {
+            self.write_error_value(
+                id,
+                JSONRPC_INVALID_PARAMS,
+                format!("Unknown ACP session id: {session_id}"),
+            )
+            .await?;
+            return Ok(());
+        };
+
+        let config = {
+            let mut config = session.config.lock().await;
+            if let Err(err) = apply_config_option(&mut config, "tool_profile", &mode_id) {
+                self.write_error_value(id, JSONRPC_INVALID_PARAMS, err)
+                    .await?;
+                return Ok(());
+            }
+            config.clone()
+        };
+
+        self.write_result(
+            id,
+            json!({ "modes": modes(&config), "configOptions": config_options(&config) }),
+        )
+        .await?;
         Ok(())
     }
 
@@ -368,6 +534,7 @@ impl AcpRuntime {
         };
 
         if session
+            .daemon
             .prompt_running
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
@@ -413,8 +580,11 @@ impl AcpRuntime {
             sessions.get(&session_id).cloned()
         };
         if let Some(session) = session {
-            let cancel_id = session.next_id();
-            let _ = session.send(&Request::Cancel { id: cancel_id }).await;
+            let cancel_id = session.daemon.next_id();
+            let _ = session
+                .daemon
+                .send(&Request::Cancel { id: cancel_id })
+                .await;
         }
         if let Some(id) = message.id {
             self.write_result(id, json!({})).await?;
@@ -435,8 +605,11 @@ impl AcpRuntime {
             }
         };
         if let Some(session) = self.sessions.lock().await.remove(&session_id) {
-            let cancel_id = session.next_id();
-            let _ = session.send(&Request::Cancel { id: cancel_id }).await;
+            let cancel_id = session.daemon.next_id();
+            let _ = session
+                .daemon
+                .send(&Request::Cancel { id: cancel_id })
+                .await;
         }
         self.write_result(id, json!({})).await?;
         Ok(())
@@ -577,10 +750,30 @@ impl AcpRuntime {
     async fn run_prompt(
         &self,
         rpc_id: Value,
-        session: Arc<DaemonSession>,
+        acp_session: Arc<AcpSession>,
         text: String,
         images: Vec<(String, String)>,
     ) -> Result<()> {
+        let config = acp_session.config.lock().await.clone();
+        let session = acp_session.daemon.clone();
+        if let Some(model) = effective_model_spec(&config) {
+            let set_model_id = session.next_id();
+            if let Err(err) = session
+                .send(&Request::SetModel {
+                    id: set_model_id,
+                    model,
+                })
+                .await
+            {
+                cleanup_prompt_state(&session).await;
+                return Err(err);
+            }
+            if let Err(err) = wait_for_done(&session, set_model_id).await {
+                cleanup_prompt_state(&session).await;
+                return Err(err);
+            }
+        }
+
         let prompt_id = session.next_id();
         {
             let mut active = session.active_prompt_id.lock().await;
@@ -929,6 +1122,310 @@ fn initialize_result(params: &Value, profile: AcpProfile) -> Value {
     })
 }
 
+fn session_setup_result(session_id: Option<&str>, config: &AcpSessionConfig) -> Value {
+    let mut result = json!({
+        "configOptions": config_options(config),
+        "modes": modes(config),
+    });
+    if let Some(session_id) = session_id
+        && let Some(object) = result.as_object_mut()
+    {
+        object.insert("sessionId".to_string(), json!(session_id));
+    }
+    result
+}
+
+fn config_options(config: &AcpSessionConfig) -> Value {
+    json!([
+        {
+            "id": "provider",
+            "name": "Provider",
+            "description": "Jcode provider preference for subsequent prompts. Unsupported provider/model pairings are rejected by Jcode when the next prompt starts.",
+            "category": "_provider",
+            "type": "select",
+            "currentValue": config.provider.as_arg_value(),
+            "options": provider_option_values(),
+        },
+        {
+            "id": "model",
+            "name": "Model",
+            "description": "Model to use for subsequent prompts. 'Auto' lets Jcode choose the provider default.",
+            "category": "model",
+            "type": "select",
+            "currentValue": config.model_value(),
+            "options": model_option_values(config.model.as_deref()),
+        },
+        {
+            "id": "tool_profile",
+            "name": "Tool Profile",
+            "description": "Controls the tool capability profile exposed by Jcode.",
+            "category": "mode",
+            "type": "select",
+            "currentValue": config.tool_profile,
+            "options": tool_profile_option_values(),
+        }
+    ])
+}
+
+fn modes(config: &AcpSessionConfig) -> Value {
+    json!({
+        "currentModeId": config.tool_profile,
+        "availableModes": tool_profile_modes(),
+    })
+}
+
+fn provider_choices() -> &'static [ProviderChoice] {
+    &[
+        ProviderChoice::Auto,
+        ProviderChoice::Jcode,
+        ProviderChoice::Claude,
+        ProviderChoice::AnthropicApi,
+        ProviderChoice::Openai,
+        ProviderChoice::OpenaiApi,
+        ProviderChoice::Openrouter,
+        ProviderChoice::Bedrock,
+        ProviderChoice::Copilot,
+        ProviderChoice::Gemini,
+        ProviderChoice::GeminiApi,
+        ProviderChoice::Antigravity,
+        ProviderChoice::Google,
+        ProviderChoice::Cursor,
+    ]
+}
+
+fn provider_option_values() -> Value {
+    Value::Array(
+        provider_choices()
+            .iter()
+            .map(|choice| {
+                json!({
+                    "value": choice.as_arg_value(),
+                    "name": provider_display_name(*choice),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn provider_display_name(choice: ProviderChoice) -> &'static str {
+    match choice {
+        ProviderChoice::Auto => "Auto",
+        ProviderChoice::Jcode => "Jcode",
+        ProviderChoice::Claude => "Claude",
+        ProviderChoice::AnthropicApi => "Anthropic API",
+        ProviderChoice::Openai => "OpenAI",
+        ProviderChoice::OpenaiApi => "OpenAI API",
+        ProviderChoice::Openrouter => "OpenRouter",
+        ProviderChoice::Bedrock => "Bedrock",
+        ProviderChoice::Azure => "Azure OpenAI",
+        ProviderChoice::Copilot => "GitHub Copilot",
+        ProviderChoice::Gemini => "Gemini",
+        ProviderChoice::GeminiApi => "Gemini API",
+        ProviderChoice::Antigravity => "Antigravity",
+        ProviderChoice::Google => "Google",
+        ProviderChoice::Cursor => "Cursor",
+        ProviderChoice::OpenaiCompatible => "OpenAI-compatible",
+        ProviderChoice::Ollama => "Ollama",
+        _ => choice.as_arg_value(),
+    }
+}
+
+fn parse_provider_choice(value: &str) -> Option<ProviderChoice> {
+    let trimmed = value.trim();
+    provider_choices()
+        .iter()
+        .copied()
+        .find(|choice| choice.as_arg_value().eq_ignore_ascii_case(trimmed))
+}
+
+fn model_option_values(current_model: Option<&str>) -> Value {
+    let mut models = vec!["auto".to_string()];
+    for model in ALL_CLAUDE_MODELS.iter().chain(ALL_OPENAI_MODELS.iter()) {
+        push_unique(&mut models, model);
+    }
+    for model in cheap_extra_model_options() {
+        push_unique(&mut models, model);
+    }
+    if let Some(model) = current_model {
+        push_unique(&mut models, model);
+    }
+    Value::Array(
+        models
+            .into_iter()
+            .map(|model| {
+                let name = if model == "auto" {
+                    "Auto".to_string()
+                } else {
+                    model.clone()
+                };
+                json!({ "value": model, "name": name })
+            })
+            .collect(),
+    )
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|existing| existing == value) {
+        values.push(value.to_string());
+    }
+}
+
+fn cheap_extra_model_options() -> &'static [&'static str] {
+    &[
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-3-flash",
+        "gpt-5.2-codex",
+        "composer-2.5",
+        "anthropic/claude-sonnet-4",
+    ]
+}
+
+fn tool_profile_option_values() -> Value {
+    Value::Array(
+        tool_profile_modes()
+            .into_iter()
+            .map(|mut mode| {
+                if let Some(object) = mode.as_object_mut()
+                    && let Some(id) = object.remove("id")
+                {
+                    object.insert("value".to_string(), id);
+                }
+                mode
+            })
+            .collect(),
+    )
+}
+
+fn tool_profile_modes() -> Vec<Value> {
+    vec![
+        json!({
+            "id": "acp",
+            "name": "ACP",
+            "description": "Balanced tool set for ACP editor clients",
+        }),
+        json!({
+            "id": "full",
+            "name": "Full",
+            "description": "Expose the full default Jcode tool set",
+        }),
+        json!({
+            "id": "minimal",
+            "name": "Minimal",
+            "description": "Expose a smaller core coding tool set",
+        }),
+        json!({
+            "id": "none",
+            "name": "None",
+            "description": "Disable built-in tools unless explicitly configured elsewhere",
+        }),
+    ]
+}
+
+fn normalize_tool_profile(value: &str) -> &str {
+    parse_tool_profile(value).unwrap_or("acp")
+}
+
+fn parse_tool_profile(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "lite" | "small" => Some("minimal"),
+        "off" | "disabled" => Some("none"),
+        "full" => Some("full"),
+        "none" => Some("none"),
+        "minimal" => Some("minimal"),
+        "acp" => Some("acp"),
+        _ => None,
+    }
+}
+
+fn apply_config_option(
+    config: &mut AcpSessionConfig,
+    config_id: &str,
+    value: &str,
+) -> std::result::Result<(), String> {
+    match config_id.trim() {
+        "provider" => {
+            let provider = parse_provider_choice(value)
+                .ok_or_else(|| format!("Unsupported ACP provider option: {value}"))?;
+            config.provider = provider;
+            Ok(())
+        }
+        "model" => {
+            let value = value.trim();
+            let valid = model_option_values(config.model.as_deref())
+                .as_array()
+                .map(|options| {
+                    options
+                        .iter()
+                        .any(|option| option.get("value").and_then(Value::as_str) == Some(value))
+                })
+                .unwrap_or(false);
+            if !valid {
+                return Err(format!("Unsupported ACP model option: {value}"));
+            }
+            config.model = if value == "auto" {
+                None
+            } else {
+                Some(value.to_string())
+            };
+            Ok(())
+        }
+        "tool_profile" | "permission_mode" | "mode" => {
+            let normalized = parse_tool_profile(value)
+                .ok_or_else(|| format!("Unsupported ACP tool profile option: {value}"))?;
+            config.tool_profile = normalized.to_string();
+            Ok(())
+        }
+        other => Err(format!("Unsupported ACP config option id: {other}")),
+    }
+}
+
+fn effective_model_spec(config: &AcpSessionConfig) -> Option<String> {
+    let model = config
+        .model
+        .as_deref()
+        .or_else(|| provider_default_model(config.provider))?;
+    Some(match provider_model_prefix(config.provider) {
+        Some(prefix) => format!("{prefix}{model}"),
+        None => model.to_string(),
+    })
+}
+
+fn provider_model_prefix(provider: ProviderChoice) -> Option<&'static str> {
+    match provider {
+        ProviderChoice::Claude => Some("claude:"),
+        ProviderChoice::AnthropicApi => Some("claude-api:"),
+        ProviderChoice::Openai => Some("openai:"),
+        ProviderChoice::OpenaiApi => Some("openai-api:"),
+        ProviderChoice::Openrouter => Some("openrouter:"),
+        ProviderChoice::Copilot => Some("copilot:"),
+        ProviderChoice::Gemini | ProviderChoice::GeminiApi | ProviderChoice::Google => {
+            Some("gemini:")
+        }
+        ProviderChoice::Antigravity => Some("antigravity:"),
+        ProviderChoice::Cursor => Some("cursor:"),
+        ProviderChoice::Bedrock => Some("bedrock:"),
+        ProviderChoice::Auto | ProviderChoice::Jcode => None,
+        _ => None,
+    }
+}
+
+fn provider_default_model(provider: ProviderChoice) -> Option<&'static str> {
+    match provider {
+        ProviderChoice::Claude => Some("claude-opus-4-6"),
+        ProviderChoice::AnthropicApi => Some("claude-opus-4-8"),
+        ProviderChoice::Openai | ProviderChoice::OpenaiApi => Some("gpt-5.5"),
+        ProviderChoice::Openrouter => Some("anthropic/claude-sonnet-4"),
+        ProviderChoice::Copilot => Some("gpt-5.2-codex"),
+        ProviderChoice::Gemini | ProviderChoice::GeminiApi | ProviderChoice::Google => {
+            Some("gemini-2.5-pro")
+        }
+        ProviderChoice::Antigravity => Some("gemini-3-flash"),
+        ProviderChoice::Cursor => Some("composer-2.5"),
+        _ => None,
+    }
+}
+
 fn cwd_from_params(params: &Value) -> std::result::Result<PathBuf, String> {
     let cwd = match params.get("cwd").and_then(Value::as_str) {
         Some(cwd) if !cwd.trim().is_empty() => PathBuf::from(cwd),
@@ -938,6 +1435,16 @@ fn cwd_from_params(params: &Value) -> std::result::Result<PathBuf, String> {
         return Err(format!("ACP cwd must be absolute: {}", cwd.display()));
     }
     Ok(cwd)
+}
+
+fn required_string_param(params: &Value, name: &str) -> std::result::Result<String, String> {
+    params
+        .get(name)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| format!("Missing required {name}"))
 }
 
 fn required_session_id(params: &Value) -> std::result::Result<String, String> {
@@ -1080,9 +1587,15 @@ pub(crate) async fn run_acp_command(
         crate::config::invalidate_config_cache();
     }
     let profile = AcpProfile::parse(&acp_config.profile);
-    AcpRuntime::new(profile, provider_choice, model, provider_profile)
-        .run()
-        .await
+    AcpRuntime::new(
+        profile,
+        provider_choice,
+        model,
+        provider_profile,
+        acp_config.tool_profile,
+    )
+    .run()
+    .await
 }
 
 #[cfg(test)]
@@ -1142,6 +1655,100 @@ mod tests {
         assert_eq!(
             result["agentCapabilities"]["_meta"]["jcode"]["profile"],
             "full"
+        );
+    }
+
+    #[test]
+    fn session_new_result_includes_config_options_and_modes() {
+        let config = AcpSessionConfig::new(
+            ProviderChoice::Auto,
+            Some("claude-sonnet-4-5".to_string()),
+            "lite",
+        );
+        let result = session_setup_result(Some("s1"), &config);
+        assert_eq!(result["sessionId"], "s1");
+        let options = result["configOptions"].as_array().expect("config options");
+        assert_eq!(options[0]["id"], "provider");
+        assert_eq!(options[0]["category"], "_provider");
+        assert!(
+            options[0]["options"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|option| { option["value"] == "gemini" })
+        );
+        assert!(
+            options[0]["options"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|option| { option["value"] == "antigravity" })
+        );
+        assert_eq!(options[1]["id"], "model");
+        assert_eq!(options[1]["category"], "model");
+        assert_eq!(options[1]["currentValue"], "claude-sonnet-4-5");
+        assert_eq!(options[2]["id"], "tool_profile");
+        assert_eq!(options[2]["category"], "mode");
+        assert_eq!(options[2]["currentValue"], "minimal");
+        assert_eq!(result["modes"]["currentModeId"], "minimal");
+    }
+
+    #[test]
+    fn session_load_result_includes_config_options_without_session_id() {
+        let config = AcpSessionConfig::new(ProviderChoice::Gemini, None, "acp");
+        let result = session_setup_result(None, &config);
+        assert!(result.get("sessionId").is_none());
+        assert_eq!(result["configOptions"][0]["currentValue"], "gemini");
+        assert_eq!(result["configOptions"][1]["currentValue"], "auto");
+    }
+
+    #[test]
+    fn apply_config_option_updates_provider_model_and_tool_profile() {
+        let mut config = AcpSessionConfig::new(ProviderChoice::Auto, None, "acp");
+        apply_config_option(&mut config, "provider", "antigravity").unwrap();
+        assert_eq!(config.provider, ProviderChoice::Antigravity);
+
+        apply_config_option(&mut config, "model", "gemini-2.5-pro").unwrap();
+        assert_eq!(config.model.as_deref(), Some("gemini-2.5-pro"));
+
+        apply_config_option(&mut config, "tool_profile", "full").unwrap();
+        assert_eq!(config.tool_profile, "full");
+
+        apply_config_option(&mut config, "model", "auto").unwrap();
+        assert_eq!(config.model, None);
+    }
+
+    #[test]
+    fn apply_config_option_rejects_unknown_ids_and_values() {
+        let mut config = AcpSessionConfig::new(ProviderChoice::Auto, None, "acp");
+        assert!(apply_config_option(&mut config, "provider", "bogus").is_err());
+        assert!(apply_config_option(&mut config, "model", "not-a-listed-model").is_err());
+        assert!(apply_config_option(&mut config, "tool_profile", "dangerous").is_err());
+        assert!(apply_config_option(&mut config, "missing", "auto").is_err());
+    }
+
+    #[test]
+    fn effective_model_spec_applies_provider_prefixes_for_subsequent_prompts() {
+        let mut config = AcpSessionConfig::new(ProviderChoice::Auto, None, "acp");
+        assert_eq!(effective_model_spec(&config), None);
+
+        apply_config_option(&mut config, "provider", "gemini").unwrap();
+        assert_eq!(
+            effective_model_spec(&config).as_deref(),
+            Some("gemini:gemini-2.5-pro")
+        );
+
+        apply_config_option(&mut config, "model", "gemini-2.5-flash").unwrap();
+        assert_eq!(
+            effective_model_spec(&config).as_deref(),
+            Some("gemini:gemini-2.5-flash")
+        );
+
+        apply_config_option(&mut config, "provider", "antigravity").unwrap();
+        apply_config_option(&mut config, "model", "auto").unwrap();
+        assert_eq!(
+            effective_model_spec(&config).as_deref(),
+            Some("antigravity:gemini-3-flash")
         );
     }
 

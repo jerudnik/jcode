@@ -546,20 +546,32 @@ configure_linux_linker() {
   esac
 
   selected_linker_mode="$mode"
-  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER:-clang}"
 
   case "$mode" in
     lld)
+      # lld/mold are invoked via clang's `-fuse-ld`, so they require clang as
+      # the linker driver.
+      export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER:-clang}"
       append_rustflags "-C link-arg=-fuse-ld=lld"
       selected_linker_desc="clang + lld"
       log "using clang + lld"
       ;;
     mold)
+      export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER:-clang}"
       append_rustflags "-C link-arg=-fuse-ld=mold"
       selected_linker_desc="clang + mold"
       log "using clang + mold"
       ;;
     system)
+      # Don't force clang here: the system path is the fallback for machines
+      # without a fast linker, and many of those (e.g. nix gcc-wrapper shells)
+      # have no `clang` on PATH at all. Prefer the standard `cc` driver, which
+      # the gcc wrapper always provides, unless the caller pinned a linker.
+      if [[ -z "${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER:-}" ]] \
+        && ! command -v clang >/dev/null 2>&1 \
+        && command -v cc >/dev/null 2>&1; then
+        export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER="cc"
+      fi
       selected_linker_desc="system linker settings"
       if [[ "$requested_mode" == "auto" ]]; then
         log "no supported fast linker detected; using system linker settings"

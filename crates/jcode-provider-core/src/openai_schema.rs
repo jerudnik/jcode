@@ -162,19 +162,49 @@ fn flatten_all_of_schema(mut map: serde_json::Map<String, Value>) -> Value {
     Value::Object(merged)
 }
 
-pub fn openai_compatible_schema(schema: &Value) -> Value {
+fn openai_compatible_schema_inner(schema: &Value, named_schema_map: bool) -> Value {
     match schema {
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (key, value) in map {
+                if named_schema_map {
+                    out.insert(
+                        key.to_string(),
+                        openai_compatible_schema_inner(value, false),
+                    );
+                    continue;
+                }
+
+                // OpenAI rejects JSON Schema format hints that are valid in
+                // MCP/tool schemas, for example `format: "uri"`.
+                if key == "format" {
+                    continue;
+                }
+
                 let normalized_key = if key == "oneOf" { "anyOf" } else { key };
-                out.insert(normalized_key.to_string(), openai_compatible_schema(value));
+                let child_is_named_schema_map = matches!(
+                    normalized_key,
+                    "properties" | "$defs" | "definitions" | "patternProperties"
+                );
+                out.insert(
+                    normalized_key.to_string(),
+                    openai_compatible_schema_inner(value, child_is_named_schema_map),
+                );
             }
             flatten_all_of_schema(out)
         }
-        Value::Array(items) => Value::Array(items.iter().map(openai_compatible_schema).collect()),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| openai_compatible_schema_inner(item, false))
+                .collect(),
+        ),
         _ => schema.clone(),
     }
+}
+
+pub fn openai_compatible_schema(schema: &Value) -> Value {
+    openai_compatible_schema_inner(schema, false)
 }
 
 pub fn schema_supports_strict(schema: &Value) -> bool {
@@ -502,5 +532,47 @@ mod tests {
             json!("integer")
         );
         assert_eq!(normalized["required"], json!(["file_path"]));
+    }
+
+    #[test]
+    fn openai_compatible_schema_strips_format_keywords_but_preserves_property_names() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL to fetch"
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["text", "markdown"]
+                },
+                "nested": {
+                    "type": "object",
+                    "properties": {
+                        "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    }
+                }
+            },
+            "required": ["url"]
+        });
+
+        let normalized = openai_compatible_schema(&schema);
+
+        assert!(normalized["properties"]["url"].get("format").is_none());
+        assert!(
+            normalized["properties"]["nested"]["properties"]["created_at"]
+                .get("format")
+                .is_none()
+        );
+        assert_eq!(normalized["properties"]["format"]["type"], json!("string"));
+        assert_eq!(
+            normalized["properties"]["format"]["enum"],
+            json!(["text", "markdown"])
+        );
     }
 }
