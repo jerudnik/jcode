@@ -129,7 +129,7 @@ package() {
 }
 EOF
 
-(cd "$AUR_DIR" && makepkg --printsrcinfo > .SRCINFO && git add -A && git commit -m "Update to $VERSION" && git push origin master)
+(cd "$AUR_DIR" && makepkg --printsrcinfo > .SRCINFO && git add -A && git commit -m "Update to $VERSION" && git push origin HEAD)
 echo "  ✅ AUR package updated"
 
 echo ""

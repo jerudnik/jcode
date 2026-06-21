@@ -34,7 +34,6 @@
         "x86_64-linux"
         "aarch64-linux"
         "aarch64-darwin"
-        "x86_64-darwin"
       ];
 
       flake = {
@@ -92,24 +91,16 @@
             inherit jcode;
           };
 
-          apps.default = {
-            type = "app";
-            program = lib.getExe jcode;
-          };
-
           # CI gates run by `nix flake check`. We intentionally do NOT duplicate
           # clippy/rustfmt/test here: those are owned by the upstream `ci.yml`
           # against its pinned `stable` toolchain. Re-running them through the
           # flake's rust-overlay toolchain only produces spurious version-skew
           # failures. Dependency security auditing runs as a separate,
-          # non-blocking CI job (advisories in transitive deps should surface
-          # without permanently reddening every build). The flake's job here is
-          # to prove the package *builds* reproducibly under Nix.
-          checks = {
-            # Reuses the package derivation: `nix flake check` fails if the
-            # workspace does not build reproducibly under Nix.
-            inherit jcode;
-          };
+          # non-blocking CI job. Package builds are covered by the workflow's
+          # trusted push/dispatch matrix; PR validation uses
+          # `nix flake check --no-build --all-systems` to evaluate every public
+          # flake surface without duplicating full package builds.
+          checks = { };
 
           devShells.default = craneLib.devShell {
             checks = self'.checks;
@@ -117,7 +108,7 @@
               pkgs.cargo-nextest
               pkgs.cargo-audit
               pkgs.cargo-watch
-              pkgs.nixfmt-rfc-style
+              pkgs.nixfmt
               pkgs.pkg-config
               pkgs.cmake
               pkgs.perl
@@ -130,7 +121,7 @@
             '';
           };
 
-          formatter = pkgs.nixfmt-rfc-style;
+          formatter = pkgs.nixfmt;
         };
     };
 }

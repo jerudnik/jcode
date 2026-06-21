@@ -555,21 +555,23 @@ jobs:
           sed -i 's/^          //' PKGBUILD
 
           # Generate .SRCINFO without makepkg (AUR uses tab indentation)
-          printf 'pkgbase = jcode-bin\n' > .SRCINFO
-          printf '\tpkgdesc = AI coding agent powered by Claude and ChatGPT\n' >> .SRCINFO
-          printf '\tpkgver = %s\n' "${VERSION_NUM}" >> .SRCINFO
-          printf '\tpkgrel = 1\n' >> .SRCINFO
-          printf '\turl = https://github.com/1jehuang/jcode\n' >> .SRCINFO
-          printf '\tarch = x86_64\n' >> .SRCINFO
-          printf '\tlicense = MIT\n' >> .SRCINFO
-          printf '\tprovides = jcode\n' >> .SRCINFO
-          printf '\tconflicts = jcode\n' >> .SRCINFO
-          printf '\tsource = %s\n' "${LINUX_URL}" >> .SRCINFO
-          printf '\tsha256sums = %s\n' "${LINUX_SHA}" >> .SRCINFO
-          printf '\npkgname = jcode-bin\n' >> .SRCINFO
+          {
+            printf 'pkgbase = jcode-bin\n'
+            printf '\tpkgdesc = AI coding agent powered by Claude and ChatGPT\n'
+            printf '\tpkgver = %s\n' "${VERSION_NUM}"
+            printf '\tpkgrel = 1\n'
+            printf '\turl = https://github.com/1jehuang/jcode\n'
+            printf '\tarch = x86_64\n'
+            printf '\tlicense = MIT\n'
+            printf '\tprovides = jcode\n'
+            printf '\tconflicts = jcode\n'
+            printf '\tsource = %s\n' "${LINUX_URL}"
+            printf '\tsha256sums = %s\n' "${LINUX_SHA}"
+            printf '\npkgname = jcode-bin\n'
+          } > .SRCINFO
 
           git config user.name "Jeremy Huang"
           git config user.email "jeremyhuang55555@gmail.com"
           git add PKGBUILD .SRCINFO
           git commit -m "Update to ${VERSION}" || echo "No changes"
-          retry 3 5 git push origin master
+          retry 3 5 git push origin HEAD

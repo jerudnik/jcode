@@ -1,31 +1,117 @@
 name: Update flake.lock
 
-# Weekly automated dependency bump for the Nix flake inputs. Opens a PR so the
-# Nix CI (build + checks across all platforms) gates the update before merge.
+# Reusable dependency bump for the Nix flake inputs. The repository's default
+# branch is reserved as an upstream mirror, so this workflow is invoked by the
+# registered Nix workflow on `nix-flake` instead of relying on schedule or manual
+# dispatch triggers that GitHub only registers from the default branch.
 
 on:
-  schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: update-flake-lock-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          ref: nix-flake
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Update flake.lock and open PR
-        uses: DeterminateSystems/update-flake-lock@main
+      - name: Cachix (read-only public binary cache)
+        uses: cachix/cachix-action@v17
         with:
-          pr-title: "chore(nix): update flake.lock"
-          pr-labels: |
-            dependencies
-            nix
-          commit-msg: "chore(nix): update flake.lock"
+          name: jerudnik-jcode
+          skipPush: true
+
+      - name: Update flake.lock
+        id: update
+        run: |
+          cp flake.lock "$RUNNER_TEMP/flake.lock.before"
+          nix flake update
+          if git diff --quiet -- flake.lock; then
+            echo "flake.lock is already up to date."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Validate updated lockfile
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
+          nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+
+      - name: Open pull request against nix-flake
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="automation/update-flake-lock"
+          body="$RUNNER_TEMP/update-flake-lock-pr.md"
+
+          {
+            echo "Automated weekly Nix flake input update."
+            echo
+            echo "### Changed inputs"
+            jq -r --slurpfile before "$RUNNER_TEMP/flake.lock.before" '
+              def label($locked):
+                if $locked == null then
+                  "none"
+                elif ($locked.rev? // "") != "" then
+                  $locked.rev[0:12]
+                elif ($locked.ref? // "") != "" then
+                  $locked.ref
+                elif ($locked.version? // "") != "" then
+                  $locked.version
+                else
+                  "unknown"
+                end;
+              .nodes as $after
+              | $before[0].nodes as $beforeNodes
+              | [
+                  (($beforeNodes | keys_unsorted) + ($after | keys_unsorted) | unique[])
+                  | . as $name
+                  | ($beforeNodes[$name].locked // null) as $old
+                  | ($after[$name].locked // null) as $new
+                  | select($old != $new)
+                  | "- \($name): \(label($old)) -> \(label($new))"
+                ]
+              | if length == 0 then ["- No lock input changes detected."] else . end
+              | .[]
+            ' flake.lock
+            echo
+            echo "### Validation"
+            echo "- \`nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs\`"
+            echo "- \`nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1\`"
+          } > "$body"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add flake.lock
+          git commit -m "chore(nix): update flake.lock"
+          git push --force-with-lease origin "$branch"
+
+          existing_pr="$(gh pr list --head "$branch" --base nix-flake --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --base nix-flake \
+              --title "chore(nix): update flake.lock" \
+              --body-file "$body"
+          else
+            gh pr create \
+              --base nix-flake \
+              --head "$branch" \
+              --title "chore(nix): update flake.lock" \
+              --body-file "$body"
+          fi

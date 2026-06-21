@@ -920,7 +920,7 @@ Add `--dry-run` to preview what would be removed without deleting anything.
 | Platform | Status |
 |---|---|
 | **Linux** x86_64 / aarch64 | Fully supported |
-| **macOS** Apple Silicon & Intel | Supported |
+| **macOS** Apple Silicon | Supported |
 | **Windows** x86_64 | Supported (native + WSL2) |
 | **Termux** aarch64 / x86_64 | Supported with `pkg install glibc patchelf` |
 

@@ -13,6 +13,7 @@
   pkg-config,
   cmake,
   perl,
+  openssl,
   libiconv,
   # Build metadata. Defaults keep the sandboxed build reproducible because
   # jcode's build.rs shells out to `git` (unavailable in the Nix sandbox) and
@@ -50,13 +51,27 @@ let
     pname = "jcode";
     strictDeps = true;
 
+    # Cargo git dependencies must be fetched as fixed-output Nix sources before
+    # vendoring. Without these hashes, Crane can fall back to Cargo/git network
+    # access while preparing dependencies, which is flaky on hosted macOS CI.
+    cargoLock = "${src}/Cargo.lock";
+    outputHashes = {
+      "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.2#63e420bb4e035490d28cbca3f58e26baf297048e" =
+        "sha256-Sf3EmWIZJ29KdaNbYRvM1tFXAPhOGhmpHOyqViEwkRI=";
+      "git+https://github.com/1jehuang/mermaid-rs-renderer.git?tag=v0.2.1#01e8304ffc670f04dd4a047595cfb8ea9c854ae7" =
+        "sha256-lQCloOhTqqEU8MNrkUmmJFdoOTEE3j5nvZJo21GJlMU=";
+    };
+
     nativeBuildInputs = [
       pkg-config
       cmake
       perl # required by aws-lc-sys (rustls aws_lc_rs backend)
     ];
 
-    buildInputs = lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
+    # `openssl` (via openssl-sys) is required on Linux, where stdenv does not
+    # provide it implicitly. Keeping it unconditional is harmless on Darwin and
+    # avoids target-specific native dependency gaps. pkg-config (above) locates it.
+    buildInputs = [ openssl ] ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
 
     # Reproducible build metadata: jcode-build-meta/build.rs reads these env
     # vars instead of invoking git, and JCODE_BUILD_SEMVER pins the version so
@@ -93,9 +108,13 @@ craneLib.buildPackage (
     meta = {
       description = "Coding agent harness with a blazing-fast TUI, multi-model support, swarm coordination, and tool orchestration";
       homepage = "https://github.com/jerudnik/jcode";
-      license = lib.licenses.asl20;
+      license = lib.licenses.mit;
       mainProgram = "jcode";
-      platforms = lib.platforms.linux ++ lib.platforms.darwin;
+      platforms = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
     };
   }
 )
