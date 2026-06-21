@@ -14,8 +14,10 @@ impl Agent {
         if trace_enabled() {
             eprintln!("[trace] session_id {}", self.session.id);
         }
-        let _ = self.run_turn(true).await?;
-        Ok(())
+        self.report_herdr_session("working", "thinking");
+        let result = self.run_turn(true).await.map(|_| ());
+        self.report_herdr_session("idle", "idle");
+        result
     }
 
     pub async fn run_once_capture(&mut self, user_message: &str) -> Result<String> {
@@ -30,7 +32,10 @@ impl Agent {
         if trace_enabled() {
             eprintln!("[trace] session_id {}", self.session.id);
         }
-        self.run_turn(false).await
+        self.report_herdr_session("working", "thinking");
+        let result = self.run_turn(false).await;
+        self.report_herdr_session("idle", "idle");
+        result
     }
 
     /// Run one conversation turn with streaming events via mpsc channel (per-client)
@@ -83,9 +88,11 @@ impl Agent {
         let turn_started_at = Instant::now();
         let start_message_index = self.message_count();
         self.fire_turn_start_hook("chat");
+        self.report_herdr_session("working", "thinking");
         let result = self.run_turn_streaming_mpsc(event_tx).await;
         self.current_turn_system_reminder = None;
         self.fire_turn_end_hook(&result, turn_started_at, start_message_index);
+        self.report_herdr_session("idle", "idle");
         result
     }
 
@@ -167,6 +174,7 @@ impl Agent {
         self.reset_runtime_state_for_session_change();
         self.provider_session_id = None;
         self.seed_compaction_from_session();
+        self.report_herdr_session("idle", "session_start");
     }
 
     /// Clear provider session so the next turn sends full context.
@@ -475,7 +483,10 @@ impl Agent {
             graceful_shutdown_signal: Some(self.graceful_shutdown.clone()),
             execution_mode: ToolExecutionMode::Direct,
         };
-        self.registry.execute(name, input, ctx).await
+        self.report_herdr_tool(name);
+        let result = self.registry.execute(name, input, ctx).await;
+        self.report_herdr_session("idle", "idle");
+        result
     }
 
     pub fn add_manual_tool_use(
@@ -613,6 +624,7 @@ impl Agent {
         self.log_env_snapshot("resume");
         let env_snapshot_ms = env_snapshot_start.elapsed().as_millis();
         self.fire_session_lifecycle_hook("session_start", "resume");
+        self.report_herdr_session("idle", "session_start");
 
         let save_start = Instant::now();
         if let Err(err) = self.session.save() {

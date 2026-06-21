@@ -289,3 +289,33 @@ fn test_initialize_result() {
     assert_eq!(result.protocol_version, "2024-11-05");
     assert!(result.server_info.is_some());
 }
+
+// Fork seam: env placeholder expansion (see protocol.rs::expand_env_placeholders).
+#[test]
+fn test_expand_env_placeholders_exact_match_only() {
+    jcode_core::env::set_var("JCODE_MCP_TEST_TOKEN", "resolved-token");
+    let mut env = std::collections::HashMap::new();
+    env.insert("EXACT".to_string(), "${JCODE_MCP_TEST_TOKEN}".to_string());
+    env.insert(
+        "SUBSTRING".to_string(),
+        "prefix-${JCODE_MCP_TEST_TOKEN}".to_string(),
+    );
+    env.insert(
+        "MISSING".to_string(),
+        "${JCODE_MCP_TEST_DOES_NOT_EXIST}".to_string(),
+    );
+
+    let expanded = expand_env_placeholders(env);
+    assert_eq!(expanded.get("EXACT").unwrap(), "resolved-token");
+    // Substring placeholders are intentionally left literal.
+    assert_eq!(
+        expanded.get("SUBSTRING").unwrap(),
+        "prefix-${JCODE_MCP_TEST_TOKEN}"
+    );
+    // Missing vars fall back to the literal placeholder.
+    assert_eq!(
+        expanded.get("MISSING").unwrap(),
+        "${JCODE_MCP_TEST_DOES_NOT_EXIST}"
+    );
+    jcode_core::env::remove_var("JCODE_MCP_TEST_TOKEN");
+}

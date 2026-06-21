@@ -601,6 +601,7 @@ pub(super) async fn handle_client(
         let client_event_tx = client_event_tx.clone();
         let stdin_responses = stdin_responses.clone();
         let tool_call_id = String::new();
+        let herdr_reporter = crate::herdr::HerdrReporter::from_env();
         tokio::spawn(async move {
             while let Some(req) = stdin_req_rx.recv().await {
                 let request_id = req.request_id.clone();
@@ -608,6 +609,7 @@ pub(super) async fn handle_client(
                     .lock()
                     .await
                     .insert(request_id.clone(), req.response_tx);
+                herdr_reporter.report_agent("blocked", "waiting");
                 let _ = client_event_tx.send(ServerEvent::StdinRequest {
                     request_id,
                     prompt: req.prompt,
