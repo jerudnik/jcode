@@ -191,6 +191,7 @@ impl Agent {
                 messages_with_memory.len(),
                 tools.len()
             ));
+            self.report_herdr_session("working", "thinking");
             let api_start = Instant::now();
 
             let stamped;
@@ -1293,6 +1294,7 @@ impl Agent {
                     self.inline_tail.start_tool(&tc.name, &tc.input);
                     self.publish_inline_tail();
                 }
+                self.report_herdr_tool(&tc.name);
                 let tool_start = Instant::now();
 
                 // Spawn tool in its own task so we can detach it to background on Alt+B

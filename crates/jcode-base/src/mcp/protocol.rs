@@ -498,6 +498,20 @@ impl McpConfig {
         let project_root = project_dir
             .map(|dir| dir.to_path_buf())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+        // Fork seam (APM MCP surface): APM and agent-package managers commonly
+        // materialize MCP manifests in project-local generated paths. Load these
+        // before the jcode/Claude compatibility paths so explicit local overrides
+        // can still win.
+        for generated in [".apm/mcp.json", ".agents/mcp.json"] {
+            let path = project_root.join(generated);
+            if path.exists()
+                && let Ok(config) = Self::load_from_file(&path)
+            {
+                merged.servers.extend(config.servers);
+            }
+        }
+
         merged
             .servers
             .extend(Self::load_project_locals(&project_root).servers);
@@ -517,8 +531,47 @@ impl McpConfig {
             keep
         });
 
+        // Fork seam (env placeholder expansion): resolve exact `${VAR}` env
+        // values against the process environment so secrets injected by tools
+        // like Phase are usable without committing them to the MCP manifest.
+        for cfg in merged.servers.values_mut() {
+            cfg.env = expand_env_placeholders(std::mem::take(&mut cfg.env));
+        }
+
         merged
     }
+}
+
+/// Expand env values that are exactly a single `${VAR}` placeholder against the
+/// process environment. Values that only contain a placeholder as a substring
+/// (e.g. `prefix-${VAR}`) are left untouched, matching the fork's documented
+/// behavior. Missing variables fall back to the literal placeholder.
+fn expand_env_placeholders(
+    env: std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, String> {
+    env.into_iter()
+        .map(|(key, value)| {
+            let value = if let Some(env_name) = exact_env_placeholder(&value) {
+                std::env::var(env_name).unwrap_or(value)
+            } else {
+                value
+            };
+            (key, value)
+        })
+        .collect()
+}
+
+fn exact_env_placeholder(value: &str) -> Option<&str> {
+    let value = value.trim();
+    let inner = value.strip_prefix("${")?.strip_suffix('}')?;
+    if inner.is_empty()
+        || !inner
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    Some(inner)
 }
 
 #[cfg(test)]

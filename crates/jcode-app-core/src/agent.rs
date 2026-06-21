@@ -95,6 +95,55 @@ fn message_hashes(messages: &[Message]) -> Vec<u64> {
     crate::message::cache_relevant_message_hashes(messages)
 }
 
+fn herdr_tool_status(tool_name: &str) -> String {
+    match tool_name {
+        "agentgrep"
+        | "conversation_search"
+        | "glob"
+        | "grep"
+        | "session_search"
+        | "read"
+        | "ls" => "searching code".to_string(),
+        "webfetch" | "websearch" => "searching web".to_string(),
+        "edit" | "multiedit" | "write" => "editing files".to_string(),
+        "bash" => "running shell".to_string(),
+        "selfdev" => "building jcode".to_string(),
+        "todo" => "planning".to_string(),
+        "browser" => "using browser".to_string(),
+        "open" => "opening target".to_string(),
+        "initiative" => "tracking initiative".to_string(),
+        "schedule" => "scheduling follow-up".to_string(),
+        other => format!("running {other}"),
+    }
+}
+
+fn herdr_channel_guardrail_status() -> Option<String> {
+    let expected = std::env::var("JCODE_HERDR_EXPECTED_REV")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value != "unknown")?;
+    let actual = jcode_build_meta::GIT_HASH.trim();
+    if actual.is_empty() || actual == "unknown" || actual == "nix" {
+        return Some(format!("unpinned:{}", short_rev(actual)));
+    }
+    if expected.starts_with(actual) || actual.starts_with(&expected) {
+        return None;
+    }
+    Some(format!(
+        "unpinned:{}≠{}",
+        short_rev(actual),
+        short_rev(&expected)
+    ))
+}
+
+fn short_rev(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        return "unknown".to_string();
+    }
+    value.chars().take(8).collect()
+}
+
 fn kv_cache_request_event(
     messages: &[Message],
     tools: &[ToolDefinition],
@@ -249,6 +298,8 @@ pub struct Agent {
     /// Persists across turns so the coordinator's viewport never blanks at
     /// turn boundaries or freezes during long tool calls.
     inline_tail: inline_tail::InlineTailBuffer,
+    /// Best-effort Herdr lifecycle reporter. Disabled unless Herdr env vars are present.
+    herdr_reporter: crate::herdr::HerdrReporter,
 }
 
 impl Agent {
@@ -302,6 +353,7 @@ impl Agent {
             provider_runtime_state: ProviderRuntimeState::observed(initial_provider_model),
             inline_output_tap: false,
             inline_tail: inline_tail::InlineTailBuffer::default(),
+            herdr_reporter: crate::herdr::HerdrReporter::from_env(),
         };
         crate::tool::set_session_tool_policy(
             &agent.session.id,
@@ -344,6 +396,7 @@ impl Agent {
         agent.seed_compaction_from_session();
         agent.log_env_snapshot("create");
         agent.fire_session_lifecycle_hook("session_start", "create");
+        agent.report_herdr_session("idle", "session_start");
         crate::telemetry::begin_session_with_parent(
             agent.provider.name(),
             &agent.provider.model(),
@@ -404,6 +457,7 @@ impl Agent {
         agent.seed_compaction_from_session();
         agent.log_env_snapshot("attach");
         agent.fire_session_lifecycle_hook("session_start", "attach");
+        agent.report_herdr_session("idle", "session_start");
         crate::telemetry::begin_session_with_parent(
             agent.provider.name(),
             &agent.provider.model(),
@@ -836,6 +890,30 @@ impl Agent {
         &self.session.id
     }
 
+    fn herdr_session_path(&self) -> Option<PathBuf> {
+        crate::session::session_path(&self.session.id).ok()
+    }
+
+    fn report_herdr_session(&self, state: &'static str, custom_status: impl Into<String>) {
+        self.herdr_reporter.report_agent_session(
+            self.session.id.clone(),
+            self.herdr_session_path(),
+            state,
+            self.herdr_custom_status(custom_status.into()),
+        );
+    }
+
+    fn herdr_custom_status(&self, custom_status: String) -> String {
+        let Some(guardrail) = herdr_channel_guardrail_status() else {
+            return custom_status;
+        };
+        format!("{custom_status} · {guardrail}")
+    }
+
+    fn report_herdr_tool(&self, tool_name: &str) {
+        self.report_herdr_session("working", herdr_tool_status(tool_name));
+    }
+
     pub(crate) fn set_working_dir_for_pending_context(&mut self, working_dir: Option<String>) {
         if working_dir.is_some() {
             self.session.working_dir = working_dir;
@@ -856,6 +934,7 @@ impl Agent {
             self.persist_session_best_effort("session close state");
         }
         self.fire_session_lifecycle_hook("session_end", "close");
+        self.herdr_reporter.release_agent(self.session.id.clone());
     }
 
     /// Fire a session lifecycle observer hook (`session_start`/`session_end`).
