@@ -286,12 +286,13 @@ const CLAUDE_CODE_IDENTITY_TOOLS: &[&str] = &[
 ];
 
 /// Internal (jcode) tool names that may be exposed under OAuth in ADDITION to
-/// the Claude Code identity set. The model still only sees a tool if it is
-/// registered and allowed by the `[tools]` config (the caller has already
-/// filtered `tools` to the allowed set), so this is a safety allowlist that
-/// keeps the OAuth tool surface intentional rather than leaking the whole
-/// registry. Phase 3 replaces this constant with a config-driven set.
-const OAUTH_EXTRA_TOOLS: &[&str] = &["websearch", "webfetch", "nix"];
+/// the Claude Code identity set, used when the caller does not supply an explicit
+/// allowlist. The model still only sees a tool if it is registered and allowed
+/// by the `[tools]` config (the caller has already filtered `tools` to the
+/// allowed set), so this is a safety allowlist that keeps the OAuth tool surface
+/// intentional rather than leaking the whole registry. The configured value
+/// lives in `ToolConfig::oauth_extra_tools`; this constant is the fallback.
+pub const DEFAULT_OAUTH_EXTRA_TOOLS: &[&str] = &["websearch", "webfetch", "nix"];
 
 /// The nine curated Claude Code identity tools, sent verbatim under OAuth.
 fn claude_code_identity_tools() -> Vec<ApiTool> {
@@ -354,13 +355,13 @@ fn claude_code_identity_tools() -> Vec<ApiTool> {
 }
 
 /// Registered tools that should be appended to the OAuth tool list because they
-/// are in [`OAUTH_EXTRA_TOOLS`]. Names are mapped to their OAuth-facing form and
-/// the curated identity tools are skipped to avoid duplicates.
-fn oauth_extra_tools(tools: &[ToolDefinition]) -> Vec<ApiTool> {
+/// are in `extra_allow`. Names are mapped to their OAuth-facing form and the
+/// curated identity tools are skipped to avoid duplicates.
+fn oauth_extra_tools(tools: &[ToolDefinition], extra_allow: &[String]) -> Vec<ApiTool> {
     let mut seen = std::collections::HashSet::new();
     let mut extras = Vec::new();
     for tool in tools {
-        if !OAUTH_EXTRA_TOOLS.contains(&tool.name.as_str()) {
+        if !extra_allow.iter().any(|allowed| allowed == &tool.name) {
             continue;
         }
         let mapped = map_tool_name_for_oauth(&tool.name);
@@ -380,12 +381,32 @@ fn oauth_extra_tools(tools: &[ToolDefinition]) -> Vec<ApiTool> {
     extras
 }
 
-/// Convert tool definitions to Anthropic API format
-/// Adds cache_control to the last tool for prompt caching
+/// Convert tool definitions to Anthropic API format.
+///
+/// Under OAuth, appends the [`DEFAULT_OAUTH_EXTRA_TOOLS`] allowlist; callers that
+/// read the `[tools] oauth_extra_tools` config should use
+/// [`format_tools_with_extras`]. Adds cache_control to the last tool for prompt
+/// caching.
 pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool) -> Vec<ApiTool> {
+    let default_allow: Vec<String> = DEFAULT_OAUTH_EXTRA_TOOLS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    format_tools_with_extras(tools, is_oauth, cache_ttl_1h, &default_allow)
+}
+
+/// Like [`format_tools`], but uses an explicit OAuth extra-tool allowlist
+/// (typically `ToolConfig::oauth_extra_tools`). The allowlist only affects the
+/// OAuth branch; under direct API auth the registry is passed through verbatim.
+pub fn format_tools_with_extras(
+    tools: &[ToolDefinition],
+    is_oauth: bool,
+    cache_ttl_1h: bool,
+    extra_allow: &[String],
+) -> Vec<ApiTool> {
     if is_oauth {
         let mut api_tools = claude_code_identity_tools();
-        api_tools.extend(oauth_extra_tools(tools));
+        api_tools.extend(oauth_extra_tools(tools, extra_allow));
         // The prompt-cache breakpoint must sit on the actual last tool so the
         // cached tools prefix stays stable regardless of how many extras the
         // session exposes.
@@ -1002,5 +1023,34 @@ mod oauth_tool_list_tests {
         let tools = format_tools(&registry, false, false);
         // Non-OAuth passes the registry through verbatim (sorted by caller, not here).
         assert_eq!(names(&tools), ["bash", "read", "websearch"]);
+    }
+
+    #[test]
+    fn explicit_allowlist_overrides_default() {
+        let registry = vec![def("websearch"), def("webfetch"), def("nix")];
+        // Only allow websearch via an explicit (config-driven) allowlist.
+        let allow = vec!["websearch".to_string()];
+        let tools = format_tools_with_extras(&registry, true, false, &allow);
+        let got = names(&tools);
+        assert!(got.contains(&"websearch".to_string()));
+        for excluded in ["webfetch", "nix"] {
+            assert!(
+                !got.contains(&excluded.to_string()),
+                "{excluded} should be excluded by the explicit allowlist"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_allowlist_yields_bare_identity_set() {
+        let registry = vec![def("websearch"), def("webfetch"), def("nix")];
+        let tools = format_tools_with_extras(&registry, true, false, &[]);
+        assert_eq!(
+            names(&tools),
+            CLAUDE_CODE_IDENTITY_TOOLS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 }

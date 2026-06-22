@@ -531,7 +531,7 @@ impl Default for AcpConfig {
 }
 
 /// Controls which tools are sent to the model.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolConfig {
     /// Tool profile: "full" (default), "acp", "minimal"/"lite", or "none".
@@ -543,6 +543,29 @@ pub struct ToolConfig {
     pub disabled: Vec<String>,
     /// Disable all built-in tools unless `enabled` is provided.
     pub disable_base_tools: bool,
+    /// Extra (non-Claude-Code) tools to expose under the Anthropic OAuth (Claude
+    /// subscription) transport, in addition to the nine Claude Code identity
+    /// tools. A tool only appears if it is also registered and allowed by the
+    /// profile/`enabled`/`disabled` rules above; this list is the gate that keeps
+    /// the OAuth tool surface intentional rather than leaking the whole registry.
+    /// Names are jcode-internal tool names (e.g. "websearch", "webfetch", "nix").
+    pub oauth_extra_tools: Vec<String>,
+}
+
+impl Default for ToolConfig {
+    fn default() -> Self {
+        Self {
+            profile: String::new(),
+            enabled: Vec::new(),
+            disabled: Vec::new(),
+            disable_base_tools: false,
+            oauth_extra_tools: vec![
+                "websearch".to_string(),
+                "webfetch".to_string(),
+                "nix".to_string(),
+            ],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
