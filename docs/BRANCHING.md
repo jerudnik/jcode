@@ -59,6 +59,12 @@ git push --force-with-lease github distro/nix
 git push --force-with-lease github main
 ```
 
+## Local development
+
+Work on `main` unless you are intentionally changing packaging. Topic branches should start from `main` and be folded back into `main` or upstreamed. Do not keep durable remote topic branches in this fork.
+
+The dev shell installs a pre-push guard that refuses accidental pushes to `distro/nix` and `vendor/upstream`. Intentional maintenance can opt in with the documented environment flags.
+
 ## Audits
 
 Check the branch contract with:
