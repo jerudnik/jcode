@@ -6,7 +6,7 @@ Source branch reviewed: `origin/nix-flake-dev`
 
 ## Summary
 
-Do not merge `nix-flake-dev` wholesale. It is based on the old pre-sync fork base and is now hundreds of upstream commits behind current `nix-flake`. The Cloudflare work contains useful experiments, but the latest upstream memory/retrieval stack changes the baseline: hybrid dense+BM25 recall, listwise LLM reranking, ONNX/cross-encoder work, and cadence gating already improve the latency/quality tradeoff locally.
+Do not merge `nix-flake-dev` wholesale. It is based on the old pre-sync fork base and is now hundreds of upstream commits behind the stable custom fork branch. The Cloudflare work contains useful experiments, but the latest upstream memory/retrieval stack changes the baseline: hybrid dense+BM25 recall, listwise LLM reranking, ONNX/cross-encoder work, and cadence gating already improve the latency/quality tradeoff locally.
 
 The prior host experiments found Cloudflare service latency creates a hard ceiling for latency-sensitive work. Treat Cloudflare as a durability, sharing, observability, and batch/offline substrate, not as the hot path for interactive memory recall or prompt-turn decisions unless measurements prove otherwise.
 
@@ -51,7 +51,7 @@ The prior host experiments found Cloudflare service latency creates a hard ceili
 
 ## Porting order
 
-1. Create a fresh branch from current `nix-flake`.
+1. Create a fresh branch from current `main`.
 2. Cherry-pick docs/eval scaffolding first, not runtime hooks.
 3. Port artifact store/spill/get behind explicit config and local-first defaults.
 4. Add benchmarks comparing:
