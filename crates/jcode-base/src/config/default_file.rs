@@ -244,6 +244,12 @@ profile = "full"
 # disabled = ["browser", "gmail", "swarm"]
 # Disable all built-in tools unless enabled is set.
 disable_base_tools = false
+# Extra tools exposed under the Anthropic OAuth (Claude subscription) transport,
+# in addition to the nine Claude Code identity tools. A tool only appears if it
+# is also registered and allowed by the profile/enabled/disabled rules above.
+# Default: ["websearch", "webfetch", "nix"]. Set to [] to present the bare
+# Claude Code identity set.
+# oauth_extra_tools = ["websearch", "webfetch", "nix"]
 
 [acp]
 # Agent Client Protocol adapter compatibility profile: standard, extended, or full.
