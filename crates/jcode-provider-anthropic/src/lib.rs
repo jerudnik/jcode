@@ -267,111 +267,132 @@ pub fn format_content_blocks(blocks: &[ContentBlock], is_oauth: bool) -> Vec<Api
     result
 }
 
-/// Convert tool definitions to Anthropic API format
-/// Adds cache_control to the last tool for prompt caching
-/// Local tool names that are represented by the curated Claude-Code builtin
-/// definitions in OAuth mode. These keep their hand-tuned schemas/descriptions
-/// (which the Anthropic subscription endpoint expects) instead of the raw
-/// registry definitions; every other tool is forwarded as-is (see #409).
-const OAUTH_BUILTIN_LOCAL_TOOLS: &[&str] = &[
-    "subagent",
-    "bash",
-    "edit",
-    "glob",
-    "grep",
-    "read",
-    "schedule",
-    "skill_manage",
-    "write",
+/// The OAuth-facing names of the curated Claude Code identity tools. Under the
+/// Claude subscription (OAuth) transport we present these nine tools with
+/// descriptions and schemas that match Anthropic's Claude Agent SDK so the
+/// request reads as a genuine Claude Code client. Any registered jcode tool
+/// whose OAuth-facing name is in this set is already represented here and is not
+/// re-appended by [`oauth_extra_tools`].
+const CLAUDE_CODE_IDENTITY_TOOLS: &[&str] = &[
+    "Agent",
+    "Bash",
+    "Edit",
+    "Glob",
+    "Grep",
+    "Read",
+    "ScheduleWakeup",
+    "Skill",
+    "Write",
 ];
 
+/// Internal (jcode) tool names that may be exposed under OAuth in ADDITION to
+/// the Claude Code identity set. The model still only sees a tool if it is
+/// registered and allowed by the `[tools]` config (the caller has already
+/// filtered `tools` to the allowed set), so this is a safety allowlist that
+/// keeps the OAuth tool surface intentional rather than leaking the whole
+/// registry. Phase 3 replaces this constant with a config-driven set.
+const OAUTH_EXTRA_TOOLS: &[&str] = &["websearch", "webfetch", "nix"];
+
+/// The nine curated Claude Code identity tools, sent verbatim under OAuth.
+fn claude_code_identity_tools() -> Vec<ApiTool> {
+    vec![
+        ApiTool {
+            name: "Agent".to_string(),
+            description: "Launch a new agent to handle complex, multi-step tasks.".to_string(),
+            input_schema: json!({"type":"object","properties":{"description":{"type":"string"},"prompt":{"type":"string"},"subagent_type":{"type":"string"},"run_in_background":{"type":"boolean"}},"required":["description","prompt"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Bash".to_string(),
+            description: "Executes a given bash command and returns its output.".to_string(),
+            input_schema: json!({"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"},"run_in_background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Edit".to_string(),
+            description: "Performs exact string replacements in files.".to_string(),
+            input_schema: json!({"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean","default":false}},"required":["file_path","old_string","new_string"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Glob".to_string(),
+            description: "Fast file pattern matching tool.".to_string(),
+            input_schema: json!({"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Grep".to_string(),
+            description: "A powerful search tool built on ripgrep.".to_string(),
+            input_schema: json!({"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"glob":{"type":"string"},"output_mode":{"type":"string","enum":["content","files_with_matches","count"]},"-B":{"type":"number"},"-A":{"type":"number"},"-C":{"type":"number"},"context":{"type":"number"},"-n":{"type":"boolean"},"-i":{"type":"boolean"},"type":{"type":"string"},"head_limit":{"type":"number"},"offset":{"type":"number"},"multiline":{"type":"boolean"}},"required":["pattern"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Read".to_string(),
+            description: "Reads a file from the local filesystem.".to_string(),
+            input_schema: json!({"type":"object","properties":{"file_path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","exclusiveMinimum":0},"pages":{"type":"string"}},"required":["file_path"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "ScheduleWakeup".to_string(),
+            description: "Schedule when to resume work in /loop dynamic mode.".to_string(),
+            input_schema: json!({"type":"object","properties":{"delaySeconds":{"type":"number"},"reason":{"type":"string"},"prompt":{"type":"string"}},"required":["delaySeconds","reason","prompt"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Skill".to_string(),
+            description: "Execute a skill within the main conversation".to_string(),
+            input_schema: json!({"type":"object","properties":{"skill":{"type":"string"},"args":{"type":"string"}},"required":["skill"],"additionalProperties":false}),
+            cache_control: None,
+        },
+        ApiTool {
+            name: "Write".to_string(),
+            description: "Writes a file to the local filesystem.".to_string(),
+            input_schema: json!({"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"}},"required":["file_path","content"],"additionalProperties":false}),
+            cache_control: None,
+        },
+    ]
+}
+
+/// Registered tools that should be appended to the OAuth tool list because they
+/// are in [`OAUTH_EXTRA_TOOLS`]. Names are mapped to their OAuth-facing form and
+/// the curated identity tools are skipped to avoid duplicates.
+fn oauth_extra_tools(tools: &[ToolDefinition]) -> Vec<ApiTool> {
+    let mut seen = std::collections::HashSet::new();
+    let mut extras = Vec::new();
+    for tool in tools {
+        if !OAUTH_EXTRA_TOOLS.contains(&tool.name.as_str()) {
+            continue;
+        }
+        let mapped = map_tool_name_for_oauth(&tool.name);
+        if CLAUDE_CODE_IDENTITY_TOOLS.contains(&mapped.as_str()) {
+            continue;
+        }
+        if !seen.insert(mapped.clone()) {
+            continue;
+        }
+        extras.push(ApiTool {
+            name: mapped,
+            description: tool.description.clone(),
+            input_schema: tool.input_schema.clone(),
+            cache_control: None,
+        });
+    }
+    extras
+}
+
+/// Convert tool definitions to Anthropic API format
+/// Adds cache_control to the last tool for prompt caching
 pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool) -> Vec<ApiTool> {
     if is_oauth {
-        // Curated Claude-Code builtin tool definitions. These remain hand-tuned
-        // because the Anthropic OAuth (subscription) endpoint expects the
-        // builtin names with compatible schemas. Anything not represented here
-        // is appended from the real registry below so OAuth users keep the full
-        // toolset (websearch, webfetch, browser, codesearch, memory, ...).
-        let mut out = vec![
-            ApiTool {
-                name: "Agent".to_string(),
-                description: "Launch a new agent to handle complex, multi-step tasks.".to_string(),
-                input_schema: json!({"type":"object","properties":{"description":{"type":"string"},"prompt":{"type":"string"},"subagent_type":{"type":"string"},"run_in_background":{"type":"boolean"}},"required":["description","prompt"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Bash".to_string(),
-                description: "Executes a given bash command and returns its output.".to_string(),
-                input_schema: json!({"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"},"run_in_background":{"type":"boolean"}},"required":["command"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Edit".to_string(),
-                description: "Performs exact string replacements in files.".to_string(),
-                input_schema: json!({"type":"object","properties":{"file_path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"},"replace_all":{"type":"boolean","default":false}},"required":["file_path","old_string","new_string"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Glob".to_string(),
-                description: "Fast file pattern matching tool.".to_string(),
-                input_schema: json!({"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Grep".to_string(),
-                description: "A powerful search tool built on ripgrep.".to_string(),
-                input_schema: json!({"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"},"glob":{"type":"string"},"output_mode":{"type":"string","enum":["content","files_with_matches","count"]},"-B":{"type":"number"},"-A":{"type":"number"},"-C":{"type":"number"},"context":{"type":"number"},"-n":{"type":"boolean"},"-i":{"type":"boolean"},"type":{"type":"string"},"head_limit":{"type":"number"},"offset":{"type":"number"},"multiline":{"type":"boolean"}},"required":["pattern"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Read".to_string(),
-                description: "Reads a file from the local filesystem.".to_string(),
-                input_schema: json!({"type":"object","properties":{"file_path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","exclusiveMinimum":0},"pages":{"type":"string"}},"required":["file_path"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "ScheduleWakeup".to_string(),
-                description: "Schedule when to resume work in /loop dynamic mode.".to_string(),
-                input_schema: json!({"type":"object","properties":{"delaySeconds":{"type":"number"},"reason":{"type":"string"},"prompt":{"type":"string"}},"required":["delaySeconds","reason","prompt"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Skill".to_string(),
-                description: "Execute a skill within the main conversation".to_string(),
-                input_schema: json!({"type":"object","properties":{"skill":{"type":"string"},"args":{"type":"string"}},"required":["skill"],"additionalProperties":false}),
-                cache_control: None,
-            },
-            ApiTool {
-                name: "Write".to_string(),
-                description: "Writes a file to the local filesystem.".to_string(),
-                input_schema: json!({"type":"object","properties":{"file_path":{"type":"string"},"content":{"type":"string"}},"required":["file_path","content"],"additionalProperties":false}),
-                cache_control: None,
-            },
-        ];
-
-        // Forward every other registered tool, remapping its name to the
-        // OAuth-accepted form. This restores websearch/webfetch/browser/
-        // codesearch/memory/swarm/multiedit/open/etc. for subscription users,
-        // matching the documented "remap names, keep the full toolset" behavior
-        // and the (deprecated) Claude CLI transport.
-        for tool in tools {
-            if OAUTH_BUILTIN_LOCAL_TOOLS.contains(&tool.name.as_str()) {
-                continue;
-            }
-            out.push(ApiTool {
-                name: map_tool_name_for_oauth(&tool.name),
-                description: tool.description.clone(),
-                input_schema: tool.input_schema.clone(),
-                cache_control: None,
-            });
-        }
-
-        // Move the prompt-cache breakpoint to the final tool in the list.
-        if let Some(last) = out.last_mut() {
+        let mut api_tools = claude_code_identity_tools();
+        api_tools.extend(oauth_extra_tools(tools));
+        // The prompt-cache breakpoint must sit on the actual last tool so the
+        // cached tools prefix stays stable regardless of how many extras the
+        // session exposes.
+        if let Some(last) = api_tools.last_mut() {
             last.cache_control = Some(CacheControlParam::ephemeral(cache_ttl_1h));
         }
-
-        return out;
+        return api_tools;
     }
 
     let len = tools.len();
@@ -872,43 +893,6 @@ mod cache_prefix_invariant_tests {
     }
 
     #[test]
-    fn oauth_format_tools_keeps_full_custom_toolset() {
-        // Registry includes builtins (remapped) plus extra tools that must survive.
-        let registry = vec![
-            tool_def("bash"),
-            tool_def("read"),
-            tool_def("subagent"),
-            tool_def("websearch"),
-            tool_def("webfetch"),
-            tool_def("browser"),
-            tool_def("codesearch"),
-            tool_def("memory"),
-        ];
-
-        let formatted = format_tools(&registry, true, false);
-        let names: Vec<&str> = formatted.iter().map(|t| t.name.as_str()).collect();
-
-        // Curated builtins are present under their OAuth names.
-        for builtin in ["Bash", "Read", "Agent", "Write", "Edit", "Glob", "Grep"] {
-            assert!(
-                names.contains(&builtin),
-                "missing builtin {builtin} in {names:?}"
-            );
-        }
-        // The previously-dropped custom tools are now forwarded.
-        for custom in ["websearch", "webfetch", "browser", "codesearch", "memory"] {
-            assert!(
-                names.contains(&custom),
-                "custom tool {custom} was dropped on OAuth; got {names:?}"
-            );
-        }
-        // No duplicate Agent/Bash/Read from the registry remap.
-        assert_eq!(names.iter().filter(|n| **n == "Agent").count(), 1);
-        assert_eq!(names.iter().filter(|n| **n == "Bash").count(), 1);
-        assert_eq!(names.iter().filter(|n| **n == "Read").count(), 1);
-    }
-
-    #[test]
     fn oauth_format_tools_places_single_cache_breakpoint_on_last_tool() {
         let registry = vec![tool_def("bash"), tool_def("websearch")];
         let formatted = format_tools(&registry, true, false);
@@ -923,5 +907,100 @@ mod cache_prefix_invariant_tests {
             with_cache.first().copied(),
             "cache breakpoint must be on the final tool"
         );
+    }
+}
+
+#[cfg(test)]
+mod oauth_tool_list_tests {
+    //! The OAuth (Claude subscription) transport presents a curated Claude Code
+    //! tool identity. These tests pin that the nine identity tools are always
+    //! present, that allow-listed extras (websearch/webfetch/nix) are appended
+    //! when registered, that arbitrary registry tools are NOT leaked, and that
+    //! the single prompt-cache breakpoint stays on the real last tool.
+
+    use super::*;
+
+    fn def(name: &str) -> ToolDefinition {
+        ToolDefinition {
+            name: name.to_string(),
+            description: format!("{name} description"),
+            input_schema: json!({"type": "object", "properties": {}}),
+        }
+    }
+
+    fn names(tools: &[ApiTool]) -> Vec<String> {
+        tools.iter().map(|t| t.name.clone()).collect()
+    }
+
+    #[test]
+    fn identity_tools_present_with_no_registry_tools() {
+        let tools = format_tools(&[], true, false);
+        assert_eq!(
+            names(&tools),
+            CLAUDE_CODE_IDENTITY_TOOLS
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn allowlisted_extras_are_appended_after_identity() {
+        let registry = vec![def("websearch"), def("webfetch"), def("nix")];
+        let tools = format_tools(&registry, true, false);
+        let got = names(&tools);
+        assert_eq!(&got[..CLAUDE_CODE_IDENTITY_TOOLS.len()], CLAUDE_CODE_IDENTITY_TOOLS);
+        assert_eq!(&got[CLAUDE_CODE_IDENTITY_TOOLS.len()..], ["websearch", "webfetch", "nix"]);
+    }
+
+    #[test]
+    fn non_allowlisted_registry_tools_are_not_leaked() {
+        let registry = vec![def("websearch"), def("gmail"), def("browser"), def("memory")];
+        let tools = format_tools(&registry, true, false);
+        let got = names(&tools);
+        assert!(got.contains(&"websearch".to_string()));
+        for leaked in ["gmail", "browser", "memory"] {
+            assert!(
+                !got.contains(&leaked.to_string()),
+                "{leaked} must not leak into the OAuth tool list"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_breakpoint_is_only_on_the_actual_last_tool() {
+        let registry = vec![def("websearch")];
+        let tools = format_tools(&registry, true, false);
+        let with_breakpoint: Vec<usize> = tools
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.cache_control.is_some())
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(with_breakpoint, vec![tools.len() - 1]);
+        assert_eq!(tools.last().unwrap().name, "websearch");
+    }
+
+    #[test]
+    fn extras_round_trip_through_oauth_name_mapping() {
+        // The append path uses map_tool_name_for_oauth; the response path uses
+        // map_tool_name_from_oauth. For these extras the names are identity, so
+        // a tool call comes back as the same internal name the registry knows.
+        for name in ["websearch", "webfetch", "nix"] {
+            let oauth = jcode_provider_core::anthropic_map_tool_name_for_oauth(name);
+            assert_eq!(oauth, name);
+            assert_eq!(
+                jcode_provider_core::anthropic_map_tool_name_from_oauth(&oauth),
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn non_oauth_path_is_unchanged() {
+        let registry = vec![def("bash"), def("read"), def("websearch")];
+        let tools = format_tools(&registry, false, false);
+        // Non-OAuth passes the registry through verbatim (sorted by caller, not here).
+        assert_eq!(names(&tools), ["bash", "read", "websearch"]);
     }
 }

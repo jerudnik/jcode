@@ -5,6 +5,7 @@ mod bash;
 mod batch;
 mod bg;
 mod browser;
+mod codesearch;
 mod communicate;
 #[cfg(target_os = "macos")]
 mod computer;
@@ -19,6 +20,7 @@ mod ls;
 pub mod mcp;
 mod memory;
 mod multiedit;
+mod nix;
 mod open;
 mod patch;
 mod read;
@@ -208,6 +210,13 @@ impl Registry {
                 "websearch",
                 websearch::WebSearchTool::new,
             );
+            Self::insert_tool_timed(
+                &mut m,
+                &mut timings,
+                "codesearch",
+                codesearch::CodeSearchTool::new,
+            );
+            Self::insert_tool_timed(&mut m, &mut timings, "nix", nix::NixTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "invalid", invalid::InvalidTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "todo", todo::TodoTool::new);
             Self::insert_tool_timed(&mut m, &mut timings, "bg", bg::BgTool::new);
