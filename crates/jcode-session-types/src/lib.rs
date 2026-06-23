@@ -645,6 +645,7 @@ pub fn session_search_markdown_code_block(text: &str) -> String {
 pub enum SessionSearchResultKind {
     Metadata,
     Message,
+    Evidence,
 }
 
 impl SessionSearchResultKind {
@@ -652,6 +653,7 @@ impl SessionSearchResultKind {
         match self {
             Self::Metadata => "metadata",
             Self::Message => "message",
+            Self::Evidence => "evidence",
         }
     }
 }
