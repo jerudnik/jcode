@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="29.7.9">
+  <diagram name="Jcode Assistant Homelab Architecture" id="jcode-assistant-homelab">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Jcode-owned Assistant Harness Architecture&#xa;local-first evidence, topology-aware homelab execution, external tools as inspiration only" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=24;fontStyle=1;fontColor=#1f2937;" vertex="1" parent="1">
+          <mxGeometry x="270" y="20" width="1260" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="jcodeBoundary" value="Jcode-owned modules tuned for harness performance" style="swimlane;html=1;rounded=1;startSize=36;whiteSpace=wrap;fillColor=#f8fbff;strokeColor=#1d4ed8;strokeWidth=3;fontColor=#1d4ed8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="100" width="1100" height="650" as="geometry" />
+        </mxCell>
+
+        <mxCell id="tui" value="Assistant TUI / CLI&#xa;foreground control surface" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="40" y="70" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="control" value="Jcode Control Plane&#xa;scheduler, policy, permissions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1d4ed8;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="320" y="70" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="placement" value="Topology-aware Placement Engine&#xa;latency + capacity + task class" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="650" y="70" width="260" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="directTransports" value="Direct Native Transports&#xa;provider + MCP + tool paths&#xa;gateway optional, bypass allowed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="890" y="210" width="170" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="evidence" value="Session Evidence Spine&#xa;append-only SessionLogEvent envelope&#xa;node id, git state, tool calls, validation, correlation ids" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="330" y="230" width="330" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="store" value="Local-first Durable Store&#xa;JSONL/SQLite event logs&#xa;explicit export/sync API" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="380" y="430" width="230" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="memory" value="Jcode Memory Module&#xa;provenance, review, scoped recall" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="40" y="240" width="210" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="context" value="Jcode Context Module&#xa;bounded providers, redaction, budgets" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="40" y="380" width="210" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="computer" value="Jcode Computer-use Module&#xa;provider, planner, trace, safety policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="40" y="520" width="210" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="evals" value="Jcode Evaluation Module&#xa;goldens, red-team, regression outcomes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="720" y="410" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="observability" value="Jcode Telemetry Export Module&#xa;OTel-shaped logs, traces, metrics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="jcodeBoundary">
+          <mxGeometry x="720" y="540" width="230" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="nodesBoundary" value="Homelab nodes selected by topology, latency, and capacity" style="swimlane;html=1;rounded=1;startSize=32;whiteSpace=wrap;fillColor=#fbfbfb;strokeColor=#64748b;strokeWidth=2;fontColor=#334155;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="790" width="1100" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="lowLatency" value="Low-latency node&#xa;foreground turns&#xa;TUI-adjacent work&#xa;live tool loops" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="nodesBoundary">
+          <mxGeometry x="50" y="70" width="210" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="asyncNode" value="Async / higher-latency node&#xa;summarization&#xa;indexing&#xa;batch research" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="nodesBoundary">
+          <mxGeometry x="320" y="70" width="210" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="capacityNode" value="High-capacity node&#xa;embeddings&#xa;observability retention&#xa;model serving" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="nodesBoundary">
+          <mxGeometry x="590" y="70" width="210" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="buildNode" value="Build / eval node&#xa;distributed builds&#xa;Prompt/eval batches&#xa;replay analysis" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="nodesBoundary">
+          <mxGeometry x="860" y="70" width="210" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="inspiration" value="External tools are inspiration patterns, not runtime dependencies" style="swimlane;html=1;rounded=1;startSize=32;whiteSpace=wrap;fillColor=#f5f5f5;strokeColor=#666666;dashed=1;strokeWidth=2;fontColor=#444444;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1400" y="100" width="340" height="650" as="geometry" />
+        </mxCell>
+        <mxCell id="inspSession" value="Session capture patterns&#xa;Entire, Lore&#xa;commit trailers, checkpoint branches, blame/search" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
+          <mxGeometry x="40" y="70" width="260" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="inspContext" value="Context accumulation patterns&#xa;Screenpipe&#xa;local capture, source risks, redaction needs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
+          <mxGeometry x="40" y="185" width="260" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="inspGateway" value="Gateway patterns&#xa;Bifrost, LiteLLM&#xa;routing, fallback, policy, observability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
+          <mxGeometry x="40" y="300" width="260" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="inspObs" value="Observability patterns&#xa;OpenObserve, Langfuse, Phoenix&#xa;OTel sinks and LLM traces" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
+          <mxGeometry x="40" y="415" width="260" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="inspEval" value="Evaluation patterns&#xa;Promptfoo, DeepEval, Inspect AI&#xa;regression and red-team suites" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
+          <mxGeometry x="40" y="530" width="260" height="95" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="commands + events" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#1d4ed8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="jcodeBoundary" source="tui" target="control"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" value="place work" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#1d4ed8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="jcodeBoundary" source="control" target="placement"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" value="records every action" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="jcodeBoundary" source="control" target="evidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="append / read" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#82b366;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="jcodeBoundary" source="evidence" target="store"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" value="native when faster" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#d6b656;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="jcodeBoundary" source="placement" target="directTransports"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e6" value="provenance" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#9673a6;exitX=1;exitY=0.5;entryX=0;entryY=0.25;" edge="1" parent="jcodeBoundary" source="memory" target="evidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" value="bounded snippets" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#9673a6;exitX=1;exitY=0.5;entryX=0;entryY=0.55;" edge="1" parent="jcodeBoundary" source="context" target="evidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" value="action traces" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#9673a6;exitX=1;exitY=0.5;entryX=0;entryY=0.85;" edge="1" parent="jcodeBoundary" source="computer" target="evidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" value="validation events" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#b85450;exitX=0;exitY=0.5;entryX=1;entryY=0.35;" edge="1" parent="jcodeBoundary" source="evals" target="evidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="export from log" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#d79b00;exitX=0;exitY=0.5;entryX=1;entryY=0.75;" edge="1" parent="jcodeBoundary" source="observability" target="evidence"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="n1" value="interactive" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#64748b;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="placement" target="lowLatency"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="790" y="770" /><mxPoint x="415" y="770" /></Array></mxGeometry></mxCell>
+        <mxCell id="n2" value="async" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#64748b;exitX=0.4;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="placement" target="asyncNode"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="820" y="770" /><mxPoint x="685" y="770" /></Array></mxGeometry></mxCell>
+        <mxCell id="n3" value="heavy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#64748b;exitX=0.6;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="placement" target="capacityNode"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="850" y="770" /><mxPoint x="955" y="770" /></Array></mxGeometry></mxCell>
+        <mxCell id="n4" value="build/eval" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;strokeColor=#64748b;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="placement" target="buildNode"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="880" y="770" /><mxPoint x="1225" y="770" /></Array></mxGeometry></mxCell>
+
+        <mxCell id="i1" value="pattern only" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.3;" edge="1" parent="1" source="inspSession" target="evidence"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="217" /></Array></mxGeometry></mxCell>
+        <mxCell id="i2" value="pattern only" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="inspContext" target="context"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="332" /><mxPoint x="1380" y="525" /></Array></mxGeometry></mxCell>
+        <mxCell id="i3" value="pattern only" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="inspGateway" target="directTransports"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="447" /></Array></mxGeometry></mxCell>
+        <mxCell id="i4" value="sink pattern" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="inspObs" target="observability"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="562" /></Array></mxGeometry></mxCell>
+        <mxCell id="i5" value="suite pattern" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="inspEval" target="evals"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="677" /></Array></mxGeometry></mxCell>
+
+        <mxCell id="legend" value="Legend: solid arrows = Jcode runtime/data flow; dashed arrows = design inspiration only; gateway remains optional and bypassable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;fontColor=#7c2d12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="1090" width="760" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
