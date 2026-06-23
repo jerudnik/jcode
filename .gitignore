@@ -18,3 +18,19 @@ target-ttest*/
 /*.avif
 /*.mp4
 /*.png
+
+# APM dependencies
+apm_modules/
+
+# APM-generated agent primitives — regenerated locally from .apm/ + apm.yml
+AGENTS.md
+GEMINI.md
+CLAUDE.md
+/.claude/rules/
+/.claude/skills/
+/.agents/skills/
+/.github/instructions/
+/.mcp.json
+/.codex/
+/.gemini/
+/.claude/mcp.json
