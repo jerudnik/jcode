@@ -20,10 +20,10 @@
         <mxCell id="control" value="Jcode Control Plane&#xa;scheduler, policy, permissions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#1d4ed8;fontStyle=1;" vertex="1" parent="jcodeBoundary">
           <mxGeometry x="320" y="70" width="230" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="placement" value="Topology-aware Placement Engine&#xa;latency + capacity + task class" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+        <mxCell id="placement" value="Interaction Routing Engine&#xa;runs beside TUI loop&#xa;latency + capacity + task class" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="jcodeBoundary">
           <mxGeometry x="650" y="70" width="260" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="directTransports" value="Direct Native Transports&#xa;provider + MCP + tool paths&#xa;gateway optional, bypass allowed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="jcodeBoundary">
+        <mxCell id="directTransports" value="Direct Native Transports&#xa;provider + MCP + tool paths&#xa;routing engine chooses direct paths" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="jcodeBoundary">
           <mxGeometry x="890" y="210" width="170" height="120" as="geometry" />
         </mxCell>
 
@@ -75,7 +75,7 @@
         <mxCell id="inspContext" value="Context accumulation patterns&#xa;Screenpipe&#xa;local capture, source risks, redaction needs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
           <mxGeometry x="40" y="185" width="260" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="inspGateway" value="Gateway patterns&#xa;Bifrost, LiteLLM&#xa;routing, fallback, policy, observability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
+        <mxCell id="inspGateway" value="Gateway references, later only&#xa;Bifrost, LiteLLM&#xa;adapter patterns, not first-cut runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
           <mxGeometry x="40" y="300" width="260" height="95" as="geometry" />
         </mxCell>
         <mxCell id="inspObs" value="Observability patterns&#xa;OpenObserve, Langfuse, Phoenix&#xa;OTel sinks and LLM traces" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;dashed=1;" vertex="1" parent="inspiration">
@@ -108,7 +108,7 @@
         <mxCell id="i4" value="sink pattern" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="inspObs" target="observability"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="562" /></Array></mxGeometry></mxCell>
         <mxCell id="i5" value="suite pattern" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=open;strokeColor=#999999;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="inspEval" target="evals"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1380" y="677" /></Array></mxGeometry></mxCell>
 
-        <mxCell id="legend" value="Legend: solid arrows = Jcode runtime/data flow; dashed arrows = design inspiration only; gateway remains optional and bypassable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;fontColor=#7c2d12;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="legend" value="Legend: solid arrows = Jcode runtime/data flow; dashed arrows = design inspiration only; no gateway in first cut" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff7ed;strokeColor=#fb923c;fontColor=#7c2d12;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="520" y="1090" width="760" height="50" as="geometry" />
         </mxCell>
       </root>
