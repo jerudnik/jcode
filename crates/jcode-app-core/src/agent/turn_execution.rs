@@ -11,11 +11,15 @@ impl Agent {
             }],
         );
         self.session.save()?;
+        let user_message_index = self.message_count().saturating_sub(1);
+        let evidence_started_at = Instant::now();
+        self.start_evidence_turn(user_message, 0, user_message_index);
         if trace_enabled() {
             eprintln!("[trace] session_id {}", self.session.id);
         }
         self.report_herdr_session("working", "thinking");
         let result = self.run_turn(true).await.map(|_| ());
+        self.finish_evidence_turn(&result, evidence_started_at, None);
         self.report_herdr_session("idle", "idle");
         result
     }
@@ -29,11 +33,16 @@ impl Agent {
             }],
         );
         self.session.save()?;
+        let user_message_index = self.message_count().saturating_sub(1);
+        let evidence_started_at = Instant::now();
+        self.start_evidence_turn(user_message, 0, user_message_index);
         if trace_enabled() {
             eprintln!("[trace] session_id {}", self.session.id);
         }
         self.report_herdr_session("working", "thinking");
         let result = self.run_turn(false).await;
+        let output = result.as_ref().ok().map(String::as_str);
+        self.finish_evidence_turn(&result, evidence_started_at, output);
         self.report_herdr_session("idle", "idle");
         result
     }
@@ -82,14 +91,19 @@ impl Agent {
             ));
         }
 
+        let image_count = blocks.len().saturating_sub(1);
         self.add_message(Role::User, blocks);
         crate::telemetry::record_turn();
         self.session.save()?;
+        let evidence_started_at = Instant::now();
+        let user_message_index = self.message_count().saturating_sub(1);
+        self.start_evidence_turn(user_message, image_count, user_message_index);
         let turn_started_at = Instant::now();
         let start_message_index = self.message_count();
         self.fire_turn_start_hook("chat");
         self.report_herdr_session("working", "thinking");
         let result = self.run_turn_streaming_mpsc(event_tx).await;
+        self.finish_evidence_turn(&result, evidence_started_at, None);
         self.current_turn_system_reminder = None;
         self.fire_turn_end_hook(&result, turn_started_at, start_message_index);
         self.report_herdr_session("idle", "idle");
@@ -173,6 +187,7 @@ impl Agent {
         self.session = new_session;
         self.reset_runtime_state_for_session_change();
         self.provider_session_id = None;
+        self.current_evidence_turn_id = None;
         self.seed_compaction_from_session();
         self.report_herdr_session("idle", "session_start");
     }

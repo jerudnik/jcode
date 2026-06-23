@@ -9,7 +9,9 @@
 use super::session_search_index::{self, IndexFileSpec};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::message::ContentBlock;
-use crate::session::{Session, StoredMessage, session_journal_path_from_snapshot};
+use crate::session::{
+    Session, StoredMessage, session_evidence_path_from_snapshot, session_journal_path_from_snapshot,
+};
 use crate::storage;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -265,6 +267,7 @@ impl RoleFilter {
 struct SessionFileCandidate {
     snapshot_path: PathBuf,
     journal_path: PathBuf,
+    evidence_path: PathBuf,
     session_id_hint: String,
     mtime: SystemTime,
 }
@@ -748,9 +751,11 @@ fn collect_session_files(
         Vec::with_capacity(timestamped.len() + untimestamped.len().min(max_scan_sessions));
     for Reverse((timestamp_ms, path, stem)) in timestamped.into_sorted_vec() {
         let journal_path = session_journal_path_from_snapshot(&path);
+        let evidence_path = session_evidence_path_from_snapshot(&path);
         files.push(SessionFileCandidate {
             snapshot_path: path,
             journal_path,
+            evidence_path,
             session_id_hint: stem,
             mtime: system_time_from_unix_millis(timestamp_ms),
         });
@@ -760,13 +765,16 @@ fn collect_session_files(
     // uncommon, so only stat these fallback paths instead of every session file.
     for (path, stem) in untimestamped {
         let journal_path = session_journal_path_from_snapshot(&path);
+        let evidence_path = session_evidence_path_from_snapshot(&path);
         let snapshot_mtime = modified_time_or_epoch(&path);
         let journal_mtime = modified_time_or_epoch(&journal_path);
+        let evidence_mtime = modified_time_or_epoch(&evidence_path);
         files.push(SessionFileCandidate {
             snapshot_path: path,
             journal_path,
+            evidence_path,
             session_id_hint: stem,
-            mtime: snapshot_mtime.max(journal_mtime),
+            mtime: snapshot_mtime.max(journal_mtime).max(evidence_mtime),
         });
     }
 
@@ -822,15 +830,19 @@ fn jcode_index_candidates(
     let specs: Vec<IndexFileSpec> = files
         .iter()
         .map(|file| {
-            // Journals grow after the snapshot is written, so identity covers
-            // both files.
+            // Journals and evidence logs grow after the snapshot is written, so
+            // identity covers all files included in the indexed raw text.
             let (snap_mtime, snap_size) = session_search_index::stat_ms_size(&file.snapshot_path);
             let (journal_mtime, journal_size) =
                 session_search_index::stat_ms_size(&file.journal_path);
+            let (evidence_mtime, evidence_size) =
+                session_search_index::stat_ms_size(&file.evidence_path);
             IndexFileSpec {
                 key: file.session_id_hint.clone(),
-                mtime_ms: snap_mtime.max(journal_mtime),
-                size: snap_size.wrapping_add(journal_size),
+                mtime_ms: snap_mtime.max(journal_mtime).max(evidence_mtime),
+                size: snap_size
+                    .wrapping_add(journal_size)
+                    .wrapping_add(evidence_size),
             }
         })
         .collect();
@@ -928,6 +940,16 @@ fn read_candidate_raw(
         }
     }
 
+    if candidate.evidence_path.exists() {
+        match std::fs::read(&candidate.evidence_path) {
+            Ok(evidence) => {
+                raw.push(b'\n');
+                raw.extend_from_slice(&evidence);
+            }
+            Err(_) => *read_errors += 1,
+        }
+    }
+
     Some(raw)
 }
 
@@ -950,7 +972,19 @@ fn score_candidates_parallel(
                 for candidate in chunk {
                     match Session::load_from_path(&candidate.snapshot_path) {
                         Ok(session) => {
-                            append_session_results(&mut outcome.results, &session, query, options)
+                            append_session_results(&mut outcome.results, &session, query, options);
+                            match crate::session::read_session_evidence_from_path(
+                                &candidate.evidence_path,
+                            ) {
+                                Ok(events) => append_session_evidence_results(
+                                    &mut outcome.results,
+                                    &session,
+                                    &events,
+                                    query,
+                                    options,
+                                ),
+                                Err(_) => outcome.parse_errors += 1,
+                            }
                         }
                         Err(_) => outcome.parse_errors += 1,
                     }
@@ -1601,6 +1635,204 @@ fn append_session_results(
     }
 }
 
+fn append_session_evidence_results(
+    results: &mut Vec<SearchResult>,
+    session: &Session,
+    events: &[jcode_session_types::SessionLogEvent],
+    query: &QueryProfile,
+    options: &SearchOptions,
+) {
+    if !role_filter_allows_evidence(options) {
+        return;
+    }
+    for event in events {
+        if !session_datetime_matches(event.timestamp, options.after, options.before) {
+            continue;
+        }
+        let text = evidence_text(event);
+        let Some(match_score) = score_message_match(&text, query) else {
+            continue;
+        };
+        results.push(SearchResult {
+            source: "jcode".to_string(),
+            session_id: session.id.clone(),
+            short_name: session.short_name.clone(),
+            title: session.display_title().map(ToOwned::to_owned),
+            working_dir: session.working_dir.clone(),
+            provider_key: session.provider_key.clone(),
+            model: session.model.clone(),
+            updated_at: session.updated_at,
+            kind: SearchResultKind::Evidence,
+            role: "evidence".to_string(),
+            message_index: None,
+            message_id: Some(event.event_id.clone()),
+            message_timestamp: Some(event.timestamp),
+            snippet: match_score.snippet,
+            score: match_score.score + 1.0,
+            matched_terms: match_score.matched_terms,
+            exact_match: match_score.exact_match,
+            context: Vec::new(),
+        });
+    }
+}
+
+fn evidence_text(event: &jcode_session_types::SessionLogEvent) -> String {
+    let mut fields = vec![
+        format!("Evidence event: {}", evidence_kind_label(&event.kind)),
+        format!("Event ID: {}", event.event_id),
+        format!("Sequence: {}", event.sequence),
+        format!("Session ID: {}", event.session_id),
+        format!("Timestamp: {}", format_datetime(event.timestamp)),
+        format!("Node: {}", event.node.node_id),
+    ];
+    if let Some(turn_id) = &event.correlation.turn_id {
+        fields.push(format!("Turn ID: {turn_id}"));
+    }
+    if let Some(request_id) = &event.correlation.provider_request_id {
+        fields.push(format!("Provider request ID: {request_id}"));
+    }
+    if let Some(tool_call_id) = &event.correlation.tool_call_id {
+        fields.push(format!("Tool call ID: {tool_call_id}"));
+    }
+    match &event.kind {
+        jcode_session_types::SessionLogEventKind::TurnStarted {
+            user_message_index,
+            image_count,
+            input,
+        } => {
+            fields.push(format!("User message index: {user_message_index}"));
+            fields.push(format!("Image count: {image_count}"));
+            push_payload_summary(&mut fields, "Input", input.as_ref());
+        }
+        jcode_session_types::SessionLogEventKind::TurnFinished {
+            status,
+            duration_ms,
+            output,
+            error_class,
+        } => {
+            fields.push(format!("Status: {status:?}"));
+            fields.push(format!("Duration ms: {duration_ms}"));
+            push_payload_summary(&mut fields, "Output", output.as_ref());
+            if let Some(error_class) = error_class {
+                fields.push(format!("Error class: {error_class}"));
+            }
+        }
+        jcode_session_types::SessionLogEventKind::ProviderRequest {
+            provider,
+            model,
+            route,
+            message_count,
+            tool_count,
+            prompt,
+        } => {
+            fields.push(format!("Provider: {provider}"));
+            fields.push(format!("Model: {model}"));
+            if let Some(route) = route {
+                fields.push(format!("Route: {route}"));
+            }
+            fields.push(format!("Message count: {message_count}"));
+            fields.push(format!("Tool count: {tool_count}"));
+            push_payload_summary(&mut fields, "Prompt", prompt.as_ref());
+        }
+        jcode_session_types::SessionLogEventKind::ProviderResponse {
+            provider,
+            model,
+            status,
+            duration_ms,
+            output,
+            usage,
+            error_class,
+        } => {
+            fields.push(format!("Provider: {provider}"));
+            fields.push(format!("Model: {model}"));
+            fields.push(format!("Status: {status:?}"));
+            fields.push(format!("Duration ms: {duration_ms}"));
+            if let Some(usage) = usage {
+                fields.push(format!(
+                    "Tokens: input={} output={} total={}",
+                    usage
+                        .input_tokens
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    usage
+                        .output_tokens
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    usage
+                        .total_tokens
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                ));
+            }
+            push_payload_summary(&mut fields, "Output", output.as_ref());
+            if let Some(error_class) = error_class {
+                fields.push(format!("Error class: {error_class}"));
+            }
+        }
+        jcode_session_types::SessionLogEventKind::ToolStarted { tool_name, input } => {
+            fields.push(format!("Tool: {tool_name}"));
+            push_payload_summary(&mut fields, "Input", input.as_ref());
+        }
+        jcode_session_types::SessionLogEventKind::ToolFinished {
+            tool_name,
+            status,
+            duration_ms,
+            output,
+            error_class,
+        } => {
+            fields.push(format!("Tool: {tool_name}"));
+            fields.push(format!("Status: {status:?}"));
+            fields.push(format!("Duration ms: {duration_ms}"));
+            push_payload_summary(&mut fields, "Output", output.as_ref());
+            if let Some(error_class) = error_class {
+                fields.push(format!("Error class: {error_class}"));
+            }
+        }
+        other => {
+            if let Ok(json) = serde_json::to_string(other) {
+                fields.push(json);
+            }
+        }
+    }
+    fields.join("\n")
+}
+
+fn evidence_kind_label(kind: &jcode_session_types::SessionLogEventKind) -> &'static str {
+    match kind {
+        jcode_session_types::SessionLogEventKind::TurnStarted { .. } => "turn_started",
+        jcode_session_types::SessionLogEventKind::TurnFinished { .. } => "turn_finished",
+        jcode_session_types::SessionLogEventKind::ProviderRequest { .. } => "provider_request",
+        jcode_session_types::SessionLogEventKind::ProviderResponse { .. } => "provider_response",
+        jcode_session_types::SessionLogEventKind::ToolStarted { .. } => "tool_started",
+        jcode_session_types::SessionLogEventKind::ToolFinished { .. } => "tool_finished",
+        jcode_session_types::SessionLogEventKind::RouteSelected { .. } => "route_selected",
+        jcode_session_types::SessionLogEventKind::MemoryInjected { .. } => "memory_injected",
+        jcode_session_types::SessionLogEventKind::ChildSessionStarted { .. } => {
+            "child_session_started"
+        }
+        jcode_session_types::SessionLogEventKind::PolicyDecision { .. } => "policy_decision",
+    }
+}
+
+fn push_payload_summary(
+    fields: &mut Vec<String>,
+    label: &str,
+    payload: Option<&jcode_session_types::PayloadSummary>,
+) {
+    if let Some(payload) = payload {
+        fields.push(format!(
+            "{label}: bytes={} sha256={}",
+            payload.bytes, payload.sha256
+        ));
+        if let Some(media_type) = &payload.media_type {
+            fields.push(format!("{label} media type: {media_type}"));
+        }
+        if let Some(path) = &payload.artifact_path {
+            fields.push(format!("{label} artifact path: {path}"));
+        }
+    }
+}
+
 fn metadata_text(session: &Session) -> String {
     let mut fields = vec![
         format!("Session ID: {}", session.id),
@@ -1705,6 +1937,13 @@ fn provider_matches(provider_key: Option<&str>, source: &str, options: &SearchOp
 }
 
 fn role_filter_allows_metadata(options: &SearchOptions) -> bool {
+    options
+        .role_filter
+        .map(|role| role == RoleFilter::Metadata)
+        .unwrap_or(true)
+}
+
+fn role_filter_allows_evidence(options: &SearchOptions) -> bool {
     options
         .role_filter
         .map(|role| role == RoleFilter::Metadata)

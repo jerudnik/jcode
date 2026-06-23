@@ -2,6 +2,7 @@
 
 mod compaction;
 mod environment;
+mod evidence;
 mod inline_tail;
 mod interrupts;
 mod messages;
@@ -248,6 +249,8 @@ pub struct Agent {
     /// Transient reminder injected into provider requests for the current turn only.
     /// Not persisted to session history.
     current_turn_system_reminder: Option<String>,
+    /// Correlation id for evidence emitted during the current user turn.
+    current_evidence_turn_id: Option<String>,
     /// Tool call ids observed in the current session transcript.
     tool_call_ids: HashSet<String>,
     /// Tool result ids observed in the current session transcript.
@@ -336,6 +339,7 @@ impl Agent {
             last_status_detail: None,
             pending_alerts: Vec::new(),
             current_turn_system_reminder: None,
+            current_evidence_turn_id: None,
             tool_call_ids: HashSet::new(),
             tool_result_ids: HashSet::new(),
             tool_output_scan_index: 0,
