@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 mod crash;
+mod evidence;
 mod journal;
 mod maintenance;
 mod memory_profile;
@@ -43,6 +44,10 @@ mod storage_paths;
 pub use crash::{
     CrashedSessionsInfo, detect_crashed_sessions, find_recent_crashed_sessions,
     find_session_by_name_or_id, recover_crashed_sessions, recover_crashed_sessions_by_ids,
+};
+pub use evidence::{
+    SessionEvidenceContext, SessionEvidenceWriter, payload_summary_bytes, payload_summary_text,
+    read_session_evidence, read_session_evidence_for_snapshot, read_session_evidence_from_path,
 };
 pub use jcode_session_types::{
     EnvSnapshot, GitState, SessionImproveMode, SessionStatus, StoredCompactionState,
@@ -66,7 +71,9 @@ pub use storage_paths::session_journal_path_from_snapshot;
 #[cfg(test)]
 pub(crate) use storage_paths::session_path_in_dir;
 use storage_paths::{estimate_json_bytes, persist_vector_mode_label};
-pub use storage_paths::{session_exists, session_journal_path, session_path};
+pub use storage_paths::{
+    session_evidence_path, session_exists, session_journal_path, session_path,
+};
 
 fn stored_messages_to_messages(messages: &[StoredMessage]) -> Vec<Message> {
     messages.iter().map(StoredMessage::to_message).collect()
