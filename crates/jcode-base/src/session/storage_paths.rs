@@ -32,6 +32,15 @@ pub fn session_path(session_id: &str) -> Result<PathBuf> {
     Ok(session_path_in_dir(&base, session_id))
 }
 
+pub fn session_evidence_path_from_snapshot(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_stem()
+        .map(|stem| stem.to_os_string())
+        .unwrap_or_default();
+    name.push(".evidence.jsonl");
+    path.with_file_name(name)
+}
+
 pub fn session_journal_path_from_snapshot(path: &Path) -> PathBuf {
     let mut name = path
         .file_stem()
@@ -39,6 +48,12 @@ pub fn session_journal_path_from_snapshot(path: &Path) -> PathBuf {
         .unwrap_or_default();
     name.push(".journal.jsonl");
     path.with_file_name(name)
+}
+
+pub fn session_evidence_path(session_id: &str) -> Result<PathBuf> {
+    Ok(session_evidence_path_from_snapshot(&session_path(
+        session_id,
+    )?))
 }
 
 pub fn session_journal_path(session_id: &str) -> Result<PathBuf> {
