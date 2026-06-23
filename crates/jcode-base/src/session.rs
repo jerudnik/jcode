@@ -67,13 +67,13 @@ pub use render::{
     render_messages, render_messages_and_images, render_messages_and_images_with_compacted_history,
     summarize_tool_calls,
 };
-pub use storage_paths::session_journal_path_from_snapshot;
 #[cfg(test)]
 pub(crate) use storage_paths::session_path_in_dir;
 use storage_paths::{estimate_json_bytes, persist_vector_mode_label};
 pub use storage_paths::{
     session_evidence_path, session_exists, session_journal_path, session_path,
 };
+pub use storage_paths::{session_evidence_path_from_snapshot, session_journal_path_from_snapshot};
 
 fn stored_messages_to_messages(messages: &[StoredMessage]) -> Vec<Message> {
     messages.iter().map(StoredMessage::to_message).collect()

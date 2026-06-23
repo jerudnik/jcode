@@ -307,6 +307,75 @@ fn metadata_is_searchable_and_returned_with_locator() {
 }
 
 #[test]
+fn evidence_events_are_searchable_and_distinctly_labeled() {
+    with_temp_home(|home| {
+        let session = save_test_session(
+            "evidence-session",
+            vec![(
+                Role::User,
+                vec![text("ordinary content without evidence terms")],
+            )],
+        );
+        let context =
+            crate::session::SessionEvidenceContext::local(session.working_dir.clone(), None);
+        let mut writer = crate::session::SessionEvidenceWriter::for_session(&session.id, context)
+            .expect("create evidence writer");
+        writer
+            .append(jcode_session_types::SessionLogEventKind::ProviderRequest {
+                provider: "openai".to_string(),
+                model: "gpt-evidence-only".to_string(),
+                route: Some("openai-api".to_string()),
+                message_count: 2,
+                tool_count: 1,
+                prompt: None,
+            })
+            .expect("append evidence");
+
+        let mut options = SearchOptions::for_test("current-session");
+        options.limit = 10;
+        let results = run_search(home, "gpt-evidence-only", &options);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].kind, SearchResultKind::Evidence);
+        assert_eq!(results[0].role, "evidence");
+        assert_eq!(results[0].message_index, None);
+        assert!(results[0].snippet.contains("gpt-evidence-only"));
+
+        let report = run_report(home, "gpt-evidence-only", &options);
+        let output = format_results("gpt-evidence-only", &report, &options);
+        assert!(output.contains("Match: evidence"));
+    });
+}
+
+#[test]
+fn evidence_events_obey_role_filters() {
+    with_temp_home(|home| {
+        let session = save_test_session(
+            "evidence-role-session",
+            vec![(Role::User, vec![text("role filter baseline")])],
+        );
+        let context =
+            crate::session::SessionEvidenceContext::local(session.working_dir.clone(), None);
+        let mut writer = crate::session::SessionEvidenceWriter::for_session(&session.id, context)
+            .expect("create evidence writer");
+        writer
+            .append(jcode_session_types::SessionLogEventKind::ToolStarted {
+                tool_name: "evidence-tool-needle".to_string(),
+                input: None,
+            })
+            .expect("append evidence");
+
+        let mut options = SearchOptions::for_test("current-session");
+        options.role_filter = Some(RoleFilter::User);
+        assert!(run_search(home, "evidence-tool-needle", &options).is_empty());
+
+        options.role_filter = Some(RoleFilter::Metadata);
+        let results = run_search(home, "evidence-tool-needle", &options);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].kind, SearchResultKind::Evidence);
+    });
+}
+
+#[test]
 fn system_reminders_are_hidden_by_default_and_opt_in_searchable() {
     with_temp_home(|home| {
         let mut session = Session::create_with_id("system-session".to_string(), None, None);

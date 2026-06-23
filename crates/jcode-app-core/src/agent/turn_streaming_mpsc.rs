@@ -219,6 +219,18 @@ impl Agent {
                 &ephemeral_signature_messages,
             ));
             let mut keepalive = stream_keepalive_ticker();
+            let provider_correlation = self.provider_evidence_correlation();
+            self.append_session_evidence_with_correlation(
+                jcode_session_types::SessionLogEventKind::ProviderRequest {
+                    provider: provider.name().to_string(),
+                    model: provider.model(),
+                    route: self.session.route_api_method.clone(),
+                    message_count: send_messages.len(),
+                    tool_count: tools.len(),
+                    prompt: self.evidence_payload_json(send_messages),
+                },
+                provider_correlation.clone(),
+            );
             let mut stream = {
                 let mut complete_future = std::pin::pin!(provider.complete_split(
                     send_messages,
@@ -266,6 +278,18 @@ impl Agent {
                                         });
                                         continue;
                                     }
+                                    self.append_session_evidence_with_correlation(
+                                        jcode_session_types::SessionLogEventKind::ProviderResponse {
+                                            provider: provider.name().to_string(),
+                                            model: provider.model(),
+                                            status: jcode_session_types::SessionLogStatus::Error,
+                                            duration_ms: api_start.elapsed().as_millis() as u64,
+                                            output: None,
+                                            usage: None,
+                                            error_class: Some(e.to_string().chars().take(120).collect()),
+                                        },
+                                        provider_correlation.clone(),
+                                    );
                                     return Err(e);
                                 }
                             }
@@ -883,6 +907,18 @@ impl Agent {
                                 ),
                             ],
                         );
+                        self.append_session_evidence_with_correlation(
+                            jcode_session_types::SessionLogEventKind::ProviderResponse {
+                                provider: provider.name().to_string(),
+                                model: provider.model(),
+                                status: jcode_session_types::SessionLogStatus::Error,
+                                duration_ms: api_start.elapsed().as_millis() as u64,
+                                output: None,
+                                usage: None,
+                                error_class: Some(message.chars().take(120).collect()),
+                            },
+                            provider_correlation.clone(),
+                        );
                         return Err(StreamError::new(message, retry_after_secs).into());
                     }
                 }
@@ -925,6 +961,28 @@ impl Agent {
                     ("cache_read", usage_cache_read.unwrap_or(0).to_string()),
                     ("cache_write", usage_cache_creation.unwrap_or(0).to_string()),
                 ],
+            );
+
+            self.append_session_evidence_with_correlation(
+                jcode_session_types::SessionLogEventKind::ProviderResponse {
+                    provider: provider.name().to_string(),
+                    model: provider.model(),
+                    status: jcode_session_types::SessionLogStatus::Ok,
+                    duration_ms: api_elapsed.as_millis() as u64,
+                    output: Some(crate::session::payload_summary_text(
+                        &text_content,
+                        Some("text/plain".to_string()),
+                    )),
+                    usage: Some(jcode_session_types::TokenUsageSummary {
+                        input_tokens: usage_input,
+                        output_tokens: usage_output,
+                        total_tokens: usage_input
+                            .zip(usage_output)
+                            .map(|(input, output)| input + output),
+                    }),
+                    error_class: None,
+                },
+                provider_correlation.clone(),
             );
 
             if usage_input.is_some()
@@ -1294,6 +1352,14 @@ impl Agent {
                     self.inline_tail.start_tool(&tc.name, &tc.input);
                     self.publish_inline_tail();
                 }
+                let tool_correlation = self.tool_evidence_correlation(&tc.id);
+                self.append_session_evidence_with_correlation(
+                    jcode_session_types::SessionLogEventKind::ToolStarted {
+                        tool_name: tc.name.clone(),
+                        input: self.evidence_payload_json(&tc.input),
+                    },
+                    tool_correlation.clone(),
+                );
                 self.report_herdr_tool(&tc.name);
                 let tool_start = Instant::now();
 
@@ -1393,6 +1459,20 @@ impl Agent {
                                 });
                             }
 
+                            self.append_session_evidence_with_correlation(
+                                jcode_session_types::SessionLogEventKind::ToolFinished {
+                                    tool_name: tc.name.clone(),
+                                    status: jcode_session_types::SessionLogStatus::Ok,
+                                    duration_ms: tool_elapsed.as_millis() as u64,
+                                    output: Some(crate::session::payload_summary_text(
+                                        &output.output,
+                                        Some("text/plain".to_string()),
+                                    )),
+                                    error_class: None,
+                                },
+                                tool_correlation.clone(),
+                            );
+
                             let blocks = tool_output_to_content_blocks(tc.id.clone(), output);
                             self.add_message_with_duration(
                                 Role::User,
@@ -1409,6 +1489,20 @@ impl Agent {
                                 output: error_msg.clone(),
                                 error: Some(error_msg.clone()),
                             });
+
+                            self.append_session_evidence_with_correlation(
+                                jcode_session_types::SessionLogEventKind::ToolFinished {
+                                    tool_name: tc.name.clone(),
+                                    status: jcode_session_types::SessionLogStatus::Error,
+                                    duration_ms: tool_elapsed.as_millis() as u64,
+                                    output: Some(crate::session::payload_summary_text(
+                                        &error_msg,
+                                        Some("text/plain".to_string()),
+                                    )),
+                                    error_class: Some(e.to_string().chars().take(120).collect()),
+                                },
+                                tool_correlation.clone(),
+                            );
 
                             self.add_message_with_duration(
                                 Role::User,
@@ -1436,6 +1530,28 @@ impl Agent {
                     // after reload rather than treated as failed work.
                     let (interrupted_msg, is_error) =
                         reload_interrupted_tool_result(tc, tool_elapsed.as_secs_f64());
+
+                    self.append_session_evidence_with_correlation(
+                        jcode_session_types::SessionLogEventKind::ToolFinished {
+                            tool_name: tc.name.clone(),
+                            status: if is_error {
+                                jcode_session_types::SessionLogStatus::Interrupted
+                            } else {
+                                jcode_session_types::SessionLogStatus::Ok
+                            },
+                            duration_ms: tool_elapsed.as_millis() as u64,
+                            output: Some(crate::session::payload_summary_text(
+                                &interrupted_msg,
+                                Some("text/plain".to_string()),
+                            )),
+                            error_class: if is_error {
+                                Some("interrupted_by_reload".to_string())
+                            } else {
+                                None
+                            },
+                        },
+                        tool_correlation.clone(),
+                    );
 
                     let _ = event_tx.send(ServerEvent::ToolDone {
                         id: tc.id.clone(),
