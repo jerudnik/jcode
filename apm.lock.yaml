@@ -1,0 +1,25 @@
+lockfile_version: '1'
+generated_at: '2026-06-23T04:50:43.754323+00:00'
+dependencies: []
+local_deployed_files:
+- .claude/rules/dox-apm.md
+- .claude/rules/dox-desktop.md
+- .claude/rules/dox-docs.md
+- .claude/rules/dox.md
+- .claude/rules/main.md
+- .github/instructions/dox-apm.instructions.md
+- .github/instructions/dox-desktop.instructions.md
+- .github/instructions/dox-docs.instructions.md
+- .github/instructions/dox.instructions.md
+- .github/instructions/main.instructions.md
+local_deployed_file_hashes:
+  .claude/rules/dox-apm.md: sha256:cc13fd2d15d199573c123bc3fd571b15763a5e46052ff418e060ab0f1db08f55
+  .claude/rules/dox-desktop.md: sha256:1b4ac891b831d07eb70979e65ceec539191c3b4167141d19051b12a1c4119d9c
+  .claude/rules/dox-docs.md: sha256:681427b8d0729a145b5d4e2e1686c121d15384eb40184417e25ce3c4032247e1
+  .claude/rules/dox.md: sha256:b34363a3061f8bdf73fc2f9dcddc23da51226e7b853715f6386de76949a64e8c
+  .claude/rules/main.md: sha256:6beba789d07021de1d293f9af5e0cf40e3e7713f39d5ee702acf3e4274afd574
+  .github/instructions/dox-apm.instructions.md: sha256:a30317849c42b9277b14a3ea5923ecbde1a2a188ee41c5df9effaab77e251a54
+  .github/instructions/dox-desktop.instructions.md: sha256:2480ae565677d577cb335dec1fb969b729f6add831e8fc9d6f37ba13c46b7cef
+  .github/instructions/dox-docs.instructions.md: sha256:7e37cf7efe144409cab7e04f9d98857dc90bd99935036c2f7612942b5a2a176f
+  .github/instructions/dox.instructions.md: sha256:2d09371203a6d96c12eb520d905251c310954ce9b074fbb43eba3df951db6955
+  .github/instructions/main.instructions.md: sha256:acb2f3f2036cc0a0066b1c214730ed93290f3c1a44dc74283871e6e15f286c25
