@@ -1170,7 +1170,11 @@ impl App {
         match super::spawn_fresh_session_in_new_terminal(&cwd) {
             Ok(true) => self.set_status_notice("↗ New terminal opened"),
             Ok(false) => {
-                self.set_status_notice("No supported terminal found; run `jcode` manually")
+                self.push_display_message(DisplayMessage::system(format!(
+                    "No supported terminal found.\n\n{}\n\nRun `jcode` manually to start a new session.",
+                    crate::terminal_launch::terminal_spawn_failure_hint()
+                )));
+                self.set_status_notice("No supported terminal found")
             }
             Err(error) => self.set_status_notice(format!("New terminal failed: {}", error)),
         }

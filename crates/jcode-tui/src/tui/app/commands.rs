@@ -2243,8 +2243,9 @@ fn handle_selfdev_command(app: &mut App, trimmed: &str) -> bool {
                 )
             } else {
                 format!(
-                    "Created self-dev session {} but could not auto-open a supported terminal.\n\nRun manually:\n{}",
+                    "Created self-dev session {} but could not auto-open a supported terminal.\n\n{}\n\nRun manually:\n{}",
                     launch.session_id,
+                    crate::terminal_launch::terminal_spawn_failure_hint(),
                     launch.command_preview().unwrap_or_else(|| format!(
                         "jcode --resume {} self-dev",
                         launch.session_id

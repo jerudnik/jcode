@@ -2057,7 +2057,8 @@ impl App {
             self.set_status_notice(format!("Resumed {} session(s)", spawned));
         } else {
             self.push_display_message(DisplayMessage::system(format!(
-                "No terminal found. Resume manually:\n{}",
+                "No terminal found.\n\n{}\n\nResume manually:\n{}",
+                crate::terminal_launch::terminal_spawn_failure_hint(),
                 manual.join("\n")
             )));
         }
@@ -2209,7 +2210,8 @@ impl App {
                 .map(|id| format!("  jcode --resume {}", id))
                 .collect();
             self.push_display_message(DisplayMessage::system(format!(
-                "No terminal found. Resume manually:\n{}",
+                "No terminal found.\n\n{}\n\nResume manually:\n{}",
+                crate::terminal_launch::terminal_spawn_failure_hint(),
                 manual.join("\n")
             )));
         }

@@ -20,6 +20,32 @@ pub fn configured_spawn_hook() -> Option<String> {
         .map(str::to_string)
 }
 
+/// Human-facing diagnostics for terminal auto-spawn failures.
+///
+/// This is intentionally concise enough to append to TUI/tool messages while
+/// still surfacing the two most useful fixes: configure a spawn hook, or make a
+/// supported terminal executable available on PATH.
+pub fn terminal_spawn_failure_hint() -> String {
+    let hook = configured_spawn_hook()
+        .map(|hook| format!("configured: `{hook}` (failed to start; see logs)"))
+        .unwrap_or_else(|| "not configured".to_string());
+    let detected = detected_resume_terminal().unwrap_or_else(|| "none".to_string());
+    let candidates = resume_terminal_candidates();
+    let candidates = if candidates.is_empty() {
+        "none".to_string()
+    } else {
+        candidates.join(", ")
+    };
+
+    format!(
+        "Terminal auto-spawn diagnostics:\n\
+         - Spawn hook: {hook}\n\
+         - Detected terminal: {detected}\n\
+         - Built-in candidates tried: {candidates}\n\n\
+         Fix: set `[terminal] spawn_hook` or `JCODE_SPAWN_HOOK` (for example a Ghostty/zmx router), or install/configure one of the candidate terminal executables."
+    )
+}
+
 /// Spawn `command` in a new terminal window/pane.
 ///
 /// When a spawn hook is configured (`[terminal] spawn_hook` / `JCODE_SPAWN_HOOK`),

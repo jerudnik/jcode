@@ -169,8 +169,9 @@ impl SelfDevTool {
                 .command_preview()
                 .unwrap_or_else(|| format!("jcode --resume {} self-dev", launch.session_id));
             return Ok(ToolOutput::new(format!(
-                "Created self-dev session {} but could not find a supported terminal to spawn automatically.\n\nRun manually:\n`{} --resume {} self-dev`",
+                "Created self-dev session {} but could not find a supported terminal to spawn automatically.\n\n{}\n\nRun manually:\n`{} --resume {} self-dev`",
                 launch.session_id,
+                crate::terminal_launch::terminal_spawn_failure_hint(),
                 launch.exe.as_ref().map(|exe| exe.display().to_string()).unwrap_or_else(|| "jcode".to_string()),
                 launch.session_id
             ))
