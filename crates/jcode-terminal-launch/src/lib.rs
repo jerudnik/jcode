@@ -267,14 +267,18 @@ pub fn detected_resume_terminal() -> Option<String> {
     if std::env::var("ALACRITTY_WINDOW_ID").is_ok() {
         return Some("alacritty".to_string());
     }
+    if std::env::var("GHOSTTY_RESOURCES_DIR").is_ok()
+        || std::env::var("GHOSTTY_BIN_DIR").is_ok()
+        || std::env::var("TERM_PROGRAM")
+            .ok()
+            .map(|value| value.eq_ignore_ascii_case("ghostty"))
+            .unwrap_or(false)
+    {
+        return Some("ghostty".to_string());
+    }
 
     #[cfg(target_os = "macos")]
     {
-        if std::env::var("GHOSTTY_RESOURCES_DIR").is_ok()
-            || std::env::var("GHOSTTY_BIN_DIR").is_ok()
-        {
-            return Some("ghostty".to_string());
-        }
         let term_program = std::env::var("TERM_PROGRAM")
             .ok()
             .map(|value| value.to_ascii_lowercase());
@@ -331,6 +335,7 @@ pub fn resume_terminal_candidates() -> Vec<String> {
     #[cfg(not(target_os = "macos"))]
     {
         for term in [
+            "ghostty",
             "handterm",
             "kitty",
             "wezterm",
@@ -588,6 +593,10 @@ fn build_spawn_command(term: &str, command: &TerminalCommand, cwd: &Path) -> Opt
                 cmd.env("JCODE_FRESH_SPAWN", "1");
             }
         }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        "ghostty" => {
+            cmd.args(["-e"]).arg(&command.program).args(&command.args);
+        }
         "kitty" => {
             cmd.args(["--title", title, "-e"])
                 .arg(&command.program)
@@ -701,6 +710,22 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    #[cfg(unix)]
+    unsafe fn clear_terminal_detection_env() {
+        unsafe {
+            std::env::remove_var("HANDTERM_SESSION");
+            std::env::remove_var("HANDTERM_PID");
+            std::env::remove_var("TERM_PROGRAM");
+            std::env::remove_var("KITTY_PID");
+            std::env::remove_var("WEZTERM_EXECUTABLE");
+            std::env::remove_var("WEZTERM_PANE");
+            std::env::remove_var("ALACRITTY_WINDOW_ID");
+            std::env::remove_var("GHOSTTY_RESOURCES_DIR");
+            std::env::remove_var("GHOSTTY_BIN_DIR");
+            std::env::remove_var("JCODE_TERMINAL");
+        }
+    }
+
     #[test]
     fn spawn_metadata_env_reexports_client_terminal_env_with_native_and_client_keys() {
         // A spawn carrying the requesting client's terminal env (#405) should
@@ -771,19 +796,58 @@ mod tests {
     fn detected_resume_terminal_recognizes_ghostty_env() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
-            std::env::remove_var("HANDTERM_SESSION");
-            std::env::remove_var("HANDTERM_PID");
-            std::env::remove_var("KITTY_PID");
-            std::env::remove_var("WEZTERM_EXECUTABLE");
-            std::env::remove_var("WEZTERM_PANE");
-            std::env::remove_var("ALACRITTY_WINDOW_ID");
+            clear_terminal_detection_env();
             std::env::set_var("GHOSTTY_RESOURCES_DIR", "/tmp/ghostty");
         }
-        #[cfg(target_os = "macos")]
         assert_eq!(detected_resume_terminal().as_deref(), Some("ghostty"));
         unsafe {
-            std::env::remove_var("GHOSTTY_RESOURCES_DIR");
+            clear_terminal_detection_env();
         }
+    }
+
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn detected_resume_terminal_recognizes_linux_ghostty_term_program() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            clear_terminal_detection_env();
+            std::env::set_var("TERM_PROGRAM", "ghostty");
+        }
+        assert_eq!(detected_resume_terminal().as_deref(), Some("ghostty"));
+        unsafe {
+            clear_terminal_detection_env();
+        }
+    }
+
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn linux_terminal_candidates_include_ghostty() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            clear_terminal_detection_env();
+        }
+        assert!(resume_terminal_candidates().contains(&"ghostty".to_string()));
+    }
+
+    #[test]
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn linux_ghostty_spawn_command_runs_program_with_args() {
+        let command = TerminalCommand::new(
+            std::path::PathBuf::from("/usr/local/bin/jcode"),
+            vec!["--resume".to_string(), "abc-123".to_string()],
+        );
+        let cmd = build_spawn_command("ghostty", &command, Path::new("/work/dir"))
+            .expect("ghostty spawn command should build on Linux");
+        assert_eq!(cmd.get_program().to_string_lossy(), "ghostty");
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            vec!["-e", "/usr/local/bin/jcode", "--resume", "abc-123"]
+        );
+        assert_eq!(cmd.get_current_dir(), Some(Path::new("/work/dir")));
     }
 
     #[test]

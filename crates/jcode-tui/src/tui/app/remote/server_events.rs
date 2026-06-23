@@ -2687,14 +2687,19 @@ pub(in crate::tui::app) fn handle_server_event(
                 Ok(false) => {
                     if let Some(label) = split_label.as_deref() {
                         app.push_display_message(DisplayMessage::system(format!(
-                            "🔍 {} session {} created.\n\nNo terminal found. Resume manually:\n  jcode --resume {}",
-                            label, new_session_name, new_session_id,
+                            "🔍 {} session {} created.\n\nNo terminal found.\n\n{}\n\nResume manually:\n  jcode --resume {}",
+                            label,
+                            new_session_name,
+                            crate::terminal_launch::terminal_spawn_failure_hint(),
+                            new_session_id,
                         )));
                         app.set_status_notice(format!("{} session created", label));
                     } else {
                         app.push_display_message(DisplayMessage::system(format!(
-                            "✂ Split → {}\n\nNo terminal found. Resume manually:\n  jcode --resume {}",
-                            new_session_name, new_session_id,
+                            "✂ Split → {}\n\nNo terminal found.\n\n{}\n\nResume manually:\n  jcode --resume {}",
+                            new_session_name,
+                            crate::terminal_launch::terminal_spawn_failure_hint(),
+                            new_session_id,
                         )));
                     }
                 }
