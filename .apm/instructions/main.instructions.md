@@ -62,6 +62,7 @@ Rules:
 - Track temporary shims and planned upstream work in `docs/fork/patch-ledger.md`.
 - Use commit prefixes that describe why downstream changes exist: `compat(...)`, `shim(...)`, `feature(...)`, `behavior(...)`, `distro(...)`, `docs(...)`, and `test(...)`.
 - Git remotes use surface names: `github` for GitHub, `upstream` for `1jehuang/jcode`, and `forgejo` for the 4nix Forgejo mirror. Avoid durable docs/scripts that assume `origin`.
+- The `forgejo` remote (`srv-4nix-core.mesh.4nix.cc:2222/infrastructure/jcode.git`) is **not yet provisioned**: fetch/push return "Cannot find repository" as of 2026-06-25. Treat GitHub as the only authoritative remote until the mirror exists. Do not attempt to fetch, push, or reconcile against `forgejo`, and do not add it to sync tooling, until the repo is created on the Forgejo host.
 
 ## 4nix integration
 
