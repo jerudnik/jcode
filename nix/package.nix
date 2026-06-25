@@ -75,16 +75,22 @@ let
     # avoids target-specific native dependency gaps. pkg-config (above) locates it.
     buildInputs = [ openssl ] ++ lib.optionals stdenv.hostPlatform.isDarwin [ libiconv ];
 
-    # Reproducible build metadata: jcode-build-meta/build.rs reads these env
-    # vars instead of invoking git, and JCODE_BUILD_SEMVER pins the version so
-    # the dev patch-counter does not fire against a read-only source tree.
+    # rustls uses aws-lc-rs; ensure the bundled C build is deterministic.
+    CARGO_PROFILE = "release";
+  };
+
+  # Per-commit build metadata. This is deliberately kept OUT of `commonArgs` so
+  # it does not flow into `buildDepsOnly`: the git hash/date change on every
+  # commit, and including them in the dependency derivation would invalidate the
+  # entire ~900-crate dependency cache on each commit (a full cold rebuild in CI
+  # and locally). Only `jcode-build-meta` (a workspace crate compiled in the
+  # final `buildPackage` step) reads these vars, so injecting them there alone is
+  # correct and lets the expensive dependency layer stay cached across commits.
+  buildMeta = {
     JCODE_BUILD_SEMVER = version;
     JCODE_BUILD_GIT_HASH = gitHash;
     JCODE_BUILD_GIT_DATE = gitDate;
     JCODE_BUILD_GIT_DIRTY = "false";
-
-    # rustls uses aws-lc-rs; ensure the bundled C build is deterministic.
-    CARGO_PROFILE = "release";
   }
   // lib.optionalAttrs releaseBuild {
     # Emit a clean release version string ("vX.Y.Z (hash)") rather than "-dev".
@@ -92,10 +98,14 @@ let
   };
 
   # Build all workspace dependencies once; reused for the package and checks.
+  # Note: `commonArgs` excludes the per-commit `buildMeta`, so this derivation's
+  # hash is stable across commits and rebuilds only when actual dependencies,
+  # toolchain, or native inputs change.
   cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 in
 craneLib.buildPackage (
   commonArgs
+  // buildMeta
   // {
     inherit cargoArtifacts;
 
