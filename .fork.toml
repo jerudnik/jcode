@@ -1,0 +1,10 @@
+# Fork rail configuration for 4nix tooling (fork-sync / fork-status / fork-doctor).
+# Consumed by `nix run github:jerudnik/4nix-utilities#fork-sync` and friends.
+[fork]
+fork-remote = "github"
+upstream-remote = "upstream"
+upstream-branch = "master"
+vendor-branch = "vendor/upstream"
+packaging-branch = "distro/nix"
+main-branch = "main"
+fork-repo = "jerudnik/jcode"
