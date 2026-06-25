@@ -58,6 +58,8 @@ let
     outputHashes = {
       "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.2#63e420bb4e035490d28cbca3f58e26baf297048e" =
         "sha256-Sf3EmWIZJ29KdaNbYRvM1tFXAPhOGhmpHOyqViEwkRI=";
+      "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.3#1fc53630181548db7ad2c73ac8fb66969c04f854" =
+        "sha256-vs8RK85sMa4WVupKU1V2oWxEVs1yHkEy7WNoTCNcMtE=";
       "git+https://github.com/1jehuang/mermaid-rs-renderer.git?tag=v0.2.1#01e8304ffc670f04dd4a047595cfb8ea9c854ae7" =
         "sha256-lQCloOhTqqEU8MNrkUmmJFdoOTEE3j5nvZJo21GJlMU=";
     };
