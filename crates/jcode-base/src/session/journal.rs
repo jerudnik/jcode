@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    EnvSnapshot, SessionImproveMode, SessionStatus, StoredCompactionState, StoredMemoryInjection,
-    StoredMessage, StoredReplayEvent,
+    AssistantSessionMeta, EnvSnapshot, SessionImproveMode, SessionStatus, StoredCompactionState,
+    StoredMemoryInjection, StoredMessage, StoredReplayEvent,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -33,6 +33,8 @@ pub(super) struct SessionJournalMeta {
     pub(super) is_debug: bool,
     pub(super) saved: bool,
     pub(super) save_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) assistant: Option<AssistantSessionMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,4 +93,5 @@ pub(super) fn metadata_requires_snapshot(
         || prev.is_debug != current.is_debug
         || prev.saved != current.saved
         || prev.save_label != current.save_label
+        || prev.assistant != current.assistant
 }

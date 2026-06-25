@@ -44,6 +44,55 @@ include!("tests/hotkey_feedback_e2e.rs");
 include!("tests/todo_card.rs");
 
 #[test]
+fn assistant_status_command_shows_metadata_and_recovery() {
+    let mut app = create_test_app();
+    app.session.assistant = Some(crate::session::AssistantSessionMeta {
+        profile: "infra".to_string(),
+        display_name: Some("Infra".to_string()),
+        cwd: Some("/home/john/infrastructure/4nix".to_string()),
+        backing: Some("jcode-assistant-infra".to_string()),
+        last_checkpoint: Some("wired chrome".to_string()),
+        last_validation: Some("cargo check ok".to_string()),
+    });
+
+    assert!(super::commands::handle_session_command(
+        &mut app,
+        "/assistant status"
+    ));
+    let content = app.display_messages().last().unwrap().content.clone();
+    assert!(content.contains("Profile:  Infra"), "{content}");
+    assert!(
+        content.contains("/home/john/infrastructure/4nix"),
+        "{content}"
+    );
+    assert!(content.contains("jcode assistant infra"), "{content}");
+    assert!(content.contains("jcode --resume"), "{content}");
+    assert!(
+        content.contains("zmx attach jcode-assistant-infra"),
+        "{content}"
+    );
+    assert!(
+        content.contains("last validation: cargo check ok"),
+        "{content}"
+    );
+}
+
+#[test]
+fn assistant_command_without_metadata_explains_how_to_launch() {
+    let mut app = create_test_app();
+    assert!(super::commands::handle_session_command(
+        &mut app,
+        "/assistant"
+    ));
+    let content = app.display_messages().last().unwrap().content.clone();
+    assert!(
+        content.contains("not an assistant-mode session"),
+        "{content}"
+    );
+    assert!(content.contains("jcode assistant <profile>"), "{content}");
+}
+
+#[test]
 fn kv_cache_signature_prefix_match_allows_appended_messages() {
     let baseline_messages = vec![
         crate::message::Message::user("first prompt"),

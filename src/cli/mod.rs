@@ -1,5 +1,6 @@
 pub mod acp;
 pub mod args;
+pub mod assistant;
 pub mod auth_test;
 pub mod commands;
 pub mod debug;

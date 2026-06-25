@@ -50,8 +50,9 @@ pub use evidence::{
     read_session_evidence, read_session_evidence_for_snapshot, read_session_evidence_from_path,
 };
 pub use jcode_session_types::{
-    EnvSnapshot, GitState, SessionImproveMode, SessionStatus, StoredCompactionState,
-    StoredDisplayRole, StoredMemoryInjection, StoredMessage, StoredTokenUsage,
+    AssistantSessionMeta, EnvSnapshot, GitState, SessionImproveMode, SessionStatus,
+    StoredCompactionState, StoredDisplayRole, StoredMemoryInjection, StoredMessage,
+    StoredTokenUsage,
 };
 use journal::{PersistVectorMode, SessionJournalMeta, SessionPersistState};
 pub use maintenance::prune_old_session_backups;
@@ -167,6 +168,9 @@ pub struct Session {
     /// Optional user-provided label for saved sessions
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub save_label: Option<String>,
+    /// Assistant-mode metadata (set when launched via `jcode assistant`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant: Option<AssistantSessionMeta>,
     /// Environment snapshots for post-mortem debugging
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env_snapshots: Vec<EnvSnapshot>,
@@ -243,6 +247,8 @@ struct SessionStartupStub {
     saved: bool,
     #[serde(default)]
     save_label: Option<String>,
+    #[serde(default)]
+    assistant: Option<AssistantSessionMeta>,
 }
 
 const MAX_SESSION_JOURNAL_BYTES: u64 = 512 * 1024;
@@ -337,6 +343,7 @@ impl Session {
         session.is_debug = stub.is_debug;
         session.saved = stub.saved;
         session.save_label = stub.save_label;
+        session.assistant = stub.assistant;
         session.messages.clear();
         session.env_snapshots.clear();
         session.memory_injections.clear();
@@ -372,6 +379,7 @@ impl Session {
         session.is_debug = snapshot.is_debug;
         session.saved = snapshot.saved;
         session.save_label = snapshot.save_label;
+        session.assistant = snapshot.assistant;
         session.replay_events.clear();
         session.env_snapshots.clear();
         session.memory_injections.clear();
@@ -509,6 +517,7 @@ impl Session {
             is_debug: self.is_debug,
             saved: self.saved,
             save_label: self.save_label.clone(),
+            assistant: self.assistant.clone(),
         }
     }
 
@@ -693,6 +702,7 @@ impl Session {
         self.is_debug = meta.is_debug;
         self.saved = meta.saved;
         self.save_label = meta.save_label;
+        self.assistant = meta.assistant;
         self.mark_memory_profile_dirty();
     }
 
@@ -733,6 +743,7 @@ impl Session {
             is_debug,
             saved: false,
             save_label: None,
+            assistant: None,
             env_snapshots: Vec::new(),
             memory_injections: Vec::new(),
             replay_events: Vec::new(),
@@ -780,6 +791,7 @@ impl Session {
             is_debug,
             saved: false,
             save_label: None,
+            assistant: None,
             env_snapshots: Vec::new(),
             memory_injections: Vec::new(),
             replay_events: Vec::new(),
@@ -1581,6 +1593,8 @@ struct RemoteStartupSessionSnapshot {
     saved: bool,
     #[serde(default)]
     save_label: Option<String>,
+    #[serde(default)]
+    assistant: Option<AssistantSessionMeta>,
 }
 
 #[cfg(test)]

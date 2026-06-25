@@ -1635,6 +1635,67 @@ pub(super) fn handle_git_status_completed(app: &mut App, completed: GitStatusCom
     }
 }
 
+/// `/assistant` and `/assistant status` — show assistant-mode metadata and
+/// recovery commands for the current session. When the session has no assistant
+/// metadata, explain how to launch one.
+fn handle_assistant_command(app: &mut App, trimmed: &str) -> bool {
+    if trimmed != "/assistant" && trimmed != "/assistant status" {
+        if trimmed.starts_with("/assistant ") {
+            app.push_display_message(DisplayMessage::error(
+                "Usage: /assistant or /assistant status".to_string(),
+            ));
+            return true;
+        }
+        return false;
+    }
+
+    let Some(meta) = app.session.assistant.clone() else {
+        app.push_display_message(
+            DisplayMessage::system(
+                "This session is not an assistant-mode session.\n\n\
+                 Launch one with: jcode assistant <profile>\n\
+                 List profiles:   jcode assistant list\n\
+                 Configure them under [assistant.profiles.<name>] in ~/.jcode/config.toml."
+                    .to_string(),
+            )
+            .with_title("Assistant"),
+        );
+        app.set_status_notice("Assistant");
+        return true;
+    };
+
+    let session_id = active_session_id(app);
+    let mut out = String::new();
+    out.push_str(&format!("Profile:  {}\n", meta.display_label()));
+    out.push_str(&format!("  key:    {}\n", meta.profile));
+    if let Some(cwd) = meta.cwd.as_deref() {
+        out.push_str(&format!("  cwd:    {cwd}\n"));
+    }
+    out.push_str(&format!("  session: {session_id}\n"));
+    if let Some(backing) = meta.backing.as_deref() {
+        out.push_str(&format!("  backing: zmx: {backing}\n"));
+    }
+    if let Some(checkpoint) = meta.last_checkpoint.as_deref() {
+        out.push_str(&format!("  last checkpoint: {checkpoint}\n"));
+    }
+    if let Some(validation) = meta.last_validation.as_deref() {
+        out.push_str(&format!("  last validation: {validation}\n"));
+    }
+
+    out.push_str("\nRecovery commands:\n");
+    out.push_str(&format!("  jcode assistant {}\n", meta.profile));
+    out.push_str(&format!("  jcode --resume {session_id}\n"));
+    out.push_str(&format!("  jcode assistant status {}\n", meta.profile));
+    if let Some(backing) = meta.backing.as_deref() {
+        out.push_str(&format!("  zmx attach {backing}\n"));
+        out.push_str(&format!("  zmx history {backing}\n"));
+    }
+
+    app.push_display_message(DisplayMessage::system(out).with_title("Assistant status"));
+    app.set_status_notice("Assistant status");
+    true
+}
+
 pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
     if handle_subagent_model_command(app, trimmed)
         || app.handle_hotkeys_command(trimmed)
@@ -1647,6 +1708,7 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
         || handle_fork_command(app, trimmed)
         || handle_transcript_command(app, trimmed)
         || handle_git_command(app, trimmed)
+        || handle_assistant_command(app, trimmed)
         || handle_catchup_command(app, trimmed)
         || handle_back_command(app, trimmed)
         || handle_autoreview_command_local(app, trimmed)
