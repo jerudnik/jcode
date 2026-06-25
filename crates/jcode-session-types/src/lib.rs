@@ -942,6 +942,57 @@ fn ceil_char_boundary(s: &str, i: usize) -> usize {
     idx.min(s.len())
 }
 
+/// Assistant-mode metadata persisted on a session.
+///
+/// Recorded when a session is launched/resumed via `jcode assistant <profile>`
+/// so the TUI can recover intent (which profile, where, what backing) and show
+/// compact assistant chrome. All zmx/backing fields are optional; assistant
+/// mode works without them.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssistantSessionMeta {
+    /// Assistant profile name (config key), e.g. "infra".
+    pub profile: String,
+
+    /// Human-readable display/session name, e.g. "Infra".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+
+    /// Working directory the assistant launched in (resolved, absolute).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+
+    /// Optional zmx session name or external backing label. Display-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backing: Option<String>,
+
+    /// Last checkpoint summary recorded for this assistant session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checkpoint: Option<String>,
+
+    /// Last validation summary recorded for this assistant session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_validation: Option<String>,
+}
+
+impl AssistantSessionMeta {
+    /// Construct metadata for a profile launch with a resolved cwd.
+    pub fn new(profile: impl Into<String>) -> Self {
+        Self {
+            profile: profile.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Display name with fallback to the profile name.
+    pub fn display_label(&self) -> &str {
+        self.display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&self.profile)
+    }
+}
+
 #[cfg(test)]
 mod session_search_tests {
     use super::*;
@@ -1067,5 +1118,33 @@ mod session_search_tests {
         let fenced = session_search_markdown_code_block("contains ``` fence");
         assert!(fenced.starts_with("````text\n"));
         assert!(fenced.ends_with("\n````"));
+    }
+
+    #[test]
+    fn assistant_session_meta_roundtrips() {
+        let meta = AssistantSessionMeta {
+            profile: "infra".to_string(),
+            display_name: Some("Infra".to_string()),
+            cwd: Some("/home/john/infrastructure/4nix".to_string()),
+            backing: Some("jcode-assistant-infra".to_string()),
+            last_checkpoint: Some("wired CLI".to_string()),
+            last_validation: Some("cargo check passed".to_string()),
+        };
+        let json = serde_json::to_string(&meta).expect("serialize");
+        let restored: AssistantSessionMeta = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(meta, restored);
+        assert_eq!(restored.display_label(), "Infra");
+    }
+
+    #[test]
+    fn assistant_session_meta_minimal_skips_optional_fields() {
+        let meta = AssistantSessionMeta::new("scratch");
+        let json = serde_json::to_string(&meta).expect("serialize");
+        // Optional fields are omitted when absent.
+        assert!(!json.contains("display_name"));
+        assert!(!json.contains("backing"));
+        let restored: AssistantSessionMeta = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.display_label(), "scratch");
+        assert!(restored.cwd.is_none());
     }
 }

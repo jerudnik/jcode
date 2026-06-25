@@ -616,6 +616,101 @@ fn append_batch_progress_spans(
     }
 }
 
+/// Build the compact assistant chrome line shown for assistant-mode sessions.
+///
+/// Format (truncated by caller width): `🤖 <profile> · <dir>@<branch> · <name>
+/// · zmx:<backing> · ✓ <validation>`. Returns `None` when the session has no
+/// assistant metadata.
+fn assistant_chrome_line(app: &dyn TuiState) -> Option<Line<'static>> {
+    let meta = app.assistant_status()?;
+    let data = app.info_widget_data();
+    let dir_label = meta
+        .cwd
+        .as_deref()
+        .and_then(session_facts::dir_label_short)
+        .or_else(|| {
+            app.working_dir()
+                .as_deref()
+                .and_then(session_facts::dir_label_short)
+        });
+    let branch = data
+        .git_info
+        .as_ref()
+        .map(|g| g.branch.clone())
+        .filter(|b| !b.is_empty());
+    let session_name = app.session_display_name();
+    Some(assistant_chrome_spans(
+        &meta,
+        dir_label.as_deref(),
+        branch.as_deref(),
+        session_name.as_deref(),
+    ))
+}
+
+/// Pure span builder for the assistant chrome line. Separated from the
+/// `TuiState` lookups in [`assistant_chrome_line`] so it can be unit-tested.
+fn assistant_chrome_spans(
+    meta: &crate::session::AssistantSessionMeta,
+    dir_label: Option<&str>,
+    branch: Option<&str>,
+    session_name: Option<&str>,
+) -> Line<'static> {
+    let accent = rgb(140, 200, 255);
+    let dim = dim_color();
+    let sep = || Span::styled(" · ", Style::default().fg(rgb(100, 100, 110)));
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.push(Span::styled("🤖 ", Style::default().fg(accent)));
+    spans.push(Span::styled(
+        meta.display_label().to_string(),
+        Style::default().fg(accent).bold(),
+    ));
+
+    // cwd/repo + branch.
+    if let Some(dir) = dir_label.filter(|d| !d.is_empty()) {
+        spans.push(sep());
+        let loc = match branch.filter(|b| !b.is_empty()) {
+            Some(branch) => format!("{dir}@{branch}"),
+            None => dir.to_string(),
+        };
+        spans.push(Span::styled(loc, Style::default().fg(dim)));
+    }
+
+    // Session name (memorable short name) when distinct from the profile label.
+    if let Some(name) = session_name.filter(|n| !n.is_empty()) {
+        if name != meta.display_label() && name != meta.profile {
+            spans.push(sep());
+            spans.push(Span::styled(name.to_string(), Style::default().fg(dim)));
+        }
+    }
+
+    // Optional zmx/backing label.
+    if let Some(backing) = meta.backing.as_deref().filter(|b| !b.is_empty()) {
+        spans.push(sep());
+        spans.push(Span::styled(
+            format!("zmx:{backing}"),
+            Style::default().fg(rgb(150, 150, 110)),
+        ));
+    }
+
+    // Last validation or checkpoint summary, whichever is set (validation wins).
+    if let Some(validation) = meta.last_validation.as_deref().filter(|s| !s.is_empty()) {
+        spans.push(sep());
+        spans.push(Span::styled(
+            format!("✓ {validation}"),
+            Style::default().fg(rgb(120, 200, 140)),
+        ));
+    } else if let Some(checkpoint) = meta.last_checkpoint.as_deref().filter(|s| !s.is_empty()) {
+        spans.push(sep());
+        spans.push(Span::styled(
+            format!("◇ {checkpoint}"),
+            Style::default().fg(dim),
+        ));
+    }
+
+    Line::from(spans)
+}
+
 pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pending_count: usize) {
     let elapsed = app.elapsed().map(|d| d.as_secs_f32()).unwrap_or(0.0);
     let stale_secs = app.time_since_activity().map(|d| d.as_secs_f32());
@@ -931,6 +1026,8 @@ pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pen
                 Span::styled("⚠ ", Style::default().fg(warning_color)),
                 Span::styled(warning, Style::default().fg(warning_color)),
             ])
+        } else if let Some(chrome) = assistant_chrome_line(app) {
+            chrome
         } else if let Some(tip) =
             occasional_status_tip(area.width as usize, app.animation_elapsed() as u64)
         {
@@ -942,7 +1039,9 @@ pub(super) fn draw_status(frame: &mut Frame, app: &dyn TuiState, area: Rect, pen
             Line::from("")
         }
     } else {
-        if let Some(tip) =
+        if let Some(chrome) = assistant_chrome_line(app) {
+            chrome
+        } else if let Some(tip) =
             occasional_status_tip(area.width as usize, app.animation_elapsed() as u64)
         {
             Line::from(vec![Span::styled(tip, Style::default().fg(dim_color()))])
@@ -1003,6 +1102,67 @@ fn streaming_status_spans(
 mod tests {
     use super::*;
     use ratatui::style::Modifier;
+
+    fn chrome_text(line: &Line<'static>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn assistant_chrome_line_includes_profile_dir_branch_backing_validation() {
+        let meta = crate::session::AssistantSessionMeta {
+            profile: "infra".to_string(),
+            display_name: Some("Infra".to_string()),
+            cwd: Some("/home/john/infrastructure/4nix".to_string()),
+            backing: Some("jcode-assistant-infra".to_string()),
+            last_checkpoint: Some("ignored when validation set".to_string()),
+            last_validation: Some("cargo check ok".to_string()),
+        };
+        let line = assistant_chrome_spans(
+            &meta,
+            Some("…/infrastructure/4nix"),
+            Some("main"),
+            Some("fox"),
+        );
+        let text = chrome_text(&line);
+        assert!(text.contains("Infra"), "profile label missing: {text}");
+        assert!(
+            text.contains("…/infrastructure/4nix@main"),
+            "dir@branch missing: {text}"
+        );
+        assert!(text.contains("fox"), "session name missing: {text}");
+        assert!(
+            text.contains("zmx:jcode-assistant-infra"),
+            "backing missing: {text}"
+        );
+        assert!(
+            text.contains("✓ cargo check ok"),
+            "validation missing: {text}"
+        );
+        // Validation wins over checkpoint.
+        assert!(!text.contains("ignored when validation set"));
+    }
+
+    #[test]
+    fn assistant_chrome_line_minimal_just_profile() {
+        let meta = crate::session::AssistantSessionMeta::new("scratch");
+        let line = assistant_chrome_spans(&meta, None, None, None);
+        let text = chrome_text(&line);
+        assert!(text.contains("scratch"));
+        assert!(!text.contains("zmx:"));
+        assert!(!text.contains('@'));
+    }
+
+    #[test]
+    fn assistant_chrome_line_checkpoint_when_no_validation() {
+        let mut meta = crate::session::AssistantSessionMeta::new("jcode");
+        meta.last_checkpoint = Some("wired chrome".to_string());
+        let line = assistant_chrome_spans(&meta, Some("jcode"), None, None);
+        let text = chrome_text(&line);
+        assert!(
+            text.contains("◇ wired chrome"),
+            "checkpoint missing: {text}"
+        );
+    }
 
     #[test]
     fn idle_input_hint_combines_dir_and_model() {

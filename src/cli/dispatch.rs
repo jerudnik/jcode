@@ -6,9 +6,9 @@ use std::process::{Command as ProcessCommand, Stdio};
 use std::time::Instant;
 
 use super::args::{
-    AmbientCommand, Args, AuthCommand, CloudCommand, CloudSessionsCommand, Command, MemoryCommand,
-    ModelCommand, ProviderCommand, RestartCommand, ServerCommand, SessionCommand,
-    TranscriptModeArg,
+    AmbientCommand, Args, AssistantCommand, AuthCommand, CloudCommand, CloudSessionsCommand,
+    Command, MemoryCommand, ModelCommand, ProviderCommand, RestartCommand, ServerCommand,
+    SessionCommand, TranscriptModeArg,
 };
 use crate::{
     agent, auth, build, provider, provider_catalog, server, session, setup_hints, startup_profile,
@@ -16,7 +16,8 @@ use crate::{
 };
 
 use super::{
-    acp, commands, debug, hot_exec, login, output, provider_init, selfdev, terminal, tui_launch,
+    acp, assistant, commands, debug, hot_exec, login, output, provider_init, selfdev, terminal,
+    tui_launch,
 };
 use provider_init::ProviderChoice;
 
@@ -53,6 +54,36 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         || args.disable_base_tools
     {
         crate::config::invalidate_config_cache();
+    }
+
+    // Assistant profile commands. `list`/`status` are terminal; a bare
+    // `jcode assistant <profile>` launch resolves the profile, rewrites `args`
+    // to resume the associated session in the profile cwd, then continues into
+    // the standard default-launch path below.
+    if let Some(Command::Assistant(subcmd)) = args.command {
+        args.command = None;
+        match subcmd {
+            AssistantCommand::List { json } => {
+                assistant::run_list(json)?;
+                return Ok(());
+            }
+            AssistantCommand::Status { profile, json } => {
+                assistant::run_status(&profile, json)?;
+                return Ok(());
+            }
+            AssistantCommand::Launch(launch_args) => {
+                let Some(profile_name) = assistant::launch_profile_name(&launch_args) else {
+                    eprintln!("Usage: jcode assistant <profile> | list | status <profile>");
+                    eprintln!();
+                    eprintln!("{}", assistant::example_config(""));
+                    std::process::exit(1);
+                };
+                if !assistant::prepare_launch(&mut args, &profile_name)? {
+                    std::process::exit(1);
+                }
+                // Fall through to the default launch path with the rewritten args.
+            }
+        }
     }
 
     match args.command {
@@ -428,6 +459,11 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         },
         Some(Command::Menubar { once, json }) => {
             commands::run_menubar_command(once, json)?;
+        }
+        // Assistant launches are rewritten to `None` (default launch) above;
+        // `list`/`status` return early. This arm is therefore unreachable.
+        Some(Command::Assistant(_)) => {
+            unreachable!("assistant commands are handled before the main dispatch match")
         }
         None => run_default_command(args).await?,
     }

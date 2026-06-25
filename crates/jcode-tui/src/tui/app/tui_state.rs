@@ -812,6 +812,10 @@ impl crate::tui::TuiState for App {
         }
     }
 
+    fn assistant_status(&self) -> Option<crate::session::AssistantSessionMeta> {
+        self.session.assistant.clone()
+    }
+
     fn server_display_name(&self) -> Option<String> {
         self.remote_server_short_name.clone().or_else(|| {
             if !self.is_remote {

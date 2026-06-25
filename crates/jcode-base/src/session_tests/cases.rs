@@ -564,6 +564,85 @@ fn load_for_remote_startup_preserves_messages_and_replay_but_skips_heavy_vectors
 }
 
 #[test]
+fn assistant_session_meta_survives_save_and_all_load_paths() -> Result<()> {
+    let _env_lock = lock_env();
+    let temp_home = tempfile::Builder::new()
+        .prefix("jcode-assistant-meta-test-")
+        .tempdir()
+        .map_err(|e| anyhow!(e))?;
+    let _home = EnvVarGuard::set("JCODE_HOME", temp_home.path().as_os_str());
+
+    let session_id = "session_assistant-infra_assistant_infra";
+    let mut session =
+        Session::create_with_id(session_id.to_string(), None, Some("Infra".to_string()));
+    session.working_dir = Some("/home/john/infrastructure/4nix".to_string());
+    session.assistant = Some(AssistantSessionMeta {
+        profile: "infra".to_string(),
+        display_name: Some("Infra".to_string()),
+        cwd: Some("/home/john/infrastructure/4nix".to_string()),
+        backing: Some("jcode-assistant-infra".to_string()),
+        last_checkpoint: Some("wired chrome".to_string()),
+        last_validation: Some("cargo test passed".to_string()),
+    });
+    session.append_stored_message(StoredMessage {
+        id: "msg_assistant_1".to_string(),
+        role: Role::User,
+        content: vec![ContentBlock::Text {
+            text: "status?".to_string(),
+            cache_control: None,
+        }],
+        display_role: None,
+        timestamp: Some(Utc::now()),
+        tool_duration_ms: None,
+        token_usage: None,
+    });
+    session.save()?;
+
+    // Full load (server restore_session path).
+    let full = Session::load(session_id)?;
+    let full_meta = full.assistant.expect("assistant meta on full load");
+    assert_eq!(full_meta.profile, "infra");
+    assert_eq!(full_meta.display_name.as_deref(), Some("Infra"));
+    assert_eq!(full_meta.backing.as_deref(), Some("jcode-assistant-infra"));
+    assert_eq!(full_meta.last_checkpoint.as_deref(), Some("wired chrome"));
+    assert_eq!(
+        full_meta.last_validation.as_deref(),
+        Some("cargo test passed")
+    );
+
+    // Startup stub (lightweight client/title path).
+    let stub = Session::load_startup_stub(session_id)?;
+    let stub_meta = stub.assistant.expect("assistant meta on startup stub");
+    assert_eq!(stub_meta.profile, "infra");
+    assert_eq!(stub_meta.backing.as_deref(), Some("jcode-assistant-infra"));
+
+    // Remote startup snapshot (remote-first TUI path).
+    let remote = Session::load_for_remote_startup(session_id)?;
+    let remote_meta = remote.assistant.expect("assistant meta on remote startup");
+    assert_eq!(remote_meta.profile, "infra");
+    assert_eq!(
+        remote_meta.cwd.as_deref(),
+        Some("/home/john/infrastructure/4nix")
+    );
+
+    // A journal append (metadata change) must keep the assistant block.
+    let mut reopened = Session::load(session_id)?;
+    if let Some(meta) = reopened.assistant.as_mut() {
+        meta.last_validation = Some("nix flake check passed".to_string());
+    }
+    reopened.save()?;
+    let after_append = Session::load(session_id)?;
+    assert_eq!(
+        after_append
+            .assistant
+            .and_then(|m| m.last_validation)
+            .as_deref(),
+        Some("nix flake check passed")
+    );
+    Ok(())
+}
+
+#[test]
 fn test_create_marks_debug_when_test_session_env_enabled() {
     let _env_lock = lock_env();
     let _test_flag = EnvVarGuard::set("JCODE_TEST_SESSION", "1");

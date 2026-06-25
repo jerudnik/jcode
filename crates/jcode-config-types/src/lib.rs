@@ -1531,3 +1531,317 @@ pub struct LaunchHotkeysConfig {
     /// per-repo mapping a single time and never clobber later user edits.
     pub imported: bool,
 }
+
+/// Named assistant profiles, keyed by profile name.
+///
+/// An assistant profile turns Jcode into a persistent assistant shell for a
+/// specific context (e.g. `infra`, `jcode`, `scratch`). Launching a profile
+/// resolves its working directory, resumes or creates its associated session,
+/// and surfaces intentional chrome in the TUI.
+///
+/// Example config (`~/.jcode/config.toml`):
+/// ```toml
+/// [assistant.profiles.infra]
+/// cwd = "~/infrastructure/4nix"
+/// display_name = "Infra"
+/// session_name_pattern = "assistant-infra"
+/// model = "claude-opus-4-6"
+/// provider = "claude"
+/// memory_scope = "project"
+/// startup_reminder = "You are the infra assistant. Stay in 4nix."
+/// zmx_session = "jcode-assistant-infra"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct AssistantProfilesConfig {
+    /// Profiles keyed by profile name (e.g. "infra", "jcode", "scratch").
+    pub profiles: std::collections::BTreeMap<String, AssistantProfile>,
+}
+
+impl AssistantProfilesConfig {
+    /// Look up a profile by name (case-sensitive, matching the config key).
+    pub fn get(&self, name: &str) -> Option<&AssistantProfile> {
+        self.profiles.get(name)
+    }
+
+    /// Profile names sorted for stable listing output.
+    pub fn names(&self) -> Vec<&str> {
+        self.profiles.keys().map(String::as_str).collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.profiles.is_empty()
+    }
+
+    /// Validate every profile, returning the first error keyed by profile name.
+    pub fn validate(&self) -> Result<(), AssistantProfileError> {
+        for (name, profile) in &self.profiles {
+            profile.validate(name)?;
+        }
+        Ok(())
+    }
+}
+
+/// Memory/project scope for an assistant profile.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AssistantMemoryScope {
+    /// Scope memory to the profile's working directory / project (default).
+    #[default]
+    Project,
+    /// Use the global memory scope.
+    Global,
+}
+
+impl AssistantMemoryScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Global => "global",
+        }
+    }
+}
+
+/// A single named assistant profile.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+pub struct AssistantProfile {
+    /// Working directory the assistant launches in. Supports a leading `~`.
+    /// Required; an empty cwd fails validation.
+    pub cwd: String,
+
+    /// Human-readable display name shown in chrome (e.g. "Infra").
+    /// Falls back to the profile key when empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+
+    /// Session naming pattern used to derive the associated session's short
+    /// name/title. `{profile}` expands to the profile key. When empty, defaults
+    /// to `assistant-{profile}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_name_pattern: Option<String>,
+
+    /// Default model hint (e.g. "claude-opus-4-6"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    /// Default provider hint (e.g. "claude", "openai"). Optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+
+    /// Memory/project scope for the assistant session.
+    #[serde(default)]
+    pub memory_scope: AssistantMemoryScope,
+
+    /// Startup reminder text injected/surfaced when the assistant launches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_reminder: Option<String>,
+
+    /// Optional zmx session name or external backing label. Display-only; never
+    /// required for launch/resume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zmx_session: Option<String>,
+}
+
+impl AssistantProfile {
+    /// Display name with fallback to the profile key.
+    pub fn display_name_or<'a>(&'a self, profile_name: &'a str) -> &'a str {
+        self.display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(profile_name)
+    }
+
+    /// Resolve the session short name for this profile, expanding `{profile}`.
+    pub fn session_name(&self, profile_name: &str) -> String {
+        let pattern = self
+            .session_name_pattern
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("assistant-{profile_name}"));
+        pattern.replace("{profile}", profile_name)
+    }
+
+    /// Expand a leading `~` in the configured cwd against `$HOME`.
+    pub fn resolved_cwd(&self) -> String {
+        expand_home(&self.cwd)
+    }
+
+    /// Validate this profile. `profile_name` is used only for error messages.
+    pub fn validate(&self, profile_name: &str) -> Result<(), AssistantProfileError> {
+        if profile_name.trim().is_empty() {
+            return Err(AssistantProfileError::EmptyName);
+        }
+        if self.cwd.trim().is_empty() {
+            return Err(AssistantProfileError::MissingCwd {
+                profile: profile_name.to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Errors produced while validating assistant profiles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssistantProfileError {
+    /// A profile key was empty.
+    EmptyName,
+    /// A profile has no working directory configured.
+    MissingCwd { profile: String },
+    /// No profile matched the requested name.
+    NotFound {
+        requested: String,
+        available: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for AssistantProfileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyName => write!(f, "assistant profile name must not be empty"),
+            Self::MissingCwd { profile } => {
+                write!(f, "assistant profile '{profile}' is missing a cwd")
+            }
+            Self::NotFound {
+                requested,
+                available,
+            } => {
+                if available.is_empty() {
+                    write!(
+                        f,
+                        "no assistant profile named '{requested}' (no profiles configured)"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "no assistant profile named '{requested}' (available: {})",
+                        available.join(", ")
+                    )
+                }
+            }
+        }
+    }
+}
+
+impl std::error::Error for AssistantProfileError {}
+
+/// Expand a leading `~` / `~/` against `$HOME`. Other paths pass through.
+fn expand_home(path: &str) -> String {
+    if path == "~" {
+        if let Ok(home) = std::env::var("HOME") {
+            return home;
+        }
+        return path.to_string();
+    }
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return format!("{}/{}", home.trim_end_matches('/'), rest);
+        }
+    }
+    path.to_string()
+}
+
+#[cfg(test)]
+mod assistant_tests {
+    use super::*;
+
+    #[test]
+    fn profile_parses_full_toml() {
+        let toml = r#"
+[profiles.infra]
+cwd = "/home/john/infrastructure/4nix"
+display_name = "Infra"
+session_name_pattern = "assistant-{profile}"
+model = "claude-opus-4-6"
+provider = "claude"
+memory_scope = "project"
+startup_reminder = "Stay in 4nix."
+zmx_session = "jcode-assistant-infra"
+"#;
+        let config: AssistantProfilesConfig = toml::from_str(toml).expect("parse");
+        let profile = config.get("infra").expect("infra profile");
+        assert_eq!(profile.cwd, "/home/john/infrastructure/4nix");
+        assert_eq!(profile.display_name_or("infra"), "Infra");
+        assert_eq!(profile.session_name("infra"), "assistant-infra");
+        assert_eq!(profile.model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(profile.provider.as_deref(), Some("claude"));
+        assert_eq!(profile.memory_scope, AssistantMemoryScope::Project);
+        assert_eq!(profile.startup_reminder.as_deref(), Some("Stay in 4nix."));
+        assert_eq!(
+            profile.zmx_session.as_deref(),
+            Some("jcode-assistant-infra")
+        );
+        config.validate().expect("valid");
+    }
+
+    #[test]
+    fn minimal_profile_uses_defaults() {
+        let toml = r#"
+[profiles.scratch]
+cwd = "/tmp"
+"#;
+        let config: AssistantProfilesConfig = toml::from_str(toml).expect("parse");
+        let profile = config.get("scratch").expect("scratch profile");
+        assert_eq!(profile.display_name_or("scratch"), "scratch");
+        assert_eq!(profile.session_name("scratch"), "assistant-scratch");
+        assert_eq!(profile.memory_scope, AssistantMemoryScope::Project);
+        assert!(profile.model.is_none());
+        assert!(profile.zmx_session.is_none());
+    }
+
+    #[test]
+    fn session_name_pattern_expands_profile_token() {
+        let profile = AssistantProfile {
+            cwd: "/tmp".to_string(),
+            session_name_pattern: Some("jcode-{profile}-shell".to_string()),
+            ..AssistantProfile::default()
+        };
+        assert_eq!(profile.session_name("jcode"), "jcode-jcode-shell");
+    }
+
+    #[test]
+    fn missing_cwd_fails_validation() {
+        let profile = AssistantProfile::default();
+        assert_eq!(
+            profile.validate("infra"),
+            Err(AssistantProfileError::MissingCwd {
+                profile: "infra".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn validate_reports_first_bad_profile() {
+        let mut config = AssistantProfilesConfig::default();
+        config.profiles.insert(
+            "ok".to_string(),
+            AssistantProfile {
+                cwd: "/tmp".to_string(),
+                ..AssistantProfile::default()
+            },
+        );
+        config
+            .profiles
+            .insert("bad".to_string(), AssistantProfile::default());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn expand_home_handles_tilde() {
+        // Save and set HOME deterministically.
+        let prev = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", "/home/tester");
+        }
+        assert_eq!(expand_home("~"), "/home/tester");
+        assert_eq!(expand_home("~/infra/4nix"), "/home/tester/infra/4nix");
+        assert_eq!(expand_home("/abs/path"), "/abs/path");
+        match prev {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+    }
+}
