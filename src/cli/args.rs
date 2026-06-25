@@ -274,6 +274,10 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Session(SessionCommand),
 
+    /// Launch or inspect named assistant profiles
+    #[command(subcommand)]
+    Assistant(AssistantCommand),
+
     /// Ambient mode management
     #[command(subcommand)]
     Ambient(AmbientCommand),
@@ -798,6 +802,31 @@ pub(crate) enum SessionCommand {
         #[arg(long)]
         json: bool,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum AssistantCommand {
+    /// List configured assistant profiles
+    List {
+        /// Emit JSON instead of human-readable output
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show status/recovery info for one assistant profile
+    Status {
+        /// Profile name, e.g. infra
+        profile: String,
+
+        /// Emit JSON instead of human-readable output
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Launch (or resume) an assistant profile in the TUI. This is the default
+    /// when you run `jcode assistant <profile>`.
+    #[command(external_subcommand)]
+    Launch(Vec<String>),
 }
 
 #[derive(Subcommand, Debug)]

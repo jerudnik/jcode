@@ -293,6 +293,12 @@ pub trait TuiState {
     fn current_session_id(&self) -> Option<String>;
     /// Session display name (memorable short name like "fox" or "oak")
     fn session_display_name(&self) -> Option<String>;
+    /// Assistant-mode metadata for this session, when launched via
+    /// `jcode assistant <profile>`. Drives the compact assistant chrome line and
+    /// `/assistant status`. `None` for ordinary sessions.
+    fn assistant_status(&self) -> Option<crate::session::AssistantSessionMeta> {
+        None
+    }
     /// Server display name (modifier like "running" or "blazing") - only set in remote mode
     fn server_display_name(&self) -> Option<String>;
     /// Server icon (e.g., "🔥", "🌫️") - only set in remote mode

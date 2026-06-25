@@ -4,7 +4,8 @@
 //! Environment variables override config file settings.
 
 pub use jcode_config_types::{
-    AgentsConfig, AmbientConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig, CompactionConfig,
+    AgentsConfig, AmbientConfig, AssistantMemoryScope, AssistantProfile, AssistantProfileError,
+    AssistantProfilesConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig, CompactionConfig,
     CompactionMode, CrossProviderFailoverMode, DiagramDisplayMode, DiagramPanePosition,
     DiffDisplayMode, DisplayConfig, FeatureConfig, GatewayConfig, HooksConfig, KeybindingsConfig,
     LaunchHotkeyEntry, LaunchHotkeysConfig, MarkdownSpacingMode, NamedProviderAuth,
@@ -509,6 +510,8 @@ pub struct Config {
 
     /// Global "launch a new jcode" hotkeys (macOS). Baked once by auto-import.
     pub launch_hotkeys: LaunchHotkeysConfig,
+    /// Named assistant profiles for `jcode assistant <profile>`.
+    pub assistant: AssistantProfilesConfig,
 }
 
 /// Agent Client Protocol adapter configuration.

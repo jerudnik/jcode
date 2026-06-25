@@ -85,6 +85,66 @@ fn reload_handoff_active_when_server_flag_is_set() {
     assert!(reconnect::reload_handoff_active(&state));
 }
 
+/// Render a full chat frame and return the visible text, one line per row.
+fn render_frame_text(app: &crate::tui::app::App, width: u16, height: u16) -> String {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+    terminal
+        .draw(|frame| crate::tui::ui::draw(frame, app))
+        .expect("draw");
+    let buffer = terminal.backend().buffer().clone();
+    let mut rows: Vec<String> = Vec::with_capacity(height as usize);
+    for y in 0..height {
+        let mut row = String::new();
+        for x in 0..width {
+            row.push_str(buffer[(x, y)].symbol());
+        }
+        rows.push(row.trim_end().to_string());
+    }
+    rows.join("\n")
+}
+
+#[test]
+fn assistant_chrome_appears_in_rendered_status_line() {
+    let mut app = create_test_app();
+    app.session.assistant = Some(crate::session::AssistantSessionMeta {
+        profile: "infra".to_string(),
+        display_name: Some("Infra".to_string()),
+        cwd: Some("/home/john/infrastructure/4nix".to_string()),
+        backing: Some("jcode-assistant-infra".to_string()),
+        last_checkpoint: None,
+        last_validation: Some("cargo check ok".to_string()),
+    });
+
+    let text = render_frame_text(&app, 120, 24);
+    assert!(
+        text.contains("Infra"),
+        "assistant profile label should render in chrome:\n{text}"
+    );
+    assert!(
+        text.contains("zmx:jcode-assistant-infra"),
+        "backing label should render in chrome:\n{text}"
+    );
+    assert!(
+        text.contains("cargo check ok"),
+        "validation summary should render in chrome:\n{text}"
+    );
+}
+
+#[test]
+fn no_assistant_chrome_for_ordinary_session() {
+    let app = create_test_app();
+    // A fresh test app has no assistant metadata; the chrome glyph must not show.
+    let text = render_frame_text(&app, 120, 24);
+    assert!(
+        !text.contains("zmx:"),
+        "ordinary sessions must not show assistant backing chrome:\n{text}"
+    );
+}
+
 #[test]
 fn client_focus_defaults_to_true() {
     let app = create_test_app();
