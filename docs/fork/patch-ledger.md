@@ -12,6 +12,7 @@ retirement condition and validation command.
 | ACP session config options | `feature(acp)` | `planned-upstream-pr` | none yet | Retire or reduce once upstream exposes equivalent ACP session config controls. | `cargo check --workspace` |
 | Auth refresh warning suppression | `compat(auth)` | `temporary-shim` | none yet | Upstream no longer warns on multi-provider model state after auth refresh. | `cargo check --workspace` |
 | dev_cargo clang fallback | `distro(dev)` | `local-only` | none | Keep while local development environments may lack clang. | `scripts/dev_cargo.sh --help` |
+| Nix dependency-cache stability (git stamp out of `buildDepsOnly`) | `distro(nix)` | `permanent-downstream` | none | Keep; this is a packaging correctness property, not an upstream concern. Watch that future `package.nix` edits never move `JCODE_BUILD_GIT_*` back into `commonArgs`. | gitHash A vs B must yield identical `cargoArtifacts.drvPath` (see commit `02bcc628`) |
 
 Statuses:
 
