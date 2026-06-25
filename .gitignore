@@ -34,3 +34,6 @@ CLAUDE.md
 /.codex/
 /.gemini/
 /.claude/mcp.json
+
+# qmd generated databases
+.qmd/
