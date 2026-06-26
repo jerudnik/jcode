@@ -35,10 +35,11 @@ impl Agent {
         started_at: Instant,
         output: Option<&str>,
     ) {
+        let status = status_for_result(result);
         let correlation = self.current_turn_evidence_correlation();
         self.append_session_evidence_with_correlation(
             SessionLogEventKind::TurnFinished {
-                status: status_for_result(result),
+                status,
                 duration_ms: started_at.elapsed().as_millis() as u64,
                 output: output.map(|text| {
                     crate::session::payload_summary_text(text, Some("text/plain".to_string()))
@@ -47,7 +48,46 @@ impl Agent {
             },
             correlation,
         );
+        self.record_assistant_checkpoint(status);
         self.current_evidence_turn_id = None;
+    }
+
+    /// Auto-populate the assistant session's `last_checkpoint` from this
+    /// in-process turn-end seam (AA-48 safe subset).
+    ///
+    /// Previously `AssistantSessionMeta.last_checkpoint` was inert: chrome and
+    /// `/assistant status` only displayed it, nothing wrote it. Here we derive a
+    /// deterministic recovery breadcrumb (UTC time, turn status, short git head)
+    /// at the same seam that closes the evidence turn, and persist it. No-op for
+    /// non-assistant sessions, so plain sessions are unchanged.
+    fn record_assistant_checkpoint(&mut self, status: SessionLogStatus) {
+        if self.session.assistant.is_none() {
+            return;
+        }
+        let checkpoint = self.build_assistant_checkpoint(status);
+        if let Some(meta) = self.session.assistant.as_mut() {
+            meta.last_checkpoint = Some(checkpoint);
+        }
+        self.persist_session_best_effort("assistant turn checkpoint");
+    }
+
+    /// Build the deterministic checkpoint summary string. Kept separate so it is
+    /// unit-testable without a running turn.
+    fn build_assistant_checkpoint(&self, status: SessionLogStatus) -> String {
+        let when = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        let status_label = match status {
+            SessionLogStatus::Ok => "ok",
+            SessionLogStatus::Error => "error",
+            SessionLogStatus::Cancelled => "cancelled",
+            SessionLogStatus::Interrupted => "interrupted",
+        };
+        match self.current_git_snapshot().and_then(|snapshot| snapshot.head) {
+            Some(head) => {
+                let short: String = head.chars().take(8).collect();
+                format!("turn {status_label} @ {when} (git {short})")
+            }
+            None => format!("turn {status_label} @ {when}"),
+        }
     }
 
     pub(super) fn append_session_evidence_with_correlation(
