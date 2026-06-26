@@ -1116,6 +1116,7 @@ mod tests {
             backing: Some("jcode-assistant-infra".to_string()),
             last_checkpoint: Some("ignored when validation set".to_string()),
             last_validation: Some("cargo check ok".to_string()),
+            persona: None,
         };
         let line = assistant_chrome_spans(
             &meta,

@@ -166,13 +166,15 @@ Each component is logged separately (provenance), so a surfaced memory can answe
 
 | Layer | Lives in | Cached? | Reactive? | Examples |
 |---|---|---|---|---|
-| **Static rails** | `prompt.rs::static_part` | yes | no | base prompt, AGENTS.md, skills, `.jcode` overlays, **persona/startup_reminder if deterministic-per-profile** |
-| **Dynamic turn context** | post-prefix `<system-reminder>` + `dynamic_part` | no | deterministic-per-turn only (today) | time/env, memory prompt, active skill |
+| **Static rails** | `prompt.rs::static_part` | yes (shared prefix) | no | base prompt, AGENTS.md, skills, `.jcode` overlays |
+| **Dynamic turn context** | post-prefix `<system-reminder>` + `dynamic_part` | no | deterministic-per-turn only (today) | time/env, memory prompt, active skill, **assistant persona/startup_reminder** |
 | **Reactive steering** | (does not exist yet) | no | yes - GATED | only external-signal-driven, EMA+hysteresis damped |
 
-**The line:** dynamism earns its latency/instability cost only when (a) the content genuinely changes per turn and (b) it is *deterministic given recorded inputs* (so it is replayable) **or** (c) it is reactive but external-signal-driven and damped per §3.2. Persona/startup_reminder is deterministic-per-profile, so it belongs in the static rails (AA-45 static subset) and ships now. Anything outcome-reactive waits on §6.
+**The line:** dynamism earns its latency/instability cost only when (a) the content genuinely changes per turn and (b) it is *deterministic given recorded inputs* (so it is replayable) **or** (c) it is reactive but external-signal-driven and damped per §3.2.
 
-**AA-45 implication:** the static persona injection is safe to ship immediately. The "reactive part" of AA-45 (adjusting persona/context in response to prior-turn behavior) is gated on the measurement method below.
+**Where persona goes (decided in implementation, AA-45):** persona/startup_reminder is deterministic-per-profile, but it does **not** go in `static_part`. The static prefix is the *shared, cache-stable* rails; per-profile persona there would fork the prompt cache across profiles and bleed into plain non-assistant sessions. Instead persona lands in the **dynamic (uncached) part** (`SplitSystemPrompt::append_assistant_persona`), which keeps the cached prefix byte-identical across profiles and plain sessions while still steering the model. It is deterministic (no prior-turn reactivity), so it is safe to ship now. Anything outcome-reactive waits on §6.
+
+**AA-45 implication:** the static (deterministic) persona injection is safe to ship immediately and is implemented. The "reactive part" of AA-45 (adjusting persona/context in response to prior-turn behavior) is gated on the measurement method below.
 
 ---
 
@@ -202,7 +204,7 @@ It gives an A/B over recorded sessions without re-calling the model for every tu
 
 ## 7. Recommendation
 
-1. **Ship now (no measurement needed):** AA-45 *static* persona/startup_reminder injection, placed in the deterministic rails (static for cache stability, or post-prefix dynamic if it must vary per-profile-per-turn but stays deterministic). Plain sessions unaffected. This is low-risk and high-leverage.
+1. **Ship now (no measurement needed):** AA-45 *deterministic* persona/startup_reminder injection. **Implemented:** placed in the post-prefix dynamic part (`SplitSystemPrompt::append_assistant_persona`), not the cached prefix, so plain non-assistant sessions and the shared prompt cache are byte-unaffected. Low-risk, high-leverage.
 2. **Build before any reactive work:** the §6 replay/eval harness over the evidence spine. This is the gate. It is also reusable by AA-41/AA-42 (self-improvement) and AA-51 (feedback loop).
 3. **Add a salience channel (§4.B)** as an explicit, separately-logged additive component (recency + importance/pin + frequency) on top of the existing relevance pipeline, validated through the §6 harness against the current memory bench. This is the concrete answer to "embedding relevance != user salience" and is *not* outcome-reactive, so it is safe once measured.
 4. **Defer / gate:** any outcome-responsive steering (per-turn reaction to prior-turn findings). Allowed only when (a) the §6 harness exists, (b) the trigger is an *external verifiable* signal, and (c) it is EMA+hysteresis+change-budget damped and append-only post-prefix (§3.2). Reacting to the model's own soft self-signal is rejected by the literature (§2).
