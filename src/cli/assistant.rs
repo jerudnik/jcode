@@ -53,6 +53,7 @@ pub(crate) fn example_config(profile_hint: &str) -> String {
          display_name = \"{title}\"\n\
          model = \"claude-opus-4-6\"\n\
          provider = \"claude\"\n\
+         mode = \"converse\"\n\
          startup_reminder = \"You are the {name} assistant.\"\n",
         name = name,
         title = capitalize(name),
@@ -107,12 +108,7 @@ pub(crate) fn build_session_meta(
         backing: profile.zmx_session.clone(),
         last_checkpoint: None,
         last_validation: None,
-        persona: profile
-            .startup_reminder
-            .as_deref()
-            .map(str::trim)
-            .filter(|reminder| !reminder.is_empty())
-            .map(str::to_string),
+        persona: profile.resolved_persona(),
     }
 }
 
@@ -166,6 +162,7 @@ fn render_status_text(profile_name: &str, profile: &AssistantProfile, session_id
         out.push_str(&format!("  provider: {provider}\n"));
     }
     out.push_str(&format!("  memory:  {}\n", profile.memory_scope.as_str()));
+    out.push_str(&format!("  mode:    {}\n", profile.mode.as_str()));
     if let Some(backing) = profile.zmx_session.as_deref() {
         out.push_str(&format!("  backing: zmx: {backing}\n"));
         out.push_str(&format!("    zmx attach {backing}\n"));
@@ -203,6 +200,7 @@ pub(crate) fn run_list(json: bool) -> Result<()> {
                     "model": profile.model,
                     "provider": profile.provider,
                     "memory_scope": profile.memory_scope.as_str(),
+                    "mode": profile.mode.as_str(),
                     "backing": profile.zmx_session,
                 })
             })
@@ -261,6 +259,7 @@ pub(crate) fn run_status(profile_name: &str, json: bool) -> Result<()> {
             "model": profile.model,
             "provider": profile.provider,
             "memory_scope": profile.memory_scope.as_str(),
+            "mode": profile.mode.as_str(),
             "backing": profile.zmx_session,
             "launch": format!("jcode assistant {profile_name}"),
             "resume": format!("jcode --resume {session_id}"),
