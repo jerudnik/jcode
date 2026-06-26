@@ -1602,6 +1602,49 @@ impl AssistantMemoryScope {
     }
 }
 
+/// Interaction stance for an assistant profile.
+///
+/// Biases how eagerly the assistant tool-calls versus discusses. This is a
+/// persona preset expressed as a real field (not just flavor text) so the
+/// stance is inspectable and can be set per profile. The stance is injected as
+/// a short deterministic preamble ahead of the profile persona, in the dynamic
+/// (uncached) system context; it never reacts to prior turns.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AssistantMode {
+    /// Default task-executor stance: do the work, report when done.
+    #[default]
+    Execute,
+    /// Collaborative stance: discuss, ask clarifying questions, and propose
+    /// before reflexively tool-calling.
+    Converse,
+}
+
+impl AssistantMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Execute => "execute",
+            Self::Converse => "converse",
+        }
+    }
+
+    /// Short deterministic stance preamble injected ahead of the profile
+    /// persona. Returns `None` for the default execute stance so plain and
+    /// execute-mode sessions get no extra tokens.
+    pub fn stance_preamble(self) -> Option<&'static str> {
+        match self {
+            Self::Execute => None,
+            Self::Converse => Some(
+                "Work in a collaborative, conversational stance. Discuss the request, \
+                 ask clarifying questions when intent is ambiguous, think out loud, and \
+                 propose an approach before reflexively tool-calling. Prefer a short \
+                 back-and-forth over silently executing when the path is unclear. Once \
+                 intent is clear, act.",
+            ),
+        }
+    }
+}
+
 /// A single named assistant profile.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
@@ -1632,6 +1675,12 @@ pub struct AssistantProfile {
     /// Memory/project scope for the assistant session.
     #[serde(default)]
     pub memory_scope: AssistantMemoryScope,
+
+    /// Interaction stance (execute vs converse). Default `execute` preserves the
+    /// existing task-executor behavior; `converse` biases toward discussion
+    /// before action.
+    #[serde(default)]
+    pub mode: AssistantMode,
 
     /// Startup reminder text injected/surfaced when the assistant launches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1668,6 +1717,26 @@ impl AssistantProfile {
     /// Expand a leading `~` in the configured cwd against `$HOME`.
     pub fn resolved_cwd(&self) -> String {
         expand_home(&self.cwd)
+    }
+
+    /// Resolve the effective persona text for this profile: the `mode` stance
+    /// preamble (if any) followed by the trimmed `startup_reminder` (if any).
+    ///
+    /// Returns `None` when neither contributes, so default `execute` profiles
+    /// with no reminder inject nothing. Deterministic per profile; this is the
+    /// text threaded into the session's dynamic (uncached) system context.
+    pub fn resolved_persona(&self) -> Option<String> {
+        let reminder = self
+            .startup_reminder
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        match (self.mode.stance_preamble(), reminder) {
+            (Some(stance), Some(reminder)) => Some(format!("{stance}\n\n{reminder}")),
+            (Some(stance), None) => Some(stance.to_string()),
+            (None, Some(reminder)) => Some(reminder.to_string()),
+            (None, None) => None,
+        }
     }
 
     /// Validate this profile. `profile_name` is used only for error messages.
@@ -1774,7 +1843,62 @@ zmx_session = "jcode-assistant-infra"
             profile.zmx_session.as_deref(),
             Some("jcode-assistant-infra")
         );
+        // Mode defaults to execute when unspecified.
+        assert_eq!(profile.mode, AssistantMode::Execute);
         config.validate().expect("valid");
+    }
+
+    #[test]
+    fn profile_parses_converse_mode() {
+        let toml = r#"
+[profiles.jcode]
+cwd = "/home/john/infrastructure/jcode"
+mode = "converse"
+startup_reminder = "You know the self-dev loop."
+"#;
+        let config: AssistantProfilesConfig = toml::from_str(toml).expect("parse");
+        let profile = config.get("jcode").expect("jcode profile");
+        assert_eq!(profile.mode, AssistantMode::Converse);
+        assert_eq!(profile.mode.as_str(), "converse");
+    }
+
+    #[test]
+    fn resolved_persona_combines_mode_and_reminder() {
+        // execute + reminder => just the reminder.
+        let execute = AssistantProfile {
+            cwd: "/tmp".to_string(),
+            startup_reminder: Some("  Stay in 4nix.  ".to_string()),
+            ..AssistantProfile::default()
+        };
+        assert_eq!(execute.resolved_persona().as_deref(), Some("Stay in 4nix."));
+
+        // execute + no reminder => nothing injected.
+        let bare = AssistantProfile {
+            cwd: "/tmp".to_string(),
+            ..AssistantProfile::default()
+        };
+        assert!(bare.resolved_persona().is_none());
+
+        // converse + no reminder => stance preamble only.
+        let converse = AssistantProfile {
+            cwd: "/tmp".to_string(),
+            mode: AssistantMode::Converse,
+            ..AssistantProfile::default()
+        };
+        let persona = converse.resolved_persona().expect("converse persona");
+        assert!(persona.contains("collaborative"));
+
+        // converse + reminder => stance preamble then reminder.
+        let both = AssistantProfile {
+            cwd: "/tmp".to_string(),
+            mode: AssistantMode::Converse,
+            startup_reminder: Some("Stay in 4nix.".to_string()),
+            ..AssistantProfile::default()
+        };
+        let persona = both.resolved_persona().expect("combined persona");
+        let stance_at = persona.find("collaborative").expect("stance present");
+        let reminder_at = persona.find("Stay in 4nix.").expect("reminder present");
+        assert!(stance_at < reminder_at, "stance precedes reminder");
     }
 
     #[test]
