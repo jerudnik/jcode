@@ -1213,3 +1213,51 @@ fn guardrail_notice_absent_for_normal_turns() {
     assert!(Agent::provider_guardrail_notice(Some("end_turn"), false, false).is_none());
     assert!(Agent::provider_guardrail_notice(None, false, true).is_none());
 }
+
+#[tokio::test]
+async fn finish_evidence_turn_populates_assistant_checkpoint() {
+    let _guard = crate::storage::lock_test_env();
+    let temp_home = tempfile::tempdir().expect("temp home");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    unsafe {
+        std::env::set_var("JCODE_HOME", temp_home.path());
+    }
+
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    // Non-assistant session: checkpoint stays inert.
+    let started = Instant::now();
+    let ok: Result<()> = Ok(());
+    agent.finish_evidence_turn(&ok, started, None);
+    assert!(
+        agent.session.assistant.is_none(),
+        "precondition: plain session has no assistant meta"
+    );
+
+    // Assistant session: turn-end seam auto-populates last_checkpoint.
+    agent.session.assistant = Some(crate::session::AssistantSessionMeta {
+        profile: "infra".to_string(),
+        ..crate::session::AssistantSessionMeta::default()
+    });
+    let ok: Result<()> = Ok(());
+    agent.finish_evidence_turn(&ok, started, None);
+    let checkpoint = agent
+        .session
+        .assistant
+        .as_ref()
+        .and_then(|meta| meta.last_checkpoint.clone())
+        .expect("assistant checkpoint populated from turn-end seam");
+    assert!(
+        checkpoint.contains("turn ok @"),
+        "checkpoint records status and time: {checkpoint}"
+    );
+
+    unsafe {
+        match prev_home {
+            Some(value) => std::env::set_var("JCODE_HOME", value),
+            None => std::env::remove_var("JCODE_HOME"),
+        }
+    }
+}
