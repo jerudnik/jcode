@@ -972,6 +972,14 @@ pub struct AssistantSessionMeta {
     /// Last validation summary recorded for this assistant session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_validation: Option<String>,
+
+    /// Persona / startup reminder text for this assistant profile, resolved at
+    /// launch from `AssistantProfile.startup_reminder`. Injected into the
+    /// session's per-turn *dynamic* system context (never the cached prefix) so
+    /// the assistant behaves like its role without polluting the shared,
+    /// non-assistant prompt cache. Deterministic per profile; not reactive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persona: Option<String>,
 }
 
 impl AssistantSessionMeta {
@@ -1129,11 +1137,16 @@ mod session_search_tests {
             backing: Some("jcode-assistant-infra".to_string()),
             last_checkpoint: Some("wired CLI".to_string()),
             last_validation: Some("cargo check passed".to_string()),
+            persona: Some("You are the infra assistant. Stay in 4nix.".to_string()),
         };
         let json = serde_json::to_string(&meta).expect("serialize");
         let restored: AssistantSessionMeta = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(meta, restored);
         assert_eq!(restored.display_label(), "Infra");
+        assert_eq!(
+            restored.persona.as_deref(),
+            Some("You are the infra assistant. Stay in 4nix.")
+        );
     }
 
     #[test]

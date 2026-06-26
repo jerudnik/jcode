@@ -53,6 +53,7 @@ fn assistant_status_command_shows_metadata_and_recovery() {
         backing: Some("jcode-assistant-infra".to_string()),
         last_checkpoint: Some("wired chrome".to_string()),
         last_validation: Some("cargo check ok".to_string()),
+        persona: None,
     });
 
     assert!(super::commands::handle_session_command(

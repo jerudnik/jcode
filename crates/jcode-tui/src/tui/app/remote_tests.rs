@@ -117,6 +117,7 @@ fn assistant_chrome_appears_in_rendered_status_line() {
         backing: Some("jcode-assistant-infra".to_string()),
         last_checkpoint: None,
         last_validation: Some("cargo check ok".to_string()),
+        persona: None,
     });
 
     let text = render_frame_text(&app, 120, 24);

@@ -107,6 +107,12 @@ pub(crate) fn build_session_meta(
         backing: profile.zmx_session.clone(),
         last_checkpoint: None,
         last_validation: None,
+        persona: profile
+            .startup_reminder
+            .as_deref()
+            .map(str::trim)
+            .filter(|reminder| !reminder.is_empty())
+            .map(str::to_string),
     }
 }
 
@@ -374,6 +380,31 @@ mod tests {
         assert_eq!(meta.display_name.as_deref(), Some("Infra"));
         assert_eq!(meta.cwd.as_deref(), Some("/tmp/work"));
         assert_eq!(meta.backing.as_deref(), Some("jcode-assistant-infra"));
+    }
+
+    #[test]
+    fn build_meta_carries_persona_from_startup_reminder() {
+        let mut p = profile("/tmp/work");
+        p.startup_reminder = Some("  You are the infra assistant. Stay in 4nix.  ".to_string());
+        let meta = build_session_meta("infra", &p);
+        assert_eq!(
+            meta.persona.as_deref(),
+            Some("You are the infra assistant. Stay in 4nix."),
+            "startup_reminder is trimmed and threaded into the session persona"
+        );
+    }
+
+    #[test]
+    fn build_meta_persona_absent_when_reminder_missing_or_blank() {
+        let p = profile("/tmp/work");
+        assert!(build_session_meta("infra", &p).persona.is_none());
+
+        let mut blank = profile("/tmp/work");
+        blank.startup_reminder = Some("   \n  ".to_string());
+        assert!(
+            build_session_meta("infra", &blank).persona.is_none(),
+            "blank startup_reminder does not produce a persona"
+        );
     }
 
     #[test]
