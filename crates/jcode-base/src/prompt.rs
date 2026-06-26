@@ -171,6 +171,26 @@ impl SplitSystemPrompt {
             format!("{}\n\n{}", self.static_part, self.dynamic_part)
         })
     }
+
+    /// Append an assistant profile persona to the *dynamic* (uncached) part.
+    ///
+    /// Persona text is deterministic per profile and per turn, but it must not
+    /// land in `static_part`: that prefix is the shared, cache-stable rails, and
+    /// mixing per-profile persona into it would fork the prompt cache across
+    /// profiles (and pollute plain non-assistant sessions). Putting it in
+    /// `dynamic_part` keeps the cached prefix identical while still steering the
+    /// model. No-op when `persona` is `None`/blank, so plain sessions are byte
+    /// identical to before. See `docs/architecture/AA-49-dynamic-context-injection.md` §5.
+    pub fn append_assistant_persona(&mut self, persona: Option<&str>) {
+        let Some(persona) = persona.map(str::trim).filter(|value| !value.is_empty()) else {
+            return;
+        };
+        if !self.dynamic_part.is_empty() {
+            self.dynamic_part.push_str("\n\n");
+        }
+        self.dynamic_part.push_str("# Assistant Persona\n\n");
+        self.dynamic_part.push_str(persona);
+    }
 }
 
 /// Skill info for system prompt

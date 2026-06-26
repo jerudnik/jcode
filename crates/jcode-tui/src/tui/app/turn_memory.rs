@@ -34,6 +34,15 @@ impl App {
             memory_prompt,
             None,
         );
+        // Assistant profile persona (deterministic per profile) rides the
+        // dynamic, uncached part so it steers behavior without forking the
+        // shared prompt cache. No-op for plain (non-assistant) sessions.
+        let persona = self
+            .session
+            .assistant
+            .as_ref()
+            .and_then(|meta| meta.persona.as_deref());
+        split.append_assistant_persona(persona);
         self.append_current_turn_system_reminder(&mut split);
         crate::prompt::append_swarm_effort_directive(
             &mut split,

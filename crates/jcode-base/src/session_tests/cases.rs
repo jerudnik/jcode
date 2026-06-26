@@ -583,6 +583,7 @@ fn assistant_session_meta_survives_save_and_all_load_paths() -> Result<()> {
         backing: Some("jcode-assistant-infra".to_string()),
         last_checkpoint: Some("wired chrome".to_string()),
         last_validation: Some("cargo test passed".to_string()),
+        persona: None,
     });
     session.append_stored_message(StoredMessage {
         id: "msg_assistant_1".to_string(),

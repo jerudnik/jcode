@@ -23,8 +23,9 @@ fn test_skill_prompt_integration() {
     let skill_prompt = "You are helping with a debugging task.";
     let prompt = build_system_prompt(Some(skill_prompt), &[]);
 
-    // The prompt should contain our default system prompt
-    assert!(prompt.contains("Your name is Jcode."));
+    // The prompt should contain our default system prompt identity. Upstream
+    // reworded this from "You are the Jcode Agent" to "Your name is Jcode".
+    assert!(prompt.contains("Your name is Jcode"));
 
     // The prompt should contain the skill prompt
     assert!(prompt.contains(skill_prompt));
@@ -430,4 +431,52 @@ fn classify_effort_distinguishes_reasoning_from_swarm_modes() {
     assert!(EffortKind::SwarmLight.is_swarm_mode());
     assert!(EffortKind::SwarmDeep.is_swarm_mode());
     assert!(!EffortKind::Reasoning.is_swarm_mode());
+}
+
+#[test]
+fn append_assistant_persona_is_noop_when_absent_or_blank() {
+    let (base, _info) = build_system_prompt_split(None, &[], false, None, None);
+
+    let mut none = base.clone();
+    none.append_assistant_persona(None);
+    assert_eq!(none.static_part, base.static_part);
+    assert_eq!(none.dynamic_part, base.dynamic_part);
+
+    let mut blank = base.clone();
+    blank.append_assistant_persona(Some("  \n  "));
+    assert_eq!(blank.static_part, base.static_part);
+    assert_eq!(blank.dynamic_part, base.dynamic_part);
+}
+
+#[test]
+fn append_assistant_persona_targets_dynamic_part_and_preserves_cached_prefix() {
+    let (base, _info) = build_system_prompt_split(None, &[], false, None, None);
+    let mut split = base.clone();
+    split.append_assistant_persona(Some("You are the infra assistant. Stay in 4nix."));
+
+    // The cached prefix (static_part) is byte-identical: persona must never fork
+    // the shared prompt cache across profiles or plain sessions.
+    assert_eq!(split.static_part, base.static_part);
+
+    // Persona lands in the uncached dynamic part under a clear header.
+    assert!(split.dynamic_part.contains("# Assistant Persona"));
+    assert!(
+        split
+            .dynamic_part
+            .contains("You are the infra assistant. Stay in 4nix.")
+    );
+}
+
+#[test]
+fn append_assistant_persona_appends_after_existing_dynamic_content() {
+    let mut split = SplitSystemPrompt {
+        static_part: "STATIC".to_string(),
+        dynamic_part: "# Memory\n\nexisting".to_string(),
+    };
+    split.append_assistant_persona(Some("persona text"));
+    assert_eq!(split.static_part, "STATIC");
+    assert_eq!(
+        split.dynamic_part,
+        "# Memory\n\nexisting\n\n# Assistant Persona\n\npersona text"
+    );
 }
