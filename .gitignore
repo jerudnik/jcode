@@ -37,3 +37,6 @@ CLAUDE.md
 
 # qmd generated databases
 .qmd/
+
+# Per-project Serena MCP data (language servers, memories) is machine-local.
+.serena/
