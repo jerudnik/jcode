@@ -118,6 +118,12 @@
             JCODE_BUILD_SEMVER = version;
             shellHook = ''
               echo "jcode dev shell — rust $(rustc --version 2>/dev/null || echo '?')"
+              # Non-blocking fork-drift nudge: reads cached refs, never blocks on
+              # the network, auto fast-forwards only the unambiguously safe case.
+              # Disable with FORK_NUDGE_DISABLE=1.
+              if [ "''${FORK_NUDGE_DISABLE:-0}" != "1" ] && [ -x scripts/fork-nudge.sh ]; then
+                scripts/fork-nudge.sh || true
+              fi
             '';
           };
 
