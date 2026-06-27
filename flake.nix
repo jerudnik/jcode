@@ -118,6 +118,11 @@
             JCODE_BUILD_SEMVER = version;
             shellHook = ''
               echo "jcode dev shell — rust $(rustc --version 2>/dev/null || echo '?')"
+              # Enable git rerere for this clone and import shared recorded
+              # conflict resolutions so local rebases self-heal like CI does.
+              if [ -x scripts/rerere-cache.sh ]; then
+                scripts/rerere-cache.sh setup || true
+              fi
               # Non-blocking fork-drift nudge: reads cached refs, never blocks on
               # the network, auto fast-forwards only the unambiguously safe case.
               # Disable with FORK_NUDGE_DISABLE=1.

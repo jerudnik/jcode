@@ -29,9 +29,11 @@ problem. So the model collapses to what git and the existing flake already do.
 
 ## What to actually build (cheap, ordered)
 
-1. **Enable `git rerere`** in the repo and the CI rebase job; persist the
-   `rr-cache`. Recurring conflicts in the 7 files get resolved once, then replay
-   automatically on every 6h rebase. This is the single highest-leverage change.
+1. **`git rerere` (shipped)** in the repo and the CI rebase job, with the
+   `rr-cache` shared through a tracked `.rerere-cache/` (`scripts/rerere-cache.sh`
+   + `scripts/rerere-rebase.sh`). Recurring conflicts in the 7 files get resolved
+   once, then replay automatically on every 6h rebase; a new conflict fails CI
+   loudly. This was the single highest-leverage change.
 2. **`jcode doctor`** binary-identity view: client/server path, origin
    (nix/selfdev/source), commit, dirty, a compat verdict, and the fallback
    command. `jcode-build-meta` already holds the data; just surface it.
