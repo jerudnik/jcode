@@ -47,6 +47,12 @@ section "Fetching $fork_remote and $upstream_remote"
 git fetch --prune --tags "$fork_remote"
 git fetch --prune "$upstream_remote"
 
+# Enable rerere and import shared recorded resolutions so recurring conflicts
+# during the rebases below self-heal exactly like CI does.
+if [ -x "$(git rev-parse --show-toplevel)/scripts/rerere-cache.sh" ]; then
+  "$(git rev-parse --show-toplevel)/scripts/rerere-cache.sh" setup || true
+fi
+
 start_branch="$(git symbolic-ref --quiet --short HEAD || echo '')"
 stash_ref=""
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -112,10 +118,19 @@ sync_rail() {
 inspect with: git log --oneline $fork_ref..$branch"
   fi
 
-  # Rebase mode: preserve local work on top of the reconciled fork tip.
+  # Rebase mode: preserve local work on top of the reconciled fork tip. Use the
+  # shared rerere-aware helper so recurring conflicts auto-replay recorded
+  # resolutions; a genuinely new conflict aborts cleanly for manual resolution.
   note "rebasing $ahead local commit(s) onto $fork_ref"
   git checkout --quiet "$branch"
-  if ! git rebase "$fork_ref"; then
+  local helper
+  helper="$(git rev-parse --show-toplevel)/scripts/rerere-rebase.sh"
+  if [ -x "$helper" ]; then
+    if ! "$helper" "$(git rev-parse --show-toplevel)" "$fork_ref"; then
+      die "rebase of $branch onto $fork_ref hit a NEW conflict; resolve it, then run \
+'scripts/rerere-cache.sh export' and commit .rerere-cache so it never recurs"
+    fi
+  elif ! git rebase "$fork_ref"; then
     git rebase --abort || true
     die "rebase of $branch onto $fork_ref hit conflicts; resolve manually"
   fi

@@ -71,19 +71,35 @@ commits). Anything needing a rebase is a printed nudge to run `sync-local.sh`,
 never a surprise. This closes the one real "me-proofing" gap: forgetting to
 reconcile between CI's 6h rebases. See `docs/BRANCHING.md`.
 
-### Change 1 (do next): turn on `rerere`. It is the missing piece.
+### Change 1 (shipped): `rerere` records conflict fixes; CI replays them.
 
 The whole pain of "fast upstream + recurring conflicts in the same 7 files" is
 exactly what `git rerere` ("reuse recorded resolution") was built for: it records
 how you resolved a conflict hunk and **replays it automatically** next time the
 same hunk reappears. On a branch you rebase every 6 hours, you resolve each
-recurring conflict *once*, ever.
+recurring conflict *once, ever*.
 
-- Enable it in the repo and, crucially, **in the CI rebase job** so the bot's
-  rebases self-heal instead of failing into manual reconciliation.
-- Optionally persist/share the `rr-cache` so local and CI agree on resolutions.
-- This is one `git config rerere.enabled true` + caching the resolution store. No
-  new files, no new concepts, no jj migration required.
+The non-obvious part (verified with fixtures) is that a config flag alone does
+nothing for CI: rerere stores recordings in `$GIT_DIR/rr-cache`, which is
+per-clone and never pushed, so a fresh CI checkout starts empty and re-fails the
+same conflict every cycle. So the recordings are shared through a **tracked
+`.rerere-cache/` directory**, and CI imports them before rebasing.
+
+Shipped pieces:
+
+- `scripts/rerere-cache.sh` -- `setup`/`import`/`export`/`status`. Enables rerere
+  per clone and moves resolutions between the tracked `.rerere-cache/` and the
+  live `rr-cache`.
+- `scripts/rerere-rebase.sh` -- headless rebase loop: auto-continues on a
+  recognised (recorded) conflict, **aborts non-zero on a genuinely new one**.
+- The flake `shellHook` and `scripts/sync-local.sh` run `setup` automatically;
+  `sync-local.sh` rebases through the helper. CI's `sync-upstream`
+  (`.github/workflows/nix.yml`) imports the cache and rebases `distro/nix` and
+  `main` through the helper, so the bot self-heals on known conflicts and fails
+  loudly on new ones. See `docs/BRANCHING.md`.
+
+No new files in the build, no new concepts, no jj migration. `.rerere-cache/` is
+outside the Nix `src` fileset, so committed resolutions never trigger a rebuild.
 
 Source: Git Pro book, "Rerere" (git-scm.com/book/en/v2/Git-Tools-Rerere) -- the
 documented use case is *exactly* "keep a branch rebased without re-resolving the
