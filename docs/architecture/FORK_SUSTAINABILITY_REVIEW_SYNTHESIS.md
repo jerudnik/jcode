@@ -34,9 +34,10 @@ problem. So the model collapses to what git and the existing flake already do.
    + `scripts/rerere-rebase.sh`). Recurring conflicts in the 7 files get resolved
    once, then replay automatically on every 6h rebase; a new conflict fails CI
    loudly. This was the single highest-leverage change.
-2. **`jcode doctor`** binary-identity view: client/server path, origin
-   (nix/selfdev/source), commit, dirty, a compat verdict, and the fallback
-   command. `jcode-build-meta` already holds the data; just surface it.
+2. **`jcode doctor` (shipped)** binary-identity view: client/server path, origin
+   (nix/selfdev/release/source), commit, dirty, a compat verdict, and the
+   fallback command. Needed zero new protocol -- the daemon identity already
+   lives in the server registry. `src/cli/commands/doctor.rs`, 10 unit tests.
 3. **Shrink the 7 rewrite-files** to additive seams (new file + one registration
    line), upstreaming each seam so the conflict disappears for good.
 4. Keep `patch-ledger.md` as a plain-doc index. Nothing "executable".

@@ -16,6 +16,7 @@ mod menubar;
 mod provider_setup;
 mod report_info;
 mod restart;
+mod doctor;
 
 pub(crate) use super::auth_test::run_post_login_validation;
 #[cfg(test)]
@@ -2080,6 +2081,12 @@ pub async fn run_provider_current_command(
 
 pub fn run_version_command(emit_json: bool) -> Result<()> {
     report_info::run_version_command(emit_json)
+}
+
+/// Show binary identity diagnostics: which client binary, which daemon, and
+/// whether they match. See `commands/doctor.rs`.
+pub fn run_doctor_command(emit_json: bool) -> Result<()> {
+    doctor::run_doctor_command(emit_json)
 }
 
 pub async fn run_usage_command(emit_json: bool) -> Result<()> {

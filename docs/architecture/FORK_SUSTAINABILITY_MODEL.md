@@ -105,24 +105,29 @@ Source: Git Pro book, "Rerere" (git-scm.com/book/en/v2/Git-Tools-Rerere) -- the
 documented use case is *exactly* "keep a branch rebased without re-resolving the
 same conflicts each time."
 
-### Change 2: a `jcode doctor` line that names the running binary.
+### Change 2 (shipped): a `jcode doctor` line that names the running binary.
 
 The real daily confusion (documented in `SELFDEV_NIX_DAEMON_DIVERGENCE.md`) is
 "which binary is the daemon, from which checkout?". `build-meta` already holds the
-answer; nothing surfaces it together with origin (nix vs selfdev vs source) and
-the daemon's socket/commit. Add one `doctor` view:
+answer; nothing surfaced it together with origin (nix vs selfdev vs source) and
+the daemon's socket/commit. `jcode doctor` (and `jcode doctor --json`) now does:
 
 ```
-client:  <path>  origin=<nix|selfdev|source>  <version> <hash><-dirty?>
-server:  <socket> <path>  origin=...  checkout=~/infrastructure/jcode  <hash>
-verdict: same binary | compatible | RECONNECT (build mismatch)
-fallback: nix run .   (or Home-Manager jcode)
+client:  <path>  origin=<nix|selfdev|release|source>  <semver> (<hash>)[ +dirty]
+server:  <socket>  pid=<pid>  <name>  <version> (<hash>) started <ts>
+verdict: SAME | COMPATIBLE | RECONNECT | NO_SERVER -- <detail>
+fallback: nix run github:jerudnik/jcode -- doctor   (or `jcode server reload`)
 ```
 
-Build it as a CLI subcommand (cheap, cargo-testable in a sandbox). The
-"verdict/reconnect" line is the only protocol work, and it is a small handshake
-field, not a new negotiation framework. Defer named daemon instances entirely
-until/unless this proves insufficient.
+It is a read-only CLI subcommand (`src/cli/commands/doctor.rs`, 10 unit tests).
+Crucially it needed **zero new protocol**: the running daemon's identity
+(version, git hash, pid, socket, start time) already lives in the server
+registry (`crate::registry::find_server_by_socket_sync`), and the client's
+identity comes from `jcode_build_meta` + the build-support path/dirty helpers.
+Origin is inferred from the binary path (`/nix/store` -> nix, `builds/{stable,
+versions}` -> release, other `builds/` -> selfdev, `target/` -> source). The
+verdict compares git hashes (short/full tolerant) and flags a dirty client tree.
+Named daemon instances stay deferred until this proves insufficient.
 
 ## The one durable habit: additive seams, not edits
 
