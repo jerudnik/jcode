@@ -220,6 +220,13 @@ pub(crate) enum Command {
         json: bool,
     },
 
+    /// Diagnose which binary is running and whether it matches the daemon
+    Doctor {
+        /// Emit JSON instead of plain text
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show usage limits for connected providers
     Usage {
         /// Emit JSON instead of plain text
