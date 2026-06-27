@@ -4,6 +4,31 @@ Date: 2026-06-27
 Status: draft for John review, do not delete the self-destruct Serena memory until this draft is signed off
 Scope: keeping a fast-moving upstream fork, in-repo Nix packaging, and large downstream personal feature work sustainable without turning 4nix into the control plane.
 
+## 0. Current recommendation after review
+
+Use the simple direct workflow first. Do not begin by implementing a full Nix-composable feature-stack system.
+
+The short-term model is:
+
+> **Main is the living fork. Nix is the fallback and environment. Selfdev is the dogfood edge. Doctor explains which world is running. Repeated conflicts become seams.**
+
+In practice:
+
+- `main` is John's real daily fork: upstream + Nix packaging + stable personal downstream behavior.
+- 4nix installs and manages jcode as a flake input. It consumes the packaged fork and remains boring.
+- `nix develop` is the reproducible development environment for hacking jcode.
+- the Home-Manager installed `jcode`, or `nix run .`, is the stable packaged fallback.
+- `selfdev build-reload` is the moving dogfood edge.
+- `jcode doctor` should become the primary visibility tool for client/server binary identity, source provenance, branch drift, and fallback instructions.
+- Nix feature variants and explicit feature stacks are an escape hatch, not the default workflow. Use them later only for unusually invasive, mutually exclusive, or separate-binary-identity work.
+
+The long-term model adds stronger rails without changing the daily mental model:
+
+- build provenance stamping first (NS4)
+- protocol/capability compatibility gates
+- conflict-surface reports and repeated-conflict-to-extension-seam work
+- optional named daemon instances, such as `stable` and `selfdev`, only if one shared daemon remains confusing or risky after provenance is visible
+
 ## 1. The problem
 
 John is carrying three pressures in one repository.
@@ -104,9 +129,11 @@ The Nix surface also already exists. `flake.nix` uses flake-parts and crane. It 
 
 `docs/fork/patch-ledger.md` is the embryo of the next model. It already records each downstream patch's class, status, upstream reference, retire condition, and validation command. That table should become more than documentation. It should become an executable index of patch intent and validation.
 
-## 4. The tiered model
+## 4. The tiered model, simplified
 
-Do not choose globally between a thin fork and a thick fork. Split by concern. Each tier should be only as thick as its job requires.
+The earlier design question was whether to make features themselves into composable Nix patch artifacts. The review conclusion is simpler: do not make that the first abstraction. The default should be a normal living fork on `main`, with Nix providing the environment, package, cache, and fallback. Use explicit Nix feature variants only as an escape hatch.
+
+Do not choose globally between a thin fork and a thick fork. Split by concern. Each tier should be only as thick as its job requires, but the short-term implementation should keep the number of moving parts small.
 
 ### Tier 1: BUILD
 
@@ -130,24 +157,23 @@ Why the constraints pick this shape:
 
 The compose tier wraps or selects an already-built binary without editing upstream source.
 
-It owns:
+Short term, this tier should stay almost boring. It owns:
 
 - `overlays.default`
 - `homeManagerModules.default`
 - `homeModules.default`
-- `apps.${system}.jcode`
-- `apps.${system}.dev`
+- `apps.${system}.default` or equivalent `nix run .`
 - wrapper policy
-- dogfood launcher policy
 - safe fallback launcher policy
 
 This tier should be thin and non-forking. It should touch zero Rust source. It is the 4nix-facing seam. The consumer should be able to say, "use the jcode fork's overlay/module/package," without learning how the fork is maintained.
 
-Proposed flake app names:
+Minimal flake app surface:
 
-- `apps.${system}.jcode`: run the Nix-store stable package.
-- `apps.${system}.dev`: run the self-dev launcher policy from this checkout or dev shell.
-- `apps.${system}.fallback`: explicitly run the cached/stable Nix package even when dogfood paths shadow it.
+- `nix develop`: enter the reproducible Rust/Nix development environment.
+- `nix run .`: run the packaged fallback from the checkout.
+
+Do not add separate `.#stable`, `.#dev`, `.#dogfood`, `.#preflight`, or `.#session` apps at first. They sound clear in isolation, but together they create another surface to remember. Dogfood is selfdev, not Nix. The daily dogfood command should remain `selfdev build-reload` plus normal `jcode` usage, with provenance shown by the program itself.
 
 Why the constraints pick this shape:
 
@@ -155,9 +181,13 @@ Why the constraints pick this shape:
 - Compute frugality: selecting or wrapping an existing binary should not rebuild Rust.
 - Idiot-proofing: dogfood and fallback become explicit commands, not accidental `$PATH` ordering.
 
-### Tier 3: FEATURE-EXPERIMENT
+### Tier 3: FEATURE-EXPERIMENT escape hatch
+
+This tier is deliberately not the default first implementation.
 
 The feature-experiment tier is for keepable, actively used, not-necessarily-upstreamable work that must ride a moving base. The name includes "experiment" not because the work is disposable, but because the fork is allowed to keep evolving these features while John uses them. A feature can be temporary, permanent-downstream, planned-upstream, or permanently experimental.
+
+The preferred first home for daily-used personal features is `main`, expressed as normal code with additive seams wherever possible. Reach for this tier only when a feature is unusually invasive, mutually exclusive with another feature, needs a separate binary identity, or repeatedly makes rebases confusing enough that isolation pays for itself.
 
 The proposed artifact is a feature directory:
 
@@ -195,13 +225,12 @@ base -> base.overrideAttrs (old: {
 })
 ```
 
-Proposed output names:
+Optional output names if this escape hatch is implemented:
 
-- `packages.${system}.jcode-feature-<name>` for a single feature.
-- `packages.${system}.jcode-experimental` for a selected stack of features.
-- `packages.${system}.jcode-dogfood` for the current dogfood selection.
+- `packages.${system}.jcode-feature-<name>` for a single isolated feature.
+- `packages.${system}.jcode-stack-<name>` for a deliberately selected stack.
 - `checks.${system}.feature-<name>` for the feature's validation.
-- `checks.${system}.feature-stack` for the selected stack's validation.
+- `checks.${system}.stack-<name>` for the selected stack's validation.
 
 This tier is "more than a patch, less than a package." It is pinned, composable, cacheable, and produces its own store path. It can be disposable, but it does not have to be. A permanent personal feature can live here indefinitely if that is the clearest way to keep it named, validated, and separable from the base. It can coexist with `jcode` and `jcode-fallback`, which sidesteps launcher-shadowing confusion. If a feature breaks against upstream churn, the failure happens at the variant/check boundary with a named feature, not as a mystery inside 4nix.
 
@@ -233,7 +262,7 @@ The next step is to give each durable feature or shim a machine-checkable valida
 
 - `checks.${system}.feature-<name>` runs its `check.nix`.
 - `checks.${system}.patch-ledger` verifies metadata completeness.
-- `checks.${system}.feature-stack` validates the selected dogfood or experimental stack.
+- `checks.${system}.stack-<name>` validates a selected feature stack if the escape hatch is implemented.
 
 The patch ledger remains the human index, but feature metadata and checks become the machine index. A patch without a validation command is allowed only if explicitly marked research or draft. A permanent downstream feature must say how it is validated. A temporary shim must say when it retires.
 
@@ -269,30 +298,128 @@ Jujutsu (`jj`) is a serious option for the restacked stack. It stores conflicts 
 
 ## 6. End-to-end workflow map
 
+## 6A. Daily life with 4nix, selfdev, and a shared daemon
+
+Daily life should have two clearly named worlds, even if they initially share one daemon:
+
+1. **Installed/fallback world.** 4nix installs the Nix-packaged fork from `github:jerudnik/jcode/main`. This is the boring, cached, declarative fallback.
+2. **Dogfood/selfdev world.** While hacking jcode in `~/infrastructure/jcode`, John enters `nix develop`, uses `cargo check` and targeted tests, then uses `selfdev build-reload` to run the moving edge.
+
+The confusing case is normal and should be supported: John may use jcode to modify jcode while also using jcode in other repositories. Since jcode currently uses a shared daemon by default, another client session can attach to a daemon built from the selfdev checkout. That is not inherently bad. It is dogfooding. It becomes bad only when invisible, incompatible, or state/schema-breaking.
+
+The short-term rule is:
+
+> **Selfdev daemon is allowed. Invisible selfdev daemon is not.**
+
+Therefore `jcode doctor` and the normal UI/status surface should show:
+
+```text
+Client binary:
+  path: /nix/store/.../bin/jcode or ~/.jcode/builds/current/jcode
+  origin: nix | selfdev | source
+  commit: <rev>
+
+Server daemon:
+  socket: $JCODE_RUNTIME_DIR/jcode.sock or $JCODE_SOCKET
+  path: /nix/store/.../bin/jcode or ~/.jcode/builds/current/jcode
+  origin: nix | selfdev | source
+  checkout: ~/infrastructure/jcode
+  commit: <rev>-dirty?
+
+Compatibility:
+  protocol: compatible | warning | incompatible
+  verdict: safe | warn | reconnect required
+
+Fallback:
+  command: nix run . or Home-Manager installed jcode
+```
+
+The daily loop becomes:
+
+```sh
+# keep the local fork close to upstream
+cd ~/infrastructure/jcode
+scripts/sync-local.sh --check
+scripts/sync-local.sh          # only when drift exists
+
+# hack jcode
+nix develop
+cargo check --workspace
+cargo test -p <crate> <test>
+selfdev build-reload
+jcode doctor
+
+# work elsewhere
+cd ~/other/repo
+jcode                         # allowed to attach to selfdev daemon, but must say so
+```
+
+If a selfdev daemon feels scary in another repo, the fix is not to ban it. The fix is to make the server identity and fallback obvious, and to add a compatibility gate so truly incompatible combinations fail loudly.
+
+## 6B. Longer-term named daemon instances
+
+Current code already points toward how two daemons could coexist: the socket defaults to `runtime_dir()/jcode.sock`, can be overridden by `$JCODE_SOCKET`, and the daemon lock lives in the same runtime directory. Since `runtime_dir()` can be overridden by `$JCODE_RUNTIME_DIR`, separate runtime directories can support separate daemon instances.
+
+Conceptual future shape:
+
+```sh
+# stable instance
+JCODE_RUNTIME_DIR="$XDG_RUNTIME_DIR/jcode-stable" jcode
+
+# selfdev instance
+JCODE_RUNTIME_DIR="$XDG_RUNTIME_DIR/jcode-selfdev" ~/.jcode/builds/current/jcode
+```
+
+Each instance would have its own:
+
+```text
+jcode.sock
+jcode-debug.sock
+jcode-daemon.lock
+```
+
+The productized version should not rely on ad-hoc environment variables. It should expose named instances:
+
+```sh
+jcode --instance stable
+jcode --instance selfdev
+jcode doctor --instances
+```
+
+or explicit wrappers:
+
+```sh
+jcode-stable
+jcode-selfdev
+```
+
+This is a medium-term improvement, not the first step. It solves a real problem, stable clients attaching to stable daemon and selfdev clients attaching to selfdev daemon, but it also introduces new questions about session ownership, reload targeting, active PID tracking, shared `~/.jcode` state, and doctor visibility. Do it only after provenance and compatibility checks make the one-daemon model legible.
+
 ```mermaid
 flowchart TD
   U["upstream/master\n1jehuang/jcode"] --> CI["Fork maintenance CI\n6h mirror + rebase rails"]
   CI --> V["vendor/upstream\nclean upstream mirror"]
   V --> D["distro/nix\nflake, crane, cache, HM module"]
-  D --> M["main\nstable fork behavior"]
+  D --> M["main\nliving daily fork\nNix packaging + stable personal behavior"]
 
-  M -->|"base for stable package"| B["BUILD tier\npackages: jcode-base, jcode\nshared cargoArtifacts"]
-  B --> C["COMPOSE tier\noverlay + HM module + wrappers\napps: jcode, dev, fallback"]
-
-  M -->|"base for active personal layers"| S["stack/* and exp/*\nagent-restacked feature work\nmay live forever"]
-  S --> F["FEATURE-EXPERIMENT tier\nnix/features/<name>\npatch + deps/conflicts + check.nix + pin"]
-  B --> F
-  F --> X["variant outputs\njcode-feature-<name>\njcode-stack-<name>\njcode-dogfood"]
-  F --> G["VALIDATION tier\nchecks.feature-<name>\nchecks.stack-<name>\nchecks.patch-ledger"]
-
-  C --> N4["4nix consumer\none-line jcode input\nuses package/overlay/module"]
-  X --> Dog["bounded selfdev dogfood\nexplicit variant/store path"]
-  C --> Safe["safe fallback\nNix-store stable jcode"]
-  G --> Gate["merge/restack gate\nsemantic validation before trust"]
-
-  N4 -. substitutes prebuilt outputs from .-> Cache["Cachix\nprebuilt jcode outputs"]
-  Dog -. can fall back to .-> Safe
+  M --> B["BUILD tier\ncrane package\nshared cargoArtifacts"]
+  B --> P["packaged jcode\nNix-store fallback"]
+  P --> N4["4nix consumer\none-line jcode input\nHome Manager installed jcode"]
+  P -. substitutes from .-> Cache["Cachix\nprebuilt jcode outputs"]
   Cache -. substitutes .-> N4
+
+  M --> Dev["nix develop\nreproducible dev environment"]
+  Dev --> Cargo["cheap inner loop\ncargo check + targeted tests"]
+  Cargo --> SD["selfdev build-reload\nmoving dogfood edge"]
+  SD --> Daemon["shared daemon today\nmay be selfdev"]
+  P --> Daemon
+
+  Daemon --> Doctor["jcode doctor / UI status\nclient + server provenance\ncompat verdict + fallback"]
+  Doctor --> Safe["safe fallback\nNix packaged jcode"]
+
+  M --> Seam["repeated conflicts\nbecome additive seams\nconfig/registry/trait/hooks"]
+  M -. optional later escape hatch .-> F["nix/features + stacks\nonly for invasive or mutually-exclusive work"]
+  F -. optional variant outputs .-> X["jcode-feature-*\njcode-stack-*"]
 ```
 
 ## 7. Concrete proposed layout
@@ -323,119 +450,89 @@ Recommended policy:
 
 ### Directories
 
-Proposed additions:
+Short-term additions should be minimal:
 
 ```text
-docs/architecture/FORK_SUSTAINABILITY_MODEL.md      # this report
-docs/architecture/FORK_SUSTAINABILITY_PRIOR_ART.md  # post-signoff research
-docs/fork/patch-ledger.md                           # human index of durable patches
-docs/fork/feature-schema.md                         # metadata contract for features
+docs/architecture/FORK_SUSTAINABILITY_MODEL.md          # this report
+docs/architecture/FORK_SUSTAINABILITY_REVIEW_SYNTHESIS.md # concise review synthesis
+docs/architecture/FORK_SUSTAINABILITY_PRIOR_ART.md      # post-signoff research
+docs/fork/patch-ledger.md                               # human index of durable patches
 
-nix/features/default.nix                            # feature registry
-nix/features/<name>/feature.toml                    # metadata
-nix/features/<name>/patch                           # patch or series entrypoint
-nix/features/<name>/check.nix                       # validation derivation
-nix/features/<name>/README.md                       # human explanation
-nix/stacks/<name>.toml                              # ordered active feature stack, e.g. dogfood
+scripts/fork-doctor.sh                                  # optional script prototype for jcode doctor
+scripts/fork-preflight.sh                               # optional cheap checks, likely folded into doctor later
+```
 
-nix/variants.nix                                    # compose selected feature sets
-nix/checks.nix                                      # patch-ledger and feature checks
-nix/apps.nix                                        # dev/fallback app wrappers
+Later escape-hatch additions, only if needed:
 
-scripts/fork-add-feature.sh                         # one-step feature skeleton
-scripts/fork-feature-check.sh                       # run one feature's cheap gate
-scripts/fork-restack.sh                             # future agent/jj/git restack helper
+```text
+docs/fork/feature-schema.md                             # metadata contract for Nix feature variants
+nix/features/default.nix                                # feature registry
+nix/features/<name>/feature.toml                        # metadata
+nix/features/<name>/patch                               # patch or series entrypoint
+nix/features/<name>/check.nix                           # validation derivation
+nix/features/<name>/README.md                           # human explanation
+nix/stacks/<name>.toml                                  # ordered active feature stack, e.g. dogfood
+nix/variants.nix                                        # compose selected feature sets
+nix/checks.nix                                          # patch-ledger and feature checks
+scripts/fork-add-feature.sh                             # one-step feature skeleton
 ```
 
 ### Flake outputs
 
-Proposed stable output namespace:
+Short-term stable output namespace:
 
 ```text
-packages.${system}.jcode-base
 packages.${system}.jcode
 packages.${system}.default
-packages.${system}.jcode-feature-<name>
-packages.${system}.jcode-stack-<name>
-packages.${system}.jcode-experimental
-packages.${system}.jcode-dogfood
-packages.${system}.jcode-fallback
 
 overlays.default
 homeManagerModules.default
 homeModules.default
 
-apps.${system}.jcode
-apps.${system}.dev
-apps.${system}.fallback
-apps.${system}.feature-<name>
-apps.${system}.dogfood
-
-checks.${system}.patch-ledger
-checks.${system}.feature-<name>
-checks.${system}.stack-<name>
-checks.${system}.dogfood-stack
-checks.${system}.nix-eval-surfaces
-
 devShells.${system}.default
-devShells.${system}.dogfood
+
+# app equivalent, if exposed by the flake:
+apps.${system}.default or nix run .
 ```
 
-The exact set can be smaller in the first prototype. The important naming rule is that stable, dogfood, fallback, and feature variants are separate names and, when built, separate store paths.
+Do not add separate `.#stable`, `.#dev`, `.#dogfood`, `.#preflight`, or `.#session` apps in the first pass. Use:
 
-### Minimal feature metadata
+```sh
+nix develop      # reproducible dev environment
+nix run .        # packaged fallback from the checkout
+selfdev build-reload # dogfood edge, not a Nix app
+jcode doctor     # eventual identity/provenance/status command
+```
 
-Proposed `feature.toml` shape:
+Later escape-hatch output namespace, only if the need becomes real:
+
+```text
+packages.${system}.jcode-feature-<name>
+packages.${system}.jcode-stack-<name>
+checks.${system}.feature-<name>
+checks.${system}.stack-<name>
+```
+
+### Optional feature metadata, deferred
+
+If the Nix feature-variant escape hatch becomes necessary, a `feature.toml` can look like this:
 
 ```toml
 name = "example"
 status = "permanent-downstream" # or temporary-shim, planned-upstream-pr, experiment
 class = "feature(agent-tools)"
-base = "main"                   # or a commit/pin if needed
+base = "main"
 owner = "john"
 summary = "One-sentence human explanation."
 retire_condition = "Keep unless upstream exposes equivalent extension seam."
 validation = "nix build .#checks.x86_64-linux.feature-example"
-
 claims = ["tool-registry", "prompt-defaults"]
 depends_on = []
 conflicts_with = []
 intentionally_overrides = []
-
-[deps]
-features = []
-
-[dogfood]
-default = false
 ```
 
-### One-step add-a-feature recipe
-
-The desired human workflow should be:
-
-```sh
-scripts/fork-add-feature.sh example --class feature(agent-tools) --status experiment
-$EDITOR nix/features/example/README.md
-$EDITOR nix/features/example/patch
-scripts/fork-feature-check.sh example
-```
-
-What the script should do:
-
-1. Create `nix/features/example/{feature.toml,patch,check.nix,README.md}`.
-2. Add the feature to `nix/features/default.nix`.
-3. Add or update the row in `docs/fork/patch-ledger.md`.
-4. Expose `packages.${system}.jcode-feature-example`.
-5. Expose `checks.${system}.feature-example`.
-6. Optionally add it to `nix/stacks/dogfood.toml` at an explicit order position.
-7. Check declared dependencies, conflicts, and intentional overrides before building.
-8. Print the cheap validation ladder:
-   - `cargo check ...` if the patch is already applied in the worktree
-   - `cargo test ...` if a test is named
-   - `nix build .#jcode-feature-example --dry-run`
-   - `nix build .#jcode-feature-example`
-
-The first prototype should not implement the whole model. A good proof slice is one existing patch-ledger row converted into one feature directory, one variant output, and one check.
+This is not the first implementation. The first implementation is provenance, doctor visibility, cheap validation, and repeated-conflict-to-seam work.
 
 ## 8. Recommended sequence
 
@@ -453,19 +550,30 @@ NS4 means stamping build provenance into the binary and surfacing it in self-dev
 
 This addresses the most confusing daily problem: "which binary is the daemon actually running, and from which checkout was it built?" It also supports repo containment because the fix lives in jcode, and compute frugality because it can be developed with `cargo check` and targeted tests before any live reload.
 
-### Step 2: one Nix proof slice
+### Step 2: `jcode doctor` / visibility surface
 
-After NS4, convert one existing downstream patch into the proposed feature-variant shape. Do not build the whole system at once. Choose one small row from `docs/fork/patch-ledger.md`, give it:
+Make the current world explain itself. `jcode doctor` should report:
 
-- `nix/features/<name>/feature.toml`
-- `nix/features/<name>/patch`
-- `nix/features/<name>/check.nix`
-- `packages.${system}.jcode-feature-<name>`
-- `checks.${system}.feature-<name>`
+- client binary path, origin, version, commit, and dirty/build metadata
+- server daemon socket, binary path, origin, source checkout, commit, and dirty/build metadata
+- whether client and server are the same binary, compatible binaries, or an unsafe mismatch
+- current branch and drift from `github/main`
+- selfdev channel state: current, stable, shared-server, canary if relevant
+- fallback command: Home-Manager installed jcode or `nix run .`
 
-The proof question is not "can every feature move today?" It is "does one feature become more transparent, cacheable, and me-proof when expressed this way?"
+This can begin as a script or internal command and later become a first-class TUI/status surface. It is the me-proofing layer for the shared daemon.
 
-### Step 3: drive the 60-file conflict surface toward zero
+### Step 3: protocol/capability compatibility gate
+
+After provenance is visible, add an explicit compatibility verdict to the client/server handshake. The system should distinguish:
+
+- compatible selfdev daemon, safe to use
+- newer/different daemon, warn but allow
+- protocol or state-incompatible daemon, refuse or reconnect cleanly
+
+This makes a selfdev daemon safe by policy instead of safe by hope.
+
+### Step 4: drive the 60-file conflict surface toward zero
 
 Audit the 60 invasive edits and classify each one:
 
@@ -473,21 +581,34 @@ Audit the 60 invasive edits and classify each one:
 - can become an additive seam now
 - needs a small upstreamable seam
 - genuinely invasive downstream behavior
-- should move into a Nix feature variant
 - should move into config, MCP, tool registration, or another existing extension surface
+- only if necessary, should move into a Nix feature variant
 
 The long-term objective is to shrink the conflict surface, not to eliminate local features. Every feature moved behind an additive seam makes upstream churn cheaper forever.
+
+### Step 5: optional named daemon instances
+
+If one shared daemon remains confusing after provenance and compatibility checks, add named instances:
+
+- `stable`: Nix-store binary, stable runtime dir/socket
+- `selfdev`: mutable selfdev binary, selfdev runtime dir/socket
+
+This should be productized as `jcode --instance stable`, `jcode --instance selfdev`, and `jcode doctor --instances`, not left as ad-hoc environment-variable lore.
+
+### Step 6: optional Nix feature proof slice
+
+Only after the simpler workflow is working, consider converting one unusually invasive or mutually exclusive downstream feature into a Nix feature variant. The proof question should be narrow: does this particular feature become more transparent, cacheable, and me-proof when isolated as a named variant?
 
 ## 9. Open questions for John
 
 These need human decisions before the draft is final:
 
-1. **Where do the 8 real local commits live?** Should they stay on `main`, or should research/docs remain on `main` while non-upstreamable feature work moves to `stack/*` or `exp/*` until promoted?
-2. **What is Forgejo's role?** Is it only a backup/mirror, or should it become the local authoritative copy for all three rails?
-3. **Do we adopt Jujutsu for the patch stack?** Git is enough for the current rails, but `jj` may make restacking less painful and more transparent.
-4. **What is the minimal feature triple?** Is `{patch, check.nix, feature.toml}` the right required set, or should the first version be even smaller?
-5. **What should 4nix see?** Should 4nix always consume `packages.${system}.jcode`, or should it have an explicit option to select `jcode-dogfood` while retaining `jcode-fallback`?
-6. **Which feature is the proof slice?** Candidates include a small compatibility shim with an existing targeted validation command.
+1. **Is the short-term recommendation accepted?** Default to `main` as the living fork, Nix as fallback/environment, selfdev as dogfood edge, and defer Nix feature stacks.
+2. **What should `jcode doctor` be first?** A quick script, a CLI subcommand, a TUI status panel, or all of those in sequence?
+3. **What exact provenance must be shown everywhere?** Minimum likely set: client path/origin/commit, server path/origin/socket/source checkout/commit/dirty, compatibility verdict, fallback command.
+4. **When do named daemon instances become worth it?** Immediately after doctor, or only if the one-daemon selfdev model still causes real confusion?
+5. **What is Forgejo's role?** Is it only a backup/mirror, or should it become the local authoritative copy for all three rails?
+6. **Do we adopt Jujutsu for stack work later?** Git is enough now, but `jj` may help if restacking remains painful.
 
 ## 10. Decision section placeholder
 
