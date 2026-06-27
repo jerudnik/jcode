@@ -12,9 +12,9 @@ First, upstream `1jehuang/jcode` moves fast. It changes regularly, sometimes dee
 
 Second, John's fork is not just a personal code checkout. It is also the packaging source that 4nix consumes as a flake input. The fork must expose a stable package, overlay, Home Manager module, cacheable builds, and a clear upgrade path so `~/infrastructure/4nix` can consume `jcode` without learning all of jcode's internal maintenance machinery.
 
-Third, John is doing substantial personal feature and experiment work inside jcode. This is not mostly maintenance work. It is not mostly a queue of intended upstream PRs. Much of it is customization, extension, dogfooding, and local harness integration that may never be upstreamable. The model must therefore support permanent downstream work without pretending every patch is on a path to upstream.
+Third, John is doing substantial personal feature and experiment work inside jcode. This is not mostly maintenance work. It is not mostly a queue of intended upstream PRs. Much of it is customization, extension, dogfooding, and local harness integration that may never be upstreamable. Some of it may live forever as actively used fork behavior, while still feeling experimental because John keeps developing it in place. The model must therefore support permanent downstream work without pretending every patch is on a path to upstream, and without pretending every experiment eventually graduates into upstream or disappears.
 
-The lived goal is to dogfood the moving local build while keeping a Nix-packaged version available as the safe fallback. The failure mode to avoid is familiar: upstream churn plus personal experiments plus packaging drift becomes too confusing, the fork hardens into an accidental hard fork, or John abandons the tool.
+The lived goal is to dogfood the moving local build while keeping a Nix-packaged version available as the safe fallback. In that sense, the fork is always living within bounded selfdev mode: daily use happens close to the moving edge, but the edge has rails, provenance, checks, named variants, and a boring fallback. The failure mode to avoid is familiar: upstream churn plus personal experiments plus packaging drift becomes too confusing, the fork hardens into an accidental hard fork, or John abandons the tool.
 
 The sustainability target is not "never diverge." The target is controlled divergence: know what is local, know why it exists, know how it is validated, know how expensive it is to test, and know which tier owns it.
 
@@ -157,7 +157,7 @@ Why the constraints pick this shape:
 
 ### Tier 3: FEATURE-EXPERIMENT
 
-The feature-experiment tier is for keepable but not-yet-upstreamable work that must ride a moving base.
+The feature-experiment tier is for keepable, actively used, not-necessarily-upstreamable work that must ride a moving base. The name includes "experiment" not because the work is disposable, but because the fork is allowed to keep evolving these features while John uses them. A feature can be temporary, permanent-downstream, planned-upstream, or permanently experimental.
 
 The proposed artifact is a feature directory:
 
@@ -168,6 +168,24 @@ nix/features/<name>/
   check.nix         # feature-specific validation derivation
   README.md         # short human explanation and dogfood notes
 ```
+
+Features can build on each other, so dependency and stack order must be explicit. The important object is not only a patch, but a named layer in a stack:
+
+```text
+base jcode
+  -> feature/a
+  -> feature/b, depends on a
+  -> feature/c, intentionally overrides behavior from b
+  -> dogfood stack
+```
+
+That stack needs machine-readable answers to questions that otherwise become impossible to hold in a human head:
+
+- Which feature must apply before this one?
+- Which files, modules, commands, settings, or behavior surfaces does it claim?
+- Which earlier feature does it intentionally override?
+- Which earlier feature is it incompatible with?
+- Which validation proves the combined stack still behaves?
 
 A feature variant is a Nix function from base to base-prime:
 
@@ -185,15 +203,17 @@ Proposed output names:
 - `checks.${system}.feature-<name>` for the feature's validation.
 - `checks.${system}.feature-stack` for the selected stack's validation.
 
-This tier is "more than a patch, less than a package." It is pinned, composable, disposable, cacheable, and produces its own store path. It can coexist with `jcode` and `jcode-fallback`, which sidesteps launcher-shadowing confusion. If a feature breaks against upstream churn, the failure happens at the variant/check boundary with a named feature, not as a mystery inside 4nix.
+This tier is "more than a patch, less than a package." It is pinned, composable, cacheable, and produces its own store path. It can be disposable, but it does not have to be. A permanent personal feature can live here indefinitely if that is the clearest way to keep it named, validated, and separable from the base. It can coexist with `jcode` and `jcode-fallback`, which sidesteps launcher-shadowing confusion. If a feature breaks against upstream churn, the failure happens at the variant/check boundary with a named feature, not as a mystery inside 4nix.
 
-This tier is honest about its limits. Patches over source are as brittle to upstream churn as a rebase. They only relocate the failure from `git rebase` to `nix build` or `nix flake check`. They are also slower than the cargo inner loop. Therefore this tier is not the place to edit minute-by-minute. It is the integration and dogfood tier for features that cannot yet be expressed as additive seams.
+This tier is honest about its limits. Patches over source are as brittle to upstream churn as a rebase. Stacked patches are additionally vulnerable to semantic shadowing: feature B can change a line, function, default, prompt, or configuration assumption that feature A also depends on. Nix can make the stack explicit and cacheable, but it cannot magically understand intent. Therefore every stack needs declared dependencies, declared conflicts, declared intentional overrides, and a combined validation check. The value is not that conflicts disappear. The value is that they are named, localized, cached, and tested.
+
+This tier is also slower than the cargo inner loop. Therefore it is not the place to edit minute-by-minute. It is the integration and dogfood tier for features that cannot yet be expressed as additive seams, plus the long-lived feature registry for permanent personal behavior that must remain legible.
 
 Why the constraints pick this shape:
 
 - Repo containment: feature definitions live in jcode, not 4nix.
 - Compute frugality: variants share the crane dependency cache and get their own cached checks.
-- Transparency: each feature has a directory, metadata, patch, check, and retirement story.
+- Transparency: each feature has a directory, metadata, patch, check, stack position, dependency/conflict declarations, and retirement or permanence story.
 - Idiot-proofing: deleting or disabling a feature is removing one directory or one registry entry, not unwinding scattered edits.
 
 ### Tier 4: VALIDATION
@@ -256,21 +276,21 @@ flowchart TD
   V --> D["distro/nix\nflake, crane, cache, HM module"]
   D --> M["main\nstable fork behavior"]
 
-  M --> B["BUILD tier\npackages: jcode-base, jcode\nshared cargoArtifacts"]
+  M -->|"base for stable package"| B["BUILD tier\npackages: jcode-base, jcode\nshared cargoArtifacts"]
   B --> C["COMPOSE tier\noverlay + HM module + wrappers\napps: jcode, dev, fallback"]
 
-  M --> S["stack/* and exp/*\nagent-restacked feature work"]
-  S --> F["FEATURE-EXPERIMENT tier\nnix/features/<name>\npatch + check.nix + pin"]
+  M -->|"base for active personal layers"| S["stack/* and exp/*\nagent-restacked feature work\nmay live forever"]
+  S --> F["FEATURE-EXPERIMENT tier\nnix/features/<name>\npatch + deps/conflicts + check.nix + pin"]
   B --> F
-  F --> X["variant outputs\njcode-feature-<name>\njcode-experimental\njcode-dogfood"]
-  F --> G["VALIDATION tier\nchecks.feature-<name>\nchecks.feature-stack\nchecks.patch-ledger"]
+  F --> X["variant outputs\njcode-feature-<name>\njcode-stack-<name>\njcode-dogfood"]
+  F --> G["VALIDATION tier\nchecks.feature-<name>\nchecks.stack-<name>\nchecks.patch-ledger"]
 
   C --> N4["4nix consumer\none-line jcode input\nuses package/overlay/module"]
-  X --> Dog["dogfood live build\nexplicit variant/store path"]
+  X --> Dog["bounded selfdev dogfood\nexplicit variant/store path"]
   C --> Safe["safe fallback\nNix-store stable jcode"]
   G --> Gate["merge/restack gate\nsemantic validation before trust"]
 
-  N4 -. pulls from .-> Cache["Cachix\nprebuilt jcode outputs"]
+  N4 -. substitutes prebuilt outputs from .-> Cache["Cachix\nprebuilt jcode outputs"]
   Dog -. can fall back to .-> Safe
   Cache -. substitutes .-> N4
 ```
@@ -297,8 +317,8 @@ archive/<name>               # safety copy of old branch tips
 Recommended policy:
 
 - `main` contains stable downstream behavior that John is willing to carry continuously.
-- `stack/*` contains ordered, restackable feature work before it graduates to `main` or to `nix/features/<name>`.
-- `exp/*` contains work that may be thrown away.
+- `stack/*` contains ordered, restackable feature work. Some stack entries may graduate to `main`; some may graduate to `nix/features/<name>` and live there forever as active personal layers.
+- `exp/*` contains work that may be thrown away, but an experiment can also become a permanent experimental layer if John keeps using it.
 - `pr/*` is kept clean enough to submit upstream.
 
 ### Directories
@@ -316,6 +336,7 @@ nix/features/<name>/feature.toml                    # metadata
 nix/features/<name>/patch                           # patch or series entrypoint
 nix/features/<name>/check.nix                       # validation derivation
 nix/features/<name>/README.md                       # human explanation
+nix/stacks/<name>.toml                              # ordered active feature stack, e.g. dogfood
 
 nix/variants.nix                                    # compose selected feature sets
 nix/checks.nix                                      # patch-ledger and feature checks
@@ -335,6 +356,7 @@ packages.${system}.jcode-base
 packages.${system}.jcode
 packages.${system}.default
 packages.${system}.jcode-feature-<name>
+packages.${system}.jcode-stack-<name>
 packages.${system}.jcode-experimental
 packages.${system}.jcode-dogfood
 packages.${system}.jcode-fallback
@@ -351,7 +373,8 @@ apps.${system}.dogfood
 
 checks.${system}.patch-ledger
 checks.${system}.feature-<name>
-checks.${system}.feature-stack
+checks.${system}.stack-<name>
+checks.${system}.dogfood-stack
 checks.${system}.nix-eval-surfaces
 
 devShells.${system}.default
@@ -373,6 +396,11 @@ owner = "john"
 summary = "One-sentence human explanation."
 retire_condition = "Keep unless upstream exposes equivalent extension seam."
 validation = "nix build .#checks.x86_64-linux.feature-example"
+
+claims = ["tool-registry", "prompt-defaults"]
+depends_on = []
+conflicts_with = []
+intentionally_overrides = []
 
 [deps]
 features = []
@@ -399,7 +427,9 @@ What the script should do:
 3. Add or update the row in `docs/fork/patch-ledger.md`.
 4. Expose `packages.${system}.jcode-feature-example`.
 5. Expose `checks.${system}.feature-example`.
-6. Print the cheap validation ladder:
+6. Optionally add it to `nix/stacks/dogfood.toml` at an explicit order position.
+7. Check declared dependencies, conflicts, and intentional overrides before building.
+8. Print the cheap validation ladder:
    - `cargo check ...` if the patch is already applied in the worktree
    - `cargo test ...` if a test is named
    - `nix build .#jcode-feature-example --dry-run`
