@@ -61,7 +61,17 @@ That is ~90% of a sustainable fork. The gaps are two cheap things.
 
 ## The two changes worth making
 
-### Change 1 (do first): turn on `rerere`. It is the missing piece.
+### Change 0 (shipped): a local-drift nudge so the clone never silently lags
+
+`scripts/fork-nudge.sh` runs from the devShell `shellHook` (direnv fires it on
+`cd`). It reads already-fetched refs for an instant verdict, never blocks on the
+network, background-refetches when refs are stale, and **auto fast-forwards `main`
+only in the unambiguously safe case** (strictly behind, clean tree, no local
+commits). Anything needing a rebase is a printed nudge to run `sync-local.sh`,
+never a surprise. This closes the one real "me-proofing" gap: forgetting to
+reconcile between CI's 6h rebases. See `docs/BRANCHING.md`.
+
+### Change 1 (do next): turn on `rerere`. It is the missing piece.
 
 The whole pain of "fast upstream + recurring conflicts in the same 7 files" is
 exactly what `git rerere` ("reuse recorded resolution") was built for: it records
