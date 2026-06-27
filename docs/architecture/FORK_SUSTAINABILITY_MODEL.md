@@ -150,6 +150,15 @@ edits you can carry as additions.**
 Concretely, walk the 7 rewrite-files and ask, for each, "can this become an
 insert + seam?" That work, not new tooling, is what keeps rebases boring.
 
+**Done (Change 3):** that walk is `FORK_REWRITE_SEAM_AUDIT.md`. Headline results:
+`skill.rs` was converted to a prepended additive loop (20 upstream deletions ->
+0); two of the seven "rewrites" turned out to be **upstream shipping unformatted
+code** (our tree is just what `cargo fmt` produces, verified) and one is the
+irreducible reflow of a sorted `use` list when you add types -- i.e. exactly the
+recurring conflict `rerere` (Change 1) absorbs. The remaining edits are dominated
+by additions (e.g. `acp.rs` is 626 added / 19 deleted). Net: the existing
+divergence is small and mostly unavoidable; no heavyweight tooling is justified.
+
 ## What to do with the personal features
 
 Decision rule (replaces the FEATURE-EXPERIMENT tier):

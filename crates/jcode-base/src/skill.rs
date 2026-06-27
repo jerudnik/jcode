@@ -250,14 +250,28 @@ impl SkillRegistry {
     }
 
     fn load_project_local_dirs(&mut self, working_dir: Option<&Path>) -> Result<()> {
-        // APM and agent-package-manager generated skill trees come first so
-        // project-local jcode/Claude compatibility paths can still override a
-        // generated skill with the same name.
-        for dir_name in [".apm", ".agents", ".jcode", ".claude"] {
+        // Downstream addition (kept as a separate prepended loop so upstream's
+        // .jcode/.claude blocks below stay byte-identical and never conflict on
+        // rebase): APM and agent-package-manager generated skill trees load
+        // first, so a project-local .jcode/.claude skill of the same name still
+        // overrides a generated one (load_from_dir inserts last-wins).
+        for dir_name in [".apm", ".agents"] {
             let dir = Self::project_local_dir(working_dir, dir_name);
             if dir.exists() {
                 self.load_from_dir(&dir)?;
             }
+        }
+
+        // Load from ./.jcode/skills/ (project-local jcode skills)
+        let local_jcode = Self::project_local_dir(working_dir, ".jcode");
+        if local_jcode.exists() {
+            self.load_from_dir(&local_jcode)?;
+        }
+
+        // Fallback: ./.claude/skills/ (project-local Claude skills for compatibility)
+        let local_claude = Self::project_local_dir(working_dir, ".claude");
+        if local_claude.exists() {
+            self.load_from_dir(&local_claude)?;
         }
 
         Ok(())
@@ -541,11 +555,26 @@ impl SkillRegistry {
             count += self.load_from_dir_count(&agents_skills)?;
         }
 
-        for dir_name in [".apm", ".agents", ".jcode", ".claude"] {
+        // Fork seam (additive): prepend APM/agent-package-manager generated skill
+        // trees. Upstream's `.jcode`/`.claude` blocks below stay byte-identical so
+        // this no longer conflicts on rebase.
+        for dir_name in [".apm", ".agents"] {
             let dir = Self::project_local_dir(working_dir, dir_name);
             if dir.exists() {
                 count += self.load_from_dir_count(&dir)?;
             }
+        }
+
+        // Load from ./.jcode/skills/ (project-local jcode skills)
+        let local_jcode = Self::project_local_dir(working_dir, ".jcode");
+        if local_jcode.exists() {
+            count += self.load_from_dir_count(&local_jcode)?;
+        }
+
+        // Fallback: ./.claude/skills/ (project-local Claude skills for compatibility)
+        let local_claude = Self::project_local_dir(working_dir, ".claude");
+        if local_claude.exists() {
+            count += self.load_from_dir_count(&local_claude)?;
         }
 
         Ok(count)
