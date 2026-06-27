@@ -1,50 +1,62 @@
 # Fork Sustainability Review Synthesis
 
 Date: 2026-06-27
-Status: review synthesis to fold into `FORK_SUSTAINABILITY_MODEL.md`
+Status: synthesis for the cut-down `FORK_SUSTAINABILITY_MODEL.md`.
 
-## Short-term vision
+## The cut
 
-Use the simplest sustainable workflow first.
+The earlier draft modelled jcode as "a large downstream patch stack on a fast
+upstream" and proposed tiers (BUILD/COMPOSE/FEATURE/VALIDATION), Nix feature
+variants/stacks, named daemon instances, and an executable patch ledger.
 
-- `main` is John's living daily fork: upstream + Nix packaging + stable personal downstream behavior.
-- 4nix installs and manages jcode as a flake input. It remains the stable/fallback world, not the patch-stack manager.
-- `nix develop` is the reproducible jcode development environment.
-- `nix run .` or the Home-Manager installed `jcode` is the packaged fallback.
-- Selfdev is the dogfood edge: use `selfdev build-reload` while hacking jcode.
-- Do not implement Nix feature stacks first. Keep them as an escape hatch for unusually invasive or mutually exclusive work.
-- Make the daemon's identity impossible to miss: client binary, server binary, source checkout, commit, dirty state, and compatibility verdict.
-- Keep up with upstream through the existing rails and `scripts/sync-local.sh`; treat repeated conflicts as requests for extension seams.
+The repo's own numbers reject that framing:
 
-## Longer-term work
+- 30 feature commits on `main`, 9 packaging commits. Small.
+- 107 files touched = 47 brand-new files + 60 edits, and most edits are
+  **pure insertions** (0 deletions).
+- Only **7 source files** actually rewrite >5 upstream lines.
+- `git cherry` proved the "35 ahead" was mostly already-upstream commits under new
+  hashes (6h CI rebase rewrites history).
 
-The long-term goal is explicit operating modes without cognitive overhead.
+That is a routine rebase with a few recurring conflict points, not a patch-queue
+problem. So the model collapses to what git and the existing flake already do.
 
-1. Add NS4 provenance stamping first: every build and daemon reports source path, commit, dirty state, and binary origin.
-2. Add a protocol/capability compatibility gate so incompatible selfdev/stable client-server combinations fail loudly or reconnect cleanly.
-3. Add `jcode doctor` as the main visibility command. It should explain PATH/client/server identity, branch drift, upstream sync state, selfdev channels, and fallback commands.
-4. Shrink the conflict surface by converting repeated invasive edits into additive seams: config, registries, traits, hooks, prompt/tool/session extension points.
-5. Later, add named daemon instances if needed:
-   - stable instance: Nix-store binary, stable runtime dir/socket
-   - selfdev instance: mutable selfdev binary, selfdev runtime dir/socket
-   - clients attach intentionally to one instance
-6. Only after these basics are working, consider Nix feature variants for the few features that need separate binary identity or explicit mutually exclusive stacks.
+## The target model
 
-## Overall vision
+> Main is the fork. CI rebases it on upstream. `rerere` remembers conflict fixes.
+> New features add files, they don't edit upstream. `doctor` names the running
+> binary. That's it.
 
-The fork is allowed to live in bounded selfdev mode.
+## What to actually build (cheap, ordered)
 
-That means John can use a moving personal fork every day, even while using jcode to modify itself, without pretending that all downstream features are temporary or upstream-bound. The safety model is not "never run selfdev." The safety model is:
+1. **Enable `git rerere`** in the repo and the CI rebase job; persist the
+   `rr-cache`. Recurring conflicts in the 7 files get resolved once, then replay
+   automatically on every 6h rebase. This is the single highest-leverage change.
+2. **`jcode doctor`** binary-identity view: client/server path, origin
+   (nix/selfdev/source), commit, dirty, a compat verdict, and the fallback
+   command. `jcode-build-meta` already holds the data; just surface it.
+3. **Shrink the 7 rewrite-files** to additive seams (new file + one registration
+   line), upstreaming each seam so the conflict disappears for good.
+4. Keep `patch-ledger.md` as a plain-doc index. Nothing "executable".
 
-- selfdev is visible
-- stable fallback is always available
-- upstream sync is frequent and boring
-- repeated conflicts become architecture seams
-- downstream intent is recorded in the patch ledger
-- cheap validation happens before expensive builds
-- Nix provides reproducible environment, stable package, cache, and fallback
-- selfdev provides the daily moving edge
+## What is deferred or rejected
 
-The simplest durable slogan:
+- **Rejected:** Nix feature variants/stacks, `nix/features/<name>/{patch,check.nix}`,
+  quilt/StGit/topgit patch queues, named daemon instances, a compat-negotiation
+  framework. All invent structure for a problem `git rebase + rerere + additive
+  seams` already solves. (`overrideAttrs.patches` is a one-liner if a separate
+  binary identity is ever truly needed.)
+- **Deferred:** Jujutsu (jj). Its strength is large reorderable stacks; revisit
+  only if rerere + seams stop coping.
 
-> Main is the living fork. Nix is the fallback and environment. Selfdev is the dogfood edge. Doctor explains which world is running. Repeated conflicts become seams.
+## Feature placement rule
+
+- Needs to run inside the agent loop -> additive code on `main`.
+- Can be a tool/setting -> external MCP/ACP tool or config (`.jcode/mcp.json`,
+  skills, MCP servers). Zero divergence.
+- Is really an extension point -> upstream it.
+
+## Slogan
+
+> `main` rebased by CI, `rerere` for the repeats, additions over edits, `doctor`
+> for identity, Nix for the fallback. No tiers.
