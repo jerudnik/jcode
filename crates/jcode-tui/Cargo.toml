@@ -99,6 +99,14 @@ embeddings = ["jcode-app-core/embeddings"]
 pdf = ["jcode-app-core/pdf"]
 bedrock = ["jcode-app-core/bedrock"]
 mmdr-size-api = ["jcode-tui-mermaid/mmdr-size-api"]
+# Fork divergence: compile in the pure-Rust Mermaid renderer and the markdown
+# integration that drives it. Upstream gates this off by default ("renderer is
+# unstable"); we ship it on for Kitty/iTerm2/Sixel-capable terminals. See
+# docs/fork/patch-ledger.md.
+mermaid = [
+    "jcode-tui-mermaid/renderer",
+    "jcode-tui-markdown/mermaid-renderer",
+]
 # Forwards the application core's `test-support` feature (and onward to
 # jcode-base) so downstream crates' test targets can reach the whole stack's
 # test helpers. Never enabled in normal (non-test) builds.

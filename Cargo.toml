@@ -201,7 +201,7 @@ tempfile = "3"
 # semantic retrieval, and embedding-backed features work out of the box.
 # Use `JCODE_DEV_FEATURE_PROFILE=minimal` for compile-speed probes that need
 # to skip optional default feature stacks.
-default = ["pdf", "embeddings", "bedrock"]
+default = ["pdf", "embeddings", "bedrock", "mermaid"]
 dev-bins = ["jcode-tui/dev-bins"]
 jemalloc = [
     "dep:tikv-jemallocator",
@@ -220,6 +220,7 @@ embeddings = ["jcode-tui/embeddings"]
 # forwards down through jcode-tui -> jcode-app-core -> jcode-base.
 bedrock = ["jcode-tui/bedrock"]
 mmdr-size-api = ["jcode-tui/mmdr-size-api"]
+mermaid = ["jcode-tui/mermaid"]
 pdf = ["jcode-tui/pdf"]
 
 [target.'cfg(windows)'.dependencies]
