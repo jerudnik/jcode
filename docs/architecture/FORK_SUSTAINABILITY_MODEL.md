@@ -1,6 +1,7 @@
 # Fork Sustainability Model
 
-Date: 2026-06-27
+Date: 2026-06-27 (refreshed 2026-06-29: mermaid worked example, test-suite
+evidence, NS4 provenance shipped)
 Status: cut-down target. Supersedes the prior tiered/feature-variant draft.
 Scope: keep a fast-moving upstream fork + in-repo Nix packaging + personal feature
 work sustainable, with the *minimum* machinery that actually pays for itself.
@@ -114,12 +115,13 @@ the daemon's socket/commit. `jcode doctor` (and `jcode doctor --json`) now does:
 
 ```
 client:  <path>  origin=<nix|selfdev|release|source>  <semver> (<hash>)[ +dirty]
+  built-from: <source checkout path>      # source/selfdev origins only (NS4)
 server:  <socket>  pid=<pid>  <name>  <version> (<hash>) started <ts>
 verdict: SAME | COMPATIBLE | RECONNECT | NO_SERVER -- <detail>
 fallback: nix run github:jerudnik/jcode -- doctor   (or `jcode server reload`)
 ```
 
-It is a read-only CLI subcommand (`src/cli/commands/doctor.rs`, 10 unit tests).
+It is a read-only CLI subcommand (`src/cli/commands/doctor.rs`, 16 unit tests).
 Crucially it needed **zero new protocol**: the running daemon's identity
 (version, git hash, pid, socket, start time) already lives in the server
 registry (`crate::registry::find_server_by_socket_sync`), and the client's
@@ -128,6 +130,18 @@ Origin is inferred from the binary path (`/nix/store` -> nix, `builds/{stable,
 versions}` -> release, other `builds/` -> selfdev, `target/` -> source). The
 verdict compares git hashes (short/full tolerant) and flags a dirty client tree.
 Named daemon instances stay deferred until this proves insufficient.
+
+**Update (NS4, shipped 2026-06-29, commit `f0873c3d`):** the binary now also
+stamps the *source checkout path* it was built from
+(`jcode_build_meta::BUILD_SOURCE_DIR`, emitted by `jcode-build-meta/build.rs`
+alongside the existing git stamps, overridable via `JCODE_BUILD_SOURCE_DIR` and
+pinned to `nix-store` for Nix builds in `package.nix`). `doctor` surfaces it as
+the `built-from:` line for source/selfdev origins only, since a Nix/release
+binary's stamped path is an immutable build sandbox. This closes the last half of
+the "which checkout produced the running daemon" question (G4): origin + commit +
+dirty told you *what kind* of binary and *which commit*; `built-from` now names
+*which working tree*. Kept off `buildDepsOnly` so it never perturbs the crane
+dependency cache. Ledger row: "Build-provenance source-dir stamp (NS4/G4)".
 
 ## The one durable habit: additive seams, not edits
 
@@ -174,6 +188,75 @@ There is no fourth "Nix feature variant" home. If a feature ever truly needs a
 separate binary identity, `pkgs.jcode.overrideAttrs { patches = [...]; }` is a
 one-liner you can add *that day* -- it does not need to be designed now.
 
+## Worked example: Mermaid (validates the decision rule, finds the escape hatch's first real use)
+
+Mermaid rendering (shipped 2026-06-29, commits `e828cbea`/`0d583a29`; OI-74) is the
+cleanest real test of this model, because it splits cleanly along the exact line
+the model draws between "additive code on `main`" and "the `overrideAttrs.patches`
+escape hatch."
+
+The setup: upstream deliberately *disabled* Mermaid ("renderer is unstable")
+behind three gates (the `renderer`/`mermaid-renderer` cargo features, a
+`JCODE_ENABLE_MERMAID=1` runtime opt-in, and a `DiagramDisplayMode::None`
+default). A fork that only rebases inherits "off." We want diagrams rendered
+(Ghostty speaks the Kitty graphics protocol). That is a fork-local product
+decision, not an upstream PR.
+
+It split into two parts that the decision rule sends to two different homes:
+
+1. **The enablement is additive code on `main` (the default path, and it worked).**
+   Turning Mermaid on was a `mermaid` default cargo feature, a default-on runtime
+   gate, and a `Pinned` config default: `Cargo.toml` x3, one runtime gate, one
+   config enum default. None of it was a deep logic edit to `agent.rs`/`session.rs`,
+   so it lands as low-conflict additive change on `main`, exactly as the rule says.
+   This is a data point for "additions over edits": even *enabling an
+   upstream-disabled feature* stayed additive.
+
+2. **The dependency bug is the escape hatch's first genuine candidate.** The
+   instability was concrete: `mermaid-rs-renderer` v0.2.1 writes unescaped nested
+   double-quotes into the SVG `font-family` attribute, so `usvg::Tree::from_str`
+   rejects **every** diagram. Today we carry `sanitize_font_family_quotes()`, a
+   wrapper that rewrites the quotes before parsing: a `compat(mermaid)` ledger row
+   with a clean retire condition (the renderer emits valid XML) and a real
+   upstream-PR target (the renderer repo, same author). This is the rare case the
+   model reserved `overrideAttrs.patches` / a pinned dep for: a *dependency-graph*
+   fix, not a workspace-source edit. The right end state is to **upstream the
+   renderer fix** and carry only the 3-line enablement; until then the in-tree
+   sanitizer is fine because it is small and self-contained. We did not need to
+   build a feature-variant system to hold it; we needed one ledger row and a known
+   PR target.
+
+3. **Validation is a per-feature executable check, not the inherited suite.** The
+   e2e smoke test (`crates/jcode-tui-mermaid/tests/smoke_render.rs`: a real
+   flowchart renders to a valid PNG) plus the `sanitize` unit tests are what prove
+   this feature works. That is the `patch-ledger.md` Validation column doing its
+   job as a plain command, no "executable ledger" abstraction required. The next
+   section explains why this per-feature stance is forced rather than optional.
+
+Net: Mermaid confirms the cut. The model's two homes (additive `main`, plus a
+narrow dep-patch escape hatch with a ledger row) covered a real feature with a
+real dependency bug, and the heavyweight feature-variant tier would have added
+nothing.
+
+## Validation is per-feature, because the inherited suite does not run
+
+A corollary the Mermaid work made concrete (and the reason `patch-ledger.md` keeps
+a Validation command per row): the fork cannot lean on upstream's test suite.
+`jcode-tui`'s lib tests are **stale identically on upstream** and never execute in
+CI (upstream's CI is `--no-run` for the whole workspace). With `mermaid` enabled,
+47 of them fail; the triage (`docs/fork/jcode-tui-test-triage.md`) splits them
+into 13 cross-test global-state pollution (pass alone, harness is non-hermetic)
+and 34 stale/structural (assert product behavior upstream itself has since
+changed, or depend on `current_exe()` being `jcode`).
+
+Decision recorded: do **not** grind them to green (the suite is `--no-run` in CI,
+~28% are unfixable without harness surgery, the rest re-litigate deliberate
+upstream changes that still will not run). Instead keep them compile-only for
+parity and **grow our own small, hermetic, `JCODE_HOME`-isolated checks** for
+fork-owned behavior as we touch it, with `smoke_render.rs` as the model. This is
+why "validation" in this fork means a real command attached to each patch-ledger
+row, not "run the upstream tests."
+
 ## Prior-art verdicts (why the heavy options were cut)
 
 | Option | Verdict for this fork | Why |
@@ -197,15 +280,16 @@ Sources: Git Pro "Rerere"; nixpkgs manual `overrideAttrs`/`patches` and overlays
 
 ```mermaid
 flowchart TD
-  U["upstream/master"] -->|6h CI rebase + rerere replay| M["main = the fork\nupstream + nix + features"]
-  M -->|crane, cached cargoArtifacts| P["packaged jcode\n(nix-store fallback)"]
+  U["upstream/master"] -->|6h CI rebase + rerere replay| M["main = the fork<br/>upstream + nix + features"]
+  M -->|crane, cached cargoArtifacts| P["packaged jcode<br/>(nix-store fallback)"]
   P -->|one-line input + Cachix| N4["4nix consumer"]
   M -->|nix develop| Dev["cargo check / targeted test"]
   Dev -->|selfdev build-reload| Edge["dogfood edge"]
-  P --> Doctor["jcode doctor\nclient+server binary, commit, dirty, verdict, fallback"]
+  P --> Doctor["jcode doctor<br/>client+server binary, commit, dirty, built-from, verdict"]
   Edge --> Doctor
-  M -. recurring conflict in one of 7 files .-> Seam["make it an additive seam\n(new file + 1 line) or upstream it"]
+  M -. recurring conflict in one of 7 files .-> Seam["make it an additive seam<br/>(new file + 1 line) or upstream it"]
   Seam --> M
+  Exp["exp/&lt;topic&gt;<br/>disposable experiments"] -. promote if kept .-> M
 ```
 
 Daily loop:
@@ -221,17 +305,37 @@ selfdev build-reload; jcode doctor
 ## Sequence (each step independently shippable, cheapest first)
 
 1. **Enable `rerere`** in the repo and the CI rebase job; persist `rr-cache`.
+   *(shipped)*
 2. **`jcode doctor`** binary-identity view from `build-meta` (+ a single
-   compat-verdict handshake field).
+   compat-verdict handshake field). *(shipped; NS4 `built-from` provenance added
+   2026-06-29, commit `f0873c3d`)*
 3. **Shrink the 7 rewrite-files** toward additive seams, upstreaming the seams.
+   *(seam audit done in `FORK_REWRITE_SEAM_AUDIT.md`; `skill.rs` converted; rest
+   are mostly cargo-fmt / sorted-use reflow that `rerere` absorbs)*
 4. Keep `patch-ledger.md` as the plain-doc index of why each downstream change
    exists and when it retires. No "executable ledger".
 5. Everything else (jj, feature variants, named daemons) stays **deferred** until
    a concrete failure justifies it.
 
-## Open questions for John
+## Resolved decisions (was "open questions")
 
-1. Accept the reframe: this is a small clean fork, not a patch stack?
-2. OK to enable `rerere` in CI and cache `rr-cache` (shared local+CI)?
-3. `jcode doctor` as a CLI subcommand first (not a TUI panel)?
-4. Want me to do the 7-file additive-seam audit as the next concrete task?
+1. **Accept the reframe?** Yes. This is a small clean fork (30 mostly-additive
+   commits, 7 real-rewrite files), not a patch stack. The tiered/feature-variant
+   model is cut.
+2. **`rerere` in CI + shared `rr-cache`?** Yes, shipped (tracked `.rerere-cache/`,
+   imported by CI and `sync-local.sh`).
+3. **`jcode doctor` as a CLI subcommand first?** Yes, shipped; NS4 added the
+   `built-from` provenance line.
+4. **Where do personal features live?** `main` is the living fork and carries
+   permanent personal features as additive code; `exp/<topic>` holds disposable
+   experiments, promoted to `main` only if kept. The full Nix feature-stack
+   (`nix/features/<name>/{patch,check}`) is **deferred to an escape hatch**
+   (`overrideAttrs.patches`), not designed now. (Preference recorded 2026-06-29.)
+5. **jj vs git?** Stay on git + rerere + sync-local; revisit jj only if those
+   stop coping.
+
+The prior-art exploration this report's earlier driver called for is already
+captured in the "Prior-art verdicts" table above and in
+`docs/architecture/FORK_SUSTAINABILITY_REVIEW_SYNTHESIS.md`; the heavy options
+(quilt/StGit/patch-queues, Nix feature variants, named daemon instances) were
+explored and rejected for this fork's measured size.
