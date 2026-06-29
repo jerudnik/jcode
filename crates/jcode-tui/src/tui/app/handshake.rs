@@ -146,10 +146,7 @@ pub(crate) fn act_on_verdict(
                 target.display()
             ));
 
-            let mut cmd = std::process::Command::new(&target);
-            cmd.args(std::env::args_os().skip(1));
-            // Mark the child so a still-incompatible verdict cannot loop.
-            cmd.env(REEXEC_GUARD_ENV, "1");
+            let mut cmd = build_reexec_command(&target, std::env::args_os().skip(1));
             let err = crate::platform::replace_process(&mut cmd);
             // exec() only returns on failure. Fail safe: surface, do not attach.
             HandshakeOutcome::Refuse(format!(
@@ -158,6 +155,22 @@ pub(crate) fn act_on_verdict(
             ))
         }
     }
+}
+
+/// Build the re-exec `Command` for `target`: forward the current invocation's
+/// arguments and set the [`REEXEC_GUARD_ENV`] marker so a still-incompatible
+/// verdict in the child cannot trigger another re-exec (loop guard). Pure
+/// command construction, separated from the `exec()` side effect so the
+/// targeting + guard wiring is unit-testable.
+fn build_reexec_command<I, S>(target: &Path, forwarded_args: I) -> std::process::Command
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut cmd = std::process::Command::new(target);
+    cmd.args(forwarded_args);
+    cmd.env(REEXEC_GUARD_ENV, "1");
+    cmd
 }
 
 #[cfg(test)]
@@ -243,5 +256,48 @@ mod tests {
             false,
         ));
         assert_eq!(action, HandshakeAction::Attach);
+    }
+
+    #[test]
+    fn build_reexec_command_sets_guard_env_and_forwards_args() {
+        let cmd = build_reexec_command(
+            Path::new("/home/u/.jcode/builds/current/jcode"),
+            ["serve", "--socket", "/tmp/x.sock"],
+        );
+        assert_eq!(
+            cmd.get_program(),
+            std::ffi::OsStr::new("/home/u/.jcode/builds/current/jcode")
+        );
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, vec!["serve", "--socket", "/tmp/x.sock"]);
+        let guard = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new(REEXEC_GUARD_ENV))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned());
+        assert_eq!(guard.as_deref(), Some("1"));
+    }
+
+    /// Process-level smoke: the re-exec command actually launches the target
+    /// with the guard env and forwarded args set, proving the exec seam wires
+    /// the right process (the real `exec()` itself is exercised by the server
+    /// reload path). Unix-only because it shells out to `/bin/sh`.
+    #[cfg(unix)]
+    #[test]
+    fn build_reexec_command_actually_launches_target_with_guard_and_args() {
+        // Use `sh -c` as the "launcher": print the guard env and the first
+        // forwarded arg so we can assert both crossed the process boundary.
+        let script = format!("printf '%s:%s' \"${REEXEC_GUARD_ENV}\" \"$1\"");
+        let mut cmd = build_reexec_command(
+            Path::new("/bin/sh"),
+            ["-c", script.as_str(), "sh", "forwarded-marker"],
+        );
+        let output = cmd.output().expect("re-exec command should launch");
+        assert!(output.status.success(), "launcher should exit cleanly");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout, "1:forwarded-marker",
+            "the child must see REEXEC_GUARD_ENV=1 and the forwarded args"
+        );
     }
 }

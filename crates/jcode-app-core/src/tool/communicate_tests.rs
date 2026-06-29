@@ -1228,6 +1228,35 @@ impl RawClient {
         Ok(())
     }
 
+    /// Subscribe while advertising an explicit NS1 protocol/build identity, and
+    /// return the request id so the caller can match the server's
+    /// `HandshakeVerdict`/`Done` events. Unlike [`Self::subscribe`], this does
+    /// not drain to `Done`, so the test can observe the verdict event ordering
+    /// on the wire.
+    async fn subscribe_with_identity(
+        &mut self,
+        working_dir: &Path,
+        protocol_version: Option<u32>,
+        build_hash: Option<String>,
+    ) -> Result<u64> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send_request(Request::Subscribe {
+            id,
+            working_dir: Some(working_dir.display().to_string()),
+            selfdev: None,
+            target_session_id: None,
+            client_instance_id: None,
+            client_has_local_history: false,
+            allow_session_takeover: false,
+            terminal_env: Vec::new(),
+            protocol_version,
+            build_hash,
+        })
+        .await?;
+        Ok(id)
+    }
+
     async fn session_id(&mut self) -> Result<String> {
         let id = self.next_id;
         self.next_id += 1;

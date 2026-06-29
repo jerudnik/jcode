@@ -660,3 +660,192 @@ async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
 
     server_task.abort();
 }
+
+/// NS1 live check: a client that advertises a build hash the daemon does not
+/// share receives an `IncompatibleReconnect` verdict over the wire, before the
+/// subscribe `Done`. This is the server half of the re-exec decision proven
+/// against a real `Server::run()` socket, not a fixture.
+#[tokio::test]
+async fn handshake_emits_incompatible_verdict_for_mismatched_client() {
+    let _env_lock = crate::storage::lock_test_env();
+    let runtime_dir = tempfile::TempDir::new().expect("runtime tempdir");
+    let repo_dir = std::env::current_dir().expect("repo cwd");
+    let socket_path = runtime_dir.path().join("jcode.sock");
+    let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
+    let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
+    let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
+
+    let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
+        delay: Duration::from_millis(50),
+    });
+    let server = Arc::new(Server::new(provider));
+    let mut server_task = {
+        let server = Arc::clone(&server);
+        tokio::spawn(async move { server.run().await })
+    };
+    wait_for_server_socket(&socket_path, &mut server_task)
+        .await
+        .expect("server socket should be ready");
+
+    let mut client = RawClient::connect(&socket_path)
+        .await
+        .expect("client should connect");
+    let id = client
+        .subscribe_with_identity(
+            &repo_dir,
+            Some(jcode_protocol::PROTOCOL_VERSION),
+            Some("0000000-not-a-real-build-hash".to_string()),
+        )
+        .await
+        .expect("subscribe with mismatched identity");
+
+    let verdict = client
+        .read_until(Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::HandshakeVerdict { id: ev_id, .. } if *ev_id == id)
+        })
+        .await
+        .expect("server should emit a handshake verdict");
+
+    match verdict {
+        ServerEvent::HandshakeVerdict {
+            compatibility,
+            server_protocol_version,
+            detail,
+            ..
+        } => {
+            assert_eq!(
+                compatibility,
+                jcode_protocol::HandshakeCompatibility::IncompatibleReconnect,
+                "mismatched build hash must be incompatible"
+            );
+            assert_eq!(server_protocol_version, jcode_protocol::PROTOCOL_VERSION);
+            assert!(
+                detail.contains("build mismatch"),
+                "verdict detail should explain the mismatch, got: {detail}"
+            );
+        }
+        other => panic!("expected HandshakeVerdict, got {other:?}"),
+    }
+
+    // The verdict precedes the normal subscribe completion.
+    client
+        .read_until(
+            Duration::from_secs(5),
+            |event| matches!(event, ServerEvent::Done { id: done_id } if *done_id == id),
+        )
+        .await
+        .expect("subscribe should still complete after the verdict");
+
+    server_task.abort();
+}
+
+/// NS1 live check: a client advertising the daemon's own build identity gets a
+/// `Compatible` verdict, so matching builds attach exactly as before.
+#[tokio::test]
+async fn handshake_emits_compatible_verdict_for_matching_client() {
+    let _env_lock = crate::storage::lock_test_env();
+    let runtime_dir = tempfile::TempDir::new().expect("runtime tempdir");
+    let repo_dir = std::env::current_dir().expect("repo cwd");
+    let socket_path = runtime_dir.path().join("jcode.sock");
+    let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
+    let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
+    let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
+
+    let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
+        delay: Duration::from_millis(50),
+    });
+    let server = Arc::new(Server::new(provider));
+    let mut server_task = {
+        let server = Arc::clone(&server);
+        tokio::spawn(async move { server.run().await })
+    };
+    wait_for_server_socket(&socket_path, &mut server_task)
+        .await
+        .expect("server socket should be ready");
+
+    let mut client = RawClient::connect(&socket_path)
+        .await
+        .expect("client should connect");
+    // The server and this test binary share the same compiled GIT_HASH.
+    let id = client
+        .subscribe_with_identity(
+            &repo_dir,
+            Some(jcode_protocol::PROTOCOL_VERSION),
+            Some(jcode_build_meta::GIT_HASH.to_string()),
+        )
+        .await
+        .expect("subscribe with matching identity");
+
+    let verdict = client
+        .read_until(Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::HandshakeVerdict { id: ev_id, .. } if *ev_id == id)
+        })
+        .await
+        .expect("server should emit a handshake verdict");
+    assert!(
+        matches!(
+            verdict,
+            ServerEvent::HandshakeVerdict {
+                compatibility: jcode_protocol::HandshakeCompatibility::Compatible,
+                ..
+            }
+        ),
+        "matching build identity must be compatible, got: {verdict:?}"
+    );
+
+    server_task.abort();
+}
+
+/// NS1 live check: a legacy client that advertises no identity (both fields
+/// `None`) receives NO verdict event and attaches normally. This proves the
+/// seam is additive and old clients keep parsing the stream they understand.
+#[tokio::test]
+async fn handshake_sends_no_verdict_to_legacy_client() {
+    let _env_lock = crate::storage::lock_test_env();
+    let runtime_dir = tempfile::TempDir::new().expect("runtime tempdir");
+    let repo_dir = std::env::current_dir().expect("repo cwd");
+    let socket_path = runtime_dir.path().join("jcode.sock");
+    let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
+    let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
+    let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
+
+    let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
+        delay: Duration::from_millis(50),
+    });
+    let server = Arc::new(Server::new(provider));
+    let mut server_task = {
+        let server = Arc::clone(&server);
+        tokio::spawn(async move { server.run().await })
+    };
+    wait_for_server_socket(&socket_path, &mut server_task)
+        .await
+        .expect("server socket should be ready");
+
+    let mut client = RawClient::connect(&socket_path)
+        .await
+        .expect("client should connect");
+    let id = client
+        .subscribe_with_identity(&repo_dir, None, None)
+        .await
+        .expect("legacy subscribe");
+
+    // Read until subscribe completes; assert no verdict event arrived first.
+    let mut saw_verdict = false;
+    client
+        .read_until(Duration::from_secs(5), |event| match event {
+            ServerEvent::HandshakeVerdict { .. } => {
+                saw_verdict = true;
+                true // stop early on the (unexpected) verdict so we can fail loudly
+            }
+            ServerEvent::Done { id: done_id } => *done_id == id,
+            _ => false,
+        })
+        .await
+        .expect("legacy subscribe should complete");
+    assert!(
+        !saw_verdict,
+        "a legacy client (no advertised identity) must not receive a HandshakeVerdict event"
+    );
+
+    server_task.abort();
+}
