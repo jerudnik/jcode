@@ -125,7 +125,14 @@ fn test_parse_tailscale_dns_name_invalid_json() {
 
 #[test]
 fn configured_auth_test_targets_only_include_configured_supported_providers() {
-    let _guard = crate::storage::lock_test_env();
+    // OpenRouter/OpenAI "configured" state is resolved from the live environment
+    // and config files (state_for_provider -> api_key_available), NOT from the
+    // in-memory AuthStatus struct. Use the auth sandbox to clear all tracked
+    // provider env vars and point JCODE_HOME at a temp dir so the result is
+    // hermetic, then set only OPENROUTER_API_KEY to mark OpenRouter configured.
+    let _sandbox = crate::auth::test_sandbox::AuthTestSandbox::new().expect("auth sandbox");
+    crate::env::set_var("OPENROUTER_API_KEY", "test-openrouter-key");
+    crate::auth::AuthStatus::invalidate_cache();
 
     let status = AuthStatus {
         anthropic: ProviderAuth {
