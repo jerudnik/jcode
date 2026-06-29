@@ -341,7 +341,11 @@ fn command_exists_absolute_path() {
     if cfg!(windows) {
         assert!(command_exists(r"C:\Windows\System32\cmd.exe"));
     } else {
-        assert!(command_exists("/bin/ls") || command_exists("/usr/bin/ls"));
+        // Use the running test binary's own path rather than FHS-specific paths
+        // like `/bin/ls`, which do not exist on non-FHS systems (e.g. NixOS).
+        // current_exe() is always a real, absolute, executable path.
+        let exe = std::env::current_exe().expect("current exe path");
+        assert!(command_exists(exe.to_str().expect("utf-8 exe path")));
     }
 }
 

@@ -1080,6 +1080,11 @@ mod tests {
 
     #[test]
     fn picker_switch_target_uses_profile_route_not_matching_label_only_route() {
+        // `activate_auth_change` writes process-global JCODE_RUNTIME_PROVIDER /
+        // JCODE_ACTIVE_PROVIDER as a side effect. Hold an AuthTestSandbox so this
+        // test serializes on the shared env lock and isolates JCODE_HOME, rather
+        // than racing other env-dependent tests (e.g. the auth lifecycle matrix).
+        let _sandbox = AuthTestSandbox::new().expect("auth sandbox");
         let spec = AuthLifecycleSpec::cerebras_fixture(AuthLifecycleAuthPath::RemoteTuiPasteApiKey);
         let auth = AuthChanged {
             provider: jcode_base::protocol::AuthProviderId::new(spec.provider_id),
