@@ -331,6 +331,11 @@ impl RemoteConnection {
             client_has_local_history,
             allow_session_takeover,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
+            // Advertise build/protocol identity so the daemon can return an NS1
+            // compatibility verdict; an incompatible verdict triggers a client
+            // re-exec into the matching launcher (see tui::app::handshake).
+            protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
+            build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
         })
         .await?;
         let subscribe_ms = subscribe_start.elapsed().as_millis();

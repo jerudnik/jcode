@@ -647,6 +647,10 @@ impl AcpRuntime {
                 client_has_local_history: false,
                 allow_session_takeover: false,
                 terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
+                // ACP is a thin client that does not re-exec; stay legacy so the
+                // server never sends it a handshake verdict event (NS1).
+                protocol_version: None,
+                build_hash: None,
             })
             .await?;
         wait_for_done(&session, subscribe_id).await?;

@@ -12,6 +12,19 @@ use serde::{Deserialize, Serialize};
 mod comm_format;
 mod notifications;
 
+/// Wire protocol version negotiated on the `Subscribe` handshake.
+///
+/// Bumped whenever a client and server that disagree on it can no longer safely
+/// share a session (a breaking change to request/event shapes or to the
+/// daemon's in-memory contracts). The server compares the value a client
+/// advertises against this constant and returns a typed
+/// [`wire::HandshakeCompatibility`] verdict; see
+/// `docs/architecture/SELFDEV_NIX_DAEMON_DIVERGENCE.md` (NS1, gaps G1/G3).
+///
+/// Clients built before this field existed advertise `None`, which the server
+/// treats as a legacy-compatible client rather than a mismatch.
+pub const PROTOCOL_VERSION: u32 = 1;
+
 pub use comm_format::*;
 pub use notifications::{FeatureToggle, NotificationType};
 
@@ -173,7 +186,7 @@ pub type ReloadRecoverySnapshot = jcode_selfdev_types::ReloadRecoveryDirective;
 
 mod wire;
 pub use wire::TaskGraphNodeSpec;
-pub use wire::{Request, ServerEvent};
+pub use wire::{HandshakeCompatibility, Request, ServerEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallSummary {

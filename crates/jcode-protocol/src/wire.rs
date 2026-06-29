@@ -28,6 +28,100 @@ fn is_zero_u8(value: &u8) -> bool {
     *value == 0
 }
 
+/// Typed compatibility verdict the server returns for a client's advertised
+/// build/protocol identity on the `Subscribe` handshake.
+///
+/// Mirrors the read-only verdict vocabulary `jcode doctor` already uses
+/// (Compatible vs Reconnect), but here the server *enforces* it at connect time
+/// and the client *acts* on it. See
+/// `docs/architecture/SELFDEV_NIX_DAEMON_DIVERGENCE.md` (NS1, gaps G1/G3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandshakeCompatibility {
+    /// Client and server agree on protocol version and build identity (or the
+    /// client is a legacy client that advertised nothing): proceed as today.
+    Compatible,
+    /// Client and server differ enough that attaching is unsafe; the client
+    /// should re-exec into the matching launcher and reconnect.
+    IncompatibleReconnect,
+}
+
+impl HandshakeCompatibility {
+    /// Pure compatibility verdict for a client's advertised handshake identity
+    /// against the server's own. Returns the verdict plus a human-readable
+    /// explanation. Total over every input, including a legacy client that
+    /// advertised nothing (`client_protocol = None`, `client_hash = None`),
+    /// which is a defined Compatible case, never a panic.
+    ///
+    /// Rules, in order:
+    /// 1. A legacy client (no protocol version advertised) is Compatible: it
+    ///    predates the handshake and the server must not break it.
+    /// 2. Differing protocol versions are IncompatibleReconnect: the wire
+    ///    contract itself changed.
+    /// 3. Same protocol but differing known build hashes are
+    ///    IncompatibleReconnect: a substantially-different daemon (G3).
+    /// 4. Otherwise Compatible (same hash, or a hash the server cannot compare).
+    ///
+    /// Hash comparison tolerates short-vs-full forms, matching `jcode doctor`.
+    pub fn evaluate(
+        client_protocol: Option<u32>,
+        client_hash: Option<&str>,
+        server_protocol: u32,
+        server_hash: Option<&str>,
+    ) -> (HandshakeCompatibility, String) {
+        let Some(client_protocol) = client_protocol else {
+            return (
+                HandshakeCompatibility::Compatible,
+                "legacy client advertised no protocol version; attaching as compatible"
+                    .to_string(),
+            );
+        };
+
+        if client_protocol != server_protocol {
+            return (
+                HandshakeCompatibility::IncompatibleReconnect,
+                format!(
+                    "protocol mismatch: client speaks v{client_protocol}, server speaks v{server_protocol}; reconnect into the matching build"
+                ),
+            );
+        }
+
+        match (client_hash, server_hash) {
+            (Some(c), Some(s)) if !c.is_empty() && !s.is_empty() => {
+                if hashes_match(c, s) {
+                    (
+                        HandshakeCompatibility::Compatible,
+                        format!("client and server are the same build ({c})"),
+                    )
+                } else {
+                    (
+                        HandshakeCompatibility::IncompatibleReconnect,
+                        format!(
+                            "build mismatch: client {c} != server {s} (protocol v{server_protocol}); reconnect into the matching build"
+                        ),
+                    )
+                }
+            }
+            // Same protocol, but at least one side's hash is unknown/unstamped:
+            // the protocol contract holds, so attaching is safe.
+            _ => (
+                HandshakeCompatibility::Compatible,
+                format!("protocol v{server_protocol} matches; build hash not comparable, attaching as compatible"),
+            ),
+        }
+    }
+
+    /// Whether this verdict permits attaching to the daemon as-is.
+    pub fn is_compatible(self) -> bool {
+        matches!(self, HandshakeCompatibility::Compatible)
+    }
+}
+
+/// Short-vs-full-tolerant git hash comparison (mirrors `jcode doctor`).
+fn hashes_match(a: &str, b: &str) -> bool {
+    a.starts_with(b) || b.starts_with(a)
+}
+
 /// Client request to server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -123,6 +217,18 @@ pub enum Request {
         /// to the client's terminal instead of its own stale startup env (#405).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         terminal_env: Vec<(String, String)>,
+        /// Wire protocol version this client was built with
+        /// ([`crate::PROTOCOL_VERSION`]). Absent for clients built before the
+        /// NS1 handshake existed; the server treats `None` as legacy-compatible
+        /// rather than a mismatch. See
+        /// `docs/architecture/SELFDEV_NIX_DAEMON_DIVERGENCE.md` (G1).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        protocol_version: Option<u32>,
+        /// Short git hash of the client binary (`jcode_build_meta::GIT_HASH`),
+        /// used by the server to decide whether attaching to a
+        /// substantially-different daemon is safe. Absent for legacy clients.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        build_hash: Option<String>,
     },
 
     /// Get full conversation history (for TUI sync on connect)
@@ -716,6 +822,27 @@ pub enum ServerEvent {
     /// Acknowledgment of request
     #[serde(rename = "ack")]
     Ack { id: u64 },
+
+    /// Server's compatibility verdict for the client's advertised build/protocol
+    /// identity on `Subscribe` (NS1). Sent only to clients that advertised a
+    /// `protocol_version`/`build_hash`, so legacy clients never receive an
+    /// unknown event. On [`HandshakeCompatibility::IncompatibleReconnect`] the
+    /// client prints what mismatched and re-execs into the matching launcher
+    /// instead of attaching to a substantially-different daemon. See
+    /// `docs/architecture/SELFDEV_NIX_DAEMON_DIVERGENCE.md` (NS1).
+    #[serde(rename = "handshake_verdict")]
+    HandshakeVerdict {
+        /// The `Subscribe` request id this verdict answers.
+        id: u64,
+        compatibility: HandshakeCompatibility,
+        /// The server's own protocol version, so the client can explain the gap.
+        server_protocol_version: u32,
+        /// The server's own short git hash.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_build_hash: Option<String>,
+        /// Human-readable explanation of what matched or mismatched.
+        detail: String,
+    },
 
     /// Streaming text delta
     #[serde(rename = "text_delta")]
@@ -1428,4 +1555,66 @@ pub enum ServerEvent {
         /// Tool call ID this is associated with
         tool_call_id: String,
     },
+}
+
+#[cfg(test)]
+mod handshake_verdict_tests {
+    use super::HandshakeCompatibility as HC;
+
+    #[test]
+    fn legacy_client_with_no_protocol_is_compatible() {
+        let (v, _) = HC::evaluate(None, None, 1, Some("abc1234"));
+        assert_eq!(v, HC::Compatible);
+    }
+
+    #[test]
+    fn legacy_client_ignores_any_stale_hash() {
+        // No protocol version advertised wins even if a hash leaked through.
+        let (v, _) = HC::evaluate(None, Some("deadbee"), 1, Some("abc1234"));
+        assert_eq!(v, HC::Compatible);
+    }
+
+    #[test]
+    fn matching_protocol_and_hash_is_compatible() {
+        let (v, _) = HC::evaluate(Some(1), Some("abc1234"), 1, Some("abc1234"));
+        assert_eq!(v, HC::Compatible);
+    }
+
+    #[test]
+    fn matching_protocol_tolerates_short_vs_full_hash() {
+        let (v, _) = HC::evaluate(Some(1), Some("abc1234"), 1, Some("abc1234def567"));
+        assert_eq!(v, HC::Compatible);
+    }
+
+    #[test]
+    fn protocol_mismatch_is_incompatible() {
+        let (v, detail) = HC::evaluate(Some(2), Some("abc1234"), 1, Some("abc1234"));
+        assert_eq!(v, HC::IncompatibleReconnect);
+        assert!(detail.contains("protocol mismatch"));
+    }
+
+    #[test]
+    fn same_protocol_different_hash_is_incompatible() {
+        let (v, detail) = HC::evaluate(Some(1), Some("abc1234"), 1, Some("def5678"));
+        assert_eq!(v, HC::IncompatibleReconnect);
+        assert!(detail.contains("build mismatch"));
+    }
+
+    #[test]
+    fn same_protocol_unknown_hash_is_compatible() {
+        // A client that advertises protocol but no hash, or a server with no
+        // stamped hash, still shares the wire contract: attach.
+        assert_eq!(
+            HC::evaluate(Some(1), None, 1, Some("abc1234")).0,
+            HC::Compatible
+        );
+        assert_eq!(
+            HC::evaluate(Some(1), Some("abc1234"), 1, None).0,
+            HC::Compatible
+        );
+        assert_eq!(
+            HC::evaluate(Some(1), Some("abc1234"), 1, Some("")).0,
+            HC::Compatible
+        );
+    }
 }

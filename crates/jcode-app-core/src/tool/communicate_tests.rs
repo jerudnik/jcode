@@ -1216,6 +1216,8 @@ impl RawClient {
             client_has_local_history: false,
             allow_session_takeover: false,
             terminal_env: Vec::new(),
+            protocol_version: None,
+            build_hash: None,
         })
         .await?;
         self.read_until(
