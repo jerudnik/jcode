@@ -45,6 +45,19 @@ fn create_git_repo_fixture() -> tempfile::TempDir {
         .current_dir(temp.path())
         .output()
         .expect("git config name");
+    // Disable commit/tag signing so the fixture is hermetic against an ambient
+    // global git config with commit.gpgsign=true (which would make `git commit`
+    // fail when no GPG agent is available, e.g. on a CI runner).
+    std::process::Command::new("git")
+        .args(["config", "commit.gpgsign", "false"])
+        .current_dir(temp.path())
+        .output()
+        .expect("git config commit.gpgsign");
+    std::process::Command::new("git")
+        .args(["config", "tag.gpgsign", "false"])
+        .current_dir(temp.path())
+        .output()
+        .expect("git config tag.gpgsign");
     std::process::Command::new("git")
         .args(["add", "Cargo.toml"])
         .current_dir(temp.path())
