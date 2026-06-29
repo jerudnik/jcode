@@ -23,6 +23,13 @@ pub const UPDATE_SEMVER: &str = env!("JCODE_UPDATE_SEMVER");
 pub const CHANGELOG: &str = env!("JCODE_CHANGELOG");
 /// Root crate package version (mirrors the historical `CARGO_PKG_VERSION`).
 pub const PKG_VERSION: &str = env!("JCODE_PKG_VERSION");
+/// Filesystem path of the source checkout this binary was built from, e.g.
+/// `/home/u/infrastructure/jcode` (or `unknown`). This answers the daemon
+/// divergence question "which checkout produced the running binary" (G4 in
+/// `docs/architecture/SELFDEV_NIX_DAEMON_DIVERGENCE.md`). For immutable Nix/store
+/// builds it is the build-sandbox path and not meaningful as a live checkout;
+/// `jcode doctor` only surfaces it for source/selfdev origins.
+pub const BUILD_SOURCE_DIR: &str = env!("JCODE_BUILD_SOURCE_DIR");
 
 /// Whether this binary was built as a release build (`JCODE_RELEASE_BUILD=1`).
 pub const fn is_release_build() -> bool {
