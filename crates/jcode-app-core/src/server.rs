@@ -31,6 +31,7 @@ mod debug_swarm_read;
 mod debug_swarm_write;
 mod debug_testers;
 mod durable_state;
+mod handshake;
 mod headless;
 mod jade_relay;
 mod lifecycle;

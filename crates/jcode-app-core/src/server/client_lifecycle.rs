@@ -1320,8 +1320,20 @@ pub(super) async fn handle_client(
                 client_has_local_history,
                 allow_session_takeover,
                 terminal_env,
+                protocol_version: client_protocol_version,
+                build_hash: client_build_hash,
             } => {
                 current_client_instance_id = client_instance_id.clone();
+                // NS1: compare the client's advertised build/protocol identity
+                // against this daemon's and emit a typed verdict so the client
+                // can re-exec into the matching launcher on a mismatch. Legacy
+                // clients (no advertised identity) receive no verdict event.
+                super::handshake::evaluate_and_notify(
+                    id,
+                    client_protocol_version,
+                    client_build_hash.as_deref(),
+                    &client_event_tx,
+                );
                 {
                     let mut connections = client_connections.write().await;
                     if let Some(info) = connections.get_mut(&client_connection_id) {

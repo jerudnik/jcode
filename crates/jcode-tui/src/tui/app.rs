@@ -63,6 +63,7 @@ mod debug;
 mod dictation;
 mod event_wrappers;
 mod handterm_native_scroll;
+mod handshake;
 pub(crate) mod helpers;
 mod hotkey_feedback;
 mod idle_heap_release;

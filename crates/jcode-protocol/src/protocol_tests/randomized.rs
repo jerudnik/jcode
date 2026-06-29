@@ -63,6 +63,8 @@ fn test_protocol_request_roundtrip_randomized_samples() -> Result<()> {
             client_has_local_history,
             allow_session_takeover,
             terminal_env: Vec::new(),
+            protocol_version: None,
+            build_hash: None,
         };
         let decoded = parse_request_json(&serde_json::to_string(&req)?)?;
         let Request::Subscribe {
@@ -74,6 +76,8 @@ fn test_protocol_request_roundtrip_randomized_samples() -> Result<()> {
             client_has_local_history: decoded_client_has_local_history,
             allow_session_takeover: decoded_allow_session_takeover,
             terminal_env: _,
+            protocol_version: _,
+            build_hash: _,
         } = decoded
         else {
             return Err(anyhow!("expected randomized Subscribe"));

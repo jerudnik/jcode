@@ -767,6 +767,29 @@ pub(super) async fn handle_remote_event<B: Backend>(
             process_remote_followups(app, remote).await;
             Ok((RemoteEventOutcome::Continue, needs_redraw))
         }
+        RemoteRead::Event(ServerEvent::HandshakeVerdict {
+            compatibility,
+            detail,
+            ..
+        }) => {
+            // NS1: the daemon told us whether our build is compatible. On an
+            // incompatible verdict, re-exec into the matching launcher (the
+            // common case, which never returns) or refuse to attach when no
+            // launcher can be resolved, instead of talking to a
+            // substantially-different daemon.
+            use super::handshake::{HandshakeOutcome, act_on_verdict};
+            let is_selfdev_session = app.remote_is_canary.unwrap_or(app.session.is_canary);
+            match act_on_verdict(compatibility, &detail, is_selfdev_session) {
+                HandshakeOutcome::Attach => Ok((RemoteEventOutcome::Continue, false)),
+                HandshakeOutcome::Refuse(message) => {
+                    app.push_display_message(DisplayMessage::error(message));
+                    app.set_status_notice("Incompatible daemon");
+                    app.is_processing = false;
+                    app.status = ProcessingStatus::Idle;
+                    Ok((RemoteEventOutcome::Quit, true))
+                }
+            }
+        }
         RemoteRead::Event(ServerEvent::ClientDebugRequest { id, command }) => {
             let output = handle_debug_command(app, &command, remote).await;
             let _ = remote.send_client_debug_response(id, output).await;

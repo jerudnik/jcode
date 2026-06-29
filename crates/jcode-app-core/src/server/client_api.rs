@@ -83,6 +83,11 @@ impl Client {
             client_has_local_history,
             allow_session_takeover,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
+            // Advertise this client's protocol/build identity so the server can
+            // return a compatibility verdict (NS1). Sourced from the compiled
+            // build metadata, the same identity `jcode doctor` reads.
+            protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
+            build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
         };
         let json = serde_json::to_string(&request)? + "\n";
         self.writer.write_all(json.as_bytes()).await?;
