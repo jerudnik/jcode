@@ -17,6 +17,33 @@ retirement condition and validation command.
 | Auth refresh warning suppression | `compat(auth)` | `temporary-shim` | none yet | Upstream no longer warns on multi-provider model state after auth refresh. | `cargo check --workspace` |
 | dev_cargo clang fallback | `distro(dev)` | `local-only` | none | Keep while local development environments may lack clang. | `scripts/dev_cargo.sh --help` |
 | Nix dependency-cache stability (git stamp out of `buildDepsOnly`) | `distro(nix)` | `permanent-downstream` | none | Keep; this is a packaging correctness property, not an upstream concern. Watch that future `package.nix` edits never move `JCODE_BUILD_GIT_*` back into `commonArgs`. | gitHash A vs B must yield identical `cargoArtifacts.drvPath` (see commit `02bcc628`) |
+| Workspace lib-test hermeticity | `feature(test-hygiene)` | `planned-upstream-pr` | none yet | Clean upstream-PR candidate: every fix isolates ambient state instead of changing product behavior. Retire individual fixes if/when upstream lands the same isolation. Includes one real product fix (`JCODE_SHOW_AGENTGREP_OUTPUT` missing from `CONFIG_ENV_KEYS`). | `cargo test --workspace --lib --exclude jcode-tui` (Linux, clean `JCODE_HOME`) |
+| CI executes workspace lib tests (Linux) | `feature(fork-maint)` | `permanent-downstream` | none | Keep; upstream CI is `--no-run` only, so lib regressions ship undetected. `jcode-tui` lib tests stay compile-only (see below). Promote macOS once its macOS-only tests are audited. | `.github/workflows/ci.yml` "Run workspace library tests (Linux)" step |
+
+## jcode-tui lib tests: compile-only (matches upstream)
+
+`jcode-tui`'s lib tests are compiled but **not executed** in CI, on both this
+fork and upstream (upstream's CI is `--lib --bins --no-run` for the whole
+workspace). When first executed on a clean runner ~45 of them fail, and the
+failures are not environment coupling: they assert UI/onboarding/model-catalog
+behavior that upstream's own production code has since changed. Verified against
+`upstream/master`:
+
+- `model_picker_recommended_route_is_provider_aware` asserts `claude-opus-4-7`
+  and DeepSeek are recommended, but `RECOMMENDED_MODELS` is `["gpt-5.5",
+  "claude-opus-4-8"]` upstream too.
+- The `pending_queued_dispatch`-on-remote-startup cluster asserts eager dispatch
+  that `apply_restored_reload_input` deliberately defers for remote sessions
+  ("the remote post-connect/history/tick paths will dispatch once it is safe").
+- Others depend on the new post-login onboarding flow, reactor context for
+  `handle_login_completed`/`handle_server_event` `tokio::spawn`, theme color
+  drift, and snapshot nondeterminism.
+
+These are stale identically upstream, so rewriting them in the fork would be pure
+divergence with no payoff (the suite still will not run). They keep compile
+coverage via the `--workspace ... --no-run` step. Revisit only if upstream starts
+executing the `jcode-tui` lib suite.
+
 
 Statuses:
 
