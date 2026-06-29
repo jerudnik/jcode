@@ -123,6 +123,17 @@ fn main() {
         format!("v{}.{}.{}-dev ({})", major, minor, patch, git_hash)
     };
 
+    // Source checkout path this binary is built from. Lets `jcode doctor` answer
+    // "which checkout produced the running binary" (G4). Callers (install scripts,
+    // selfdev) may override with JCODE_BUILD_SOURCE_DIR; otherwise it is the
+    // workspace root this build script derived. Kept on `jcode-build-meta` only,
+    // never threaded into `buildDepsOnly`, so it cannot perturb the crane
+    // dependency cache (see the patch-ledger "Nix dependency-cache stability" row).
+    let source_dir = std::env::var("JCODE_BUILD_SOURCE_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| repo_root.display().to_string());
+
     // Set environment variables for compilation
     println!("cargo:rustc-env=JCODE_GIT_HASH={}", git_hash);
     println!("cargo:rustc-env=JCODE_GIT_DATE={}", git_date);
@@ -133,6 +144,7 @@ fn main() {
     println!("cargo:rustc-env=JCODE_GIT_TAG={}", git_tag);
     println!("cargo:rustc-env=JCODE_CHANGELOG={}", changelog);
     println!("cargo:rustc-env=JCODE_PKG_VERSION={}", pkg_version);
+    println!("cargo:rustc-env=JCODE_BUILD_SOURCE_DIR={}", source_dir);
 
     // Forward JCODE_RELEASE_BUILD env var if set (CI sets this for release binaries)
     if std::env::var("JCODE_RELEASE_BUILD").is_ok() {
@@ -175,6 +187,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=JCODE_BUILD_GIT_DATE");
     println!("cargo:rerun-if-env-changed=JCODE_BUILD_GIT_DIRTY");
     println!("cargo:rerun-if-env-changed=JCODE_BUILD_GIT_TAG");
+    println!("cargo:rerun-if-env-changed=JCODE_BUILD_SOURCE_DIR");
 }
 
 /// Workspace root, derived from this crate's manifest dir (`crates/jcode-build-meta`).

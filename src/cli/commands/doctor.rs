@@ -76,6 +76,10 @@ struct ClientIdentity {
     version: String,
     git_hash: String,
     dirty: Option<bool>,
+    /// Source checkout this binary was built from. Only meaningful for a
+    /// source/selfdev build sitting in a live repo; `None` for Nix/release
+    /// binaries whose stamped path is an immutable build sandbox.
+    build_source_dir: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -134,6 +138,21 @@ fn client_identity() -> ClientIdentity {
         version: jcode_build_meta::SEMVER.to_string(),
         git_hash: jcode_build_meta::GIT_HASH.to_string(),
         dirty,
+        build_source_dir: build_source_dir(origin),
+    }
+}
+
+/// The source checkout the binary was built from, surfaced only where it names a
+/// live editable tree. For immutable Nix/release binaries the stamped path is a
+/// build sandbox, so reporting it would mislead rather than answer "which
+/// checkout produced this"; return `None` there. (G4 in the divergence doc.)
+fn build_source_dir(origin: Origin) -> Option<String> {
+    match origin {
+        Origin::Source | Origin::Selfdev | Origin::Unknown => {
+            let dir = jcode_build_meta::BUILD_SOURCE_DIR.trim();
+            (!dir.is_empty() && dir != "unknown").then(|| dir.to_string())
+        }
+        Origin::Nix | Origin::Release => None,
     }
 }
 
@@ -241,6 +260,9 @@ pub fn run_doctor_command(emit_json: bool) -> Result<()> {
         report.client.git_hash,
         dirty_suffix,
     );
+    if let Some(src) = report.client.build_source_dir.as_deref() {
+        println!("  built-from: {src}");
+    }
     if report.server.running {
         // The registry version string already embeds the hash (e.g.
         // "v0.31.37-dev (b83b6668)"); strip the parenthetical so the line does
@@ -325,6 +347,7 @@ mod tests {
             version: version.into(),
             git_hash: hash.into(),
             dirty,
+            build_source_dir: None,
         }
     }
 
@@ -380,5 +403,20 @@ mod tests {
             &server(true, Some("v0.1.0 (def5678)"), Some("def5678")),
         );
         assert_eq!(v, Verdict::Reconnect);
+    }
+
+    #[test]
+    fn build_source_dir_hidden_for_immutable_origins() {
+        assert_eq!(build_source_dir(Origin::Nix), None);
+        assert_eq!(build_source_dir(Origin::Release), None);
+    }
+
+    #[test]
+    fn build_source_dir_shown_for_live_origins_when_stamped() {
+        // The stamped value is whatever this test binary was built with; it is a
+        // real path (cargo target tree), never empty/"unknown", so source/selfdev
+        // origins surface Some(_).
+        assert!(build_source_dir(Origin::Source).is_some());
+        assert!(build_source_dir(Origin::Selfdev).is_some());
     }
 }
