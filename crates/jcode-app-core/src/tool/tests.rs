@@ -179,7 +179,10 @@ fn test_resolve_tool_name_oauth_aliases() {
 async fn test_batch_resolves_oauth_names() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
-    let temp_dir = std::env::temp_dir();
+    // Use an isolated temp dir, not the shared system temp dir.
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let temp_dir = temp.path().to_path_buf();
+    let temp_dir_str = temp_dir.to_string_lossy().to_string();
 
     let ctx = ToolContext {
         session_id: "test".to_string(),
@@ -201,7 +204,11 @@ async fn test_batch_resolves_oauth_names() {
 async fn registry_execute_enforces_session_tool_policy_after_alias_resolution() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
-    let temp_dir = std::env::temp_dir();
+    // Isolated temp dir (see `test_batch_resolves_oauth_names`): the policy is
+    // expected to deny the call before grep scans anything, but using a fresh
+    // dir keeps the test fast and hermetic if that ordering ever changes.
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let temp_dir = temp.path().to_path_buf();
     let session_id = "test-policy-deny";
     set_session_tool_policy(session_id, None, HashSet::from(["bash".to_string()]));
 
@@ -255,11 +262,15 @@ async fn registry_execute_pre_tool_hook_blocks_and_allows() {
     // re-checks env every 500ms; force a reload so the hook is visible now.
     crate::config::invalidate_config_cache();
 
+    // Scan inside the isolated temp dir, not the shared system temp dir: the
+    // "allowed" call actually runs grep, and scanning a large shared /tmp makes
+    // the test crawl gigabytes and effectively hang.
+    let scan_dir = temp.path().to_path_buf();
     let ctx = || ToolContext {
         session_id: "test-pre-tool-hook".to_string(),
         message_id: "test".to_string(),
         tool_call_id: "test".to_string(),
-        working_dir: Some(std::env::temp_dir()),
+        working_dir: Some(scan_dir.clone()),
         stdin_request_tx: None,
         graceful_shutdown_signal: None,
         execution_mode: ToolExecutionMode::Direct,

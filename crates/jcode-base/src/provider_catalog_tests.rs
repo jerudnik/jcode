@@ -965,6 +965,9 @@ fn quality_tier_ranks_flagship_above_bare_above_cheap() {
 #[test]
 fn newest_release_picker_prefers_strongest_tier_over_newest_cheap() {
     use jcode_provider_openrouter::ModelInfo;
+    // Serialize with every other env-mutating test: this sets a process-global
+    // JCODE_HOME and writes a shared provider disk-cache namespace, so without
+    // the lock a concurrent test can clobber JCODE_HOME mid-run.
     let _lock = crate::storage::lock_test_env();
     let _env = EnvGuard::save(&["JCODE_HOME"]);
     let temp = tempfile::tempdir().expect("tempdir");
@@ -1001,6 +1004,8 @@ fn newest_release_picker_prefers_strongest_tier_over_newest_cheap() {
 #[test]
 fn newest_release_picker_uses_recency_within_a_tier() {
     use jcode_provider_openrouter::ModelInfo;
+    // See `newest_release_picker_prefers_strongest_tier_*`: serialize on the
+    // shared env lock because this mutates a process-global JCODE_HOME.
     let _lock = crate::storage::lock_test_env();
     let _env = EnvGuard::save(&["JCODE_HOME"]);
     let temp = tempfile::tempdir().expect("tempdir");

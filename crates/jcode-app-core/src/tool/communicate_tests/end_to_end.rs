@@ -354,6 +354,13 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
     let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
     let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
+    // Force in-process (headless) spawning so the spawned agent actually runs
+    // and reports back. The default "visible" mode only falls back to headless
+    // when no terminal/spawn-hook is available; on a dev machine with a
+    // configured JCODE_SPAWN_HOOK it would instead launch a real external
+    // terminal and the in-process report-back would never arrive.
+    let _spawn_mode = EnvGuard::set("JCODE_SWARM_SPAWN_MODE", "headless");
+    crate::config::invalidate_config_cache();
 
     let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
         delay: Duration::from_millis(100),
@@ -431,6 +438,11 @@ async fn communicate_spawn_with_prompt_and_summary_work_end_to_end() {
     let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
     let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
     let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
+    // Force in-process (headless) spawning so the test never launches a real
+    // external terminal window on a dev machine with a configured
+    // JCODE_SPAWN_HOOK, and behaves identically to CI (which has no terminal).
+    let _spawn_mode = EnvGuard::set("JCODE_SWARM_SPAWN_MODE", "headless");
+    crate::config::invalidate_config_cache();
 
     let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
         delay: Duration::from_millis(100),

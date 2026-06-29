@@ -263,6 +263,23 @@ fn load_key_from_file(path: &PathBuf) -> Result<String> {
     anyhow::bail!("No CURSOR_API_KEY found")
 }
 
+/// Whether the `sqlite3` CLI is available on PATH.
+///
+/// The vscdb reader shells out to `sqlite3`, and these tests build fixtures the
+/// same way. On hosts without the CLI (e.g. a minimal CI image or a NixOS dev
+/// shell that does not pull it in) we skip rather than hard-fail, so the suite
+/// stays green where the dependency is genuinely absent while still exercising
+/// the reader everywhere `sqlite3` exists.
+fn sqlite3_available() -> bool {
+    std::process::Command::new("sqlite3")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 /// Helper: create a mock state.vscdb with the given key/value pairs.
 fn create_mock_vscdb(dir: &std::path::Path, entries: &[(&str, &str)]) -> PathBuf {
     let db_path = dir.join("state.vscdb");
@@ -290,6 +307,10 @@ fn create_mock_vscdb(dir: &std::path::Path, entries: &[(&str, &str)]) -> PathBuf
 
 #[test]
 fn vscdb_read_access_token() {
+    if !sqlite3_available() {
+        eprintln!("skipping vscdb_read_access_token: sqlite3 CLI not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
     let db = create_mock_vscdb(dir.path(), &[("cursorAuth/accessToken", "tok_abc123xyz")]);
     let result = read_vscdb_key(&db, "cursorAuth/accessToken").unwrap();
@@ -298,6 +319,10 @@ fn vscdb_read_access_token() {
 
 #[test]
 fn vscdb_read_machine_id() {
+    if !sqlite3_available() {
+        eprintln!("skipping vscdb_read_machine_id: sqlite3 CLI not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
     let db = create_mock_vscdb(
         dir.path(),
@@ -312,6 +337,10 @@ fn vscdb_read_machine_id() {
 
 #[test]
 fn vscdb_missing_key_returns_error() {
+    if !sqlite3_available() {
+        eprintln!("skipping vscdb_missing_key_returns_error: sqlite3 CLI not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
     let db = create_mock_vscdb(dir.path(), &[("other/key", "value")]);
     let result = read_vscdb_key(&db, "cursorAuth/accessToken");
@@ -326,6 +355,10 @@ fn vscdb_missing_key_returns_error() {
 
 #[test]
 fn vscdb_empty_value_returns_error() {
+    if !sqlite3_available() {
+        eprintln!("skipping vscdb_empty_value_returns_error: sqlite3 CLI not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
     let db = create_mock_vscdb(dir.path(), &[("cursorAuth/accessToken", "")]);
     let result = read_vscdb_key(&db, "cursorAuth/accessToken");
@@ -341,6 +374,10 @@ fn vscdb_missing_file_returns_error() {
 
 #[test]
 fn vscdb_multiple_keys() {
+    if !sqlite3_available() {
+        eprintln!("skipping vscdb_multiple_keys: sqlite3 CLI not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
     let db = create_mock_vscdb(
         dir.path(),
@@ -371,6 +408,10 @@ fn vscdb_multiple_keys() {
 
 #[test]
 fn vscdb_wrong_table_name() {
+    if !sqlite3_available() {
+        eprintln!("skipping vscdb_wrong_table_name: sqlite3 CLI not available");
+        return;
+    }
     let dir = TempDir::new().unwrap();
     let db_path = dir.path().join("state.vscdb");
     let status = std::process::Command::new("sqlite3")

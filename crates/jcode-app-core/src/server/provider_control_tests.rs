@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::RwLock as StdRwLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard, OnceLock};
+use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard};
 
 #[derive(Default)]
 struct AuthChangeMockState {
@@ -141,8 +141,13 @@ impl Provider for AuthChangeMockProvider {
 }
 
 fn lock_env() -> StdMutexGuard<'static, ()> {
-    static LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| StdMutex::new(())).lock().unwrap()
+    // Serialize on the *shared* process-wide test env lock, not a private one:
+    // these tests mutate JCODE_HOME (and other process-global env vars), so they
+    // must mutually exclude every other env-mutating test (e.g. the reload
+    // recovery suite) that also keys off JCODE_HOME. A private mutex here would
+    // only serialize tests within this file and let cross-file env races slip
+    // through under the parallel test runner.
+    crate::storage::lock_test_env()
 }
 
 struct EnvGuard {
