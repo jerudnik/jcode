@@ -91,6 +91,11 @@ let
     JCODE_BUILD_GIT_HASH = gitHash;
     JCODE_BUILD_GIT_DATE = gitDate;
     JCODE_BUILD_GIT_DIRTY = "false";
+    # Pin the stamped source dir to a stable marker instead of the Nix build
+    # sandbox path (which varies per build and is meaningless as a live
+    # checkout). `jcode doctor` hides this for the `nix` origin anyway, but a
+    # fixed value keeps the binary deterministic.
+    JCODE_BUILD_SOURCE_DIR = "nix-store";
   }
   // lib.optionalAttrs releaseBuild {
     # Emit a clean release version string ("vX.Y.Z (hash)") rather than "-dev".
