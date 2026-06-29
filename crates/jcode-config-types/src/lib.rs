@@ -131,11 +131,11 @@ impl DiffDisplayMode {
 #[serde(rename_all = "lowercase")]
 pub enum DiagramDisplayMode {
     /// Don't show diagrams in dedicated widgets (only inline in messages).
-    #[default]
     None,
     /// Show diagrams in info widget margins (opportunistic, if space available).
     Margin,
     /// Show diagrams in a dedicated pinned pane (forces space allocation).
+    #[default]
     Pinned,
 }
 

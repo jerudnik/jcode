@@ -294,6 +294,75 @@ fn parse_hex_color_for_png(input: &str) -> Option<resvg::tiny_skia::Color> {
     resvg::tiny_skia::Color::from_rgba8(r, g, b, a).into()
 }
 
+/// Repair invalid XML emitted by `mermaid-rs-renderer` (v0.2.1).
+///
+/// The renderer writes CSS font stacks verbatim into the SVG `font-family`
+/// attribute, e.g.
+///
+/// ```text
+/// font-family="Inter, ui-sans-serif, "Segoe UI", sans-serif"
+/// ```
+///
+/// The nested unescaped double quotes around `Segoe UI` close the attribute
+/// early, so `usvg::Tree::from_str` rejects the whole document with a parse
+/// error ("expected a whitespace not 'N'"), which broke every rendered
+/// diagram. Until the upstream renderer emits well-formed XML, rewrite the
+/// inner double quotes inside each `font-family="..."` value to single quotes.
+/// Single-quoted family names are valid CSS and survive XML parsing intact, so
+/// usvg's font matching is unaffected.
+#[cfg(feature = "renderer")]
+fn sanitize_font_family_quotes(svg: &str) -> std::borrow::Cow<'_, str> {
+    const ATTR: &str = "font-family=\"";
+    if !svg.contains(ATTR) {
+        return std::borrow::Cow::Borrowed(svg);
+    }
+
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(start) = rest.find(ATTR) {
+        // Copy everything up to and including the opening `font-family="`.
+        let value_start = start + ATTR.len();
+        out.push_str(&rest[..value_start]);
+
+        // The attribute value ends at the next `"` that is immediately followed
+        // by whitespace, `>`, `/`, or end-of-input. Any `"` inside the value
+        // (the nested family-name quotes) is rewritten to `'`. Iterating over
+        // char indices keeps multi-byte UTF-8 intact.
+        let tail = &rest[value_start..];
+        let mut consumed = tail.len();
+        let mut closed = false;
+        let mut chars = tail.char_indices().peekable();
+        while let Some((idx, ch)) = chars.next() {
+            if ch == '"' {
+                let next = chars.peek().map(|&(_, c)| c);
+                let is_closing = matches!(
+                    next,
+                    None | Some(' ') | Some('\t') | Some('\n') | Some('\r') | Some('>') | Some('/')
+                );
+                if is_closing {
+                    consumed = idx;
+                    closed = true;
+                    break;
+                }
+                out.push('\'');
+            } else {
+                out.push(ch);
+            }
+        }
+
+        if closed {
+            out.push('"');
+            // Advance past the value and its closing quote.
+            rest = &tail[consumed + 1..];
+        } else {
+            // No closing quote found: we already emitted the whole tail.
+            rest = "";
+        }
+    }
+    out.push_str(rest);
+    std::borrow::Cow::Owned(out)
+}
+
 #[cfg(feature = "renderer")]
 pub(super) fn write_output_png_cached_fonts(
     svg: &str,
@@ -310,7 +379,8 @@ pub(super) fn write_output_png_cached_fonts(
         ..Default::default()
     };
 
-    let tree = usvg::Tree::from_str(svg, &opt)?;
+    let sanitized = sanitize_font_family_quotes(svg);
+    let tree = usvg::Tree::from_str(&sanitized, &opt)?;
     let size = tree.size().to_int_size();
     let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())
         .ok_or_else(|| anyhow::anyhow!("Failed to allocate pixmap"))?;
@@ -326,4 +396,60 @@ pub(super) fn write_output_png_cached_fonts(
     );
     pixmap.save_png(output)?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "renderer"))]
+mod sanitize_tests {
+    use super::sanitize_font_family_quotes;
+
+    #[test]
+    fn rewrites_nested_quotes_in_font_family() {
+        let input = r#"<text font-family="Inter, "Segoe UI", sans-serif" font-size="14">hi</text>"#;
+        let out = sanitize_font_family_quotes(input);
+        assert_eq!(
+            out,
+            r#"<text font-family="Inter, 'Segoe UI', sans-serif" font-size="14">hi</text>"#
+        );
+        // Result must be balanced: every attribute quote pairs up.
+        assert_eq!(out.matches('"').count() % 2, 0);
+    }
+
+    #[test]
+    fn leaves_well_formed_font_family_unchanged() {
+        let input = r#"<text font-family="Inter" font-size="14">hi</text>"#;
+        assert_eq!(sanitize_font_family_quotes(input), input);
+    }
+
+    #[test]
+    fn borrows_when_no_font_family_present() {
+        let input = r#"<rect width="10" height="10"/>"#;
+        assert!(matches!(
+            sanitize_font_family_quotes(input),
+            std::borrow::Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn handles_multiple_occurrences() {
+        let input = concat!(
+            r#"<text font-family="A, "B C", d">x</text>"#,
+            r#"<text font-family="E, "F G", h">y</text>"#,
+        );
+        let out = sanitize_font_family_quotes(input);
+        assert_eq!(
+            out,
+            concat!(
+                r#"<text font-family="A, 'B C', d">x</text>"#,
+                r#"<text font-family="E, 'F G', h">y</text>"#,
+            )
+        );
+    }
+
+    #[test]
+    fn preserves_multibyte_content() {
+        let input = r#"<text font-family="Inter, "Ｓegoe", x">café</text>"#;
+        let out = sanitize_font_family_quotes(input);
+        assert!(out.contains("café"));
+        assert!(out.contains("'Ｓegoe'"));
+    }
 }
