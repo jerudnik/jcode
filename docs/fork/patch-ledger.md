@@ -46,6 +46,28 @@ divergence with no payoff (the suite still will not run). They keep compile
 coverage via the `--workspace ... --no-run` step. Revisit only if upstream starts
 executing the `jcode-tui` lib suite.
 
+### Triage data and the "don't grind, grow our own" decision
+
+With the `mermaid` feature enabled, 47 lib tests fail. Running each one alone vs
+in the full suite (see `docs/fork/jcode-tui-test-triage.md`) splits them:
+
+- **13 pass alone, fail in the full suite** = cross-test global-state pollution.
+  The product is fine; the harness is non-hermetic. These cannot be fixed by
+  editing the test body, only by adding isolation infrastructure (high effort,
+  high divergence).
+- **34 fail even alone** = stale assertions (model catalog, the remote
+  `pending_queued_dispatch` deferral, the 8->24MB full-prep cache threshold) plus
+  ~2 structurally non-runnable (`current_exe()` is the test runner, never
+  `jcode`).
+
+Decision: do **not** grind these to green. The suite is `--no-run` in CI (upstream
+parity), ~28% are unfixable without harness surgery, and the rest each require
+reverse-engineering a deliberate product change to update an assertion that still
+will not run. Instead, grow our own small, hermetic, `JCODE_HOME`-isolated tests
+for fork-owned behavior as we touch it. `crates/jcode-tui-mermaid/tests/smoke_render.rs`
+is the model: it tests real behavior we care about and passes deterministically.
+
+
 
 Statuses:
 
