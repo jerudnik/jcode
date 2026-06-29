@@ -174,7 +174,32 @@ jobs:
         shell: bash
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            "$(rustup which cargo)" test --target ${{ matrix.target }} --lib --bins --no-run
+            "$(rustup which cargo)" test --target ${{ matrix.target }} --workspace --lib --bins --no-run
+
+      - name: Run workspace library tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        # Fork addition: upstream only compiles the lib suites (--no-run) and
+        # never executes them. We execute the workspace lib suites that are
+        # verified hermetic on a clean Linux runner so real cross-environment
+        # and concurrency regressions are caught.
+        #
+        # Scoped to Linux for now: that is where the suites were audited for
+        # hermeticity. macOS still gets compile coverage via the step above and
+        # the targeted macOS tests elsewhere; promoting macOS to full execution
+        # is future work once its macOS-only tests are audited the same way.
+        #
+        # jcode-tui is excluded on purpose: its lib tests have never been
+        # executed by upstream CI either (upstream is also --no-run), and a large
+        # set of them assert UI/onboarding/model-catalog behavior that has since
+        # changed in upstream's own production code (e.g. RECOMMENDED_MODELS, the
+        # remote-startup pending_queued_dispatch deferral). They still compile
+        # here for type/borrow coverage via the step above. See
+        # docs/fork/patch-ledger.md.
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            "$(rustup which cargo)" test --target ${{ matrix.target }} \
+            --workspace --lib --bins --exclude jcode-tui
 
       - name: Compile integration test binaries
         shell: bash
