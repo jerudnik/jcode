@@ -92,7 +92,125 @@ pub const SELFDEV_CARGO_PROFILE: &str = "selfdev";
 /// canonicalized input path.
 pub fn resolve_binary_payload(path: &Path) -> PathBuf {
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    wrapper_payload_sibling(&canonical).unwrap_or(canonical)
+    resolve_payload_inner(canonical, 0)
+}
+
+/// Bound on wrapper-unwrap recursion. A wrapper may exec another wrapper (e.g. a
+/// Nix `makeWrapper` script execing a release wrapper that execs the `.bin`
+/// payload), but the chain is short; the bound just guarantees termination and
+/// caps work even if a malformed wrapper points in a cycle.
+const MAX_WRAPPER_DEPTH: usize = 8;
+
+/// Largest file we will read as a candidate wrapper script. Wrapper scripts are
+/// a few hundred bytes to a few KB (Nix `makeWrapper` env-export wrappers are
+/// the big end); a real jcode binary is ~120 MB, so this gate keeps us from
+/// ever slurping the payload just to look for a shebang.
+const MAX_WRAPPER_BYTES: u64 = 64 * 1024;
+
+/// Resolve `path` to the executable payload that actually runs, unwrapping
+/// either launcher shape we ship:
+///
+/// 1. release / self-dev wrappers with a sibling `<stem>-*.bin` payload, and
+/// 2. Nix / `makeWrapper`-style wrappers that `exec` an **absolute** path to the
+///    real `jcode` binary in a store path (this is the `_ai` Phase-injection
+///    wrapper on this machine: `exec phase run ... "/nix/store/...-jcode/bin/jcode" "$@"`).
+///
+/// Shape 2 is the cross-boundary half of G2: before NS2 the Nix wrapper was
+/// treated as its own payload, so a Nix-wrapped daemon and a self-dev build
+/// compared wrapper-vs-payload mtimes and could look like a phantom update of
+/// each other. Resolving both shapes to the running payload removes that.
+fn resolve_payload_inner(path: PathBuf, depth: usize) -> PathBuf {
+    if depth >= MAX_WRAPPER_DEPTH {
+        return path;
+    }
+    // Prefer the cheap sibling-`.bin` form (release / self-dev installs).
+    if let Some(sibling) = wrapper_payload_sibling(&path) {
+        let canonical = canonicalize_or(sibling);
+        if canonical != path {
+            return resolve_payload_inner(canonical, depth + 1);
+        }
+        return canonical;
+    }
+    // Then the absolute-exec-target form (Nix / makeWrapper).
+    if let Some(target) = wrapper_exec_target(&path) {
+        let canonical = canonicalize_or(target);
+        if canonical != path {
+            return resolve_payload_inner(canonical, depth + 1);
+        }
+        return canonical;
+    }
+    path
+}
+
+/// `std::fs::canonicalize`, falling back to the input on error (a path that does
+/// not exist or cannot be resolved).
+fn canonicalize_or(path: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&path).unwrap_or(path)
+}
+
+/// True when `path`'s file name names a jcode executable payload: the bare
+/// launcher (`jcode` / `jcode.exe`), a release `<stem>-*.bin` payload, or the
+/// `makeWrapper` hidden-original convention (`.jcode-wrapped`).
+fn is_jcode_payload_basename(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let stem = binary_stem();
+    name == binary_name()
+        || name == stem
+        || (name.starts_with(&format!("{stem}-")) && name.ends_with(".bin"))
+        || name == format!(".{stem}-wrapped")
+}
+
+/// Tokenize a shell wrapper script into bare path-like words, stripping the
+/// surrounding quotes and line-continuation backslashes a wrapper uses. This is
+/// deliberately simple: we only want absolute-path tokens, and a real wrapper
+/// writes the payload path as a single quoted word.
+fn script_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(char::is_whitespace)
+        .map(|token| token.trim_matches(|c| c == '"' || c == '\'' || c == '\\'))
+        .filter(|token| !token.is_empty())
+}
+
+/// If `path` is a shebang wrapper that `exec`s an absolute path to the real
+/// jcode payload, return that payload path. Returns `None` when `path` is not a
+/// small shebang script, names no such target, or names more than one distinct
+/// target (ambiguous -> refuse to guess, matching [`wrapper_payload_sibling`]).
+///
+/// The wrapper's own path is never returned, so a launcher whose own basename is
+/// `jcode` cannot resolve to itself.
+fn wrapper_exec_target(path: &Path) -> Option<PathBuf> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_WRAPPER_BYTES {
+        return None;
+    }
+    let content = std::fs::read(path).ok()?;
+    if !content.starts_with(b"#!") {
+        return None;
+    }
+    let text = std::str::from_utf8(&content).ok()?;
+    let self_canonical = canonicalize_or(path.to_path_buf());
+
+    let mut found: Option<PathBuf> = None;
+    for token in script_tokens(text) {
+        if !token.starts_with('/') {
+            continue;
+        }
+        let candidate = Path::new(token);
+        if !is_jcode_payload_basename(candidate) || !candidate.is_file() {
+            continue;
+        }
+        let candidate_canonical = canonicalize_or(candidate.to_path_buf());
+        if candidate_canonical == self_canonical {
+            continue;
+        }
+        match &found {
+            Some(existing) if *existing != candidate_canonical => return None,
+            Some(_) => {}
+            None => found = Some(candidate_canonical),
+        }
+    }
+    found
 }
 
 fn wrapper_payload_sibling(path: &Path) -> Option<PathBuf> {
@@ -695,5 +813,147 @@ mod tests {
             resolve_binary_payload(&wrapper),
             std::fs::canonicalize(&wrapper).expect("canonical wrapper")
         );
+    }
+
+    /// Build a Nix-style store payload: `<store>/bin/jcode` is the real ELF.
+    /// Returns (tempdir, payload_path).
+    fn nix_store_payload_fixture() -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::TempDir::new().expect("temp store");
+        let bin_dir = temp.path().join("nix-store-jcode").join("bin");
+        std::fs::create_dir_all(&bin_dir).expect("store bin dir");
+        let payload = bin_dir.join("jcode");
+        // A "real" binary: large enough not to be mistaken for a wrapper script,
+        // and not a shebang.
+        std::fs::write(&payload, vec![0x7fu8; 8192]).expect("store payload");
+        (temp, payload)
+    }
+
+    /// Write a Nix `_ai`-style wrapper that execs an absolute store payload via
+    /// a multi-arg `phase run ... "<payload>" "$@"` line.
+    fn nix_wrapper_pointing_at(dir: &Path, payload: &Path) -> PathBuf {
+        let wrapper = dir.join("jcode");
+        let script = format!(
+            "#!/usr/bin/env bash\nset -o errexit\nexport PHASE_HOST=\"https://example\"\nexec phase run --app github --env development \\\n  \"{}\" \"$@\"\n",
+            payload.display()
+        );
+        std::fs::write(&wrapper, script).expect("nix wrapper");
+        wrapper
+    }
+
+    #[test]
+    fn resolve_binary_payload_unwraps_nix_exec_target() {
+        // NS2: the Nix/_ai wrapper execs an absolute store path, not a sibling
+        // `.bin`. The resolver must follow it to the real payload.
+        let (store, payload) = nix_store_payload_fixture();
+        let wrapper_dir = tempfile::TempDir::new().expect("wrapper dir");
+        let wrapper = nix_wrapper_pointing_at(wrapper_dir.path(), &payload);
+        assert_eq!(
+            resolve_binary_payload(&wrapper),
+            std::fs::canonicalize(&payload).expect("canonical store payload")
+        );
+        drop(store);
+    }
+
+    #[test]
+    fn resolve_binary_payload_nix_wrapper_basename_is_jcode_not_self() {
+        // The wrapper's own basename is also `jcode`; it must not resolve to
+        // itself just because the basename matches.
+        let (store, payload) = nix_store_payload_fixture();
+        let wrapper_dir = tempfile::TempDir::new().expect("wrapper dir");
+        let wrapper = nix_wrapper_pointing_at(wrapper_dir.path(), &payload);
+        let resolved = resolve_binary_payload(&wrapper);
+        assert_ne!(
+            resolved,
+            std::fs::canonicalize(&wrapper).expect("canonical wrapper"),
+            "wrapper must not resolve to itself"
+        );
+        drop(store);
+    }
+
+    #[test]
+    fn resolve_binary_payload_refuses_two_distinct_exec_targets() {
+        // A malformed wrapper naming two different jcode payloads is ambiguous;
+        // refuse to guess and keep the wrapper path.
+        let (store_a, payload_a) = nix_store_payload_fixture();
+        let (store_b, payload_b) = nix_store_payload_fixture();
+        let wrapper_dir = tempfile::TempDir::new().expect("wrapper dir");
+        let wrapper = wrapper_dir.path().join("jcode");
+        let script = format!(
+            "#!/usr/bin/env bash\nexec \"{}\" \"{}\" \"$@\"\n",
+            payload_a.display(),
+            payload_b.display()
+        );
+        std::fs::write(&wrapper, script).expect("ambiguous wrapper");
+        assert_eq!(
+            resolve_binary_payload(&wrapper),
+            std::fs::canonicalize(&wrapper).expect("canonical wrapper")
+        );
+        drop((store_a, store_b));
+    }
+
+    #[test]
+    fn resolve_binary_payload_ignores_non_jcode_abs_paths() {
+        // Absolute paths to non-jcode tools (bash, coreutils, phase) in the
+        // wrapper must be ignored; only the jcode payload is the target.
+        let (store, payload) = nix_store_payload_fixture();
+        let wrapper_dir = tempfile::TempDir::new().expect("wrapper dir");
+        let wrapper = wrapper_dir.path().join("jcode");
+        let script = format!(
+            "#!/nix/store/abc-bash/bin/bash\nexport PATH=\"/nix/store/def-coreutils/bin:$PATH\"\nexec /nix/store/ghi-phase/bin/phase run \\\n  \"{}\" \"$@\"\n",
+            payload.display()
+        );
+        std::fs::write(&wrapper, script).expect("wrapper");
+        assert_eq!(
+            resolve_binary_payload(&wrapper),
+            std::fs::canonicalize(&payload).expect("canonical payload")
+        );
+        drop(store);
+    }
+
+    #[test]
+    fn nix_wrapper_and_self_dev_build_are_not_phantom_updates() {
+        // The cross-boundary half of G2: a Nix-wrapped launcher and a self-dev
+        // build must each resolve to their real payload, so a freshness check
+        // compares payload-vs-payload, not the 842-byte Nix wrapper against a
+        // self-dev `.bin`. Before NS2 the Nix wrapper resolved to itself, so the
+        // comparison used the wrapper's unrelated mtime and could report a
+        // phantom update. We prove the resolved paths are the payloads and that
+        // a payload-mtime comparison is therefore well-defined.
+        let (store, nix_payload) = nix_store_payload_fixture();
+        let wrapper_dir = tempfile::TempDir::new().expect("wrapper dir");
+        let nix_wrapper = nix_wrapper_pointing_at(wrapper_dir.path(), &nix_payload);
+
+        // A self-dev install: release-style wrapper + sibling `.bin` payload.
+        let (selfdev, selfdev_wrapper, selfdev_payload) = release_install_fixture();
+
+        let nix_resolved = resolve_binary_payload(&nix_wrapper);
+        let selfdev_resolved = resolve_binary_payload(&selfdev_wrapper);
+
+        // Both resolve to real payloads, never their wrappers. This is the
+        // property the phantom-update guard depends on: the freshness check now
+        // reads two payload mtimes instead of one wrapper mtime and one payload.
+        assert_eq!(
+            nix_resolved,
+            std::fs::canonicalize(&nix_payload).expect("nix payload")
+        );
+        assert_eq!(
+            selfdev_resolved,
+            std::fs::canonicalize(&selfdev_payload).expect("selfdev payload")
+        );
+        assert_ne!(
+            nix_resolved,
+            std::fs::canonicalize(&nix_wrapper).expect("nix wrapper"),
+            "nix launcher must not resolve to its wrapper"
+        );
+        assert_ne!(
+            selfdev_resolved,
+            std::fs::canonicalize(&selfdev_wrapper).expect("selfdev wrapper"),
+            "selfdev launcher must not resolve to its wrapper"
+        );
+        // Both resolved payloads expose a readable mtime, so the freshness
+        // comparison the divergence guard performs is well-defined on payloads.
+        let mtime = |p: &Path| std::fs::metadata(p).ok().and_then(|m| m.modified().ok());
+        assert!(mtime(&nix_resolved).is_some() && mtime(&selfdev_resolved).is_some());
+        drop((store, selfdev, wrapper_dir));
     }
 }
