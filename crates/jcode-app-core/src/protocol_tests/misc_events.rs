@@ -206,6 +206,8 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         client_has_local_history: true,
         allow_session_takeover: true,
         terminal_env: vec![("ZELLIJ_SESSION_NAME".to_string(), "sessionB".to_string())],
+        protocol_version: Some(1),
+        build_hash: Some("abc1234".to_string()),
     };
     let json = serde_json::to_string(&req)?;
     assert!(json.contains("\"type\":\"subscribe\""));
@@ -219,11 +221,15 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         client_has_local_history,
         allow_session_takeover,
         terminal_env,
+        protocol_version,
+        build_hash,
     } = decoded
     else {
         return Err(anyhow!("expected Subscribe"));
     };
     assert_eq!(id, 89);
+    assert_eq!(protocol_version, Some(1));
+    assert_eq!(build_hash.as_deref(), Some("abc1234"));
     assert_eq!(working_dir.as_deref(), Some("/tmp/project"));
     assert_eq!(selfdev, Some(true));
     assert_eq!(target_session_id.as_deref(), Some("sess_target"));
@@ -250,6 +256,8 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
         client_has_local_history,
         allow_session_takeover,
         terminal_env,
+        protocol_version,
+        build_hash,
     } = decoded
     else {
         return Err(anyhow!("expected Subscribe"));
@@ -262,6 +270,8 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
     assert!(!client_has_local_history);
     assert!(!allow_session_takeover);
     assert!(terminal_env.is_empty());
+    assert_eq!(protocol_version, None);
+    assert_eq!(build_hash, None);
     Ok(())
 }
 
