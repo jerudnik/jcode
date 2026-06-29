@@ -99,6 +99,12 @@ fn spawn_resume_in_new_terminal_uses_handterm_exec_mode() {
     );
     let _path_guard = EnvVarGuard::set_value("PATH", &path);
     let _term_guard = EnvVarGuard::set_value("JCODE_TERMINAL", "handterm");
+    // This self-dev environment configures a `JCODE_SPAWN_HOOK` (the spawn
+    // router) that would intercept the spawn before the built-in handterm path
+    // runs. Disable it (an empty hook is treated as "none") and force the config
+    // cache to re-read so the test exercises the built-in launcher.
+    let _hook_guard = EnvVarGuard::set_value("JCODE_SPAWN_HOOK", "");
+    crate::config::invalidate_config_cache();
 
     let exe = temp.path().join("jcode-bin");
     let cwd = temp.path().join("cwd");
@@ -168,6 +174,12 @@ fn spawn_selfdev_in_new_terminal_uses_handterm_exec_mode() {
     );
     let _path_guard = EnvVarGuard::set_value("PATH", &path);
     let _term_guard = EnvVarGuard::set_value("JCODE_TERMINAL", "handterm");
+    // This self-dev environment configures a `JCODE_SPAWN_HOOK` (the spawn
+    // router) that would intercept the spawn before the built-in handterm path
+    // runs. Disable it (an empty hook is treated as "none") and force the config
+    // cache to re-read so the test exercises the built-in launcher.
+    let _hook_guard = EnvVarGuard::set_value("JCODE_SPAWN_HOOK", "");
+    crate::config::invalidate_config_cache();
 
     let exe = temp.path().join("jcode-bin");
     let cwd = temp.path().join("cwd");
