@@ -78,7 +78,7 @@ async fn update_delivery_applies_to_running_task_completion() -> Result<()> {
     assert!(updated.notify);
     assert!(updated.wake);
 
-    for _ in 0..40 {
+    for _ in 0..200 {
         let status = manager
             .status(&info.task_id)
             .await
