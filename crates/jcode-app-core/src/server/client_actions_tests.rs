@@ -14,7 +14,6 @@ use anyhow::Result;
 use async_stream::stream;
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock, mpsc};
@@ -179,13 +178,25 @@ async fn enabling_swarm_does_not_auto_elect_coordinator() {
     let (member_event_tx, _member_event_rx) = mpsc::unbounded_channel();
     let now = Instant::now();
     let session_id = "session_test_swarm_toggle";
+    // Give the member a real working dir with its own `.git` so the swarm-id
+    // derivation (which walks up to the git root) terminates here deterministically.
+    // A bare path like `/tmp/jcode-passive-swarm` would otherwise inherit any
+    // ambient `.git` higher up the tree (e.g. a stray `/tmp/.git`), making the
+    // expected swarm id machine-dependent.
+    let work = tempfile::TempDir::new().expect("temp working dir");
+    std::fs::create_dir(work.path().join(".git")).expect("create .git marker");
+    let work_dir = work.path().to_path_buf();
+    let expected_swarm_id = std::fs::canonicalize(work_dir.join(".git"))
+        .unwrap_or_else(|_| work_dir.join(".git"))
+        .to_string_lossy()
+        .to_string();
     let swarm_members = Arc::new(RwLock::new(HashMap::from([(
         session_id.to_string(),
         crate::server::SwarmMember {
             session_id: session_id.to_string(),
             event_tx: member_event_tx,
             event_txs: HashMap::new(),
-            working_dir: Some(PathBuf::from("/tmp/jcode-passive-swarm")),
+            working_dir: Some(work_dir.clone()),
             swarm_id: None,
             swarm_enabled: false,
             status: "ready".to_string(),
@@ -244,7 +255,7 @@ async fn enabling_swarm_does_not_auto_elect_coordinator() {
             .get(session_id)
             .and_then(|member| member.swarm_id.clone())
             .as_deref(),
-        Some("/tmp/jcode-passive-swarm")
+        Some(expected_swarm_id.as_str())
     );
     assert_eq!(
         swarm_members
