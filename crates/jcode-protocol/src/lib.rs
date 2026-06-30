@@ -517,6 +517,65 @@ pub struct AwaitedMemberStatus {
     pub completion_report: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceWorkspaceObject {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub fields: serde_json::Value,
+    #[serde(default)]
+    pub targets: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub links: Vec<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceWorkspaceSnapshot {
+    pub schema_version: u32,
+    pub workspace_id: String,
+    pub title: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub objects: Vec<SurfaceWorkspaceObject>,
+    #[serde(default)]
+    pub views: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub bodies: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceWorkspaceOperation {
+    pub op_id: String,
+    pub workspace_id: String,
+    pub kind: String,
+    pub created_at: String,
+    #[serde(default)]
+    pub source: serde_json::Value,
+    #[serde(default)]
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceWorkspaceExport {
+    pub snapshot: SurfaceWorkspaceSnapshot,
+    #[serde(default)]
+    pub ops: Vec<SurfaceWorkspaceOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceWorkspaceApplyResult {
+    pub workspace_id: String,
+    pub applied: usize,
+    pub snapshot: SurfaceWorkspaceSnapshot,
+}
+
 impl Request {
     pub fn id(&self) -> u64 {
         match self {
@@ -535,6 +594,10 @@ impl Request {
             Request::ClientDebugResponse { id, .. } => *id,
             Request::Subscribe { id, .. } => *id,
             Request::GetHistory { id } => *id,
+            Request::SurfaceWorkspaceOpen { id, .. } => *id,
+            Request::SurfaceWorkspaceApply { id, .. } => *id,
+            Request::SurfaceWorkspaceGetSnapshot { id, .. } => *id,
+            Request::SurfaceWorkspaceExport { id, .. } => *id,
             Request::GetModelCatalog { id } => *id,
             Request::GetCompactedHistory { id, .. } => *id,
             Request::Reload { id, .. } => *id,

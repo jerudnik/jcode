@@ -56,6 +56,7 @@ use crate::bus::{Bus, BusEvent};
 use crate::id;
 use crate::protocol::{Request, ServerEvent, decode_request, encode_event};
 use crate::provider::Provider;
+use crate::surface_workspace::SurfaceWorkspaceStore;
 use crate::tool::Registry;
 use crate::transport::Stream;
 use anyhow::Result;
@@ -1516,6 +1517,82 @@ pub(super) async fn handle_client(
                 send_swarm_plan_to_session(&client_session_id, &swarm_members, &swarm_plans).await;
                 if let Some(snapshot) = try_available_models_snapshot(&agent) {
                     last_available_models_snapshot = Some(snapshot);
+                }
+            }
+
+            Request::SurfaceWorkspaceOpen {
+                id,
+                workspace_id,
+                title,
+            } => match SurfaceWorkspaceStore::from_jcode_home()
+                .and_then(|store| store.open_or_create(&workspace_id, title.as_deref()))
+            {
+                Ok(snapshot) => {
+                    let _ = client_event_tx
+                        .send(ServerEvent::SurfaceWorkspaceSnapshot { id, snapshot });
+                }
+                Err(error) => {
+                    let _ = client_event_tx.send(ServerEvent::Error {
+                        id,
+                        message: format!("surface workspace open failed: {error:#}"),
+                        retry_after_secs: None,
+                    });
+                }
+            },
+
+            Request::SurfaceWorkspaceApply {
+                id,
+                workspace_id,
+                ops,
+            } => match SurfaceWorkspaceStore::from_jcode_home()
+                .and_then(|store| store.apply_ops(&workspace_id, &ops))
+            {
+                Ok(result) => {
+                    let _ = client_event_tx
+                        .send(ServerEvent::SurfaceWorkspaceApplyResult { id, result });
+                }
+                Err(error) => {
+                    let _ = client_event_tx.send(ServerEvent::Error {
+                        id,
+                        message: format!("surface workspace apply failed: {error:#}"),
+                        retry_after_secs: None,
+                    });
+                }
+            },
+
+            Request::SurfaceWorkspaceGetSnapshot { id, workspace_id } => {
+                match SurfaceWorkspaceStore::from_jcode_home()
+                    .and_then(|store| store.get_snapshot(&workspace_id))
+                {
+                    Ok(snapshot) => {
+                        let _ = client_event_tx
+                            .send(ServerEvent::SurfaceWorkspaceSnapshot { id, snapshot });
+                    }
+                    Err(error) => {
+                        let _ = client_event_tx.send(ServerEvent::Error {
+                            id,
+                            message: format!("surface workspace snapshot failed: {error:#}"),
+                            retry_after_secs: None,
+                        });
+                    }
+                }
+            }
+
+            Request::SurfaceWorkspaceExport { id, workspace_id } => {
+                match SurfaceWorkspaceStore::from_jcode_home()
+                    .and_then(|store| store.export(&workspace_id))
+                {
+                    Ok(export) => {
+                        let _ = client_event_tx
+                            .send(ServerEvent::SurfaceWorkspaceExport { id, export });
+                    }
+                    Err(error) => {
+                        let _ = client_event_tx.send(ServerEvent::Error {
+                            id,
+                            message: format!("surface workspace export failed: {error:#}"),
+                            retry_after_secs: None,
+                        });
+                    }
                 }
             }
 
