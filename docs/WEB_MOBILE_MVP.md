@@ -7,6 +7,21 @@ This is a zero-build browser client for jcode's existing local gateway. It is ai
 
 The app lives in `web/jcode-mobile/` and uses ArrowJS from a pinned CDN import. There is no npm install or bundler required.
 
+## Local preview server
+
+Use the first-class CLI manager for the zero-build mobile web preview:
+
+```bash
+jcode mobile-server start --open      # serve web/jcode-mobile on 127.0.0.1:8765
+jcode mobile-server status            # human-readable status
+jcode mobile-server status --json     # script-friendly status
+jcode mobile-server logs --lines 80   # recent request/server logs
+jcode mobile-server open              # open the running preview URL
+jcode mobile-server stop              # stop the preview server
+```
+
+The manager writes a small status contract to `JCODE_HOME/mobile-server.json` (or `~/.jcode/mobile-server.json`) and logs to `JCODE_HOME/mobile-server.log`. The TUI header shows a compact `mobile` badge while the status file points at a live preview process. This is intentionally separate from the gateway/protocol path so upstream conflicts stay low and the preview server remains a disposable local developer tool.
+
 See also:
 
 - [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md) for the shared design language, device roles, typography, glyph, and cross-surface architecture direction.

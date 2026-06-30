@@ -293,6 +293,13 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Cloud(CloudCommand),
 
+    /// Manage the local zero-build mobile web preview server
+    #[command(name = "mobile-server", alias = "mobile")]
+    MobileServer {
+        #[command(subcommand)]
+        action: MobileServerCommand,
+    },
+
     /// Generate a pairing code for iOS/web client
     Pair {
         /// List paired devices instead of generating a code
@@ -500,6 +507,53 @@ pub(crate) enum Command {
         /// Emit the current counts as JSON and exit
         #[arg(long, conflicts_with = "once")]
         json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub(crate) enum MobileServerCommand {
+    /// Start the mobile web preview server in the background
+    Start {
+        /// TCP port to bind
+        #[arg(long, default_value_t = 8765)]
+        port: u16,
+
+        /// Bind address. Defaults to loopback for safe local preview.
+        #[arg(long, default_value = "127.0.0.1")]
+        bind: String,
+
+        /// Open the preview URL in the default browser after start
+        #[arg(long)]
+        open: bool,
+    },
+
+    /// Print the mobile web preview server status
+    Status {
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Print recent mobile server logs
+    Logs {
+        /// Number of log lines to print
+        #[arg(long, default_value_t = 80)]
+        lines: usize,
+    },
+
+    /// Stop the mobile web preview server
+    Stop,
+
+    /// Open the running mobile web preview in the default browser
+    Open,
+
+    /// Internal daemon entrypoint for the static file server
+    #[command(hide = true)]
+    ServeInternal {
+        #[arg(long)]
+        port: u16,
+        #[arg(long)]
+        bind: String,
     },
 }
 

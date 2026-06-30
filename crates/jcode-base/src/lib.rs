@@ -53,6 +53,7 @@ pub mod memory_log;
 pub mod memory_rerank;
 pub mod memory_types;
 pub mod message;
+pub mod mobile_server;
 pub mod model_pricing;
 pub mod plan;
 pub mod platform;
