@@ -262,6 +262,53 @@ async fn test_guard_between_80_and_95_starts_background_only() {
     );
 }
 
+#[tokio::test]
+async fn test_native_auto_fallback_starts_at_native_threshold_below_soft_window_threshold() {
+    let mut manager = CompactionManager::new().with_budget(1_000_000);
+    let mut messages = Vec::new();
+    for i in 0..20 {
+        messages.push(make_text_message(Role::User, &format!("msg {}", i)));
+        manager.notify_message_added();
+    }
+    manager.update_observed_input_tokens(210_000);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
+    let action = manager.ensure_native_auto_fallback_context_fits(&messages, provider, 200_000);
+
+    assert_eq!(
+        action,
+        CompactionAction::BackgroundStarted {
+            trigger: "native_auto_fallback".to_string()
+        }
+    );
+    assert!(manager.is_compacting());
+    assert_eq!(manager.compacted_count, 0);
+}
+
+#[tokio::test]
+async fn test_native_auto_fallback_uses_hard_compact_at_real_critical_threshold() {
+    let mut manager = CompactionManager::new().with_budget(1_000);
+    let mut messages = Vec::new();
+    for i in 0..30 {
+        messages.push(make_text_message(
+            Role::User,
+            &format!("turn {} {}", i, "x".repeat(120)),
+        ));
+        manager.notify_message_added();
+    }
+    manager.update_observed_input_tokens(960);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
+    let action = manager.ensure_native_auto_fallback_context_fits(&messages, provider, 200);
+
+    match action {
+        CompactionAction::HardCompacted(dropped) => assert!(dropped > 0),
+        other => panic!("expected hard compact, got {other:?}"),
+    }
+    assert!(!manager.is_compacting());
+    assert!(manager.compacted_count > 0);
+}
+
 /// Regression: a hard compact that runs while a background (reactive)
 /// compaction is in flight must abort the background task and discard its
 /// stale `pending_cutoff`. Otherwise, when the background task completes,

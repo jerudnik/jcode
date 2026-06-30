@@ -681,26 +681,37 @@ impl Agent {
                         manager.discard_oversized_openai_native_compaction();
                     let messages = {
                         let all_messages = self.session.provider_messages();
-                        if self.provider.uses_jcode_compaction() {
-                            let action =
-                                manager.ensure_context_fits(all_messages, self.provider.clone());
-                            match action {
-                                crate::compaction::CompactionAction::BackgroundStarted {
-                                    trigger,
-                                } => {
-                                    logging::info(&format!(
-                                        "Background compaction started ({})",
-                                        trigger
-                                    ));
-                                }
-                                crate::compaction::CompactionAction::HardCompacted(dropped) => {
-                                    logging::warn(&format!(
-                                        "Emergency hard compact: dropped {} messages (context was critical)",
-                                        dropped
-                                    ));
-                                }
-                                crate::compaction::CompactionAction::None => {}
+                        let native_auto_fallback_threshold = (!self
+                            .provider
+                            .uses_jcode_compaction()
+                            && self.provider.native_compaction_mode().as_deref() == Some("auto"))
+                        .then(|| self.provider.native_compaction_threshold_tokens())
+                        .flatten();
+                        let action = if self.provider.uses_jcode_compaction() {
+                            manager.ensure_context_fits(all_messages, self.provider.clone())
+                        } else if let Some(threshold) = native_auto_fallback_threshold {
+                            manager.ensure_native_auto_fallback_context_fits(
+                                all_messages,
+                                self.provider.clone(),
+                                threshold,
+                            )
+                        } else {
+                            crate::compaction::CompactionAction::None
+                        };
+                        match action {
+                            crate::compaction::CompactionAction::BackgroundStarted { trigger } => {
+                                logging::info(&format!(
+                                    "Background compaction started ({})",
+                                    trigger
+                                ));
                             }
+                            crate::compaction::CompactionAction::HardCompacted(dropped) => {
+                                logging::warn(&format!(
+                                    "Emergency hard compact: dropped {} messages (context was critical)",
+                                    dropped
+                                ));
+                            }
+                            crate::compaction::CompactionAction::None => {}
                         }
                         manager.messages_for_api_with(all_messages)
                     };

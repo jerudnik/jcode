@@ -33,6 +33,7 @@ impl App {
             "semantic" => "semantic",
             "reactive" => "reactive",
             "auto_recovery" => "automatic recovery",
+            "native_auto_fallback" => "native-auto fallback",
             "hard_compact" => "emergency",
             _ => "automatic",
         }
@@ -335,18 +336,30 @@ impl App {
             Ok(mut manager) => {
                 let discarded_oversized_native =
                     manager.discard_oversized_openai_native_compaction();
-                if self.provider.uses_jcode_compaction() {
-                    let action = manager.ensure_context_fits(&base_messages, self.provider.clone());
-                    match action {
-                        crate::compaction::CompactionAction::BackgroundStarted { trigger } => {
-                            self.push_display_message(DisplayMessage::system(
-                                Self::format_compaction_started_message(&trigger),
-                            ));
-                            self.set_status_notice("Compacting context");
-                        }
-                        crate::compaction::CompactionAction::HardCompacted(_) => {}
-                        crate::compaction::CompactionAction::None => {}
+                let native_auto_fallback_threshold = (!self.provider.uses_jcode_compaction()
+                    && self.provider.native_compaction_mode().as_deref() == Some("auto"))
+                .then(|| self.provider.native_compaction_threshold_tokens())
+                .flatten();
+                let action = if self.provider.uses_jcode_compaction() {
+                    manager.ensure_context_fits(&base_messages, self.provider.clone())
+                } else if let Some(threshold) = native_auto_fallback_threshold {
+                    manager.ensure_native_auto_fallback_context_fits(
+                        &base_messages,
+                        self.provider.clone(),
+                        threshold,
+                    )
+                } else {
+                    crate::compaction::CompactionAction::None
+                };
+                match action {
+                    crate::compaction::CompactionAction::BackgroundStarted { trigger } => {
+                        self.push_display_message(DisplayMessage::system(
+                            Self::format_compaction_started_message(&trigger),
+                        ));
+                        self.set_status_notice("Compacting context");
                     }
+                    crate::compaction::CompactionAction::HardCompacted(_) => {}
+                    crate::compaction::CompactionAction::None => {}
                 }
                 let messages = manager.messages_for_api_with(&base_messages);
                 let event = manager.take_compaction_event();
