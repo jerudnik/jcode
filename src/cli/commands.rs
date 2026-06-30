@@ -13,6 +13,7 @@ use crate::{browser, gateway, memory, session, storage, tui};
 use super::terminal::init_tui_runtime;
 
 mod menubar;
+mod mobile_server;
 mod provider_setup;
 mod report_info;
 mod restart;
@@ -28,6 +29,10 @@ pub use super::auth_test::{
     run_auth_test_command, run_auth_test_context_audit_command, run_auth_test_coverage_command,
 };
 pub use menubar::{ensure_menubar_helper_running, run_menubar_command};
+pub(crate) use mobile_server::{
+    run_mobile_server_logs, run_mobile_server_open, run_mobile_server_serve_internal,
+    run_mobile_server_start, run_mobile_server_status, run_mobile_server_stop,
+};
 pub(crate) use provider_setup::{ProviderAddOptions, run_provider_add_command};
 pub use restart::{
     maybe_run_pending_restart_restore_on_startup, run_restart_clear_command,

@@ -623,6 +623,9 @@ pub(super) fn build_persistent_header(app: &dyn TuiState, width: u16) -> Vec<Lin
     if client_update {
         status_items.push("cli↑");
     }
+    if crate::mobile_server::read_running_status().is_some() {
+        status_items.push("mobile");
+    }
     if let Some(badge) = crate::perf::profile().tier.badge() {
         status_items.push(badge);
     }
