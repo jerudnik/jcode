@@ -14,6 +14,9 @@ const state = reactive({
   status: "Not connected",
   error: "",
   draft: "",
+  sessionFilter: "",
+  modelFilter: "",
+  focusMode: false,
   sessionId: "",
   sessionTitle: "",
   providerModel: "",
@@ -394,6 +397,45 @@ function formatTokens(event) {
   return "";
 }
 
+function shortId(value) {
+  if (!value) return "none";
+  const text = String(value);
+  return text.length > 14 ? `${text.slice(0, 6)}…${text.slice(-6)}` : text;
+}
+
+function visibleSessions() {
+  const filter = state.sessionFilter.trim().toLowerCase();
+  const sessions = state.allSessions || [];
+  return filter ? sessions.filter((id) => String(id).toLowerCase().includes(filter)) : sessions;
+}
+
+function visibleModels() {
+  const filter = state.modelFilter.trim().toLowerCase();
+  const models = state.availableModels || [];
+  return (filter ? models.filter((model) => String(model).toLowerCase().includes(filter)) : models).slice(0, 36);
+}
+
+function transcriptStats() {
+  const entries = state.transcript || [];
+  let tools = 0;
+  let running = 0;
+  entries.forEach((entry) => {
+    (entry.tools || []).forEach((tool) => {
+      tools += 1;
+      if (tool.status === "running" || tool.status === "input") running += 1;
+    });
+  });
+  return { entries: entries.length, tools, running };
+}
+
+function applyQuickPrompt(text) {
+  state.draft = text;
+  requestAnimationFrame(() => {
+    const composer = document.getElementById("composer-input");
+    if (composer) composer.focus();
+  });
+}
+
 function submitOnEnter(event) {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -460,13 +502,35 @@ const PairPanel = () => html`
 
 const Header = () => html`
   <header class="topbar">
-    <div>
-      <p class="eyebrow">jcode mobile web</p>
+    <div class="brand-block">
+      <p class="eyebrow">jcode away cockpit</p>
       <h1>${() => { const credential = activeCredential(); return state.sessionTitle || (credential && credential.serverName) || "jcode"; }}</h1>
       <p class="meta">${() => [state.providerName, state.providerModel, state.tokens].filter(Boolean).join(" · ") || "Gateway client for Android / browser"}</p>
     </div>
-    <div class="status" data-phase="${() => state.phase}">${() => state.phase}</div>
+    <div class="top-actions">
+      <button class="ghost mode-toggle" @click="${() => { state.focusMode = !state.focusMode; }}">${() => state.focusMode ? "Cockpit" : "Focus"}</button>
+      <div class="status" data-phase="${() => state.phase}">${() => state.phase}</div>
+    </div>
   </header>
+`;
+
+const MetricsRail = () => html`
+  <section class="metrics-rail" aria-label="jcode status metrics">
+    <div class="metric live" data-phase="${() => state.phase}"><span>link</span><strong>${() => state.phase}</strong></div>
+    <div class="metric"><span>session</span><strong>${() => shortId(state.sessionId)}</strong></div>
+    <div class="metric"><span>stream</span><strong>${() => { const stats = transcriptStats(); return stats.running ? `${stats.running} active` : "idle"; }}</strong></div>
+    <div class="metric"><span>turns</span><strong>${() => transcriptStats().entries}</strong></div>
+    <div class="metric"><span>tools</span><strong>${() => transcriptStats().tools}</strong></div>
+  </section>
+`;
+
+const QuickDeck = () => html`
+  <section class="quick-deck" aria-label="quick prompts">
+    <button @click="${() => applyQuickPrompt("Summarize the current session state, blockers, and next best action.")}">situational brief</button>
+    <button @click="${() => applyQuickPrompt("Inspect the repo state, identify risks, and propose the highest leverage next step.")}">repo scan</button>
+    <button @click="${() => applyQuickPrompt("Continue autonomously. Validate your work and report only important progress.")}">keep going</button>
+    <button @click="${() => applyQuickPrompt("Show me changed files and what each change accomplishes.")}">diff brief</button>
+  </section>
 `;
 
 const TranscriptEntry = (entry) => html`
@@ -503,7 +567,7 @@ const ChatPanel = () => html`
       <div id="bottom"></div>
     </div>
     <form class="composer" @submit="${(event) => { event.preventDefault(); sendDraft(); }}">
-      <textarea rows="3" placeholder="Ask jcode..." .value="${() => state.draft}" @input="${(event) => { state.draft = event.target.value; }}" @keydown="${submitOnEnter}"></textarea>
+      <textarea id="composer-input" rows="3" placeholder="Ask jcode..." .value="${() => state.draft}" @input="${(event) => { state.draft = event.target.value; }}" @keydown="${submitOnEnter}"></textarea>
       <button class="primary" disabled="${() => state.phase === "live" && state.draft.trim() ? false : ""}" type="submit">Send</button>
     </form>
   </section>
@@ -512,12 +576,22 @@ const ChatPanel = () => html`
 const SessionPanel = () => html`
   <section class="card side-card">
     ${CredentialPicker()}
+    <div class="side-section command-center">
+      <div class="section-title tight">
+        <h2>Pulse</h2>
+        <p>${() => state.status}</p>
+      </div>
+      <div class="pulse-line"><span>model</span><strong>${() => state.providerModel || "unset"}</strong></div>
+      <div class="pulse-line"><span>tokens</span><strong>${() => state.tokens || "no totals"}</strong></div>
+      <div class="pulse-line"><span>server</span><strong>${() => { const credential = activeCredential(); return credential ? `${credential.host}:${credential.port}` : "manual"; }}</strong></div>
+    </div>
     <div class="section-title tight">
       <h2>Sessions</h2>
       <p>${() => state.allSessions.length ? `${state.allSessions.length} reported by server` : "History sync will fill this."}</p>
     </div>
+    <input class="filter-input" placeholder="filter sessions" .value="${() => state.sessionFilter}" @input="${(event) => { state.sessionFilter = event.target.value; }}" />
     <div class="session-list">
-      ${() => state.allSessions.map((id) => html`
+      ${() => visibleSessions().map((id) => html`
         <button class="session-chip" data-active="${() => id === state.sessionId ? "true" : "false"}" @click="${() => sendRaw({ type: "resume_session", id: nextRequestId(), session_id: id })}">${id}</button>
       `.key(id))}
     </div>
@@ -525,8 +599,9 @@ const SessionPanel = () => html`
       <h2>Models</h2>
       <p>${() => state.availableModels.length ? "Tap to switch" : "Server has not sent a model list yet."}</p>
     </div>
+    <input class="filter-input" placeholder="filter models" .value="${() => state.modelFilter}" @input="${(event) => { state.modelFilter = event.target.value; }}" />
     <div class="session-list">
-      ${() => state.availableModels.slice(0, 24).map((model) => html`
+      ${() => visibleModels().map((model) => html`
         <button class="session-chip" data-active="${() => model === state.providerModel ? "true" : "false"}" @click="${() => sendRaw({ type: "set_model", id: nextRequestId(), model })}">${model}</button>
       `.key(model))}
     </div>
@@ -534,8 +609,10 @@ const SessionPanel = () => html`
 `;
 
 const App = () => html`
-  <div class="shell">
+  <div class="shell" data-focus="${() => state.focusMode ? "true" : "false"}">
     ${Header()}
+    ${MetricsRail()}
+    ${QuickDeck()}
     <div class="layout">
       <div class="main-col">
         ${PairPanel()}
