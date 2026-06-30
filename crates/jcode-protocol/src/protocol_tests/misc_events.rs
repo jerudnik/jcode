@@ -129,6 +129,87 @@ fn test_input_shell_result_event_roundtrip() -> Result<()> {
 }
 
 #[test]
+fn test_surface_workspace_protocol_roundtrip() -> Result<()> {
+    let object = SurfaceWorkspaceObject {
+        id: "obj_1".to_string(),
+        kind: "card".to_string(),
+        title: "Review artifact".to_string(),
+        status: "todo".to_string(),
+        fields: serde_json::json!({"priority":"high"}),
+        targets: Vec::new(),
+        links: Vec::new(),
+        created_at: "2026-06-30T20:00:00.000Z".to_string(),
+        updated_at: "2026-06-30T20:00:00.000Z".to_string(),
+        deleted: false,
+    };
+    let op = SurfaceWorkspaceOperation {
+        op_id: "op_1".to_string(),
+        workspace_id: "sw_test".to_string(),
+        kind: "object.upsert".to_string(),
+        created_at: "2026-06-30T20:00:00.000Z".to_string(),
+        source: serde_json::json!({"surface_id":"browser"}),
+        payload: serde_json::json!({"object": object, "body":"notes"}),
+    };
+    let req = Request::SurfaceWorkspaceApply {
+        id: 91,
+        workspace_id: "sw_test".to_string(),
+        ops: vec![op.clone()],
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"surface_workspace_apply\""));
+    let decoded = parse_request_json(&json)?;
+    assert_eq!(decoded.id(), 91);
+    let Request::SurfaceWorkspaceApply {
+        workspace_id, ops, ..
+    } = decoded else {
+        return Err(anyhow!("expected SurfaceWorkspaceApply"));
+    };
+    assert_eq!(workspace_id, "sw_test");
+    assert_eq!(ops[0].op_id, "op_1");
+
+    let snapshot = SurfaceWorkspaceSnapshot {
+        schema_version: 1,
+        workspace_id: "sw_test".to_string(),
+        title: "Surface workspace".to_string(),
+        updated_at: "2026-06-30T20:00:00.000Z".to_string(),
+        objects: Vec::new(),
+        views: Vec::new(),
+        bodies: std::collections::BTreeMap::new(),
+    };
+    let event = ServerEvent::SurfaceWorkspaceApplyResult {
+        id: 91,
+        result: SurfaceWorkspaceApplyResult {
+            workspace_id: "sw_test".to_string(),
+            applied: 1,
+            snapshot: snapshot.clone(),
+        },
+    };
+    let json = encode_event(&event);
+    assert!(json.contains("\"type\":\"surface_workspace_apply_result\""));
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::SurfaceWorkspaceApplyResult { result, .. } = decoded else {
+        return Err(anyhow!("expected SurfaceWorkspaceApplyResult"));
+    };
+    assert_eq!(result.applied, 1);
+
+    let export = ServerEvent::SurfaceWorkspaceExport {
+        id: 92,
+        export: SurfaceWorkspaceExport {
+            snapshot,
+            ops: vec![op],
+        },
+    };
+    let json = encode_event(&export);
+    assert!(json.contains("\"type\":\"surface_workspace_export\""));
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::SurfaceWorkspaceExport { export, .. } = decoded else {
+        return Err(anyhow!("expected SurfaceWorkspaceExport"));
+    };
+    assert_eq!(export.ops.len(), 1);
+    Ok(())
+}
+
+#[test]
 fn test_protocol_enum_roundtrips_cover_wire_names() -> Result<()> {
     let transcript_modes = [
         (TranscriptMode::Insert, "insert"),
