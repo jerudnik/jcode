@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use super::args::{
     AmbientCommand, Args, AssistantCommand, AuthCommand, CloudCommand, CloudSessionsCommand,
-    Command, MemoryCommand, ModelCommand, ProviderCommand, RestartCommand, ServerCommand,
-    SessionCommand, TranscriptModeArg,
+    Command, MemoryCommand, MobileServerCommand, ModelCommand, ProviderCommand, RestartCommand,
+    ServerCommand, SessionCommand, TranscriptModeArg,
 };
 use crate::{
     agent, auth, build, provider, provider_catalog, server, session, setup_hints, startup_profile,
@@ -294,6 +294,18 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         Some(Command::Cloud(subcmd)) => {
             commands::run_cloud_command(map_cloud_subcommand(subcmd))?;
         }
+        Some(Command::MobileServer { action }) => match action {
+            MobileServerCommand::Start { port, bind, open } => {
+                commands::run_mobile_server_start(port, &bind, open)?;
+            }
+            MobileServerCommand::Status { json } => commands::run_mobile_server_status(json)?,
+            MobileServerCommand::Logs { lines } => commands::run_mobile_server_logs(lines)?,
+            MobileServerCommand::Stop => commands::run_mobile_server_stop()?,
+            MobileServerCommand::Open => commands::run_mobile_server_open()?,
+            MobileServerCommand::ServeInternal { port, bind } => {
+                commands::run_mobile_server_serve_internal(port, &bind)?;
+            }
+        },
         Some(Command::Pair { list, revoke }) => {
             commands::run_pair_command(list, revoke)?;
         }
