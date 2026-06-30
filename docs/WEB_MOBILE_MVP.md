@@ -66,8 +66,12 @@ Pairing talks directly from the Android browser to the jcode gateway at `http://
 
 - Pair via host, port, code, and device name.
 - Store paired credentials in `localStorage`.
+- Store drafts, selected server/session, filters, focus mode, and pending local commands in `localStorage` before or while editing.
 - Connect to saved servers.
+- Auto-reconnect a saved workstation with capped jittered backoff.
+- Treat mobile background, page hide/show, and offline/online changes as normal: foreground/network return resubscribes and requests `get_history` before sending queued local messages.
 - Send prompts.
+- Queue prompts locally when the socket is unavailable, show them as pending, and allow retry, edit-back-to-draft, or discard. Commands that may have been sent before an ack are marked for review instead of auto-replayed.
 - Cancel a running turn.
 - Sync history.
 - Render streamed assistant text, reasoning, tool calls, errors, notifications, token summaries, sessions, and model list events.
@@ -77,6 +81,7 @@ Pairing talks directly from the Android browser to the jcode gateway at `http://
 - Focus mode that hides pairing and side panels for transcript-first supervision.
 - Quick prompt deck for away-from-keyboard control patterns.
 - Searchable session and model lists plus a compact pulse panel for status, model, token, and server readouts.
+- Explicit link states for offline, reconnecting, resyncing, live, idle session, auth failure, and generic error.
 
 ## Design direction
 
@@ -94,6 +99,7 @@ The portal is intentionally not a heavy admin dashboard. It should feel like a j
 - No vendored ArrowJS bundle yet. The app imports `@arrow-js/core@1.0.6` from `esm.sh`.
 - No HTTPS/WSS yet. Use Tailscale or LAN. Some browsers may block `ws://` if the page itself is served over `https://`; serve the app over `http://` for this MVP.
 - Credentials are in browser `localStorage`. This is acceptable for a local-first prototype, but native Android should move tokens to Android Keystore.
+- Auth is still local pairing-token only. Kanidm OIDC + PKCE remains the planned P1 path; no public exposure is configured by this app.
 - The UI is protocol-tolerant but not exhaustive. Unknown events are ignored with a status note.
 
 ## Validation
@@ -105,6 +111,7 @@ Run:
 ```
 
 It checks JavaScript syntax and verifies the static app contains the required gateway protocol pieces.
+It also runs `web/jcode-mobile/surface_state.test.mjs`, which covers reconnect backoff, foreground resync request ordering, offline/background close handling, auth-failure close classification, and draft/pending-command recovery.
 
 ## Next slices
 
