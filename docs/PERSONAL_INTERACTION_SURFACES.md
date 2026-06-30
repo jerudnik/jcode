@@ -446,13 +446,23 @@ Candidate event classes:
 6. **Annotation primitive.** Support text annotations on a transcript message or artifact preview, with a serializable local schema and export path.
 7. **Surface handoff.** Add command verbs for “continue this on tablet”, “send summary to phone”, and “open artifact on desktop”.
 
-## Open questions
+## Decision status
 
-- Should the web client vendor fonts immediately, or only define tokens until the PWA installable shell exists?
-- Should Source Serif 4 be included in the default bundle, or loaded only for reading mode?
-- Should Backlog.md be the canonical project board format for all prototypes, or should the board first read-only mirror existing tasks?
-- What is the smallest annotation sidecar format that can later map to PR review comments, Plannotator notes, and Backlog tasks?
-- Should the orchestrator live as a distinct server/session role, or as a protocol convention over existing swarm/session primitives?
+No P0-blocking open questions remain. Use these defaults unless a future implementation slice proves they are wrong:
+
+- **Fonts:** define CSS tokens now. Vendor small font subsets only when the installable PWA shell starts.
+- **Serif:** load Source Serif 4 only for reading and documentation modes at first, not as part of the default operational chrome.
+- **Project cards:** start with local cards in P0. Treat Backlog.md as the first repo-backed substrate in P1, but keep the adapter boundary narrow so the format can change.
+- **Annotations:** start with the local schema in [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md). In P1, write a JSON sidecar with target URI/range/status and export paths to markdown, PR comments, or Plannotator notes later.
+- **Orchestrator:** implement it first as a role/session convention over existing jcode session and swarm primitives. Do not add a dedicated orchestrator runtime until protocol-visible surface capabilities and handoffs require it.
+
+Deferred decisions that should not block P0:
+
+- exact font subset and vendoring strategy for the PWA
+- exact Backlog.md round-trip format for ordered cards
+- exact annotation sidecar filename/location convention
+- native Android packaging versus hardened PWA after the web proof
+- server-visible protocol shape for `surface.*`, `intent.*`, `artifact.*`, and `card.*` events
 
 ## Design posture
 
