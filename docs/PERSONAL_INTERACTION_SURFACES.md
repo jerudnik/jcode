@@ -1,478 +1,230 @@
 # Personal Interaction Surface Design Language
 
-Status: Draft 2026-06-30
+Status: Implementation guide, 2026-06-30
 
-Implementation requirements: [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md)
+Start here for visual and interaction decisions. Use [`INTERACTION_SURFACES.md`](./INTERACTION_SURFACES.md) as the project map, [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) for implementation work, and [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md) for cards/docs/annotations storage.
 
-Surface workspace substrate: [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md)
+## Design target
 
-This document records a personal design direction for jcode interaction surfaces that are more controllable than the terminal UI. It extends the existing jcode values of minimalism, cypherpunk pragmatism, functional density, and crisp performance without turning the UI into a heavyweight dashboard.
+Every jcode surface should feel like the same instrument viewed through a device-specific lens.
 
-The central idea is that every surface should feel like the same instrument viewed through a device-specific lens:
+- **TUI:** primary coding cockpit.
+- **Key2 / Clicks:** field terminal for intent capture and status.
+- **Y700 tablet:** command plane for steering, cards, artifacts, and annotations.
+- **Desktop web:** review, annotation, planning, and control plane beside the TUI.
 
-- **Phone / hardware keyboard:** field terminal and intent capture.
-- **Small tablet:** command plane, steering surface, and light project console.
-- **Desktop / laptop web:** review, annotation, planning, and control plane alongside the TUI.
-- **TUI:** the canonical coding cockpit and fastest direct interaction surface.
+## Principles
 
-## Design principles
+| Principle | Implementation meaning |
+| --- | --- |
+| Transcript and intent first | Chrome exists to reduce friction around messages, commands, and captured intent. |
+| Surface-local, session-global | Drafts and UI focus are local. Sessions, tools, models, and history stay runtime-owned. |
+| Rich views degrade to text | Every card move, annotation, and handoff has a command or text representation. |
+| Functional cypherpunk | Dark, precise, inspectable, performant, not decorative retro cosplay. |
+| Local-first | Drafts, intents, annotations, and card changes survive reload and offline use. |
+| One grammar | Reuse nouns: session, agent, task, artifact, annotation, plan, workspace, surface. |
 
-1. **Transcript and intent first.** The primary object is still a conversation, command, or captured intent. UI chrome exists to remove work, not to create more interaction.
-2. **Surface-local, session-global.** Sessions, messages, tools, tasks, and artifacts are server or repo owned. Draft text, scroll position, open drawers, focus, gesture state, and view density are local to the current surface.
-3. **Every rich surface degrades to text.** A kanban card, diagram annotation, or drawer action should always have a text representation that works from the Key2 or TUI.
-4. **No gratuitous motion.** Motion should confirm cause and effect. Use short transform-only transitions, disable them in low-power or reduced-motion modes, and never make users wait for animation.
-5. **Functional cypherpunk, not retro cosplay.** Dark graphite, terse telemetry, strong contrast, obvious status, and precise glyphs. Avoid skeuomorphic panels, fake terminals, heavy blur, noisy scanlines, and dashboard clutter.
-6. **Local-first and recoverable.** Drafts, annotations, board moves, and captured intent should land in local storage or a repo-backed file before they depend on a remote service.
-7. **One shared grammar.** The same nouns should appear everywhere: session, agent, task, artifact, annotation, plan, model, workspace, surface.
-
-## Visual language
+## Visual system
 
 ### Typography
 
-Use richer fonts where the client controls rendering, especially web and future native shells. The TUI can keep terminal-native fonts unless a controlled renderer is in use.
-
-| Role | Preferred family | Use |
+| Token | Family | Use |
 | --- | --- | --- |
-| Display and headings | **Space Grotesk** | Product title, drawer titles, board names, major mode labels |
-| Body/UI sans | **Geist Sans** | Forms, buttons, labels, cards, transcript prose on web surfaces |
-| Mono/code | **Geist Mono** | Tool output, code, session IDs, telemetry, shortcuts, command previews |
-| Serif | **Source Serif 4** | Long-form reading mode, documentation excerpts, reflective planning notes |
-| Fallback serif | Charter, Georgia, serif | System fallback when Source Serif 4 is unavailable |
-
-Serif recommendation: **Source Serif 4**. It is neutral, readable, technically polished, and pairs better with Geist than a more expressive editorial serif. Use it sparingly for long-form markdown and reading/annotation modes, not for operational chrome. If a more literary voice is desired later, evaluate Newsreader as an alternate reading-mode theme, not as the default.
-
-Suggested CSS token direction:
+| `--font-display` | Space Grotesk | Surface title, drawer title, board name, mode label |
+| `--font-sans` | Geist Sans | Forms, buttons, labels, cards, web transcript prose |
+| `--font-mono` | Geist Mono | Code, tool output, IDs, telemetry, shortcuts |
+| `--font-serif` | Source Serif 4 | Long-form reading and docs mode only |
 
 ```css
 :root {
   --font-display: "Space Grotesk", "Geist", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --font-serif: "Source Serif 4", Charter, Georgia, serif;
 }
 ```
 
-Implementation note: keep the current zero-build browser constraint. Either rely on locally installed fonts during prototypes or vendor a small static font subset when the PWA shell is formalized. Avoid runtime font services for offline/local-first use.
+Prototype rule: keep zero-build web. Use system fonts or vendored subsets. Do not rely on runtime font services.
 
-### Glyphs and icons
+### Color tokens
 
-Use **Phosphor Icons** for glyphs instead of emojis. Prefer inline SVG or a tiny vendored subset over a whole icon font so the web client remains deterministic, cacheable, and lightweight.
-
-Initial icon grammar:
-
-| Concept | Phosphor direction |
+| Token | Use |
 | --- | --- |
-| Session | `terminal-window`, `chat-circle-text` |
-| Multi-session / workspace | `squares-four`, `layout` |
-| Agent / swarm | `robot`, `tree-structure`, `users-three` |
-| Task / project | `kanban`, `check-square`, `list-checks` |
-| Artifact | `file-text`, `file-code`, `image`, `package` |
-| Annotation | `note-pencil`, `highlighter-circle`, `cursor-click` |
-| Diagram / graph | `graph`, `nodes`, `flow-arrow` |
-| Pair / connect | `link`, `plugs-connected`, `qr-code` |
-| Cancel / danger | `stop-circle`, `warning-diamond`, `x-circle` |
-| Status live | `pulse`, `circle`, `broadcast` |
-
-Guidelines:
-
-- Icons are labels and affordance hints, not decoration.
-- Prefer regular weight for normal chrome, fill/duotone only for active state or critical attention.
-- Pair icon-only controls with `aria-label` and visible text on first-use or low-confidence surfaces.
-- Use glyphs consistently across device classes so command muscle memory transfers.
-
-### Color and material
-
-The current green-on-graphite scheme is in a good place. Keep color mostly semantic rather than decorative.
-
-| Token | Meaning |
-| --- | --- |
-| Graphite / near black | ambient background, focus, low energy draw |
-| Deep green panels | jcode identity and cypherpunk continuity |
-| Mint | live, primary action, successful connection |
-| Blue | linked artifact, navigable reference, network path |
-| Purple | reasoning, agentic context, alternate path |
-| Orange | pending, needs attention, degraded state |
-| Red | stop, failed, destructive, unsafe |
-
-Material rules:
-
-- Prefer solid or lightly translucent panels. Blur is acceptable on tablet/desktop, but should be disabled in lite mode.
-- One background gradient is enough. Do not add noise unless it measurably improves perception.
-- Borders should do more hierarchy work than shadows. Shadows should be subtle and rare.
-- Make focus rings highly visible. Cypherpunk does not mean inaccessible.
-
-### Motion and interaction timing
-
-| Interaction | Target |
-| --- | --- |
-| Button press | 80 to 120 ms transform or color response |
-| Drawer slide | 140 to 180 ms transform-only |
-| Panel resize / orientation adaptation | immediate or under 120 ms |
-| Session stream updates | no animation, text should feel live |
-| Drag/drop card feedback | immediate hover/lift, persist on release |
-
-Respect `prefers-reduced-motion`. On Key2 or lite mode, disable non-essential transitions.
-
-### Density
-
-Density should be device-adaptive, not globally minimal.
-
-- **Key2:** one column, transcript-dominant, sparse controls, hardware-keyboard shortcuts, no canvas, no persistent side rails.
-- **Y700 tablet:** compact cockpit, drawers, quick rails, cards, touch/stylus annotation, split orientation-specific layouts.
-- **Desktop web:** wide review/planning tables, annotation sidebars, artifact inspectors, control-plane panels. Do not try to out-chat the TUI.
-
-## Shared basics across all surfaces
-
-These are the atomic primitives that should remain coherent across clients.
-
-### Session
-
-A server-owned runtime. A surface attaches to a session, observes it, and can send messages or control actions if authorized.
-
-Required basics:
-
-- title or short ID
-- provider/model
-- cwd/project
-- live/running/idle/error state
-- current turn status
-- recent tool activity
-
-### Surface
-
-A local presentation and input context for one or more sessions.
-
-Surface-local state:
-
-- draft input
-- scroll and selection
-- drawer visibility
-- viewport density
-- open artifact/annotation
-- gesture or keyboard focus
-- local caches and unsynced edits
-
-### Intent
-
-A captured user desire that may become a chat message, orchestrator instruction, task, plan, or agent assignment.
-
-Intent should support:
-
-- raw text capture
-- optional clarifying questions
-- target selection: session, project, agent, task, artifact
-- confidence and urgency
-- conversion to durable task or plan
-
-### Artifact
-
-A thing produced or inspected by agents: file, diff, image, evidence pack, screenshot, rendered doc, diagram, terminal output, benchmark, or web page.
-
-Artifact basics:
-
-- stable ID or path
-- type
-- provenance
-- preview
-- open/reveal action
-- annotations
-- related session and task links
-
-### Annotation
-
-A first-class comment or mark on an artifact, not just a visual overlay.
-
-Minimum schema:
-
-```text
-annotation_id
-target: file path, URL, message ID, image region, DOM node, line range, or diagram node
-body: markdown text
-kind: note | change-request | question | approval | defect | idea
-status: open | resolved | superseded
-created_by: user | agent
-created_at
-links: task IDs, session IDs, artifact IDs
-```
-
-### Task/card
-
-A durable work object in the jcode-native surface workspace substrate. Cards should share the same object graph as docs, annotations, intents, and artifact references so board, review, and planning views do not drift apart.
-
-Card basics:
-
-- title
-- status/lane
-- priority
-- assignee/agent
-- labels
-- references/artifacts
-- acceptance criteria
-- definition of done
-- modified files
-- ordinal for manual ordering
-
-### Command
-
-A typed or tapped action that should be invokable from every surface.
-
-Examples:
-
-- send message
-- cancel turn
-- attach session
-- spawn agent
-- assign task
-- annotate artifact
-- create card
-- move card
-- summarize current state
-- hand off to another surface
-
-## Device-specific surfaces
-
-### BlackBerry Key2 / Clicks Communicator: field terminal
-
-Primary role: fast on-the-go capture and imperative orchestration.
-
-What it is good for:
-
-- general chat when away from a workstation
-- “tell the orchestrator what I mean” capture
-- connecting to an already-running workstation/session
-- checking status of agents, tasks, and current turn
-- issuing short imperative commands
-- reviewing small summaries and deciding next actions
-
-What it should avoid:
-
-- multi-pane overview
-- drag/drop project management
-- visual diagram editing
-- large rendered documents
-- continuous telemetry that burns battery or attention
-
-Interface shape:
-
-- one-column transcript
-- bottom composer optimized for hardware keyboard
-- compact status strip: link, session, turn, model
-- command palette reachable by shortcut
-- quick actions: attach, summarize, cancel, route, hand off
-- optional lite mode that removes gradients, blur, side cards, and non-essential state
-
-Recommended shortcuts:
-
-| Shortcut | Action |
-| --- | --- |
-| Enter | send if draft is single-line mode |
-| Shift+Enter or Ctrl+Enter | newline |
-| Esc | cancel current turn or close command palette |
-| `/` | command palette |
-| `@` | target session/agent/task |
-| `#` | target task/card/tag |
-
-Orchestration model:
-
-1. User captures rough intent.
-2. Orchestrator asks at most one clarifying question if necessary.
-3. Orchestrator selects or spawns the appropriate subagent/session.
-4. Phone receives a terse handoff confirmation and later status summary.
-
-### Lenovo Legion Tab Y700 Gen 5: command plane
-
-Primary role: high-performance multi-session supervision, steering, annotation, and lightweight project management.
-
-Why it matters:
-
-- 8.8 inch size is large enough for real spatial context but small enough to demand discipline.
-- High refresh and strong hardware make it viable for drawers, split panes, stylus/touch annotation, and live multi-session status.
-- Portrait and landscape are both useful, but should emphasize different jobs.
-
-#### Portrait mode
-
-Best for:
-
-- reading and annotating a single transcript, document, or artifact
-- steering one session deeply
-- capturing intent while holding the tablet
-- reviewing a task/card and associated evidence
-
-Layout:
-
-```text
-status strip
-primary transcript/artifact
-composer or annotation input
-bottom sheet: actions / references / cards
-```
-
-#### Landscape mode
-
-Best for:
-
-- multi-session overview
-- command plane
-- project board plus selected card detail
-- artifact review with side annotations
-- diagram/canvas collaboration
-
-Layout:
-
-```text
-left rail: sessions / agents / project
-center: selected transcript, artifact, board, or canvas
-right drawer: details, annotations, plan, commands
-bottom rail: composer, quick prompts, status pulses
-```
-
-Suggested drawers:
-
-| Drawer | Purpose |
-| --- | --- |
-| Sessions | attach, switch, watch running turns, pop out/handoff |
-| Agents | swarm status, assignments, blockers, role summaries |
-| Intent | capture and refine goals before dispatch |
-| Project | cards, lanes, priorities, milestones, issue/PR links |
-| Artifacts | files, diffs, screenshots, rendered docs, evidence packs |
-| Annotations | comments, change requests, approvals, questions |
-| Canvas | diagrams, touch marks, screenshot overlays, architecture sketches |
-| Models | model/provider selection and capability hints |
-
-Implementation notes:
-
-- Start with CSS drawers and plain ArrowJS state. Avoid a component framework until a measured bottleneck demands one.
-- For markdown editing, begin with a durable textarea plus preview. Add CodeJar only for lightweight code editing. Treat Milkdown as an optional richer editor for tablet/desktop after measuring bundle size and offline behavior.
-- For canvas, start with SVG or a simple absolute-positioned annotation layer over images/docs. Do not begin with a full whiteboard dependency.
-- For project boards, use the jcode-native surface workspace substrate. Drag/drop should mutate status and ordinal through object operations, not through an external task adapter.
-- Every drawer state should be serializable so tablet crashes or browser reloads do not lose work.
-
-### Desktop/laptop full-screen web: review table
-
-Primary role: control-plane, review, planning, annotation, and visual coordination. The TUI remains the fastest direct chat/coding environment.
-
-What desktop web should be good for:
-
-- reviewing artifacts, diffs, screenshots, rendered markdown, plans, and diagrams
-- annotating code and docs with richer spatial context
-- supervising multiple sessions or swarms at a glance
-- planning work in boards and linked documents
-- summarizing progress for commits, PRs, and roadmap docs
-
-What it should not try to replace first:
-
-- the TUI as the primary coding chat surface
-- native IDE/editor workflows
-- OS-level window management
-
-Shape:
-
-- full-screen board/review workspace
-- session/status strip across top or left
-- artifact viewer in the center
-- annotation/task drawer on the side
-- command palette for routing actions to agents/sessions
-- handoff controls to TUI, tablet, or phone
-
-## Architecture direction
-
-### Surface capability handshake
-
-Clients should eventually advertise capabilities so agents and orchestrators can tailor output.
-
-Example capability shape:
-
-```json
-{
-  "surface": "y700-web",
-  "viewport": { "width": 2560, "height": 1600, "orientation": "landscape" },
-  "input": ["touch", "stylus", "keyboard"],
-  "features": ["multi_session", "drawers", "annotation", "canvas", "drag_drop"],
-  "constraints": { "lite_mode": false, "offline_cache": true }
+| Graphite | Background, low power, focus shell |
+| Deep green | jcode identity, primary panel field |
+| Mint | Live, connected, success, primary action |
+| Blue | Link, artifact, navigable reference |
+| Purple | Reasoning, alternate path, agent context |
+| Orange | Pending, degraded, attention |
+| Red | Failed, destructive, stop |
+
+```css
+:root {
+  --surface-bg: #070b09;
+  --surface-panel: #0d1712;
+  --surface-panel-2: #10241b;
+  --surface-border: #244535;
+  --surface-text: #dcefe5;
+  --surface-muted: #88a395;
+  --surface-live: #55f0a5;
+  --surface-link: #73a7ff;
+  --surface-reasoning: #b591ff;
+  --surface-warn: #ffb45c;
+  --surface-danger: #ff6b6b;
 }
 ```
 
-A Key2 might advertise `keyboard`, `single_column`, and `lite_mode`. The orchestrator can then send summaries and simple choices instead of diagrams or boards.
+### Glyphs
 
-### Shared design token package
+Use **Phosphor Icons** as inline SVG or a tiny vendored subset. Prefer text labels until an icon is part of repeated muscle memory.
 
-Create one lightweight token file before duplicating CSS across prototypes:
+| Concept | Glyph direction |
+| --- | --- |
+| Session | `terminal-window`, `chat-circle-text` |
+| Workspace | `squares-four`, `layout` |
+| Agent | `robot`, `tree-structure` |
+| Card/task | `kanban`, `check-square`, `list-checks` |
+| Artifact | `file-text`, `file-code`, `image` |
+| Annotation | `note-pencil`, `highlighter-circle` |
+| Link/pair | `link`, `plugs-connected`, `qr-code` |
+| Danger | `stop-circle`, `warning-diamond`, `x-circle` |
 
-```text
-web/shared/jcode-design-tokens.css
-web/shared/jcode-icons.js
-web/shared/jcode-surface-primitives.js
+### Motion and density
+
+| Interaction | Target |
+| --- | --- |
+| Button response | 80 to 120 ms transform or color change |
+| Drawer slide | 140 to 180 ms transform-only |
+| Resize/orientation | Immediate or under 120 ms |
+| Streamed text | No animation |
+| Card drag/drop | Immediate hover/lift, persist on release |
+
+Respect `prefers-reduced-motion`. Disable non-essential transitions on Key2 and in lite mode.
+
+## Shared UI primitives
+
+```mermaid
+flowchart TD
+  Session --> Transcript
+  Session --> Composer
+  Composer --> Command[Command palette]
+  Command --> Intent
+  Intent --> Card
+  Intent --> Agent
+  Artifact --> Annotation
+  Annotation --> Card
+  Card --> Plan
 ```
 
-Initial scope:
-
-- font family variables
-- semantic color variables
-- radii, spacing, shadows, focus rings
-- icon registry for the small Phosphor subset
-- helpers for status pills, drawers, rails, cards, transcript entries
-
-### Durable synchronization
-
-For now, prefer the jcode-native surface workspace substrate for cards, docs, annotations, intents, and artifact references. Export to repo files should be explicit and user-directed, not the default storage path for P0.
-
-| Object | First durable home |
+| Primitive | Minimum UI |
 | --- | --- |
-| Project cards | surface workspace `card` objects |
-| Design docs | surface workspace `doc` objects first, explicit `docs/` markdown export later |
-| Architecture diagrams | markdown Mermaid or SVG files in repo |
-| Code annotations | surface workspace `annotation` objects with compact selectors |
-| Screenshots/evidence | evidence pack/artifact storage path |
-| Session transcripts | jcode session store, exported summaries in docs/tasks when needed |
+| Session chip | title/ID, model, cwd, live/idle/error, running tool |
+| Composer | multiline input, send, cancel, command mode, target session |
+| Intent | raw body, target, urgency, route action, status |
+| Artifact | type, path/ID, provenance, preview, open/reveal, linked annotations |
+| Annotation | target, selector, body, status, convert-to-card |
+| Card | title, status, priority, body, acceptance, linked artifacts |
+| Command | typed verb, visible preview, reversible local log |
 
-### Event model
+## Device mockups
 
-A future web control plane should not parse only transcript events. It should have explicit events for project and artifact actions.
+### Key2 / Clicks field terminal
 
-Candidate event classes:
+Use a single-column, hardware-keyboard-first layout. Avoid canvas, side rails, and dense touch controls.
 
-- `session.*`: attach, detach, renamed, active, idle, running, errored
-- `turn.*`: started, token, tool, checkpoint, completed, cancelled
-- `agent.*`: spawned, assigned, blocked, reported, stopped
-- `artifact.*`: created, updated, opened, annotated
-- `task.*`: created, moved, edited, completed
-- `surface.*`: handoff requested, capabilities changed, viewport changed
+```text
+┌────────────────────────────┐
+│ jcode ● live   sonnet ~/jc │
+├────────────────────────────┤
+│ now                         │
+│ 3 agents running            │
+│ 1 needs review              │
+│ tests passed 2m ago         │
+│                             │
+│ intent                      │
+│ > check cloudflare plan     │
+│ /route desktop-review       │
+├────────────────────────────┤
+│ send  route  status  cancel │
+└────────────────────────────┘
+```
 
-## Near-term implementation slices
+Required feel: terse, durable, fast under thumb or keyboard. It should work while walking or away from the desk.
 
-1. **Typography/token pass for `web/jcode-mobile`.** Add font tokens, migrate current raw font stacks to Space Grotesk / Geist / Geist Mono fallbacks, and preserve zero-build operation.
-2. **Phosphor subset.** Add a tiny inline SVG icon helper and replace any emoji-like affordances or text-only status glyph gaps with named icons.
-3. **Key2 lite mode.** Make a true low-resource single-column mode: no blur, minimal metrics, keyboard shortcuts, transcript-first height, reduced CSS effects.
-4. **Y700 drawer prototype.** Add one right-side drawer system that can switch between Sessions, Artifacts, Project, and Annotations without adding a framework.
-5. **Surface workspace store.** Implement jcode-native objects for cards, docs, annotations, intents, and artifact refs, backed first by localStorage and later by server-local JSON/JSONL storage.
-6. **Annotation primitive.** Support text annotations on a transcript message or artifact preview, with a serializable local schema and export path.
-7. **Surface handoff.** Add command verbs for “continue this on tablet”, “send summary to phone”, and “open artifact on desktop”.
+### Y700 tablet command plane
+
+Portrait favors stacked focus with drawers. Landscape favors three panes.
+
+```text
+portrait
+┌─────────────────────────────┐
+│ status rail + command       │
+├─────────────────────────────┤
+│ active session transcript   │
+│ tool stream                 │
+├─────────────────────────────┤
+│ drawer: cards/docs/agents   │
+└─────────────────────────────┘
+```
+
+```text
+landscape
+┌──────────────┬────────────────────────┬──────────────┐
+│ sessions     │ transcript + composer  │ artifact     │
+│ cards/intents│ command palette        │ annotations  │
+│ agents       │ live tool stream       │ linked cards │
+└──────────────┴────────────────────────┴──────────────┘
+```
+
+Required feel: command surface, not a desktop clone. Drawers and direct manipulation should have command equivalents.
+
+### Desktop web review surface
+
+Desktop web optimizes review, annotation, planning, and workspace visibility. The TUI remains primary for coding.
+
+```text
+┌────────────────┬─────────────────────────────────┬────────────────┐
+│ workspace      │ artifact inspector              │ annotations    │
+│ board lanes    │ diff / image / markdown preview │ linked cards   │
+│ sessions       │ command palette                 │ intent inbox   │
+└────────────────┴─────────────────────────────────┴────────────────┘
+```
+
+Required feel: high-signal review table. Avoid becoming a slower chat UI.
+
+## Implementation-ready component inventory
+
+| Component | First version | Later version |
+| --- | --- | --- |
+| Shell | CSS grid, responsive panes, no framework requirement | Saved layouts |
+| Command palette | Text input with filtered commands | Hotkeys, command history |
+| Board | CSS columns, buttons for move | Pointer drag/drop if needed |
+| Docs editor | `textarea` + markdown preview | CodeJar only if textarea fails |
+| Annotation capture | Native selection + target JSON | Image/SVG region selection |
+| Icons | Inline SVG subset | Tokenized icon package |
+| Persistence | `localStorage` snapshot + op log | Server-local JSON/JSONL/Markdown |
+
+## Design checklist
+
+Before shipping a slice:
+
+- Does the action have a text command fallback?
+- Does the UI survive reload without losing drafts or annotations?
+- Is the active session/model visible before send?
+- Is live/idle/error distinguishable from connection state?
+- Are destructive actions gated?
+- Does it work without cloud services?
+- Does reduced motion disable non-essential transitions?
+- Does Key2 lite mode avoid heavy layout and animation?
 
 ## Decision status
 
-No P0-blocking open questions remain. Use these defaults unless a future implementation slice proves they are wrong:
+No P0-blocking design questions remain.
 
-- **Fonts:** define CSS tokens now. Vendor small font subsets only when the installable PWA shell starts.
-- **Serif:** load Source Serif 4 only for reading and documentation modes at first, not as part of the default operational chrome.
-- **Project cards:** start with jcode-native surface workspace `card` objects in P0. Do not build a Backlog.md adapter now. External task formats can become explicit import/export adapters later.
-- **Annotations:** start with surface workspace `annotation` objects using compact jcode selectors inspired by W3C Web Annotation. Export paths to markdown, PR comments, or Plannotator notes can come later.
-- **Orchestrator:** implement it first as a role/session convention over existing jcode session and swarm primitives. Do not add a dedicated orchestrator runtime until protocol-visible surface capabilities and handoffs require it.
+Locked defaults:
 
-Deferred decisions that should not block P0:
-
-- exact font subset and vendoring strategy for the PWA
-- exact repo export pack format for surface workspace objects
-- exact server-local and repo-export layout for annotation bodies and selectors
-- native Android packaging versus hardened PWA after the web proof
-- server-visible protocol shape for `surface.*`, `intent.*`, `artifact.*`, and `card.*` events
-
-## Design posture
-
-The right target is not “mobile chat app” or “admin dashboard”. It is a family of precise instruments:
-
-- the **Key2** captures intent and delegates.
-- the **Y700** steers and arranges live work.
-- the **desktop web surface** reviews and annotates.
-- the **TUI** remains the coding cockpit.
-
-If the basics stay coherent, each device can specialize without fragmenting the jcode experience.
+- Zero-build web first, ArrowJS/plain CSS/JS acceptable.
+- Phosphor glyph direction, not emoji chrome.
+- Space Grotesk, Geist Sans, Geist Mono, and Source Serif 4.
+- Native surface workspace substrate for cards/docs/annotations/intents/artifacts.
+- No Backlog.md adapter, Milkdown, tldraw, or drag/drop framework in P0.
