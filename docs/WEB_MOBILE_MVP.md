@@ -108,9 +108,12 @@ Run:
 
 ```bash
 ./scripts/check_web_mobile.sh
+./scripts/check_web_mobile_rendered.mjs
 ```
 
-It checks JavaScript syntax and verifies the static app contains the required gateway protocol pieces.
+The rendered smoke script launches Chrome through the DevTools Protocol, serves `web/jcode-mobile/` locally, and checks Key2, Y700, and laptop viewports. It verifies the app renders without runtime errors or horizontal overflow, queues a local command, reloads, and confirms the pending command remains visible and persisted. Screenshots and `report.json` are written under ignored `.tmp/web-mobile-rendered/`.
+
+`check_web_mobile.sh` checks JavaScript syntax, including the rendered harness, and verifies the static app contains the required gateway protocol pieces.
 It also runs `web/jcode-mobile/surface_state.test.mjs`, which covers reconnect backoff, foreground resync request ordering, offline/background close handling, auth-failure close classification, and draft/pending-command recovery.
 
 ## Next slices

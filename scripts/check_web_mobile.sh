@@ -5,17 +5,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/web/jcode-mobile/app.js"
 STATE="$ROOT/web/jcode-mobile/surface_state.mjs"
 STATE_TEST="$ROOT/web/jcode-mobile/surface_state.test.mjs"
+RENDERED_SMOKE="$ROOT/scripts/check_web_mobile_rendered.mjs"
 INDEX="$ROOT/web/jcode-mobile/index.html"
 STYLE="$ROOT/web/jcode-mobile/style.css"
 DOC="$ROOT/docs/WEB_MOBILE_MVP.md"
 
-for file in "$APP" "$STATE" "$STATE_TEST" "$INDEX" "$STYLE" "$DOC"; do
+for file in "$APP" "$STATE" "$STATE_TEST" "$RENDERED_SMOKE" "$INDEX" "$STYLE" "$DOC"; do
   [[ -s "$file" ]] || { echo "missing or empty: $file" >&2; exit 1; }
 done
 
 node --check "$APP"
 node --check "$STATE"
 node --check "$STATE_TEST"
+node --check "$RENDERED_SMOKE"
 node --test "$STATE_TEST"
 
 required=(
