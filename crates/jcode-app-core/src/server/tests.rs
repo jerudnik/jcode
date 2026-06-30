@@ -712,6 +712,65 @@ async fn startup_recovery_resumes_interrupted_headless_sessions_after_reload() -
     clippy::await_holding_lock,
     reason = "test intentionally serializes process-wide JCODE_HOME/env state across async recovery assertions"
 )]
+async fn startup_recovery_does_not_keep_idle_headless_sessions_active() -> Result<()> {
+    let _storage_guard = crate::storage::lock_test_env();
+    let temp = tempfile::TempDir::new()?;
+    let _env = configure_test_env(&temp);
+
+    let provider = Arc::new(StreamingMockProvider::default());
+    let mut idle = crate::session::Session::create(None, Some("idle headless".to_string()));
+    idle.mark_closed();
+    idle.save()?;
+    let active_dir = crate::storage::jcode_dir()?.join("active_pids");
+    std::fs::create_dir_all(&active_dir)?;
+    std::fs::write(active_dir.join(&idle.id), std::process::id().to_string())?;
+
+    let swarm_id = "swarm-idle-recovery";
+    persist_swarm_state_snapshot(
+        swarm_id,
+        None,
+        None,
+        &[persisted_headless_member(
+            &idle.id, swarm_id, "crashed", "idle",
+        )],
+    );
+
+    assert!(
+        crate::session::active_session_ids().contains(&idle.id),
+        "fixture should begin with an active marker"
+    );
+
+    let server = Server::new(provider.clone());
+    server.recover_headless_sessions_on_startup().await;
+
+    assert!(
+        !crate::session::active_session_ids().contains(&idle.id),
+        "skipped idle headless recovery must clear the stale active marker"
+    );
+    assert!(
+        !server.sessions.read().await.contains_key(&idle.id),
+        "skipped idle headless recovery must not leave a live runtime agent"
+    );
+    assert_eq!(
+        server
+            .swarm_state
+            .members
+            .read()
+            .await
+            .get(&idle.id)
+            .map(|member| member.status.as_str()),
+        Some("ready"),
+        "swarm metadata remains ready even though live ownership was cleared"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[allow(
+    clippy::await_holding_lock,
+    reason = "test intentionally serializes process-wide JCODE_HOME/env state across async recovery assertions"
+)]
 async fn startup_recovery_preserves_headed_session_reload_context_for_later_reconnect() -> Result<()>
 {
     let _storage_guard = crate::storage::lock_test_env();
