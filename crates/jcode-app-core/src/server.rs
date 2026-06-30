@@ -2039,6 +2039,9 @@ impl Server {
                 port: gw_config.port,
                 bind_addr: gw_config.bind_addr.clone(),
                 enabled: gw_config.enabled,
+                access_mode: gw_config.access_mode.clone(),
+                public_exposure_reviewed: gw_config.public_exposure_reviewed,
+                oidc_enabled: gw_config.oidc_enabled,
             }
         };
 

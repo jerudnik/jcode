@@ -44,6 +44,12 @@ pub struct GatewayConfig {
     pub bind_addr: String,
     /// Whether gateway is enabled
     pub enabled: bool,
+    /// Access mode: local, mesh, or public_reviewed.
+    pub access_mode: String,
+    /// Required before public_reviewed mode will start.
+    pub public_exposure_reviewed: bool,
+    /// Disabled-by-default future Kanidm OIDC + PKCE path.
+    pub oidc_enabled: bool,
 }
 
 impl Default for GatewayConfig {
@@ -52,8 +58,52 @@ impl Default for GatewayConfig {
             port: DEFAULT_PORT,
             bind_addr: "0.0.0.0".to_string(),
             enabled: false,
+            access_mode: "mesh".to_string(),
+            public_exposure_reviewed: false,
+            oidc_enabled: false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GatewayAccessMode {
+    Local,
+    Mesh,
+    PublicReviewed,
+}
+
+impl GatewayAccessMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" | "loopback" => Some(Self::Local),
+            "mesh" | "tailnet" | "zerotier" => Some(Self::Mesh),
+            "public_reviewed" | "public-reviewed" => Some(Self::PublicReviewed),
+            _ => None,
+        }
+    }
+}
+
+pub fn validate_access_policy(config: &GatewayConfig) -> Result<GatewayAccessMode> {
+    let mode = GatewayAccessMode::parse(&config.access_mode)
+        .ok_or_else(|| anyhow::anyhow!("invalid gateway access_mode: {}", config.access_mode))?;
+    if config.oidc_enabled {
+        anyhow::bail!(
+            "gateway OIDC/Kanidm path is disabled pending security review; keep oidc_enabled=false"
+        );
+    }
+    if mode == GatewayAccessMode::Local && !is_loopback_bind(&config.bind_addr) {
+        anyhow::bail!("gateway access_mode=local requires a loopback bind address");
+    }
+    if mode == GatewayAccessMode::PublicReviewed && !config.public_exposure_reviewed {
+        anyhow::bail!(
+            "gateway public_reviewed mode requires public_exposure_reviewed=true after security review"
+        );
+    }
+    Ok(mode)
+}
+
+fn is_loopback_bind(bind_addr: &str) -> bool {
+    matches!(bind_addr.trim(), "127.0.0.1" | "::1" | "localhost")
 }
 
 // ---------------------------------------------------------------------------
@@ -72,9 +122,13 @@ pub async fn run_gateway(
     config: GatewayConfig,
     client_tx: tokio::sync::mpsc::UnboundedSender<GatewayClient>,
 ) -> Result<()> {
+    let mode = validate_access_policy(&config)?;
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let listener = TcpListener::bind(&addr).await?;
-    logging::info(&format!("WebSocket gateway listening on {}", addr));
+    logging::info(&format!(
+        "WebSocket gateway listening on {} with {:?} access policy",
+        addr, mode
+    ));
 
     let registry = Arc::new(tokio::sync::RwLock::new(DeviceRegistry::load()));
 
