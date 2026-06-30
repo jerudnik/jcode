@@ -57,6 +57,7 @@ const state = reactive({
   reconnectDueAt: 0,
   lastSyncAt: persistedSurface.lastSyncAt,
   pendingCommands: persistedSurface.pendingCommands,
+  pendingCommandCount: persistedSurface.pendingCommands.length,
 });
 
 let socket = null;
@@ -76,7 +77,7 @@ if (state.credentials.length > 0) {
 }
 
 if (state.pendingCommands.some((command) => command.status === "sending")) {
-  state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Recovered after reload before ack");
+  replacePendingCommands(markInflightCommandsUnknown(state.pendingCommands, new Date(), "Recovered after reload before ack"));
 }
 
 function defaultDeviceName() {
@@ -139,6 +140,11 @@ function setDraft(value) {
 function setPhase(phase, message) {
   state.phase = phase;
   state.status = message || phaseLabel(phase);
+}
+
+function replacePendingCommands(commands) {
+  state.pendingCommands.splice(0, state.pendingCommands.length, ...commands);
+  state.pendingCommandCount = state.pendingCommands.length;
 }
 
 function documentIsVisible() {
@@ -240,7 +246,7 @@ function connect(reason = "manual") {
   connectionSerial += 1;
   const serial = connectionSerial;
   if (socket) {
-    state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Socket replaced before ack");
+    replacePendingCommands(markInflightCommandsUnknown(state.pendingCommands, new Date(), "Socket replaced before ack"));
     persistSurfaceState();
     try { socket.close(); } catch {}
     socket = null;
@@ -271,7 +277,7 @@ function connect(reason = "manual") {
   socket.addEventListener("close", (event) => {
     if (serial !== connectionSerial) return;
     state.connecting = false;
-    state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Connection closed before ack");
+    replacePendingCommands(markInflightCommandsUnknown(state.pendingCommands, new Date(), "Connection closed before ack"));
     persistSurfaceState();
     socket = null;
     const close = classifySocketClose({
@@ -301,7 +307,7 @@ function disconnect(updateStatus = true) {
     socket = null;
   }
   state.connecting = false;
-  state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Disconnected before ack");
+  replacePendingCommands(markInflightCommandsUnknown(state.pendingCommands, new Date(), "Disconnected before ack"));
   persistSurfaceState();
   if (updateStatus) setPhase("offline", "Disconnected");
 }
@@ -380,7 +386,7 @@ function sendPendingCommand(commandId, mode = "manual") {
   const command = state.pendingCommands.find((item) => item.id === commandId);
   if (!command) return;
   if (!canUseSocket()) {
-    state.pendingCommands = markCommandQueued(state.pendingCommands, commandId, new Date());
+    replacePendingCommands(markCommandQueued(state.pendingCommands, commandId, new Date()));
     persistSurfaceState();
     state.status = "Command saved locally. It will send after reconnect and history sync.";
     return;
@@ -388,13 +394,13 @@ function sendPendingCommand(commandId, mode = "manual") {
   const requestId = nextRequestId();
   const payload = commandRequestPayload(command, requestId);
   if (!payload) return;
-  state.pendingCommands = markCommandSending(state.pendingCommands, commandId, requestId, new Date());
+  replacePendingCommands(markCommandSending(state.pendingCommands, commandId, requestId, new Date()));
   persistSurfaceState();
   try {
     sendRaw(payload);
     state.status = mode === "auto" ? "Sending queued command after resync..." : "Sending command...";
   } catch (error) {
-    state.pendingCommands = markCommandFailed(state.pendingCommands, commandId, error.message || String(error), new Date());
+    replacePendingCommands(markCommandFailed(state.pendingCommands, commandId, error.message || String(error), new Date()));
     persistSurfaceState();
     setError(error.message || String(error));
   }
@@ -404,7 +410,7 @@ function sendDraft() {
   const text = state.draft.trim();
   if (!text) return;
   const command = createPendingMessageCommand({ content: text, sessionId: state.sessionId, now: new Date(), randomFn: Math.random });
-  state.pendingCommands = appendPendingCommand(state.pendingCommands, command);
+  replacePendingCommands(appendPendingCommand(state.pendingCommands, command));
   state.draft = "";
   persistSurfaceState();
   if (canUseSocket() && state.phase !== "resyncing") {
@@ -456,7 +462,7 @@ function requestHistorySync() {
 }
 
 function retryPendingCommand(commandId) {
-  state.pendingCommands = markCommandQueued(state.pendingCommands, commandId, new Date());
+  replacePendingCommands(markCommandQueued(state.pendingCommands, commandId, new Date()));
   persistSurfaceState();
   if (canUseSocket() && state.phase !== "resyncing") {
     sendPendingCommand(commandId, "manual");
@@ -470,7 +476,7 @@ function restorePendingCommand(commandId) {
   const command = state.pendingCommands.find((item) => item.id === commandId);
   if (!command) return;
   state.draft = command.payload.content;
-  state.pendingCommands = removePendingCommand(state.pendingCommands, commandId);
+  replacePendingCommands(removePendingCommand(state.pendingCommands, commandId));
   persistSurfaceState();
   requestAnimationFrame(() => {
     const composer = document.getElementById("composer-input");
@@ -479,7 +485,7 @@ function restorePendingCommand(commandId) {
 }
 
 function discardPendingCommand(commandId) {
-  state.pendingCommands = removePendingCommand(state.pendingCommands, commandId);
+  replacePendingCommands(removePendingCommand(state.pendingCommands, commandId));
   persistSurfaceState();
   state.status = "Pending command discarded locally.";
 }
@@ -568,7 +574,7 @@ function handleOffline() {
 function handleAck(id) {
   const result = applyCommandAck(state.pendingCommands, id);
   if (result.ackedCommand) {
-    state.pendingCommands = result.commands;
+    replacePendingCommands(result.commands);
     persistSurfaceState();
     appendEntry({ role: "user", text: result.ackedCommand.payload.content });
     state.status = state.pendingCommands.length ? pendingCommandSummary(state.pendingCommands) : "Sent";
@@ -862,7 +868,7 @@ const MetricsRail = () => html`
     <div class="metric"><span>session</span><strong>${() => shortId(state.sessionId)}</strong></div>
     <div class="metric"><span>stream</span><strong>${() => { const stats = transcriptStats(); return stats.running ? `${stats.running} active` : "idle"; }}</strong></div>
     <div class="metric"><span>turns</span><strong>${() => transcriptStats().entries}</strong></div>
-    <div class="metric"><span>pending</span><strong>${() => state.pendingCommands.length ? pendingCommandSummary(state.pendingCommands) : `${transcriptStats().tools} tools`}</strong></div>
+    <div class="metric"><span>pending</span><strong>${() => state.pendingCommandCount ? pendingCommandSummary(state.pendingCommands) : `${transcriptStats().tools} tools`}</strong></div>
   </section>
 `;
 
@@ -928,7 +934,7 @@ const ChatPanel = () => html`
       </div>
     </div>
     ${() => state.error ? html`<div class="error">${state.error}</div>` : ""}
-    ${() => state.pendingCommands.length ? PendingCommandsPanel() : ""}
+    ${() => state.pendingCommandCount ? PendingCommandsPanel() : ""}
     <div class="transcript">
       ${() => state.transcript.length ? state.transcript.map(TranscriptEntry) : html`<div class="empty">Pair, connect, then send a prompt.</div>`}
       <div id="bottom"></div>
