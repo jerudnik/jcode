@@ -7,7 +7,10 @@ This is a zero-build browser client for jcode's existing local gateway. It is ai
 
 The app lives in `web/jcode-mobile/` and uses ArrowJS from a pinned CDN import. There is no npm install or bundler required.
 
-See also: [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md) for the shared design language, device roles, typography, glyph, and cross-surface architecture direction.
+See also:
+
+- [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md) for the shared design language, device roles, typography, glyph, and cross-surface architecture direction.
+- [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) for implementation-ready requirements, command contracts, object schemas, and acceptance criteria.
 
 ## Why web first
 
