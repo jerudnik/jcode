@@ -413,15 +413,15 @@ watch(
 );
 
 const CredentialPicker = () => html`
-  <label class="field small">
+  <div class="field small">
     <span>Server</span>
-    <select @change="${switchCredential}" .value="${() => state.activeId}">
-      <option value="">manual</option>
-      ${() => state.credentials.map((credential) => html`
-        <option value="${credentialId(credential)}">${credential.serverName || "jcode"} · ${credential.host}:${credential.port}</option>
-      `)}
-    </select>
-  </label>
+    <div class="server-readout">
+      ${() => {
+        const credential = activeCredential();
+        return credential ? `${credential.serverName || "jcode"} · ${credential.host}:${credential.port}` : "manual pairing";
+      }}
+    </div>
+  </div>
 `;
 
 const PairPanel = () => html`
@@ -465,12 +465,12 @@ const Header = () => html`
       <h1>${() => { const credential = activeCredential(); return state.sessionTitle || (credential && credential.serverName) || "jcode"; }}</h1>
       <p class="meta">${() => [state.providerName, state.providerModel, state.tokens].filter(Boolean).join(" · ") || "Gateway client for Android / browser"}</p>
     </div>
-    <div class="status ${() => `status-${state.phase}`}">${() => state.phase}</div>
+    <div class="status" data-phase="${() => state.phase}">${() => state.phase}</div>
   </header>
 `;
 
 const TranscriptEntry = (entry) => html`
-  <article class="entry ${entry.role}">
+  <article class="entry" data-role="${entry.role}">
     <div class="role">${entry.role}</div>
     ${() => entry.reasoning ? html`<pre class="reasoning">${entry.reasoning}</pre>` : ""}
     ${() => entry.tools.map((tool) => html`
@@ -518,7 +518,7 @@ const SessionPanel = () => html`
     </div>
     <div class="session-list">
       ${() => state.allSessions.map((id) => html`
-        <button class="session-chip ${() => id === state.sessionId ? "active" : ""}" @click="${() => sendRaw({ type: "resume_session", id: nextRequestId(), session_id: id })}">${id}</button>
+        <button class="session-chip" data-active="${() => id === state.sessionId ? "true" : "false"}" @click="${() => sendRaw({ type: "resume_session", id: nextRequestId(), session_id: id })}">${id}</button>
       `.key(id))}
     </div>
     <div class="section-title tight">
@@ -527,7 +527,7 @@ const SessionPanel = () => html`
     </div>
     <div class="session-list">
       ${() => state.availableModels.slice(0, 24).map((model) => html`
-        <button class="session-chip ${() => model === state.providerModel ? "active" : ""}" @click="${() => sendRaw({ type: "set_model", id: nextRequestId(), model })}">${model}</button>
+        <button class="session-chip" data-active="${() => model === state.providerModel ? "true" : "false"}" @click="${() => sendRaw({ type: "set_model", id: nextRequestId(), model })}">${model}</button>
       `.key(model))}
     </div>
   </section>
