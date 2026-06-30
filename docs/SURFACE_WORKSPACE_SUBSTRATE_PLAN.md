@@ -22,7 +22,7 @@ Do not start with Backlog.md, GitHub Issues, Milkdown, tldraw, CRDTs, or a task-
 | W3C Web Annotation | `body + target + selector`, target kinds, fallback selectors | JSON-LD, RDF, broad interoperability machinery |
 | Local-first software | Local writes, user-owned files, explicit sync/export | CRDTs, peer-to-peer, complex conflicts |
 | jcode storage patterns | Atomic JSON, JSONL append, markdown bodies, `.bak` recovery | A new database dependency |
-| Lightweight web packages | `textarea`, native selection, CSS/SVG/Pointer Events | Milkdown, tldraw, heavy drag/drop |
+| Lightweight web packages | `textarea`, native selection, CSS/SVG/Pointer Events, CSS grid pane presets | Milkdown, tldraw, heavy drag/drop, heavy rich-text editing |
 
 ## Core model
 
@@ -65,6 +65,7 @@ board view       = objects where kind=card grouped by status
 annotation view  = objects where kind=annotation grouped by target/status
 docs view        = objects where kind=doc ordered by links or workspace order
 artifact review  = artifact_ref + linked annotations/cards/docs
+meta-agent view  = selected artifacts/cards/docs + an agent instruction
 intent inbox     = objects where kind=intent and status is captured/triaged
 ```
 
@@ -124,6 +125,25 @@ canvas_mark diagram_node diagram_edge review handoff
     { "kind": "created_from", "to": "obj_intent_01J..." }
   ],
   "fields": {}
+}
+```
+
+### View layout
+
+Surface layout is local UI state, but saved workspace views may hold durable defaults for pane composition.
+
+```json
+{
+  "view_id": "view_y700_landscape",
+  "kind": "command_plane",
+  "layout": {
+    "panes": [
+      { "id": "sessions", "width": "1/3", "order": 1 },
+      { "id": "chat", "width": "1/3", "order": 2 },
+      { "id": "artifact", "width": "1/3", "order": 3 }
+    ],
+    "allowed_widths": ["1/3", "2/3", "full"]
+  }
 }
 ```
 
@@ -269,11 +289,12 @@ flowchart LR
 
 | View | Query | First UI |
 | --- | --- | --- |
-| Board | `kind=card` | CSS columns, move buttons |
-| Docs | `kind=doc` | list + textarea + preview |
+| Board | `kind=card` | CSS columns, move buttons first, lightweight drag/drop later |
+| Docs | `kind=doc` | list + textarea + preview, later folding/format selection |
 | Annotations | `kind=annotation` | grouped list + target jump |
 | Intent inbox | `kind=intent` and open | capture, route, convert |
 | Artifact review | selected artifact_ref + inbound links | preview + annotations/cards |
+| Meta-agent | selected objects + instruction | critique/summarize/compare/review prompt builder |
 
 ## Protocol path
 
@@ -330,6 +351,7 @@ Do not put UI layout or web-specific state in this crate.
 - [ ] Define JS object shapes matching this doc.
 - [ ] Implement local operation append and snapshot compaction.
 - [ ] Render board/docs/annotations/intents from selectors over one array.
+- [ ] Persist user-composable pane presets for tablet landscape and desktop review.
 - [ ] Add command verbs for `card.create`, `card.move`, `annotation.create`, `intent.capture`, `intent.route`.
 - [ ] Make reload recovery visible and testable.
 - [ ] Add fixtures for 500 cards and 1,000 annotations.

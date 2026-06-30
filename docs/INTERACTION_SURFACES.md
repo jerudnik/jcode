@@ -40,8 +40,8 @@ flowchart LR
 | --- | --- | --- | --- |
 | TUI | Fastest coding cockpit | Chat, tools, edits, builds, commits | A touch dashboard |
 | Key2 / Clicks | Field terminal | Capture intent, route work, terse status, cancel | A mini desktop |
-| Y700 | Command plane | Drawers, cards, annotations, agent steering | A full IDE |
-| Desktop web | Review table | Artifact review, planning, annotations, workspace management | A TUI replacement |
+| Y700 | Command plane | Drawers, cards, diffs, annotations, agent steering | A full IDE |
+| Desktop web | Review table | Artifact review, planning, annotations, workspace management, meta-agent interactions | A TUI/IDE replacement |
 
 ## First coherent implementation slice
 
@@ -50,7 +50,8 @@ flowchart LR
 3. Add command palette with text fallback verbs.
 4. Add browser-local surface workspace store.
 5. Render board/docs/annotations from one object graph.
-6. Lift store to server-local files under `~/.jcode/surface_workspaces/`.
+6. Treat mobile background disconnects as normal: reconnect, resubscribe, and recover from runtime history.
+7. Lift store to server-local files under `~/.jcode/surface_workspaces/`.
 
 ## Visual direction
 
@@ -89,22 +90,24 @@ jcode surface feel
 ```text
 portrait                         landscape
 ┌────────────────────┐           ┌──────────┬─────────────┬──────────┐
-│ status + command   │           │ sessions │ transcript  │ artifact │
-├────────────────────┤           │ cards    │ command     │ notes    │
-│ active session     │           │ intents  │ stream      │ links    │
-│ transcript preview │           └──────────┴─────────────┴──────────┘
-├────────────────────┤
-│ drawer: cards/docs │
-└────────────────────┘
+│ status + command        │      │ sessions │ chat        │ artifact │
+├─────────────────────────┤      │ cards    │ command     │ notes    │
+│ active session          │      │ intents  │ stream      │ links    │
+│ interactive chat        │      └──────────┴─────────────┴──────────┘
+├─────────────────────────┤
+│ drawer: cards/docs/diffs│
+└─────────────────────────┘
 ```
+
+Landscape panes should be user-composable: reorder panes, expand to one-third, two-thirds, or full width, and persist the layout as surface-local state.
 
 ### Desktop review surface
 
 ```text
 ┌──────────────┬───────────────────────────────┬──────────────┐
 │ workspace    │ artifact / diff / rendered doc │ annotations  │
-│ board        │                               │ cards        │
-│ sessions     │ command palette               │ intents      │
+│ board        │ meta-agent prompt              │ cards        │
+│ sessions     │ command palette                │ intents      │
 └──────────────┴───────────────────────────────┴──────────────┘
 ```
 
@@ -114,8 +117,15 @@ portrait                         landscape
 - GitHub Issues sync.
 - CRDT collaboration.
 - Milkdown or tldraw.
-- Heavy drag/drop framework.
+- Heavy drag/drop framework in P0. Lightweight card/node rearrangement can come after the simple button path works.
+- Heavy rich-text editor in P0. Folding and formatting-selection affordances are useful later, but textarea plus preview comes first.
 - Cloud-hosted dependency for local use.
+
+## Connectivity and auth direction
+
+Mobile browsers will suspend background pages and close WebSockets. Surfaces must recover by storing local drafts/intents, reconnecting with backoff on visibility/network changes, resubscribing, and fetching runtime history.
+
+Auth should progress from local pairing tokens to device-scoped refreshable tokens, then to Kanidm OIDC with Authorization Code + PKCE. Hardware passkeys/YubiKey should be supported either through Kanidm WebAuthn or a later direct WebAuthn path for personal local use.
 
 ## Future session starting prompt
 
