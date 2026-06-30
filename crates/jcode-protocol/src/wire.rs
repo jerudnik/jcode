@@ -235,6 +235,31 @@ pub enum Request {
     #[serde(rename = "get_history")]
     GetHistory { id: u64 },
 
+    /// Open or create a server-local interaction surface workspace.
+    #[serde(rename = "surface_workspace_open")]
+    SurfaceWorkspaceOpen {
+        id: u64,
+        workspace_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
+
+    /// Apply local workspace operations to the server-local workspace store.
+    #[serde(rename = "surface_workspace_apply")]
+    SurfaceWorkspaceApply {
+        id: u64,
+        workspace_id: String,
+        ops: Vec<SurfaceWorkspaceOperation>,
+    },
+
+    /// Get the current server-local workspace snapshot.
+    #[serde(rename = "surface_workspace_get_snapshot")]
+    SurfaceWorkspaceGetSnapshot { id: u64, workspace_id: String },
+
+    /// Export the current server-local workspace snapshot and JSONL operations.
+    #[serde(rename = "surface_workspace_export")]
+    SurfaceWorkspaceExport { id: u64, workspace_id: String },
+
     /// Get only provider/model metadata and available models.
     #[serde(rename = "get_model_catalog")]
     GetModelCatalog { id: u64 },
@@ -842,6 +867,27 @@ pub enum ServerEvent {
         server_build_hash: Option<String>,
         /// Human-readable explanation of what matched or mismatched.
         detail: String,
+    },
+
+    /// Server-local surface workspace snapshot response.
+    #[serde(rename = "surface_workspace_snapshot")]
+    SurfaceWorkspaceSnapshot {
+        id: u64,
+        snapshot: SurfaceWorkspaceSnapshot,
+    },
+
+    /// Server-local surface workspace operation apply response.
+    #[serde(rename = "surface_workspace_apply_result")]
+    SurfaceWorkspaceApplyResult {
+        id: u64,
+        result: SurfaceWorkspaceApplyResult,
+    },
+
+    /// Server-local surface workspace export response.
+    #[serde(rename = "surface_workspace_export")]
+    SurfaceWorkspaceExport {
+        id: u64,
+        export: SurfaceWorkspaceExport,
     },
 
     /// Streaming text delta

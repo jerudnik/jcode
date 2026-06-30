@@ -215,25 +215,22 @@ Use this only for zero-build prototypes and reload recovery.
 
 ```text
 ~/.jcode/surface_workspaces/<workspace_id>/
-  workspace.json
-  objects.json
-  views.json
+  snapshot.json
+  snapshot.json.bak
+  bodies.json
+  bodies.json.bak
   ops.jsonl
-  body/
-    obj_01J....md
-  artifact_cache/
-    preview_....json
-  snapshots/
-    2026-06-30T17-00-00Z.json
 ```
 
 Rules:
 
 - Write JSON atomically with `.tmp` + rename.
-- Keep `.bak` recovery for primary indexes.
+- Keep `.bak` recovery for `snapshot.json` and `bodies.json`.
 - Append operations as JSONL.
-- Store body markdown separately from object indexes.
+- Store object bodies separately from object indexes.
 - Never make repo export the canonical storage by default.
+
+Implemented module: `crates/jcode-base/src/surface_workspace.rs`. It stores one directory per sanitized workspace id, rejects path traversal ids, uses `JCODE_HOME` when set, and otherwise resolves under `~/.jcode/surface_workspaces/`.
 
 ### P2 explicit repo export
 
@@ -255,11 +252,11 @@ P0:
 
 ```text
 workspace.create
+object.upsert
 object.create
 object.update
-object.delete_soft
-object.restore
-body.update
+object.delete
+body.set
 link.create
 link.delete
 view.create
@@ -304,7 +301,7 @@ Requests:
 
 ```text
 surface_workspace_open
-surface_workspace_apply_ops
+surface_workspace_apply
 surface_workspace_get_snapshot
 surface_workspace_export
 ```
@@ -313,27 +310,29 @@ Events:
 
 ```text
 surface_workspace_snapshot
-surface_workspace_ops_applied
-surface_workspace_conflict
-surface_workspace_error
+surface_workspace_apply_result
+surface_workspace_export
+error
 ```
+
+Implemented wire types live in `crates/jcode-protocol/src/wire.rs` and shared payload structs live in `crates/jcode-protocol/src/lib.rs`. The server handles these requests in `jcode-app-core/src/server/client_lifecycle.rs` and returns typed snapshot/apply/export events, or the existing typed `error` event for validation/storage failures.
 
 ## Rust crate path
 
-Suggested crate/module name:
+Implemented module path:
 
 ```text
-jcode-surface-workspace
+jcode-base::surface_workspace
 ```
 
 Responsibilities:
 
-- serde types for workspace/object/target/link/view/op
+- serde-compatible protocol types for workspace/object/view/op payloads
 - load/save server-local layout
 - apply operation log to snapshot
-- atomic writes and backup recovery via `jcode-storage` patterns
-- markdown body read/write helpers
-- export/import pack helpers
+- atomic writes and backup recovery
+- body read/write helpers via `bodies.json`
+- export pack helper returning snapshot plus JSONL operations
 
 Do not put UI layout or web-specific state in this crate.
 
@@ -342,19 +341,27 @@ Do not put UI layout or web-specific state in this crate.
 | Phase | Goal | Exit criteria |
 | --- | --- | --- |
 | 0 | Browser-local object store | `surface-store.js` supports CRUD, op log, snapshot, board/docs/annotation projections. |
-| 1 | Server-local store | Rust types and file layout persist workspaces under `~/.jcode/surface_workspaces/`. |
+| 1 | Server-local store | Rust types and file layout persist workspaces under `~/.jcode/surface_workspaces/`. Implemented in WS6 with protocol hooks. |
 | 2 | Repo export pack | User can export/import `.jcode-surface/<workspace_id>/` explicitly. |
 | 3 | Richer anchors | Image regions, SVG/DOM selectors, text quote repair, optional CodeJar. |
 
 ## P0 implementation checklist
 
-- [ ] Define JS object shapes matching this doc.
-- [ ] Implement local operation append and snapshot compaction.
-- [ ] Render board/docs/annotations/intents from selectors over one array.
-- [ ] Persist user-composable pane presets for tablet landscape and desktop review.
-- [ ] Add command verbs for `card.create`, `card.move`, `annotation.create`, `intent.capture`, `intent.route`.
-- [ ] Make reload recovery visible and testable.
-- [ ] Add fixtures for 500 cards and 1,000 annotations.
+- [x] Define JS object shapes matching this doc.
+- [x] Implement local operation append and snapshot compaction.
+- [x] Render board/docs/annotations/intents from selectors over one array.
+- [x] Persist local workspace state for tablet landscape and desktop review.
+- [x] Add command verbs for `card.create`, `card.move`, `annotation.create`, `intent.capture`, `intent.route`.
+- [x] Make reload recovery visible and testable.
+- [x] Add fixtures for 500 cards and 1,000 annotations.
+
+## P1 implementation checklist
+
+- [x] Define Rust protocol structs for workspace snapshots, objects, operations, exports, and apply results.
+- [x] Persist snapshots, bodies, and JSONL operations under `~/.jcode/surface_workspaces/`.
+- [x] Use atomic snapshot/body writes and `.bak` recovery.
+- [x] Implement `surface_workspace_open`, `surface_workspace_apply`, `surface_workspace_get_snapshot`, and `surface_workspace_export` request hooks.
+- [x] Add protocol roundtrip tests and storage tests.
 
 ## Recommendation
 
