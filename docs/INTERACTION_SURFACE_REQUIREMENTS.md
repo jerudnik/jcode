@@ -60,7 +60,8 @@ sequenceDiagram
 | SURF-G-006 | Safety gates | Credential deletion, destructive file actions, external posting, broad agent stops, and pushes require confirmation. |
 | SURF-G-007 | Performance budget | Key2 works on low-power mode. Y700 orientation change is under 120 ms. Desktop can render 500 cards and 1,000 annotations with responsive input. |
 | SURF-G-008 | Mobile lifecycle recovery | Backgrounding, lock-screening, app switching, network changes, and browser WebSocket closure are expected. On foreground, the surface reconnects with backoff, resubscribes, fetches history, restores drafts/intents, and clearly marks any unsent commands. |
-| SURF-G-009 | Auth path | P0 local pairing tokens work. P1 supports device-scoped refresh/revocation. P2 supports Kanidm OIDC using Authorization Code + PKCE. P3 supports hardware passkey/YubiKey through Kanidm WebAuthn or a direct local WebAuthn path. |
+| SURF-G-009 | Auth path | P0 local pairing tokens work. P1 moves directly to Kanidm OIDC using Authorization Code + PKCE with Kanidm WebAuthn/passkey support for YubiKey. Do not add a separate device-scoped refresh/revocation layer unless Kanidm proves unreliable. |
+| SURF-G-010 | Network exposure policy | Prefer the existing ZeroTier mesh plus DNS name `jcode.mesh.rudnik.online` unless a security review shows public HTTPS exposure has very low risk. Infrastructure changes may be made in `~/infrastructure/nix-config`. |
 
 ## Protocol baseline
 
@@ -249,17 +250,21 @@ stateDiagram-v2
 | Phase | Method | Notes |
 | --- | --- | --- |
 | P0 | Pairing code + bearer token | Current prototype. Browser uses `POST /pair`, stores token locally, and connects with `WS /ws?token=...` because browser WebSockets cannot set Authorization headers. Use only on LAN/Tailscale or HTTPS. |
-| P1 | Device-scoped token with refresh/revocation | Token is tied to device ID/name, has expiry, can be rotated, and can be revoked from the TUI/server. Store only the minimum credential client-side. |
-| P2 | Kanidm OIDC | Browser uses Authorization Code + PKCE. Gateway validates issuer, audience, expiry, and groups via JWKS, then issues a short-lived gateway session token or secure cookie. |
-| P3 | Hardware passkey/YubiKey | Preferred path is Kanidm WebAuthn/passkey as the identity provider. Direct jcode WebAuthn is acceptable later for personal local fallback, but requires HTTPS, stable RP ID, challenge storage, and device registration. |
+| P1 | Kanidm OIDC + passkey | Browser uses Authorization Code + PKCE against Kanidm. Gateway validates issuer, audience, expiry, and groups via JWKS, then issues a short-lived WebSocket ticket or secure same-site session cookie. YubiKey/passkey support should come through Kanidm WebAuthn. |
+| P1b | Safe mobile suspend/reconnect | No separate device-token system. Persist local drafts/intents/pending commands, allow WebSocket suspension, then re-auth or resume, resubscribe, and `get_history` on foreground. |
+| P2 | Direct jcode WebAuthn fallback | Only if Kanidm is unreliable for this use case. Requires HTTPS, stable RP ID, challenge storage, device registration, and a focused security review. |
 
 Guidance:
 
-- Prefer Kanidm as the source of truth for endgame auth.
+- Prefer Kanidm as the source of truth for endgame auth and passkeys.
+- Skip a bespoke device-scoped refresh/revocation layer unless Kanidm fails in practice.
 - Prefer short-lived WebSocket tickets or secure same-site cookies after OIDC login.
 - Avoid OAuth implicit flow.
 - Do not put provider API keys or long-lived secrets in the browser.
 - Keep local pairing as a fallback for prototypes and offline personal LAN use.
+- Public exposure is allowed only after threat modeling, auth verification, TLS/origin/rate-limit review, and endpoint audit.
+- If public exposure is not clearly low-risk, use ZeroTier mesh access and DNS `jcode.mesh.rudnik.online`.
+- Kanidm and mesh/DNS infrastructure live in `~/infrastructure/nix-config`, which future implementation sessions may edit for jcode setup.
 
 ## Storage requirements
 
@@ -273,7 +278,7 @@ jcode.surface.workspace.<workspace_id>.snapshot
 jcode.surface.workspace.<workspace_id>.ops
 jcode.surface.preferences
 jcode.surface.pending_commands
-jcode.surface.auth.device
+jcode.surface.auth.oidc
 ```
 
 P1 durable home:
@@ -295,7 +300,7 @@ Rules:
 | Phase | Goal | Main requirement IDs | Exit criteria |
 | --- | --- | --- | --- |
 | 0 | Stabilize current web client boundary | SURF-G-001 to G-003, G-008 | Pairing, history, stream, cancel, reconnect/resync, model switch, errors are fixture-tested. |
-| 1 | Key2 lite + intent capture | KEY2-P0, SURF-G-004 to G-009 | Phone layout captures, routes, reload-recovers, reconnects after backgrounding, and shows terse status. |
+| 1 | Key2 lite + intent capture | KEY2-P0, SURF-G-004 to G-010 | Phone layout captures, routes, reload-recovers, reconnects after backgrounding, and shows terse status. |
 | 2 | Y700 drawer shell | Y700-P0 | Portrait/landscape layouts work with cards/docs/diffs/annotations local store and composable pane presets. |
 | 3 | Server-local workspace | Storage P1, substrate P1 | JSON/JSONL/Markdown store exists with atomic writes and recovery. |
 | 4 | Desktop review | DWEB-P0 | Three-pane review creates artifact-linked annotations and cards. |
@@ -308,16 +313,18 @@ Rules:
 | Viewports | 390x844, 412x915, 600x1024, 800x1280, 1280x800, 1440x1000 |
 | Protocol | history, streaming, tool call lifecycle, interruption, error, reconnect, background/foreground resync, unknown event |
 | Persistence | reload with draft, reload with unsynced intent, backgrounded socket close, corrupted snapshot, quota failure |
-| Auth | bad pairing code, expired token, revoked device, OIDC callback failure, WebAuthn unavailable |
+| Auth | bad pairing code, expired OIDC session, OIDC callback failure, WebAuthn unavailable, mesh DNS failure |
 | Accessibility | keyboard-only, focus rings, reduced motion, visible labels, touch target sizing |
 | Performance | 500 cards, 1,000 annotations, 20 active sessions, long streamed response |
 
 ## Future implementation prompts
 
+Use [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](./INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md) for the next full implementation session. The smaller prompts below are slice-specific shortcuts.
+
 ### Key2 slice
 
 ```text
-Implement Phase 1 from docs/INTERACTION_SURFACE_REQUIREMENTS.md. Preserve zero-build web, add Key2 lite layout, command palette verbs for intent.capture and intent.route, and local reload recovery. Validate KEY2-P0-* and SURF-G-004 to SURF-G-009, including foreground reconnect after phone backgrounding.
+Implement Phase 1 from docs/INTERACTION_SURFACE_REQUIREMENTS.md. Preserve zero-build web, add Key2 lite layout, command palette verbs for intent.capture and intent.route, and local reload recovery. Validate KEY2-P0-* and SURF-G-004 to SURF-G-010, including foreground reconnect after phone backgrounding.
 ```
 
 ### Y700 slice

@@ -11,6 +11,7 @@ This is the starting point for the jcode surface project. It links the design la
 | [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md) | Visual language, device feel, mockups, density, typography | UI decisions and design checklist |
 | [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) | Requirements, phases, command verbs, protocol hooks, tests | Work items with acceptance criteria |
 | [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md) | Cards/docs/annotations/intents/artifacts object graph | Data model, storage plan, operation log |
+| [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](./INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md) | Next-session execution prompt | Research, implementation, tests, troubleshooting, cleanup, commit |
 
 ## Product thesis
 
@@ -125,10 +126,12 @@ Landscape panes should be user-composable: reorder panes, expand to one-third, t
 
 Mobile browsers will suspend background pages and close WebSockets. Surfaces must recover by storing local drafts/intents, reconnecting with backoff on visibility/network changes, resubscribing, and fetching runtime history.
 
-Auth should progress from local pairing tokens to device-scoped refreshable tokens, then to Kanidm OIDC with Authorization Code + PKCE. Hardware passkeys/YubiKey should be supported either through Kanidm WebAuthn or a later direct WebAuthn path for personal local use.
+Auth should progress from local pairing tokens directly to Kanidm OIDC with Authorization Code + PKCE and Kanidm WebAuthn/passkey support for YubiKey. Do not build a separate device-scoped refresh/revocation layer unless Kanidm fails. The important mobile capability is safe suspend/reconnect: the browser may disconnect, then re-auth or resume and resubscribe without losing local work.
+
+Networking should use the existing `~/infrastructure/nix-config` Kanidm and mesh infrastructure. Public exposure is acceptable only after a security review shows very low risk. Otherwise, use the ZeroTier mesh and DNS so clients can reach `jcode.mesh.rudnik.online`.
 
 ## Future session starting prompt
 
 ```text
-Implement the next jcode interaction-surface slice using docs/INTERACTION_SURFACES.md as the entrypoint. Preserve the zero-build web path, keep TUI primary, use the surface workspace object model, and satisfy the requirement IDs for the selected phase before expanding scope.
+Use docs/INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md for the next implementation session. Preserve the zero-build web path, keep TUI primary, use the surface workspace object model, and satisfy the requirement IDs for the selected phase before expanding scope.
 ```
