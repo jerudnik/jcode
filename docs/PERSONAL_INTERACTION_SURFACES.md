@@ -11,14 +11,14 @@ Every jcode surface should feel like the same instrument viewed through a device
 - **TUI:** primary coding cockpit.
 - **Key2 / Clicks:** field terminal for intent capture and status.
 - **Y700 tablet:** command plane for steering, cards, artifacts, and annotations.
-- **Desktop web:** review, annotation, planning, and control plane beside the TUI.
+- **Desktop web:** review, annotation, planning, meta-agent interaction, and control plane beside the TUI.
 
 ## Principles
 
 | Principle | Implementation meaning |
 | --- | --- |
 | Transcript and intent first | Chrome exists to reduce friction around messages, commands, and captured intent. |
-| Surface-local, session-global | Drafts and UI focus are local. Sessions, tools, models, and history stay runtime-owned. |
+| Surface-local, session-global | Drafts, UI focus, pane layout, and reconnect hints are local. Sessions, tools, models, and history stay runtime-owned. |
 | Rich views degrade to text | Every card move, annotation, and handoff has a command or text representation. |
 | Functional cypherpunk | Dark, precise, inspectable, performant, not decorative retro cosplay. |
 | Local-first | Drafts, intents, annotations, and card changes survive reload and offline use. |
@@ -125,6 +125,7 @@ flowchart TD
 | Annotation | target, selector, body, status, convert-to-card |
 | Card | title, status, priority, body, acceptance, linked artifacts |
 | Command | typed verb, visible preview, reversible local log |
+| Meta-agent interaction | critique, plan, summarize, route, and supervise another agent without pretending the web UI is an IDE |
 
 ## Device mockups
 
@@ -160,10 +161,10 @@ portrait
 ┌─────────────────────────────┐
 │ status rail + command       │
 ├─────────────────────────────┤
-│ active session transcript   │
+│ active interactive chat     │
 │ tool stream                 │
 ├─────────────────────────────┤
-│ drawer: cards/docs/agents   │
+│ drawer: cards/docs/diffs    │
 └─────────────────────────────┘
 ```
 
@@ -171,35 +172,35 @@ portrait
 landscape
 ┌──────────────┬────────────────────────┬──────────────┐
 │ sessions     │ transcript + composer  │ artifact     │
-│ cards/intents│ command palette        │ annotations  │
+│ cards/intents│ interactive chat       │ annotations  │
 │ agents       │ live tool stream       │ linked cards │
 └──────────────┴────────────────────────┴──────────────┘
 ```
 
-Required feel: command surface, not a desktop clone. Drawers and direct manipulation should have command equivalents.
+Required feel: command surface, not a desktop clone. Drawers and direct manipulation should have command equivalents. In landscape, panes should be user-composable with one-third, two-thirds, and full-width presets persisted as surface-local state.
 
 ### Desktop web review surface
 
-Desktop web optimizes review, annotation, planning, and workspace visibility. The TUI remains primary for coding.
+Desktop web optimizes review, annotation, planning, meta-agent interaction, and workspace visibility. The TUI remains primary for coding.
 
 ```text
 ┌────────────────┬─────────────────────────────────┬────────────────┐
 │ workspace      │ artifact inspector              │ annotations    │
-│ board lanes    │ diff / image / markdown preview │ linked cards   │
+│ board lanes    │ meta-agent prompt               │ linked cards   │
 │ sessions       │ command palette                 │ intent inbox   │
 └────────────────┴─────────────────────────────────┴────────────────┘
 ```
 
-Required feel: high-signal review table. Avoid becoming a slower chat UI.
+Required feel: high-signal review table for planning, critique, comparison, and supervision. Avoid becoming a slower chat UI or IDE clone.
 
 ## Implementation-ready component inventory
 
 | Component | First version | Later version |
 | --- | --- | --- |
-| Shell | CSS grid, responsive panes, no framework requirement | Saved layouts |
+| Shell | CSS grid, responsive panes, no framework requirement | Saved user-composable layouts with pane order and widths |
 | Command palette | Text input with filtered commands | Hotkeys, command history |
-| Board | CSS columns, buttons for move | Pointer drag/drop if needed |
-| Docs editor | `textarea` + markdown preview | CodeJar only if textarea fails |
+| Board | CSS columns, buttons for move | Lightweight pointer drag/drop for cards/nodes if needed |
+| Docs editor | `textarea` + markdown preview | Folding and formatting-selection affordances, then CodeJar only if textarea fails |
 | Annotation capture | Native selection + target JSON | Image/SVG region selection |
 | Icons | Inline SVG subset | Tokenized icon package |
 | Persistence | `localStorage` snapshot + op log | Server-local JSON/JSONL/Markdown |
@@ -209,7 +210,7 @@ Required feel: high-signal review table. Avoid becoming a slower chat UI.
 Before shipping a slice:
 
 - Does the action have a text command fallback?
-- Does the UI survive reload without losing drafts or annotations?
+- Does the UI survive reload, backgrounding, and reconnect without losing drafts or annotations?
 - Is the active session/model visible before send?
 - Is live/idle/error distinguishable from connection state?
 - Are destructive actions gated?
@@ -227,4 +228,4 @@ Locked defaults:
 - Phosphor glyph direction, not emoji chrome.
 - Space Grotesk, Geist Sans, Geist Mono, and Source Serif 4.
 - Native surface workspace substrate for cards/docs/annotations/intents/artifacts.
-- No Backlog.md adapter, Milkdown, tldraw, or drag/drop framework in P0.
+- No Backlog.md adapter, Milkdown, tldraw, heavy drag/drop framework, or heavy rich-text editor in P0. Lightweight card/node rearrangement, folding, and formatting selection remain valid later enhancements.

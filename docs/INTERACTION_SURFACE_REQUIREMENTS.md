@@ -15,7 +15,7 @@ Build device-specific surfaces over the same jcode runtime:
 
 - **Key2 / Clicks:** capture intent, route work, check status.
 - **Y700:** steer sessions, review artifacts, manipulate cards/docs/annotations.
-- **Desktop web:** review, annotate, plan, and supervise.
+- **Desktop web:** review, annotate, plan, supervise, and run meta-agent interactions.
 - **TUI:** remains the primary coding cockpit.
 
 ## Architecture target
@@ -46,7 +46,7 @@ sequenceDiagram
 5. Cards, docs, annotations, intents, and artifact refs use the native surface workspace substrate.
 6. Every rich action has a command/text fallback.
 7. No cloud dependency for local-first use.
-8. No Backlog.md adapter, Milkdown, tldraw, or heavyweight drag/drop in P0.
+8. No Backlog.md adapter, Milkdown, tldraw, heavyweight drag/drop, or heavyweight rich-text editor in P0. Lightweight card/node rearrangement, folding, and formatting selection are valid later enhancements.
 
 ## Global requirements
 
@@ -59,6 +59,8 @@ sequenceDiagram
 | SURF-G-005 | Local recovery | Drafts, captured intents, unsynced annotations, selected session/model, and open drawers survive reload. |
 | SURF-G-006 | Safety gates | Credential deletion, destructive file actions, external posting, broad agent stops, and pushes require confirmation. |
 | SURF-G-007 | Performance budget | Key2 works on low-power mode. Y700 orientation change is under 120 ms. Desktop can render 500 cards and 1,000 annotations with responsive input. |
+| SURF-G-008 | Mobile lifecycle recovery | Backgrounding, lock-screening, app switching, network changes, and browser WebSocket closure are expected. On foreground, the surface reconnects with backoff, resubscribes, fetches history, restores drafts/intents, and clearly marks any unsent commands. |
+| SURF-G-009 | Auth path | P0 local pairing tokens work. P1 supports device-scoped refresh/revocation. P2 supports Kanidm OIDC using Authorization Code + PKCE. P3 supports hardware passkey/YubiKey through Kanidm WebAuthn or a direct local WebAuthn path. |
 
 ## Protocol baseline
 
@@ -77,7 +79,7 @@ Existing outbound requests:
 subscribe get_history message cancel resume_session set_model
 ```
 
-Future surface events should use newline-delimited JSON over the existing WebSocket bridge.
+Future surface events should use newline-delimited JSON over the existing WebSocket bridge. Browser implementations must assume the WebSocket can disappear while the page is backgrounded and recover through reconnect plus `get_history`.
 
 ## Command verbs
 
@@ -115,6 +117,7 @@ All controls should map to command envelopes.
 | `card.move` | `card_id`, `status`, optional `ordinal` |
 | `surface.handoff` | `target_surface`, `context` |
 | `summary.request` | `scope` |
+| `agent.meta` | `agent_id` or `session_id`, `instruction`, optional linked artifacts/cards |
 
 ## Surface requirements
 
@@ -156,11 +159,12 @@ P0 requirements:
 
 | ID | Requirement | Acceptance criteria |
 | --- | --- | --- |
-| Y700-P0-001 | Orientation-aware shell | Portrait uses stacked transcript + drawer. Landscape uses sessions/cards, transcript, artifact/annotation panes. |
-| Y700-P0-002 | Command drawer | Cards, docs, annotations, agents, and intents are reachable from a drawer or rail. |
+| Y700-P0-001 | Orientation-aware shell | Portrait uses stacked interactive chat + drawer. Landscape uses sessions/cards, chat/command, artifact/annotation panes. |
+| Y700-P0-002 | Command drawer | Cards, docs, diffs, annotations, agents, and intents are reachable from a drawer or rail. |
 | Y700-P0-003 | Artifact preview | File/diff/markdown/image placeholder preview with open/reveal action. |
 | Y700-P0-004 | Annotation capture | Text selection or artifact-level note creates an annotation object with target JSON. |
-| Y700-P0-005 | Card manipulation | Create, move, block, and link cards without drag/drop dependency. |
+| Y700-P0-005 | Card manipulation | Create, move, block, and link cards without requiring drag/drop. Lightweight drag/drop can be added later after button/command paths work. |
+| Y700-P0-006 | Composable landscape panes | User can reorder panes and switch each pane between one-third, two-thirds, and full-width presets. Layout persists locally per surface. |
 
 Happy path:
 
@@ -175,7 +179,8 @@ Primary jobs:
 1. Review implementation output and evidence.
 2. Annotate files, diffs, docs, images, and transcript messages.
 3. Plan future work with cards/docs/intent inbox.
-4. Supervise multiple sessions without replacing the TUI.
+4. Run meta-agent interactions such as critique, summary, route, compare, and review.
+5. Supervise multiple sessions without replacing the TUI or IDE.
 
 P0 requirements:
 
@@ -186,6 +191,7 @@ P0 requirements:
 | DWEB-P0-003 | Board/docs views | Board, docs, annotations, and intent inbox derive from the same surface workspace store. |
 | DWEB-P0-004 | Planning handoff | Selected cards/docs/annotations can generate a session prompt or future-session prompt. |
 | DWEB-P0-005 | TUI coexistence | Clear state indicates when desktop web is controlling a session versus only observing. |
+| DWEB-P0-006 | Meta-agent interactions | User can ask an agent to critique, summarize, compare, route, or review selected artifacts/cards without entering a code-editor workflow. |
 
 Happy path:
 
@@ -213,6 +219,48 @@ review/comment -> annotation + card if actionable
 large vague goal -> plan doc + cards + orchestrator clarification
 ```
 
+## Connectivity requirements
+
+Mobile browser backgrounding is not a failure. iOS and Android may suspend timers, freeze pages, and close WebSockets when the surface is not foregrounded.
+
+Implementation requirements:
+
+- Persist drafts, captured intents, pending local commands, active credential ID, active session ID, and last seen event/history marker before sending or on each edit.
+- Listen for `visibilitychange`, `pageshow`, `pagehide`, `online`, and `offline`.
+- On foreground or network return, reconnect with capped exponential backoff plus jitter.
+- After reconnect, send `subscribe` and `get_history`, then reconcile local pending commands against runtime state.
+- Keep unsent commands visible instead of pretending they were delivered.
+- Never rely on a background WebSocket for correctness.
+
+```mermaid
+stateDiagram-v2
+  [*] --> Live
+  Live --> Backgrounded: page hidden / app switch
+  Backgrounded --> Suspended: browser freezes timers or socket closes
+  Suspended --> Reconnecting: visible / online
+  Reconnecting --> Resyncing: socket open
+  Resyncing --> Live: subscribe + get_history applied
+  Reconnecting --> Offline: backoff exhausted
+  Offline --> Reconnecting: online / manual retry
+```
+
+## Auth roadmap
+
+| Phase | Method | Notes |
+| --- | --- | --- |
+| P0 | Pairing code + bearer token | Current prototype. Browser uses `POST /pair`, stores token locally, and connects with `WS /ws?token=...` because browser WebSockets cannot set Authorization headers. Use only on LAN/Tailscale or HTTPS. |
+| P1 | Device-scoped token with refresh/revocation | Token is tied to device ID/name, has expiry, can be rotated, and can be revoked from the TUI/server. Store only the minimum credential client-side. |
+| P2 | Kanidm OIDC | Browser uses Authorization Code + PKCE. Gateway validates issuer, audience, expiry, and groups via JWKS, then issues a short-lived gateway session token or secure cookie. |
+| P3 | Hardware passkey/YubiKey | Preferred path is Kanidm WebAuthn/passkey as the identity provider. Direct jcode WebAuthn is acceptable later for personal local fallback, but requires HTTPS, stable RP ID, challenge storage, and device registration. |
+
+Guidance:
+
+- Prefer Kanidm as the source of truth for endgame auth.
+- Prefer short-lived WebSocket tickets or secure same-site cookies after OIDC login.
+- Avoid OAuth implicit flow.
+- Do not put provider API keys or long-lived secrets in the browser.
+- Keep local pairing as a fallback for prototypes and offline personal LAN use.
+
 ## Storage requirements
 
 P0 browser-local keys:
@@ -224,6 +272,8 @@ jcode.surface.session.<session_id>.draft
 jcode.surface.workspace.<workspace_id>.snapshot
 jcode.surface.workspace.<workspace_id>.ops
 jcode.surface.preferences
+jcode.surface.pending_commands
+jcode.surface.auth.device
 ```
 
 P1 durable home:
@@ -244,9 +294,9 @@ Rules:
 
 | Phase | Goal | Main requirement IDs | Exit criteria |
 | --- | --- | --- | --- |
-| 0 | Stabilize current web client boundary | SURF-G-001 to G-003 | Pairing, history, stream, cancel, model switch, errors are fixture-tested. |
-| 1 | Key2 lite + intent capture | KEY2-P0, SURF-G-004 to G-006 | Phone layout captures, routes, reload-recovers, and shows terse status. |
-| 2 | Y700 drawer shell | Y700-P0 | Portrait/landscape layouts work with cards/docs/annotations local store. |
+| 0 | Stabilize current web client boundary | SURF-G-001 to G-003, G-008 | Pairing, history, stream, cancel, reconnect/resync, model switch, errors are fixture-tested. |
+| 1 | Key2 lite + intent capture | KEY2-P0, SURF-G-004 to G-009 | Phone layout captures, routes, reload-recovers, reconnects after backgrounding, and shows terse status. |
+| 2 | Y700 drawer shell | Y700-P0 | Portrait/landscape layouts work with cards/docs/diffs/annotations local store and composable pane presets. |
 | 3 | Server-local workspace | Storage P1, substrate P1 | JSON/JSONL/Markdown store exists with atomic writes and recovery. |
 | 4 | Desktop review | DWEB-P0 | Three-pane review creates artifact-linked annotations and cards. |
 | 5 | Richer anchors and previews | P1/P2 substrate targets | Image/SVG/DOM anchors, better preview, optional lightweight editor. |
@@ -256,8 +306,9 @@ Rules:
 | Area | Fixtures |
 | --- | --- |
 | Viewports | 390x844, 412x915, 600x1024, 800x1280, 1280x800, 1440x1000 |
-| Protocol | history, streaming, tool call lifecycle, interruption, error, reconnect, unknown event |
-| Persistence | reload with draft, reload with unsynced intent, corrupted snapshot, quota failure |
+| Protocol | history, streaming, tool call lifecycle, interruption, error, reconnect, background/foreground resync, unknown event |
+| Persistence | reload with draft, reload with unsynced intent, backgrounded socket close, corrupted snapshot, quota failure |
+| Auth | bad pairing code, expired token, revoked device, OIDC callback failure, WebAuthn unavailable |
 | Accessibility | keyboard-only, focus rings, reduced motion, visible labels, touch target sizing |
 | Performance | 500 cards, 1,000 annotations, 20 active sessions, long streamed response |
 
@@ -266,13 +317,13 @@ Rules:
 ### Key2 slice
 
 ```text
-Implement Phase 1 from docs/INTERACTION_SURFACE_REQUIREMENTS.md. Preserve zero-build web, add Key2 lite layout, command palette verbs for intent.capture and intent.route, and local reload recovery. Validate KEY2-P0-* and SURF-G-004 to SURF-G-006.
+Implement Phase 1 from docs/INTERACTION_SURFACE_REQUIREMENTS.md. Preserve zero-build web, add Key2 lite layout, command palette verbs for intent.capture and intent.route, and local reload recovery. Validate KEY2-P0-* and SURF-G-004 to SURF-G-009, including foreground reconnect after phone backgrounding.
 ```
 
 ### Y700 slice
 
 ```text
-Implement Phase 2 from docs/INTERACTION_SURFACE_REQUIREMENTS.md. Build orientation-aware tablet shell, drawers for cards/docs/annotations/intents, and local surface workspace views. Validate Y700-P0-* with viewport fixtures.
+Implement Phase 2 from docs/INTERACTION_SURFACE_REQUIREMENTS.md. Build orientation-aware tablet shell, composable landscape panes, drawers for cards/docs/diffs/annotations/intents, and local surface workspace views. Validate Y700-P0-* with viewport fixtures.
 ```
 
 ### Desktop review slice
