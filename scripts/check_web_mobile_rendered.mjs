@@ -12,6 +12,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WEB_ROOT = path.join(ROOT, "web", "jcode-mobile");
 const OUTPUT_DIR = path.join(ROOT, ".tmp", "web-mobile-rendered");
 const STATE_KEY = "jcode.mobileWeb.surfaceState.v1";
+const COMMAND_LOG_KEY = "jcode.surface.commandLog.v1";
+const WORKSPACE_SNAPSHOT_KEY = "jcode.surface.workspace.sw_local_default.snapshot";
 const DEFAULT_TIMEOUT_MS = 20000;
 
 const VIEWPORTS = [
@@ -305,6 +307,7 @@ function consoleFailures(cdp, sessionId) {
 async function runViewport(cdp, origin, viewport) {
   const { targetId, sessionId } = await prepareTarget(cdp, viewport);
   const commandText = `render smoke ${viewport.name} ${Date.now()}`;
+  const cardTitle = `smoke card ${viewport.name} ${Date.now()}`;
   const url = `${origin}/index.html?render-smoke=${encodeURIComponent(viewport.name)}`;
   await cdp.send("Page.navigate", { url }, sessionId);
   await waitForExpression(cdp, sessionId, "document.readyState === 'complete'", `${viewport.name} document complete`);
@@ -321,11 +324,21 @@ async function runViewport(cdp, origin, viewport) {
   `));
 
   await waitForExpression(cdp, sessionId, `document.body.innerText.indexOf(${JSON.stringify(commandText)}) >= 0`, `${viewport.name} pending command visible`);
+  await evaluate(cdp, sessionId, expressionSource(`
+    const commandInput = document.getElementById("command-input");
+    commandInput.value = "/card create " + JSON.stringify({ title: ${JSON.stringify(cardTitle)}, body: "rendered smoke body", status: "todo" });
+    commandInput.dispatchEvent(new Event("input", { bubbles: true }));
+    commandInput.closest("form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    return true;
+  `));
+  await waitForExpression(cdp, sessionId, `document.body.innerText.indexOf(${JSON.stringify(cardTitle)}) >= 0`, `${viewport.name} workspace card visible`);
+  await waitForExpression(cdp, sessionId, `document.body.innerText.indexOf("card.create") >= 0`, `${viewport.name} command log visible`);
   const beforeReload = await collectViewportState(cdp, sessionId, commandText);
   await cdp.send("Page.reload", { ignoreCache: true }, sessionId);
   await waitForExpression(cdp, sessionId, "document.readyState === 'complete'", `${viewport.name} reload complete`);
   await waitForExpression(cdp, sessionId, "Boolean(document.querySelector('.shell') && document.getElementById('composer-input'))", `${viewport.name} shell after reload`);
   await waitForExpression(cdp, sessionId, `document.body.innerText.indexOf(${JSON.stringify(commandText)}) >= 0`, `${viewport.name} pending command persisted after reload`);
+  await waitForExpression(cdp, sessionId, `document.body.innerText.indexOf(${JSON.stringify(cardTitle)}) >= 0`, `${viewport.name} workspace card persisted after reload`);
   const afterReload = await collectViewportState(cdp, sessionId, commandText);
   const screenshot = await cdp.send("Page.captureScreenshot", { format: "png", fromSurface: true, captureBeyondViewport: false }, sessionId);
   const screenshotPath = path.join(OUTPUT_DIR, `${viewport.name}.png`);
@@ -338,6 +351,10 @@ async function runViewport(cdp, origin, viewport) {
   if (beforeReload.hasOverflow) failures.push(`horizontal overflow before reload: ${beforeReload.scrollWidth} > ${beforeReload.innerWidth}`);
   if (afterReload.hasOverflow) failures.push(`horizontal overflow after reload: ${afterReload.scrollWidth} > ${afterReload.innerWidth}`);
   if (!beforeReload.pendingVisible || !afterReload.pendingVisible) failures.push("pending command not visible across queue/reload");
+  if (!beforeReload.commandPaletteVisible || !afterReload.commandPaletteVisible) failures.push("command palette not visible across reload");
+  if (!beforeReload.workspaceVisible || !afterReload.workspaceVisible) failures.push("workspace panel not visible across reload");
+  if (!beforeReload.commandLogged || !afterReload.commandLogged) failures.push("card command not logged durably");
+  if (!beforeReload.workspacePersisted || !afterReload.workspacePersisted) failures.push("workspace card not persisted durably");
   if (!beforeReload.persisted || !afterReload.persisted) failures.push("pending command not persisted in localStorage");
 
   return {
@@ -358,11 +375,22 @@ async function collectViewportState(cdp, sessionId, commandText) {
     const maxScrollWidth = Math.max(root.scrollWidth, body ? body.scrollWidth : 0);
     const pendingVisible = document.body.innerText.indexOf(${JSON.stringify(commandText)}) >= 0;
     let persisted = false;
+    let commandLogged = false;
+    let workspacePersisted = false;
     try {
       const parsed = JSON.parse(localStorage.getItem(${JSON.stringify(STATE_KEY)}) || "{}");
       persisted = Array.isArray(parsed.pendingCommands) && parsed.pendingCommands.some(function(command) {
         return command && command.payload && String(command.payload.content).indexOf(${JSON.stringify(commandText)}) >= 0;
       });
+    } catch {}
+    try {
+      const parsedLog = JSON.parse(localStorage.getItem(${JSON.stringify(COMMAND_LOG_KEY)}) || "[]");
+      const commands = Array.isArray(parsedLog) ? parsedLog : (Array.isArray(parsedLog.commands) ? parsedLog.commands : []);
+      commandLogged = Array.isArray(commands) && commands.some(function(command) { return command && command.verb === "card.create" && command.status === "acked"; });
+    } catch {}
+    try {
+      const snapshot = JSON.parse(localStorage.getItem(${JSON.stringify(WORKSPACE_SNAPSHOT_KEY)}) || "{}");
+      workspacePersisted = Array.isArray(snapshot.objects) && snapshot.objects.some(function(object) { return object && object.kind === "card"; });
     } catch {}
     return {
       innerWidth: window.innerWidth,
@@ -371,6 +399,10 @@ async function collectViewportState(cdp, sessionId, commandText) {
       hasOverflow: maxScrollWidth > window.innerWidth + 1,
       pendingVisible,
       persisted,
+      commandPaletteVisible: Boolean(document.querySelector(".command-palette") && document.getElementById("command-input")),
+      workspaceVisible: Boolean(document.querySelector(".workspace-card") && document.querySelector(".board-view")),
+      commandLogged,
+      workspacePersisted,
       appRendered: Boolean(document.querySelector(".shell")),
       smokeErrors: Array.isArray(window.__jcodeSmokeErrors) ? window.__jcodeSmokeErrors.slice() : [],
     };
