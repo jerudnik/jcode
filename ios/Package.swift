@@ -8,11 +8,17 @@ let package = Package(
         .macOS(.v14),
     ],
     products: [
-        .library(name: "JCodeKit", targets: ["JCodeKit"])
+        .library(name: "JCodeKit", targets: ["JCodeKit"]),
+        .executable(name: "JCodeKitChecks", targets: ["JCodeKitChecks"]),
     ],
     targets: [
         .target(
             name: "JCodeKit",
+            swiftSettings: [.enableUpcomingFeature("StrictConcurrency")]
+        ),
+        .executableTarget(
+            name: "JCodeKitChecks",
+            dependencies: ["JCodeKit"],
             swiftSettings: [.enableUpcomingFeature("StrictConcurrency")]
         ),
         .testTarget(
