@@ -129,19 +129,19 @@ h2 {
   font-size: 0.82rem;
 }
 
-.status-live {
+.status[data-phase="live"] {
   color: #04150f;
   background: var(--mint);
   border-color: var(--mint);
 }
 
-.status-connecting {
+.status[data-phase="connecting"] {
   color: #180d00;
   background: var(--orange);
   border-color: var(--orange);
 }
 
-.status-error {
+.status[data-phase="error"] {
   color: #260008;
   background: var(--red);
   border-color: var(--red);
@@ -283,7 +283,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   margin-bottom: 0.9rem;
 }
 
-.entry.user {
+.entry[data-role="user"] {
   justify-items: end;
 }
 
@@ -295,7 +295,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   text-transform: uppercase;
 }
 
-.entry.user .role { margin-right: 0.35rem; }
+.entry[data-role="user"] .role { margin-right: 0.35rem; }
 
 .message, .reasoning, .tool pre {
   width: fit-content;
@@ -314,7 +314,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   padding: 0.75rem 0.85rem;
 }
 
-.entry.user .message {
+.entry[data-role="user"] .message {
   background: var(--mint-soft);
   border-color: rgba(77, 217, 166, 0.35);
 }
@@ -371,7 +371,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   font-size: 0.78rem;
 }
 
-.session-chip.active {
+.session-chip[data-active="true"] {
   color: #04150f;
   background: var(--mint);
   border-color: var(--mint);
