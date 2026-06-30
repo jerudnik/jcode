@@ -91,6 +91,14 @@ impl Provider for NativeAutoCompactionProvider {
         false
     }
 
+    fn native_compaction_mode(&self) -> Option<String> {
+        Some("auto".to_string())
+    }
+
+    fn native_compaction_threshold_tokens(&self) -> Option<usize> {
+        Some(200)
+    }
+
     fn context_window(&self) -> usize {
         1_000
     }
@@ -456,6 +464,56 @@ async fn messages_for_provider_applies_manual_compaction_in_native_auto_mode() {
     assert!(agent.provider_session_id.is_none());
     assert!(agent.session.provider_session_id.is_none());
     assert!(compacted_messages.len() < provider_messages.len());
+    match &compacted_messages[0].content[0] {
+        ContentBlock::Text { text, .. } => {
+            assert!(text.contains("Previous Conversation Summary"));
+            assert!(text.contains("manual summary from native-auto provider"));
+        }
+        other => panic!("expected text summary block, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn messages_for_provider_falls_back_when_native_auto_crosses_threshold_without_event() {
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    for i in 0..30 {
+        agent.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: format!("turn {i}"),
+                cache_control: None,
+            }],
+        );
+    }
+
+    agent.update_compaction_usage_from_stream(850, None, None);
+    let (first_messages, first_event) = agent.messages_for_provider();
+    let original_len = 30;
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut event = first_event;
+    let mut compacted_messages = if event.is_some() {
+        first_messages
+    } else {
+        Vec::new()
+    };
+    while event.is_none() && Instant::now() < deadline {
+        let (messages, maybe_event) = agent.messages_for_provider();
+        if maybe_event.is_some() {
+            event = maybe_event;
+            compacted_messages = messages;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let event = event.expect("native auto fallback compaction event should be applied");
+    assert_eq!(event.trigger, "native_auto_fallback");
+    assert!(agent.session.compaction.is_some());
+    assert!(compacted_messages.len() < original_len);
     match &compacted_messages[0].content[0] {
         ContentBlock::Text { text, .. } => {
             assert!(text.contains("Previous Conversation Summary"));

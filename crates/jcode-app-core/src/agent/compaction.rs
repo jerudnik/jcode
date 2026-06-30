@@ -306,7 +306,7 @@ impl Agent {
         cache_read_input_tokens: Option<u64>,
         cache_creation_input_tokens: Option<u64>,
     ) {
-        if !self.provider.uses_jcode_compaction() || input_tokens == 0 {
+        if !self.provider.supports_compaction() || input_tokens == 0 {
             return;
         }
         let observed = self.effective_context_tokens_from_usage(
