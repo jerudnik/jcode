@@ -18,12 +18,41 @@ import {
   serializeSurfaceState,
   unknownProtocolEventStatus,
 } from "./surface_state.mjs";
+import {
+  appendCommandLog,
+  commandLogSummary,
+  createCommandEnvelope,
+  markCommandLogStatus,
+  parseCommandInput,
+  restoreCommandLog,
+  serializeCommandLog,
+} from "./surface_commands.mjs";
+import {
+  annotationsProjection,
+  appendOperation,
+  artifactReviewProjection,
+  artifactsProjection,
+  boardProjection,
+  bodyForObject,
+  compactWorkspaceState,
+  createObjectOperation,
+  createOperation,
+  docsProjection,
+  intentInboxProjection,
+  loadWorkspaceState,
+  saveWorkspaceState,
+  workspaceCounts,
+} from "./surface_workspace_store.mjs";
 
 const STORAGE_KEY = "jcode.mobileWeb.credentials.v1";
 const DEVICE_ID_KEY = "jcode.mobileWeb.deviceId.v1";
 const SURFACE_STATE_KEY = "jcode.mobileWeb.surfaceState.v1";
+const COMMAND_LOG_KEY = "jcode.surface.commandLog.v1";
+const WORKSPACE_ID = "sw_local_default";
 
 const persistedSurface = loadSurfaceState();
+const persistedCommandLog = loadCommandLog();
+const persistedWorkspace = loadWorkspace();
 
 const state = reactive({
   host: "",
@@ -58,6 +87,19 @@ const state = reactive({
   lastSyncAt: persistedSurface.lastSyncAt,
   pendingCommands: persistedSurface.pendingCommands,
   pendingCommandCount: persistedSurface.pendingCommands.length,
+  commandInput: "",
+  commandError: "",
+  commandLog: persistedCommandLog,
+  workspace: persistedWorkspace,
+  workspaceView: "board",
+  workspaceTitleDraft: "",
+  workspaceBodyDraft: "",
+  annotationDraft: "",
+  intentDraft: persistedSurface.draft && persistedSurface.draft.startsWith("/intent") ? persistedSurface.draft : "",
+  artifactDraft: "",
+  metaInstruction: "Review the selected workspace objects and propose the next best action.",
+  selectedObjectId: "",
+  selectedArtifactId: "",
 });
 
 let socket = null;
@@ -115,6 +157,48 @@ function loadSurfaceState() {
   }
 }
 
+function loadCommandLog() {
+  try {
+    return restoreCommandLog(localStorage.getItem(COMMAND_LOG_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function persistCommandLog() {
+  try {
+    localStorage.setItem(COMMAND_LOG_KEY, serializeCommandLog(state.commandLog));
+  } catch {
+    state.status = "Command log storage unavailable; command replay may not survive reload.";
+  }
+}
+
+function replaceCommandLog(commands) {
+  state.commandLog = commands;
+  persistCommandLog();
+}
+
+function loadWorkspace() {
+  try {
+    return loadWorkspaceState(localStorage, WORKSPACE_ID, { workspaceId: WORKSPACE_ID });
+  } catch {
+    return loadWorkspaceState({ getItem: () => null, setItem: () => {} }, WORKSPACE_ID, { workspaceId: WORKSPACE_ID });
+  }
+}
+
+function persistWorkspace() {
+  try {
+    saveWorkspaceState(localStorage, state.workspace);
+  } catch {
+    state.status = "Workspace storage unavailable; local objects may not survive reload.";
+  }
+}
+
+function replaceWorkspace(nextWorkspace) {
+  state.workspace = nextWorkspace;
+  persistWorkspace();
+}
+
 function persistSurfaceState() {
   try {
     localStorage.setItem(SURFACE_STATE_KEY, serializeSurfaceState({
@@ -145,6 +229,18 @@ function setPhase(phase, message) {
 function replacePendingCommands(commands) {
   state.pendingCommands.splice(0, state.pendingCommands.length, ...commands);
   state.pendingCommandCount = state.pendingCommands.length;
+}
+
+function markLoggedCommand(commandId, status, error, requestId) {
+  replaceCommandLog(markCommandLogStatus(state.commandLog, commandId, status, error || "", requestId, new Date()));
+}
+
+function logCommand(envelope) {
+  replaceCommandLog(appendCommandLog(state.commandLog, envelope));
+}
+
+function applyWorkspaceOperation(op) {
+  replaceWorkspace(appendOperation(state.workspace, op));
 }
 
 function documentIsVisible() {
@@ -395,12 +491,14 @@ function sendPendingCommand(commandId, mode = "manual") {
   const payload = commandRequestPayload(command, requestId);
   if (!payload) return;
   replacePendingCommands(markCommandSending(state.pendingCommands, commandId, requestId, new Date()));
+  markLoggedCommand(commandId, "sending", "", requestId);
   persistSurfaceState();
   try {
     sendRaw(payload);
     state.status = mode === "auto" ? "Sending queued command after resync..." : "Sending command...";
   } catch (error) {
     replacePendingCommands(markCommandFailed(state.pendingCommands, commandId, error.message || String(error), new Date()));
+    markLoggedCommand(commandId, "failed", error.message || String(error), requestId);
     persistSurfaceState();
     setError(error.message || String(error));
   }
@@ -410,6 +508,8 @@ function sendDraft() {
   const text = state.draft.trim();
   if (!text) return;
   const command = createPendingMessageCommand({ content: text, sessionId: state.sessionId, now: new Date(), randomFn: Math.random });
+  const parsed = { verb: "message.send", payload: { session_id: state.sessionId, content: text }, raw: text };
+  logCommand(createCommandEnvelope(parsed, { id: command.id, sessionId: state.sessionId, status: "pending" }));
   replacePendingCommands(appendPendingCommand(state.pendingCommands, command));
   state.draft = "";
   persistSurfaceState();
@@ -575,10 +675,141 @@ function handleAck(id) {
   const result = applyCommandAck(state.pendingCommands, id);
   if (result.ackedCommand) {
     replacePendingCommands(result.commands);
+    markLoggedCommand(result.ackedCommand.id, "acked", "", id);
     persistSurfaceState();
     appendEntry({ role: "user", text: result.ackedCommand.payload.content });
     state.status = state.pendingCommands.length ? pendingCommandSummary(state.pendingCommands) : "Sent";
   }
+}
+
+function workspaceOptions() {
+  return { workspaceId: state.workspace.workspace.workspace_id, surfaceId: deviceId(), now: new Date(), randomFn: Math.random };
+}
+
+function createLocalObject(kind, fields, body) {
+  const op = createObjectOperation(kind, fields, body || "", workspaceOptions());
+  applyWorkspaceOperation(op);
+  return op.object;
+}
+
+function executeWorkspaceCommand(envelope) {
+  const payload = envelope.payload || {};
+  if (envelope.verb === "card.create") {
+    const card = createLocalObject("card", { title: payload.title || "Untitled card", status: payload.status || "todo", priority: payload.priority || "normal" }, payload.body || "");
+    state.selectedObjectId = card.id;
+    state.workspaceView = "board";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = `Card created: ${card.title}`;
+    return true;
+  }
+  if (envelope.verb === "card.move") {
+    applyWorkspaceOperation(createOperation("object.update", { object_id: payload.card_id, patch: { status: payload.status || "todo" } }, workspaceOptions()));
+    state.workspaceView = "board";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = `Card moved to ${payload.status || "todo"}`;
+    return true;
+  }
+  if (envelope.verb === "doc.create") {
+    const doc = createLocalObject("doc", { title: payload.title || "Untitled doc", status: "open" }, payload.body || "");
+    state.selectedObjectId = doc.id;
+    state.workspaceView = "docs";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = `Doc created: ${doc.title}`;
+    return true;
+  }
+  if (envelope.verb === "annotation.create") {
+    const annotation = createLocalObject("annotation", {
+      title: payload.title || (payload.body || "Annotation").slice(0, 48),
+      status: "open",
+      targets: [payload.target || { kind: "workspace", uri: state.selectedArtifactId || "workspace" }],
+      links: state.selectedArtifactId ? [{ kind: "annotates", to: state.selectedArtifactId }] : [],
+    }, payload.body || "");
+    state.selectedObjectId = annotation.id;
+    state.workspaceView = "annotations";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = "Annotation saved locally.";
+    return true;
+  }
+  if (envelope.verb === "intent.capture") {
+    const intent = createLocalObject("intent", { title: (payload.body || "Intent").slice(0, 48), status: "captured", priority: payload.urgency || "normal" }, payload.body || "");
+    state.selectedObjectId = intent.id;
+    state.workspaceView = "intents";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = "Intent captured locally.";
+    return true;
+  }
+  if (envelope.verb === "intent.route") {
+    const source = state.workspace.objects.find((object) => object.id === payload.intent_id);
+    const body = payload.body || (source ? bodyForObject(state.workspace, source) : "");
+    const card = createLocalObject("card", { title: body.slice(0, 48) || "Routed intent", status: "todo", links: source ? [{ kind: "created_from", to: source.id }] : [] }, body);
+    if (source) applyWorkspaceOperation(createOperation("object.update", { object_id: source.id, patch: { status: "routed" } }, workspaceOptions()));
+    state.selectedObjectId = card.id;
+    state.workspaceView = "board";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = "Intent routed to card.";
+    return true;
+  }
+  if (envelope.verb === "artifact.open") {
+    const path = payload.path || payload.artifact_id || "artifact";
+    const artifact = createLocalObject("artifact_ref", { title: path.split("/").pop() || path, status: "open", fields: { path } }, path);
+    state.selectedArtifactId = artifact.id;
+    state.workspaceView = "artifact";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = `Artifact reference saved: ${path}`;
+    return true;
+  }
+  if (envelope.verb === "summary.request" || envelope.verb === "agent.meta" || envelope.verb === "surface.handoff") {
+    state.metaInstruction = payload.instruction || payload.context || payload.scope || state.metaInstruction;
+    state.workspaceView = "meta";
+    markLoggedCommand(envelope.id, "acked", "", null);
+    state.status = "Meta-agent prompt prepared locally.";
+    return true;
+  }
+  return false;
+}
+
+function executeCommandInput(input) {
+  const parsed = parseCommandInput(input, { sessionId: state.sessionId });
+  if (!parsed.ok) {
+    state.commandError = parsed.error;
+    state.status = parsed.error;
+    return;
+  }
+  const envelope = createCommandEnvelope(parsed, { sessionId: state.sessionId, surfaceId: deviceId(), status: "pending" });
+  logCommand(envelope);
+  state.commandError = "";
+  state.commandInput = "";
+  if (parsed.verb === "message.send") {
+    const command = createPendingMessageCommand({ id: envelope.id, content: parsed.payload.content, sessionId: state.sessionId, now: new Date(), randomFn: Math.random });
+    replacePendingCommands(appendPendingCommand(state.pendingCommands, command));
+    persistSurfaceState();
+    if (canUseSocket() && state.phase !== "resyncing") sendPendingCommand(command.id, "manual");
+    else state.status = "Command queued locally. It will send after reconnect and history sync.";
+    return;
+  }
+  if (parsed.verb === "turn.cancel") {
+    cancelTurn();
+    markLoggedCommand(envelope.id, canUseSocket() ? "acked" : "failed", canUseSocket() ? "" : "needs live connection", null);
+    return;
+  }
+  if (parsed.verb === "history.sync") {
+    requestHistorySync();
+    markLoggedCommand(envelope.id, "acked", "", null);
+    return;
+  }
+  if (parsed.verb === "model.set") {
+    setModel(parsed.payload.model);
+    markLoggedCommand(envelope.id, "acked", "", null);
+    return;
+  }
+  if (parsed.verb === "session.switch" || parsed.verb === "session.attach") {
+    resumeSession(parsed.payload.session_id);
+    markLoggedCommand(envelope.id, "acked", "", null);
+    return;
+  }
+  if (executeWorkspaceCommand(envelope)) return;
+  markLoggedCommand(envelope.id, "failed", "This verb is logged but not executable in the browser surface yet.", null);
+  state.status = "Command logged safely; this verb needs a live orchestrator path.";
 }
 
 function handleLine(line) {
@@ -791,6 +1022,63 @@ function submitOnEnter(event) {
   }
 }
 
+function submitCommandOnEnter(event) {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    executeCommandInput(state.commandInput);
+  }
+}
+
+function setCommandShortcut(text) {
+  state.commandInput = text;
+  requestAnimationFrame(() => {
+    const input = document.getElementById("command-input");
+    if (input) input.focus();
+  });
+}
+
+function createCardFromDraft() {
+  const title = state.workspaceTitleDraft.trim() || "Untitled card";
+  const body = state.workspaceBodyDraft.trim();
+  executeCommandInput(`/card create ${JSON.stringify({ title, body, status: "todo" })}`);
+  state.workspaceTitleDraft = "";
+  state.workspaceBodyDraft = "";
+}
+
+function createDocFromDraft() {
+  const title = state.workspaceTitleDraft.trim() || "Untitled doc";
+  const body = state.workspaceBodyDraft.trim();
+  executeCommandInput(`/doc create ${JSON.stringify({ title, body })}`);
+  state.workspaceTitleDraft = "";
+  state.workspaceBodyDraft = "";
+}
+
+function captureIntentFromDraft() {
+  const body = state.intentDraft.trim();
+  if (!body) return;
+  executeCommandInput(`/intent ${body}`);
+  state.intentDraft = "";
+}
+
+function annotateFromDraft() {
+  const body = state.annotationDraft.trim();
+  if (!body) return;
+  executeCommandInput(`/annotate ${JSON.stringify({ body, target: { kind: "workspace", uri: state.selectedArtifactId || "workspace" } })}`);
+  state.annotationDraft = "";
+}
+
+function openArtifactFromDraft() {
+  const path = state.artifactDraft.trim();
+  if (!path) return;
+  executeCommandInput(`/artifact open ${JSON.stringify({ path })}`);
+  state.artifactDraft = "";
+}
+
+function compactWorkspace() {
+  replaceWorkspace(compactWorkspaceState(localStorage, state.workspace));
+  state.status = "Workspace snapshot compacted locally.";
+}
+
 watch(
   () => {
     if (!state.transcript.length) return "";
@@ -918,6 +1206,172 @@ const PendingCommandsPanel = () => html`
       </article>
     `.key(command.id))}
   </div>
+	`;
+
+const CommandPalette = () => html`
+  <section class="card command-palette" aria-label="typed command palette">
+    <div class="section-title">
+      <h2>Command palette</h2>
+      <p>Durable typed verbs. Commands are logged before execution, and message sends survive reload/reconnect.</p>
+    </div>
+    <form class="command-form" @submit="${(event) => { event.preventDefault(); executeCommandInput(state.commandInput); }}">
+      <input id="command-input" autocapitalize="none" spellcheck="false" placeholder="/card create {&quot;title&quot;:&quot;Fix mobile flow&quot;}" .value="${() => state.commandInput}" @input="${(event) => { state.commandInput = event.target.value; }}" @keydown="${submitCommandOnEnter}" />
+      <button class="primary" type="submit" disabled="${() => state.commandInput.trim() ? false : ""}">Run</button>
+    </form>
+    ${() => state.commandError ? html`<p class="pending-error command-error">${state.commandError}</p>` : ""}
+    <div class="command-shortcuts">
+      <button @click="${() => setCommandShortcut("/intent Capture follow-up from the away cockpit")}">intent</button>
+      <button @click="${() => setCommandShortcut("/card create {\"title\":\"Review latest diff\",\"status\":\"todo\"}")}">card</button>
+      <button @click="${() => setCommandShortcut("/doc create {\"title\":\"Session notes\",\"body\":\"Notes from mobile surface.\"}")}">doc</button>
+      <button @click="${() => setCommandShortcut("/history sync")}">sync</button>
+      <button @click="${() => setCommandShortcut("/summary request")}">meta</button>
+    </div>
+    <div class="command-log" aria-label="durable verb log">
+      <div class="pending-head">
+        <strong>${() => commandLogSummary(state.commandLog)}</strong>
+        <span>Recent commands</span>
+      </div>
+      ${() => state.commandLog.slice(0, 8).map((command) => html`
+        <article class="command-row" data-status="${command.status}">
+          <span>${command.verb}</span>
+          <strong>${command.status}</strong>
+          <code>${shortId(command.id)}</code>
+          ${command.error ? html`<small>${command.error}</small>` : ""}
+        </article>
+      `.key(command.id))}
+    </div>
+  </section>
+`;
+
+const WorkspaceTabs = () => {
+  const tabs = [
+    ["board", "Board"],
+    ["docs", "Docs"],
+    ["annotations", "Annotations"],
+    ["intents", "Intents"],
+    ["artifact", "Artifact"],
+    ["meta", "Meta"],
+  ];
+  return html`<div class="workspace-tabs">${tabs.map(([id, label]) => html`<button data-active="${() => state.workspaceView === id ? "true" : "false"}" @click="${() => { state.workspaceView = id; }}">${label}</button>`)}</div>`;
+};
+
+const WorkspaceObject = (object, options = {}) => html`
+  <article class="workspace-object" data-kind="${object.kind}" data-selected="${() => state.selectedObjectId === object.id ? "true" : "false"}" @click="${() => { state.selectedObjectId = object.id; }}">
+    <div class="object-head">
+      <strong>${object.title || object.id}</strong>
+      <span>${object.status || object.kind}</span>
+    </div>
+    ${options.body ? html`<p>${options.body}</p>` : ""}
+    <div class="object-meta"><code>${shortId(object.id)}</code><span>${object.updated_at || object.created_at}</span></div>
+  </article>
+`;
+
+const BoardView = () => html`
+  <div class="board-view">
+    ${() => boardProjection(state.workspace).map((lane) => html`
+      <section class="board-lane" data-lane="${lane.status}">
+        <h3>${lane.status} <span>${lane.cards.length}</span></h3>
+        ${() => lane.cards.length ? lane.cards.map((card) => html`
+          <article class="workspace-object board-card" data-kind="card" @click="${() => { state.selectedObjectId = card.id; }}">
+            <div class="object-head"><strong>${card.title}</strong><span>${card.fields.priority || "normal"}</span></div>
+            <div class="actions compact lane-actions">
+              <button @click="${(event) => { event.stopPropagation(); executeCommandInput(`/card move ${JSON.stringify({ card_id: card.id, status: "todo" })}`); }}">todo</button>
+              <button @click="${(event) => { event.stopPropagation(); executeCommandInput(`/card move ${JSON.stringify({ card_id: card.id, status: "doing" })}`); }}">doing</button>
+              <button @click="${(event) => { event.stopPropagation(); executeCommandInput(`/card move ${JSON.stringify({ card_id: card.id, status: "done" })}`); }}">done</button>
+            </div>
+          </article>
+        `.key(card.id)) : html`<div class="empty mini">No cards</div>`}
+      </section>
+    `)}
+  </div>
+`;
+
+const DocsView = () => html`
+  <div class="object-list">${() => docsProjection(state.workspace).length ? docsProjection(state.workspace).map((doc) => WorkspaceObject(doc, { body: doc.body }).key(doc.id)) : html`<div class="empty mini">Create a doc from the form below.</div>`}</div>
+`;
+
+const AnnotationsView = () => html`
+  <div class="object-list">${() => annotationsProjection(state.workspace).length ? annotationsProjection(state.workspace).map((group) => html`
+    <section class="annotation-group">
+      <h3>${group.key}</h3>
+      ${group.annotations.map((annotation) => WorkspaceObject(annotation, { body: annotation.body }).key(annotation.id))}
+    </section>
+  `) : html`<div class="empty mini">No annotations yet.</div>`}</div>
+`;
+
+const IntentsView = () => html`
+  <div class="object-list">${() => intentInboxProjection(state.workspace).length ? intentInboxProjection(state.workspace).map((intent) => html`
+    <article class="workspace-object" data-kind="intent">
+      <div class="object-head"><strong>${intent.title}</strong><span>${intent.status}</span></div>
+      <p>${intent.body}</p>
+      <div class="actions compact"><button @click="${() => executeCommandInput(`/intent route ${JSON.stringify({ intent_id: intent.id, body: intent.body })}`)}">Route to card</button></div>
+    </article>
+  `.key(intent.id)) : html`<div class="empty mini">Capture away-from-keyboard intents here.</div>`}</div>
+`;
+
+const ArtifactReviewView = () => html`
+  <div class="artifact-review">
+    <div class="artifact-list">
+      ${() => artifactsProjection(state.workspace).length ? artifactsProjection(state.workspace).map((artifact) => html`<button data-active="${() => state.selectedArtifactId === artifact.id ? "true" : "false"}" @click="${() => { state.selectedArtifactId = artifact.id; }}">${artifact.title}</button>`.key(artifact.id)) : html`<div class="empty mini">Open an artifact path below.</div>`}
+    </div>
+    ${() => {
+      const review = artifactReviewProjection(state.workspace, state.selectedArtifactId);
+      return review.artifact ? html`
+        <section class="artifact-detail">
+          <h3>${review.artifact.title}</h3>
+          <p>${review.artifact.body || review.artifact.fields.path || "artifact"}</p>
+          <div class="review-counts"><span>${review.annotations.length} annotations</span><span>${review.cards.length} cards</span><span>${review.docs.length} docs</span></div>
+        </section>
+      ` : "";
+    }}
+  </div>
+`;
+
+const MetaAgentView = () => html`
+  <div class="meta-builder">
+    <label class="field">
+      <span>Meta-agent prompt</span>
+      <textarea rows="5" .value="${() => state.metaInstruction}" @input="${(event) => { state.metaInstruction = event.target.value; }}"></textarea>
+    </label>
+    <button class="primary" @click="${() => executeCommandInput(`/summary request ${JSON.stringify({ instruction: state.metaInstruction, counts: workspaceCounts(state.workspace) })}`)}">Prepare summary request</button>
+  </div>
+`;
+
+const WorkspaceCreatePanel = () => html`
+  <div class="workspace-create">
+    <label class="field"><span>Title</span><input placeholder="Object title" .value="${() => state.workspaceTitleDraft}" @input="${(event) => { state.workspaceTitleDraft = event.target.value; }}" /></label>
+    <label class="field"><span>Body</span><textarea rows="3" placeholder="Body, notes, or context" .value="${() => state.workspaceBodyDraft}" @input="${(event) => { state.workspaceBodyDraft = event.target.value; }}"></textarea></label>
+    <div class="actions compact"><button @click="${createCardFromDraft}">Create card</button><button @click="${createDocFromDraft}">Create doc</button></div>
+    <label class="field"><span>Intent</span><textarea rows="2" placeholder="Capture an intent before context is lost" .value="${() => state.intentDraft}" @input="${(event) => { state.intentDraft = event.target.value; }}"></textarea></label>
+    <div class="actions compact"><button @click="${captureIntentFromDraft}">Capture intent</button></div>
+    <label class="field"><span>Annotation</span><textarea rows="2" placeholder="Annotate selected artifact or workspace" .value="${() => state.annotationDraft}" @input="${(event) => { state.annotationDraft = event.target.value; }}"></textarea></label>
+    <div class="actions compact"><button @click="${annotateFromDraft}">Save annotation</button></div>
+    <label class="field"><span>Artifact path</span><input placeholder="crates/jcode/src/main.rs" .value="${() => state.artifactDraft}" @input="${(event) => { state.artifactDraft = event.target.value; }}" /></label>
+    <div class="actions compact"><button @click="${openArtifactFromDraft}">Open artifact</button><button class="ghost" @click="${compactWorkspace}">Compact</button></div>
+  </div>
+`;
+
+const WorkspacePanel = () => html`
+  <section class="card workspace-card" aria-label="surface workspace">
+    <div class="workspace-header">
+      <div class="section-title">
+        <h2>Surface workspace</h2>
+        <p>${() => { const counts = workspaceCounts(state.workspace); return `${counts.card} cards · ${counts.doc} docs · ${counts.annotation} annotations · ${counts.intent} intents · ${counts.artifact_ref} artifacts`; }}</p>
+      </div>
+      ${WorkspaceTabs()}
+    </div>
+    <div class="workspace-grid">
+      <div class="workspace-view">
+        ${() => state.workspaceView === "board" ? BoardView() : ""}
+        ${() => state.workspaceView === "docs" ? DocsView() : ""}
+        ${() => state.workspaceView === "annotations" ? AnnotationsView() : ""}
+        ${() => state.workspaceView === "intents" ? IntentsView() : ""}
+        ${() => state.workspaceView === "artifact" ? ArtifactReviewView() : ""}
+        ${() => state.workspaceView === "meta" ? MetaAgentView() : ""}
+      </div>
+      ${WorkspaceCreatePanel()}
+    </div>
+  </section>
 `;
 
 const ChatPanel = () => html`
@@ -989,7 +1443,9 @@ const App = () => html`
     <div class="layout">
       <div class="main-col">
         ${PairPanel()}
+        ${CommandPalette()}
         ${ChatPanel()}
+        ${WorkspacePanel()}
       </div>
       ${SessionPanel()}
     </div>

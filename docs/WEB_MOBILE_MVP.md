@@ -82,6 +82,9 @@ Pairing talks directly from the Android browser to the jcode gateway at `http://
 - Quick prompt deck for away-from-keyboard control patterns.
 - Searchable session and model lists plus a compact pulse panel for status, model, token, and server readouts.
 - Explicit link states for offline, reconnecting, resyncing, live, idle session, auth failure, and generic error.
+- Typed command palette with slash aliases and durable verb log. Browser-executable verbs include `message.send`, `history.sync`, `turn.cancel`, `session.switch`, `model.set`, `card.create`, `card.move`, `doc.create`, `annotation.create`, `intent.capture`, `intent.route`, `artifact.open`, `summary.request`, and `agent.meta` preparation.
+- Browser-local surface workspace store under `localStorage`, with snapshots, operation log, object bodies, corrupt-state recovery, and manual compaction.
+- Workspace projections for board lanes, docs, annotation groups, intent inbox routing, artifact review, and meta-agent prompt building. These are intentionally local-first until the server-local workspace protocol lands.
 
 ## Design direction
 
@@ -101,6 +104,7 @@ The portal is intentionally not a heavy admin dashboard. It should feel like a j
 - Credentials are in browser `localStorage`. This is acceptable for a local-first prototype, but native Android should move tokens to Android Keystore.
 - Auth is still local pairing-token only. Kanidm OIDC + PKCE remains the planned P1 path; no public exposure is configured by this app.
 - The UI is protocol-tolerant but not exhaustive. Unknown events are ignored with a status note.
+- The browser-local workspace is not yet synchronized with `~/.jcode/surface_workspaces/`; server-local storage and protocol hooks are the next implementation surface.
 
 ## Validation
 
@@ -111,27 +115,37 @@ Run:
 ./scripts/check_web_mobile_rendered.mjs
 ```
 
-The rendered smoke script launches Chrome through the DevTools Protocol, serves `web/jcode-mobile/` locally, and checks Key2, Y700, and laptop viewports. It verifies the app renders without runtime errors or horizontal overflow, queues a local command, reloads, and confirms the pending command remains visible and persisted. Screenshots and `report.json` are written under ignored `.tmp/web-mobile-rendered/`.
+The rendered smoke script launches Chrome through the DevTools Protocol, serves `web/jcode-mobile/` locally, and checks Key2, Y700, and laptop viewports. It verifies the app renders without runtime errors or horizontal overflow, queues a local message, runs a typed `/card create` command through the palette, confirms the workspace board and durable verb log update, reloads, and confirms pending commands plus workspace objects remain visible and persisted. Screenshots and `report.json` are written under ignored `.tmp/web-mobile-rendered/`.
 
 `check_web_mobile.sh` checks JavaScript syntax, including the rendered harness, and verifies the static app contains the required gateway protocol pieces.
-It also runs `web/jcode-mobile/surface_state.test.mjs`, which covers reconnect backoff, foreground resync request ordering, offline/background close handling, auth-failure close classification, and draft/pending-command recovery.
+It also runs:
+
+- `web/jcode-mobile/surface_state.test.mjs`, which covers reconnect backoff, foreground resync request ordering, offline/background close handling, auth-failure close classification, and draft/pending-command recovery.
+- `web/jcode-mobile/surface_commands.test.mjs`, which covers typed verb parsing, slash subcommands, invalid verb safety, durable log recovery, and ack/failed status tracking.
+- `web/jcode-mobile/surface_workspace_store.test.mjs`, which covers cards/docs/annotations/intents/artifact refs, object bodies, operation replay, snapshot compaction, corrupt recovery, and a 500 card/1,000 annotation projection fixture.
 
 ## Next slices
 
-1. **Key2 polish**
+1. **Server-local workspace substrate**
+   - Persist workspace snapshots, JSONL ops, and object bodies under `~/.jcode/surface_workspaces/`.
+   - Add protocol hooks for open/apply/get_snapshot/export and bridge the browser-local projections to server snapshots.
+
+2. **Safe access and auth path**
+   - Keep local pairing and mesh/LAN access as the default operational path.
+   - Add a documented security review gate before enabling any public OIDC/WebAuthn path.
+
+3. **Key2 polish**
    - Add a true "lite mode" toggle that hides sessions/models and maximizes transcript height.
-   - Add keyboard shortcuts: Enter send, Ctrl+Enter newline, Esc cancel.
    - Add larger touch targets and smaller memory footprint checks.
 
-2. **Y700 tablet mode**
+4. **Y700 tablet mode**
    - Add split transcript/session inspector.
-   - Add model picker search.
    - Add local transcript cache and export.
 
-3. **Installable PWA**
+5. **Installable PWA**
    - Vendor ArrowJS locally.
    - Add app manifest and service worker for offline shell caching when served from a secure origin or localhost.
 
-4. **Native Android**
+6. **Native Android**
    - Reuse this protocol layer.
    - Add Android Keystore, share intents, notifications, background reconnect, and better IME/keyboard integration.
