@@ -68,6 +68,20 @@ Pairing talks directly from the Android browser to the jcode gateway at `http://
 - Render streamed assistant text, reasoning, tool calls, errors, notifications, token summaries, sessions, and model list events.
 - Switch sessions and models when the server provides them.
 - Responsive layout for small phones and tablets.
+- 8.8 inch tablet cockpit shell with live link/session/stream/turn/tool telemetry.
+- Focus mode that hides pairing and side panels for transcript-first supervision.
+- Quick prompt deck for away-from-keyboard control patterns.
+- Searchable session and model lists plus a compact pulse panel for status, model, token, and server readouts.
+
+## Design direction
+
+The portal is intentionally not a heavy admin dashboard. It should feel like a jcode instrument panel:
+
+- **Razor sharp hierarchy**: one primary transcript plane, one secondary control rail, and terse telemetry.
+- **Lightning fast**: zero build step, pinned ArrowJS CDN import, no icon packs, no charting runtime, no unnecessary animation.
+- **Featherweight**: plain HTML/CSS/JS, local state only, tolerant protocol handling, and no dependency expansion until installable PWA work requires it.
+- **Tablet first**: optimized for 8.8 inch landscape use with thumb-safe controls, sticky side controls, horizontal quick chips, and high contrast dark mode.
+- **Near future ready**: room for adaptive/agentic UI without committing to opaque generative UI. The next 6 to 8 months should add context-aware command chips, file/tree review, and multi-session watch panes while keeping the shell static and inspectable.
 
 ## Known limitations
 
