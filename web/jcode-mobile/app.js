@@ -1,7 +1,29 @@
 import { html, reactive, watch } from "https://esm.sh/@arrow-js/core@1.0.6";
+import {
+  appendPendingCommand,
+  applyCommandAck,
+  buildResyncRequests,
+  classifySocketClose,
+  commandRequestPayload,
+  computeReconnectDelay,
+  createPendingMessageCommand,
+  markCommandFailed,
+  markCommandQueued,
+  markCommandSending,
+  markInflightCommandsUnknown,
+  pendingCommandSummary,
+  phaseLabel,
+  removePendingCommand,
+  restoreSurfaceState,
+  serializeSurfaceState,
+  unknownProtocolEventStatus,
+} from "./surface_state.mjs";
 
 const STORAGE_KEY = "jcode.mobileWeb.credentials.v1";
 const DEVICE_ID_KEY = "jcode.mobileWeb.deviceId.v1";
+const SURFACE_STATE_KEY = "jcode.mobileWeb.surfaceState.v1";
+
+const persistedSurface = loadSurfaceState();
 
 const state = reactive({
   host: "",
@@ -9,15 +31,15 @@ const state = reactive({
   code: "",
   deviceName: defaultDeviceName(),
   credentials: loadCredentials(),
-  activeId: "",
-  phase: "offline",
-  status: "Not connected",
+  activeId: persistedSurface.activeId,
+  phase: navigator.onLine === false ? "offline" : "offline",
+  status: navigator.onLine === false ? "Offline. Drafts and pending commands are saved locally." : "Not connected",
   error: "",
-  draft: "",
-  sessionFilter: "",
-  modelFilter: "",
-  focusMode: false,
-  sessionId: "",
+  draft: persistedSurface.draft,
+  sessionFilter: persistedSurface.sessionFilter,
+  modelFilter: persistedSurface.modelFilter,
+  focusMode: persistedSurface.focusMode,
+  sessionId: persistedSurface.sessionId,
   sessionTitle: "",
   providerModel: "",
   providerName: "",
@@ -28,17 +50,33 @@ const state = reactive({
   nextId: 1,
   pairing: false,
   connecting: false,
+  networkOnline: navigator.onLine !== false,
+  pageVisible: document.visibilityState !== "hidden",
+  reconnectAttempt: 0,
+  reconnectDelayMs: 0,
+  reconnectDueAt: 0,
+  lastSyncAt: persistedSurface.lastSyncAt,
+  pendingCommands: persistedSurface.pendingCommands,
 });
 
 let socket = null;
 let currentAssistantId = null;
 let currentToolId = null;
+let reconnectTimer = null;
+let connectionSerial = 0;
 
 if (state.credentials.length > 0) {
-  const last = state.credentials[state.credentials.length - 1];
-  state.activeId = credentialId(last);
-  state.host = last.host;
-  state.port = String(last.port);
+  let selected = activeCredential();
+  if (!selected) {
+    selected = state.credentials[state.credentials.length - 1];
+    state.activeId = credentialId(selected);
+  }
+  state.host = selected.host;
+  state.port = String(selected.port);
+}
+
+if (state.pendingCommands.some((command) => command.status === "sending")) {
+  state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Recovered after reload before ack");
 }
 
 function defaultDeviceName() {
@@ -66,6 +104,45 @@ function loadCredentials() {
 
 function saveCredentials(credentials) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(credentials));
+}
+
+function loadSurfaceState() {
+  try {
+    return restoreSurfaceState(localStorage.getItem(SURFACE_STATE_KEY));
+  } catch {
+    return restoreSurfaceState(null);
+  }
+}
+
+function persistSurfaceState() {
+  try {
+    localStorage.setItem(SURFACE_STATE_KEY, serializeSurfaceState({
+      activeId: state.activeId,
+      draft: state.draft,
+      sessionId: state.sessionId,
+      focusMode: state.focusMode,
+      sessionFilter: state.sessionFilter,
+      modelFilter: state.modelFilter,
+      lastSyncAt: state.lastSyncAt,
+      pendingCommands: state.pendingCommands,
+    }));
+  } catch {
+    state.status = "Local storage unavailable; drafts may not survive reload.";
+  }
+}
+
+function setDraft(value) {
+  state.draft = value;
+  persistSurfaceState();
+}
+
+function setPhase(phase, message) {
+  state.phase = phase;
+  state.status = message || phaseLabel(phase);
+}
+
+function documentIsVisible() {
+  return document.visibilityState !== "hidden";
 }
 
 function credentialId(credential) {
@@ -124,9 +201,10 @@ async function pair() {
     state.credentials = next;
     state.activeId = credentialId(credential);
     saveCredentials(next);
+    persistSurfaceState();
     state.code = "";
     state.status = `Paired with ${credential.serverName}`;
-    connect();
+    connect("paired");
   } catch (error) {
     setError(error.message || String(error));
   } finally {
@@ -134,39 +212,81 @@ async function pair() {
   }
 }
 
-function connect() {
+function canUseSocket() {
+  return socket && socket.readyState === WebSocket.OPEN;
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  state.reconnectDelayMs = 0;
+  state.reconnectDueAt = 0;
+}
+
+function connect(reason = "manual") {
   const credential = activeCredential();
   if (!credential || state.connecting) return;
-  disconnect(false);
+  if (state.networkOnline === false) {
+    setPhase("offline", "Offline. Drafts and pending commands are saved locally.");
+    return;
+  }
+  if (state.pageVisible === false) {
+    setPhase("offline", "Backgrounded. Local state saved; will reconnect and resync on foreground.");
+    return;
+  }
+  clearReconnectTimer();
+  connectionSerial += 1;
+  const serial = connectionSerial;
+  if (socket) {
+    state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Socket replaced before ack");
+    persistSurfaceState();
+    try { socket.close(); } catch {}
+    socket = null;
+  }
   state.connecting = true;
-  state.phase = "connecting";
-  state.status = `Connecting to ${credential.host}:${credential.port}...`;
+  setPhase("reconnecting", `Connecting to ${credential.host}:${credential.port} (${reason})...`);
   setError("");
   const base = gatewayBase(credential);
   const url = `${base.ws}/ws?token=${encodeURIComponent(credential.token)}`;
+  let opened = false;
   socket = new WebSocket(url);
   socket.addEventListener("open", () => {
+    if (serial !== connectionSerial) return;
+    opened = true;
     state.connecting = false;
-    state.phase = "live";
-    state.status = "Connected";
-    state.nextId = 1;
-    sendRaw({ type: "subscribe", id: nextRequestId() });
-    sendRaw({ type: "get_history", id: nextRequestId() });
+    state.reconnectAttempt = 0;
+    setPhase("resyncing", "Connected. Resubscribing and fetching history...");
+    resyncAfterReconnect(reason);
   });
   socket.addEventListener("message", (event) => {
+    if (serial !== connectionSerial) return;
     String(event.data)
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean)
       .forEach(handleLine);
   });
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", (event) => {
+    if (serial !== connectionSerial) return;
     state.connecting = false;
-    state.phase = "offline";
-    state.status = "Disconnected";
+    state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Connection closed before ack");
+    persistSurfaceState();
     socket = null;
+    const close = classifySocketClose({
+      manual: false,
+      online: state.networkOnline,
+      visible: state.pageVisible,
+      opened,
+      code: event.code,
+      reason: event.reason,
+    });
+    setPhase(close.phase, close.status);
+    if (close.reconnect) scheduleReconnect("socket close");
   });
   socket.addEventListener("error", () => {
+    if (serial !== connectionSerial) return;
     state.connecting = false;
     state.phase = "error";
     setError("WebSocket connection failed. Check gateway, token, LAN/Tailscale reachability, and mixed-content browser rules.");
@@ -174,13 +294,16 @@ function connect() {
 }
 
 function disconnect(updateStatus = true) {
+  clearReconnectTimer();
+  connectionSerial += 1;
   if (socket) {
     socket.close();
     socket = null;
   }
   state.connecting = false;
-  state.phase = "offline";
-  if (updateStatus) state.status = "Disconnected";
+  state.pendingCommands = markInflightCommandsUnknown(state.pendingCommands, new Date(), "Disconnected before ack");
+  persistSurfaceState();
+  if (updateStatus) setPhase("offline", "Disconnected");
 }
 
 function nextRequestId() {
@@ -196,26 +319,104 @@ function sendRaw(payload) {
   socket.send(JSON.stringify(payload));
 }
 
-function sendDraft() {
-  const text = state.draft.trim();
-  if (!text) return;
-  state.draft = "";
-  appendEntry({ role: "user", text });
+function sendResyncRequests() {
+  const resync = buildResyncRequests({
+    nextId: state.nextId,
+    sessionId: state.sessionId,
+    clientInstanceId: deviceId(),
+    hasLocalHistory: state.transcript.length > 0,
+  });
+  state.nextId = resync.nextId;
+  resync.requests.forEach(sendRaw);
+}
+
+function resyncAfterReconnect(reason) {
   try {
-    sendRaw({ type: "message", id: nextRequestId(), content: text });
-    state.status = "Sent";
+    sendResyncRequests();
+    setPhase("resyncing", `Resyncing history after ${reason}...`);
   } catch (error) {
+    setError(error.message || String(error));
+    scheduleReconnect("resync send failed");
+  }
+}
+
+function scheduleReconnect(reason, immediate = false) {
+  if (!activeCredential()) return;
+  if (state.networkOnline === false) {
+    setPhase("offline", "Offline. Drafts and pending commands are saved locally.");
+    return;
+  }
+  if (state.pageVisible === false) {
+    setPhase("offline", "Backgrounded. Local state saved; will reconnect and resync on foreground.");
+    return;
+  }
+  clearReconnectTimer();
+  const delay = immediate ? 0 : computeReconnectDelay(state.reconnectAttempt, Math.random);
+  state.reconnectAttempt += 1;
+  state.reconnectDelayMs = delay;
+  state.reconnectDueAt = Date.now() + delay;
+  setPhase("reconnecting", delay > 0 ? `Reconnecting in ${Math.ceil(delay / 1000)}s (${reason})...` : `Reconnecting (${reason})...`);
+  reconnectTimer = setTimeout(() => connect(reason), delay);
+}
+
+function finishHistoryResync() {
+  state.lastSyncAt = new Date().toISOString();
+  persistSurfaceState();
+  if (state.sessionId) {
+    setPhase("live", `Live. History synced ${new Date(state.lastSyncAt).toLocaleTimeString()}.`);
+  } else {
+    setPhase("idle", "Connected. No active session yet.");
+  }
+  flushQueuedCommands();
+}
+
+function flushQueuedCommands() {
+  if (!canUseSocket()) return;
+  const queued = state.pendingCommands.filter((command) => command.status === "queued");
+  queued.forEach((command) => sendPendingCommand(command.id, "auto"));
+}
+
+function sendPendingCommand(commandId, mode = "manual") {
+  const command = state.pendingCommands.find((item) => item.id === commandId);
+  if (!command) return;
+  if (!canUseSocket()) {
+    state.pendingCommands = markCommandQueued(state.pendingCommands, commandId, new Date());
+    persistSurfaceState();
+    state.status = "Command saved locally. It will send after reconnect and history sync.";
+    return;
+  }
+  const requestId = nextRequestId();
+  const payload = commandRequestPayload(command, requestId);
+  if (!payload) return;
+  state.pendingCommands = markCommandSending(state.pendingCommands, commandId, requestId, new Date());
+  persistSurfaceState();
+  try {
+    sendRaw(payload);
+    state.status = mode === "auto" ? "Sending queued command after resync..." : "Sending command...";
+  } catch (error) {
+    state.pendingCommands = markCommandFailed(state.pendingCommands, commandId, error.message || String(error), new Date());
+    persistSurfaceState();
     setError(error.message || String(error));
   }
 }
 
-function cancelTurn() {
-  try {
-    sendRaw({ type: "cancel", id: nextRequestId() });
-    state.status = "Cancel requested";
-  } catch (error) {
-    setError(error.message || String(error));
+function sendDraft() {
+  const text = state.draft.trim();
+  if (!text) return;
+  const command = createPendingMessageCommand({ content: text, sessionId: state.sessionId, now: new Date(), randomFn: Math.random });
+  state.pendingCommands = appendPendingCommand(state.pendingCommands, command);
+  state.draft = "";
+  persistSurfaceState();
+  if (canUseSocket() && state.phase !== "resyncing") {
+    sendPendingCommand(command.id, "manual");
+  } else {
+    state.status = "Command queued locally. It will send after reconnect and history sync.";
+    if (!canUseSocket() && activeCredential() && state.networkOnline !== false && state.pageVisible !== false) scheduleReconnect("queued command", true);
   }
+}
+
+function cancelTurn() {
+  sendControl({ type: "cancel", id: nextRequestId() }, "Cancel");
 }
 
 function switchCredential(event) {
@@ -225,6 +426,8 @@ function switchCredential(event) {
     state.host = credential.host;
     state.port = String(credential.port);
   }
+  persistSurfaceState();
+  scheduleReconnect("server switch", true);
 }
 
 function forgetActiveCredential() {
@@ -235,6 +438,141 @@ function forgetActiveCredential() {
   state.credentials = next;
   state.activeId = next.length ? credentialId(next[next.length - 1]) : "";
   saveCredentials(next);
+  persistSurfaceState();
+}
+
+function requestHistorySync() {
+  if (!canUseSocket()) {
+    state.status = "History sync queued until reconnect.";
+    scheduleReconnect("manual history sync", true);
+    return;
+  }
+  try {
+    setPhase("resyncing", "Resyncing history...");
+    sendRaw({ type: "get_history", id: nextRequestId() });
+  } catch (error) {
+    setError(error.message || String(error));
+  }
+}
+
+function retryPendingCommand(commandId) {
+  state.pendingCommands = markCommandQueued(state.pendingCommands, commandId, new Date());
+  persistSurfaceState();
+  if (canUseSocket() && state.phase !== "resyncing") {
+    sendPendingCommand(commandId, "manual");
+  } else {
+    state.status = "Command queued locally. It will send after reconnect and history sync.";
+    scheduleReconnect("retry pending command", true);
+  }
+}
+
+function restorePendingCommand(commandId) {
+  const command = state.pendingCommands.find((item) => item.id === commandId);
+  if (!command) return;
+  state.draft = command.payload.content;
+  state.pendingCommands = removePendingCommand(state.pendingCommands, commandId);
+  persistSurfaceState();
+  requestAnimationFrame(() => {
+    const composer = document.getElementById("composer-input");
+    if (composer) composer.focus();
+  });
+}
+
+function discardPendingCommand(commandId) {
+  state.pendingCommands = removePendingCommand(state.pendingCommands, commandId);
+  persistSurfaceState();
+  state.status = "Pending command discarded locally.";
+}
+
+function sendControl(payload, label) {
+  if (!canUseSocket()) {
+    state.status = `${label} needs a live connection. Reconnecting first...`;
+    scheduleReconnect(label, true);
+    return;
+  }
+  try {
+    sendRaw(payload);
+    state.status = `${label} requested`;
+  } catch (error) {
+    setError(error.message || String(error));
+  }
+}
+
+function resumeSession(id) {
+  state.sessionId = id;
+  persistSurfaceState();
+  sendControl({
+    type: "resume_session",
+    id: nextRequestId(),
+    session_id: id,
+    client_instance_id: deviceId(),
+    client_has_local_history: state.transcript.length > 0,
+    allow_session_takeover: true,
+  }, "Session switch");
+}
+
+function setModel(model) {
+  sendControl({ type: "set_model", id: nextRequestId(), model }, "Model switch");
+}
+
+function foregroundResync(reason) {
+  state.pageVisible = documentIsVisible();
+  persistSurfaceState();
+  if (state.pageVisible === false) {
+    clearReconnectTimer();
+    setPhase("offline", "Backgrounded. Local state saved; will reconnect and resync on foreground.");
+    return;
+  }
+  if (canUseSocket()) {
+    setPhase("resyncing", `Foreground return. Resyncing after ${reason}...`);
+    resyncAfterReconnect(reason);
+  } else {
+    scheduleReconnect(reason, true);
+  }
+}
+
+function handleVisibilityChange() {
+  state.pageVisible = documentIsVisible();
+  persistSurfaceState();
+  if (state.pageVisible) {
+    foregroundResync("visibilitychange");
+  } else {
+    clearReconnectTimer();
+    setPhase("offline", "Backgrounded. Local state saved; will reconnect and resync on foreground.");
+  }
+}
+
+function handlePageShow() {
+  state.pageVisible = documentIsVisible();
+  foregroundResync("pageshow");
+}
+
+function handlePageHide() {
+  state.pageVisible = false;
+  clearReconnectTimer();
+  persistSurfaceState();
+}
+
+function handleOnline() {
+  state.networkOnline = true;
+  foregroundResync("network online");
+}
+
+function handleOffline() {
+  state.networkOnline = false;
+  clearReconnectTimer();
+  setPhase("offline", "Offline. Drafts and pending commands are saved locally.");
+  persistSurfaceState();
+}
+
+function handleAck(id) {
+  const result = applyCommandAck(state.pendingCommands, id);
+  if (result.ackedCommand) {
+    state.pendingCommands = result.commands;
+    persistSurfaceState();
+    appendEntry({ role: "user", text: result.ackedCommand.payload.content });
+    state.status = state.pendingCommands.length ? pendingCommandSummary(state.pendingCommands) : "Sent";
+  }
 }
 
 function handleLine(line) {
@@ -247,18 +585,21 @@ function handleLine(line) {
   }
   switch (event.type) {
     case "ack":
+      handleAck(event.id);
       break;
     case "history":
       applyHistory(event);
       break;
     case "session":
       state.sessionId = event.session_id || state.sessionId;
+      persistSurfaceState();
       break;
     case "session_renamed":
       state.sessionTitle = event.display_title || state.sessionTitle;
       break;
     case "state":
       state.sessionId = event.session_id || state.sessionId;
+      persistSurfaceState();
       break;
     case "available_models_updated":
       state.availableModels = event.available_models || [];
@@ -272,7 +613,7 @@ function handleLine(line) {
       state.tokens = formatTokens(event);
       break;
     case "status_detail":
-      state.status = event.message || event.status || JSON.stringify(event);
+      state.status = event.detail || event.message || event.status || JSON.stringify(event);
       break;
     case "notification":
       appendEntry({ role: "system", text: `${event.from_name || "jcode"}: ${event.message || ""}` });
@@ -322,7 +663,7 @@ function handleLine(line) {
       setError(event.message || "Server error");
       break;
     default:
-      state.status = `Ignored ${event.type || "unknown"} event`;
+      state.status = unknownProtocolEventStatus(event);
   }
 }
 
@@ -343,6 +684,7 @@ function applyHistory(event) {
   }));
   currentAssistantId = null;
   currentToolId = null;
+  finishHistoryResync();
 }
 
 function historyTool(tool) {
@@ -429,7 +771,7 @@ function transcriptStats() {
 }
 
 function applyQuickPrompt(text) {
-  state.draft = text;
+  setDraft(text);
   requestAnimationFrame(() => {
     const composer = document.getElementById("composer-input");
     if (composer) composer.focus();
@@ -494,7 +836,7 @@ const PairPanel = () => html`
     </div>
     <div class="actions">
       <button class="primary" disabled="${() => canPair() && !state.pairing ? false : ""}" @click="${pair}">${() => state.pairing ? "Pairing..." : "Pair"}</button>
-      <button disabled="${() => activeCredential() ? false : ""}" @click="${connect}">Connect saved</button>
+      <button disabled="${() => activeCredential() ? false : ""}" @click="${() => connect("manual")}">Connect saved</button>
       <button class="danger ghost" disabled="${() => activeCredential() ? false : ""}" @click="${forgetActiveCredential}">Forget</button>
     </div>
   </section>
@@ -508,19 +850,19 @@ const Header = () => html`
       <p class="meta">${() => [state.providerName, state.providerModel, state.tokens].filter(Boolean).join(" · ") || "Gateway client for Android / browser"}</p>
     </div>
     <div class="top-actions">
-      <button class="ghost mode-toggle" @click="${() => { state.focusMode = !state.focusMode; }}">${() => state.focusMode ? "Cockpit" : "Focus"}</button>
-      <div class="status" data-phase="${() => state.phase}">${() => state.phase}</div>
+      <button class="ghost mode-toggle" @click="${() => { state.focusMode = !state.focusMode; persistSurfaceState(); }}">${() => state.focusMode ? "Cockpit" : "Focus"}</button>
+      <div class="status" data-phase="${() => state.phase}">${() => phaseLabel(state.phase)}</div>
     </div>
   </header>
 `;
 
 const MetricsRail = () => html`
   <section class="metrics-rail" aria-label="jcode status metrics">
-    <div class="metric live" data-phase="${() => state.phase}"><span>link</span><strong>${() => state.phase}</strong></div>
+    <div class="metric live" data-phase="${() => state.phase}"><span>link</span><strong>${() => phaseLabel(state.phase)}</strong></div>
     <div class="metric"><span>session</span><strong>${() => shortId(state.sessionId)}</strong></div>
     <div class="metric"><span>stream</span><strong>${() => { const stats = transcriptStats(); return stats.running ? `${stats.running} active` : "idle"; }}</strong></div>
     <div class="metric"><span>turns</span><strong>${() => transcriptStats().entries}</strong></div>
-    <div class="metric"><span>tools</span><strong>${() => transcriptStats().tools}</strong></div>
+    <div class="metric"><span>pending</span><strong>${() => state.pendingCommands.length ? pendingCommandSummary(state.pendingCommands) : `${transcriptStats().tools} tools`}</strong></div>
   </section>
 `;
 
@@ -548,6 +890,30 @@ const TranscriptEntry = (entry) => html`
   </article>
 `.key(entry.id);
 
+const PendingCommandsPanel = () => html`
+  <div class="pending-panel" role="status" aria-label="pending local commands">
+    <div class="pending-head">
+      <strong>${() => pendingCommandSummary(state.pendingCommands)}</strong>
+      <span>Saved locally. Queued commands auto-send after reconnect + history sync; needs-review commands require a tap to avoid duplicates.</span>
+    </div>
+    ${() => state.pendingCommands.map((command) => html`
+      <article class="pending-command" data-status="${command.status}">
+        <div class="pending-meta">
+          <span>${command.verb}</span>
+          <strong>${command.status}</strong>
+        </div>
+        <pre>${command.payload.content}</pre>
+        ${() => command.last_error ? html`<p class="pending-error">${command.last_error}</p>` : ""}
+        <div class="actions compact">
+          <button disabled="${() => command.status === "sending" ? "" : false}" @click="${() => retryPendingCommand(command.id)}">${() => command.status === "unknown" ? "Send anyway" : "Retry"}</button>
+          <button class="ghost" @click="${() => restorePendingCommand(command.id)}">Edit draft</button>
+          <button class="danger ghost" @click="${() => discardPendingCommand(command.id)}">Discard</button>
+        </div>
+      </article>
+    `.key(command.id))}
+  </div>
+`;
+
 const ChatPanel = () => html`
   <section class="card chat-card">
     <div class="chat-header">
@@ -556,19 +922,20 @@ const ChatPanel = () => html`
         <p>${() => state.sessionId ? `session ${state.sessionId}` : "No session yet"}</p>
       </div>
       <div class="actions compact">
-        <button disabled="${() => state.phase === "live" ? false : ""}" @click="${cancelTurn}">Cancel</button>
-        <button class="ghost" disabled="${() => state.phase === "live" ? false : ""}" @click="${() => sendRaw({ type: "get_history", id: nextRequestId() })}">Sync</button>
+        <button disabled="${() => canUseSocket() ? false : ""}" @click="${cancelTurn}">Cancel</button>
+        <button class="ghost" disabled="${() => activeCredential() ? false : ""}" @click="${requestHistorySync}">Sync</button>
         <button class="ghost" @click="${() => disconnect()}">Disconnect</button>
       </div>
     </div>
     ${() => state.error ? html`<div class="error">${state.error}</div>` : ""}
+    ${() => state.pendingCommands.length ? PendingCommandsPanel() : ""}
     <div class="transcript">
       ${() => state.transcript.length ? state.transcript.map(TranscriptEntry) : html`<div class="empty">Pair, connect, then send a prompt.</div>`}
       <div id="bottom"></div>
     </div>
     <form class="composer" @submit="${(event) => { event.preventDefault(); sendDraft(); }}">
-      <textarea id="composer-input" rows="3" placeholder="Ask jcode..." .value="${() => state.draft}" @input="${(event) => { state.draft = event.target.value; }}" @keydown="${submitOnEnter}"></textarea>
-      <button class="primary" disabled="${() => state.phase === "live" && state.draft.trim() ? false : ""}" type="submit">Send</button>
+      <textarea id="composer-input" rows="3" placeholder="Ask jcode..." .value="${() => state.draft}" @input="${(event) => setDraft(event.target.value)}" @keydown="${submitOnEnter}"></textarea>
+      <button class="primary" disabled="${() => state.draft.trim() ? false : ""}" type="submit">${() => canUseSocket() && state.phase !== "resyncing" ? "Send" : "Queue"}</button>
     </form>
   </section>
 `;
@@ -589,20 +956,20 @@ const SessionPanel = () => html`
       <h2>Sessions</h2>
       <p>${() => state.allSessions.length ? `${state.allSessions.length} reported by server` : "History sync will fill this."}</p>
     </div>
-    <input class="filter-input" placeholder="filter sessions" .value="${() => state.sessionFilter}" @input="${(event) => { state.sessionFilter = event.target.value; }}" />
+    <input class="filter-input" placeholder="filter sessions" .value="${() => state.sessionFilter}" @input="${(event) => { state.sessionFilter = event.target.value; persistSurfaceState(); }}" />
     <div class="session-list">
       ${() => visibleSessions().map((id) => html`
-        <button class="session-chip" data-active="${() => id === state.sessionId ? "true" : "false"}" @click="${() => sendRaw({ type: "resume_session", id: nextRequestId(), session_id: id })}">${id}</button>
+        <button class="session-chip" data-active="${() => id === state.sessionId ? "true" : "false"}" @click="${() => resumeSession(id)}">${id}</button>
       `.key(id))}
     </div>
     <div class="section-title tight">
       <h2>Models</h2>
       <p>${() => state.availableModels.length ? "Tap to switch" : "Server has not sent a model list yet."}</p>
     </div>
-    <input class="filter-input" placeholder="filter models" .value="${() => state.modelFilter}" @input="${(event) => { state.modelFilter = event.target.value; }}" />
+    <input class="filter-input" placeholder="filter models" .value="${() => state.modelFilter}" @input="${(event) => { state.modelFilter = event.target.value; persistSurfaceState(); }}" />
     <div class="session-list">
       ${() => visibleModels().map((model) => html`
-        <button class="session-chip" data-active="${() => model === state.providerModel ? "true" : "false"}" @click="${() => sendRaw({ type: "set_model", id: nextRequestId(), model })}">${model}</button>
+        <button class="session-chip" data-active="${() => model === state.providerModel ? "true" : "false"}" @click="${() => setModel(model)}">${model}</button>
       `.key(model))}
     </div>
   </section>
@@ -627,3 +994,14 @@ const App = () => html`
 `;
 
 App()(document.getElementById("app"));
+
+window.addEventListener("visibilitychange", handleVisibilityChange);
+window.addEventListener("pageshow", handlePageShow);
+window.addEventListener("pagehide", handlePageHide);
+window.addEventListener("online", handleOnline);
+window.addEventListener("offline", handleOffline);
+
+persistSurfaceState();
+if (activeCredential() && state.networkOnline && state.pageVisible) {
+  scheduleReconnect("saved workstation", true);
+}
