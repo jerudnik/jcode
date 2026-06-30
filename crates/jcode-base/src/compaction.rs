@@ -866,6 +866,23 @@ impl CompactionManager {
             return;
         }
 
+        let _ = self.start_background_compaction_with_trigger(
+            all_messages,
+            provider,
+            self.mode_trigger_label().to_string(),
+        );
+    }
+
+    fn start_background_compaction_with_trigger(
+        &mut self,
+        all_messages: &[Message],
+        provider: Arc<dyn Provider>,
+        trigger_label: String,
+    ) -> bool {
+        if self.pending_task.is_some() {
+            return false;
+        }
+
         let active = self.active_messages(all_messages);
 
         // Calculate cutoff within active messages.
@@ -875,24 +892,23 @@ impl CompactionManager {
             _ => active.len().saturating_sub(RECENT_TURNS_TO_KEEP),
         };
         if cutoff == 0 {
-            return;
+            return false;
         }
 
         // Adjust cutoff to not split tool call/result pairs
         cutoff = safe_compaction_cutoff(active, cutoff);
         if cutoff == 0 {
-            return;
+            return false;
         }
 
         // Snapshot messages to summarize (must clone for the async task)
         let messages_to_summarize: Vec<Message> = active[..cutoff].to_vec();
         let msg_count = messages_to_summarize.len();
         let existing_summary = self.active_summary.clone();
-        let mode_label = self.mode_trigger_label().to_string();
         let estimated_tokens = self.effective_token_count_with(all_messages);
         crate::logging::info(&format!(
             "[TIMING] compaction_start: trigger={}, active_messages={}, cutoff={}, estimated_tokens={}, has_existing_summary={}",
-            mode_label,
+            trigger_label,
             active.len(),
             cutoff,
             estimated_tokens,
@@ -900,7 +916,7 @@ impl CompactionManager {
         ));
 
         self.pending_cutoff = cutoff;
-        self.pending_trigger = Some(mode_label.clone());
+        self.pending_trigger = Some(trigger_label.clone());
 
         // Spawn background task that notifies via Bus when done
         self.pending_task = Some(tokio::spawn(async move {
@@ -911,7 +927,7 @@ impl CompactionManager {
             let duration_ms = start.elapsed().as_millis() as u64;
             crate::logging::info(&format!(
                 "Compaction ({}) finished in {:.2}s ({} messages summarized)",
-                mode_label,
+                trigger_label,
                 duration_ms as f64 / 1000.0,
                 msg_count,
             ));
@@ -922,6 +938,62 @@ impl CompactionManager {
                 result
             })
         }));
+
+        true
+    }
+
+    /// Ensure context has a local fallback when provider-native automatic
+    /// compaction crosses its configured threshold but no native compaction item
+    /// has been returned yet.
+    ///
+    /// OpenAI native `auto` is intentionally optimistic: jcode asks the backend to
+    /// compact by sending `context_management`, and normally does not run its own
+    /// proactive compactor. Some backend/transport/model combinations can report
+    /// input usage beyond that threshold without emitting a compaction output item.
+    /// In that case we start the ordinary jcode summarizer using a dedicated
+    /// trigger label, while preserving the existing critical-threshold hard
+    /// compaction behavior against the real model context window.
+    pub fn ensure_native_auto_fallback_context_fits(
+        &mut self,
+        all_messages: &[Message],
+        provider: Arc<dyn Provider>,
+        native_threshold_tokens: usize,
+    ) -> CompactionAction {
+        if native_threshold_tokens == 0 {
+            return CompactionAction::None;
+        }
+        let observed_tokens = self.effective_token_count_with(all_messages);
+        if observed_tokens < native_threshold_tokens {
+            return CompactionAction::None;
+        }
+        if self.pending_task.is_some() {
+            return CompactionAction::None;
+        }
+
+        let usage = self.context_usage_with(all_messages);
+        if usage >= CRITICAL_THRESHOLD {
+            return self.ensure_context_fits(all_messages, provider);
+        }
+
+        if self.suppress_compaction_until_new_message {
+            return CompactionAction::None;
+        }
+        if self.active_messages(all_messages).len() <= RECENT_TURNS_TO_KEEP {
+            return CompactionAction::None;
+        }
+
+        let trigger = "native_auto_fallback".to_string();
+        if self.start_background_compaction_with_trigger(all_messages, provider, trigger.clone()) {
+            crate::logging::warn(&format!(
+                "[compaction] Native auto compaction fallback started: observed_tokens={} threshold={} usage={:.1}%",
+                observed_tokens,
+                native_threshold_tokens,
+                usage * 100.0,
+            ));
+            CompactionAction::BackgroundStarted { trigger }
+        } else {
+            CompactionAction::None
+        }
     }
 
     /// Ensure context fits before an API call.
