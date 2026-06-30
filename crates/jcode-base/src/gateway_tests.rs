@@ -108,6 +108,74 @@ fn test_hex_token_validation() {
 }
 
 #[test]
+fn test_gateway_access_policy_allows_local_and_mesh_paths() {
+    let local = GatewayConfig {
+        enabled: true,
+        bind_addr: "127.0.0.1".to_string(),
+        access_mode: "local".to_string(),
+        ..GatewayConfig::default()
+    };
+    assert_eq!(
+        validate_access_policy(&local).unwrap(),
+        GatewayAccessMode::Local
+    );
+
+    let mesh = GatewayConfig {
+        enabled: true,
+        bind_addr: "0.0.0.0".to_string(),
+        access_mode: "mesh".to_string(),
+        ..GatewayConfig::default()
+    };
+    assert_eq!(
+        validate_access_policy(&mesh).unwrap(),
+        GatewayAccessMode::Mesh
+    );
+}
+
+#[test]
+fn test_gateway_access_policy_blocks_public_and_oidc_without_review() {
+    let public_without_review = GatewayConfig {
+        enabled: true,
+        access_mode: "public_reviewed".to_string(),
+        public_exposure_reviewed: false,
+        ..GatewayConfig::default()
+    };
+    assert!(validate_access_policy(&public_without_review).is_err());
+
+    let reviewed = GatewayConfig {
+        enabled: true,
+        access_mode: "public_reviewed".to_string(),
+        public_exposure_reviewed: true,
+        ..GatewayConfig::default()
+    };
+    assert_eq!(
+        validate_access_policy(&reviewed).unwrap(),
+        GatewayAccessMode::PublicReviewed
+    );
+
+    let oidc_enabled = GatewayConfig {
+        enabled: true,
+        oidc_enabled: true,
+        ..GatewayConfig::default()
+    };
+    let error = validate_access_policy(&oidc_enabled)
+        .expect_err("oidc remains disabled pending review")
+        .to_string();
+    assert!(error.contains("disabled pending security review"));
+}
+
+#[test]
+fn test_gateway_access_policy_local_rejects_non_loopback_bind() {
+    let config = GatewayConfig {
+        enabled: true,
+        bind_addr: "0.0.0.0".to_string(),
+        access_mode: "local".to_string(),
+        ..GatewayConfig::default()
+    };
+    assert!(validate_access_policy(&config).is_err());
+}
+
+#[test]
 fn test_extract_ws_auth_prefers_header_and_falls_back_to_query() {
     let token_a = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     let token_b = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
