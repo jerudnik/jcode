@@ -4,6 +4,8 @@ Status: Draft 2026-06-30
 
 Implementation requirements: [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md)
 
+Surface workspace substrate: [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md)
+
 This document records a personal design direction for jcode interaction surfaces that are more controllable than the terminal UI. It extends the existing jcode values of minimalism, cypherpunk pragmatism, functional density, and crisp performance without turning the UI into a heavyweight dashboard.
 
 The central idea is that every surface should feel like the same instrument viewed through a device-specific lens:
@@ -195,7 +197,7 @@ links: task IDs, session IDs, artifact IDs
 
 ### Task/card
 
-A durable project-management object, ideally repo-backed. Backlog.md tasks are a good local-first target, with GitHub Issues or PR metadata as sync targets rather than the source of truth in early prototypes.
+A durable work object in the jcode-native surface workspace substrate. Cards should share the same object graph as docs, annotations, intents, and artifact references so board, review, and planning views do not drift apart.
 
 Card basics:
 
@@ -342,7 +344,7 @@ Implementation notes:
 - Start with CSS drawers and plain ArrowJS state. Avoid a component framework until a measured bottleneck demands one.
 - For markdown editing, begin with a durable textarea plus preview. Add CodeJar only for lightweight code editing. Treat Milkdown as an optional richer editor for tablet/desktop after measuring bundle size and offline behavior.
 - For canvas, start with SVG or a simple absolute-positioned annotation layer over images/docs. Do not begin with a full whiteboard dependency.
-- For project boards, Backlog.md task files can be the local-first substrate. Drag/drop should mutate status and ordinal, then persist to repo-backed task metadata.
+- For project boards, use the jcode-native surface workspace substrate. Drag/drop should mutate status and ordinal through object operations, not through an external task adapter.
 - Every drawer state should be serializable so tablet crashes or browser reloads do not lose work.
 
 ### Desktop/laptop full-screen web: review table
@@ -410,16 +412,16 @@ Initial scope:
 - icon registry for the small Phosphor subset
 - helpers for status pills, drawers, rails, cards, transcript entries
 
-### Repo-backed synchronization
+### Durable synchronization
 
-For now, prefer repo-backed state over app-specific backend state when the object belongs to a project.
+For now, prefer the jcode-native surface workspace substrate for cards, docs, annotations, intents, and artifact references. Export to repo files should be explicit and user-directed, not the default storage path for P0.
 
 | Object | First durable home |
 | --- | --- |
-| Project cards | Backlog.md tasks |
-| Design docs | `docs/` markdown |
+| Project cards | surface workspace `card` objects |
+| Design docs | surface workspace `doc` objects first, explicit `docs/` markdown export later |
 | Architecture diagrams | markdown Mermaid or SVG files in repo |
-| Code annotations | structured sidecar or task references, later PR comments |
+| Code annotations | surface workspace `annotation` objects with compact selectors |
 | Screenshots/evidence | evidence pack/artifact storage path |
 | Session transcripts | jcode session store, exported summaries in docs/tasks when needed |
 
@@ -442,7 +444,7 @@ Candidate event classes:
 2. **Phosphor subset.** Add a tiny inline SVG icon helper and replace any emoji-like affordances or text-only status glyph gaps with named icons.
 3. **Key2 lite mode.** Make a true low-resource single-column mode: no blur, minimal metrics, keyboard shortcuts, transcript-first height, reduced CSS effects.
 4. **Y700 drawer prototype.** Add one right-side drawer system that can switch between Sessions, Artifacts, Project, and Annotations without adding a framework.
-5. **Repo-backed cards spike.** Render Backlog.md tasks as cards, allow lane/order edits, and write changes back through a safe server/tool path.
+5. **Surface workspace store.** Implement jcode-native objects for cards, docs, annotations, intents, and artifact refs, backed first by localStorage and later by server-local JSON/JSONL storage.
 6. **Annotation primitive.** Support text annotations on a transcript message or artifact preview, with a serializable local schema and export path.
 7. **Surface handoff.** Add command verbs for “continue this on tablet”, “send summary to phone”, and “open artifact on desktop”.
 
@@ -452,15 +454,15 @@ No P0-blocking open questions remain. Use these defaults unless a future impleme
 
 - **Fonts:** define CSS tokens now. Vendor small font subsets only when the installable PWA shell starts.
 - **Serif:** load Source Serif 4 only for reading and documentation modes at first, not as part of the default operational chrome.
-- **Project cards:** start with local cards in P0. Treat Backlog.md as the first repo-backed substrate in P1, but keep the adapter boundary narrow so the format can change.
-- **Annotations:** start with the local schema in [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md). In P1, write a JSON sidecar with target URI/range/status and export paths to markdown, PR comments, or Plannotator notes later.
+- **Project cards:** start with jcode-native surface workspace `card` objects in P0. Do not build a Backlog.md adapter now. External task formats can become explicit import/export adapters later.
+- **Annotations:** start with surface workspace `annotation` objects using compact jcode selectors inspired by W3C Web Annotation. Export paths to markdown, PR comments, or Plannotator notes can come later.
 - **Orchestrator:** implement it first as a role/session convention over existing jcode session and swarm primitives. Do not add a dedicated orchestrator runtime until protocol-visible surface capabilities and handoffs require it.
 
 Deferred decisions that should not block P0:
 
 - exact font subset and vendoring strategy for the PWA
-- exact Backlog.md round-trip format for ordered cards
-- exact annotation sidecar filename/location convention
+- exact repo export pack format for surface workspace objects
+- exact server-local and repo-export layout for annotation bodies and selectors
 - native Android packaging versus hardened PWA after the web proof
 - server-visible protocol shape for `surface.*`, `intent.*`, `artifact.*`, and `card.*` events
 

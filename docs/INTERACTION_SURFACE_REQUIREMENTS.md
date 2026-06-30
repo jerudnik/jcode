@@ -4,6 +4,8 @@ Status: Draft 2026-06-30
 
 Companion design language: [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md)
 
+Surface workspace substrate: [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md)
+
 This document specifies what the personal jcode interaction surfaces must do so later sessions can focus on implementation. The design-language document explains the aesthetic and philosophy. This document is the product and implementation contract.
 
 The surfaces are not competing clients. They are specialized controls over the same runtime:
@@ -20,7 +22,7 @@ These decisions should be treated as defaults unless explicitly revisited.
 2. **The first web implementation stays zero-build.** ArrowJS plus plain CSS/JS is the baseline. Any dependency must justify its weight.
 3. **Surface-local state stays local.** Drafts, drawer state, scroll positions, selected cards, and open annotations belong to the surface until explicitly persisted.
 4. **Session state stays server-owned.** Messages, tools, models, turn lifecycle, and session metadata are owned by jcode server/runtime.
-5. **Project state should be repo-backed when possible.** Cards, plans, decisions, diagrams, and annotations should be exportable to markdown or structured sidecars.
+5. **Cards, docs, and annotations should use the jcode-native surface workspace substrate first.** Repo export should be explicit and user-directed, not a Backlog.md adapter or task-manager default.
 6. **Every rich action must have a text fallback.** If a touch board can move a card, a command can move that card too.
 7. **Phosphor glyphs are preferred over emojis.** Use a vendored inline SVG subset rather than a full icon runtime.
 8. **Space Grotesk, Geist Sans, Geist Mono, and Source Serif 4 are the target controlled-surface fonts.** Use fallbacks until fonts are vendored.
@@ -182,7 +184,7 @@ Do not store locally as canonical state:
 
 - complete session transcript when server history is authoritative
 - provider credentials beyond gateway token
-- final project board state once repo-backed storage exists
+- final project board state once server-local surface workspace storage exists
 
 Acceptance criteria:
 
@@ -450,8 +452,9 @@ idea
     "pr_urls": []
   },
   "storage": {
-    "kind": "backlog_md",
-    "path": "Backlog.md"
+    "kind": "surface_workspace",
+    "workspace_id": "sw_...",
+    "object_id": "obj_..."
   }
 }
 ```
@@ -634,7 +637,7 @@ Acceptance criteria:
 
 | ID | Requirement | Acceptance criteria |
 | --- | --- | --- |
-| Y700-P1-001 | Repo-backed cards | Card state can read from and write to a repo-backed format such as Backlog.md or structured sidecar files. |
+| Y700-P1-001 | Server-local surface workspace | Card, doc, annotation, intent, and artifact-ref objects can sync to a jcode-native server-local surface workspace store. |
 | Y700-P1-002 | Artifact preview | Markdown, image, text, and diff previews render in the center panel. |
 | Y700-P1-003 | Image annotation | User can draw or place a rectangular note over an image or screenshot. |
 | Y700-P1-004 | Agent drawer | Swarm/agent status shows spawned, running, blocked, completed, failed, and stopped states. |
@@ -676,8 +679,8 @@ Acceptance criteria:
 2. Cards render by status lane.
 3. User drags a card from `todo` to `in_progress` or uses `card.move` command.
 4. UI records local change immediately.
-5. If repo-backed write is available, the change is persisted.
-6. If write fails, unsynced state remains visible and retryable.
+5. If server-local surface workspace sync is available, the change is persisted there.
+6. If sync fails, unsynced state remains visible and retryable.
 
 ## Desktop web review surface requirements
 
@@ -785,22 +788,21 @@ Suggested web keys:
 ```text
 jcode.mobileWeb.credentials.v1
 jcode.mobileWeb.deviceId.v1
-jcode.surfaceState.v1
-jcode.intentOutbox.v1
-jcode.annotationDrafts.v1
-jcode.cardDrafts.v1
+jcode.surfaceWorkspace.active.v1
+jcode.surfaceWorkspace.<workspace_id>.snapshot.v1
+jcode.surfaceWorkspace.<workspace_id>.events.v1
 jcode.handoffs.v1
 ```
 
-### Repo-backed state candidates
+### Surface workspace durable homes
 
 | State | Preferred early home | Notes |
 | --- | --- | --- |
-| Cards | Backlog.md or structured sidecar | Must preserve ordering and status. |
-| Design decisions | `docs/` markdown | Keep human-readable. |
-| Annotations | sidecar JSON or markdown review file | Need target URI and range. |
-| Diagrams | Mermaid in markdown first | SVG export is optional. |
-| Evidence packs | existing artifact/evidence directories | Link rather than duplicate. |
+| Cards | surface workspace `card` objects | Must preserve ordering and status. |
+| Design decisions | surface workspace `doc` objects | Export to `docs/` markdown explicitly when wanted. |
+| Annotations | surface workspace `annotation` objects | Need target URI, selector, and stale-anchor handling. |
+| Diagrams | artifact refs plus later SVG/canvas marks | Link rather than duplicate. |
+| Evidence packs | artifact refs to existing evidence directories | Link rather than duplicate. |
 | Handoffs | server/session state first, local fallback | Needs expiry or acknowledgement. |
 
 ### Sync conflict policy
@@ -808,9 +810,9 @@ jcode.handoffs.v1
 P0 policy:
 
 1. Local edits apply immediately.
-2. Repo/server write is attempted when available.
+2. Server-local surface workspace sync is attempted when available.
 3. If write fails, mark item `unsynced` with retry action.
-4. If remote changed since local edit, preserve both and ask user or orchestrator to reconcile.
+4. If server/export state changed since local edit, preserve both and ask user or orchestrator to reconcile.
 5. Never silently discard local drafts or annotations.
 
 ## Event extensions for future protocol work
@@ -933,23 +935,23 @@ Done when:
 - Cards and annotations persist locally.
 - A handoff can focus a session, artifact, or intent.
 
-### Phase 3: repo-backed project and annotation primitives
+### Phase 3: server-local surface workspace primitives
 
-Goal: make planning and review durable beyond browser storage.
+Goal: make planning and review durable beyond browser storage without adopting an external task format.
 
 Tasks:
 
-- Pick first card storage format.
+- Add jcode-native surface workspace serde types.
 - Add safe read/write path through server/tool layer.
-- Add annotation sidecar format.
-- Link annotations to artifacts, cards, and sessions.
+- Store object metadata as compact JSON, bodies as markdown, and operations as JSONL.
+- Link annotations to artifacts, cards, docs, and sessions.
 - Add sync-failure UI.
 
 Done when:
 
-- Card move can be written to repo-backed storage.
+- Card moves can be written to server-local surface workspace storage.
 - Annotation can target a transcript message and a file range.
-- Failed writes remain retryable and visible.
+- Failed sync remains retryable and visible.
 
 ### Phase 4: desktop review and artifact workflow
 
@@ -1050,8 +1052,8 @@ DWEB-P0-001 Add desktop review shell mode.
 
 ```text
 SURF-P1-001 Add handoff object and local handoff inbox.
-SURF-P1-002 Add repo-backed card read/write spike.
-SURF-P1-003 Add annotation sidecar export.
+SURF-P1-002 Add server-local surface workspace sync spike.
+SURF-P1-003 Add surface workspace export pack for annotations, cards, docs, and artifact refs.
 Y700-P1-002 Add markdown/image/text/diff artifact previews.
 Y700-P1-004 Add agent drawer from swarm status events.
 DWEB-P1-001 Add file line-range annotations.
