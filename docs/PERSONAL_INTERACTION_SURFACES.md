@@ -2,6 +2,8 @@
 
 Status: Draft 2026-06-30
 
+Implementation requirements: [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md)
+
 This document records a personal design direction for jcode interaction surfaces that are more controllable than the terminal UI. It extends the existing jcode values of minimalism, cypherpunk pragmatism, functional density, and crisp performance without turning the UI into a heavyweight dashboard.
 
 The central idea is that every surface should feel like the same instrument viewed through a device-specific lens:
