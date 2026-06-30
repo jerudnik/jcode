@@ -1453,6 +1453,20 @@ pub struct GatewayConfig {
     pub port: u16,
     /// Bind address (default: 0.0.0.0)
     pub bind_addr: String,
+    /// Access mode for the gateway: local, mesh, or public_reviewed.
+    pub access_mode: String,
+    /// Required for public_reviewed mode. This is intentionally false by default.
+    pub public_exposure_reviewed: bool,
+    /// Disabled-by-default placeholder for future Kanidm OIDC Authorization Code + PKCE.
+    pub oidc_enabled: bool,
+    /// OIDC issuer URL for the disabled-by-default Kanidm path.
+    pub oidc_issuer: Option<String>,
+    /// OIDC client id for the disabled-by-default Kanidm path.
+    pub oidc_client_id: Option<String>,
+    /// Required audience for OIDC validation when that path is approved/enabled.
+    pub oidc_audience: Option<String>,
+    /// Optional required group claim for OIDC validation when that path is approved/enabled.
+    pub oidc_required_group: Option<String>,
 }
 
 impl Default for GatewayConfig {
@@ -1461,6 +1475,13 @@ impl Default for GatewayConfig {
             enabled: false,
             port: 7643,
             bind_addr: "0.0.0.0".to_string(),
+            access_mode: "mesh".to_string(),
+            public_exposure_reviewed: false,
+            oidc_enabled: false,
+            oidc_issuer: None,
+            oidc_client_id: None,
+            oidc_audience: None,
+            oidc_required_group: None,
         }
     }
 }

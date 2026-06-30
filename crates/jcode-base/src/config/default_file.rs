@@ -523,6 +523,19 @@ enabled = false
 port = 7643
 # Bind address (0.0.0.0 for LAN/Tailscale reachability)
 bind_addr = "0.0.0.0"
+# Access mode: "local" requires loopback bind, "mesh" is the default LAN/mesh path,
+# and "public_reviewed" refuses to start unless public_exposure_reviewed=true.
+access_mode = "mesh"
+# Set true only after a documented low-risk security review for public exposure.
+public_exposure_reviewed = false
+# Kanidm OIDC Authorization Code + PKCE/WebAuthn path is disabled by default.
+# Enabling this currently fails closed until the security review approves issuer,
+# audience, JWKS validation, group mapping, and browser cookie/ticket handling.
+oidc_enabled = false
+# oidc_issuer = "https://idm.example.test/oauth2/openid/jcode"
+# oidc_client_id = "jcode"
+# oidc_audience = "jcode"
+# oidc_required_group = "jcode-users"
 
 [power]
 # Prevent the machine from suspending (idle/lid sleep) while any jcode session
