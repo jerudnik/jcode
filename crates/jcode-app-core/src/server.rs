@@ -727,6 +727,20 @@ impl Server {
                     "skipped",
                     "restored session was not interrupted by reload",
                 );
+                {
+                    let mut sessions = self.sessions.write().await;
+                    sessions.remove(&session_id);
+                }
+                {
+                    let mut shutdown_signals = self.shutdown_signals.write().await;
+                    shutdown_signals.remove(&session_id);
+                }
+                remove_session_interrupt_queue(&self.soft_interrupt_queues, &session_id).await;
+                remove_background_tool_signal(&session_id);
+                {
+                    let mut agent_guard = agent.lock().await;
+                    agent_guard.mark_closed();
+                }
                 stats.skipped += 1;
                 update_member_status(
                     &session_id,
@@ -768,6 +782,22 @@ impl Server {
                     "failed",
                     "recovery directive missing for interrupted headless session",
                 );
+                {
+                    let mut sessions = self.sessions.write().await;
+                    sessions.remove(&session_id);
+                }
+                {
+                    let mut shutdown_signals = self.shutdown_signals.write().await;
+                    shutdown_signals.remove(&session_id);
+                }
+                remove_session_interrupt_queue(&self.soft_interrupt_queues, &session_id).await;
+                remove_background_tool_signal(&session_id);
+                {
+                    let mut agent_guard = agent.lock().await;
+                    agent_guard.mark_crashed(Some(
+                        "Headless reload recovery directive was missing".to_string(),
+                    ));
+                }
                 continue;
             };
             stats.resumed += 1;
