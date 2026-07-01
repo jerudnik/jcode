@@ -10,7 +10,8 @@ case "$branch" in
     exit 2
     ;;
   distro/nix)
-    echo "OK: distro/nix. Packaging, flake, Home Manager, cache, and CI changes only."
+    echo "CAUTION: distro/nix is packaging, flake, Home Manager, cache, and CI changes only."
+    echo "         Feature/docs/behavior work belongs on main."
     ;;
   main)
     echo "OK: main. Stable fork behavior and customizations belong here."
@@ -25,6 +26,10 @@ case "$branch" in
     echo "WARNING: branch does not match the fork rail convention." >&2
     ;;
 esac
+
+echo
+echo "default rule: if it changes Jcode behavior or product docs, use main."
+echo "override rule: use distro/nix only for reusable distribution glue."
 
 echo
 printf 'remotes:\n'
