@@ -719,7 +719,7 @@ Ambient mode operates under the [Safety System](./SAFETY_SYSTEM.md) — a human-
 
 Key constraints for ambient:
 - **All actions classified** — auto-allowed (read, local branches, memory ops), requires permission (PRs, pushes, communication), or always denied (force-push, delete remote branches)
-- **Commits to a separate branch** — never pushes to `main` or `nix-flake` directly
+- **Commits to a separate branch** — never pushes to maintained branches (`main`, `distro/nix`, or `vendor/upstream`) directly
 - **Code changes require worktree + PR** — modifications always go through review
 - **Small, focused changes** — no large refactors without user request
 - **Session transcript** — full log of every action, sent as summary after each cycle
