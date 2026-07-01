@@ -54,7 +54,7 @@ let
     # Cargo git dependencies must be fetched as fixed-output Nix sources before
     # vendoring. Without these hashes, Crane can fall back to Cargo/git network
     # access while preparing dependencies, which is flaky on hosted macOS CI.
-    cargoLock = "${src}/Cargo.lock";
+    cargoLock = ../Cargo.lock;
     outputHashes = {
       "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.2#63e420bb4e035490d28cbca3f58e26baf297048e" =
         "sha256-Sf3EmWIZJ29KdaNbYRvM1tFXAPhOGhmpHOyqViEwkRI=";

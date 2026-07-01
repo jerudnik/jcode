@@ -136,10 +136,10 @@ pub(crate) fn ensure_session(profile_name: &str, profile: &AssistantProfile) -> 
 
     session.working_dir = Some(cwd);
     session.assistant = Some(meta);
-    if let Some(model) = profile.model.clone() {
-        if session.model.is_none() {
-            session.model = Some(model);
-        }
+    if let Some(model) = profile.model.clone()
+        && session.model.is_none()
+    {
+        session.model = Some(model);
     }
     session.save()?;
     Ok(session_id)
@@ -319,10 +319,10 @@ pub(crate) fn prepare_launch(args: &mut Args, profile_name: &str) -> Result<bool
     // server spawn, cwd switch, and TUI resume.
     args.cwd = Some(cwd);
     args.resume = Some(session_id.clone());
-    if args.model.is_none() {
-        if let Some(model) = profile.model.clone() {
-            args.model = Some(model);
-        }
+    if args.model.is_none()
+        && let Some(model) = profile.model.clone()
+    {
+        args.model = Some(model);
     }
 
     output::stderr_info(format!(

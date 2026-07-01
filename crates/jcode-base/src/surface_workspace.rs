@@ -276,16 +276,15 @@ fn apply_operation(
                     .unwrap_or_else(|| op.payload.clone()),
             )?;
             upsert_object(snapshot, object);
-            if let Some(body) = op.payload.get("body").and_then(Value::as_str) {
-                if let Some(id) = op
+            if let Some(body) = op.payload.get("body").and_then(Value::as_str)
+                && let Some(id) = op
                     .payload
                     .get("object")
                     .and_then(|v| v.get("id"))
                     .and_then(Value::as_str)
                     .or_else(|| op.payload.get("id").and_then(Value::as_str))
-                {
-                    snapshot.bodies.insert(id.to_string(), body.to_string());
-                }
+            {
+                snapshot.bodies.insert(id.to_string(), body.to_string());
             }
         }
         "object.update" => {

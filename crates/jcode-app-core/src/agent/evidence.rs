@@ -44,7 +44,7 @@ impl Agent {
                 output: output.map(|text| {
                     crate::session::payload_summary_text(text, Some("text/plain".to_string()))
                 }),
-                error_class: result.as_ref().err().map(|error| error_class(error)),
+                error_class: result.as_ref().err().map(error_class),
             },
             correlation,
         );
