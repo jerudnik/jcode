@@ -335,6 +335,8 @@ impl WsTestClient {
             client_has_local_history: false,
             allow_session_takeover: false,
             terminal_env: Vec::new(),
+            protocol_version: None,
+            build_hash: None,
         })
         .await
     }
@@ -654,6 +656,9 @@ pub(crate) async fn run_websocket_transport_scenario() -> Result<TransportScenar
                 port: gateway_port,
                 bind_addr: "127.0.0.1".to_string(),
                 enabled: true,
+                access_mode: "local".to_string(),
+                public_exposure_reviewed: false,
+                oidc_enabled: false,
             });
     let server_handle = tokio::spawn(async move { server_instance.run().await });
 
