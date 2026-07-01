@@ -1826,10 +1826,10 @@ fn expand_home(path: &str) -> String {
         }
         return path.to_string();
     }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{}/{}", home.trim_end_matches('/'), rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Ok(home) = std::env::var("HOME")
+    {
+        return format!("{}/{}", home.trim_end_matches('/'), rest);
     }
     path.to_string()
 }
