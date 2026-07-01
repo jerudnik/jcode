@@ -1,12 +1,12 @@
 # Cloudflare Experiment Strategy After Upstream Sync
 
 Date: 2026-06-16
-Base: `nix-flake` after syncing upstream through v0.28.0
-Source branch reviewed: `origin/nix-flake-dev`
+Historical base: former `nix-flake` branch after syncing upstream through v0.28.0. Current branch model uses `distro/nix` for packaging and `main` for custom work.
+Historical source branch reviewed: former `origin/nix-flake-dev`.
 
 ## Summary
 
-Do not merge `nix-flake-dev` wholesale. It is based on the old pre-sync fork base and is now hundreds of upstream commits behind the stable custom fork branch. The Cloudflare work contains useful experiments, but the latest upstream memory/retrieval stack changes the baseline: hybrid dense+BM25 recall, listwise LLM reranking, ONNX/cross-encoder work, and cadence gating already improve the latency/quality tradeoff locally.
+Do not merge the former `nix-flake-dev` work wholesale. It is based on the old pre-sync fork base and is now hundreds of upstream commits behind the stable custom fork branch. The Cloudflare work contains useful experiments, but the latest upstream memory/retrieval stack changes the baseline: hybrid dense+BM25 recall, listwise LLM reranking, ONNX/cross-encoder work, and cadence gating already improve the latency/quality tradeoff locally.
 
 The prior host experiments found Cloudflare service latency creates a hard ceiling for latency-sensitive work. Treat Cloudflare as a durability, sharing, observability, and batch/offline substrate, not as the hot path for interactive memory recall or prompt-turn decisions unless measurements prove otherwise.
 
@@ -47,7 +47,7 @@ The prior host experiments found Cloudflare service latency creates a hard ceili
 
 - Any Cloudflare feature that adds turn-time network round trips without a local fallback.
 - Any branch code that lowers upstream code quality: broad globals, hidden telemetry, network-dependent unit tests, hard-coded account/resource names, or unclear ownership boundaries.
-- Blind rebase of all 71 `nix-flake-dev` commits.
+- Blind rebase of all 71 former `nix-flake-dev` commits.
 
 ## Porting order
 
