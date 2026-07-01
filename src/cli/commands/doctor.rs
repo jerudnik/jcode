@@ -285,7 +285,11 @@ pub fn run_doctor_command(emit_json: bool) -> Result<()> {
     } else {
         println!("server:  {}  (not running)", report.server.socket);
     }
-    println!("verdict: {} -- {}", report.verdict.to_uppercase(), report.verdict_detail);
+    println!(
+        "verdict: {} -- {}",
+        report.verdict.to_uppercase(),
+        report.verdict_detail
+    );
     println!("fallback: {}", report.fallback);
 
     Ok(())
@@ -315,7 +319,9 @@ mod tests {
             Origin::Release
         );
         assert_eq!(
-            Origin::classify(&PathBuf::from("/home/u/.jcode/builds/versions/0.14.6/jcode")),
+            Origin::classify(&PathBuf::from(
+                "/home/u/.jcode/builds/versions/0.14.6/jcode"
+            )),
             Origin::Release
         );
     }

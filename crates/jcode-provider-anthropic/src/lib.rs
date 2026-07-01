@@ -970,13 +970,24 @@ mod oauth_tool_list_tests {
         let registry = vec![def("websearch"), def("webfetch"), def("nix")];
         let tools = format_tools(&registry, true, false);
         let got = names(&tools);
-        assert_eq!(&got[..CLAUDE_CODE_IDENTITY_TOOLS.len()], CLAUDE_CODE_IDENTITY_TOOLS);
-        assert_eq!(&got[CLAUDE_CODE_IDENTITY_TOOLS.len()..], ["websearch", "webfetch", "nix"]);
+        assert_eq!(
+            &got[..CLAUDE_CODE_IDENTITY_TOOLS.len()],
+            CLAUDE_CODE_IDENTITY_TOOLS
+        );
+        assert_eq!(
+            &got[CLAUDE_CODE_IDENTITY_TOOLS.len()..],
+            ["websearch", "webfetch", "nix"]
+        );
     }
 
     #[test]
     fn non_allowlisted_registry_tools_are_not_leaked() {
-        let registry = vec![def("websearch"), def("gmail"), def("browser"), def("memory")];
+        let registry = vec![
+            def("websearch"),
+            def("gmail"),
+            def("browser"),
+            def("memory"),
+        ];
         let tools = format_tools(&registry, true, false);
         let got = names(&tools);
         assert!(got.contains(&"websearch".to_string()));
