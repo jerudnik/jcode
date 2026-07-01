@@ -677,11 +677,12 @@ fn assistant_chrome_spans(
     }
 
     // Session name (memorable short name) when distinct from the profile label.
-    if let Some(name) = session_name.filter(|n| !n.is_empty()) {
-        if name != meta.display_label() && name != meta.profile {
-            spans.push(sep());
-            spans.push(Span::styled(name.to_string(), Style::default().fg(dim)));
-        }
+    if let Some(name) = session_name.filter(|n| !n.is_empty())
+        && name != meta.display_label()
+        && name != meta.profile
+    {
+        spans.push(sep());
+        spans.push(Span::styled(name.to_string(), Style::default().fg(dim)));
     }
 
     // Optional zmx/backing label.
