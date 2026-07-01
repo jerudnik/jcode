@@ -81,7 +81,10 @@ impl Agent {
             SessionLogStatus::Cancelled => "cancelled",
             SessionLogStatus::Interrupted => "interrupted",
         };
-        match self.current_git_snapshot().and_then(|snapshot| snapshot.head) {
+        match self
+            .current_git_snapshot()
+            .and_then(|snapshot| snapshot.head)
+        {
             Some(head) => {
                 let short: String = head.chars().take(8).collect();
                 format!("turn {status_label} @ {when} (git {short})")

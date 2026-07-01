@@ -72,8 +72,7 @@ impl HandshakeCompatibility {
         let Some(client_protocol) = client_protocol else {
             return (
                 HandshakeCompatibility::Compatible,
-                "legacy client advertised no protocol version; attaching as compatible"
-                    .to_string(),
+                "legacy client advertised no protocol version; attaching as compatible".to_string(),
             );
         };
 
@@ -106,7 +105,9 @@ impl HandshakeCompatibility {
             // the protocol contract holds, so attaching is safe.
             _ => (
                 HandshakeCompatibility::Compatible,
-                format!("protocol v{server_protocol} matches; build hash not comparable, attaching as compatible"),
+                format!(
+                    "protocol v{server_protocol} matches; build hash not comparable, attaching as compatible"
+                ),
             ),
         }
     }

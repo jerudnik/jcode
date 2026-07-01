@@ -93,8 +93,12 @@ mod tests {
         // The server hash is whatever this test binary was stamped with; a
         // deliberately-mismatched client hash forces IncompatibleReconnect so
         // the assertion does not depend on the ambient build hash.
-        let verdict =
-            evaluate_and_notify(9, Some(PROTOCOL_VERSION), Some("0000000-not-a-real-hash"), &tx);
+        let verdict = evaluate_and_notify(
+            9,
+            Some(PROTOCOL_VERSION),
+            Some("0000000-not-a-real-hash"),
+            &tx,
+        );
         assert_eq!(verdict, HandshakeCompatibility::IncompatibleReconnect);
         match rx.try_recv() {
             Ok(ServerEvent::HandshakeVerdict {
