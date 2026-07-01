@@ -39,7 +39,7 @@
       flake = {
         # Overlay: the single most useful thing for downstream reuse. Consumers
         # add `inputs.jcode.overlays.default` and get `pkgs.jcode`.
-        overlays.default = final: prev: {
+        overlays.default = final: _prev: {
           jcode = inputs.self.packages.${final.stdenv.hostPlatform.system}.jcode;
         };
 
@@ -74,7 +74,7 @@
           craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
 
           # Version is the single source of truth from the root Cargo.toml.
-          version = (craneLib.crateNameFromCargoToml { src = ./.; }).version;
+          inherit ((craneLib.crateNameFromCargoToml { src = ./.; })) version;
 
           jcode = pkgs.callPackage ./nix/package.nix {
             inherit craneLib version;
@@ -103,7 +103,7 @@
           checks = { };
 
           devShells.default = craneLib.devShell {
-            checks = self'.checks;
+            inherit (self') checks;
             packages = [
               pkgs.cargo-nextest
               pkgs.cargo-audit
@@ -122,6 +122,12 @@
               # conflict resolutions so local rebases self-heal like CI does.
               if [ -x scripts/rerere-cache.sh ]; then
                 scripts/rerere-cache.sh setup || true
+              fi
+              # Install a local pre-push guard that blocks accidental writes to
+              # distro/nix/vendor rails. It is idempotent and leaves user-owned
+              # hooks untouched.
+              if [ -x scripts/install-git-hooks.sh ]; then
+                scripts/install-git-hooks.sh || true
               fi
               # Non-blocking fork-drift nudge: reads cached refs, never blocks on
               # the network, auto fast-forwards only the unambiguously safe case.
