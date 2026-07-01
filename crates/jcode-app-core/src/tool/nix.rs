@@ -180,18 +180,20 @@ impl Tool for NixTool {
             )
         })?;
 
-        let output =
-            match tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait_with_output())
-                .await
-            {
-                Ok(result) => result?,
-                Err(_) => {
-                    return Ok(ToolOutput::new(format!(
-                        "`{display}` timed out after {timeout_ms}ms. First-time package fetches can \
+        let output = match tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            child.wait_with_output(),
+        )
+        .await
+        {
+            Ok(result) => result?,
+            Err(_) => {
+                return Ok(ToolOutput::new(format!(
+                    "`{display}` timed out after {timeout_ms}ms. First-time package fetches can \
                          be slow; retry with a larger `timeout`, or pre-warm the package."
-                    )));
-                }
-            };
+                )));
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -314,8 +316,6 @@ mod tests {
 
     #[test]
     fn unknown_mode_errors() {
-        assert!(
-            NixTool::build_argv(&input(json!({"mode": "bogus", "packages": ["x"]}))).is_err()
-        );
+        assert!(NixTool::build_argv(&input(json!({"mode": "bogus", "packages": ["x"]}))).is_err());
     }
 }

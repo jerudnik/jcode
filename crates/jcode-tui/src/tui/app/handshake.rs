@@ -194,12 +194,8 @@ mod tests {
 
     #[test]
     fn compatible_always_attaches() {
-        let action = decide_handshake_action(&ctx(
-            HandshakeCompatibility::Compatible,
-            None,
-            None,
-            false,
-        ));
+        let action =
+            decide_handshake_action(&ctx(HandshakeCompatibility::Compatible, None, None, false));
         assert_eq!(action, HandshakeAction::Attach);
     }
 
@@ -268,7 +264,10 @@ mod tests {
             cmd.get_program(),
             std::ffi::OsStr::new("/home/u/.jcode/builds/current/jcode")
         );
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(args, vec!["serve", "--socket", "/tmp/x.sock"]);
         let guard = cmd
             .get_envs()
