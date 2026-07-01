@@ -1,99 +1,75 @@
 # Fork branch maintenance
 
-This fork is maintained as two downstream branches:
+This fork has exactly three maintained branches.
 
 ```mermaid
 gitGraph
-  commit id: "upstream"
-  branch nix-flake
-  checkout nix-flake
-  commit id: "generic Nix packaging"
+  commit id: "upstream jcode"
+  branch "vendor/upstream"
+  checkout "vendor/upstream"
+  commit id: "mirror only"
+  branch "distro/nix"
+  checkout "distro/nix"
+  commit id: "flake packaging"
+  branch main
+  checkout main
+  commit id: "custom fork work"
 ```
 
 ## Branch roles
 
-| Branch | Role | Allowed original commits |
+| Branch | Contents | Rule |
 |---|---|---|
-| `main` | Upstream mirror plus the tiny fork-maintenance scheduler workflow | `.github/workflows/fork-maintenance.yml` only |
-| `nix-flake` | `main` plus generic Nix packaging, docs, and CI | Only reusable Nix packaging changes |
+| `vendor/upstream` | Upstream `1jehuang/jcode` exactly | First landing place for upstream syncs. No downstream edits. |
+| `distro/nix` | `vendor/upstream` plus reusable flake packaging | Nix flake, lockfile, `nix/`, cache/Cachix, packaging workflows, and packaging docs only. |
+| `main` | `distro/nix` plus fork customizations | Daily development branch for app behavior, mobile/web/server work, compatibility shims, tests, and fork docs. |
 
-All flow is downstream only:
+`main` must be a descendant of `distro/nix`, and `distro/nix` must be a descendant of `vendor/upstream`.
 
-1. Recreate `main` from `upstream/master` plus `.github/workflows/fork-maintenance.yml`.
-2. Rebase `nix-flake` onto `main`.
+## Placement rules
 
-Never merge `nix-flake` back into `main`.
+- Put behavior changes on `main`.
+- Put mobile, web, server, gateway, assistant, provider, test, and roadmap work on `main`.
+- Put reusable packaging and distribution glue on `distro/nix`.
+- Put clean upstream updates on `vendor/upstream` first, then rebase `distro/nix`, then rebase `main`.
+- Do not merge upstream into downstream branches. Rebase the stack.
+- Use `--force-with-lease` for maintained branch updates.
 
-## Safe status check
-
-Run this before changing branches:
-
-```sh
-scripts/branch-model-status.sh
-```
-
-It fetches `origin` and `upstream`, then reports:
-
-- whether `origin/main` only differs from `upstream/master` by the scheduler workflow
-- the commits carried by `origin/nix-flake` beyond `origin/main`
-- remote pull requests targeting each maintained branch
-- recent Nix workflow runs
-
-The script is read-only apart from `git fetch`.
-
-## Updating `main` from upstream
-
-Automated upstream sync runs every six hours through the default-branch
-`Fork maintenance` scheduler. To trigger it manually:
+## Manual sync outline
 
 ```sh
-gh workflow run "Fork maintenance" --repo jerudnik/jcode -f task=sync-upstream
+git fetch github upstream
+
+git switch vendor/upstream
+git reset --hard upstream/master
+
+git switch distro/nix
+git rebase vendor/upstream
+nix flake show --all-systems --json
+
+git switch main
+git rebase distro/nix
 ```
 
-That dispatches the `Nix` workflow on `nix-flake`, which rebuilds `main` from
-`upstream/master` plus `.github/workflows/fork-maintenance.yml`, then rebases and
-pushes `nix-flake`. The `nix-flake` push triggers normal Nix validation, so
-upstream breakage surfaces before the next lock update.
-
-Manual equivalent:
+Push only after validation:
 
 ```sh
-git fetch origin upstream
-git log --oneline upstream/master..origin/main -- . ':(exclude).github/workflows/fork-maintenance.yml'
+git push --force-with-lease github vendor/upstream
+git push --force-with-lease github distro/nix
+git push --force-with-lease github main
 ```
 
-The log must be empty before force-updating `main`.
+## Audits
 
-## Rebasing `nix-flake`
-
-After `main` moves:
+Check the branch contract with:
 
 ```sh
-git fetch origin upstream
-git switch nix-flake
-git rebase origin/main
-nix flake show
-nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
-nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
-git push --force-with-lease origin nix-flake
+git fetch github upstream
+git rev-list --left-right --count upstream/master...github/vendor/upstream
+git rev-list --left-right --count github/vendor/upstream...github/distro/nix
+git rev-list --left-right --count github/distro/nix...github/main
+git diff --name-only github/vendor/upstream..github/distro/nix
+git diff --name-only github/distro/nix..github/main
 ```
 
-The Nix branch should contain only packaging-related changes. Audit with:
-
-```sh
-git log --oneline origin/main..nix-flake
-git diff --stat origin/main..nix-flake
-```
-
-Expected touched areas are `flake.nix`, `flake.lock`, `nix/**`, Nix docs, and Nix-specific workflows.
-
-## CI ownership
-
-- Upstream Rust and product CI belongs to upstream/default workflows.
-- Nix reproducibility, supported platform builds, Cachix publishing, and flake.lock update PRs belong to `nix-flake`.
-- Branch-local Nix validation runs automatically on `push` and PR events for
-  `nix-flake`. Lock updates are invoked through the registered Nix workflow:
-  `gh workflow run Nix --repo jerudnik/jcode --ref nix-flake -f task=update-flake-lock`.
-- The default-branch `Fork maintenance` workflow dispatches upstream sync every
-  six hours and flake.lock updates weekly on Monday at 06:47 UTC.
-- `x86_64-darwin` is intentionally unsupported.
+Expected `distro/nix` touched areas are packaging-only: `.github/workflows/*nix*`, `.github/workflows/fork-maintenance.yml`, `flake.nix`, `flake.lock`, `nix/**`, `docs/NIX.md`, `docs/BRANCHING.md`, packaging-related README sections, and packaging helper scripts.
