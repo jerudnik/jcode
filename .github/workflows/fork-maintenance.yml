@@ -1,8 +1,7 @@
 name: Fork maintenance
 
 # Default-branch scheduler for fork maintenance. Keep this workflow tiny: it
-# only dispatches branch-local workflows on `nix-flake`, where the actual Nix
-# packaging and validation logic lives.
+# dispatches the branch-stack workflow registered on `main`.
 
 on:
   schedule:
@@ -38,7 +37,7 @@ jobs:
       - name: Dispatch Nix sync task
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run Nix --repo "$GITHUB_REPOSITORY" --ref nix-flake -f task=sync-upstream
+        run: gh workflow run Nix --repo "$GITHUB_REPOSITORY" --ref main -f task=sync-upstream
 
   dispatch-lock-update:
     name: dispatch flake.lock update
@@ -50,4 +49,4 @@ jobs:
       - name: Dispatch Nix lock update task
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run Nix --repo "$GITHUB_REPOSITORY" --ref nix-flake -f task=update-flake-lock
+        run: gh workflow run Nix --repo "$GITHUB_REPOSITORY" --ref main -f task=update-flake-lock

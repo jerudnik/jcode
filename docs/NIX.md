@@ -1,18 +1,18 @@
 # Using jcode with Nix
 
-This branch ships a [Nix flake](https://nixos.wiki/wiki/Flakes) so jcode can be
-built, run, installed reproducibly, and reused as a flake input by downstream
-configurations. The flake is intentionally unopinionated: it exposes the package,
-an overlay, an app, a dev shell, CI checks, and a Home Manager module, but bakes
-in no personal configuration.
+The `distro/nix` and `main` branches ship a
+[Nix flake](https://nixos.wiki/wiki/Flakes) so jcode can be built, run,
+installed reproducibly, and reused as a flake input by downstream
+configurations. The packaging layer exposes the package, an overlay, an app, a
+dev shell, CI checks, and a Home Manager module.
 
 ## Branches
 
-The upstream-mirror branch is `main` and is kept free of fork packaging commits.
-Use the Nix packaging branch explicitly in flake URLs:
+Use one of the branch-specific flake URLs:
 
 ```sh
-github:jerudnik/jcode/nix-flake
+github:jerudnik/jcode/distro/nix # packaging layer only
+github:jerudnik/jcode/main       # stable custom fork
 ```
 
 See [BRANCHING.md](BRANCHING.md) for the full downstream-only maintenance
@@ -27,13 +27,13 @@ procedure.
 Run without installing:
 
 ```sh
-nix run github:jerudnik/jcode/nix-flake
+nix run github:jerudnik/jcode/main
 ```
 
 Build the binary:
 
 ```sh
-nix build github:jerudnik/jcode/nix-flake
+nix build github:jerudnik/jcode/main
 ./result/bin/jcode --version
 ```
 
@@ -62,8 +62,8 @@ safe to expose publicly and safe for others to consume.
 ### Maintaining the cache
 
 CI (`.github/workflows/nix.yml`) pushes successful build outputs automatically
-from `nix-flake` once the `CACHIX_AUTH_TOKEN` repo secret is set. Pull requests
-consume the cache read-only and do not push. To set up or re-key:
+from `distro/nix` and `main` once the `CACHIX_AUTH_TOKEN` repo secret is set.
+Pull requests consume the cache read-only and do not push. To set up or re-key:
 
 1. The cache is `jerudnik-jcode` on Cachix.
 2. Generate a push auth token in the Cachix UI and store it as the
@@ -73,13 +73,12 @@ consume the cache read-only and do not push. To set up or re-key:
 
 ### Automated maintenance
 
-The default branch carries one fork-only exception:
-`.github/workflows/fork-maintenance.yml`. It is a tiny scheduler that dispatches
-the real branch-local maintenance work on `nix-flake`.
+The default branch is the stable custom fork, `main`. It carries the scheduler
+that dispatches branch-stack maintenance work.
 
-Upstream sync runs every six hours. It rebuilds `main` from `upstream/master`
-plus the scheduler workflow, rebases `nix-flake`, pushes it, and lets the normal
-Nix CI surface breakage early.
+Upstream sync runs every six hours. It sets `vendor/upstream` to
+`upstream/master`, rebases `distro/nix`, rebases `main`, pushes with
+`--force-with-lease`, and lets CI surface breakage early.
 
 `flake.lock` updates run weekly on Monday at 06:47 UTC, after the 06:17 UTC
 sync window. To trigger either task manually:
@@ -88,20 +87,20 @@ sync window. To trigger either task manually:
 gh workflow run "Fork maintenance" --repo jerudnik/jcode -f task=sync-upstream
 gh workflow run "Fork maintenance" --repo jerudnik/jcode -f task=update-flake-lock
 
-# Or dispatch the branch-local workflow directly:
-gh workflow run Nix --repo jerudnik/jcode --ref nix-flake -f task=sync-upstream
-gh workflow run Nix --repo jerudnik/jcode --ref nix-flake -f task=update-flake-lock
+# Or dispatch the branch-stack workflow directly:
+gh workflow run Nix --repo jerudnik/jcode --ref main -f task=sync-upstream
+gh workflow run Nix --repo jerudnik/jcode --ref main -f task=update-flake-lock
 ```
 
 The lock update task invokes `.github/workflows/nix-update.yml` as a reusable
 workflow, updates `flake.lock` on a temporary branch, validates the lock bump,
-and opens or updates a PR against `nix-flake`.
+and opens or updates a PR against `distro/nix`.
 
 ## Use as a flake input
 
 ```nix
 {
-  inputs.jcode.url = "github:jerudnik/jcode/nix-flake";
+  inputs.jcode.url = "github:jerudnik/jcode/main";
   # Optionally pin nixpkgs to your own:
   inputs.jcode.inputs.nixpkgs.follows = "nixpkgs";
 }

@@ -1,9 +1,8 @@
 name: Update flake.lock
 
 # Reusable dependency bump for the Nix flake inputs. The repository's default
-# branch is reserved as an upstream mirror, so this workflow is invoked by the
-# registered Nix workflow on `nix-flake` instead of relying on schedule or manual
-# dispatch triggers that GitHub only registers from the default branch.
+# branch is the stable custom fork, so this workflow is invoked by the
+# registered Nix workflow on `main` and opens lock-update PRs against `distro/nix`.
 
 on:
   workflow_call:
@@ -22,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: nix-flake
+          ref: distro/nix
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
@@ -51,12 +50,12 @@ jobs:
           nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
           nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
 
-      - name: Open pull request against nix-flake
+      - name: Open pull request against distro/nix
         if: steps.update.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          branch="automation/update-flake-lock"
+          branch="automation/update-distro-flake-lock"
           body="$RUNNER_TEMP/update-flake-lock-pr.md"
 
           {
@@ -102,15 +101,15 @@ jobs:
           git commit -m "chore(nix): update flake.lock"
           git push --force-with-lease origin "$branch"
 
-          existing_pr="$(gh pr list --head "$branch" --base nix-flake --json number --jq '.[0].number // empty')"
+          existing_pr="$(gh pr list --head "$branch" --base distro/nix --json number --jq '.[0].number // empty')"
           if [ -n "$existing_pr" ]; then
             gh pr edit "$existing_pr" \
-              --base nix-flake \
+              --base distro/nix \
               --title "chore(nix): update flake.lock" \
               --body-file "$body"
           else
             gh pr create \
-              --base nix-flake \
+              --base distro/nix \
               --head "$branch" \
               --title "chore(nix): update flake.lock" \
               --body-file "$body"

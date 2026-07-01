@@ -6,7 +6,7 @@ name: Nix
 
 on:
   push:
-    branches: [nix-flake]
+    branches: [distro/nix, main]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -18,7 +18,7 @@ on:
       - ".github/workflows/nix.yml"
       - ".github/workflows/nix-update.yml"
   pull_request:
-    branches: [nix-flake]
+    branches: [distro/nix, main]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -100,7 +100,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
-      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/nix-flake' && secrets.CACHIX_AUTH_TOKEN != '' }}
+      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/distro/nix' || github.ref == 'refs/heads/main') && secrets.CACHIX_AUTH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -109,10 +109,18 @@ jobs:
 
       - name: Cachix (read/write public binary cache)
         if: env.CACHIX_CAN_PUSH == 'true'
+        continue-on-error: true
         uses: cachix/cachix-action@v17
         with:
           name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Build success is authoritative; cache upload is best-effort. Daemon
+          # mode pushes the full dependency build closure and can fail during
+          # post-job drain on slower ARM runners after the package already built
+          # and smoke-tested successfully. Push just the final result path.
+          useDaemon: false
+          pathsToPush: ./result
+          cachixArgs: -j2
 
       - name: Cachix (read-only public binary cache)
         if: env.CACHIX_CAN_PUSH != 'true'
@@ -182,71 +190,59 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync main and rebase nix-flake
+      - name: Sync vendor/upstream, distro/nix, and main
         run: |
           set -euo pipefail
 
-          scheduler=".github/workflows/fork-maintenance.yml"
           upstream_url="https://github.com/1jehuang/jcode.git"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git fetch --prune origin main nix-flake
+          git fetch --prune origin vendor/upstream distro/nix main
           git remote add upstream "$upstream_url" 2>/dev/null || git remote set-url upstream "$upstream_url"
           git fetch --prune upstream master
 
-          old_main="$(git rev-parse origin/main)"
-          old_nix="$(git rev-parse origin/nix-flake)"
-
-          # If the default branch has fork-only commits, keep this automation
-          # conservative. A branch that is merely behind upstream is expected and
-          # must be allowed, otherwise every real sync attempt fails.
-          if ! git merge-base --is-ancestor origin/main upstream/master; then
-            unexpected="$(git diff --name-only upstream/master...origin/main | grep -v -x "$scheduler" || true)"
-            if [ -n "$unexpected" ]; then
-              echo "origin/main has fork-only changes outside $scheduler:" >&2
-              echo "$unexpected" >&2
-              exit 1
-            fi
+          # Enable rerere and import the repo's shared recorded conflict
+          # resolutions so recurring downstream-vs-upstream conflicts replay
+          # automatically. A genuinely NEW conflict still fails the job loudly
+          # (rerere-rebase.sh aborts non-zero) so a human resolves it once.
+          git config rerere.enabled true
+          git config rerere.autoupdate true
+          if [ -x scripts/rerere-cache.sh ]; then
+            scripts/rerere-cache.sh import || true
           fi
+
+          old_vendor="$(git rev-parse origin/vendor/upstream)"
+          old_distro="$(git rev-parse origin/distro/nix)"
+          old_main="$(git rev-parse origin/main)"
 
           tmp="$(mktemp -d)"
-          trap 'git worktree remove --force "$tmp/main" >/dev/null 2>&1 || true; git worktree remove --force "$tmp/nix-flake" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+          trap 'git worktree remove --force "$tmp/distro" >/dev/null 2>&1 || true; git worktree remove --force "$tmp/main" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
 
-          git worktree add --detach "$tmp/main" upstream/master
-          mkdir -p "$tmp/main/.github/workflows"
-          if git show "origin/main:$scheduler" > "$tmp/main/$scheduler" 2>/dev/null; then
-            :
+          git worktree add --detach "$tmp/distro" origin/distro/nix
+          scripts/rerere-rebase.sh "$tmp/distro" upstream/master
+          new_distro="$(git -C "$tmp/distro" rev-parse HEAD)"
+
+          git worktree add --detach "$tmp/main" origin/main
+          scripts/rerere-rebase.sh "$tmp/main" "$new_distro"
+          new_main="$(git -C "$tmp/main" rev-parse HEAD)"
+
+          new_vendor="$(git rev-parse upstream/master)"
+          if [ "$new_vendor" != "$old_vendor" ]; then
+            git push --force-with-lease=refs/heads/vendor/upstream:"$old_vendor" origin "$new_vendor":refs/heads/vendor/upstream
           else
-            git show "origin/nix-flake:$scheduler" > "$tmp/main/$scheduler"
+            echo "vendor/upstream already matches upstream/master."
           fi
 
-          (
-            cd "$tmp/main"
-            git add "$scheduler"
-            if ! git diff --cached --quiet; then
-              git commit -m "ci: schedule fork maintenance"
-            fi
-          )
+          if [ "$new_distro" != "$old_distro" ]; then
+            git -C "$tmp/distro" push --force-with-lease=refs/heads/distro/nix:"$old_distro" origin HEAD:refs/heads/distro/nix
+          else
+            echo "distro/nix already rebased on current vendor/upstream."
+          fi
 
-          new_main="$(git -C "$tmp/main" rev-parse HEAD)"
           if [ "$new_main" != "$old_main" ]; then
             git -C "$tmp/main" push --force-with-lease=refs/heads/main:"$old_main" origin HEAD:refs/heads/main
           else
-            echo "main already matches upstream plus scheduler."
-          fi
-
-          git fetch --prune origin main
-          git worktree add --detach "$tmp/nix-flake" origin/nix-flake
-          (
-            cd "$tmp/nix-flake"
-            git rebase origin/main
-          )
-
-          new_nix="$(git -C "$tmp/nix-flake" rev-parse HEAD)"
-          if [ "$new_nix" != "$old_nix" ]; then
-            git -C "$tmp/nix-flake" push --force-with-lease=refs/heads/nix-flake:"$old_nix" origin HEAD:refs/heads/nix-flake
-          else
-            echo "nix-flake already rebased on current main."
+            echo "main already rebased on current distro/nix."
           fi

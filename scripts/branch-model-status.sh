@@ -3,11 +3,11 @@ set -euo pipefail
 
 repo="${1:-jerudnik/jcode}"
 upstream_remote="${UPSTREAM_REMOTE:-upstream}"
-origin_remote="${ORIGIN_REMOTE:-origin}"
+fork_remote="${FORK_REMOTE:-github}"
 upstream_branch="${UPSTREAM_BRANCH:-master}"
+vendor_branch="${VENDOR_BRANCH:-vendor/upstream}"
+distro_branch="${DISTRO_BRANCH:-distro/nix}"
 main_branch="${MAIN_BRANCH:-main}"
-nix_branch="${NIX_BRANCH:-nix-flake}"
-scheduler_path=".github/workflows/fork-maintenance.yml"
 
 section() {
   printf '\n== %s ==\n' "$1"
@@ -17,16 +17,26 @@ ref_exists() {
   git show-ref --verify --quiet "$1"
 }
 
-git fetch --prune "$origin_remote" >/dev/null
+if ! git remote get-url "$fork_remote" >/dev/null 2>&1; then
+  printf 'warning: fork remote %s is missing; set FORK_REMOTE or add the remote.\n' "$fork_remote" >&2
+  exit 1
+fi
+if ! git remote get-url "$upstream_remote" >/dev/null 2>&1; then
+  printf 'warning: upstream remote %s is missing; set UPSTREAM_REMOTE or add the remote.\n' "$upstream_remote" >&2
+  exit 1
+fi
+
+git fetch --prune "$fork_remote" >/dev/null
 git fetch --prune "$upstream_remote" >/dev/null
 
-origin_main="$origin_remote/$main_branch"
-origin_nix="$origin_remote/$nix_branch"
+fork_vendor="$fork_remote/$vendor_branch"
+fork_distro="$fork_remote/$distro_branch"
+fork_main="$fork_remote/$main_branch"
 upstream_ref="$upstream_remote/$upstream_branch"
 
 section "Mirror status"
-if ! ref_exists "refs/remotes/$origin_main"; then
-  echo "missing $origin_main" >&2
+if ! ref_exists "refs/remotes/$fork_vendor"; then
+  echo "missing $fork_vendor" >&2
   exit 1
 fi
 if ! ref_exists "refs/remotes/$upstream_ref"; then
@@ -34,40 +44,42 @@ if ! ref_exists "refs/remotes/$upstream_ref"; then
   exit 1
 fi
 
-main_sha="$(git rev-parse "$origin_main")"
+vendor_sha="$(git rev-parse "$fork_vendor")"
 upstream_sha="$(git rev-parse "$upstream_ref")"
-printf '%-18s %s\n' "$origin_main" "$main_sha"
+printf '%-18s %s\n' "$fork_vendor" "$vendor_sha"
 printf '%-18s %s\n' "$upstream_ref" "$upstream_sha"
 
-fork_only_paths="$(git diff --name-only "$upstream_ref..$origin_main" || true)"
-unexpected_paths="$(printf '%s\n' "$fork_only_paths" | sed '/^$/d' | grep -v -x "$scheduler_path" || true)"
-
-if [ "$main_sha" = "$upstream_sha" ]; then
-  echo "OK: $origin_main exactly matches $upstream_ref"
-elif [ -z "$unexpected_paths" ]; then
-  echo "OK: $origin_main only differs by $scheduler_path"
+if [ "$vendor_sha" = "$upstream_sha" ]; then
+  echo "OK: $fork_vendor exactly matches $upstream_ref"
 else
-  echo "WARN: $origin_main has unexpected fork-only changes"
-  echo "unexpected paths:"
-  echo "$unexpected_paths"
-  echo "fork-only commits on $origin_main:"
-  git log --oneline "$upstream_ref..$origin_main" || true
-  echo "upstream commits not yet in $origin_main:"
-  git log --oneline "$origin_main..$upstream_ref" || true
+  echo "WARN: $fork_vendor differs from $upstream_ref"
+  echo "fork-only commits on $fork_vendor:"
+  git log --oneline "$upstream_ref..$fork_vendor" || true
+  echo "upstream commits not yet in $fork_vendor:"
+  git log --oneline "$fork_vendor..$upstream_ref" || true
 fi
 
-section "$nix_branch payload beyond $main_branch"
-if ref_exists "refs/remotes/$origin_nix"; then
-  git log --oneline --decorate "$origin_main..$origin_nix" || true
+section "$distro_branch payload beyond $vendor_branch"
+if ref_exists "refs/remotes/$fork_distro"; then
+  git log --oneline --decorate "$fork_vendor..$fork_distro" || true
   echo
-  git diff --stat "$origin_main..$origin_nix" || true
+  git diff --stat "$fork_vendor..$fork_distro" || true
 else
-  echo "missing $origin_nix"
+  echo "missing $fork_distro"
+fi
+
+section "$main_branch payload beyond $distro_branch"
+if ref_exists "refs/remotes/$fork_main"; then
+  git log --oneline --decorate "$fork_distro..$fork_main" || true
+  echo
+  git diff --stat "$fork_distro..$fork_main" || true
+else
+  echo "missing $fork_main"
 fi
 
 section "Open PRs by base"
 if command -v gh >/dev/null 2>&1; then
-  for base in "$main_branch" "$nix_branch"; do
+  for base in "$vendor_branch" "$distro_branch" "$main_branch"; do
     echo "-- base: $base"
     gh pr list --repo "$repo" --base "$base" --state open --json number,title,headRefName,isDraft \
       --jq '.[] | "#\(.number) [\(if .isDraft then "draft" else "ready" end)] \(.headRefName): \(.title)"' || true
