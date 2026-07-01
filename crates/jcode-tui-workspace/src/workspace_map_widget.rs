@@ -273,10 +273,12 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 20, 6));
         render_workspace_map(&mut buf, Rect::new(0, 0, 20, 6), &rows, 0);
 
-        let has_greenish_fg = buf.content().iter().any(|cell| {
-            matches!(cell.style().fg, Some(ratatui::style::Color::Rgb(r, g, b)) if g > r && g > b)
-        });
-        assert!(has_greenish_fg);
+        let expected = crate::color_support::rgb(160, 240, 180);
+        let has_completed_fg = buf
+            .content()
+            .iter()
+            .any(|cell| cell.style().fg == Some(expected));
+        assert!(has_completed_fg);
     }
 
     #[test]
