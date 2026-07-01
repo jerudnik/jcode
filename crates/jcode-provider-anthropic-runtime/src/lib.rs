@@ -1983,8 +1983,8 @@ fn anthropic_recommended_model_from_error(error_str: &str) -> Option<String> {
         .split("please use")
         .nth(1)
         .or_else(|| error_str.split("use ").nth(1))?;
-    // Take up to the next sentence boundary.
-    let hint = hint.split(['.', '!', '\n']).next().unwrap_or(hint).trim();
+    // Stop only at non-decimal delimiters so version prose like "Opus 4.8" survives.
+    let hint = hint.split(['!', '\n']).next().unwrap_or(hint).trim();
     if hint.is_empty() {
         return None;
     }
