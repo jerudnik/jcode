@@ -363,7 +363,7 @@ async fn open_target(target: &ResolvedTarget) -> Result<String> {
             }
         }
         spawn_with_grace(cmd, "open").await?;
-        return Ok("open".to_string());
+        Ok("open".to_string())
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -403,7 +403,7 @@ async fn reveal_target(path: &Path, kind: LocalTargetKind) -> Result<(String, bo
             cmd.arg("-R").arg(path);
         }
         spawn_with_grace(cmd, "open").await?;
-        return Ok(("open".to_string(), true));
+        Ok(("open".to_string(), true))
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -545,6 +545,7 @@ async fn focus_browser_window_after_open(ctx: Option<BrowserFocusContext>) {
     }
 }
 
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
 #[derive(Debug, Clone, Deserialize)]
 struct NiriWindow {
     id: u64,
@@ -554,6 +555,7 @@ struct NiriWindow {
     focus_timestamp: Option<NiriTimestamp>,
 }
 
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
 #[derive(Debug, Clone, Copy, Deserialize)]
 struct NiriTimestamp {
     secs: u64,
@@ -565,6 +567,7 @@ struct NiriTimestamp {
 /// Prefer a window that appeared after the open (a brand new browser window).
 /// Otherwise raise the most recently focused matching window, which is where
 /// browsers add a new tab by default.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
 fn select_window_to_focus(
     windows: &[NiriWindow],
     stems: &[String],
@@ -597,6 +600,7 @@ fn select_window_to_focus(
 }
 
 /// Case-insensitive match between a window `app_id` and known browser stems.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
 fn app_id_matches(app_id: Option<&str>, stems: &[String]) -> bool {
     let Some(app_id) = app_id else {
         return false;
@@ -613,6 +617,7 @@ fn app_id_matches(app_id: Option<&str>, stems: &[String]) -> bool {
 
 /// Normalize a desktop entry (e.g. `org.mozilla.firefox.desktop`) into the
 /// application id stems a compositor is likely to report.
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
 fn normalize_desktop_entry_to_stems(entry: &str) -> Vec<String> {
     let entry = entry.trim();
     let stem = entry
