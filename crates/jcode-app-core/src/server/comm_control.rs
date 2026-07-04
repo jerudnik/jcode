@@ -627,6 +627,64 @@ async fn next_unassigned_runnable_task_id(
     next_unassigned_runnable_item_id(plan)
 }
 
+/// F1 repair: clear `assigned_to` on plan items whose assignee has left the
+/// swarm. `next_unassigned_runnable_item_id` requires `assigned_to.is_none()`,
+/// so a stale assignment makes an otherwise runnable task permanently
+/// unrunnable and stalls the run_plan driver ("runnable task(s) could not be
+/// assigned") while fresh workers sit idle. Only non-terminal, non-running
+/// items are reclaimed: running items with departed owners are the salvage
+/// path's business (task_control replace/salvage), not silent reassignment.
+async fn reclaim_stale_plan_assignments(
+    swarm_id: &str,
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+) {
+    let live_sessions: HashSet<String> = {
+        let members = swarm_members.read().await;
+        members
+            .values()
+            .filter(|member| member.swarm_id.as_deref() == Some(swarm_id))
+            .map(|member| member.session_id.clone())
+            .collect()
+    };
+    let mut plans = swarm_plans.write().await;
+    let Some(plan) = plans.get_mut(swarm_id) else {
+        return;
+    };
+    let mut reclaimed = 0usize;
+    for item in &mut plan.items {
+        if crate::plan::is_terminal_status(&item.status) {
+            continue;
+        }
+        if matches!(item.status.as_str(), "running" | "running_stale") {
+            continue;
+        }
+        let stale = item
+            .assigned_to
+            .as_ref()
+            .is_some_and(|assignee| !live_sessions.contains(assignee));
+        if stale {
+            crate::logging::event_info(
+                "SWARM_LIFECYCLE",
+                vec![
+                    ("phase", "reclaim_stale_assignment".to_string()),
+                    ("swarm_id", swarm_id.to_string()),
+                    ("task_id", item.id.clone()),
+                    (
+                        "departed_assignee",
+                        item.assigned_to.clone().unwrap_or_default(),
+                    ),
+                ],
+            );
+            item.assigned_to = None;
+            reclaimed += 1;
+        }
+    }
+    if reclaimed > 0 {
+        plan.version += 1;
+    }
+}
+
 /// Like [`next_unassigned_runnable_task_id`], but when no unassigned runnable
 /// item exists, look for a runnable item *stranded* on a dead assignee (a
 /// member whose lifecycle status is terminal, or that is no longer a swarm
@@ -1576,6 +1634,10 @@ async fn handle_comm_assign_task_with_mode(
     };
 
     let (selected_task_id, task_content, participant_ids, plan_item_count, blocked_reason) = {
+        // F1: release assignments held by departed sessions so the "next
+        // unassigned runnable" scan below cannot be starved by a stale
+        // assignee (the audited run_plan stall).
+        reclaim_stale_plan_assignments(&swarm_id, swarm_members, swarm_plans).await;
         let now_ms = now_unix_ms();
         let mut plans = swarm_plans.write().await;
         let plan = plans
