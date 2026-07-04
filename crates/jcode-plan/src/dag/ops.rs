@@ -364,6 +364,32 @@ pub fn fail_node(graph: &mut TaskGraph, node_id: &str, actor: &str) -> Result<()
     Ok(())
 }
 
+/// Transfer ownership of a running node to a new actor: the salvage primitive.
+/// Ownership is advisory coordination state, not a security boundary, and a
+/// node whose owner has vanished (crashed worker, evicted session) would
+/// otherwise wedge forever: `complete_node`/`fail_node` are owner-only and
+/// `requeue_failed` requires `Failed`. The engine cannot know whether an owner
+/// is alive, so the CALLER is responsible for the policy decision (e.g. only a
+/// coordinator may take over, and only from a departed member). This op only
+/// enforces the mechanics: the node must exist and be `Running`.
+pub fn take_over_node(
+    graph: &mut TaskGraph,
+    node_id: &str,
+    new_actor: &str,
+) -> Result<(), DagError> {
+    let node = graph
+        .get(node_id)
+        .ok_or_else(|| DagError::UnknownNode(node_id.to_string()))?;
+    if node.status != NodeStatus::Running {
+        return Err(DagError::InvalidState {
+            node: node_id.to_string(),
+            status: node.status,
+        });
+    }
+    graph.get_mut(node_id).unwrap().owner = Some(new_actor.to_string());
+    Ok(())
+}
+
 /// Inject new gap/fix nodes from a gate that found a problem (the adversarial
 /// path). The gate does not decompose itself; instead it adds new sibling nodes
 /// under the same composite parent and re-queues itself to depend on them. This is

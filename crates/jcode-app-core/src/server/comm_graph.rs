@@ -413,6 +413,32 @@ pub(super) async fn handle_comm_complete_node(
         }
     };
 
+    // F3 salvage policy: a coordinator may complete a node whose recorded
+    // owner is no longer a live swarm member. Without this, a crashed or
+    // evicted worker wedges its running node forever (complete/fail are
+    // owner-only, requeue requires Failed). The engine op (take_over_node)
+    // enforces only mechanics; being the coordinator + the owner being gone is
+    // the policy, decided here where membership is visible.
+    let salvage_takeover_allowed = {
+        let coordinators = swarm_coordinators.read().await;
+        let is_coordinator = coordinators
+            .get(&swarm_id)
+            .map(|coordinator| coordinator == &req_session_id)
+            .unwrap_or(false);
+        if is_coordinator {
+            let members = swarm_members.read().await;
+            let plans = swarm_plans.read().await;
+            plans
+                .get(&swarm_id)
+                .and_then(|plan| plan.items.iter().find(|item| item.id == node_id))
+                .and_then(|item| item.assigned_to.as_ref())
+                .map(|owner| owner != &req_session_id && !members.contains_key(owner))
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    };
+
     let result = {
         let mut plans = swarm_plans.write().await;
         let Some(plan) = plans.get_mut(&swarm_id) else {
@@ -421,6 +447,9 @@ pub(super) async fn handle_comm_complete_node(
         };
         let mut graph = to_task_graph(plan);
         claim_queued_node_for_actor(&mut graph, &node_id, &req_session_id);
+        if salvage_takeover_allowed {
+            let _ = dag::take_over_node(&mut graph, &node_id, &req_session_id);
+        }
         match dag::complete_node(&mut graph, &node_id, &req_session_id, artifact) {
             Ok(()) => {
                 apply_task_graph(plan, &graph);

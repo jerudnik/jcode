@@ -184,6 +184,7 @@ async fn f2_await_members_ignores_mid_task_turn_boundary() {
             client_event_tx: &client_tx,
             swarm_members: &swarm_members,
             swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
             swarm_event_tx: &swarm_event_tx,
             await_members_runtime: &await_runtime,
         },
@@ -205,8 +206,6 @@ async fn f2_await_members_ignores_mid_task_turn_boundary() {
             new_status: "ready".to_string(),
         },
     ));
-    // Keep the plans map alive/observable for the (fixed) handler.
-    let _ = &swarm_plans;
 
     let response = tokio::time::timeout(Duration::from_secs(3), client_rx.recv())
         .await

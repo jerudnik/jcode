@@ -109,6 +109,31 @@ fn complete_rejects_non_owner() {
     );
 }
 
+/// F3 salvage primitive: ownership of a running node can be transferred so a
+/// coordinator can complete/fail a node whose owner vanished. Policy (who may
+/// take over) lives with the caller; the engine only enforces Running state.
+#[test]
+fn take_over_node_transfers_ownership_of_running_node() {
+    let mut g = dag(Mode::Light, vec![spec("a", NodeKind::Explore)]);
+    dispatch(&mut g, "a", "w-dead");
+
+    take_over_node(&mut g, "a", "coordinator").unwrap();
+    assert_eq!(g.get("a").unwrap().owner.as_deref(), Some("coordinator"));
+    complete_node(&mut g, "a", "coordinator", HandoffArtifact::brief("salvaged")).unwrap();
+    assert_eq!(g.get("a").unwrap().status, NodeStatus::Done);
+
+    // Mechanics still enforced: only running nodes can be taken over.
+    let mut g2 = dag(Mode::Light, vec![spec("b", NodeKind::Explore)]);
+    assert!(matches!(
+        take_over_node(&mut g2, "b", "coordinator").unwrap_err(),
+        DagError::InvalidState { .. }
+    ));
+    assert!(matches!(
+        take_over_node(&mut g2, "missing", "coordinator").unwrap_err(),
+        DagError::UnknownNode(_)
+    ));
+}
+
 #[test]
 fn expand_rejects_non_owner() {
     let mut g = dag(Mode::Light, vec![spec("a", NodeKind::Explore)]);

@@ -15,6 +15,7 @@ async fn await_members_stops_when_requesting_client_disconnects() {
         swarm_id.to_string(),
         HashSet::from([requester.to_string(), peer.to_string()]),
     )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let (swarm_event_tx, swarm_event_rx) = broadcast::channel(32);
     drop(swarm_event_rx);
     let baseline_receivers = swarm_event_tx.receiver_count();
@@ -33,6 +34,7 @@ async fn await_members_stops_when_requesting_client_disconnects() {
             client_event_tx: &client_tx,
             swarm_members: &swarm_members,
             swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
             swarm_event_tx: &swarm_event_tx,
             await_members_runtime: &await_runtime,
         },

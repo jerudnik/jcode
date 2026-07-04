@@ -42,6 +42,7 @@ async fn resume_background_awaits_finalizes_states_expired_while_down() {
         swarm_id.to_string(),
         HashSet::from([requester.to_string(), peer.to_string()]),
     )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
 
     let mut bus_rx = crate::bus::Bus::global().subscribe();
@@ -49,6 +50,7 @@ async fn resume_background_awaits_finalizes_states_expired_while_down() {
     crate::server::comm_await::resume_background_awaits(
         &swarm_members,
         &swarms_by_id,
+        &swarm_plans,
         &swarm_event_tx,
         &await_runtime,
     )

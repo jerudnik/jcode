@@ -14,6 +14,7 @@ async fn await_members_blocking_to_background_upgrade_survives_waiter_disconnect
         swarm_id.to_string(),
         HashSet::from([requester.to_string(), peer.to_string()]),
     )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
 
     let mut bus_rx = crate::bus::Bus::global().subscribe();
@@ -34,6 +35,7 @@ async fn await_members_blocking_to_background_upgrade_survives_waiter_disconnect
             client_event_tx: &blocking_tx,
             swarm_members: &swarm_members,
             swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
             swarm_event_tx: &swarm_event_tx,
             await_members_runtime: &await_runtime,
         },
@@ -58,6 +60,7 @@ async fn await_members_blocking_to_background_upgrade_survives_waiter_disconnect
             client_event_tx: &bg_tx,
             swarm_members: &swarm_members,
             swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
             swarm_event_tx: &swarm_event_tx,
             await_members_runtime: &await_runtime,
         },
