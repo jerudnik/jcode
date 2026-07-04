@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Rebase a worktree with rerere auto-resolution, failing loud on NEW conflicts.
 #
-# Used by the CI sync-upstream job (.github/workflows/nix.yml). With rerere
+# Used by the CI Upstream Sync job (.github/workflows/sync.yml). With rerere
 # enabled and the shared `.rerere-cache` imported, a recurring conflict is
 # auto-resolved and auto-staged, but `git rebase` still PAUSES needing
 # `--continue` (verified behaviour). This drives that loop:

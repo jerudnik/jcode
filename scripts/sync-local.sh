@@ -2,7 +2,7 @@
 # Pull the CI-reconciled branch stack down to this local clone.
 #
 # Upstream maintenance is automated on GitHub (see
-# .github/workflows/fork-maintenance.yml -> nix.yml `sync-upstream`): every six
+# .github/workflows/sync.yml `Upstream Sync`): every six
 # hours CI fast-forwards `vendor/upstream` to `upstream/master`, rebases
 # `distro/nix` onto it, then rebases `main` onto `distro/nix`, force-pushing all
 # three. GitHub is therefore the authoritative surface; a local clone only goes
