@@ -101,8 +101,43 @@ jobs:
       - name: Check all targets and all features
         run: cargo check --all-targets --all-features
 
-      - name: Run clippy with warnings denied
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      # Same vendor-tolerance policy as the formatting gate (and it reuses
+      # /tmp/fork-touched from that step): run clippy over the whole tree
+      # without -D warnings so it completes, then fail only when a lint's
+      # primary span lands in a fork-modified file. Hard compile errors are
+      # already caught by `cargo check` above. Vendor lint debt under
+      # --all-features (which upstream CI rarely reaches, its Format job
+      # fails first) is reported as a warning instead of blocking.
+      - name: Clippy (blocking for fork-touched files)
+        run: |
+          cargo clippy --all-targets --all-features --message-format=json \
+            > /tmp/clippy.json
+          jq -r '
+            select(.reason=="compiler-message")
+            | .message
+            | select(.level=="warning" or .level=="error")
+            | .spans[]?
+            | select(.is_primary)
+            | .file_name' /tmp/clippy.json \
+            | grep -v '^/' | sort -u > /tmp/clippy-flagged || true
+          bad=$(comm -12 /tmp/fork-touched /tmp/clippy-flagged)
+          if [ -n "$bad" ]; then
+            echo "::error::clippy lints in fork-modified files:"
+            echo "$bad"
+            jq -r '
+              select(.reason=="compiler-message")
+              | .message
+              | select(.level=="warning" or .level=="error")
+              | .rendered' /tmp/clippy.json
+            exit 1
+          fi
+          vendor_only=$(comm -13 /tmp/fork-touched /tmp/clippy-flagged)
+          if [ -n "$vendor_only" ]; then
+            echo "::warning::vendor files carry clippy lints (upstream drift, not blocking):"
+            echo "$vendor_only"
+          else
+            echo "clippy clean across the whole tree."
+          fi
 
       - name: Enforce warning budget
         run: scripts/check_warning_budget.sh
