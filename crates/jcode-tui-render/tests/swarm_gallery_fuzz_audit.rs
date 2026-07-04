@@ -3,8 +3,8 @@
 //! member counts, tiny widths/heights, wide glyphs).
 
 use jcode_tui_render::swarm_gallery::{
-    GalleryMember, SwarmStripHint, render_gallery, render_swarm_dock, render_swarm_panel,
-    render_swarm_strip,
+    GalleryMember, SwarmStripHint, SwarmStripOptions, render_gallery, render_swarm_dock,
+    render_swarm_panel, render_swarm_strip,
 };
 use ratatui::prelude::Line;
 use unicode_width::UnicodeWidthStr;
@@ -167,13 +167,15 @@ fn strip_never_panics_and_stays_width_bounded() {
                     for spinner in [0usize, 7, usize::MAX] {
                         let lines = render_swarm_strip(
                             &members,
-                            selected,
-                            focused,
-                            &hints(),
-                            Some("ctrl+t controls"),
-                            spinner,
-                            width,
-                            12,
+                            SwarmStripOptions {
+                                selected,
+                                focused,
+                                hints: &hints(),
+                                enter_hint: Some("ctrl+t controls"),
+                                spinner_frame: spinner,
+                                width,
+                                max_height: 12,
+                            },
                         );
                         for line in &lines {
                             let text = plain(line);
