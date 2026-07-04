@@ -1,0 +1,268 @@
+name: Nix
+
+# Builds, checks, and caches the jcode flake across all supported Nix
+# platforms. Pushes successful build outputs to a public Cachix cache so
+# downstream consumers never have to rebuild from source.
+
+on:
+  push:
+    branches: [distro/nix, main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/nix.yml"
+      - ".github/workflows/nix-update.yml"
+  pull_request:
+    branches: [distro/nix, main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/nix.yml"
+      - ".github/workflows/nix-update.yml"
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Nix task to run"
+        required: true
+        default: validate
+        type: choice
+        options:
+          - validate
+          - sync-upstream
+          - update-flake-lock
+
+concurrency:
+  group: nix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: fast validation
+    if: github.event_name != 'workflow_dispatch' || inputs.task == 'validate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cachix (read-only public binary cache)
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          skipPush: true
+
+      - name: Check workflow syntax
+        run: nix run nixpkgs#actionlint -- .github/workflows/*.yml
+
+      - name: Dry-run Linux package
+        run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
+
+      - name: Evaluate flake checks
+        run: nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+
+      - name: Verify flake.lock is committed
+        if: github.event_name == 'pull_request'
+        run: |
+          nix flake metadata --json > /dev/null
+          if [ -n "$(git status --porcelain flake.lock)" ]; then
+            echo "flake.lock is out of date; run 'nix flake update' and commit." >&2
+            exit 1
+          fi
+
+  build:
+    name: build (${{ matrix.system }})
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.task == 'validate')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/distro/nix' || github.ref == 'refs/heads/main') && secrets.CACHIX_AUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cachix (read/write public binary cache)
+        if: env.CACHIX_CAN_PUSH == 'true'
+        continue-on-error: true
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Build success is authoritative; cache upload is best-effort. Daemon
+          # mode pushes the full dependency build closure and can fail during
+          # post-job drain on slower ARM runners after the package already built
+          # and smoke-tested successfully. Push just the final result path.
+          useDaemon: false
+          pathsToPush: ./result
+          cachixArgs: -j2
+
+      - name: Cachix (read-only public binary cache)
+        if: env.CACHIX_CAN_PUSH != 'true'
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          skipPush: true
+
+      - name: Build package
+        run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs
+
+      - name: Smoke test binary
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        run: |
+          ./result/bin/jcode --version
+
+  audit:
+    name: cargo audit (advisory, non-blocking)
+    if: github.event_name != 'workflow_dispatch' || inputs.task == 'validate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: cargo audit
+        # Advisories in transitive deps should surface as a warning, not block
+        # merges of unrelated changes. We capture findings into the job summary
+        # and always exit 0 so the check stays green; fixes are tracked
+        # separately via upstream dependency bumps.
+        run: |
+          set +e
+          out="$(nix run nixpkgs#cargo-audit -- audit 2>&1)"
+          status=$?
+          echo "$out"
+          {
+            echo "## cargo audit"
+            if [ "$status" -ne 0 ]; then
+              echo "Advisories found (non-blocking):"
+            else
+              echo "No advisories."
+            fi
+            echo '```'
+            echo "$out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+  update-flake-lock:
+    name: update flake.lock
+    if: github.event_name == 'workflow_dispatch' && inputs.task == 'update-flake-lock'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/nix-update.yml
+    secrets: inherit
+
+  sync-upstream:
+    name: sync upstream
+    if: github.event_name == 'workflow_dispatch' && inputs.task == 'sync-upstream'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Sync vendor/upstream, distro/nix, and main
+        run: |
+          set -euo pipefail
+
+          upstream_url="https://github.com/1jehuang/jcode.git"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --prune origin vendor/upstream distro/nix main
+          git remote add upstream "$upstream_url" 2>/dev/null || git remote set-url upstream "$upstream_url"
+          git fetch --prune upstream master
+
+<<<<<<<
+          # Enable rerere and import the repo's shared recorded conflict
+          # resolutions so recurring downstream-vs-upstream conflicts replay
+          # automatically. A genuinely NEW conflict still fails the job loudly
+          # (rerere-rebase.sh aborts non-zero) so a human resolves it once.
+          git config rerere.enabled true
+          git config rerere.autoupdate true
+          if [ -x scripts/rerere-cache.sh ]; then
+            scripts/rerere-cache.sh import || true
+          fi
+=======
+          old_vendor="$(git rev-parse origin/vendor/upstream)"
+          old_distro="$(git rev-parse origin/distro/nix)"
+          old_main="$(git rev-parse origin/main)"
+>>>>>>>
+
+          old_vendor="$(git rev-parse origin/vendor/upstream)"
+          old_distro="$(git rev-parse origin/distro/nix)"
+          old_main="$(git rev-parse origin/main)"
+
+          tmp="$(mktemp -d)"
+          trap 'git worktree remove --force "$tmp/distro" >/dev/null 2>&1 || true; git worktree remove --force "$tmp/main" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+
+<<<<<<<
+          git worktree add --detach "$tmp/distro" origin/distro/nix
+          git -C "$tmp/distro" rebase upstream/master
+          new_distro="$(git -C "$tmp/distro" rev-parse HEAD)"
+
+          git worktree add --detach "$tmp/main" origin/main
+          git -C "$tmp/main" rebase "$new_distro"
+          new_main="$(git -C "$tmp/main" rev-parse HEAD)"
+
+          new_vendor="$(git rev-parse upstream/master)"
+          if [ "$new_vendor" != "$old_vendor" ]; then
+            git push --force-with-lease=refs/heads/vendor/upstream:"$old_vendor" origin "$new_vendor":refs/heads/vendor/upstream
+=======
+          git worktree add --detach "$tmp/distro" origin/distro/nix
+          scripts/rerere-rebase.sh "$tmp/distro" upstream/master
+          new_distro="$(git -C "$tmp/distro" rev-parse HEAD)"
+
+          git worktree add --detach "$tmp/main" origin/main
+          scripts/rerere-rebase.sh "$tmp/main" "$new_distro"
+          new_main="$(git -C "$tmp/main" rev-parse HEAD)"
+
+          new_vendor="$(git rev-parse upstream/master)"
+          if [ "$new_vendor" != "$old_vendor" ]; then
+            git push --force-with-lease=refs/heads/vendor/upstream:"$old_vendor" origin "$new_vendor":refs/heads/vendor/upstream
+>>>>>>>
+          else
+            echo "vendor/upstream already matches upstream/master."
+          fi
+
+          if [ "$new_distro" != "$old_distro" ]; then
+            git -C "$tmp/distro" push --force-with-lease=refs/heads/distro/nix:"$old_distro" origin HEAD:refs/heads/distro/nix
+          else
+            echo "distro/nix already rebased on current vendor/upstream."
+          fi
+
+          if [ "$new_main" != "$old_main" ]; then
+            git -C "$tmp/main" push --force-with-lease=refs/heads/main:"$old_main" origin HEAD:refs/heads/main
+          else
+            echo "main already rebased on current distro/nix."
+          fi
