@@ -268,7 +268,25 @@ async fn run_burst_resume_attach_stress(burst_size: usize) -> Result<()> {
     let wall_elapsed = wall_start.elapsed();
     let cpu_elapsed = current_process_cpu_time()?.saturating_sub(cpu_start);
 
-    let client_map = debug_run_command_json(debug_socket_path.clone(), "clients:map", None).await?;
+    let mut client_map =
+        debug_run_command_json(debug_socket_path.clone(), "clients:map", None).await?;
+    let ready_count_from_map = |client_map: &serde_json::Value| -> Result<usize> {
+        let clients = client_map
+            .get("clients")
+            .and_then(|value| value.as_array())
+            .context("clients:map missing clients array")?;
+        Ok(clients
+            .iter()
+            .filter(|client| client.get("status").and_then(|value| value.as_str()) == Some("ready"))
+            .count())
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut ready_count = ready_count_from_map(&client_map)?;
+    while ready_count < burst_size && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        client_map = debug_run_command_json(debug_socket_path.clone(), "clients:map", None).await?;
+        ready_count = ready_count_from_map(&client_map)?;
+    }
     let info = debug_run_command_json(debug_socket_path.clone(), "server:info", None).await?;
 
     let clients = client_map
@@ -293,10 +311,6 @@ async fn run_burst_resume_attach_stress(burst_size: usize) -> Result<()> {
     let expected_session_ids_set: HashSet<String> = expected_session_ids.iter().cloned().collect();
     assert_eq!(mapped_session_ids, expected_session_ids_set);
 
-    let ready_count = clients
-        .iter()
-        .filter(|client| client.get("status").and_then(|value| value.as_str()) == Some("ready"))
-        .count();
     assert_eq!(
         ready_count, burst_size,
         "all resumed clients should settle to ready"
