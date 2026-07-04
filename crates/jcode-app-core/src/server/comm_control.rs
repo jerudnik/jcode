@@ -2,7 +2,8 @@
 
 use super::append_swarm_completion_report_instructions;
 use super::swarm::{
-    now_unix_ms, swarm_task_heartbeat_interval, swarm_task_stale_after, touch_swarm_task_progress,
+    SwarmTargetResolution, format_ambiguous_target_matches, now_unix_ms, resolve_swarm_target,
+    swarm_task_heartbeat_interval, swarm_task_stale_after, touch_swarm_task_progress,
 };
 use super::swarm_mutation_state::{
     PersistedSwarmMutationResponse, begin_or_join_in_flight as begin_swarm_mutation_no_replay,
@@ -507,19 +508,49 @@ async fn resolve_assignment_target_session(
     let members = swarm_members.read().await;
 
     if let Some(target) = requested_target {
-        if target == req_session_id {
+        // F5: accept friendly names as well as exact session IDs, using the
+        // same resolver as the DM path (resolve_swarm_target in swarm.rs).
+        let swarm_session_ids: Vec<String> = members
+            .values()
+            .filter(|member| member.swarm_id.as_deref() == Some(swarm_id))
+            .map(|member| member.session_id.clone())
+            .collect();
+        let resolved = match resolve_swarm_target(target, &swarm_session_ids, &members) {
+            SwarmTargetResolution::Session(session_id) => session_id,
+            SwarmTargetResolution::Unknown => {
+                // Preserve the historical error for targets that exist but are
+                // outside this swarm; otherwise report the target as unknown.
+                if members.contains_key(target) {
+                    return Err(format!(
+                        "Session '{}' is not in swarm '{}' and cannot receive this task.",
+                        target, swarm_id
+                    ));
+                }
+                return Err(format!(
+                    "Unknown session '{target}' - use an exact session_id or a unique friendly name within the swarm."
+                ));
+            }
+            SwarmTargetResolution::Ambiguous(matches) => {
+                return Err(format!(
+                    "Friendly name '{}' is ambiguous in swarm. Use an exact session id instead. Matches: {}",
+                    target,
+                    format_ambiguous_target_matches(&matches)
+                ));
+            }
+        };
+        if resolved == req_session_id {
             return Err("Coordinator cannot assign a swarm task to itself.".to_string());
         }
-        let Some(member) = members.get(target) else {
-            return Err(format!("Unknown session '{target}'"));
+        let Some(member) = members.get(&resolved) else {
+            return Err(format!("Unknown session '{resolved}'"));
         };
         if member.swarm_id.as_deref() != Some(swarm_id) {
             return Err(format!(
                 "Session '{}' is not in swarm '{}' and cannot receive this task.",
-                target, swarm_id
+                resolved, swarm_id
             ));
         }
-        return Ok(target.to_string());
+        return Ok(resolved);
     }
 
     let assignment_counts = {

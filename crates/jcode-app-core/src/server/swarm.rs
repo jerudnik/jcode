@@ -70,6 +70,65 @@ pub(super) fn swarm_spawn_depth(members: &HashMap<String, SwarmMember>, session_
     swarm_ancestors(members, session_id).len() as u32
 }
 
+/// Outcome of resolving a user-supplied target (session ID or friendly name)
+/// against a swarm's members. Shared by the DM path and the assignment path so
+/// friendly names behave identically everywhere (F5 in the orchestration
+/// hardening audit: the assign path used to accept session IDs only).
+pub(super) enum SwarmTargetResolution {
+    /// Unique resolution to a session ID.
+    Session(String),
+    /// The target matched no session ID and no friendly name.
+    Unknown,
+    /// The friendly name matched more than one member; contains
+    /// `(session_id, friendly_name)` pairs for the error message.
+    Ambiguous(Vec<(String, String)>),
+}
+
+/// Resolve `target` as an exact session ID first, then as a friendly name,
+/// considering only members whose session ID is in `candidate_session_ids`.
+/// Pure lookup: callers decide how to phrase Unknown/Ambiguous errors.
+pub(super) fn resolve_swarm_target(
+    target: &str,
+    candidate_session_ids: &[String],
+    members: &HashMap<String, SwarmMember>,
+) -> SwarmTargetResolution {
+    if candidate_session_ids
+        .iter()
+        .any(|session_id| session_id == target)
+    {
+        return SwarmTargetResolution::Session(target.to_string());
+    }
+
+    let mut matches: Vec<(String, String)> = candidate_session_ids
+        .iter()
+        .filter_map(|session_id| {
+            let member = members.get(session_id)?;
+            member
+                .friendly_name
+                .as_deref()
+                .filter(|friendly_name| *friendly_name == target)
+                .map(|friendly_name| (session_id.clone(), friendly_name.to_string()))
+        })
+        .collect();
+    matches.sort_by(|(left_session, _), (right_session, _)| left_session.cmp(right_session));
+    matches.dedup_by(|(left_session, _), (right_session, _)| left_session == right_session);
+    match matches.len() {
+        0 => SwarmTargetResolution::Unknown,
+        1 => SwarmTargetResolution::Session(matches.remove(0).0),
+        _ => SwarmTargetResolution::Ambiguous(matches),
+    }
+}
+
+/// Format the standard "ambiguous friendly name" error detail from
+/// [`SwarmTargetResolution::Ambiguous`] matches.
+pub(super) fn format_ambiguous_target_matches(matches: &[(String, String)]) -> String {
+    matches
+        .iter()
+        .map(|(session_id, friendly_name)| format!("{} [{}]", friendly_name, session_id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// True when `ancestor` is `session_id` itself or any transitive spawner of it.
 /// Used to decide whether a requester may manage (stop/control) a target: an
 /// agent owns its entire spawned subtree.
