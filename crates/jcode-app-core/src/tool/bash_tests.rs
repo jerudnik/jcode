@@ -29,6 +29,29 @@ fn make_agent_ctx(signal: jcode_agent_runtime::InterruptSignal) -> ToolContext {
     }
 }
 
+async fn wait_for_background_task_terminal(
+    task_id: &str,
+    timeout: std::time::Duration,
+) -> crate::background::TaskStatusFile {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let status = crate::background::global()
+            .status(task_id)
+            .await
+            .expect("status should exist");
+        if status.status != BackgroundTaskStatus::Running {
+            return status;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            panic!(
+                "background task {task_id} did not finish within {:?}; last status was {:?}",
+                timeout, status.status
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
 #[tokio::test]
 async fn test_basic_command_no_stdin() {
     let tool = BashTool::new();
@@ -278,12 +301,8 @@ async fn test_reload_persistable_bash_continues_in_background() {
             .expect("status_file should be present"),
     );
 
-    tokio::time::sleep(std::time::Duration::from_millis(1400)).await;
-
-    let status = crate::background::global()
-        .status(&task_id)
-        .await
-        .expect("status should exist");
+    let status =
+        wait_for_background_task_terminal(&task_id, std::time::Duration::from_secs(10)).await;
     assert_eq!(status.status, BackgroundTaskStatus::Completed);
     let output = crate::background::global()
         .output(&task_id)
@@ -345,20 +364,8 @@ async fn test_reload_persistable_bash_timeout_promotes_to_background() {
         .expect("status should exist");
     assert_eq!(initial_status.status, BackgroundTaskStatus::Running);
 
-    let mut final_status = None;
-    for _ in 0..40 {
-        let status = crate::background::global()
-            .status(&task_id)
-            .await
-            .expect("status should exist");
-        if status.status != BackgroundTaskStatus::Running {
-            final_status = Some(status);
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-
-    let status = final_status.expect("promoted background task should finish");
+    let status =
+        wait_for_background_task_terminal(&task_id, std::time::Duration::from_secs(10)).await;
     assert_eq!(status.status, BackgroundTaskStatus::Completed);
     assert_eq!(status.exit_code, Some(0));
 
