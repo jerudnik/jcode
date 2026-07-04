@@ -24,6 +24,10 @@ concurrency:
 jobs:
   require-issue:
     name: Require Linked Issue
+    # Fork policy (distro/nix layer): exempt the fork's automation PRs
+    # (e.g. the weekly flake.lock bump) -- they are routine maintenance with
+    # no issue to link. Human PRs still need a linked issue.
+    if: ${{ !startsWith(github.head_ref, 'automation/') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

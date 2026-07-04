@@ -1,10 +1,12 @@
 name: CI
 
+# Fork policy (distro/nix layer): this is upstream's CI, kept byte-close to
+# vendor/upstream so it never conflicts on rebase. It does NOT gate the fork's
+# rails -- fork-ci.yml (macOS-first) does that. Keep this dispatchable so a
+# branch can be validated against upstream's full matrix (Windows, xwin
+# cross-checks, Linux/macOS Build & Test) before opening an upstream PR.
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -13,6 +15,9 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   SCCACHE_GHA_ENABLED: "true"
+  # The fork has no DEPLOY_KEY secret; guard the ssh-agent steps so manual
+  # dispatch works here while the file stays drop-in compatible upstream.
+  JCODE_HAS_DEPLOY_KEY: ${{ secrets.DEPLOY_KEY != '' }}
 
 jobs:
   quality:
@@ -26,6 +31,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
+        if: env.JCODE_HAS_DEPLOY_KEY == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -114,6 +120,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
+        if: env.JCODE_HAS_DEPLOY_KEY == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -159,8 +166,7 @@ jobs:
           # ("compiled by an incompatible version of rustc"). rust-cache already
           # caches target/ across runs, so a clean, wrapper-consistent build is
           # both correct and fast enough.
-          RUSTC="$(rustup which rustc)"
-          export RUSTC
+          export RUSTC="$(rustup which rustc)"
           CARGO_BIN="$(rustup which cargo)"
           "$CARGO_BIN" build --release --target ${{ matrix.target }}
 
@@ -226,6 +232,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
+        if: env.JCODE_HAS_DEPLOY_KEY == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
@@ -397,6 +404,7 @@ jobs:
           submodules: recursive
 
       - name: Configure SSH for cargo git dependencies
+        if: env.JCODE_HAS_DEPLOY_KEY == 'true'
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.DEPLOY_KEY }}
