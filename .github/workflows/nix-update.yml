@@ -1,23 +1,31 @@
 name: Update flake.lock
 
-# Reusable dependency bump for the Nix flake inputs. The repository's default
-# branch is the stable custom fork, so this workflow is invoked by the
-# registered Nix workflow on `main` and opens lock-update PRs against `distro/nix`.
+# Weekly dependency bump for the Nix flake inputs. Runs on its own schedule
+# (after the Monday 06:17 UTC upstream sync window), updates flake.lock on a
+# temporary branch, validates the bump, and opens or refreshes a PR against
+# `distro/nix`.
+#
+# NOTE: scheduled workflows execute from the default branch (`main`), but the
+# job checks out and targets `distro/nix` explicitly, so the lock bump lands
+# in the packaging layer where it belongs.
 
 on:
-  workflow_call:
+  schedule:
+    - cron: "47 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
 
 concurrency:
-  group: update-flake-lock-${{ github.workflow }}-${{ github.ref }}
+  group: update-flake-lock
   cancel-in-progress: true
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:

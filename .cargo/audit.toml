@@ -1,0 +1,30 @@
+# cargo-audit configuration -- the fork's single source of truth for triaged
+# dependency advisories. cargo-audit reads this file automatically from the
+# workspace root, so plain `cargo audit`, scripts/security_preflight.sh, and
+# the Security workflow gate all apply the same policy.
+#
+# Rules (enforced by .github/workflows/security.yml):
+#   - every ignore below MUST have a triage row in docs/SECURITY_DEPENDENCIES.md
+#     (CI fails otherwise), with the affected area and the retirement condition;
+#   - the weekly Security report re-runs the audit with ignores DISABLED so
+#     accepted risk is re-reviewed on a cadence;
+#   - unmaintained/unsound *warnings* are advisory by design (cargo-audit only
+#     fails on vulnerabilities unless configured otherwise; do not add
+#     `--deny warnings` semantics here).
+#
+# Owned by the distro/nix layer (fork CI policy), like the workflows that
+# consume it.
+
+[advisories]
+ignore = [
+  "RUSTSEC-2026-0141", # lettre via notify-email; Boring TLS backend not compiled into jcode
+  "RUSTSEC-2026-0099", # rustls-webpki via rustls stack; awaiting upstream upgrade
+  "RUSTSEC-2026-0104", # rustls-webpki via rustls stack; awaiting upstream upgrade
+  "RUSTSEC-2026-0098", # rustls-webpki via rustls stack; awaiting upstream upgrade
+  "RUSTSEC-2026-0049", # rustls-webpki via older rustls stacks (aws-smithy, imap); awaiting upstream upgrade
+  "RUSTSEC-2026-0187", # lopdf via pdf-extract 0.8.2 (pins lopdf 0.34); PDF text extraction only
+  "RUSTSEC-2026-0190", # anyhow 1.0.100 downcast_mut unsoundness; awaiting patched release
+  "RUSTSEC-2026-0186", # memmap2 via UI/rendering/embedding stacks; awaiting transitive upgrades
+  "RUSTSEC-2026-0195", # quick-xml via wayland-scanner/winit desktop build stack (build-time, Linux desktop only)
+  "RUSTSEC-2026-0194", # quick-xml via wayland-scanner/winit desktop build stack (build-time, Linux desktop only)
+]

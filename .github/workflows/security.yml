@@ -1,0 +1,125 @@
+name: Security
+
+# Fork security policy, in one place (was: a --strict preflight buried inside
+# upstream's Build & Test job plus a permanently-green audit job in nix.yml).
+#
+#   gate (push/PR) : secret scan, script permissions, and cargo-audit with the
+#                    triaged ignores from .cargo/audit.toml. A NEW vulnerability
+#                    fails this workflow -- and only this workflow, so unrelated
+#                    work (Fork CI, Nix) stays green while you triage: either
+#                    fix the dependency or add an ignore + a triage row to
+#                    docs/SECURITY_DEPENDENCIES.md in the same commit.
+#   weekly report  : the full, un-ignored advisory picture (including triaged
+#                    ignores and unmaintained/unsound warnings) posted to a
+#                    single tracking issue, so accepted risk is re-reviewed on
+#                    a cadence instead of rotting in the ignore list.
+#
+# Policy by advisory class (see docs/SECURITY_DEPENDENCIES.md):
+#   direct vulnerability            -> gate fails until fixed or triaged
+#   reachable runtime transitive    -> gate fails until triaged; weekly re-lists
+#   build-time / non-compiled paths -> triaged ignore, weekly re-lists
+#   unmaintained / unsound warnings -> advisory only (never --deny warnings)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}-${{ github.event_name == 'schedule' && 'weekly' || 'gate' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  gate:
+    name: security gate
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Install cargo-audit (binary from nixpkgs, no compile)
+        run: |
+          nix build nixpkgs#cargo-audit --out-link "$RUNNER_TEMP/cargo-audit"
+          echo "$RUNNER_TEMP/cargo-audit/bin" >> "$GITHUB_PATH"
+
+      - name: Verify audit ignores are documented
+        run: |
+          # Every triaged ignore must have a matching row in the triage doc,
+          # so the config file and the rationale cannot drift apart.
+          missing=0
+          while IFS= read -r id; do
+            if ! grep -q "$id" docs/SECURITY_DEPENDENCIES.md; then
+              echo "::error::$id is ignored in .cargo/audit.toml but has no triage row in docs/SECURITY_DEPENDENCIES.md"
+              missing=1
+            fi
+          done < <(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' .cargo/audit.toml | sort -u)
+          exit "$missing"
+
+      - name: Security preflight (secret scan, permissions, triaged audit)
+        run: scripts/security_preflight.sh --strict
+
+  weekly-report:
+    name: full advisory report
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Run full cargo audit (no ignores)
+        run: |
+          set +e
+          # cargo-audit auto-loads .cargo/audit.toml from the CWD; delete it in
+          # this disposable checkout so triaged advisories reappear here for
+          # scheduled re-review.
+          rm -f .cargo/audit.toml
+          nix run nixpkgs#cargo-audit -- audit > audit-report.txt 2>&1
+          cat audit-report.txt
+          {
+            echo "## cargo audit (full, ignores disabled)"
+            echo '```'
+            tail -100 audit-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # The report is informational; the tracking issue is the artifact.
+          exit 0
+
+      - name: Update the advisory tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Dependency advisories: weekly report"
+          body_file="$(mktemp)"
+          {
+            echo "Weekly full \`cargo audit\` (ignores disabled). Triaged advisories live in \`.cargo/audit.toml\` with rationale in \`docs/SECURITY_DEPENDENCIES.md\`."
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '```'
+            tail -100 audit-report.txt
+            echo '```'
+          } > "$body_file"
+          existing="$(gh issue list --state open --search "in:title \"Dependency advisories: weekly report\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --body-file "$body_file"
+          else
+            gh issue create --title "$title" --body-file "$body_file" --label fork-maintenance \
+              || gh issue create --title "$title" --body-file "$body_file"
+          fi
