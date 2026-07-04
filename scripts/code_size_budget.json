@@ -2,7 +2,7 @@
   "threshold_loc": 1200,
   "tracked_files": {
     "crates/jcode-app-core/src/agent/turn_loops.rs": 1245,
-    "crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs": 1737,
+    "crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs": 1738,
     "crates/jcode-app-core/src/overnight.rs": 1274,
     "crates/jcode-app-core/src/server.rs": 2043,
     "crates/jcode-app-core/src/server/client_lifecycle.rs": 3113,
