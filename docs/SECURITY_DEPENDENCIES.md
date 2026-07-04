@@ -1,6 +1,6 @@
 # Dependency Security Triage
 
-Last reviewed: 2026-05-14
+Last reviewed: 2026-07-04
 
 This file tracks the current `cargo audit` findings for jcode and the intended remediation path.
 It is not an allowlist. It is a triage record so advisories are visible and actionable.
@@ -19,16 +19,22 @@ It is not an allowlist. It is a triage record so advisories are visible and acti
 | `RUSTSEC-2026-0104` | `rustls-webpki` | `rustls` dependency stack | TLS certificate revocation list parsing | Reachable panic in CRL parsing. Transitive via TLS libraries. | Upgrade rustls/webpki stack when compatible releases are available. |
 | `RUSTSEC-2026-0049` | `rustls-webpki` | `rustls` dependency stack (`aws-smithy` rustls 0.21, `imap`/`rustls-connector` rustls 0.22) | TLS certificate revocation list handling | CRLs not considered authoritative by Distribution Point due to faulty matching logic. Transitive via the older rustls stacks; fix needs rustls-webpki >=0.103.10, which requires major bumps of the `aws-sdk`/`imap` stacks. | Upgrade rustls/webpki stack when compatible releases are available. |
 | `RUSTSEC-2026-0187` | `lopdf` | `jcode-pdf -> pdf-extract 0.8.2 -> lopdf 0.34` | PDF text extraction (`/pdf`, image/PDF reads) | Stack overflow parsing deeply nested PDF objects. Only reached when extracting text from a (potentially malicious) PDF the user opens; not in the auth/provider/network path. `pdf-extract 0.8.2` pins `lopdf 0.34`, so it cannot be bumped to the fixed `>=0.42` without an upstream `pdf-extract` release. | Upgrade once `pdf-extract` ships a release depending on `lopdf >=0.42`; remove the ignore then. |
+| `RUSTSEC-2026-0190` | `anyhow` | Workspace-wide direct/common dependency | Error handling across CLI, providers, tools, TUI, and support crates | Unsoundness in `Error::downcast_mut()`. Jcode uses `anyhow` broadly for error propagation; there is no patched release in the current lockfile. | Upgrade `anyhow` as soon as a patched release is available; remove the ignore then. |
+| `RUSTSEC-2026-0186` | `memmap2` | `fontdb`/`usvg`/`resvg`/`mermaid-rs-renderer`, `tract-onnx`, and other rendering/embedding transitive paths | TUI rendering, Mermaid/SVG rendering, and embedding/model support | Unsoundness in unchecked pointer offset. Mostly transitive through rendering/embedding stacks; Linux CI also observes an older transitive `memmap2` alongside the current 0.9 line. | Prefer upstream upgrades of rendering/embedding dependency stacks; remove the ignore once all affected `memmap2` versions are gone. |
+| `RUSTSEC-2026-0195` / `RUSTSEC-2026-0194` | `quick-xml` | `jcode-desktop -> winit 0.29 -> smithay-client-toolkit 0.18 -> wayland-scanner 0.31` | Linux Wayland protocol code generation in the desktop build stack | High-severity allocation/runtime denial-of-service issues in XML parsing. This is a build-time Wayland protocol scanner path, not the TUI/runtime agent path. A direct `quick-xml >=0.41` lockfile update is blocked by `wayland-scanner`'s `quick-xml = ^0.39` constraint. | Upgrade the Wayland/winit desktop stack when a compatible release allows `quick-xml >=0.41`; remove both ignores then. |
 | `RUSTSEC-2023-0086` | `lexical-core` | `imap -> imap-proto -> lexical-core` | Gmail/IMAP support path | Old unsound transitive dependency in the mail stack. Higher priority than the UI-only findings because it touches network-parsed data. | Investigate upgrading or replacing `imap` / `imap-proto`. If no maintained path exists, isolate or remove the IMAP dependency. |
 
 ## Priority order
 
 1. `rustls-webpki` TLS advisories via rustls stack
 2. `lexical-core` via `imap-proto`
-3. `lettre` if Jcode ever enables `boring-tls`
-4. `lru` via `ratatui`
-5. `bincode` via `syntect`
-6. `paste` / `rand` via multiple transitive dependencies
+3. `anyhow` once a patched release is available
+4. `memmap2` via rendering/embedding transitive stacks
+5. `quick-xml` via the desktop Wayland/winit build-time stack
+6. `lettre` if Jcode ever enables `boring-tls`
+7. `lru` via `ratatui`
+8. `bincode` via `syntect`
+9. `paste` / `rand` via multiple transitive dependencies
 
 ## Notes
 
@@ -37,6 +43,7 @@ It is not an allowlist. It is a triage record so advisories are visible and acti
 - `RUSTSEC-2024-0320` (`yaml-rust`) was removed from the dependency graph on 2026-03-05 by trimming `syntect` features to built-in syntax/theme dumps instead of YAML loading.
 - `RUSTSEC-2026-0194` / `RUSTSEC-2026-0195` (`quick-xml` 0.39.2): reached only through `wayland-scanner`, a build-time proc-macro in the desktop crate's winit stack. It parses trusted, vendored Wayland protocol XML during compilation and never touches untrusted input at runtime. Remediation is upstream: `wayland-scanner` needs to move to `quick-xml >= 0.41`. Triaged and ignored in `scripts/security_preflight.sh` on 2026-07-04.
 - `scripts/security_preflight.sh` ignores the vulnerability advisories that are explicitly triaged above (`lettre` and `rustls-webpki`) so CI can remain actionable. New vulnerabilities still fail CI by default.
+- `scripts/security_preflight.sh` ignores the vulnerability advisories that are explicitly triaged above (`lettre`, `rustls-webpki`, `lopdf`, `anyhow`, `memmap2`, and `quick-xml`) so CI can remain actionable. New vulnerabilities still fail CI by default.
 - Before changing dependency versions, run:
   - `cargo check`
   - `cargo test -j 1`
