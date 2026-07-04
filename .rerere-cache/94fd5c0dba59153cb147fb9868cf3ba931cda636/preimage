@@ -1,0 +1,181 @@
+# Fork branch maintenance
+
+<<<<<<<
+This fork has exactly three maintained branches.
+=======
+This fork is maintained as a downstream stack:
+>>>>>>>
+
+```mermaid
+gitGraph
+<<<<<<<
+  commit id: "upstream jcode"
+  branch "vendor/upstream"
+  checkout "vendor/upstream"
+  commit id: "mirror only"
+  branch "distro/nix"
+  checkout "distro/nix"
+  commit id: "flake packaging"
+  branch main
+  checkout main
+  commit id: "custom fork work"
+=======
+  commit id: "upstream"
+  branch "distro/nix"
+  checkout "distro/nix"
+  commit id: "flake packaging"
+  branch main
+  checkout main
+  commit id: "custom fork patches"
+>>>>>>>
+```
+
+## Branch roles
+
+| Branch | Contents | Rule |
+|---|---|---|
+<<<<<<<
+| `vendor/upstream` | Exact mirror of `1jehuang/jcode` primary branch | None |
+| `distro/nix` | `vendor/upstream` plus flake packaging, HM module, cache, docs, and CI | Reusable packaging/distribution changes |
+| `main` | Stable daily custom fork over `distro/nix` | Compatibility fixes, shims, features, behavior changes, and fork docs |
+=======
+| `vendor/upstream` | Upstream `1jehuang/jcode` exactly | First landing place for upstream syncs. No downstream edits. |
+| `distro/nix` | `vendor/upstream` plus reusable flake packaging | Nix flake, lockfile, `nix/`, cache/Cachix, packaging workflows, and packaging docs only. |
+| `main` | `distro/nix` plus fork customizations | Daily development branch for app behavior, mobile/web/server work, compatibility shims, tests, and fork docs. |
+>>>>>>>
+
+<<<<<<<
+Use short-lived topic branches for work in progress:
+=======
+`main` must be a descendant of `distro/nix`, and `distro/nix` must be a descendant of `vendor/upstream`.
+>>>>>>>
+
+<<<<<<<
+## Placement rules
+
+- Put behavior changes on `main`.
+- Put mobile, web, server, gateway, assistant, provider, test, and roadmap work on `main`.
+- Put reusable packaging and distribution glue on `distro/nix`.
+- Put clean upstream updates on `vendor/upstream` first, then rebase `distro/nix`, then rebase `main`.
+- Do not merge upstream into downstream branches. Rebase the stack.
+- Use `--force-with-lease` for maintained branch updates.
+=======
+| Prefix | Purpose |
+|---|---|
+| `exp/<topic>` | Experiment over `main` |
+| `pr/<topic>` | Work intended for upstream PR |
+| `shim/<topic>` | Temporary compatibility workaround |
+| `archive/<name>` | Safety copy of old branch tips |
+>>>>>>>
+
+## Manual sync outline
+
+```sh
+git fetch github upstream
+
+git switch vendor/upstream
+git reset --hard upstream/master
+
+git switch distro/nix
+git rebase vendor/upstream
+nix flake show --all-systems --json
+
+git switch main
+git rebase distro/nix
+```
+
+<<<<<<<
+It fetches `origin` and `upstream`, then reports:
+
+- whether `origin/vendor/upstream` exactly matches `upstream/master`
+- the commits carried by `origin/distro/nix` beyond `origin/vendor/upstream`
+- the commits carried by `origin/main` beyond `origin/distro/nix`
+- open PRs targeting maintained branches
+- recent Nix workflow runs
+
+The script is read-only apart from `git fetch`.
+
+## Updating from upstream
+
+Automated upstream sync runs every six hours through the default-branch
+`Fork maintenance` scheduler. To trigger it manually:
+=======
+Push only after validation:
+>>>>>>>
+
+```sh
+git push --force-with-lease github vendor/upstream
+git push --force-with-lease github distro/nix
+git push --force-with-lease github main
+```
+
+<<<<<<<
+## Audits
+=======
+The workflow sets `vendor/upstream` to `upstream/master`, rebases `distro/nix`,
+then rebases `main`. Pushes use `--force-with-lease`.
+>>>>>>>
+
+Check the branch contract with:
+
+```sh
+<<<<<<<
+git fetch github upstream
+git rev-list --left-right --count upstream/master...github/vendor/upstream
+git rev-list --left-right --count github/vendor/upstream...github/distro/nix
+git rev-list --left-right --count github/distro/nix...github/main
+git diff --name-only github/vendor/upstream..github/distro/nix
+git diff --name-only github/distro/nix..github/main
+```
+=======
+git fetch origin upstream
+>>>>>>>
+
+<<<<<<<
+Expected `distro/nix` touched areas are packaging-only: `.github/workflows/*nix*`, `.github/workflows/fork-maintenance.yml`, `flake.nix`, `flake.lock`, `nix/**`, `docs/NIX.md`, `docs/BRANCHING.md`, packaging-related README sections, and packaging helper scripts.
+=======
+git switch vendor/upstream
+git reset --hard upstream/master
+git push --force-with-lease origin vendor/upstream
+
+git switch distro/nix
+git rebase vendor/upstream
+nix flake show --all-systems --json
+nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
+nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+git push --force-with-lease origin distro/nix
+
+git switch main
+git rebase distro/nix
+cargo check --workspace
+cargo test -p jcode-provider-core openai_schema
+git push --force-with-lease origin main
+```
+
+## Patch classes
+
+Use commit prefixes that describe why a downstream change exists:
+
+| Prefix | Meaning |
+|---|---|
+| `compat(...)` | Compatibility with provider, protocol, runtime, OS, or upstream drift |
+| `shim(...)` | Temporary workaround with a retirement path |
+| `feature(...)` | Fork-only capability |
+| `behavior(...)` | Intentional semantic/default behavior change |
+| `distro(...)` | Packaging, Nix, release, cache, install, or CI glue |
+| `docs(...)` | Documentation and roadmap notes |
+| `test(...)` | Regression or harness-only change |
+
+Temporary shims and upstreamable compatibility fixes must be tracked in
+`docs/fork/patch-ledger.md`.
+
+## CI ownership
+
+- Upstream Rust and product CI belongs to upstream.
+- Nix reproducibility, supported platform builds, Cachix publishing, and flake.lock update PRs belong to `distro/nix`.
+- Stable custom fork validation belongs to `main`.
+- Branch-local Nix validation runs automatically on `push` and PR events for
+  `distro/nix` and `main`.
+- Lock updates open PRs against `distro/nix`; `main` then rebases on the updated packaging layer.
+- `x86_64-darwin` is intentionally unsupported.
+>>>>>>>
