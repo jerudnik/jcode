@@ -2716,6 +2716,7 @@ pub(super) async fn handle_client(
                         client_event_tx: &client_event_tx,
                         swarm_members: &swarm_members,
                         swarms_by_id: &swarms_by_id,
+                        swarm_plans: &swarm_plans,
                         swarm_event_tx: &swarm_event_tx,
                         await_members_runtime: &await_members_runtime,
                     },

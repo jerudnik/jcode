@@ -1104,12 +1104,14 @@ impl Server {
         {
             let resume_swarm_members = Arc::clone(&self.swarm_state.members);
             let resume_swarms_by_id = Arc::clone(&self.swarm_state.swarms_by_id);
+            let resume_swarm_plans = Arc::clone(&self.swarm_state.plans);
             let resume_swarm_event_tx = self.swarm_event_tx.clone();
             let resume_await_runtime = self.await_members_runtime.clone();
             tokio::spawn(async move {
                 comm_await::resume_background_awaits(
                     &resume_swarm_members,
                     &resume_swarms_by_id,
+                    &resume_swarm_plans,
                     &resume_swarm_event_tx,
                     &resume_await_runtime,
                 )

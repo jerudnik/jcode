@@ -430,6 +430,31 @@ pub(super) async fn handle_comm_resync_plan(
     };
 
     if let Some(swarm_id) = swarm_id {
+        // F4 repair: coordinatorship is tracked both in the coordinators map
+        // (authoritative for permission checks) and the member role string
+        // (what swarm list shows). Restarts/races can drop the map entry while
+        // the role string still reads "coordinator", wedging every assign with
+        // "Only the coordinator can assign tasks". resync_plan is the
+        // documented recovery step, so reconcile the map here: if the swarm
+        // has no live coordinator entry and this member's role says
+        // coordinator, restore it.
+        {
+            let members = ctx.swarm_members.read().await;
+            let requester_is_coordinator = members
+                .get(&req_session_id)
+                .map(|member| member.role == "coordinator")
+                .unwrap_or(false);
+            if requester_is_coordinator {
+                let mut coordinators = ctx.swarm_coordinators.write().await;
+                let entry_is_live = coordinators
+                    .get(&swarm_id)
+                    .map(|coordinator| members.contains_key(coordinator))
+                    .unwrap_or(false);
+                if !entry_is_live {
+                    coordinators.insert(swarm_id.clone(), req_session_id.clone());
+                }
+            }
+        }
         let plan_state = {
             let mut plans = ctx.swarm_plans.write().await;
             plans.get_mut(&swarm_id).map(|plan| {

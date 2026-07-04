@@ -2,13 +2,37 @@ use super::await_members_state::{
     PersistedAwaitMembersState, all_pending_await_members_including_expired, ensure_pending_state,
     load_state, persist_final_response, request_key, save_state,
 };
-use super::{AwaitMembersRuntime, SwarmEvent, SwarmMember};
+use super::{AwaitMembersRuntime, SwarmEvent, SwarmMember, VersionedPlan};
 use crate::bus::{Bus, BusEvent, SwarmAwaitCompleted, UiActivity};
 use crate::protocol::{AwaitedMemberStatus, ServerEvent, format_comm_awaited_members_with_reports};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, broadcast, mpsc};
+
+/// Sessions that still hold a non-terminal assigned task in the swarm plan.
+///
+/// F2 (premature wake): member status flips to "ready" at EVERY turn end
+/// (comm_session.rs), so status alone cannot distinguish "task complete" from
+/// "mid-task turn boundary". The plan is the source of truth for in-flight
+/// work; awaits must not treat a member as done while its assigned task is
+/// still active.
+async fn sessions_with_active_plan_tasks(
+    swarm_id: &str,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+) -> HashSet<String> {
+    let plans = swarm_plans.read().await;
+    plans
+        .get(swarm_id)
+        .map(|plan| {
+            plan.items
+                .iter()
+                .filter(|item| !crate::plan::is_terminal_status(&item.status))
+                .filter_map(|item| item.assigned_to.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
 pub(super) async fn awaited_member_statuses(
     req_session_id: &str,
@@ -17,6 +41,7 @@ pub(super) async fn awaited_member_statuses(
     target_status: &[String],
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
 ) -> Vec<AwaitedMemberStatus> {
     let watch_ids: Vec<String> = if requested_ids.is_empty() {
         let mut watch_ids: Vec<String> = {
@@ -38,6 +63,8 @@ pub(super) async fn awaited_member_statuses(
         requested_ids.to_vec()
     };
 
+    let busy_sessions = sessions_with_active_plan_tasks(swarm_id, swarm_plans).await;
+
     let members = swarm_members.read().await;
     watch_ids
         .iter()
@@ -52,10 +79,17 @@ pub(super) async fn awaited_member_statuses(
                     )
                 })
                 .unwrap_or((None, "unknown".to_string(), None));
-            let done = target_status.contains(&status)
-                || (status == "unknown"
-                    && (target_status.contains(&"stopped".to_string())
-                        || target_status.contains(&"completed".to_string())));
+            // A success-shaped status ("ready"/"completed") is only honest
+            // when the member has no in-flight plan task: turn boundaries set
+            // "ready" mid-task (F2). Failure-shaped statuses still count as
+            // done, otherwise a crashed worker would hang the await forever.
+            let mid_task_success_status = matches!(status.as_str(), "ready" | "completed")
+                && busy_sessions.contains(session_id);
+            let done = !mid_task_success_status
+                && (target_status.contains(&status)
+                    || (status == "unknown"
+                        && (target_status.contains(&"stopped".to_string())
+                            || target_status.contains(&"completed".to_string()))));
             AwaitedMemberStatus {
                 session_id: session_id.clone(),
                 friendly_name: name,
@@ -211,6 +245,7 @@ pub(super) async fn spawn_or_resume_await_members(
     req_session_id: String,
     swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_event_tx: broadcast::Sender<SwarmEvent>,
     await_members_runtime: AwaitMembersRuntime,
 ) {
@@ -232,6 +267,7 @@ pub(super) async fn spawn_or_resume_await_members(
                 &target_status,
                 &swarm_members,
                 &swarms_by_id,
+                &swarm_plans,
             )
             .await;
 
@@ -306,6 +342,7 @@ pub(super) struct CommAwaitMembersContext<'a> {
     pub client_event_tx: &'a mpsc::UnboundedSender<ServerEvent>,
     pub swarm_members: &'a Arc<RwLock<HashMap<String, SwarmMember>>>,
     pub swarms_by_id: &'a Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    pub swarm_plans: &'a Arc<RwLock<HashMap<String, VersionedPlan>>>,
     pub swarm_event_tx: &'a broadcast::Sender<SwarmEvent>,
     pub await_members_runtime: &'a AwaitMembersRuntime,
 }
@@ -350,6 +387,7 @@ pub(super) async fn handle_comm_await_members(
             &target_status,
             ctx.swarm_members,
             ctx.swarms_by_id,
+            ctx.swarm_plans,
         )
         .await;
 
@@ -479,6 +517,7 @@ pub(super) async fn handle_comm_await_members(
                     req_session_id,
                     ctx.swarm_members.clone(),
                     ctx.swarms_by_id.clone(),
+                    ctx.swarm_plans.clone(),
                     ctx.swarm_event_tx.clone(),
                     ctx.await_members_runtime.clone(),
                 )
@@ -524,6 +563,7 @@ pub(super) async fn handle_comm_await_members(
                 req_session_id,
                 ctx.swarm_members.clone(),
                 ctx.swarms_by_id.clone(),
+                ctx.swarm_plans.clone(),
                 ctx.swarm_event_tx.clone(),
                 ctx.await_members_runtime.clone(),
             )
@@ -608,6 +648,7 @@ fn publish_await_started_card(
 pub(super) async fn resume_background_awaits(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
     await_members_runtime: &AwaitMembersRuntime,
 ) {
@@ -634,6 +675,7 @@ pub(super) async fn resume_background_awaits(
                 &state.target_status,
                 swarm_members,
                 swarms_by_id,
+                swarm_plans,
             )
             .await;
             let (completed, summary) = if member_statuses.is_empty() {
@@ -663,6 +705,7 @@ pub(super) async fn resume_background_awaits(
                 req_session_id,
                 swarm_members.clone(),
                 swarms_by_id.clone(),
+                swarm_plans.clone(),
                 swarm_event_tx.clone(),
                 await_members_runtime.clone(),
             )

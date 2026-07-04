@@ -54,6 +54,7 @@ async fn await_members_returns_persisted_final_response_after_reload_retry() {
         swarm_id.to_string(),
         HashSet::from([requester.to_string()]),
     )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
 
     handle_comm_await_members(
@@ -70,6 +71,7 @@ async fn await_members_returns_persisted_final_response_after_reload_retry() {
             client_event_tx: &client_tx,
             swarm_members: &swarm_members,
             swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
             swarm_event_tx: &swarm_event_tx,
             await_members_runtime: &await_runtime,
         },
@@ -151,6 +153,7 @@ async fn await_members_ignores_persisted_final_when_requested_member_is_queued_a
         swarm_id.to_string(),
         HashSet::from([requester.to_string(), peer.to_string()]),
     )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
 
     handle_comm_await_members(
@@ -167,6 +170,7 @@ async fn await_members_ignores_persisted_final_when_requested_member_is_queued_a
             client_event_tx: &client_tx,
             swarm_members: &swarm_members,
             swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
             swarm_event_tx: &swarm_event_tx,
             await_members_runtime: &await_runtime,
         },
