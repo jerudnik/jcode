@@ -196,10 +196,23 @@ jobs:
         # remote-startup pending_queued_dispatch deferral). They still compile
         # here for type/borrow coverage via the step above. See
         # docs/fork/patch-ledger.md.
+        #
+        # jcode-app-core is executed in its own step below: it is hermetic, but
+        # large enough (800+ lib tests plus heavy dependency startup on hosted
+        # Linux) that grouping it with the rest of the workspace obscures which
+        # package exceeded the timeout budget.
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
             "$(rustup which cargo)" test --target ${{ matrix.target }} \
-            --workspace --lib --bins --exclude jcode-tui
+            --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
+
+      - name: Run jcode-app-core library tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python3 .github/scripts/run_with_timeout.py 1800 \
+            "$(rustup which cargo)" test --target ${{ matrix.target }} \
+            -p jcode-app-core --lib -- --nocapture
 
       - name: Compile integration test binaries
         shell: bash
