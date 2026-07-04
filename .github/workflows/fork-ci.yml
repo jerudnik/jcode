@@ -66,8 +66,35 @@ jobs:
           key: fork-quality
           cache-all-crates: "true"
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
+      # Upstream's tip does not always pass `cargo fmt --check` under the
+      # current stable rustfmt (their own CI goes red on Format when that
+      # happens). Reformatting vendor code here would grow the fork diff, so
+      # this gate runs the full-tree check once but only *fails* when a
+      # flagged file is one this fork modified relative to vendor/upstream.
+      # Vendor-only drift is reported and tolerated until upstream fixes it.
+      - name: Check formatting (blocking for fork-touched files)
+        run: |
+          git fetch --no-tags --depth=1 origin vendor/upstream
+          git diff --name-only --diff-filter=d \
+            origin/vendor/upstream HEAD -- '*.rs' | sort -u > /tmp/fork-touched
+          cargo fmt --all -- --check > /tmp/fmt-out 2>&1 || true
+          grep '^Diff in ' /tmp/fmt-out \
+            | sed "s|^Diff in $PWD/||; s|:[0-9]*:\$||" \
+            | sort -u > /tmp/fmt-flagged
+          bad=$(comm -12 /tmp/fork-touched /tmp/fmt-flagged)
+          if [ -n "$bad" ]; then
+            echo "::error::rustfmt diffs in fork-modified files:"
+            echo "$bad"
+            cat /tmp/fmt-out
+            exit 1
+          fi
+          vendor_only=$(comm -13 /tmp/fork-touched /tmp/fmt-flagged)
+          if [ -n "$vendor_only" ]; then
+            echo "::warning::vendor files fail rustfmt (upstream drift, not blocking):"
+            echo "$vendor_only"
+          else
+            echo "cargo fmt clean across the whole tree."
+          fi
 
       # Doubles as the Linux mergeability canary: everything (tests included)
       # must still type-check on Linux so fork patches stay upstreamable.
