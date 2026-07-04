@@ -58,12 +58,14 @@ jobs:
 
       - name: Verify audit ignores are documented
         run: |
-          # Every triaged ignore must have a matching row in the triage doc,
-          # so the config file and the rationale cannot drift apart.
+          # Every triaged ignore must have a row in a triage doc, so the
+          # config file and the rationale cannot drift apart. Upstream rows
+          # live in docs/SECURITY_DEPENDENCIES.md (vendor file, main layer may
+          # extend it); fork-only rows live in docs/fork/SECURITY_TRIAGE.md.
           missing=0
           while IFS= read -r id; do
-            if ! grep -q "$id" docs/SECURITY_DEPENDENCIES.md; then
-              echo "::error::$id is ignored in .cargo/audit.toml but has no triage row in docs/SECURITY_DEPENDENCIES.md"
+            if ! grep -q "$id" docs/SECURITY_DEPENDENCIES.md docs/fork/SECURITY_TRIAGE.md 2>/dev/null; then
+              echo "::error::$id is ignored in .cargo/audit.toml but has no triage row in docs/SECURITY_DEPENDENCIES.md or docs/fork/SECURITY_TRIAGE.md"
               missing=1
             fi
           done < <(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' .cargo/audit.toml | sort -u)

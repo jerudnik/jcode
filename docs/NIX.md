@@ -73,28 +73,26 @@ Pull requests consume the cache read-only and do not push. To set up or re-key:
 
 ### Automated maintenance
 
-The default branch is the stable custom fork, `main`. It carries the scheduler
-that dispatches branch-stack maintenance work.
+Each maintenance concern has its own workflow (schedules run from `main`, the
+default branch):
 
-Upstream sync runs every six hours. It sets `vendor/upstream` to
-`upstream/master`, rebases `distro/nix`, rebases `main`, pushes with
-`--force-with-lease`, and lets CI surface breakage early.
+- **Upstream sync** (`sync.yml`) runs every six hours. It fast-forwards
+  `vendor/upstream` to `upstream/master`, rebases `distro/nix`, rebases
+  `main`, pushes with `--force-with-lease`, verifies rail health, and
+  dispatches Fork CI + Nix on the result. Recurring conflicts self-heal via
+  the shared rerere cache; a new conflict opens a `sync-blocked` issue.
+- **Fork health** (`fork-health.yml`) runs daily and enforces the
+  three-branch invariants via `scripts/fork-health.sh`.
+- **flake.lock updates** (`nix-update.yml`) run weekly on Monday at 06:47
+  UTC, after the 06:17 UTC sync window, and open a PR against `distro/nix`.
 
-`flake.lock` updates run weekly on Monday at 06:47 UTC, after the 06:17 UTC
-sync window. To trigger either task manually:
+To trigger any of them manually:
 
 ```sh
-gh workflow run "Fork maintenance" --repo jerudnik/jcode -f task=sync-upstream
-gh workflow run "Fork maintenance" --repo jerudnik/jcode -f task=update-flake-lock
-
-# Or dispatch the branch-stack workflow directly:
-gh workflow run Nix --repo jerudnik/jcode --ref main -f task=sync-upstream
-gh workflow run Nix --repo jerudnik/jcode --ref main -f task=update-flake-lock
+gh workflow run "Upstream Sync" --repo jerudnik/jcode
+gh workflow run "Fork Health" --repo jerudnik/jcode
+gh workflow run "Update flake.lock" --repo jerudnik/jcode
 ```
-
-The lock update task invokes `.github/workflows/nix-update.yml` as a reusable
-workflow, updates `flake.lock` on a temporary branch, validates the lock bump,
-and opens or updates a PR against `distro/nix`.
 
 ## Use as a flake input
 

@@ -72,4 +72,34 @@ git diff --name-only github/vendor/upstream..github/distro/nix
 git diff --name-only github/distro/nix..github/main
 ```
 
-Expected `distro/nix` touched areas are packaging-only: `.github/workflows/*nix*`, `.github/workflows/fork-maintenance.yml`, `flake.nix`, `flake.lock`, `nix/**`, `docs/NIX.md`, `docs/BRANCHING.md`, packaging-related README sections, and packaging helper scripts.
+Or run the codified version of the same checks (used by CI daily and after
+every sync):
+
+```sh
+scripts/fork-health.sh
+```
+
+Expected `distro/nix` touched areas are packaging and fork CI policy:
+`.github/workflows/**` (all workflow ownership lives here, never on `main`),
+`flake.nix`, `flake.lock`, `nix/**`, `.cargo/audit.toml`, `docs/NIX.md`,
+`docs/BRANCHING.md`, packaging-related README sections, and packaging/health
+helper scripts. The authoritative allowlist is `allowed_scope_regex` in
+`scripts/fork-health.sh`; update both together.
+
+## CI ownership
+
+The `distro/nix` layer owns every file under `.github/workflows/`:
+
+| Workflow | Role | Trigger |
+|---|---|---|
+| `fork-ci.yml` | The fork's real gate: quality + macOS build/test, advisory Linux tests | push/PR to `main`, weekly strict run |
+| `nix.yml` | Flake validation + x86_64-linux/aarch64-darwin builds + Cachix | push/PR touching build inputs |
+| `security.yml` | Secret scan + triaged cargo-audit gate; weekly full advisory report | push/PR touching deps, weekly |
+| `sync.yml` | 6h upstream mirror + rail rebase (rerere self-healing) | schedule, manual |
+| `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, after sync, manual |
+| `nix-update.yml` | Weekly `flake.lock` bump PR against `distro/nix` | weekly, manual |
+| `ci.yml`, `freebsd-smoke.yml`, `windows-smoke.yml`, `release.yml`, `require-issue.yml` | Upstream's workflows, kept byte-close to `vendor/upstream`; dispatch-only or trigger-neutered | manual dispatch (before upstreaming patches) |
+
+`main` must not modify `.github/workflows/` -- that recreates the per-sync
+conflict problem the layering exists to solve. `scripts/fork-health.sh` fails
+when it does.

@@ -104,7 +104,7 @@ fi
 # ── 4) distro/nix scope ──────────────────────────────────────────────────────
 # The packaging layer touches only distribution and fork-CI-policy paths.
 # Keep in lockstep with docs/BRANCHING.md "Expected distro/nix touched areas".
-allowed_scope_regex='^(flake\.(nix|lock)|nix/|docs/(NIX|BRANCHING)\.md|docs/AMBIENT_MODE\.md|README\.md|\.github/workflows/|scripts/(branch-model-status|fork-health|update_packages)\.sh)'
+allowed_scope_regex='^(flake\.(nix|lock)|nix/|docs/(NIX|BRANCHING)\.md|docs/AMBIENT_MODE\.md|docs/fork/SECURITY_TRIAGE\.md|README\.md|\.cargo/audit\.toml|\.github/workflows/|scripts/(branch-model-status|fork-health|update_packages)\.sh)'
 out_of_scope="$(git diff --name-only "$fork_vendor" "$fork_distro" \
   | grep -Ev "$allowed_scope_regex" || true)"
 if [ -z "$out_of_scope" ]; then
