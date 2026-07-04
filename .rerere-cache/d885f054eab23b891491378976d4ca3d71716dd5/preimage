@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="${1:-jerudnik/jcode}"
+upstream_remote="${UPSTREAM_REMOTE:-upstream}"
+fork_remote="${FORK_REMOTE:-github}"
+upstream_branch="${UPSTREAM_BRANCH:-master}"
+vendor_branch="${VENDOR_BRANCH:-vendor/upstream}"
+distro_branch="${DISTRO_BRANCH:-distro/nix}"
+main_branch="${MAIN_BRANCH:-main}"
+
+section() {
+  printf '\n== %s ==\n' "$1"
+}
+
+ref_exists() {
+  git show-ref --verify --quiet "$1"
+}
+
+if ! git remote get-url "$fork_remote" >/dev/null 2>&1; then
+  printf 'warning: fork remote %s is missing; set FORK_REMOTE or add the remote.\n' "$fork_remote" >&2
+  exit 1
+fi
+if ! git remote get-url "$upstream_remote" >/dev/null 2>&1; then
+  printf 'warning: upstream remote %s is missing; set UPSTREAM_REMOTE or add the remote.\n' "$upstream_remote" >&2
+  exit 1
+fi
+
+git fetch --prune "$fork_remote" >/dev/null
+git fetch --prune "$upstream_remote" >/dev/null
+
+<<<<<<<
+fork_vendor="$fork_remote/$vendor_branch"
+fork_distro="$fork_remote/$distro_branch"
+fork_main="$fork_remote/$main_branch"
+=======
+origin_vendor="$origin_remote/$vendor_branch"
+origin_distro="$origin_remote/$distro_branch"
+origin_main="$origin_remote/$main_branch"
+>>>>>>>
+upstream_ref="$upstream_remote/$upstream_branch"
+
+section "Mirror status"
+<<<<<<<
+if ! ref_exists "refs/remotes/$fork_vendor"; then
+  echo "missing $fork_vendor" >&2
+=======
+if ! ref_exists "refs/remotes/$origin_vendor"; then
+  echo "missing $origin_vendor" >&2
+>>>>>>>
+  exit 1
+fi
+if ! ref_exists "refs/remotes/$upstream_ref"; then
+  echo "missing $upstream_ref" >&2
+  exit 1
+fi
+
+<<<<<<<
+vendor_sha="$(git rev-parse "$fork_vendor")"
+=======
+vendor_sha="$(git rev-parse "$origin_vendor")"
+>>>>>>>
+upstream_sha="$(git rev-parse "$upstream_ref")"
+<<<<<<<
+printf '%-18s %s\n' "$fork_vendor" "$vendor_sha"
+=======
+printf '%-18s %s\n' "$origin_vendor" "$vendor_sha"
+>>>>>>>
+printf '%-18s %s\n' "$upstream_ref" "$upstream_sha"
+
+<<<<<<<
+if [ "$vendor_sha" = "$upstream_sha" ]; then
+  echo "OK: $fork_vendor exactly matches $upstream_ref"
+=======
+if [ "$vendor_sha" = "$upstream_sha" ]; then
+  echo "OK: $origin_vendor exactly matches $upstream_ref"
+>>>>>>>
+else
+<<<<<<<
+  echo "WARN: $fork_vendor differs from $upstream_ref"
+  echo "fork-only commits on $fork_vendor:"
+  git log --oneline "$upstream_ref..$fork_vendor" || true
+  echo "upstream commits not yet in $fork_vendor:"
+  git log --oneline "$fork_vendor..$upstream_ref" || true
+=======
+  echo "WARN: $origin_vendor differs from $upstream_ref"
+  echo "fork-only commits on $origin_vendor:"
+  git log --oneline "$upstream_ref..$origin_vendor" || true
+  echo "upstream commits not yet in $origin_vendor:"
+  git log --oneline "$origin_vendor..$upstream_ref" || true
+>>>>>>>
+fi
+
+<<<<<<<
+section "$distro_branch payload beyond $vendor_branch"
+if ref_exists "refs/remotes/$fork_distro"; then
+  git log --oneline --decorate "$fork_vendor..$fork_distro" || true
+=======
+section "$distro_branch payload beyond $vendor_branch"
+if ref_exists "refs/remotes/$origin_distro"; then
+  git log --oneline --decorate "$origin_vendor..$origin_distro" || true
+>>>>>>>
+  echo
+<<<<<<<
+  git diff --stat "$fork_vendor..$fork_distro" || true
+=======
+  git diff --stat "$origin_vendor..$origin_distro" || true
+>>>>>>>
+else
+<<<<<<<
+  echo "missing $fork_distro"
+fi
+
+section "$main_branch payload beyond $distro_branch"
+if ref_exists "refs/remotes/$fork_main"; then
+  git log --oneline --decorate "$fork_distro..$fork_main" || true
+  echo
+  git diff --stat "$fork_distro..$fork_main" || true
+else
+  echo "missing $fork_main"
+=======
+  echo "missing $origin_distro"
+fi
+
+section "$main_branch payload beyond $distro_branch"
+if ref_exists "refs/remotes/$origin_main"; then
+  git log --oneline --decorate "$origin_distro..$origin_main" || true
+  echo
+  git diff --stat "$origin_distro..$origin_main" || true
+else
+  echo "missing $origin_main"
+>>>>>>>
+fi
+
+section "Open PRs by base"
+if command -v gh >/dev/null 2>&1; then
+  for base in "$vendor_branch" "$distro_branch" "$main_branch"; do
+    echo "-- base: $base"
+    gh pr list --repo "$repo" --base "$base" --state open --json number,title,headRefName,isDraft \
+      --jq '.[] | "#\(.number) [\(if .isDraft then "draft" else "ready" end)] \(.headRefName): \(.title)"' || true
+  done
+
+  section "Recent Nix workflow runs"
+  gh run list --repo "$repo" --workflow Nix --limit 5 \
+    --json databaseId,headBranch,status,conclusion,createdAt,event \
+    --jq '.[] | "#\(.databaseId) \(.createdAt) \(.headBranch) \(.event): \(.status)/\(.conclusion // "-")"' || true
+else
+  echo "gh not found; skipping PR and workflow summaries"
+fi

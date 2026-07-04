@@ -1,0 +1,225 @@
+# Fork branch maintenance
+
+This fork has exactly three maintained branches.
+
+```mermaid
+gitGraph
+  commit id: "upstream jcode"
+  branch "vendor/upstream"
+  checkout "vendor/upstream"
+  commit id: "mirror only"
+  branch "distro/nix"
+  checkout "distro/nix"
+  commit id: "flake packaging"
+  branch main
+  checkout main
+  commit id: "custom fork work"
+```
+
+## Branch roles
+
+| Branch | Contents | Rule |
+|---|---|---|
+| `vendor/upstream` | Upstream `1jehuang/jcode` exactly | First landing place for upstream syncs. No downstream edits. |
+| `distro/nix` | `vendor/upstream` plus reusable flake packaging | Nix flake, lockfile, `nix/`, cache/Cachix, packaging workflows, and packaging docs only. |
+| `main` | `distro/nix` plus fork customizations | Daily development branch for app behavior, mobile/web/server work, compatibility shims, tests, and fork docs. |
+
+`main` must be a descendant of `distro/nix`, and `distro/nix` must be a descendant of `vendor/upstream`.
+
+## Placement rules
+
+- Put behavior changes on `main`.
+- Put mobile, web, server, gateway, assistant, provider, test, and roadmap work on `main`.
+- Put reusable packaging and distribution glue on `distro/nix`.
+- Put clean upstream updates on `vendor/upstream` first, then rebase `distro/nix`, then rebase `main`.
+- Do not merge upstream into downstream branches. Rebase the stack.
+- Use `--force-with-lease` for maintained branch updates.
+
+## Manual sync outline
+
+```sh
+git fetch github upstream
+
+git switch vendor/upstream
+git reset --hard upstream/master
+
+git switch distro/nix
+git rebase vendor/upstream
+nix flake show --all-systems --json
+
+git switch main
+git rebase distro/nix
+```
+
+Push only after validation:
+
+```sh
+git push --force-with-lease github vendor/upstream
+git push --force-with-lease github distro/nix
+git push --force-with-lease github main
+```
+
+## Local development
+
+Work on `main` unless you are intentionally changing packaging. Topic branches should start from `main` and be folded back into `main` or upstreamed. Do not keep durable remote topic branches in this fork.
+
+The dev shell installs a pre-push guard that refuses accidental pushes to `distro/nix` and `vendor/upstream`. Intentional maintenance can opt in with the documented environment flags.
+
+## Audits
+
+Check the branch contract with:
+
+```sh
+git fetch github upstream
+git rev-list --left-right --count upstream/master...github/vendor/upstream
+git rev-list --left-right --count github/vendor/upstream...github/distro/nix
+git rev-list --left-right --count github/distro/nix...github/main
+git diff --name-only github/vendor/upstream..github/distro/nix
+git diff --name-only github/distro/nix..github/main
+```
+
+<<<<<<<
+## Recurring conflicts: record once, replay forever (`rerere`)
+
+Because CI rebases `distro/nix` and `main` onto upstream every six hours, the few
+files this fork rewrites conflict against upstream the **same way every cycle**.
+`git rerere` ("reuse recorded resolution") records how you resolved a conflict
+hunk and replays it automatically the next time the same hunk reappears, so each
+recurring conflict is resolved *once, ever*.
+
+rerere's recordings normally live in `$GIT_DIR/rr-cache`, which is per-clone and
+never pushed, so CI would start empty and re-fail every cycle. To fix that, the
+recordings are shared through a **tracked `.rerere-cache/` directory**:
+
+- Every clone enables rerere and imports the shared recordings automatically on
+  dev-shell entry (`scripts/rerere-cache.sh setup`, run from the flake
+  `shellHook`). `scripts/sync-local.sh` does the same before its rebases.
+- When a `sync-local.sh` rebase hits a **new** recurring conflict, resolve it
+  once, then capture and commit the recording:
+
+  ```sh
+  scripts/rerere-cache.sh export
+  git add .rerere-cache && git commit -m "fork: record rerere resolution"
+  ```
+
+- CI (`nix.yml` `sync-upstream`) imports `.rerere-cache` and rebases through
+  `scripts/rerere-rebase.sh`, which auto-continues on recognised conflicts and
+  **fails the job loudly on a genuinely new conflict** so a human resolves it
+  once. `.rerere-cache/` is outside the Nix build `src` fileset, so committing
+  resolutions never triggers a rebuild.
+
+`scripts/rerere-cache.sh status` shows the tracked/live counts and whether rerere
+is enabled in the current clone.
+
+## Staying in sync without thinking about it
+
+`scripts/fork-nudge.sh` is a fast, non-blocking drift reminder so the local clone
+never silently lags the 6h-rebased rails. The devShell `shellHook` runs it on
+entry (direnv fires it on `cd`), so just being in the repo nudges you.
+
+It is compute-frugal and idiot-proof by design:
+
+- It reads **already-fetched** remote-tracking refs for an instant verdict and
+  never blocks shell entry on the network.
+- When those cached refs are older than `FORK_NUDGE_MAX_AGE` (default 3h) it kicks
+  a **background** `git fetch` so the next entry is accurate.
+- It **auto fast-forwards `main` only in the unambiguously safe case**: strictly
+  behind, clean working tree, on `main`, zero local-only commits. Anything that
+  would need a rebase is a printed nudge to run `scripts/sync-local.sh`, never a
+  surprise rebase.
+
+Knobs: `FORK_NUDGE_DISABLE=1` (off), `FORK_NUDGE_AUTOSYNC=0` (nudge only, never
+auto-ff), `FORK_NUDGE_QUIET=1` (silent when in sync), `FORK_NUDGE_MAX_AGE=<secs>`.
+
+
+Policy per rail:
+
+- `vendor/upstream`: hard-reset to `github/vendor/upstream` (mirror; aborts loud
+  if it somehow carries local-only commits).
+- `distro/nix`, `main`: reset when the local branch is strictly behind, otherwise
+  rebase local commits onto the GitHub tip. A rebase conflict aborts cleanly and
+  leaves the branch untouched.
+
+After syncing `main`, bump the consumer pin (see below).
+
+## End-to-end maintenance loop
+
+```mermaid
+flowchart LR
+  U["upstream/master<br/>1jehuang/jcode"] -->|"6h scheduler<br/>(fork-maintenance.yml)"| CI
+  CI["nix.yml sync-upstream:<br/>ff vendor/upstream,<br/>rebase distro/nix, then main<br/>(force-with-lease)"] --> GH["github/jerudnik:<br/>vendor/upstream<br/>distro/nix<br/>main"]
+  GH -->|"nix.yml build matrix"| CX["Cachix:<br/>jerudnik-jcode.cachix.org<br/>(prebuilt x86_64/aarch64-linux,<br/>aarch64-darwin)"]
+  GH -->|"scripts/sync-local.sh"| L["local clone<br/>~/infrastructure/jcode"]
+  GH -->|"nix flake update jcode"| FX["4nix consumer<br/>jcode.url = github:jerudnik/jcode/main"]
+  CX -.->|"substituter<br/>(no local rebuild)"| FX
+  CX -.->|"substituter"| L
+```
+
+Surfaces and their owners:
+
+| Surface | Updated by | Authoritative? |
+|---|---|---|
+| `upstream/master` | upstream maintainers | source of truth for upstream code |
+| `github/{vendor,distro/nix,main}` | `Fork maintenance` CI every 6h | yes (only writer) |
+| Cachix `jerudnik-jcode` | `nix.yml` build matrix on push | prebuilt artifact cache |
+| local clone | `scripts/sync-local.sh` | read-only mirror of GitHub |
+| 4nix `jcode` input | `nix flake update jcode` in `~/infrastructure/4nix` | consumer pin |
+
+The Cachix cache is what keeps real-time local resource use low: 4nix and local
+`nix build` pull prebuilt binaries from `jerudnik-jcode.cachix.org` (trusted in
+`4nix/modules/defaults.nix`) instead of recompiling the Rust workspace.
+
+## Updating the 4nix consumer pin
+
+4nix consumes `jcode.url = "github:jerudnik/jcode/main"`. Its `flake.lock` pins a
+specific `main` rev and only moves when you bump it:
+
+```sh
+cd ~/infrastructure/4nix
+nix flake update jcode          # repin jcode/main to the latest reconciled tip
+nix flake check                 # or the repo's preflight/validation gate
+git commit -m "chore(flake): bump jcode" flake.lock
+```
+
+Prefer bumping after the GitHub `Nix` build matrix is green for that `main` rev,
+so the Cachix cache is already populated and the consumer never builds jcode
+locally.
+
+## Remote availability
+
+- `github` (`jerudnik/jcode`): authoritative fork remote.
+- `upstream` (`1jehuang/jcode`): read-only upstream source.
+- `forgejo` (`srv-4nix-core.mesh.4nix.cc:2222/infrastructure/jcode.git`):
+  **not yet provisioned** (fetch/push return "Cannot find repository" as of
+  2026-06-25). Do not fetch, push, reconcile, or add it to sync tooling until
+  the repository is created on the Forgejo host.
+
+## Patch classes
+
+Use commit prefixes that describe why a downstream change exists:
+
+| Prefix | Meaning |
+|---|---|
+| `compat(...)` | Compatibility with provider, protocol, runtime, OS, or upstream drift |
+| `shim(...)` | Temporary workaround with a retirement path |
+| `feature(...)` | Fork-only capability |
+| `behavior(...)` | Intentional semantic/default behavior change |
+| `distro(...)` | Packaging, Nix, release, cache, install, or CI glue |
+| `docs(...)` | Documentation and roadmap notes |
+| `test(...)` | Regression or harness-only change |
+
+Temporary shims and upstreamable compatibility fixes must be tracked in
+`docs/fork/patch-ledger.md`.
+
+## CI ownership
+
+- Upstream Rust and product CI belongs to upstream.
+- Nix reproducibility, supported platform builds, Cachix publishing, and flake.lock update PRs belong to `distro/nix`.
+- Stable custom fork validation belongs to `main`.
+- Branch-local Nix validation runs automatically on `push` and PR events for
+  `distro/nix` and `main`.
+- Lock updates open PRs against `distro/nix`; `main` then rebases on the updated packaging layer.
+- `x86_64-darwin` is intentionally unsupported.
+=======
+Expected `distro/nix` touched areas are packaging-only: `.github/workflows/*nix*`, `.github/workflows/fork-maintenance.yml`, `flake.nix`, `flake.lock`, `nix/**`, `docs/NIX.md`, `docs/BRANCHING.md`, packaging-related README sections, and packaging helper scripts.
+>>>>>>>
