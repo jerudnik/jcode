@@ -4156,6 +4156,7 @@ dependencies = [
  "jcode-core",
  "jcode-logging",
  "jcode-productivity-core",
+ "jcode-protocol",
  "jcode-provider-core",
  "jcode-selfdev-types",
  "jcode-session-types",
