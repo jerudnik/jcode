@@ -1,0 +1,78 @@
+name: Fork Health
+
+# Enforces the three-branch fork model invariants (see scripts/fork-health.sh):
+# exact branch set, mirror equality, rail ancestry, distro/nix scope, and
+# workflow ownership. Runs daily, after each Upstream Sync (which calls the
+# same script inline), and on demand. Drift opens/updates a single issue
+# instead of failing silently.
+
+on:
+  schedule:
+    - cron: "37 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: fork-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: verify rail invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Fetch rails and upstream
+        run: |
+          git remote add upstream https://github.com/1jehuang/jcode.git 2>/dev/null || true
+          git fetch --prune origin vendor/upstream distro/nix main
+          git fetch --prune upstream master
+
+      - name: Run fork health check
+        id: health
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/fork-health.sh --repo "$GITHUB_REPOSITORY" \
+            --fork-remote origin --upstream-remote upstream | tee health.txt
+          {
+            echo "## Fork health"
+            echo '```'
+            cat health.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the drift issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Fork health: rail invariant violation"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          existing="$(gh issue list --state open --search "in:title \"Fork health\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still violated: $run_url"
+          else
+            gh issue create --title "$title" \
+              --body "scripts/fork-health.sh found rail drift. See $run_url and run it locally to reproduce." \
+              --label fork-maintenance \
+              || gh issue create --title "$title" \
+                --body "scripts/fork-health.sh found rail drift. See $run_url and run it locally to reproduce."
+          fi
+
+      - name: Close the drift issue on success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing="$(gh issue list --state open --search "in:title \"Fork health\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Invariants hold again: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
