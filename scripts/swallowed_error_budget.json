@@ -1,8 +1,8 @@
 {
-  "total": 2922,
+  "total": 2928,
   "totals_by_pattern": {
-    "dot_ok": 1064,
-    "let_underscore": 1100,
+    "dot_ok": 1066,
+    "let_underscore": 1104,
     "unwrap_or_default": 758
   },
   "tracked_files": {
@@ -247,8 +247,8 @@
       "unwrap_or_default": 2
     },
     "crates/jcode-app-core/src/server/debug_testers.rs": {
-      "dot_ok": 0,
-      "let_underscore": 6,
+      "dot_ok": 1,
+      "let_underscore": 8,
       "unwrap_or_default": 0
     },
     "crates/jcode-app-core/src/server/durable_state.rs": {
@@ -683,7 +683,7 @@
     },
     "crates/jcode-base/src/embedding.rs": {
       "dot_ok": 2,
-      "let_underscore": 1,
+      "let_underscore": 0,
       "unwrap_or_default": 0
     },
     "crates/jcode-base/src/gateway.rs": {
@@ -807,8 +807,8 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-base/src/process_memory.rs": {
-      "dot_ok": 26,
-      "let_underscore": 5,
+      "dot_ok": 27,
+      "let_underscore": 6,
       "unwrap_or_default": 0
     },
     "crates/jcode-base/src/process_title.rs": {
@@ -1858,7 +1858,7 @@
     },
     "crates/jcode-tui/src/tui/app/onboarding_flow_control.rs": {
       "dot_ok": 0,
-      "let_underscore": 2,
+      "let_underscore": 3,
       "unwrap_or_default": 1
     },
     "crates/jcode-tui/src/tui/app/onboarding_repair.rs": {
@@ -2248,7 +2248,7 @@
     },
     "src/main.rs": {
       "dot_ok": 2,
-      "let_underscore": 2,
+      "let_underscore": 3,
       "unwrap_or_default": 0
     }
   },
