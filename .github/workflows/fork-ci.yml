@@ -1,0 +1,232 @@
+name: Fork CI
+
+# The fork's actual CI gate for `main`. This fork ships to exactly two
+# surfaces: macOS/aarch64 (the maintainer's machines) and Nix (nix.yml).
+# Upstream's ci.yml is kept byte-close to vendor/upstream and dispatch-only;
+# its Windows/FreeBSD/cross-check matrix is upstream's concern.
+#
+# Tiering:
+#   blocking on push : quality guardrails (also the Linux cargo-check
+#                      mergeability canary), macOS build + integration tests
+#   advisory on push : macOS lib-test execution (hermeticity unaudited on
+#                      macOS, see docs/fork/patch-ledger.md), full Linux
+#                      test execution (hosted-runner timing flakes must not
+#                      block the rails and must not breed fix-commits)
+#   blocking weekly  : the same Linux test job, via the schedule trigger, so
+#                      real Linux rot is caught within a week
+#
+# Owned by the distro/nix layer: `main` must carry no .github/workflows
+# diffs (enforced by scripts/fork-health.sh).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".rerere-cache/**"
+      - "backlog/**"
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly full-strictness run: the linux-tests job is blocking here.
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Some published crates ship a rust-toolchain.toml inside the crate
+  # (convert_case pins 1.83.0, proc-macro2 requests rust-src) and the rustup
+  # proxy honours it per-crate CWD. RUSTUP_TOOLCHAIN takes precedence, so pin
+  # every job to this runner's stable toolchain. (Inherited hard-won fix from
+  # upstream ci.yml; see the comment there.)
+  RUSTUP_TOOLCHAIN: stable
+
+jobs:
+  quality:
+    name: Quality Guardrails
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-quality
+          cache-all-crates: "true"
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # Doubles as the Linux mergeability canary: everything (tests included)
+      # must still type-check on Linux so fork patches stay upstreamable.
+      - name: Check all targets and all features
+        run: cargo check --all-targets --all-features
+
+      - name: Run clippy with warnings denied
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Enforce warning budget
+        run: scripts/check_warning_budget.sh
+
+      - name: Enforce oversized-file ratchet
+        run: python3 scripts/check_code_size_budget.py
+
+      - name: Enforce oversized-test ratchet
+        run: python3 scripts/check_test_size_budget.py
+
+      - name: Enforce panic-prone usage ratchet
+        run: python3 scripts/check_panic_budget.py
+
+      - name: Enforce swallowed-error usage ratchet
+        run: python3 scripts/check_swallowed_error_budget.py
+
+      - name: Enforce no unused dependencies
+        run: |
+          cargo install cargo-machete --locked
+          cargo machete
+
+  macos:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+          # Pre-install rust-src serially so parallel on-demand `rustup
+          # component add` calls don't race on ~/.rustup/downloads (inherited
+          # fix from upstream ci.yml).
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-macos
+
+      - name: Build release binary
+        run: cargo build --release --target aarch64-apple-darwin
+
+      - name: Verify built binary launches
+        run: ./target/aarch64-apple-darwin/release/jcode --version
+
+      - name: Compile library and binary tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            cargo test --target aarch64-apple-darwin --workspace --lib --bins --no-run
+
+      # Advisory: macOS lib suites have not been audited for hermeticity the
+      # way the Linux ones were (docs/fork/patch-ledger.md, "CI executes
+      # workspace lib tests"). Promote to blocking by deleting
+      # continue-on-error once a clean week of runs shows they are stable.
+      # jcode-tui stays compile-only on both rails (stale upstream too).
+      - name: Run workspace library tests (advisory)
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            cargo test --target aarch64-apple-darwin \
+            --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
+
+      - name: Run jcode-app-core library tests (advisory)
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/run_with_timeout.py 1800 \
+            cargo test --target aarch64-apple-darwin -p jcode-app-core --lib
+
+      - name: Compile integration test binaries
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            cargo test --target aarch64-apple-darwin \
+            --test provider_matrix --test e2e --no-run
+
+      - name: Run provider matrix tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 600 \
+            cargo test --target aarch64-apple-darwin --test provider_matrix
+
+      - name: Run e2e tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 600 \
+            cargo test --target aarch64-apple-darwin --test e2e
+
+  linux-tests:
+    name: Linux Tests (${{ github.event_name == 'schedule' && 'blocking weekly' || 'advisory' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Advisory on push/PR: hosted ubuntu runners have produced repeated
+    # timing-sensitive e2e failures whose "fixes" only grew fork divergence.
+    # The weekly scheduled run is blocking so genuine Linux regressions still
+    # surface with bounded delay.
+    continue-on-error: ${{ github.event_name != 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fork-linux-tests
+
+      - name: Install mold linker
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mold clang
+
+      - name: Configure mold linker
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'EOF'
+          [target.x86_64-unknown-linux-gnu]
+          linker = "clang"
+          rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+          EOF
+
+      - name: Compile library and binary tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            cargo test --target x86_64-unknown-linux-gnu --workspace --lib --bins --no-run
+
+      # The Linux lib suites were audited for hermeticity on clean runners
+      # (docs/fork/patch-ledger.md). jcode-tui is compile-only by design;
+      # jcode-app-core runs separately so timeout attribution stays legible.
+      - name: Run workspace library tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            cargo test --target x86_64-unknown-linux-gnu \
+            --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
+
+      - name: Run jcode-app-core library tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 1800 \
+            cargo test --target x86_64-unknown-linux-gnu -p jcode-app-core --lib
+
+      - name: Compile integration test binaries
+        run: |
+          python3 .github/scripts/run_with_timeout.py 900 \
+            cargo test --target x86_64-unknown-linux-gnu \
+            --test provider_matrix --test e2e --no-run
+
+      - name: Run provider matrix tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 600 \
+            cargo test --target x86_64-unknown-linux-gnu --test provider_matrix
+
+      - name: Run e2e tests
+        run: |
+          python3 .github/scripts/run_with_timeout.py 600 \
+            cargo test --target x86_64-unknown-linux-gnu --test e2e
