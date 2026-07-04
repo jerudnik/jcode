@@ -1,0 +1,139 @@
+name: Nix
+
+# Builds, checks, and caches the jcode flake for the platforms this fork
+# actually serves: x86_64-linux (CI validation + cache for Linux consumers)
+# and aarch64-darwin (the maintainer's real machines). aarch64-linux was
+# dropped deliberately -- no consumer exists; restore the matrix row when one
+# does. Successful builds push to the public Cachix cache so downstream
+# flakes never rebuild from source.
+#
+# Upstream sync lives in sync.yml; flake.lock bumps in nix-update.yml;
+# cargo-audit policy in security.yml.
+
+on:
+  push:
+    branches: [distro/nix, main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/nix.yml"
+  pull_request:
+    branches: [distro/nix, main]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "src/**"
+      - ".github/workflows/nix.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: nix-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: fast validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cachix (read-only public binary cache)
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          skipPush: true
+
+      - name: Check workflow syntax (fork-owned workflows)
+        # Only lint the workflows this fork owns. Upstream's files (ci.yml,
+        # release.yml, windows-smoke.yml, freebsd-smoke.yml, require-issue.yml)
+        # are kept byte-close to vendor/upstream -- linting them here would
+        # force body edits that reintroduce rebase conflicts.
+        run: |
+          nix run nixpkgs#actionlint -- \
+            .github/workflows/fork-ci.yml \
+            .github/workflows/fork-health.yml \
+            .github/workflows/security.yml \
+            .github/workflows/sync.yml \
+            .github/workflows/nix.yml \
+            .github/workflows/nix-update.yml
+
+      - name: Dry-run Linux package
+        run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
+
+      - name: Evaluate flake checks
+        run: nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+
+      - name: Verify flake.lock is committed
+        if: github.event_name == 'pull_request'
+        run: |
+          nix flake metadata --json > /dev/null
+          if [ -n "$(git status --porcelain flake.lock)" ]; then
+            echo "flake.lock is out of date; run 'nix flake update' and commit." >&2
+            exit 1
+          fi
+
+  build:
+    name: build (${{ matrix.system }})
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/distro/nix' || github.ref == 'refs/heads/main') && secrets.CACHIX_AUTH_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cachix (read/write public binary cache)
+        if: env.CACHIX_CAN_PUSH == 'true'
+        continue-on-error: true
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          # Build success is authoritative; cache upload is best-effort. Daemon
+          # mode pushes the full dependency build closure and can fail during
+          # post-job drain after the package already built and smoke-tested
+          # successfully. Push just the final result path.
+          useDaemon: false
+          pathsToPush: ./result
+          cachixArgs: -j2
+
+      - name: Cachix (read-only public binary cache)
+        if: env.CACHIX_CAN_PUSH != 'true'
+        uses: cachix/cachix-action@v17
+        with:
+          name: jerudnik-jcode
+          skipPush: true
+
+      - name: Build package
+        run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs
+
+      - name: Smoke test binary
+        run: |
+          ./result/bin/jcode --version
