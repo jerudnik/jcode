@@ -159,7 +159,8 @@ jobs:
           # ("compiled by an incompatible version of rustc"). rust-cache already
           # caches target/ across runs, so a clean, wrapper-consistent build is
           # both correct and fast enough.
-          export RUSTC="$(rustup which rustc)"
+          RUSTC="$(rustup which rustc)"
+          export RUSTC
           CARGO_BIN="$(rustup which cargo)"
           "$CARGO_BIN" build --release --target ${{ matrix.target }}
 
