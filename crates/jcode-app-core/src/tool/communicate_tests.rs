@@ -525,12 +525,12 @@ fn cap_recovery_prefers_cleanup_then_reuse_then_gives_up() {
 
 #[test]
 fn run_plan_driver_failures_carry_worker_retention_hint() {
-    // Every driver-failure path must tell the caller the spawned workers are
-    // still running and how to stop them.
+    // Every driver-failure path must tell the caller that running workers are
+    // kept alive (finished ones are collected, W3a) and how to stop/resume.
     let hinted = super::with_worker_retention_hint(
         "run_plan stalled after 3 loop(s): no ready tasks and no in-flight workers.".to_string(),
     );
-    assert!(hinted.contains("Spawned workers were retained"));
+    assert!(hinted.contains("Still-running workers were kept alive"));
     assert!(hinted.contains("swarm cleanup"));
 
     // Max-loops keeps its intentional retention-for-inspection wording but
@@ -544,7 +544,10 @@ fn run_plan_driver_failures_carry_worker_retention_hint() {
     // Idempotent: re-wrapping (e.g. the background wrapper re-reporting the
     // error) must not duplicate the hint.
     let twice = super::with_worker_retention_hint(hinted.clone());
-    assert_eq!(twice.matches("Spawned workers were retained").count(), 1);
+    assert_eq!(
+        twice.matches("Still-running workers were kept alive").count(),
+        1
+    );
 }
 
 #[test]
