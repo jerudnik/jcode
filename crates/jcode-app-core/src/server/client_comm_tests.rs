@@ -889,3 +889,210 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
         Ok(ServerEvent::Notification { .. })
     ));
 }
+
+/// W3c (orchestration-hardening): a Wake DM parked as a soft interrupt while
+/// the target was transiently busy must still be DELIVERED once the target is
+/// idle again. Today the queue is only drained by mid-turn injection points,
+/// so a message parked during a lock-contention window (no real turn running)
+/// sits undelivered forever and the worker idles with a pending assignment.
+/// Riptide's nudge pattern: queued messages are delivered on ready_for_input.
+#[tokio::test]
+async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
+    let sender = test_agent().await;
+
+    // Target agent with a mock stream so the delivery turn can actually run.
+    #[derive(Default, Clone)]
+    struct NudgeStreamProvider {
+        responses: Arc<std::sync::Mutex<Vec<Vec<crate::message::StreamEvent>>>>,
+    }
+    #[async_trait]
+    impl Provider for NudgeStreamProvider {
+        async fn complete(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDefinition],
+            _system: &str,
+            _resume_session_id: Option<&str>,
+        ) -> Result<EventStream> {
+            let mut guard = self.responses.lock().expect("responses lock");
+            let response = if guard.is_empty() {
+                vec![crate::message::StreamEvent::MessageEnd { stop_reason: None }]
+            } else {
+                guard.remove(0)
+            };
+            drop(guard);
+            Ok(Box::pin(futures::stream::iter(
+                response.into_iter().map(Ok),
+            )))
+        }
+        fn name(&self) -> &str {
+            "test-nudge"
+        }
+        fn fork(&self) -> Arc<dyn Provider> {
+            Arc::new(self.clone())
+        }
+    }
+    let streaming = NudgeStreamProvider::default();
+    streaming
+        .responses
+        .lock()
+        .expect("responses lock")
+        .push(vec![
+            crate::message::StreamEvent::TextDelta("Parked DM processed.".to_string()),
+            crate::message::StreamEvent::MessageEnd { stop_reason: None },
+        ]);
+    let streaming_dyn: Arc<dyn Provider> = Arc::new(streaming);
+    let registry = Registry::new(streaming_dyn.clone()).await;
+    let target = Arc::new(Mutex::new(Agent::new(streaming_dyn, registry)));
+
+    let sender_id = sender.lock().await.session_id().to_string();
+    let target_id = target.lock().await.session_id().to_string();
+    let target_queue = target.lock().await.soft_interrupt_queue();
+
+    let sessions = Arc::new(RwLock::new(HashMap::from([
+        (sender_id.clone(), sender.clone()),
+        (target_id.clone(), target.clone()),
+    ])));
+    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    crate::server::register_session_interrupt_queue(
+        &soft_interrupt_queues,
+        &target_id,
+        target_queue.clone(),
+    )
+    .await;
+
+    let (sender_event_tx, _sender_event_rx) = mpsc::unbounded_channel();
+    let (target_event_tx, mut target_event_rx) = mpsc::unbounded_channel();
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+
+    let swarm_id = "swarm-nudge".to_string();
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        (
+            sender_id.clone(),
+            SwarmMember {
+                session_id: sender_id.clone(),
+                event_tx: sender_event_tx,
+                event_txs: HashMap::new(),
+                working_dir: None,
+                swarm_id: Some(swarm_id.clone()),
+                swarm_enabled: true,
+                status: "ready".to_string(),
+                detail: None,
+                friendly_name: Some("falcon".to_string()),
+                report_back_to_session_id: None,
+                latest_completion_report: None,
+                role: "coordinator".to_string(),
+                joined_at: Instant::now(),
+                last_status_change: Instant::now(),
+                is_headless: false,
+                output_tail: None,
+                todo_progress: None,
+                todo_items: Vec::new(),
+            },
+        ),
+        (
+            target_id.clone(),
+            SwarmMember {
+                session_id: target_id.clone(),
+                event_tx: target_event_tx,
+                event_txs: HashMap::new(),
+                working_dir: None,
+                swarm_id: Some(swarm_id.clone()),
+                swarm_enabled: true,
+                status: "ready".to_string(),
+                detail: None,
+                friendly_name: Some("bear".to_string()),
+                report_back_to_session_id: None,
+                latest_completion_report: None,
+                role: "agent".to_string(),
+                joined_at: Instant::now(),
+                last_status_change: Instant::now(),
+                is_headless: false,
+                output_tail: None,
+                todo_progress: None,
+                todo_items: Vec::new(),
+            },
+        ),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.clone(),
+        HashSet::from([sender_id.clone(), target_id.clone()]),
+    )])));
+    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
+    let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
+        Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(AtomicU64::new(0));
+    let (swarm_event_tx, _) = broadcast::channel(16);
+    let client_connections = Arc::new(RwLock::new(HashMap::new()));
+
+    // Transient busy window: the lock is held (status query, summary, etc.)
+    // but NO turn is running, so no injection point will ever drain the queue.
+    let busy_guard = target.lock().await;
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        handle_comm_message(
+            1,
+            sender_id.clone(),
+            "urgent assignment: fix the build".to_string(),
+            Some(target_id.clone()),
+            None,
+            Some(CommDeliveryMode::Wake),
+            None,
+            &client_event_tx,
+            &sessions,
+            &soft_interrupt_queues,
+            &swarm_members,
+            &swarms_by_id,
+            &channel_subscriptions,
+            &event_history,
+            &event_counter,
+            &swarm_event_tx,
+            &client_connections,
+        ),
+    )
+    .await
+    .expect("comm message should not deadlock");
+
+    // Message parked while busy.
+    assert_eq!(
+        target_queue.lock().expect("queue lock").len(),
+        1,
+        "wake to a busy target should park the message"
+    );
+
+    // Busy window ends with NO turn having run: the parked message must now
+    // be delivered rather than rot in the queue.
+    drop(busy_guard);
+
+    let delivered = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            {
+                let guard = target.lock().await;
+                let has_dm_turn = guard.messages().iter().any(|message| {
+                    message.role == crate::message::Role::User
+                        && message
+                            .content_preview()
+                            .contains("urgent assignment: fix the build")
+                });
+                if has_dm_turn {
+                    return true;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or(false);
+
+    assert!(
+        delivered,
+        "W3c reproduced: parked wake DM was never delivered after the target \
+         became idle (queue len now {})",
+        target_queue.lock().expect("queue lock").len()
+    );
+
+    // Drain ancillary channels so they do not look like leaks.
+    let _ = client_event_rx.try_recv();
+    let _ = target_event_rx.try_recv();
+}
