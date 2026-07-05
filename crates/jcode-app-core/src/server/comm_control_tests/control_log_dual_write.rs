@@ -194,4 +194,11 @@ async fn control_log_fold_tracks_maps_through_handler_sequence() {
         "folded task must be terminal, got '{}'",
         task.status
     );
+    // W2: complete_node filed artifact evidence in the log. Status without
+    // evidence is a turn boundary; this completion has proof.
+    let evidence = task
+        .last_artifact
+        .as_ref()
+        .expect("complete_node must file ArtifactFiled evidence in the control log");
+    assert_eq!(evidence.session_id, worker);
 }

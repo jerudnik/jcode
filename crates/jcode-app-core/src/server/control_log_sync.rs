@@ -20,8 +20,8 @@
 use super::swarm_persistence::control_log_path;
 use super::{SwarmMember, VersionedPlan};
 use jcode_swarm_core::control_log::{
-    ControlLogWriter, LOCAL_ORIGIN, MemberControlState, SwarmControlState, TaskControlState,
-    diff_events, replay,
+    ControlLogWriter, LOCAL_ORIGIN, MemberControlState, SwarmControlEvent, SwarmControlState,
+    TaskControlState, diff_events, replay,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -76,6 +76,10 @@ fn target_task_view(plan: Option<&VersionedPlan>) -> HashMap<String, TaskControl
                         .task_progress
                         .get(&item.id)
                         .and_then(|progress| progress.last_heartbeat_unix_ms),
+                    // Artifact evidence is appended explicitly by
+                    // complete_node (append_control_event), never derived
+                    // from a state diff: the plan does not carry it.
+                    last_artifact: None,
                 },
             )
         })
@@ -113,33 +117,7 @@ fn sync_control_log_inner(
 ) -> Option<u64> {
     let path = control_log_path(swarm_id);
     let mut logs = CONTROL_LOGS.lock().ok()?;
-    if !logs.contains_key(&path) {
-        let (fold, _offset) = match replay(&path) {
-            Ok(replayed) => replayed,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                (SwarmControlState::default(), 0)
-            }
-            Err(error) => {
-                crate::logging::warn(&format!(
-                    "control log replay failed for {}: {}",
-                    swarm_id, error
-                ));
-                return None;
-            }
-        };
-        let writer = match ControlLogWriter::open(&path, swarm_id, LOCAL_ORIGIN) {
-            Ok(writer) => writer,
-            Err(error) => {
-                crate::logging::warn(&format!(
-                    "control log open failed for {}: {}",
-                    swarm_id, error
-                ));
-                return None;
-            }
-        };
-        logs.insert(path.clone(), ControlLogHandle { writer, fold });
-    }
-    let handle = logs.get_mut(&path)?;
+    let handle = open_handle(&mut logs, swarm_id, &path)?;
 
     for event in diff_events(&handle.fold, &target_members, target_tasks.as_ref()) {
         match handle.writer.append(event.clone()) {
@@ -156,6 +134,60 @@ fn sync_control_log_inner(
     // Offsets are byte positions; the writer appends synchronously, so the
     // current file length is the fully-covered resume offset.
     std::fs::metadata(&path).map(|meta| meta.len()).ok()
+}
+
+/// Append an explicit control event that is NOT derivable from a state diff
+/// (W2: `ArtifactFiled` evidence). The event also updates the cached fold so
+/// subsequent diffs do not re-derive against a stale view.
+pub(super) fn append_control_event(swarm_id: &str, event: SwarmControlEvent) -> Option<u64> {
+    let path = control_log_path(swarm_id);
+    let mut logs = CONTROL_LOGS.lock().ok()?;
+    let handle = open_handle(&mut logs, swarm_id, &path)?;
+    match handle.writer.append(event.clone()) {
+        Ok(_) => handle.fold.apply(&event),
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "control log append failed for {}: {}",
+                swarm_id, error
+            ));
+            return None;
+        }
+    }
+    std::fs::metadata(&path).map(|meta| meta.len()).ok()
+}
+
+fn open_handle<'a>(
+    logs: &'a mut HashMap<PathBuf, ControlLogHandle>,
+    swarm_id: &str,
+    path: &PathBuf,
+) -> Option<&'a mut ControlLogHandle> {
+    if !logs.contains_key(path) {
+        let (fold, _offset) = match replay(path) {
+            Ok(replayed) => replayed,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                (SwarmControlState::default(), 0)
+            }
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "control log replay failed for {}: {}",
+                    swarm_id, error
+                ));
+                return None;
+            }
+        };
+        let writer = match ControlLogWriter::open(path, swarm_id, LOCAL_ORIGIN) {
+            Ok(writer) => writer,
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "control log open failed for {}: {}",
+                    swarm_id, error
+                ));
+                return None;
+            }
+        };
+        logs.insert(path.clone(), ControlLogHandle { writer, fold });
+    }
+    logs.get_mut(path)
 }
 
 /// Drop the cached handle for a swarm's log (e.g. after archival). The file

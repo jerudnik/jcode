@@ -72,6 +72,20 @@ pub enum SwarmControlEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         friendly_name: Option<String>,
     },
+    /// W2: a typed handoff artifact was filed for a task (complete_node).
+    /// This is EVIDENCE of completed work, unlike a status string which turn
+    /// boundaries also produce (the F2 class). Await consumers wake on "an
+    /// ArtifactFiled for task X exists past offset N", not on status polling.
+    /// Payload is a summary, not the artifact body: the full artifact lives
+    /// in the plan's node metadata (transcript-plane); the control log needs
+    /// only what wake predicates and confidence routing read.
+    ArtifactFiled {
+        task_id: String,
+        /// Session that filed the artifact.
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        confidence: Option<String>,
+    },
 }
 
 /// The host-agnostic envelope every event ships in.
@@ -114,6 +128,17 @@ pub struct TaskControlState {
     pub assigned_to: Option<String>,
     pub status: String,
     pub last_heartbeat_ms: Option<u64>,
+    /// W2: evidence of filed work. `(session_id, confidence)` of the latest
+    /// ArtifactFiled event for this task; None means no artifact has ever
+    /// been filed - a "completed" status without one is a turn-boundary
+    /// or salvage transition, not evidenced completion.
+    pub last_artifact: Option<ArtifactEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtifactEvidence {
+    pub session_id: String,
+    pub confidence: Option<String>,
 }
 
 impl SwarmControlState {
@@ -184,6 +209,17 @@ impl SwarmControlState {
                     .entry(session_id.clone())
                     .or_default()
                     .friendly_name = friendly_name.clone();
+            }
+            SwarmControlEvent::ArtifactFiled {
+                task_id,
+                session_id,
+                confidence,
+            } => {
+                self.tasks.entry(task_id.clone()).or_default().last_artifact =
+                    Some(ArtifactEvidence {
+                        session_id: session_id.clone(),
+                        confidence: confidence.clone(),
+                    });
             }
         }
         self.events_applied += 1;
@@ -430,6 +466,50 @@ pub fn replay(path: &Path) -> std::io::Result<(SwarmControlState, u64)> {
     Ok((state, read.next_offset))
 }
 
+/// W2 await-on-offset primitive: scan the log from `offset` for the first
+/// event satisfying `predicate`. Returns `Some((next_offset, envelope))` when
+/// found - `next_offset` is the resume cursor PAST the matching event - or
+/// `None` with no match yet (the caller re-arms at `read.next_offset` and
+/// waits for more appends).
+///
+/// This is the mechanism that retires status-polling awaits (the F2 class):
+/// "wake me when an event past offset N satisfies P" is stable across turn
+/// boundaries, restarts (offsets are byte positions in a durable file), and
+/// missed notifications (the scan re-runs from the caller's own cursor, so a
+/// wake can never be lost between check and sleep).
+pub fn scan_from(
+    path: &Path,
+    offset: u64,
+    mut predicate: impl FnMut(&SwarmControlEnvelope) -> bool,
+) -> std::io::Result<ScanOutcome> {
+    let read = read_from(path, offset)?;
+    for (next_offset, envelope) in read.envelopes {
+        if predicate(&envelope) {
+            return Ok(ScanOutcome::Found {
+                next_offset,
+                envelope,
+            });
+        }
+    }
+    Ok(ScanOutcome::NotYet {
+        resume_offset: read.next_offset,
+    })
+}
+
+/// Result of an await-on-offset scan.
+#[derive(Debug)]
+pub enum ScanOutcome {
+    /// An event past the caller's offset satisfied the predicate.
+    Found {
+        /// Resume cursor past the matching event.
+        next_offset: u64,
+        envelope: SwarmControlEnvelope,
+    },
+    /// No match in the log yet; re-arm at `resume_offset` and re-scan after
+    /// the next append (skips everything already inspected).
+    NotYet { resume_offset: u64 },
+}
+
 fn now_wall_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -623,5 +703,72 @@ mod tests {
             session_id: "b".into(),
         });
         assert_eq!(state.coordinator(), None);
+    }
+
+    #[test]
+    fn artifact_filed_folds_to_evidence_and_scan_awaits_it() {
+        let (_dir, path) = temp_log();
+        let mut writer = ControlLogWriter::open(&path, "s", LOCAL_ORIGIN).expect("open");
+        writer
+            .append(SwarmControlEvent::TaskAssigned {
+                task_id: "t1".into(),
+                assigned_to: Some("w1".into()),
+            })
+            .expect("append");
+        // A status flip WITHOUT evidence: the F2 shape. The await predicate
+        // below must not fire on it.
+        writer
+            .append(SwarmControlEvent::MemberStatusChanged {
+                session_id: "w1".into(),
+                status: "ready".into(),
+            })
+            .expect("append");
+
+        let wants_artifact = |envelope: &SwarmControlEnvelope| {
+            matches!(
+                &envelope.event,
+                SwarmControlEvent::ArtifactFiled { task_id, .. } if task_id == "t1"
+            )
+        };
+
+        // Not yet: only status noise so far. Re-arm at the resume offset.
+        let outcome = scan_from(&path, 0, wants_artifact).expect("scan");
+        let resume = match outcome {
+            ScanOutcome::NotYet { resume_offset } => resume_offset,
+            ScanOutcome::Found { .. } => panic!("status flip must not satisfy an artifact await"),
+        };
+
+        // Evidence arrives.
+        writer
+            .append(SwarmControlEvent::ArtifactFiled {
+                task_id: "t1".into(),
+                session_id: "w1".into(),
+                confidence: Some("high".into()),
+            })
+            .expect("append");
+
+        // The re-armed scan (from the caller's own cursor) finds it.
+        let outcome = scan_from(&path, resume, wants_artifact).expect("scan");
+        let (next, envelope) = match outcome {
+            ScanOutcome::Found {
+                next_offset,
+                envelope,
+            } => (next_offset, envelope),
+            ScanOutcome::NotYet { .. } => panic!("artifact must wake the await"),
+        };
+        assert!(matches!(
+            &envelope.event,
+            SwarmControlEvent::ArtifactFiled { confidence: Some(c), .. } if c == "high"
+        ));
+
+        // The fold records the evidence on the task.
+        let (state, _) = replay(&path).expect("replay");
+        let evidence = state.tasks["t1"].last_artifact.as_ref().expect("evidence");
+        assert_eq!(evidence.session_id, "w1");
+        assert_eq!(evidence.confidence.as_deref(), Some("high"));
+
+        // Resuming past the match sees nothing further (no double-wake).
+        let outcome = scan_from(&path, next, wants_artifact).expect("scan");
+        assert!(matches!(outcome, ScanOutcome::NotYet { .. }));
     }
 }

@@ -467,6 +467,10 @@ fn apply_control_event_to_snapshot(state: &mut PersistedSwarmState, event: Swarm
                 plan.task_progress.remove(&task_id);
             }
         }
+        SwarmControlEvent::ArtifactFiled { .. } => {
+            // Evidence marker (W2). The snapshot's plan carries the full
+            // artifact in node metadata already; nothing to reapply here.
+        }
     }
 }
 
