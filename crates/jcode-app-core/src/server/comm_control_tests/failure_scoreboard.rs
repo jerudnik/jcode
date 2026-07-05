@@ -123,6 +123,14 @@ async fn f1_assign_next_reclaims_task_from_departed_assignee() {
         Some(live_worker),
         "assignment must be moved off the departed session"
     );
+    drop(plans);
+    // W1 dual-write: fold(control log) must agree with the maps after the fix.
+    crate::server::control_log_sync::test_support::assert_control_log_matches_maps(
+        swarm_id,
+        &swarm_members,
+        &swarm_plans,
+    )
+    .await;
 }
 
 /// F2 - premature wake: `update_member_status` sets "ready" at every turn end
@@ -311,6 +319,14 @@ async fn f3_coordinator_can_salvage_node_of_departed_owner() {
         "salvaged node must be terminal, got '{}'",
         item.status
     );
+    drop(plans);
+    // W1 dual-write: fold(control log) must agree with the maps after salvage.
+    crate::server::control_log_sync::test_support::assert_control_log_matches_maps(
+        swarm_id,
+        &swarm_members,
+        &swarm_plans,
+    )
+    .await;
 }
 
 /// F4 - coordinator desync: coordinatorship lives in TWO places, the
@@ -428,4 +444,13 @@ async fn f4_resync_plan_repairs_coordinator_map_desync() {
         }
         other => panic!("expected CommAssignTaskResponse, got {other:?}"),
     }
+
+    // W1 dual-write: fold(control log) must agree with the maps after the
+    // repaired assignment persisted.
+    crate::server::control_log_sync::test_support::assert_control_log_matches_maps(
+        swarm_id,
+        &swarm_members,
+        &swarm_plans,
+    )
+    .await;
 }

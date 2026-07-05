@@ -62,6 +62,16 @@ pub enum SwarmControlEvent {
     TaskStatusChanged { task_id: String, status: String },
     /// Liveness signal for an in-flight task.
     TaskHeartbeat { task_id: String, wall_ms: u64 },
+    /// A plan task was removed (plan replaced/cleared). Without this the fold
+    /// would keep ghost tasks forever after a wholesale plan swap.
+    TaskRemoved { task_id: String },
+    /// A member's friendly name changed (session rename). Kept separate from
+    /// `MemberJoined` so a rename does not reset role/status in the fold.
+    MemberRenamed {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        friendly_name: Option<String>,
+    },
 }
 
 /// The host-agnostic envelope every event ships in.
@@ -163,6 +173,18 @@ impl SwarmControlState {
                     .or_default()
                     .last_heartbeat_ms = Some(*wall_ms);
             }
+            SwarmControlEvent::TaskRemoved { task_id } => {
+                self.tasks.remove(task_id);
+            }
+            SwarmControlEvent::MemberRenamed {
+                session_id,
+                friendly_name,
+            } => {
+                self.members
+                    .entry(session_id.clone())
+                    .or_default()
+                    .friendly_name = friendly_name.clone();
+            }
         }
         self.events_applied += 1;
     }
@@ -175,6 +197,126 @@ pub fn fold<'a>(events: impl IntoIterator<Item = &'a SwarmControlEnvelope>) -> S
         state.apply(&envelope.event);
     }
     state
+}
+
+/// Compute the events that transform `current` into the target views.
+///
+/// This is the dual-write bridge (W1 step 3): server mutation paths update
+/// their in-memory maps and then call this at a sync point to bring the log's
+/// fold up to date. It is deterministic (sorted by id) so identical states
+/// produce identical event sequences.
+///
+/// `target_tasks = None` means "do not touch task state" (used by member-only
+/// sync points that cannot see the plan). Heartbeats only move forward: a
+/// target with `last_heartbeat_ms = None` while the fold has one recorded is
+/// left alone (the log remembers liveness evidence; it never un-happens).
+pub fn diff_events(
+    current: &SwarmControlState,
+    target_members: &HashMap<String, MemberControlState>,
+    target_tasks: Option<&HashMap<String, TaskControlState>>,
+) -> Vec<SwarmControlEvent> {
+    let mut events = Vec::new();
+
+    let mut departed: Vec<&String> = current
+        .members
+        .keys()
+        .filter(|session_id| !target_members.contains_key(*session_id))
+        .collect();
+    departed.sort();
+    for session_id in departed {
+        events.push(SwarmControlEvent::MemberLeft {
+            session_id: session_id.clone(),
+        });
+    }
+
+    let mut member_ids: Vec<&String> = target_members.keys().collect();
+    member_ids.sort();
+    for session_id in member_ids {
+        let target = &target_members[session_id];
+        match current.members.get(session_id) {
+            None => {
+                events.push(SwarmControlEvent::MemberJoined {
+                    session_id: session_id.clone(),
+                    friendly_name: target.friendly_name.clone(),
+                    role: target.role.clone(),
+                });
+                // MemberJoined folds to status "ready"; correct if needed.
+                if target.status != "ready" {
+                    events.push(SwarmControlEvent::MemberStatusChanged {
+                        session_id: session_id.clone(),
+                        status: target.status.clone(),
+                    });
+                }
+            }
+            Some(existing) => {
+                if existing.role != target.role {
+                    events.push(SwarmControlEvent::RoleChanged {
+                        session_id: session_id.clone(),
+                        role: target.role.clone(),
+                    });
+                }
+                if existing.status != target.status {
+                    events.push(SwarmControlEvent::MemberStatusChanged {
+                        session_id: session_id.clone(),
+                        status: target.status.clone(),
+                    });
+                }
+                if existing.friendly_name != target.friendly_name {
+                    events.push(SwarmControlEvent::MemberRenamed {
+                        session_id: session_id.clone(),
+                        friendly_name: target.friendly_name.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    let Some(target_tasks) = target_tasks else {
+        return events;
+    };
+
+    let mut removed: Vec<&String> = current
+        .tasks
+        .keys()
+        .filter(|task_id| !target_tasks.contains_key(*task_id))
+        .collect();
+    removed.sort();
+    for task_id in removed {
+        events.push(SwarmControlEvent::TaskRemoved {
+            task_id: task_id.clone(),
+        });
+    }
+
+    let mut task_ids: Vec<&String> = target_tasks.keys().collect();
+    task_ids.sort();
+    for task_id in task_ids {
+        let target = &target_tasks[task_id];
+        let existing = current.tasks.get(task_id);
+        if existing.is_none()
+            || existing.map(|task| &task.assigned_to) != Some(&target.assigned_to)
+        {
+            events.push(SwarmControlEvent::TaskAssigned {
+                task_id: task_id.clone(),
+                assigned_to: target.assigned_to.clone(),
+            });
+        }
+        if existing.map(|task| task.status.as_str()) != Some(target.status.as_str()) {
+            events.push(SwarmControlEvent::TaskStatusChanged {
+                task_id: task_id.clone(),
+                status: target.status.clone(),
+            });
+        }
+        if let Some(heartbeat_ms) = target.last_heartbeat_ms
+            && existing.and_then(|task| task.last_heartbeat_ms) != Some(heartbeat_ms)
+        {
+            events.push(SwarmControlEvent::TaskHeartbeat {
+                task_id: task_id.clone(),
+                wall_ms: heartbeat_ms,
+            });
+        }
+    }
+
+    events
 }
 
 /// Append-only JSONL writer for one swarm's control log. Tracks the
