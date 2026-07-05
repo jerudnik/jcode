@@ -72,6 +72,12 @@ async fn test_basic_command_with_unused_stdin_channel() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "stdin-wait detection uses libproc thread state on macOS, which is \
+              unreliable (false NotReading) on some machines/loads; the Linux \
+              /proc-based detection is exercised in CI"
+)]
 async fn test_stdin_forwarding_single_line() {
     let (tx, mut rx) = mpsc::unbounded_channel::<StdinInputRequest>();
     let tool = BashTool::new();
@@ -110,6 +116,12 @@ async fn test_stdin_forwarding_single_line() {
 }
 
 #[tokio::test]
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "stdin-wait detection uses libproc thread state on macOS, which is \
+              unreliable (false NotReading) on some machines/loads; the Linux \
+              /proc-based detection is exercised in CI"
+)]
 async fn test_stdin_forwarding_multiple_lines() {
     let (tx, mut rx) = mpsc::unbounded_channel::<StdinInputRequest>();
     let tool = BashTool::new();
