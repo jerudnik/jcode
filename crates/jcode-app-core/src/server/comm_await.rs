@@ -1,10 +1,14 @@
 use super::await_members_state::{
     PersistedAwaitMembersState, all_pending_await_members_including_expired, ensure_pending_state,
-    load_state, persist_final_response, request_key, save_state,
+    load_state, persist_final_response, persist_scan_offset, request_key, save_state,
+};
+use super::control_log_sync::{
+    current_control_log_offset, scan_swarm_control_log, subscribe_control_log,
 };
 use super::{AwaitMembersRuntime, SwarmEvent, SwarmMember, VersionedPlan};
 use crate::bus::{Bus, BusEvent, SwarmAwaitCompleted, UiActivity};
 use crate::protocol::{AwaitedMemberStatus, ServerEvent, format_comm_awaited_members_with_reports};
+use jcode_swarm_core::control_log::{ScanOutcome, SwarmControlEnvelope, SwarmControlEvent};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -240,6 +244,54 @@ async fn finalize_await(
     respond_to_waiters(runtime, &state.key, completed, members, summary).await;
 }
 
+/// Should an event past the await's cursor trigger a re-check of the await's
+/// level condition?
+///
+/// This is the W2 completion-coverage predicate (the design fork in the
+/// decision record). It is deliberately NOT artifact-only: light-mode
+/// auto-complete, requeue/fail-no-artifact (turn_end_disposition), and
+/// salvage-complete all reach terminal state without the awaited member ever
+/// filing an artifact, so an artifact-only await would hang forever on them.
+/// Wake-relevant transitions are:
+///
+/// - `ArtifactFiled`: evidenced completion (deep mode's complete_node).
+/// - terminal `TaskStatusChanged`: light auto-complete, salvage, fail —
+///   completion derived from state, without artifact evidence.
+/// - `TaskAssigned` / `TaskRemoved`: (un/re)assignment and plan swaps change
+///   which sessions the F2 busy-gate considers mid-task, so they can release
+///   an awaited member whose success-shaped status was previously dishonest.
+/// - member lifecycle (`MemberJoined`/`MemberLeft`/`MemberStatusChanged`):
+///   the await's targets are member statuses; a departure also flips a
+///   member to "unknown", which satisfies stopped/completed-shaped waits.
+///
+/// Excluded as noise: `TaskHeartbeat` (high-frequency liveness; never changes
+/// done-ness) and `RoleChanged`/`MemberRenamed` (identity/permission
+/// bookkeeping; irrelevant to await satisfaction).
+///
+/// This predicate only gates RE-CHECKS. Satisfaction itself is always decided
+/// by `awaited_member_statuses` + `mode_satisfied`, which preserve the F2
+/// discriminator exactly: a success-shaped status is honest only when the
+/// member holds no active plan task (terminal-status semantics for light
+/// mode; artifact evidence is the deep-mode signal via the gate contract).
+/// So a mid-task `MemberStatusChanged("ready")` triggers a re-check that
+/// refuses to complete — a premature wake needs the LEVEL check to agree,
+/// not just an edge.
+fn wake_relevant_event(envelope: &SwarmControlEnvelope) -> bool {
+    match &envelope.event {
+        SwarmControlEvent::ArtifactFiled { .. } => true,
+        SwarmControlEvent::TaskStatusChanged { status, .. } => {
+            crate::plan::is_terminal_status(status)
+        }
+        SwarmControlEvent::TaskAssigned { .. } | SwarmControlEvent::TaskRemoved { .. } => true,
+        SwarmControlEvent::MemberJoined { .. }
+        | SwarmControlEvent::MemberLeft { .. }
+        | SwarmControlEvent::MemberStatusChanged { .. } => true,
+        SwarmControlEvent::TaskHeartbeat { .. }
+        | SwarmControlEvent::RoleChanged { .. }
+        | SwarmControlEvent::MemberRenamed { .. } => false,
+    }
+}
+
 pub(super) async fn spawn_or_resume_await_members(
     state: PersistedAwaitMembersState,
     req_session_id: String,
@@ -257,7 +309,30 @@ pub(super) async fn spawn_or_resume_await_members(
 
     tokio::spawn(async move {
         let mut event_rx = swarm_event_tx.subscribe();
+        // W2: the control log is the TRUTH for wakes; nudge channels only
+        // schedule re-scans. Subscribe to append nudges BEFORE anchoring the
+        // cursor so an append between anchor and park is never lost (the
+        // watch marks changed for any send after subscription).
+        let mut log_rx = subscribe_control_log(&swarm_id);
         let deadline = deadline_to_instant(state.deadline_unix_ms);
+
+        // Anchor the scan cursor. scan_offset == 0 means legacy/pre-W2 state
+        // (or an await armed before the swarm's first append): re-anchor at
+        // the CURRENT tail instead of replaying from zero, which would
+        // re-match pre-await history (spurious wake). Anything that completed
+        // in the gap is level state, observed by the status check below.
+        let mut cursor = if state.scan_offset > 0 {
+            state.scan_offset
+        } else {
+            current_control_log_offset(&swarm_id)
+        };
+        if state.scan_offset != cursor {
+            persist_scan_offset(&key, cursor);
+        }
+        // The legacy broadcast nudge stays subscribed until it closes (server
+        // shutdown path); after that the log nudge alone covers appends. The
+        // flag disables the select arm so a closed receiver cannot hot-loop.
+        let mut broadcast_open = true;
 
         loop {
             let member_statuses = awaited_member_statuses(
@@ -304,13 +379,51 @@ pub(super) async fn spawn_or_resume_await_members(
                 return;
             }
 
+            // Scan the log from our own cursor. A wake-relevant event past it
+            // means control state moved since the level check above: loop and
+            // re-check instead of parking. This is what makes the wake
+            // decision durable — the scan is idempotent from a persisted
+            // cursor, so a nudge lost between check and sleep is recovered by
+            // the next re-scan rather than lost forever.
+            match scan_swarm_control_log(&swarm_id, cursor, wake_relevant_event) {
+                Ok(ScanOutcome::Found { next_offset, .. }) => {
+                    cursor = next_offset;
+                    persist_scan_offset(&key, cursor);
+                    continue;
+                }
+                Ok(ScanOutcome::NotYet { resume_offset }) => {
+                    if resume_offset != cursor {
+                        cursor = resume_offset;
+                        persist_scan_offset(&key, cursor);
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    // No log yet (swarm has never appended): nothing to scan.
+                }
+                Err(error) => {
+                    // Read failure: park and retry on the next nudge/timeout
+                    // rather than spinning; the cursor did not advance.
+                    crate::logging::warn(&format!(
+                        "await_members control-log scan failed for {}: {}",
+                        swarm_id, error
+                    ));
+                }
+            }
+
             tokio::select! {
                 _ = tokio::time::sleep_until(deadline) => {
                     let summary = timeout_summary(&member_statuses);
                     finalize_await(&await_members_runtime, &state, false, member_statuses, summary).await;
                     return;
                 }
-                event = event_rx.recv() => {
+                changed = log_rx.changed() => {
+                    // Append nudge: the log grew, re-scan from our cursor. A
+                    // closed sender cannot happen (the sender lives in a
+                    // process-wide map), but treat it like a spurious nudge:
+                    // the re-scan is idempotent either way.
+                    let _ = changed;
+                }
+                event = event_rx.recv(), if broadcast_open => {
                     match event {
                         Ok(event) => {
                             if event.swarm_id.as_deref() != Some(swarm_id.as_str()) {
@@ -318,18 +431,24 @@ pub(super) async fn spawn_or_resume_await_members(
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
-                            // Dropped events are recoverable: the loop re-reads
-                            // member statuses from shared state at the top, so
-                            // just keep watching instead of orphaning the wait.
+                            // Dropped events are recoverable BY DESIGN now:
+                            // the broadcast is only a nudge, and the loop
+                            // re-scans the durable log from its own cursor.
                             crate::logging::info(&format!(
-                                "await_members watcher lagged by {} swarm events; re-checking statuses",
+                                "await_members watcher lagged by {} swarm events; re-scanning from cursor",
                                 n
                             ));
                             continue;
                         }
                         Err(broadcast::error::RecvError::Closed) => {
-                            await_members_runtime.clear_active(&key).await;
-                            return;
+                            // The broadcast side is gone (server shutdown
+                            // path). The log nudge still covers appends, so
+                            // keep watching on that alone rather than
+                            // orphaning a background await. Disarm this
+                            // select arm: a closed receiver resolves
+                            // immediately and would hot-loop otherwise.
+                            broadcast_open = false;
+                            continue;
                         }
                     }
                 }

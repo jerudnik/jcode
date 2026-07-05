@@ -27,6 +27,7 @@ async fn await_members_returns_persisted_final_response_after_reload_retry() {
             background: false,
             notify: false,
             wake: false,
+            scan_offset: 0,
             final_response: Some(
                 crate::server::await_members_state::PersistedAwaitMembersResult {
                     completed: true,
@@ -126,6 +127,7 @@ async fn await_members_ignores_persisted_final_when_requested_member_is_queued_a
             background: false,
             notify: false,
             wake: false,
+            scan_offset: 0,
             final_response: Some(
                 crate::server::await_members_state::PersistedAwaitMembersResult {
                     completed: true,

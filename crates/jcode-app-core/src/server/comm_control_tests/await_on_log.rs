@@ -315,3 +315,113 @@ async fn w2_await_wakes_on_salvage_of_departed_owner_without_broadcast_nudge() {
     )
     .await;
 }
+
+/// Migration contract: a resumed legacy/pre-W2 pending state (scan_offset 0,
+/// the serde default) must RE-ANCHOR its cursor at the current log tail, not
+/// replay from zero. Replay-from-zero would grind through the swarm's whole
+/// pre-await history re-checking on every historical event. The observable
+/// contract is the persisted cursor: after the watcher spawns, the state on
+/// disk carries the tail offset. New awaits anchor at creation the same way
+/// (ensure_pending_state), which the second half pins.
+#[tokio::test]
+async fn w2_legacy_zero_cursor_reanchors_to_tail_not_zero() {
+    let (_env, _runtime) = RuntimeEnvGuard::new();
+    let swarm_id = "swarm-w2-anchor";
+    let requester = "coord-w2a";
+    let worker = "worker-w2a";
+    let await_runtime = AwaitMembersRuntime::default();
+
+    // Pre-await history in the log: the tail is non-zero before any await.
+    crate::server::control_log_sync::append_control_event(
+        swarm_id,
+        jcode_swarm_core::control_log::SwarmControlEvent::TaskAssigned {
+            task_id: "old".to_string(),
+            assigned_to: Some(worker.to_string()),
+        },
+    )
+    .expect("append pre-await event");
+    let tail = crate::server::control_log_sync::current_control_log_offset(swarm_id);
+    assert!(tail > 0);
+
+    // A legacy pending state: persisted before scan_offset existed (0).
+    let key = crate::server::await_members_state::request_key(
+        requester,
+        swarm_id,
+        &[worker.to_string()],
+        &["completed".to_string()],
+        None,
+    );
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    crate::server::await_members_state::save_state(
+        &crate::server::await_members_state::PersistedAwaitMembersState {
+            key: key.clone(),
+            session_id: requester.to_string(),
+            swarm_id: swarm_id.to_string(),
+            target_status: vec!["completed".to_string()],
+            requested_ids: vec![worker.to_string()],
+            mode: None,
+            created_at_unix_ms: now_ms,
+            deadline_unix_ms: now_ms + 60_000,
+            background: true,
+            notify: false,
+            wake: false,
+            scan_offset: 0,
+            final_response: None,
+        },
+    );
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        (requester.to_string(), member(requester, swarm_id, "ready")),
+        (worker.to_string(), member(worker, swarm_id, "running")),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.to_string(),
+        HashSet::from([requester.to_string(), worker.to_string()]),
+    )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
+    let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
+
+    crate::server::comm_await::resume_background_awaits(
+        &swarm_members,
+        &swarms_by_id,
+        &swarm_plans,
+        &swarm_event_tx,
+        &await_runtime,
+    )
+    .await;
+
+    // The watcher re-anchors and persists the tail cursor.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(state) = crate::server::await_members_state::load_state(&key)
+                && state.scan_offset == tail
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("resumed legacy await must re-anchor its cursor at the log tail, not 0");
+
+    // Creation-time anchoring: a brand-new pending state starts at the tail.
+    let fresh = crate::server::await_members_state::ensure_pending_state(
+        "fresh-key-w2a",
+        requester,
+        swarm_id,
+        &[worker.to_string()],
+        &["completed".to_string()],
+        None,
+        now_ms + 60_000,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(
+        fresh.scan_offset, tail,
+        "new awaits must anchor their scan cursor at the current log tail"
+    );
+}

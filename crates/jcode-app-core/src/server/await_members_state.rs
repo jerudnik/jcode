@@ -42,6 +42,17 @@ pub struct PersistedAwaitMembersState {
     /// Wake an idle requesting agent on completion (or soft-interrupt if busy).
     #[serde(default = "default_true")]
     pub wake: bool,
+    /// W2 await-on-log cursor: byte offset into the swarm's control log past
+    /// which this await scans for wake-relevant events. Anchored to the log
+    /// tail at await creation so pre-await history (e.g. an artifact filed
+    /// for a prior turn) can never satisfy the wait. `0` on a loaded state
+    /// means legacy/pre-W2 (or created before the swarm's first append): the
+    /// watcher re-anchors at the CURRENT tail instead of replaying from zero,
+    /// because replay-from-zero would re-match that pre-await history (the
+    /// premature-wake regression). Level state after a gap is covered by the
+    /// member-status check, which reads maps restored from fold(log).
+    #[serde(default)]
+    pub scan_offset: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_response: Option<PersistedAwaitMembersResult>,
 }
@@ -201,10 +212,29 @@ pub(super) fn ensure_pending_state(
         background,
         notify,
         wake,
+        // W2: anchor the scan cursor at the log tail NOW, before any
+        // completion that happens after this await is armed. Events between
+        // the caller's initial status check and this read are observed twice
+        // (once by that check, once by the first scan), which is benign; the
+        // watcher's level check decides satisfaction.
+        scan_offset: super::control_log_sync::current_control_log_offset(swarm_id),
         final_response: None,
     };
     save_state(&state);
     state
+}
+
+/// Persist an advanced scan cursor for a pending await. Reloads the latest
+/// state first so concurrently-updated delivery prefs (background/notify/wake
+/// from a duplicate request) are not clobbered by the watcher's stale copy.
+pub(super) fn persist_scan_offset(key: &str, scan_offset: u64) {
+    if let Some(mut state) = load_state(key)
+        && state.is_pending()
+        && state.scan_offset != scan_offset
+    {
+        state.scan_offset = scan_offset;
+        save_state(&state);
+    }
 }
 
 pub(super) fn persist_final_response(

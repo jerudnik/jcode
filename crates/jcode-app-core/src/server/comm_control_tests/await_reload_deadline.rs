@@ -28,6 +28,7 @@ async fn await_members_reuses_persisted_deadline_after_reload_retry() {
             background: false,
             notify: false,
             wake: false,
+            scan_offset: 0,
             final_response: None,
         },
     );
