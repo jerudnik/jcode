@@ -163,6 +163,60 @@ pub(super) fn mode_summary(member_statuses: &[AwaitedMemberStatus], mode: Option
     }
 }
 
+/// W2 low-confidence routing: when a satisfied await's done members filed
+/// low-confidence artifact evidence (fold of `ArtifactFiled`), say so in the
+/// completion summary and point the awaiter at the gate path.
+///
+/// The ENFORCEMENT already lives in the engine — `validate_gate_pass` rejects
+/// a deep gate that does not address a low-confidence sibling by id, and gate
+/// directives name them as priority probe targets — so the await must still
+/// WAKE (suppressing the wake would deadlock light-mode-style waits and gates
+/// that need the completion to become ready). What was missing is the signal
+/// to the awaiter: without it, a coordinator treats a low-confidence
+/// completion like a final result. The note is derived from the control log's
+/// evidence trail, not the artifact bodies, so it also covers artifacts filed
+/// by salvage (a coordinator completing for a departed owner).
+fn annotate_low_confidence_evidence(
+    summary: String,
+    swarm_id: &str,
+    member_statuses: &[AwaitedMemberStatus],
+) -> String {
+    let done_sessions: HashSet<&str> = member_statuses
+        .iter()
+        .filter(|member| member.done)
+        .map(|member| member.session_id.as_str())
+        .collect();
+    if done_sessions.is_empty() {
+        return summary;
+    }
+    let fold = super::control_log_sync::fold_swarm_control_log(swarm_id);
+    let mut shaky: Vec<&str> = fold
+        .tasks
+        .iter()
+        .filter(|(_, task)| {
+            task.last_artifact.as_ref().is_some_and(|artifact| {
+                artifact
+                    .confidence
+                    .as_deref()
+                    .is_some_and(|confidence| confidence.eq_ignore_ascii_case("low"))
+                    && done_sessions.contains(artifact.session_id.as_str())
+            })
+        })
+        .map(|(task_id, _)| task_id.as_str())
+        .collect();
+    if shaky.is_empty() {
+        return summary;
+    }
+    shaky.sort_unstable();
+    format!(
+        "{} LOW-CONFIDENCE evidence was filed for node(s) [{}]: the critique/verify \
+         gate will not pass until it is addressed (inject_gap adds follow-up \
+         nodes). Do not treat that work as final.",
+        summary,
+        shaky.join(", ")
+    )
+}
+
 pub(super) fn deadline_to_instant(deadline_unix_ms: u64) -> tokio::time::Instant {
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -353,7 +407,11 @@ pub(super) async fn spawn_or_resume_await_members(
             }
 
             if mode_satisfied(&member_statuses, mode.as_deref()) {
-                let summary = mode_summary(&member_statuses, mode.as_deref());
+                let summary = annotate_low_confidence_evidence(
+                    mode_summary(&member_statuses, mode.as_deref()),
+                    &swarm_id,
+                    &member_statuses,
+                );
                 finalize_await(
                     &await_members_runtime,
                     &state,
@@ -549,7 +607,11 @@ pub(super) async fn handle_comm_await_members(
         // mode. There is nothing to wait for, so the agent should get the
         // result immediately instead of a "watching in background" stub.
         if mode_satisfied(&initial_statuses, mode.as_deref()) {
-            let summary = mode_summary(&initial_statuses, mode.as_deref());
+            let summary = annotate_low_confidence_evidence(
+                mode_summary(&initial_statuses, mode.as_deref()),
+                &swarm_id,
+                &initial_statuses,
+            );
             let _ = ctx
                 .client_event_tx
                 .send(ServerEvent::CommAwaitMembersResponse {
@@ -800,7 +862,14 @@ pub(super) async fn resume_background_awaits(
             let (completed, summary) = if member_statuses.is_empty() {
                 (true, "No other members in swarm to wait for.".to_string())
             } else if mode_satisfied(&member_statuses, state.mode.as_deref()) {
-                (true, mode_summary(&member_statuses, state.mode.as_deref()))
+                (
+                    true,
+                    annotate_low_confidence_evidence(
+                        mode_summary(&member_statuses, state.mode.as_deref()),
+                        &state.swarm_id,
+                        &member_statuses,
+                    ),
+                )
             } else {
                 (false, timeout_summary(&member_statuses))
             };
