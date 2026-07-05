@@ -20,8 +20,8 @@
 use super::swarm_persistence::control_log_path;
 use super::{SwarmMember, VersionedPlan};
 use jcode_swarm_core::control_log::{
-    ControlLogWriter, LOCAL_ORIGIN, MemberControlState, SwarmControlEvent, SwarmControlState,
-    TaskControlState, diff_events, replay,
+    ControlLogWriter, LOCAL_ORIGIN, MemberControlState, ScanOutcome, SwarmControlEnvelope,
+    SwarmControlEvent, SwarmControlState, TaskControlState, diff_events, replay, scan_from,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -99,14 +99,21 @@ pub(super) fn sync_swarm_control_log(
     members: &[SwarmMember],
     plan: Option<&VersionedPlan>,
 ) -> Option<u64> {
-    sync_control_log_inner(swarm_id, target_member_view(members), Some(target_task_view(plan)))
+    sync_control_log_inner(
+        swarm_id,
+        target_member_view(members),
+        Some(target_task_view(plan)),
+    )
 }
 
 /// Member-only sync: bring the fold's member view up to date without touching
 /// task state. This is the hook for `broadcast_swarm_status`, the funnel every
 /// membership-visible change (join/leave/status/role) flows through — several
 /// of which (`update_member_status`, headless joins) do not persist a snapshot.
-pub(super) fn sync_swarm_control_log_members(swarm_id: &str, members: &[SwarmMember]) -> Option<u64> {
+pub(super) fn sync_swarm_control_log_members(
+    swarm_id: &str,
+    members: &[SwarmMember],
+) -> Option<u64> {
     sync_control_log_inner(swarm_id, target_member_view(members), None)
 }
 
@@ -193,7 +200,10 @@ fn open_handle<'a>(
 /// Drop the cached handle for a swarm's log (e.g. after archival). The file
 /// itself is deliberately kept: completed-swarm logs are the observation/
 /// evaluation dataset per the W1 decision record.
-#[cfg_attr(not(test), expect(dead_code, reason = "used by tests; wired for archival later"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "used by tests; wired for archival later")
+)]
 pub(super) fn drop_control_log_handle(swarm_id: &str) {
     let path = control_log_path(swarm_id);
     if let Ok(mut logs) = CONTROL_LOGS.lock() {
@@ -210,6 +220,74 @@ pub(super) fn fold_swarm_control_log(swarm_id: &str) -> SwarmControlState {
         Ok((state, _offset)) => state,
         Err(_) => SwarmControlState::default(),
     }
+}
+
+/// The current resume offset (byte length) of a swarm's control log, or `0` if
+/// the log does not exist yet.
+///
+/// This is the offset a new await should anchor at so it observes only events
+/// appended *after* the await was armed. Anchoring at `0` instead would let the
+/// scan re-match pre-await events (e.g. an artifact filed for a prior turn),
+/// producing a spurious immediate wake. The value is the file's metadata length,
+/// matching how `sync_*`/`append_control_event` derive the resume offset they
+/// return: the writer appends synchronously, so the file length is the
+/// fully-covered cursor.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "W2 await watcher plumbing; wired by the next session"
+    )
+)]
+pub(super) fn current_control_log_offset(swarm_id: &str) -> u64 {
+    std::fs::metadata(control_log_path(swarm_id))
+        .map(|meta| meta.len())
+        .unwrap_or(0)
+}
+
+/// Run an await-on-offset scan against a swarm's control log: return the first
+/// event strictly past `offset` for which `predicate` holds, else the resume
+/// offset to re-arm at.
+///
+/// Nudge-vs-truth contract (the entry point the W2 await watcher builds on):
+///
+/// - The **log is the truth.** A wake decision is made only by scanning the
+///   durable file from the caller's own `offset`; the scan is idempotent and a
+///   wake can never be lost between "check" and "sleep" (the caller re-scans
+///   from its own cursor, so any append it missed is seen on the next pass).
+/// - `swarm_event_tx` (the in-memory broadcast) is only a **nudge**: it tells a
+///   sleeping watcher "something changed, re-scan now." It is never itself the
+///   wake condition, so a dropped/lagged broadcast cannot cause a missed wake —
+///   it only delays the next re-scan until the following nudge (or a timeout).
+///
+/// The re-arm/re-scan loop the watcher runs is therefore:
+///
+/// 1. Anchor a cursor at [`current_control_log_offset`] when the await is armed.
+/// 2. Call this function with the cursor.
+/// 3. On [`ScanOutcome::Found`], wake and advance the cursor to `next_offset`
+///    (past the match) so the same event never double-wakes.
+/// 4. On [`ScanOutcome::NotYet`], re-arm the cursor at `resume_offset` and wait
+///    for the next `swarm_event_tx` nudge (or timeout) before looping to step 2.
+///
+/// IO errors are RETURNED (not log-and-swallowed like the `sync_*` funnel) so
+/// the caller can distinguish "no match yet" (`NotYet`) from a genuine read
+/// failure and decide how to back off. This is the single obvious re-scan entry
+/// point: the loop above is the whole "re-arm and re-scan from a cursor" pattern,
+/// so a dedicated `rescan_from_cursor` wrapper would just be this call and is
+/// intentionally omitted to keep the surface minimal.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "W2 await watcher plumbing; wired by the next session"
+    )
+)]
+pub(super) fn scan_swarm_control_log(
+    swarm_id: &str,
+    offset: u64,
+    predicate: impl FnMut(&SwarmControlEnvelope) -> bool,
+) -> std::io::Result<ScanOutcome> {
+    scan_from(&control_log_path(swarm_id), offset, predicate)
 }
 
 #[cfg(test)]
