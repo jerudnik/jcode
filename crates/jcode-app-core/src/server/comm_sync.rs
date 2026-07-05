@@ -430,28 +430,34 @@ pub(super) async fn handle_comm_resync_plan(
     };
 
     if let Some(swarm_id) = swarm_id {
-        // F4 repair: coordinatorship is tracked both in the coordinators map
-        // (authoritative for permission checks) and the member role string
-        // (what swarm list shows). Restarts/races can drop the map entry while
-        // the role string still reads "coordinator", wedging every assign with
-        // "Only the coordinator can assign tasks". resync_plan is the
-        // documented recovery step, so reconcile the map here: if the swarm
-        // has no live coordinator entry and this member's role says
-        // coordinator, restore it.
+        // F4 repair, W1 step 5 (fold-derived): coordinatorship's single home
+        // of truth is the control log's role events; the fold DERIVES the
+        // coordinator (SwarmControlState::coordinator) instead of storing it.
+        // The legacy coordinators map (still authoritative for permission
+        // checks until it is fully retired) is reconciled FROM the fold here:
+        // restarts/races can drop the map entry while the log still says
+        // this member is the coordinator, wedging every assign with "Only
+        // the coordinator can assign tasks". resync_plan is the documented
+        // recovery step, so repair the map from the derived value.
         {
-            let members = ctx.swarm_members.read().await;
-            let requester_is_coordinator = members
-                .get(&req_session_id)
-                .map(|member| member.role == "coordinator")
-                .unwrap_or(false);
-            if requester_is_coordinator {
+            let members: Vec<super::SwarmMember> = {
+                let guard = ctx.swarm_members.read().await;
+                guard
+                    .values()
+                    .filter(|member| member.swarm_id.as_deref() == Some(swarm_id.as_str()))
+                    .cloned()
+                    .collect()
+            };
+            super::control_log_sync::sync_swarm_control_log_members(&swarm_id, &members);
+            let folded = super::control_log_sync::fold_swarm_control_log(&swarm_id);
+            if let Some(derived_coordinator) = folded.coordinator() {
                 let mut coordinators = ctx.swarm_coordinators.write().await;
                 let entry_is_live = coordinators
                     .get(&swarm_id)
-                    .map(|coordinator| members.contains_key(coordinator))
+                    .map(|coordinator| folded.members.contains_key(coordinator))
                     .unwrap_or(false);
                 if !entry_is_live {
-                    coordinators.insert(swarm_id.clone(), req_session_id.clone());
+                    coordinators.insert(swarm_id.clone(), derived_coordinator.to_string());
                 }
             }
         }
