@@ -838,10 +838,11 @@ async fn run_swarm_plan_in_background(
         })))
 }
 
-/// Hint appended to every `run_plan` driver failure: the driver exits without
-/// the end-of-run cleanup, so spawned workers keep running even when
-/// `retain_agents=false`, and the caller must know how to stop or resume them.
-const RUN_PLAN_WORKER_RETENTION_HINT: &str = "\nSpawned workers were retained; run `swarm cleanup` to stop them, rerun `swarm run_plan` to resume driving the same plan, or `swarm plan_status` to inspect.";
+/// Hint appended to every `run_plan` driver failure. Finished workers are
+/// collected on failure exits too (W3a), but RUNNING workers are deliberately
+/// kept alive so the plan can be resumed; the caller must know how to stop or
+/// resume them.
+const RUN_PLAN_WORKER_RETENTION_HINT: &str = "\nStill-running workers were kept alive; run `swarm cleanup` to stop them, rerun `swarm run_plan` to resume driving the same plan, or `swarm plan_status` to inspect.";
 
 /// Append the worker-retention hint to a driver failure message, idempotently
 /// so wrappers that re-report an already-hinted error do not duplicate it.
@@ -1132,16 +1133,37 @@ async fn run_swarm_plan_to_terminal(
     params: &CommunicateInput,
     reporter: &RunPlanReporter,
 ) -> Result<ToolOutput> {
-    // Every driver-failure exit (assignment failure, await timeout, stall,
-    // max-loops, even a mid-run plan-status fetch error) leaves spawned workers
-    // running because the end-of-run cleanup never executes, regardless of
-    // retain_agents. Append the retention hint uniformly here so no failure
-    // path can forget it.
     match run_swarm_plan_loop(ctx, params, reporter).await {
         Ok(output) => Ok(output),
-        Err(error) => Err(anyhow::anyhow!(with_worker_retention_hint(
-            error.to_string()
-        ))),
+        Err(error) => {
+            // W3a: driver-failure exits (assignment failure, await timeout,
+            // stall, max-loops) used to skip the end-of-plan cleanup entirely,
+            // leaking every spawned worker as a permanent "ready" member.
+            // Collect FINISHED owned workers here too; running workers are
+            // deliberately left alive so the plan can be resumed with a rerun
+            // of run_plan. retain_agents=true keeps everything, as on success.
+            let retain_agents = params.retain_agents.unwrap_or(false);
+            let cleanup_note = if retain_agents {
+                "Retained spawned workers because retain_agents=true.".to_string()
+            } else {
+                let cleanup_params = CommunicateInput {
+                    force: None,
+                    session_ids: None,
+                    target_status: None,
+                    ..params.clone()
+                };
+                match cleanup_swarm_workers(ctx, &cleanup_params).await {
+                    Ok(cleanup) => format!("Finished workers collected: {cleanup}"),
+                    Err(cleanup_error) => format!(
+                        "Finished-worker cleanup also failed ({cleanup_error}); \
+                         run `swarm cleanup` manually."
+                    ),
+                }
+            };
+            Err(anyhow::anyhow!(with_worker_retention_hint(format!(
+                "{error}\n{cleanup_note}"
+            ))))
+        }
     }
 }
 
