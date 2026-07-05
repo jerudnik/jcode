@@ -19,6 +19,7 @@ mod comm_graph;
 mod comm_plan;
 mod comm_session;
 mod comm_sync;
+mod control_log_sync;
 mod debug;
 mod debug_ambient;
 mod debug_command_exec;
@@ -110,6 +111,10 @@ pub(super) type ChannelSubscriptions =
 
 pub(super) async fn persist_swarm_state_for(swarm_id: &str, swarm_state: &SwarmState) {
     let runtime = swarm_state.load_runtime(swarm_id).await;
+    // W1 dual-write: append the control-plane delta to the per-swarm event
+    // log before overwriting the snapshot, so the log is never behind the
+    // snapshot it will eventually compact.
+    control_log_sync::sync_swarm_control_log(swarm_id, &runtime.members, runtime.plan.as_ref());
     persist_swarm_state_snapshot(
         swarm_id,
         runtime.plan.as_ref(),

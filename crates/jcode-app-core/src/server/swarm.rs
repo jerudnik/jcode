@@ -734,6 +734,22 @@ pub(super) async fn broadcast_swarm_status(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
 ) {
+    // W1 dual-write: broadcast_swarm_status is the funnel every membership
+    // change (join/leave/status/role) flows through, including paths that do
+    // not persist a snapshot (update_member_status, headless joins). Sync the
+    // member view of the control log here so fold(log) tracks the maps.
+    {
+        let members: Vec<SwarmMember> = {
+            let guard = swarm_members.read().await;
+            guard
+                .values()
+                .filter(|member| member.swarm_id.as_deref() == Some(swarm_id))
+                .cloned()
+                .collect()
+        };
+        super::control_log_sync::sync_swarm_control_log_members(swarm_id, &members);
+    }
+
     let session_ids: Vec<String> = {
         let swarms = swarms_by_id.read().await;
         swarms
