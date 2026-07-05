@@ -145,6 +145,7 @@ async fn test_agent() -> Arc<Mutex<Agent>> {
 include!("comm_control_tests/assign_task.rs");
 include!("comm_control_tests/assign_friendly_name.rs");
 include!("comm_control_tests/failure_scoreboard.rs");
+include!("comm_control_tests/control_log_dual_write.rs");
 include!("comm_control_tests/assign_blocked.rs");
 include!("comm_control_tests/assign_double.rs");
 include!("comm_control_tests/assign_ready_agent.rs");

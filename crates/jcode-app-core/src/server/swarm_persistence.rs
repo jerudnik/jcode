@@ -118,8 +118,8 @@ fn migrate_legacy_state() {
     }
 }
 
-fn state_path(swarm_id: &str) -> PathBuf {
-    let sanitized: String = swarm_id
+fn sanitize_swarm_id(swarm_id: &str) -> String {
+    swarm_id
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
@@ -128,8 +128,17 @@ fn state_path(swarm_id: &str) -> PathBuf {
                 '_'
             }
         })
-        .collect();
-    state_dir().join(format!("{}.json", sanitized))
+        .collect()
+}
+
+fn state_path(swarm_id: &str) -> PathBuf {
+    state_dir().join(format!("{}.json", sanitize_swarm_id(swarm_id)))
+}
+
+/// Path of the per-swarm control-plane event log (W1). Lives next to the
+/// snapshot so archive/GC of a swarm is one directory glob.
+pub(super) fn control_log_path(swarm_id: &str) -> PathBuf {
+    state_dir().join(format!("{}.control.jsonl", sanitize_swarm_id(swarm_id)))
 }
 
 fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64) -> VersionedPlan {
