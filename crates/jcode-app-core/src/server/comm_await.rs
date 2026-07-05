@@ -445,15 +445,16 @@ pub(super) async fn spawn_or_resume_await_members(
             // the next re-scan rather than lost forever.
             match scan_swarm_control_log(&swarm_id, cursor, wake_relevant_event) {
                 Ok(ScanOutcome::Found { next_offset, .. }) => {
+                    // Advance in memory only and re-run the level check.
+                    // Persistence waits for the resting position (NotYet):
+                    // a crash in between just re-scans a few events from the
+                    // older on-disk cursor, and the scan is idempotent.
                     cursor = next_offset;
-                    persist_scan_offset(&key, cursor);
                     continue;
                 }
                 Ok(ScanOutcome::NotYet { resume_offset }) => {
-                    if resume_offset != cursor {
-                        cursor = resume_offset;
-                        persist_scan_offset(&key, cursor);
-                    }
+                    cursor = resume_offset;
+                    persist_scan_offset(&key, cursor);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                     // No log yet (swarm has never appended): nothing to scan.
