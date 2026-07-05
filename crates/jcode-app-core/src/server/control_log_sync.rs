@@ -26,6 +26,7 @@ use jcode_swarm_core::control_log::{
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex as StdMutex};
+use tokio::sync::watch;
 
 struct ControlLogHandle {
     writer: ControlLogWriter,
@@ -39,6 +40,43 @@ struct ControlLogHandle {
 /// a stale writer across runtime dirs.
 static CONTROL_LOGS: LazyLock<StdMutex<HashMap<PathBuf, ControlLogHandle>>> =
     LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+/// Per-path append notifiers (W2). Every in-process append funnel publishes
+/// the post-append offset here, so await watchers can park on
+/// `watch::Receiver::changed()` instead of trusting the lossy
+/// `swarm_event_tx` broadcast for wakes. The watch value is only a NUDGE
+/// ("the log grew, re-scan from your own cursor"); the log file remains the
+/// truth, so a watcher that misses a notification still converges on its
+/// next re-scan. Keyed by path for the same runtime-dir reason as
+/// [`CONTROL_LOGS`].
+static CONTROL_LOG_APPENDS: LazyLock<StdMutex<HashMap<PathBuf, watch::Sender<u64>>>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+/// Subscribe to append nudges for a swarm's control log. The receiver's
+/// current value is the offset at subscription time (already marked seen);
+/// `changed()` resolves on the next append.
+pub(super) fn subscribe_control_log(swarm_id: &str) -> watch::Receiver<u64> {
+    let path = control_log_path(swarm_id);
+    let current = current_control_log_offset(swarm_id);
+    let mut senders = CONTROL_LOG_APPENDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    senders
+        .entry(path)
+        .or_insert_with(|| watch::channel(current).0)
+        .subscribe()
+}
+
+/// Publish an append nudge. `send_replace` succeeds regardless of receiver
+/// count, so a swarm with no active awaits costs one map lookup.
+fn notify_control_log_append(path: &PathBuf, offset: u64) {
+    let senders = CONTROL_LOG_APPENDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(sender) = senders.get(path) {
+        let _ = sender.send_replace(offset);
+    }
+}
 
 /// Project the server's in-memory member records into the fold's member view.
 fn target_member_view(members: &[SwarmMember]) -> HashMap<String, MemberControlState> {
@@ -123,10 +161,44 @@ fn sync_control_log_inner(
     target_tasks: Option<HashMap<String, TaskControlState>>,
 ) -> Option<u64> {
     let path = control_log_path(swarm_id);
-    let mut logs = CONTROL_LOGS.lock().ok()?;
-    let handle = open_handle(&mut logs, swarm_id, &path)?;
+    let mut appended = false;
+    {
+        let mut logs = CONTROL_LOGS.lock().ok()?;
+        let handle = open_handle(&mut logs, swarm_id, &path)?;
 
-    for event in diff_events(&handle.fold, &target_members, target_tasks.as_ref()) {
+        for event in diff_events(&handle.fold, &target_members, target_tasks.as_ref()) {
+            match handle.writer.append(event.clone()) {
+                Ok(_) => {
+                    handle.fold.apply(&event);
+                    appended = true;
+                }
+                Err(error) => {
+                    crate::logging::warn(&format!(
+                        "control log append failed for {}: {}",
+                        swarm_id, error
+                    ));
+                    return None;
+                }
+            }
+        }
+    }
+    // Offsets are byte positions; the writer appends synchronously, so the
+    // current file length is the fully-covered resume offset.
+    let offset = std::fs::metadata(&path).map(|meta| meta.len()).ok();
+    if appended && let Some(offset) = offset {
+        notify_control_log_append(&path, offset);
+    }
+    offset
+}
+
+/// Append an explicit control event that is NOT derivable from a state diff
+/// (W2: `ArtifactFiled` evidence). The event also updates the cached fold so
+/// subsequent diffs do not re-derive against a stale view.
+pub(super) fn append_control_event(swarm_id: &str, event: SwarmControlEvent) -> Option<u64> {
+    let path = control_log_path(swarm_id);
+    {
+        let mut logs = CONTROL_LOGS.lock().ok()?;
+        let handle = open_handle(&mut logs, swarm_id, &path)?;
         match handle.writer.append(event.clone()) {
             Ok(_) => handle.fold.apply(&event),
             Err(error) => {
@@ -138,29 +210,11 @@ fn sync_control_log_inner(
             }
         }
     }
-    // Offsets are byte positions; the writer appends synchronously, so the
-    // current file length is the fully-covered resume offset.
-    std::fs::metadata(&path).map(|meta| meta.len()).ok()
-}
-
-/// Append an explicit control event that is NOT derivable from a state diff
-/// (W2: `ArtifactFiled` evidence). The event also updates the cached fold so
-/// subsequent diffs do not re-derive against a stale view.
-pub(super) fn append_control_event(swarm_id: &str, event: SwarmControlEvent) -> Option<u64> {
-    let path = control_log_path(swarm_id);
-    let mut logs = CONTROL_LOGS.lock().ok()?;
-    let handle = open_handle(&mut logs, swarm_id, &path)?;
-    match handle.writer.append(event.clone()) {
-        Ok(_) => handle.fold.apply(&event),
-        Err(error) => {
-            crate::logging::warn(&format!(
-                "control log append failed for {}: {}",
-                swarm_id, error
-            ));
-            return None;
-        }
+    let offset = std::fs::metadata(&path).map(|meta| meta.len()).ok();
+    if let Some(offset) = offset {
+        notify_control_log_append(&path, offset);
     }
-    std::fs::metadata(&path).map(|meta| meta.len()).ok()
+    offset
 }
 
 fn open_handle<'a>(
@@ -232,13 +286,6 @@ pub(super) fn fold_swarm_control_log(swarm_id: &str) -> SwarmControlState {
 /// matching how `sync_*`/`append_control_event` derive the resume offset they
 /// return: the writer appends synchronously, so the file length is the
 /// fully-covered cursor.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "W2 await watcher plumbing; wired by the next session"
-    )
-)]
 pub(super) fn current_control_log_offset(swarm_id: &str) -> u64 {
     std::fs::metadata(control_log_path(swarm_id))
         .map(|meta| meta.len())
@@ -275,13 +322,6 @@ pub(super) fn current_control_log_offset(swarm_id: &str) -> u64 {
 /// point: the loop above is the whole "re-arm and re-scan from a cursor" pattern,
 /// so a dedicated `rescan_from_cursor` wrapper would just be this call and is
 /// intentionally omitted to keep the surface minimal.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "W2 await watcher plumbing; wired by the next session"
-    )
-)]
 pub(super) fn scan_swarm_control_log(
     swarm_id: &str,
     offset: u64,
