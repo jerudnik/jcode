@@ -326,7 +326,7 @@ pub(super) async fn handle_comm_message(
                         .await;
 
                         if !woke_immediately {
-                            let _ = queue_soft_interrupt_for_session(
+                            let queued = queue_soft_interrupt_for_session(
                                 session_id,
                                 notification_msg.clone(),
                                 false,
@@ -335,6 +335,31 @@ pub(super) async fn handle_comm_message(
                                 sessions,
                             )
                             .await;
+                            // W3c nudge: a parked wake is only drained by
+                            // mid-turn injection points. If the target was
+                            // only transiently busy (no turn ever runs), the
+                            // message would rot in the queue, so watch for
+                            // idleness and deliver it as a wake turn then.
+                            if queued
+                                && let Some(queue) = soft_interrupt_queues
+                                    .read()
+                                    .await
+                                    .get(session_id)
+                                    .cloned()
+                            {
+                                super::live_turn::nudge_parked_interrupts_when_idle(
+                                    session_id.clone(),
+                                    queue,
+                                    Arc::clone(sessions),
+                                    LiveTurnSwarmContext::new(
+                                        swarm_members,
+                                        swarms_by_id,
+                                        event_history,
+                                        event_counter,
+                                        swarm_event_tx,
+                                    ),
+                                );
+                            }
                         }
                     }
                 }

@@ -195,3 +195,90 @@ pub(super) async fn run_live_turn_if_idle(
     .await;
     true
 }
+
+fn nudge_poll_interval() -> std::time::Duration {
+    std::time::Duration::from_millis(250)
+}
+
+fn nudge_max_attempts() -> u32 {
+    // ~2 minutes of polling. A worker busier than that will drain the queue
+    // itself at a mid-turn injection point when its real turn runs.
+    480
+}
+
+/// W3c (riptide's nudge pattern): deliver parked soft interrupts once the
+/// target session becomes idle.
+///
+/// A Wake message to a busy session is parked in its soft-interrupt queue,
+/// but that queue is only drained at MID-TURN injection points. If the
+/// session was only transiently busy (agent lock held for a status read, or
+/// a turn that finished before the park), no injection point ever fires and
+/// the message rots undelivered while the worker idles. This watcher polls
+/// for idleness and, when the queue still holds messages, drains them and
+/// delivers them as a tracked wake turn (same lifecycle as any other
+/// server-initiated turn). A no-op when a real turn drained the queue first:
+/// the drain is atomic, so a message is delivered exactly once.
+pub(super) fn nudge_parked_interrupts_when_idle(
+    session_id: String,
+    queue: jcode_agent_runtime::SoftInterruptQueue,
+    sessions: SessionAgents,
+    swarm: LiveTurnSwarmContext,
+) {
+    tokio::spawn(async move {
+        for _ in 0..nudge_max_attempts() {
+            tokio::time::sleep(nudge_poll_interval()).await;
+
+            let queue_empty = queue.lock().map(|q| q.is_empty()).unwrap_or(true);
+            if queue_empty {
+                // Delivered by a mid-turn injection point (or cleared): done.
+                return;
+            }
+
+            let Some(agent) = idle_live_agent(&session_id, &sessions, &swarm.members).await
+            else {
+                continue;
+            };
+
+            // Idle with parked messages: drain atomically and deliver as a
+            // wake turn. Re-check emptiness inside the lock so a racing
+            // injection cannot double-deliver.
+            let drained: Vec<jcode_agent_runtime::SoftInterruptMessage> = match queue.lock() {
+                Ok(mut q) => q.drain(..).collect(),
+                Err(_) => return,
+            };
+            if drained.is_empty() {
+                return;
+            }
+
+            crate::logging::event_info(
+                "SWARM_LIFECYCLE",
+                vec![
+                    ("phase", "nudge_parked_interrupts".to_string()),
+                    ("session_id", session_id.clone()),
+                    ("message_count", drained.len().to_string()),
+                ],
+            );
+
+            let combined = drained
+                .iter()
+                .map(|m| m.content.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n");
+            let detail = Some(truncate_detail(&combined, 120)).filter(|d| !d.is_empty());
+            spawn_tracked_live_turn(
+                &session_id,
+                agent,
+                combined,
+                Some(
+                    "These message(s) were queued while you were busy and are now being \
+                     delivered. Review them and respond or act if useful."
+                        .to_string(),
+                ),
+                detail,
+                swarm,
+            )
+            .await;
+            return;
+        }
+    });
+}
