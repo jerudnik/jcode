@@ -425,3 +425,99 @@ async fn w2_legacy_zero_cursor_reanchors_to_tail_not_zero() {
         "new awaits must anchor their scan cursor at the current log tail"
     );
 }
+
+/// W2 low-confidence routing: a satisfied await whose done member filed
+/// low-confidence artifact evidence must say so in the completion summary and
+/// point the awaiter at the gate/inject_gap path, instead of presenting the
+/// completion as final. (Enforcement lives in the engine: validate_gate_pass
+/// rejects a deep gate that skips a low-confidence sibling. The await's job
+/// is the routing signal.)
+#[tokio::test]
+async fn w2_satisfied_await_flags_low_confidence_evidence() {
+    let (_env, _runtime) = RuntimeEnvGuard::new();
+    let swarm_id = "swarm-w2-lowconf";
+    let requester = "coord-w2lc";
+    let worker = "worker-w2lc";
+    let await_runtime = AwaitMembersRuntime::default();
+
+    // Evidence trail: the worker completed node n1 with LOW confidence
+    // (complete_node appends this before the derived status flip).
+    crate::server::control_log_sync::append_control_event(
+        swarm_id,
+        jcode_swarm_core::control_log::SwarmControlEvent::ArtifactFiled {
+            task_id: "n1".to_string(),
+            session_id: worker.to_string(),
+            confidence: Some("low".to_string()),
+        },
+    )
+    .expect("append evidence");
+
+    let (client_tx, mut client_rx) = mpsc::unbounded_channel();
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        (requester.to_string(), member(requester, swarm_id, "ready")),
+        (worker.to_string(), member(worker, swarm_id, "completed")),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.to_string(),
+        HashSet::from([requester.to_string(), worker.to_string()]),
+    )])));
+    // The node is terminal in the plan: the await is satisfied immediately.
+    let mut done_task = plan_item("n1", "done", "high", &[]);
+    done_task.assigned_to = Some(worker.to_string());
+    let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.to_string(),
+        VersionedPlan {
+            items: vec![done_task],
+            version: 1,
+            participants: HashSet::from([requester.to_string(), worker.to_string()]),
+            task_progress: HashMap::new(),
+            mode: "deep".to_string(),
+            node_meta: HashMap::new(),
+        },
+    )])));
+    let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(32);
+
+    handle_comm_await_members(
+        304,
+        requester.to_string(),
+        vec!["completed".to_string()],
+        vec![worker.to_string()],
+        Some("all".to_string()),
+        Some(5),
+        false,
+        false,
+        false,
+        CommAwaitMembersContext {
+            client_event_tx: &client_tx,
+            swarm_members: &swarm_members,
+            swarms_by_id: &swarms_by_id,
+            swarm_plans: &swarm_plans,
+            swarm_event_tx: &swarm_event_tx,
+            await_members_runtime: &await_runtime,
+        },
+    )
+    .await;
+
+    let response = tokio::time::timeout(Duration::from_secs(2), client_rx.recv())
+        .await
+        .expect("satisfied await should answer inline")
+        .expect("channel should stay open");
+
+    match response {
+        ServerEvent::CommAwaitMembersResponse {
+            completed, summary, ..
+        } => {
+            assert!(completed, "await must still WAKE on low-confidence work");
+            assert!(
+                summary.contains("LOW-CONFIDENCE") && summary.contains("n1"),
+                "summary must flag the low-confidence node and route toward the \
+                 gate path, got: {summary}"
+            );
+            assert!(
+                summary.contains("inject_gap"),
+                "summary must name the follow-up mechanism, got: {summary}"
+            );
+        }
+        other => panic!("expected CommAwaitMembersResponse, got {other:?}"),
+    }
+}
