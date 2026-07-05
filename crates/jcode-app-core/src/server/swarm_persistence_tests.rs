@@ -101,6 +101,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
         plans.get("swarm-alpha"),
         coordinators.get("swarm-alpha").map(String::as_str),
         &members,
+        0,
     );
     let loaded = load_runtime_state();
 
@@ -199,7 +200,7 @@ fn remove_swarm_state_deletes_persisted_snapshot() {
             node_meta: HashMap::new(),
         },
     )]);
-    persist_swarm_state("swarm-beta", plans.get("swarm-beta"), None, &[]);
+    persist_swarm_state("swarm-beta", plans.get("swarm-beta"), None, &[], 0);
     assert!(state_path("swarm-beta").exists());
 
     remove_swarm_state("swarm-beta");
@@ -267,7 +268,7 @@ fn deep_plan_mode_and_node_meta_round_trip() {
         node_meta,
     };
 
-    persist_swarm_state("swarm-deep", Some(&plan), None, &[]);
+    persist_swarm_state("swarm-deep", Some(&plan), None, &[], 0);
     let loaded = load_runtime_state();
 
     let loaded_plan = loaded.plans.get("swarm-deep").expect("loaded plan");
@@ -394,7 +395,7 @@ fn gate_debt_and_artifact_hydration_survive_reload() {
         ),
     ]);
 
-    persist_swarm_state("swarm-debt", Some(&plan), None, &[]);
+    persist_swarm_state("swarm-debt", Some(&plan), None, &[], 0);
     let loaded = load_runtime_state();
     let loaded_plan = loaded.plans.get("swarm-debt").expect("loaded plan");
 
@@ -792,7 +793,7 @@ fn persisted_swarm_state_without_plan_still_restores_coordinator_and_members() {
         task_label: None,
     }];
 
-    persist_swarm_state("swarm-gamma", None, Some("coord-1"), &members);
+    persist_swarm_state("swarm-gamma", None, Some("coord-1"), &members, 0);
 
     let loaded = load_runtime_state();
     assert!(!loaded.plans.contains_key("swarm-gamma"));
@@ -985,4 +986,216 @@ async fn remove_racing_persist_deletes_fresh_snapshot_and_resurrects_stale_bak()
         "restart restores the stale .bak snapshot: coord-new's fresh state \
          was orphaned by the delete-vs-write race"
     );
+}
+
+/// W1 step 4: restart recovery replays control-log events past the
+/// snapshot's covered offset. A status flip, a role handoff, and a task
+/// status change that happened AFTER the last snapshot write (e.g. via
+/// broadcast_swarm_status, which never persists) must survive the restart.
+#[test]
+fn recovery_replays_control_log_tail_past_snapshot_offset() {
+    use jcode_swarm_core::control_log::{ControlLogWriter, LOCAL_ORIGIN, SwarmControlEvent};
+
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    let swarm_id = "swarm-log-tail";
+
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let make_member = |session_id: &str, role: &str, status: &str| SwarmMember {
+        session_id: session_id.to_string(),
+        event_tx: event_tx.clone(),
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some(swarm_id.to_string()),
+        swarm_enabled: true,
+        status: status.to_string(),
+        detail: None,
+        friendly_name: Some(session_id.to_string()),
+        report_back_to_session_id: None,
+        latest_completion_report: None,
+        role: role.to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: false,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+    };
+    let members = vec![
+        make_member("coord-1", "coordinator", "ready"),
+        make_member("worker-1", "agent", "ready"),
+    ];
+
+    let plan = VersionedPlan {
+        items: vec![crate::plan::PlanItem {
+            content: "task one".to_string(),
+            status: "queued".to_string(),
+            priority: "high".to_string(),
+            id: "t1".to_string(),
+            subsystem: None,
+            file_scope: Vec::new(),
+            blocked_by: Vec::new(),
+            assigned_to: None,
+        }],
+        version: 1,
+        participants: ["coord-1".to_string()].into_iter().collect(),
+        task_progress: HashMap::new(),
+        mode: "light".to_string(),
+        node_meta: HashMap::new(),
+    };
+
+    // Write the log prefix the snapshot will cover.
+    let log_path = control_log_path(swarm_id);
+    let mut writer = ControlLogWriter::open(&log_path, swarm_id, LOCAL_ORIGIN).expect("open log");
+    for event in [
+        SwarmControlEvent::MemberJoined {
+            session_id: "coord-1".to_string(),
+            friendly_name: Some("coord-1".to_string()),
+            role: "coordinator".to_string(),
+        },
+        SwarmControlEvent::MemberJoined {
+            session_id: "worker-1".to_string(),
+            friendly_name: Some("worker-1".to_string()),
+            role: "agent".to_string(),
+        },
+        SwarmControlEvent::TaskAssigned {
+            task_id: "t1".to_string(),
+            assigned_to: None,
+        },
+        SwarmControlEvent::TaskStatusChanged {
+            task_id: "t1".to_string(),
+            status: "queued".to_string(),
+        },
+    ] {
+        writer.append(event).expect("append prefix");
+    }
+    let covered_offset = std::fs::metadata(&log_path).expect("log meta").len();
+
+    // Snapshot covering exactly that prefix.
+    persist_swarm_state(
+        swarm_id,
+        Some(&plan),
+        Some("coord-1"),
+        &members,
+        covered_offset,
+    );
+
+    // Post-snapshot events that never reached a snapshot write.
+    for event in [
+        SwarmControlEvent::TaskAssigned {
+            task_id: "t1".to_string(),
+            assigned_to: Some("worker-1".to_string()),
+        },
+        SwarmControlEvent::TaskStatusChanged {
+            task_id: "t1".to_string(),
+            status: "completed".to_string(),
+        },
+        SwarmControlEvent::MemberStatusChanged {
+            session_id: "worker-1".to_string(),
+            status: "completed".to_string(),
+        },
+        SwarmControlEvent::RoleChanged {
+            session_id: "worker-1".to_string(),
+            role: "coordinator".to_string(),
+        },
+        SwarmControlEvent::RoleChanged {
+            session_id: "coord-1".to_string(),
+            role: "agent".to_string(),
+        },
+    ] {
+        writer.append(event).expect("append tail");
+    }
+
+    let loaded = load_runtime_state();
+
+    // Task tail replayed over the snapshot plan.
+    let plan = loaded.plans.get(swarm_id).expect("plan restored");
+    let item = plan.items.iter().find(|item| item.id == "t1").expect("t1");
+    assert_eq!(
+        item.assigned_to.as_deref(),
+        Some("worker-1"),
+        "post-snapshot assignment must survive restart"
+    );
+    assert_eq!(
+        item.status, "completed",
+        "post-snapshot task completion must survive restart"
+    );
+
+    // Member tail replayed: role handoff visible after restart.
+    assert_eq!(
+        loaded.members.get("worker-1").map(|m| m.role.as_str()),
+        Some("coordinator"),
+        "post-snapshot role handoff must survive restart"
+    );
+    assert_eq!(
+        loaded.members.get("coord-1").map(|m| m.role.as_str()),
+        Some("agent"),
+        "post-snapshot demotion must survive restart"
+    );
+    assert_eq!(
+        loaded.members.get("worker-1").map(|m| m.status.as_str()),
+        Some("completed"),
+        "post-snapshot terminal status must survive restart (terminal states \
+         are exempt from the crash-recovery rewrite)"
+    );
+}
+
+/// Pre-W1 snapshots have no covered offset (serde default 0): the whole log
+/// replays over them, which must be idempotent, not corrupting.
+#[test]
+fn recovery_with_legacy_snapshot_replays_whole_log_idempotently() {
+    use jcode_swarm_core::control_log::{ControlLogWriter, LOCAL_ORIGIN, SwarmControlEvent};
+
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    let swarm_id = "swarm-legacy";
+
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let members = vec![SwarmMember {
+        session_id: "coord-1".to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some(swarm_id.to_string()),
+        swarm_enabled: true,
+        status: "ready".to_string(),
+        detail: None,
+        friendly_name: Some("owl".to_string()),
+        report_back_to_session_id: None,
+        latest_completion_report: None,
+        role: "coordinator".to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: false,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+    }];
+
+    // Log fully agrees with the snapshot (dual-write in steady state)...
+    let log_path = control_log_path(swarm_id);
+    let mut writer = ControlLogWriter::open(&log_path, swarm_id, LOCAL_ORIGIN).expect("open log");
+    writer
+        .append(SwarmControlEvent::MemberJoined {
+            session_id: "coord-1".to_string(),
+            friendly_name: Some("owl".to_string()),
+            role: "coordinator".to_string(),
+        })
+        .expect("append");
+    // ...but the snapshot predates W1 and carries offset 0.
+    persist_swarm_state(swarm_id, None, Some("coord-1"), &members, 0);
+
+    let loaded = load_runtime_state();
+    assert_eq!(
+        loaded.members.get("coord-1").map(|m| m.role.as_str()),
+        Some("coordinator")
+    );
+    assert_eq!(
+        loaded
+            .members
+            .get("coord-1")
+            .and_then(|m| m.friendly_name.as_deref()),
+        Some("owl")
+    );
+    assert_eq!(loaded.members.len(), 1, "replay must not duplicate members");
 }

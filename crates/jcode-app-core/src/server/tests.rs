@@ -631,6 +631,7 @@ async fn startup_recovery_resumes_interrupted_headless_sessions_after_reload() -
             persisted_headless_member(&initiator.id, swarm_id, "running", "selfdev reload"),
             persisted_headless_member(&peer.id, swarm_id, "running", "bash tool"),
         ],
+        0,
     );
 
     let server = Server::new(provider.clone());
@@ -733,6 +734,7 @@ async fn startup_recovery_does_not_keep_idle_headless_sessions_active() -> Resul
         &[persisted_headless_member(
             &idle.id, swarm_id, "crashed", "idle",
         )],
+        0,
     );
 
     assert!(
@@ -824,6 +826,7 @@ async fn startup_recovery_preserves_headed_session_reload_context_for_later_reco
             "running",
             "bash tool",
         )],
+        0,
     );
 
     let server = Server::new(provider.clone());
@@ -898,6 +901,7 @@ async fn startup_ready_signal_is_not_blocked_by_headless_recovery_delay() -> Res
             "running",
             "delay startup recovery",
         )],
+        0,
     );
 
     let provider = Arc::new(StreamingMockProvider::default());

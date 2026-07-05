@@ -1,7 +1,8 @@
 use super::{SwarmMember, SwarmTaskProgress, VersionedPlan};
 use crate::protocol::ServerEvent;
 use crate::storage;
-use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord};
+use jcode_swarm_core::control_log::{SwarmControlEvent, read_from as read_control_log_from};
+use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -28,6 +29,15 @@ struct PersistedSwarmState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     members: Vec<PersistedSwarmMember>,
     updated_at_unix_ms: u64,
+    /// W1 step 4: byte offset into the per-swarm control log covered by this
+    /// snapshot. The snapshot is the compaction checkpoint: recovery replays
+    /// log events past this offset over the snapshot, so control-plane
+    /// changes that never reached a snapshot write (member status/role flips
+    /// via broadcast_swarm_status) survive a restart. 0 (the serde default
+    /// for pre-W1 snapshots) replays the whole log, which is safe because
+    /// replay is idempotent over the snapshot state.
+    #[serde(default)]
+    control_log_covered_offset: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -142,6 +152,21 @@ pub(super) fn control_log_path(swarm_id: &str) -> PathBuf {
 }
 
 fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64) -> VersionedPlan {
+    let mut plan = VersionedPlan {
+        items: std::mem::take(&mut plan.items),
+        version: plan.version,
+        participants: std::mem::take(&mut plan.participants).into_iter().collect(),
+        task_progress: std::mem::take(&mut plan.task_progress),
+        mode: std::mem::take(&mut plan.mode),
+        node_meta: std::mem::take(&mut plan.node_meta),
+    };
+    mark_running_items_stale(&mut plan, updated_at_unix_ms);
+    plan
+}
+
+/// Post-restart staleness pass: anything "running" cannot actually be running
+/// (the worker did not survive the reload), so mark it stale for the reaper.
+fn mark_running_items_stale(plan: &mut VersionedPlan, stale_since_unix_ms: u64) {
     for item in &mut plan.items {
         if item.status == "running" {
             item.status = "running_stale".to_string();
@@ -149,16 +174,8 @@ fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64
                 .entry(item.id.clone())
                 .or_default()
                 .stale_since_unix_ms
-                .get_or_insert(updated_at_unix_ms);
+                .get_or_insert(stale_since_unix_ms);
         }
-    }
-    VersionedPlan {
-        items: plan.items,
-        version: plan.version,
-        participants: plan.participants.into_iter().collect(),
-        task_progress: plan.task_progress,
-        mode: plan.mode,
-        node_meta: plan.node_meta,
     }
 }
 
@@ -278,9 +295,16 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
         {
             continue;
         }
-        let Ok(state) = storage::read_json::<PersistedSwarmState>(&path) else {
+        let Ok(mut state) = storage::read_json::<PersistedSwarmState>(&path) else {
             continue;
         };
+        // W1 step 4: the snapshot is the compaction checkpoint, the log is
+        // the source of truth. Replay control events past the snapshot's
+        // covered offset over the persisted records BEFORE the recovery
+        // transforms run, so control-plane changes that never reached a
+        // snapshot write (status/role flips via broadcast_swarm_status)
+        // survive the restart and still get the same crash-recovery pass.
+        apply_control_log_tail(&mut state);
         let swarm_id = state.swarm_id.clone();
         if let Some(plan) = state.plan {
             plans.insert(
@@ -313,11 +337,145 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
     }
 }
 
+/// Replay the per-swarm control log past the snapshot's covered offset,
+/// mutating the persisted records in place. Only swarms with a snapshot are
+/// replayed (a missing snapshot means the swarm was retired; its log is kept
+/// as an observation dataset, not as live state).
+fn apply_control_log_tail(state: &mut PersistedSwarmState) {
+    let path = control_log_path(&state.swarm_id);
+    let Ok(read) = read_control_log_from(&path, state.control_log_covered_offset) else {
+        return;
+    };
+    if read.envelopes.is_empty() {
+        return;
+    }
+    crate::logging::info(&format!(
+        "swarm {}: replaying {} control event(s) past snapshot offset {}",
+        state.swarm_id,
+        read.envelopes.len(),
+        state.control_log_covered_offset
+    ));
+    for (_offset, envelope) in read.envelopes {
+        if envelope.swarm_id != state.swarm_id {
+            continue;
+        }
+        apply_control_event_to_snapshot(state, envelope.event);
+    }
+}
+
+fn find_member_mut<'a>(
+    state: &'a mut PersistedSwarmState,
+    session_id: &str,
+) -> Option<&'a mut SwarmMemberRecord> {
+    state
+        .members
+        .iter_mut()
+        .map(|member| &mut member.record)
+        .find(|record| record.session_id == session_id)
+}
+
+fn apply_control_event_to_snapshot(state: &mut PersistedSwarmState, event: SwarmControlEvent) {
+    match event {
+        SwarmControlEvent::MemberJoined {
+            session_id,
+            friendly_name,
+            role,
+        } => {
+            if let Some(record) = find_member_mut(state, &session_id) {
+                record.role = SwarmRole::from(role);
+                record.friendly_name = friendly_name;
+                record.status = SwarmLifecycleStatus::Ready;
+            } else {
+                // A join the snapshot never saw. Restore it headless: the
+                // session has no live client after a restart, so the
+                // recovery pass will mark it crashed unless terminal -
+                // truthful, and visible to salvage/reap flows instead of
+                // silently vanishing.
+                state.members.push(PersistedSwarmMember {
+                    record: SwarmMemberRecord {
+                        session_id,
+                        working_dir: None,
+                        swarm_id: Some(state.swarm_id.clone()),
+                        swarm_enabled: true,
+                        status: SwarmLifecycleStatus::Ready,
+                        detail: None,
+                        task_label: None,
+                        friendly_name,
+                        report_back_to_session_id: None,
+                        latest_completion_report: None,
+                        role: SwarmRole::from(role),
+                        is_headless: true,
+                    },
+                });
+            }
+        }
+        SwarmControlEvent::MemberLeft { session_id } => {
+            state
+                .members
+                .retain(|member| member.record.session_id != session_id);
+        }
+        SwarmControlEvent::RoleChanged { session_id, role } => {
+            if let Some(record) = find_member_mut(state, &session_id) {
+                record.role = SwarmRole::from(role);
+            }
+        }
+        SwarmControlEvent::MemberStatusChanged { session_id, status } => {
+            if let Some(record) = find_member_mut(state, &session_id) {
+                record.status = SwarmLifecycleStatus::from(status);
+            }
+        }
+        SwarmControlEvent::MemberRenamed {
+            session_id,
+            friendly_name,
+        } => {
+            if let Some(record) = find_member_mut(state, &session_id) {
+                record.friendly_name = friendly_name;
+            }
+        }
+        SwarmControlEvent::TaskAssigned {
+            task_id,
+            assigned_to,
+        } => {
+            if let Some(plan) = state.plan.as_mut()
+                && let Some(item) = plan.items.iter_mut().find(|item| item.id == task_id)
+            {
+                item.assigned_to = assigned_to.clone();
+                plan.task_progress
+                    .entry(task_id)
+                    .or_default()
+                    .assigned_session_id = assigned_to;
+            }
+        }
+        SwarmControlEvent::TaskStatusChanged { task_id, status } => {
+            if let Some(plan) = state.plan.as_mut()
+                && let Some(item) = plan.items.iter_mut().find(|item| item.id == task_id)
+            {
+                item.status = status;
+            }
+        }
+        SwarmControlEvent::TaskHeartbeat { task_id, wall_ms } => {
+            if let Some(plan) = state.plan.as_mut() {
+                plan.task_progress
+                    .entry(task_id)
+                    .or_default()
+                    .last_heartbeat_unix_ms = Some(wall_ms);
+            }
+        }
+        SwarmControlEvent::TaskRemoved { task_id } => {
+            if let Some(plan) = state.plan.as_mut() {
+                plan.items.retain(|item| item.id != task_id);
+                plan.task_progress.remove(&task_id);
+            }
+        }
+    }
+}
+
 pub(super) fn persist_swarm_state(
     swarm_id: &str,
     swarm_plan: Option<&VersionedPlan>,
     coordinator_session_id: Option<&str>,
     swarm_members: &[SwarmMember],
+    control_log_covered_offset: u64,
 ) {
     if swarm_plan.is_none() && coordinator_session_id.is_none() && swarm_members.is_empty() {
         let _ = std::fs::remove_file(state_path(swarm_id));
@@ -336,6 +494,7 @@ pub(super) fn persist_swarm_state(
         coordinator_session_id: coordinator_session_id.map(str::to_string),
         members,
         updated_at_unix_ms: now_unix_ms(),
+        control_log_covered_offset,
     };
 
     if let Err(err) = storage::write_json_fast(&state_path(swarm_id), &state) {

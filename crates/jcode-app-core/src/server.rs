@@ -112,14 +112,18 @@ pub(super) type ChannelSubscriptions =
 pub(super) async fn persist_swarm_state_for(swarm_id: &str, swarm_state: &SwarmState) {
     let runtime = swarm_state.load_runtime(swarm_id).await;
     // W1 dual-write: append the control-plane delta to the per-swarm event
-    // log before overwriting the snapshot, so the log is never behind the
-    // snapshot it will eventually compact.
-    control_log_sync::sync_swarm_control_log(swarm_id, &runtime.members, runtime.plan.as_ref());
+    // log before writing the snapshot. The snapshot records the log offset it
+    // covers (the compaction checkpoint), so restart recovery replays only
+    // the log tail past it.
+    let covered_offset =
+        control_log_sync::sync_swarm_control_log(swarm_id, &runtime.members, runtime.plan.as_ref())
+            .unwrap_or(0);
     persist_swarm_state_snapshot(
         swarm_id,
         runtime.plan.as_ref(),
         runtime.coordinator_session_id.as_deref(),
         &runtime.members,
+        covered_offset,
     );
 }
 
