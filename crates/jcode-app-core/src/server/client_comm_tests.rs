@@ -898,6 +898,10 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
 /// Riptide's nudge pattern: queued messages are delivered on ready_for_input.
 #[tokio::test]
 async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
+    // This test runs a REAL delivery turn, which persists the target's
+    // session. Serialize with env-mutating tests (JCODE_HOME temp dirs +
+    // empty-sessions-dir asserts) so the save cannot land in their sandbox.
+    let _env_lock = crate::storage::lock_test_env();
     let sender = test_agent().await;
 
     // Target agent with a mock stream so the delivery turn can actually run.
