@@ -412,6 +412,9 @@ pub(super) async fn handle_comm_complete_node(
             return;
         }
     };
+    // W2: capture the evidence summary for the control log before the
+    // artifact is consumed by the engine op.
+    let artifact_confidence = artifact.confidence.clone();
 
     // F3 salvage policy: a coordinator may complete a node whose recorded
     // owner is no longer a live swarm member. Without this, a crashed or
@@ -462,6 +465,17 @@ pub(super) async fn handle_comm_complete_node(
 
     match result {
         Ok(()) => {
+            // W2: file the completion evidence in the control log BEFORE the
+            // finalize sync, so awaiters see ArtifactFiled ordered ahead of
+            // the derived TaskStatusChanged("done") for the same completion.
+            super::control_log_sync::append_control_event(
+                &swarm_id,
+                jcode_swarm_core::control_log::SwarmControlEvent::ArtifactFiled {
+                    task_id: node_id.clone(),
+                    session_id: req_session_id.clone(),
+                    confidence: artifact_confidence,
+                },
+            );
             finalize(
                 id,
                 &swarm_id,
