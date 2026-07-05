@@ -31,6 +31,7 @@ async fn await_members_background_already_expired_answers_tool_call() {
             background: true,
             notify: false,
             wake: false,
+            scan_offset: 0,
             final_response: None,
         },
     );
