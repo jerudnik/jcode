@@ -148,6 +148,7 @@ const DEFAULT_SWARM_STATUS_DEBOUNCE_MS: u64 = 75;
 const DEFAULT_SWARM_TASK_HEARTBEAT_SECS: u64 = 10;
 const DEFAULT_SWARM_TASK_STALE_AFTER_SECS: u64 = 45;
 const DEFAULT_SWARM_TASK_SWEEP_INTERVAL_SECS: u64 = 5;
+const DEFAULT_SWARM_TASK_REAP_AFTER_SECS: u64 = 180;
 #[derive(Default, Clone, Copy)]
 struct PendingSwarmStatusBroadcast {
     scheduled: bool,
@@ -438,6 +439,17 @@ async fn notify_coordinator_of_salvage(
         },
     )
     .await;
+}
+
+/// How long a task may sit `running_stale` before the sweeper reaps it
+/// (fails it) when its assignee is no longer a live swarm member. Generous
+/// relative to `swarm_task_stale_after` so a slow-but-alive worker whose
+/// member record briefly disappears (reload) is not raced.
+pub(super) fn swarm_task_reap_after() -> Duration {
+    Duration::from_secs(configured_positive_u64(
+        "JCODE_SWARM_TASK_REAP_AFTER_SECS",
+        DEFAULT_SWARM_TASK_REAP_AFTER_SECS,
+    ))
 }
 
 #[expect(
@@ -2928,6 +2940,141 @@ mod tests {
                     if message.contains("crashed while working")
             )),
             "owner should be notified of the crash, got {owner_events:?}"
+        );
+    }
+
+    /// W3 reaper (orchestration-hardening): a task that has been
+    /// `running_stale` beyond the reap deadline, whose assignee is no longer a
+    /// live swarm member, must be failed so retry/salvage paths (and blocked
+    /// awaits) can proceed. Today staleness marking is a dead end: the item
+    /// stays `running_stale` forever, holding awaits to their full timeout and
+    /// leaving children permanently blocked.
+    #[tokio::test]
+    async fn refresh_swarm_task_staleness_reaps_orphaned_tasks_past_deadline() {
+        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-reap".to_string(),
+            HashSet::from(["coord".to_string()]),
+        )])));
+        let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
+        let now_ms = now_unix_ms();
+        let reaped_age_ms = super::swarm_task_reap_after().as_millis() as u64 + 5_000;
+        // "ghost" owns the task but is NOT in swarm_members (crashed/evicted).
+        // "coord" is a live member so the swarm itself is alive.
+        let (coord, _coord_rx) = swarm_member("coord", "coordinator", false);
+        swarm_members
+            .write()
+            .await
+            .insert("coord".to_string(), coord);
+        let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-reap".to_string(),
+            VersionedPlan {
+                items: vec![PlanItem {
+                    content: "orphaned task".to_string(),
+                    status: "running_stale".to_string(),
+                    priority: "medium".to_string(),
+                    id: "task-orphan".to_string(),
+                    subsystem: None,
+                    file_scope: Vec::new(),
+                    blocked_by: Vec::new(),
+                    assigned_to: Some("ghost".to_string()),
+                }],
+                version: 1,
+                participants: HashSet::from(["coord".to_string()]),
+                task_progress: HashMap::from([(
+                    "task-orphan".to_string(),
+                    crate::server::SwarmTaskProgress {
+                        assigned_session_id: Some("ghost".to_string()),
+                        started_at_unix_ms: Some(now_ms.saturating_sub(reaped_age_ms)),
+                        last_heartbeat_unix_ms: Some(now_ms.saturating_sub(reaped_age_ms)),
+                        stale_since_unix_ms: Some(now_ms.saturating_sub(reaped_age_ms)),
+                        ..Default::default()
+                    },
+                )]),
+                mode: "light".to_string(),
+                node_meta: HashMap::new(),
+            },
+        )])));
+
+        refresh_swarm_task_staleness(
+            &swarm_members,
+            &swarms_by_id,
+            &swarm_plans,
+            &swarm_coordinators,
+        )
+        .await;
+
+        let plans = swarm_plans.read().await;
+        let plan = plans.get("swarm-reap").expect("plan");
+        assert_eq!(
+            plan.items[0].status, "failed",
+            "orphaned running_stale task past the reap deadline must be failed \
+             so retry/salvage can proceed (was left '{}')",
+            plan.items[0].status
+        );
+    }
+
+    /// Counterpart guard: a stale task whose assignee is still a live member is
+    /// NOT reaped (heartbeats may revive it; killing a live worker's task is
+    /// the salvage path's decision, not the sweeper's).
+    #[tokio::test]
+    async fn refresh_swarm_task_staleness_leaves_stale_tasks_of_live_members() {
+        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-noreap".to_string(),
+            HashSet::from(["worker".to_string()]),
+        )])));
+        let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
+        let now_ms = now_unix_ms();
+        let reaped_age_ms = super::swarm_task_reap_after().as_millis() as u64 + 5_000;
+        let (worker, _worker_rx) = swarm_member("worker", "agent", true);
+        swarm_members
+            .write()
+            .await
+            .insert("worker".to_string(), worker);
+        let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-noreap".to_string(),
+            VersionedPlan {
+                items: vec![PlanItem {
+                    content: "slow task".to_string(),
+                    status: "running_stale".to_string(),
+                    priority: "medium".to_string(),
+                    id: "task-slow".to_string(),
+                    subsystem: None,
+                    file_scope: Vec::new(),
+                    blocked_by: Vec::new(),
+                    assigned_to: Some("worker".to_string()),
+                }],
+                version: 1,
+                participants: HashSet::from(["worker".to_string()]),
+                task_progress: HashMap::from([(
+                    "task-slow".to_string(),
+                    crate::server::SwarmTaskProgress {
+                        assigned_session_id: Some("worker".to_string()),
+                        started_at_unix_ms: Some(now_ms.saturating_sub(reaped_age_ms)),
+                        last_heartbeat_unix_ms: Some(now_ms.saturating_sub(reaped_age_ms)),
+                        stale_since_unix_ms: Some(now_ms.saturating_sub(reaped_age_ms)),
+                        ..Default::default()
+                    },
+                )]),
+                mode: "light".to_string(),
+                node_meta: HashMap::new(),
+            },
+        )])));
+
+        refresh_swarm_task_staleness(
+            &swarm_members,
+            &swarms_by_id,
+            &swarm_plans,
+            &swarm_coordinators,
+        )
+        .await;
+
+        let plans = swarm_plans.read().await;
+        let plan = plans.get("swarm-noreap").expect("plan");
+        assert_eq!(
+            plan.items[0].status, "running_stale",
+            "stale task of a LIVE member must not be reaped by the sweeper"
         );
     }
 }
