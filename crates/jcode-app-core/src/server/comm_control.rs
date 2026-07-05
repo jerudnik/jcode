@@ -627,24 +627,35 @@ async fn next_unassigned_runnable_task_id(
     next_unassigned_runnable_item_id(plan)
 }
 
-/// F1 repair: clear `assigned_to` on plan items whose assignee has left the
-/// swarm. `next_unassigned_runnable_item_id` requires `assigned_to.is_none()`,
-/// so a stale assignment makes an otherwise runnable task permanently
-/// unrunnable and stalls the run_plan driver ("runnable task(s) could not be
-/// assigned") while fresh workers sit idle. Only non-terminal, non-running
-/// items are reclaimed: running items with departed owners are the salvage
-/// path's business (task_control replace/salvage), not silent reassignment.
+/// F1 repair, W1 step 5 (fold-derived): clear `assigned_to` on plan items
+/// whose assignee is not a live member per the CONTROL LOG's fold. The fold
+/// is the single home of membership truth; the in-memory map is synced into
+/// the log first, so the query is log-derived while remaining exact at this
+/// call site. `next_unassigned_runnable_item_id` requires
+/// `assigned_to.is_none()`, so a stale assignment makes an otherwise runnable
+/// task permanently unrunnable and stalls the run_plan driver ("runnable
+/// task(s) could not be assigned") while fresh workers sit idle. Only
+/// non-terminal, non-running items are reclaimed: running items with departed
+/// owners are the salvage path's business (task_control replace/salvage),
+/// not silent reassignment.
 async fn reclaim_stale_plan_assignments(
     swarm_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
 ) {
     let live_sessions: HashSet<String> = {
-        let members = swarm_members.read().await;
-        members
-            .values()
-            .filter(|member| member.swarm_id.as_deref() == Some(swarm_id))
-            .map(|member| member.session_id.clone())
+        let members: Vec<SwarmMember> = {
+            let guard = swarm_members.read().await;
+            guard
+                .values()
+                .filter(|member| member.swarm_id.as_deref() == Some(swarm_id))
+                .cloned()
+                .collect()
+        };
+        super::control_log_sync::sync_swarm_control_log_members(swarm_id, &members);
+        super::control_log_sync::fold_swarm_control_log(swarm_id)
+            .members
+            .into_keys()
             .collect()
     };
     let mut plans = swarm_plans.write().await;
