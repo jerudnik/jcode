@@ -523,7 +523,14 @@ pub(super) async fn refresh_swarm_task_staleness(
 ) {
     let now_ms = now_unix_ms();
     let stale_after_ms = swarm_task_stale_after().as_millis() as u64;
+    let reap_after_ms = swarm_task_reap_after().as_millis() as u64;
     let changed_swarm_ids = {
+        // Snapshot live members first (separate lock) so the reap check below
+        // does not read members while holding the plans write lock.
+        let live_sessions: HashSet<String> = {
+            let members = swarm_members.read().await;
+            members.keys().cloned().collect()
+        };
         let mut plans = swarm_plans.write().await;
         let mut changed = Vec::new();
         for (swarm_id, plan) in plans.iter_mut() {
@@ -552,6 +559,41 @@ pub(super) async fn refresh_swarm_task_staleness(
                         progress.stale_since_unix_ms = None;
                         plan.version += 1;
                         swarm_changed = true;
+                    }
+                    ("running_stale", true) => {
+                        // W3 reaper: staleness must not be a dead end. When the
+                        // assignee is no longer a live member AND the task has
+                        // been stale past the reap deadline, fail it so
+                        // retry/salvage (requeue_failed, task_control retry)
+                        // and blocked awaits can proceed. Live members are
+                        // never raced: their slow tasks stay running_stale and
+                        // may still be revived by a heartbeat.
+                        let assignee_departed = item
+                            .assigned_to
+                            .as_ref()
+                            .is_some_and(|assignee| !live_sessions.contains(assignee));
+                        let past_reap_deadline = progress
+                            .stale_since_unix_ms
+                            .map(|since| now_ms.saturating_sub(since) >= reap_after_ms)
+                            .unwrap_or(false);
+                        if assignee_departed && past_reap_deadline {
+                            crate::logging::event_warn(
+                                "SWARM_LIFECYCLE",
+                                vec![
+                                    ("phase", "reap_orphaned_task".to_string()),
+                                    ("swarm_id", swarm_id.clone()),
+                                    ("task_id", item.id.clone()),
+                                    (
+                                        "departed_assignee",
+                                        item.assigned_to.clone().unwrap_or_default(),
+                                    ),
+                                ],
+                            );
+                            item.status = "failed".to_string();
+                            progress.completed_at_unix_ms = Some(now_ms);
+                            plan.version += 1;
+                            swarm_changed = true;
+                        }
                     }
                     _ => {}
                 }
