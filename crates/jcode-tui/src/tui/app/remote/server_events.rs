@@ -2749,6 +2749,55 @@ pub(in crate::tui::app) fn handle_server_event(
             app.set_status_notice("⌨ Interactive terminal detected (command will timeout)");
             false
         }
+        // Responses to /swarm drive verbs (comm_* requests from the TUI).
+        ServerEvent::CommPlanStatusResponse { summary, .. } => {
+            let rendered = crate::tui::app::commands_swarm::render_plan_status(
+                &summary,
+                &app.swarm_plan_items,
+            );
+            app.push_display_message(DisplayMessage::system(rendered));
+            false
+        }
+        ServerEvent::CommAssignTaskResponse {
+            task_id,
+            target_session,
+            ..
+        } => {
+            app.push_display_message(DisplayMessage::system(format!(
+                "✓ Assigned instance {} to {}.",
+                task_id, target_session
+            )));
+            app.set_status_notice(format!("Assigned {}", task_id));
+            false
+        }
+        ServerEvent::CommTaskControlResponse {
+            action,
+            task_id,
+            target_session,
+            status,
+            ..
+        } => {
+            app.push_display_message(DisplayMessage::system(format!(
+                "✓ {} instance {}{} — {}",
+                action,
+                task_id,
+                target_session
+                    .as_deref()
+                    .map(|s| format!(" (on {})", s))
+                    .unwrap_or_default(),
+                status
+            )));
+            app.set_status_notice(format!("{} {}", action, task_id));
+            false
+        }
+        ServerEvent::CommSpawnResponse { new_session_id, .. } => {
+            app.push_display_message(DisplayMessage::system(format!(
+                "✓ Spawned swarm member {}.",
+                new_session_id
+            )));
+            app.set_status_notice("Swarm member spawned");
+            false
+        }
         _ => false,
     }
 }

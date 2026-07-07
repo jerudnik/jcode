@@ -113,7 +113,7 @@ const REGISTERED_COMMANDS: &[RegisteredCommand] = &[
         "Open initiatives overview / resume tracked initiatives",
     ),
     RegisteredCommand::public("/goals", "Legacy alias for /initiatives"),
-    RegisteredCommand::public("/swarm", "Toggle swarm feature"),
+    RegisteredCommand::public("/swarm", "Swarm control: status, plan, start, stop, spawn"),
     RegisteredCommand::public("/overnight", "Run a supervised overnight coordinator"),
     RegisteredCommand::public("/context", "Show the full session context snapshot"),
     RegisteredCommand::public(
