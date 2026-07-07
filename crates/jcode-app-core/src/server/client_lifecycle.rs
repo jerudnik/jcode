@@ -2322,6 +2322,7 @@ pub(super) async fn handle_client(
                 model,
                 effort,
                 label,
+                subagent_type,
             } => {
                 let spawn_mode = match parse_swarm_spawn_mode(id, spawn_mode, &client_event_tx) {
                     Some(spawn_mode) => spawn_mode,
@@ -2337,6 +2338,7 @@ pub(super) async fn handle_client(
                     model,
                     effort,
                     label,
+                    subagent_type,
                     &client_event_tx,
                     &sessions,
                     &global_session_id,

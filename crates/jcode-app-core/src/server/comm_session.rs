@@ -10,7 +10,8 @@ use super::{
     create_headless_session, fanout_session_event, persist_swarm_state_for, record_swarm_event,
     record_swarm_event_for_session, remove_background_tool_signal,
     remove_session_channel_subscriptions, remove_session_from_swarm,
-    remove_session_interrupt_queue, set_member_task_label, truncate_detail, update_member_status,
+    remove_session_interrupt_queue, set_member_subagent_type, set_member_task_label,
+    truncate_detail, update_member_status,
     update_member_status_with_report,
 };
 use crate::agent::Agent;
@@ -494,6 +495,7 @@ async fn register_visible_spawned_member(
                 status,
                 detail,
                 task_label: None,
+                subagent_type: None,
                 friendly_name: Some(friendly_name),
                 report_back_to_session_id: report_back_to_session_id.map(str::to_string),
                 latest_completion_report: None,
@@ -543,6 +545,7 @@ pub(super) async fn spawn_swarm_agent(
     requested_model: Option<String>,
     requested_effort: Option<String>,
     label: Option<String>,
+    subagent_type: Option<String>,
     sessions: &SessionAgents,
     global_session_id: &Arc<RwLock<String>>,
     provider_template: &Arc<dyn Provider>,
@@ -595,9 +598,18 @@ pub(super) async fn spawn_swarm_agent(
         spawn_route_api_method,
     ));
 
-    let startup_message = initial_message
-        .as_deref()
-        .map(append_swarm_completion_report_instructions);
+    // Layer the worker's first-turn directives: the type nudge (role posture)
+    // first, then the completion-report contract. Both are idempotent and skip
+    // cleanly when their input is absent, so a spawn with neither is unchanged.
+    let startup_message = initial_message.as_deref().map(|msg| {
+        let msg = match subagent_type.as_deref() {
+            Some(kind) => {
+                std::borrow::Cow::Owned(jcode_swarm_core::append_subagent_type_instructions(msg, kind))
+            }
+            None => std::borrow::Cow::Borrowed(msg),
+        };
+        append_swarm_completion_report_instructions(&msg)
+    });
 
     let visible_spawn = match resolved_spawn_mode {
         // Inline workers run in-process like headless ones; the difference is
@@ -714,6 +726,11 @@ pub(super) async fn spawn_swarm_agent(
     if let Some(label_text) = label.as_deref().or(initial_message.as_deref()) {
         set_member_task_label(&new_session_id, label_text, swarm_members).await;
     }
+    // Record the orchestrator-chosen subagent type for observability (swarm UI
+    // chips, member lists). No-op when absent or unparseable.
+    if let Some(kind) = subagent_type.as_deref() {
+        set_member_subagent_type(&new_session_id, kind, swarm_members).await;
+    }
     let swarm_state = SwarmState {
         members: Arc::clone(swarm_members),
         swarms_by_id: Arc::clone(swarms_by_id),
@@ -816,6 +833,7 @@ pub(super) async fn handle_comm_spawn(
     model: Option<String>,
     effort: Option<String>,
     label: Option<String>,
+    subagent_type: Option<String>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     sessions: &SessionAgents,
     global_session_id: &Arc<RwLock<String>>,
@@ -863,6 +881,7 @@ pub(super) async fn handle_comm_spawn(
             model.clone().unwrap_or_default(),
             effort.clone().unwrap_or_default(),
             label.clone().unwrap_or_default(),
+            subagent_type.clone().unwrap_or_default(),
         ],
     );
     let Some(mutation_state) = begin_or_replay(
@@ -887,6 +906,7 @@ pub(super) async fn handle_comm_spawn(
         model,
         effort,
         label,
+        subagent_type,
         sessions,
         global_session_id,
         provider_template,

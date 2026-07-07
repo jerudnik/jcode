@@ -659,6 +659,12 @@ pub enum Request {
         /// otherwise derived from the first line of `initial_message`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         label: Option<String>,
+        /// Optional free-form subagent type the orchestrator picks per spawn to
+        /// fit the work (e.g. `explore`, `implement`, `verify`, `review`). Shown
+        /// in swarm UI for observability and injected as a light behavioral
+        /// nudge into the worker's first turn. Not a fixed enum.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_type: Option<String>,
     },
 
     /// List models/routes available for spawning swarm agents

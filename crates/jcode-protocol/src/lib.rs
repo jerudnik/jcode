@@ -229,6 +229,10 @@ pub struct AgentInfo {
     /// Stable label of the task/role this member was spawned or assigned for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_label: Option<String>,
+    /// Free-form subagent type/role chosen by the orchestrator at spawn time
+    /// (e.g. "explore", "implement", "verify"). Observability only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_type: Option<String>,
     /// Role: "agent" or "coordinator"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
@@ -461,6 +465,10 @@ pub struct SwarmMemberStatus {
     /// Unlike `detail`, it is not overwritten by transient status updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_label: Option<String>,
+    /// Free-form subagent type chosen by the orchestrator at spawn (e.g.
+    /// "explore", "implement", "verify"). Observability tag for swarm UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_type: Option<String>,
     /// Role: "agent" or "coordinator"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,

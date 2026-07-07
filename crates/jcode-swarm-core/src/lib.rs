@@ -67,6 +67,54 @@ pub const MAX_SWARM_MEMBERS: usize = 1000;
 /// Upper bound for a member's derived task label, sized for one-line UI chips.
 pub const MAX_SWARM_TASK_LABEL_CHARS: usize = 48;
 
+/// Upper bound for a spawned agent's `subagent_type` tag. Types are short
+/// orchestrator-chosen role words (e.g. "explore", "implement", "verify",
+/// "security-review"), so this is deliberately small; longer strings are
+/// truncated on a char boundary.
+pub const MAX_SWARM_SUBAGENT_TYPE_CHARS: usize = 32;
+
+/// Normalize an orchestrator-supplied `subagent_type` into a short, stable tag.
+///
+/// The type is free-form on purpose (the coordinator picks whatever role word
+/// best fits the work), so this only sanitizes rather than validates against a
+/// fixed set: it trims, lowercases, collapses internal whitespace to single
+/// dashes, drops anything that is not alphanumeric/`-`/`_`, and truncates on a
+/// char boundary. Returns `None` for empty/garbage input so callers can treat
+/// "no usable type" uniformly.
+pub fn normalize_subagent_type(text: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in text.trim().chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            prev_dash = false;
+            ch.to_ascii_lowercase()
+        } else if ch == '_' {
+            prev_dash = false;
+            '_'
+        } else if ch.is_whitespace() || ch == '-' || ch == '/' {
+            // Collapse runs of separators into a single dash.
+            if prev_dash || out.is_empty() {
+                continue;
+            }
+            prev_dash = true;
+            '-'
+        } else {
+            // Drop other punctuation entirely.
+            continue;
+        };
+        out.push(mapped);
+        if out.chars().count() >= MAX_SWARM_SUBAGENT_TYPE_CHARS {
+            break;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 /// Derive a short, stable task label from a spawn prompt or task assignment.
 ///
 /// Takes the first non-empty line, strips common markdown/list prefixes,
@@ -227,6 +275,9 @@ pub struct SwarmMemberRecord {
     /// Stable label of the task/role this member was spawned or assigned for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_label: Option<String>,
+    /// Free-form subagent type chosen at spawn (observability + spawn nudge).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_type: Option<String>,
     pub friendly_name: Option<String>,
     pub report_back_to_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -420,6 +471,56 @@ what_i_did_not_check (the critique gate turns those into new nodes, so listing t
 coverage grows).\n\
 These are the ONLY two ways this node can close: a turn that ends without expand_node or \
 complete_node gets the node re-queued to a fresh agent, and a repeat fails it.\n"
+    ));
+    out.push_str("</system-reminder>");
+    out
+}
+
+/// Idempotency marker for [`append_subagent_type_instructions`].
+pub const SWARM_SUBAGENT_TYPE_MARKER: &str = "SWARM SUBAGENT TYPE";
+
+/// Append a light, type-appropriate behavioral nudge to a spawned worker's
+/// assignment.
+///
+/// The `subagent_type` is a free-form role word the orchestrator picks per
+/// spawn to fit the work (e.g. "explore", "implement", "verify", "review",
+/// "security-audit"). This is deliberately NOT a static persona table: the tag
+/// is echoed back to the worker with a short reminder to adopt the working
+/// style that role implies, plus a couple of well-known anchors so common types
+/// bias toward the right behavior without constraining novel ones. The heavy
+/// contracts (completion report, deep-node protocol) are layered separately, so
+/// this stays a nudge, not a second rulebook.
+///
+/// Idempotent via [`SWARM_SUBAGENT_TYPE_MARKER`]; a `None`/blank type is a
+/// no-op. The caller should pass the normalized type from
+/// [`normalize_subagent_type`].
+pub fn append_subagent_type_instructions(message: &str, subagent_type: &str) -> String {
+    let Some(kind) = normalize_subagent_type(subagent_type) else {
+        return message.to_string();
+    };
+    if message.contains(SWARM_SUBAGENT_TYPE_MARKER) {
+        return message.to_string();
+    }
+
+    let mut out = message.trim_end().to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("<system-reminder>\n");
+    out.push_str(SWARM_SUBAGENT_TYPE_MARKER);
+    out.push_str(&format!(
+        ": {kind}\nYou were spawned as a '{kind}' agent. Adopt the working style that role \
+implies for this task and let it shape where you spend effort:\n\
+- explore / research / investigate: cast wide, gather evidence and file:line \
+references, and report findings and open questions rather than editing.\n\
+- implement / build / fix: make the change end to end, keep it idiomatic and \
+minimal, and validate it (build/tests) before reporting done.\n\
+- verify / review / test / audit: be adversarial and read-mostly; hunt for \
+what is wrong, missing, or unchecked, and cite concrete evidence for each call.\n\
+- synthesize / summarize: integrate prior results into one coherent answer \
+without redoing the work.\n\
+If your type is not listed, infer the analogous posture from its name. This is \
+a lightweight nudge, not a restriction: use whatever tools the task needs.\n"
     ));
     out.push_str("</system-reminder>");
     out
@@ -687,6 +788,57 @@ mod tests {
             append_swarm_completion_report_instructions(&with_instructions),
             with_instructions
         );
+    }
+
+    #[test]
+    fn subagent_type_normalizes_free_form_input() {
+        assert_eq!(normalize_subagent_type("Explore"), Some("explore".into()));
+        assert_eq!(
+            normalize_subagent_type("  Security Review  "),
+            Some("security-review".into())
+        );
+        assert_eq!(
+            normalize_subagent_type("verify/test"),
+            Some("verify-test".into())
+        );
+        assert_eq!(
+            normalize_subagent_type("impl_worker"),
+            Some("impl_worker".into())
+        );
+        // Collapses separator runs, strips leading/trailing dashes and punctuation.
+        assert_eq!(
+            normalize_subagent_type("--build!! it --"),
+            Some("build-it".into())
+        );
+        // Empty/garbage -> None so callers treat "no type" uniformly.
+        assert_eq!(normalize_subagent_type("   "), None);
+        assert_eq!(normalize_subagent_type("***"), None);
+        // Truncated on a char boundary at the cap.
+        let long = "a".repeat(MAX_SWARM_SUBAGENT_TYPE_CHARS + 20);
+        assert_eq!(
+            normalize_subagent_type(&long).unwrap().chars().count(),
+            MAX_SWARM_SUBAGENT_TYPE_CHARS
+        );
+    }
+
+    #[test]
+    fn subagent_type_instructions_nudge_and_are_idempotent() {
+        let out = append_subagent_type_instructions("Review the auth module", "Security Review");
+        assert!(out.starts_with("Review the auth module"));
+        assert!(out.contains(SWARM_SUBAGENT_TYPE_MARKER));
+        // The normalized type is echoed back so the worker sees its role.
+        assert!(out.contains("security-review"));
+        // Idempotent: re-appending (even with a different type) is a no-op.
+        assert_eq!(
+            append_subagent_type_instructions(&out, "implement"),
+            out
+        );
+        // A blank/garbage type is a no-op passthrough.
+        assert_eq!(
+            append_subagent_type_instructions("Do work", "  "),
+            "Do work"
+        );
+        assert_eq!(append_subagent_type_instructions("Do work", "***"), "Do work");
     }
 
     #[test]

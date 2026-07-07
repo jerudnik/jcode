@@ -69,6 +69,7 @@ fn member(session_id: &str, swarm_id: &str, role: &str) -> SwarmMember {
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,
+        subagent_type: None,
     }
 }
 

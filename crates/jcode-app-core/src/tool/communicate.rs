@@ -1468,6 +1468,7 @@ async fn spawn_assignment_session(ctx: &ToolContext, params: &CommunicateInput) 
         model: params.model.clone(),
         effort: params.effort.clone(),
         label: None,
+        subagent_type: params.subagent_type.clone(),
     };
 
     match send_request(spawn_request).await {
@@ -1824,6 +1825,12 @@ struct CommunicateInput {
     /// Overrides the task label otherwise derived from the spawn prompt.
     #[serde(default)]
     label: Option<String>,
+    /// Free-form subagent type/role for a spawned agent (e.g. "explore",
+    /// "implement", "verify", "reviewer"). Chosen per-spawn by the
+    /// orchestrator. Surfaces in swarm UI for observability and injects a
+    /// light role-posture nudge into the worker's first turn.
+    #[serde(default)]
+    subagent_type: Option<String>,
 }
 
 impl CommunicateInput {
@@ -1925,6 +1932,10 @@ impl Tool for CommunicateTool {
                 "label": {
                     "type": "string",
                     "description": "Optional short label for spawn, shown on the spawned agent's chip in swarm UI (e.g. 'api reviewer'). Defaults to a label derived from the first line of the prompt."
+                },
+                "subagent_type": {
+                    "type": "string",
+                    "description": "Optional free-form subagent type/role for spawn, chosen per-call to fit the work (e.g. 'explore', 'implement', 'verify', 'synthesize', 'reviewer', 'debugger'). Surfaces in swarm UI for observability and injects a light role-posture nudge into the worker's first turn. Well-known values (explore/implement/verify/synthesize) get an extra tuned hint; any other string is accepted and still shown."
                 },
                 "working_dir": {
                     "type": "string",
@@ -2563,6 +2574,7 @@ impl Tool for CommunicateTool {
                     model: params.model.clone(),
                     effort: params.effort.clone(),
                     label: params.label.clone(),
+                    subagent_type: params.subagent_type.clone(),
                 };
 
                 match send_request(request).await {

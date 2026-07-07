@@ -400,6 +400,7 @@ fn apply_control_event_to_snapshot(state: &mut PersistedSwarmState, event: Swarm
                         status: SwarmLifecycleStatus::Ready,
                         detail: None,
                         task_label: None,
+                        subagent_type: None,
                         friendly_name,
                         report_back_to_session_id: None,
                         latest_completion_report: None,

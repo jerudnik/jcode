@@ -21,6 +21,15 @@ Structure guidance for spawned swarm agents:
 - Always pass `label` when spawning (e.g. `label: "api reviewer"`) so the swarm
   UI shows what each agent is for. Without it the label is derived from the
   first line of the prompt.
+- Also pass `subagent_type` when spawning to tag the kind of work (e.g.
+  `subagent_type: "explore"`, `"implement"`, `"verify"`, `"synthesize"`, or a
+  more specific role like `"security-audit"`). It is free-form: pick whatever
+  word best fits the task. This is both an observability tag (shown in swarm UI)
+  and a light behavioral nudge injected into the worker's first turn, biasing it
+  toward the right posture (wide/read-only for explore and verify, end-to-end and
+  validated for implement, integrative for synthesize). Prefer the common
+  anchors (explore/implement/verify/synthesize) when they fit, since they carry a
+  tuned hint; use a custom word when they do not.
 - Any agent may spawn children; the spawner owns them (children report back to
   it, and it may stop them). There is no special "manager" role: a manager is
   just an agent whose prompt tells it to decompose work, delegate via spawn,
