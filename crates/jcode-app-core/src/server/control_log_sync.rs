@@ -7,7 +7,9 @@
 //! fold and the current in-memory view (`diff_events`). This guarantees the
 //! core W1 invariant at every persistence point:
 //!
-//!     fold(control log) == in-memory member/task control views
+//! ```text
+//! fold(control log) == in-memory member/task control views
+//! ```
 //!
 //! by construction, for current AND future mutation paths (a new handler that
 //! persists is automatically covered; one that doesn't persist is already a
