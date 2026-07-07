@@ -74,6 +74,8 @@ async fn f1_assign_next_reclaims_task_from_departed_assignee() {
         None,
         None,
         None,
+        None,
+        None,
         &client_tx,
         &sessions,
         &global_session_id,
