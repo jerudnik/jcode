@@ -1,8 +1,8 @@
 use super::{
-    CommunicateInput, CommunicateTool, canonical_swarm_action, cleanup_candidate_session_ids,
-    coordination_in_flight_count, default_await_target_statuses, default_cleanup_target_statuses,
-    format_awaited_members, format_awaited_members_with_reports, format_members,
-    format_plan_status, format_swarm_model_list, latest_assistant_report,
+    CommunicateInput, CommunicateTool, RunPlanChurnGuard, canonical_swarm_action,
+    cleanup_candidate_session_ids, coordination_in_flight_count, default_await_target_statuses,
+    default_cleanup_target_statuses, format_awaited_members, format_awaited_members_with_reports,
+    format_members, format_plan_status, format_swarm_model_list, latest_assistant_report,
     resolve_optional_target_session, resolve_run_plan_concurrency, swarm_member_is_drivable_worker,
     swarm_member_is_in_flight,
 };
@@ -38,6 +38,49 @@ fn task_id_from_output_path_extracts_background_task_id() {
     );
     assert_eq!(
         super::task_id_from_output_path(Path::new("/tmp/tasks/123abc.status.json")),
+        None
+    );
+}
+
+#[test]
+fn run_plan_churn_guard_aborts_after_three_assignment_waves_without_completion() {
+    let mut guard = RunPlanChurnGuard::default();
+
+    assert_eq!(
+        guard.record_wave(&[("node-a".into(), "session_a".into())], 0, 0),
+        None
+    );
+    assert_eq!(
+        guard.record_wave(&[("node-b".into(), "session_b".into())], 0, 0),
+        None
+    );
+    let message = guard
+        .record_wave(&[("node-c".into(), "session_c".into())], 0, 0)
+        .expect("third churn wave should abort");
+
+    assert!(message.contains("possible spawn churn"));
+    assert!(message.contains("node-a, node-b, node-c"));
+    assert!(message.contains("session_a, session_b, session_c"));
+}
+
+#[test]
+fn run_plan_churn_guard_resets_on_completion_progress() {
+    let mut guard = RunPlanChurnGuard::default();
+
+    assert_eq!(
+        guard.record_wave(&[("node-a".into(), "session_a".into())], 0, 0),
+        None
+    );
+    assert_eq!(
+        guard.record_wave(&[("node-b".into(), "session_b".into())], 0, 1),
+        None
+    );
+    assert_eq!(
+        guard.record_wave(&[("node-c".into(), "session_c".into())], 1, 1),
+        None
+    );
+    assert_eq!(
+        guard.record_wave(&[("node-d".into(), "session_d".into())], 1, 1),
         None
     );
 }
@@ -545,7 +588,9 @@ fn run_plan_driver_failures_carry_worker_retention_hint() {
     // error) must not duplicate the hint.
     let twice = super::with_worker_retention_hint(hinted.clone());
     assert_eq!(
-        twice.matches("Still-running workers were kept alive").count(),
+        twice
+            .matches("Still-running workers were kept alive")
+            .count(),
         1
     );
 }

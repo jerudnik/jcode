@@ -466,6 +466,65 @@ struct RunPlanUtilization {
     starved_loops: usize,
 }
 
+#[derive(Debug, Default)]
+struct RunPlanChurnGuard {
+    consecutive_assignment_waves_without_completion: usize,
+    churned_nodes: std::collections::BTreeSet<String>,
+    lost_workers: std::collections::BTreeSet<String>,
+}
+
+impl RunPlanChurnGuard {
+    const MAX_WAVES_WITHOUT_COMPLETION: usize = 3;
+
+    fn record_wave(
+        &mut self,
+        assignments: &[(String, String)],
+        completed_before: usize,
+        completed_after: usize,
+    ) -> Option<String> {
+        if assignments.is_empty() || completed_after > completed_before {
+            self.consecutive_assignment_waves_without_completion = 0;
+            self.churned_nodes.clear();
+            self.lost_workers.clear();
+            return None;
+        }
+
+        self.consecutive_assignment_waves_without_completion += 1;
+        for (node_id, session_id) in assignments {
+            self.churned_nodes.insert(node_id.clone());
+            self.lost_workers.insert(session_id.clone());
+        }
+
+        (self.consecutive_assignment_waves_without_completion >= Self::MAX_WAVES_WITHOUT_COMPLETION)
+            .then(|| self.diagnostic())
+    }
+
+    fn diagnostic(&self) -> String {
+        let nodes = if self.churned_nodes.is_empty() {
+            "unknown".to_string()
+        } else {
+            self.churned_nodes
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let workers = if self.lost_workers.is_empty() {
+            "unknown".to_string()
+        } else {
+            self.lost_workers
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        format!(
+            "run_plan aborted after {} consecutive assignment wave(s) produced no completed nodes; possible spawn churn. Churned node(s): {nodes}. Lost worker(s): {workers}. Inspect swarm membership and worker subscribe logs before retrying.",
+            self.consecutive_assignment_waves_without_completion
+        )
+    }
+}
+
 impl RunPlanUtilization {
     /// Record one coordination loop. `open_slots` is `None` when the budget is
     /// unbounded (`concurrency_limit == usize::MAX`): an infinite budget has no
@@ -1192,6 +1251,7 @@ async fn run_swarm_plan_loop(
     let mut loop_count = 0usize;
     let max_loops = 200usize;
     let mut utilization = RunPlanUtilization::default();
+    let mut churn_guard = RunPlanChurnGuard::default();
     // Consecutive loops where an active task exists but no drivable worker is
     // awaitable. This is normally a brief transition (a composite re-waking to
     // synthesize, or a just-finished task whose member status has not propagated),
@@ -1209,6 +1269,7 @@ async fn run_swarm_plan_loop(
         }
 
         let summary = fetch_plan_status(&ctx.session_id).await?;
+        let completed_before_wave = summary.completed_ids.len();
         if summary.item_count == 0 {
             return Ok(ToolOutput::new("No swarm plan items to run."));
         }
@@ -1289,6 +1350,7 @@ async fn run_swarm_plan_loop(
         let active_count = summary.active_ids.len().max(in_flight_sessions.len());
         let available_slots = concurrency_limit.saturating_sub(active_count);
         let mut assigned_sessions = Vec::new();
+        let mut assigned_tasks = Vec::new();
         // Member-cap fallback state, reset each coordination loop. When the swarm
         // hits its total member cap, fresh spawns are refused; instead of aborting
         // the whole run we first free finished owned workers (incremental cleanup)
@@ -1328,6 +1390,7 @@ async fn run_swarm_plan_loop(
                     reporter
                         .log(&format!("assigned {} -> {}", task_id, target_session))
                         .await;
+                    assigned_tasks.push((task_id, target_session.clone()));
                     assigned_sessions.push(target_session);
                 }
                 Ok(ServerEvent::Error { message, .. }) => {
@@ -1451,6 +1514,22 @@ async fn run_swarm_plan_loop(
             &ready_baseline,
         )
         .await?;
+        let post_await_summary = fetch_plan_status(&ctx.session_id).await?;
+        if let Some(message) = churn_guard.record_wave(
+            &assigned_tasks,
+            completed_before_wave,
+            post_await_summary.completed_ids.len(),
+        ) {
+            reporter.checkpoint(&message).await;
+            if let Err(error) = broadcast_plan_alert(ctx, &message).await {
+                reporter
+                    .log(&format!(
+                        "failed to broadcast run_plan churn alert to the swarm: {error}"
+                    ))
+                    .await;
+            }
+            return Err(anyhow::anyhow!(message));
+        }
         // Real progress (an await completed); clear the transient-stall backoff so
         // a later genuine stall starts counting fresh.
         transient_stall_loops = 0;
