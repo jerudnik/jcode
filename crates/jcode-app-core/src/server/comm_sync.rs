@@ -148,7 +148,7 @@ async fn ensure_same_swarm_access(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) -> bool {
-    let (req_swarm, target_swarm) = {
+    let (req_swarm, target_swarm, requester_owns_target) = {
         let members = swarm_members.read().await;
         (
             members
@@ -157,10 +157,11 @@ async fn ensure_same_swarm_access(
             members
                 .get(target_session)
                 .and_then(|member| member.swarm_id.clone()),
+            super::swarm_is_self_or_ancestor(&members, req_session_id, target_session),
         )
     };
 
-    if req_swarm.is_some() && req_swarm == target_swarm {
+    if (req_swarm.is_some() && req_swarm == target_swarm) || requester_owns_target {
         true
     } else {
         let _ = client_event_tx.send(ServerEvent::Error {
