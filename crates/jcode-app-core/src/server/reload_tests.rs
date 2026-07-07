@@ -31,6 +31,7 @@ fn member(session_id: &str, status: &str) -> SwarmMember {
         status: status.to_string(),
         detail: None,
         task_label: None,
+        subagent_type: None,
         friendly_name: None,
         report_back_to_session_id: None,
         latest_completion_report: None,

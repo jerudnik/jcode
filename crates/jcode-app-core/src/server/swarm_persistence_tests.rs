@@ -94,6 +94,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,
+        subagent_type: None,
     }];
 
     persist_swarm_state(
@@ -170,6 +171,7 @@ fn ready_headless_member_with_report_survives_reload_without_crashed_status() {
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,
+        subagent_type: None,
     }];
 
     persist_swarm_state("swarm-gamma", None, None, &members, 0);
@@ -791,6 +793,7 @@ fn persisted_swarm_state_without_plan_still_restores_coordinator_and_members() {
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,
+        subagent_type: None,
     }];
 
     persist_swarm_state("swarm-gamma", None, Some("coord-1"), &members, 0);
@@ -1011,6 +1014,7 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         status: status.to_string(),
         detail: None,
         task_label: None,
+        subagent_type: None,
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: None,
         latest_completion_report: None,
@@ -1162,6 +1166,7 @@ fn recovery_with_legacy_snapshot_replays_whole_log_idempotently() {
         status: "ready".to_string(),
         detail: None,
         task_label: None,
+        subagent_type: None,
         friendly_name: Some("owl".to_string()),
         report_back_to_session_id: None,
         latest_completion_report: None,

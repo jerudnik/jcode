@@ -86,6 +86,7 @@ async fn comm_message_default_does_not_queue_soft_interrupt_for_connected_sessio
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
         (
@@ -110,6 +111,7 @@ async fn comm_message_default_does_not_queue_soft_interrupt_for_connected_sessio
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
     ])));
@@ -248,6 +250,7 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
         (
@@ -272,6 +275,7 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
     ])));
@@ -399,6 +403,7 @@ async fn comm_list_includes_member_status_and_detail() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
         (
@@ -423,6 +428,7 @@ async fn comm_list_includes_member_status_and_detail() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
     ])));
@@ -505,6 +511,7 @@ async fn comm_message_accepts_friendly_name_dm_target() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
         (
@@ -529,6 +536,7 @@ async fn comm_message_accepts_friendly_name_dm_target() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
     ])));
@@ -638,6 +646,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
         (
@@ -662,6 +671,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
         (
@@ -686,6 +696,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
         ),
     ])));
@@ -772,6 +783,7 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
                 todo_progress: None,
                 todo_items: Vec::new(),
                 task_label: None,
+                subagent_type: None,
             },
             event_rx,
         )
@@ -983,6 +995,7 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
                 status: "ready".to_string(),
                 detail: None,
                 task_label: None,
+                subagent_type: None,
                 friendly_name: Some("falcon".to_string()),
                 report_back_to_session_id: None,
                 latest_completion_report: None,
@@ -1007,6 +1020,7 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
                 status: "ready".to_string(),
                 detail: None,
                 task_label: None,
+                subagent_type: None,
                 friendly_name: Some("bear".to_string()),
                 report_back_to_session_id: None,
                 latest_completion_report: None,

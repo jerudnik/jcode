@@ -708,6 +708,7 @@ async fn broadcast_swarm_status_now(
                     status: m.status.clone(),
                     detail: m.detail.clone(),
                     task_label: m.task_label.clone(),
+                    subagent_type: m.subagent_type.clone(),
                     role: Some(m.role.clone()),
                     is_headless: Some(m.is_headless),
                     live_attachments: Some(m.event_txs.len()),
@@ -1240,6 +1241,24 @@ pub(super) async fn set_member_task_label(
     let mut members = swarm_members.write().await;
     if let Some(member) = members.get_mut(session_id) {
         member.task_label = Some(label);
+    }
+}
+
+/// Tag a member with the orchestrator-chosen subagent type (normalized). A
+/// blank/garbage type is a no-op, so callers can pass the raw spawn arg. This
+/// is the observability half of the type feature; the behavioral nudge is
+/// applied separately to the worker's first message at spawn.
+pub(super) async fn set_member_subagent_type(
+    session_id: &str,
+    subagent_type: &str,
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+) {
+    let Some(kind) = jcode_swarm_core::normalize_subagent_type(subagent_type) else {
+        return;
+    };
+    let mut members = swarm_members.write().await;
+    if let Some(member) = members.get_mut(session_id) {
+        member.subagent_type = Some(kind);
     }
 }
 
@@ -1823,6 +1842,7 @@ mod tests {
                 status: "ready".to_string(),
                 detail: None,
                 task_label: None,
+                subagent_type: None,
                 friendly_name: Some(session_id.to_string()),
                 report_back_to_session_id: None,
                 latest_completion_report: None,

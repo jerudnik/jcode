@@ -208,6 +208,10 @@ pub struct SwarmMember {
     /// or assigned for (compacted from the spawn prompt or plan item). Unlike
     /// `detail`, this is not overwritten by transient status updates.
     pub task_label: Option<String>,
+    /// Free-form subagent type the orchestrator chose for this member at spawn
+    /// (e.g. "explore", "implement", "verify"). Observability tag shown in
+    /// swarm UI; also drives the light behavioral nudge injected at spawn.
+    pub subagent_type: Option<String>,
     /// Friendly name like "fox"
     pub friendly_name: Option<String>,
     /// Session that should receive direct completion report-back for this member, if any.
@@ -247,6 +251,7 @@ impl SwarmMember {
             status: SwarmLifecycleStatus::from(self.status.clone()),
             detail: self.detail.clone(),
             task_label: self.task_label.clone(),
+            subagent_type: self.subagent_type.clone(),
             friendly_name: self.friendly_name.clone(),
             report_back_to_session_id: self.report_back_to_session_id.clone(),
             latest_completion_report: self.latest_completion_report.clone(),
@@ -279,6 +284,7 @@ impl SwarmMember {
             status: record.status.as_str().into_owned(),
             detail: record.detail,
             task_label: record.task_label,
+            subagent_type: record.subagent_type,
             friendly_name: record.friendly_name,
             report_back_to_session_id: record.report_back_to_session_id,
             latest_completion_report: record.latest_completion_report,

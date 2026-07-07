@@ -218,6 +218,7 @@ fn attached_swarm_member(
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,
+        subagent_type: None,
     }
 }
 
@@ -248,6 +249,7 @@ fn persisted_headless_member(
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,
+        subagent_type: None,
     }
 }
 

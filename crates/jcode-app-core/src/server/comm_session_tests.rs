@@ -69,6 +69,7 @@ fn member(
             todo_progress: None,
             todo_items: Vec::new(),
             task_label: None,
+            subagent_type: None,
         },
         event_rx,
     )
