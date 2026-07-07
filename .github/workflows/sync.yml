@@ -153,11 +153,20 @@ jobs:
           1. \`scripts/sync-local.sh\` (rebases the rails locally; the new conflict will reproduce)
           2. Resolve it once, then \`scripts/rerere-cache.sh export\` and commit \`.rerere-cache/\`
           3. Push the rails and re-dispatch this workflow"
+          # Ensure the label exists so the create below never fails on a fresh
+          # fork or if the label was deleted; best-effort, never fatal.
+          gh label create fork-maintenance \
+            --description "Automated fork rail maintenance (sync, health, advisories)" \
+            --color 0e8a16 2>/dev/null || true
           existing="$(gh issue list --state open --search "in:title \"Upstream sync blocked\"" --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "Still failing: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           else
-            gh issue create --title "$title" --body "$body" --label fork-maintenance || gh issue create --title "$title" --body "$body"
+            # Create the issue first (must succeed), then attach the label
+            # best-effort so a labeling hiccup can never suppress the alert.
+            # gh issue create prints the new issue URL on success.
+            url="$(gh issue create --title "$title" --body "$body")"
+            [ -n "$url" ] && gh issue edit "$url" --add-label fork-maintenance 2>/dev/null || true
           fi
 
       - name: Close the sync-blocked issue on success
