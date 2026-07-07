@@ -482,10 +482,16 @@ impl RunPlanChurnGuard {
         completed_before: usize,
         completed_after: usize,
     ) -> Option<String> {
-        if assignments.is_empty() || completed_after > completed_before {
+        if completed_after > completed_before {
             self.consecutive_assignment_waves_without_completion = 0;
             self.churned_nodes.clear();
             self.lost_workers.clear();
+            return None;
+        }
+        if assignments.is_empty() {
+            // No progress, but also no new assignment: leave the counter as-is
+            // so slow churn (assign, idle loop, assign, ...) still trips the
+            // breaker instead of resetting it every quiet loop.
             return None;
         }
 

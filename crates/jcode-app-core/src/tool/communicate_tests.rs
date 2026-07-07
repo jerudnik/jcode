@@ -85,6 +85,30 @@ fn run_plan_churn_guard_resets_on_completion_progress() {
     );
 }
 
+#[test]
+fn run_plan_churn_guard_trips_across_empty_idle_waves() {
+    // Slow churn: assign, idle loop, assign, idle loop, assign. Empty waves
+    // must not reset the counter (only completion progress does), so the
+    // third assignment wave still trips the breaker.
+    let mut guard = RunPlanChurnGuard::default();
+
+    assert_eq!(
+        guard.record_wave(&[("node-a".into(), "session_a".into())], 0, 0),
+        None
+    );
+    assert_eq!(guard.record_wave(&[], 0, 0), None);
+    assert_eq!(
+        guard.record_wave(&[("node-a".into(), "session_b".into())], 0, 0),
+        None
+    );
+    assert_eq!(guard.record_wave(&[], 0, 0), None);
+    let message = guard
+        .record_wave(&[("node-a".into(), "session_c".into())], 0, 0)
+        .expect("third assignment wave should abort despite idle waves between");
+    assert!(message.contains("possible spawn churn"));
+    assert!(message.contains("node-a"));
+}
+
 #[tokio::test]
 async fn run_plan_reporter_finalize_puts_summary_before_log() {
     let dir = tempfile::TempDir::new().expect("tempdir");
