@@ -231,6 +231,7 @@ fn format_members_renders_activity_progress_churn_and_turns() {
             status: Some("running".to_string()),
             detail: Some("implementing".to_string()),
             task_label: None,
+            subagent_type: None,
             role: Some("agent".to_string()),
             is_headless: Some(false),
             report_back_to_session_id: None,

@@ -284,6 +284,7 @@ mod tests {
             status: status.to_string(),
             detail: detail.map(str::to_string),
             task_label: None,
+            subagent_type: None,
             role: role.map(str::to_string),
             is_headless: Some(true),
             live_attachments: None,

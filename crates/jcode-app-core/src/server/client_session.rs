@@ -346,6 +346,7 @@ async fn ensure_client_swarm_member(
                     status: "ready".to_string(),
                     detail: None,
                     task_label: None,
+                    subagent_type: None,
                     friendly_name: member_name.clone(),
                     report_back_to_session_id: None,
                     latest_completion_report: None,

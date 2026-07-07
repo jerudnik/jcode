@@ -35,6 +35,7 @@ fn test_swarm_member(session_id: &str, status: &str) -> SwarmMember {
         status: status.to_string(),
         detail: None,
         task_label: None,
+        subagent_type: None,
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: Some("coord".to_string()),
         latest_completion_report: None,
