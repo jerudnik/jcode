@@ -1323,6 +1323,7 @@ pub(super) async fn handle_client(
                 terminal_env,
                 protocol_version: client_protocol_version,
                 build_hash: client_build_hash,
+                spawn_swarm_id,
             } => {
                 current_client_instance_id = client_instance_id.clone();
                 // NS1: compare the client's advertised build/protocol identity
@@ -1397,6 +1398,7 @@ pub(super) async fn handle_client(
                             handle_subscribe(
                                 id,
                                 subscribe_working_dir,
+                                spawn_swarm_id.clone(),
                                 selfdev,
                                 false,
                                 &mut client_selfdev,
@@ -1433,6 +1435,7 @@ pub(super) async fn handle_client(
                         handle_subscribe(
                             id,
                             subscribe_working_dir,
+                            spawn_swarm_id.clone(),
                             selfdev,
                             true,
                             &mut client_selfdev,
@@ -1460,6 +1463,7 @@ pub(super) async fn handle_client(
                     handle_subscribe(
                         id,
                         subscribe_working_dir,
+                        spawn_swarm_id.clone(),
                         selfdev,
                         true,
                         &mut client_selfdev,

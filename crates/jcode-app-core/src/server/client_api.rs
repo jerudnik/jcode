@@ -88,6 +88,7 @@ impl Client {
             // build metadata, the same identity `jcode doctor` reads.
             protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
             build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
+            spawn_swarm_id: std::env::var("JCODE_SPAWN_SWARM_ID").ok(),
         };
         let json = serde_json::to_string(&request)? + "\n";
         self.writer.write_all(json.as_bytes()).await?;

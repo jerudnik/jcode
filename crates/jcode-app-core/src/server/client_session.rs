@@ -20,7 +20,7 @@ use crate::transport::WriteHalf;
 use anyhow::Result;
 use jcode_agent_runtime::InterruptSignal;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
@@ -28,6 +28,17 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 type ChannelSubscriptions = Arc<RwLock<HashMap<String, HashMap<String, HashSet<String>>>>>;
 const RELOAD_RESTORE_MARKER_MAX_AGE: Duration = Duration::from_secs(60);
+
+fn subscribe_swarm_id_for_working_dir(
+    subscribe_working_dir: &Path,
+    spawn_swarm_id: Option<&str>,
+) -> Option<String> {
+    spawn_swarm_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .or_else(|| swarm_id_for_dir(Some(subscribe_working_dir.to_path_buf())))
+}
 
 pub(super) fn session_was_interrupted_by_reload(agent: &Agent) -> bool {
     let messages = agent.messages();
@@ -406,6 +417,7 @@ async fn ensure_client_swarm_member(
 pub(super) async fn handle_subscribe(
     id: u64,
     subscribe_working_dir: Option<String>,
+    spawn_swarm_id: Option<String>,
     selfdev: Option<bool>,
     register_mcp_tools: bool,
     client_selfdev: &mut bool,
@@ -464,7 +476,7 @@ pub(super) async fn handle_subscribe(
         drop(agent_guard);
 
         let new_path = PathBuf::from(dir);
-        let new_swarm_id = swarm_id_for_dir(Some(new_path.clone()));
+        let new_swarm_id = subscribe_swarm_id_for_working_dir(&new_path, spawn_swarm_id.as_deref());
         let mut old_swarm_id: Option<String> = None;
         let mut updated_swarm_id: Option<String> = None;
         {

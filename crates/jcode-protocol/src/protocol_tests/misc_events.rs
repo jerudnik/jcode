@@ -161,7 +161,8 @@ fn test_surface_workspace_protocol_roundtrip() -> Result<()> {
     assert_eq!(decoded.id(), 91);
     let Request::SurfaceWorkspaceApply {
         workspace_id, ops, ..
-    } = decoded else {
+    } = decoded
+    else {
         return Err(anyhow!("expected SurfaceWorkspaceApply"));
     };
     assert_eq!(workspace_id, "sw_test");
@@ -334,6 +335,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         terminal_env: vec![("ZELLIJ_SESSION_NAME".to_string(), "sessionB".to_string())],
         protocol_version: Some(1),
         build_hash: Some("abc1234".to_string()),
+        spawn_swarm_id: Some("/tmp/project/.git".to_string()),
     };
     let json = serde_json::to_string(&req)?;
     assert!(json.contains("\"type\":\"subscribe\""));
@@ -349,6 +351,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         terminal_env,
         protocol_version,
         build_hash,
+        spawn_swarm_id,
     } = decoded
     else {
         return Err(anyhow!("expected Subscribe"));
@@ -356,6 +359,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
     assert_eq!(id, 89);
     assert_eq!(protocol_version, Some(1));
     assert_eq!(build_hash.as_deref(), Some("abc1234"));
+    assert_eq!(spawn_swarm_id.as_deref(), Some("/tmp/project/.git"));
     assert_eq!(working_dir.as_deref(), Some("/tmp/project"));
     assert_eq!(selfdev, Some(true));
     assert_eq!(target_session_id.as_deref(), Some("sess_target"));
@@ -384,6 +388,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
         terminal_env,
         protocol_version,
         build_hash,
+        spawn_swarm_id,
     } = decoded
     else {
         return Err(anyhow!("expected Subscribe"));
@@ -398,6 +403,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
     assert!(terminal_env.is_empty());
     assert_eq!(protocol_version, None);
     assert_eq!(build_hash, None);
+    assert_eq!(spawn_swarm_id, None);
     Ok(())
 }
 
@@ -517,9 +523,7 @@ fn test_provider_guardrail_event_roundtrip() -> Result<()> {
     assert_eq!(message, "Provider guardrail stopped the response");
 
     // stop_reason is optional on the wire.
-    let decoded = parse_event_json(
-        r#"{"type":"provider_guardrail","message":"blocked"}"#,
-    )?;
+    let decoded = parse_event_json(r#"{"type":"provider_guardrail","message":"blocked"}"#)?;
     let ServerEvent::ProviderGuardrail { stop_reason, .. } = decoded else {
         return Err(anyhow!("expected ProviderGuardrail event"));
     };

@@ -1221,6 +1221,7 @@ impl RawClient {
             terminal_env: Vec::new(),
             protocol_version: None,
             build_hash: None,
+            spawn_swarm_id: None,
         })
         .await?;
         self.read_until(
@@ -1255,6 +1256,7 @@ impl RawClient {
             terminal_env: Vec::new(),
             protocol_version,
             build_hash,
+            spawn_swarm_id: None,
         })
         .await?;
         Ok(id)

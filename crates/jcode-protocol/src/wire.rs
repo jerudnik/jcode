@@ -230,6 +230,12 @@ pub enum Request {
         /// substantially-different daemon is safe. Absent for legacy clients.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         build_hash: Option<String>,
+        /// Authoritative swarm id for spawned swarm workers. Visible terminal
+        /// spawns may start in a different process cwd than the persisted
+        /// session working directory; when present, the server must not re-home
+        /// the member based on the subscribe-time cwd.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spawn_swarm_id: Option<String>,
     },
 
     /// Get full conversation history (for TUI sync on connect)

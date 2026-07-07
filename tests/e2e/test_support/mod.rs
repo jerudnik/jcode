@@ -337,6 +337,7 @@ impl WsTestClient {
             terminal_env: Vec::new(),
             protocol_version: None,
             build_hash: None,
+            spawn_swarm_id: None,
         })
         .await
     }
