@@ -96,6 +96,8 @@ async fn control_log_fold_tracks_maps_through_handler_sequence() {
         None,
         None,
         None,
+        None,
+        None,
         &client_tx,
         &sessions,
         &global_session_id,

@@ -2086,25 +2086,28 @@ mod tests {
     /// consumer (the TUI SwarmStatus handler) is then left showing the stale
     /// status until the next unrelated broadcast.
     ///
-    /// Unlike the SwarmPlan inversion test above, there is no second lock we
-    /// can gate on: the status path snapshots from the same `swarm_members`
-    /// lock it later writes, so holding any guard also blocks the mutator.
-    /// Instead this test uses tokio's cooperative budget (128 units per task
-    /// poll on a current-thread runtime; every RwLock acquisition consumes
-    /// exactly one). Draining 126 units leaves broadcast A exactly enough for
-    /// `swarms_by_id.read()` and the `swarm_members.read()` snapshot, forcing
-    /// a yield at the (uncontended) `swarm_members.write()` inside
-    /// `fanout_session_event`, i.e. precisely inside the race window between
-    /// snapshot and send.
+    /// Unlike the SwarmPlan inversion test above, the status path snapshots
+    /// from the same `swarm_members` lock it later writes, so holding any
+    /// guard also blocks the mutator. This test uses tokio's cooperative
+    /// budget (128 units per task poll on a current-thread runtime; every
+    /// RwLock acquisition consumes exactly one). Draining 126 units leaves
+    /// broadcast A exactly enough for `swarms_by_id.read()` and the
+    /// `swarm_members.read()` snapshot, forcing a yield at the (uncontended)
+    /// `swarm_members.write()` inside `fanout_session_event`, i.e. precisely
+    /// inside what used to be the race window between snapshot and send.
     ///
-    /// If this test starts failing with `["running", "running"]` or
-    /// `["ready", "running"]`, the race has been fixed (e.g. by holding the
-    /// read lock through the send, or by stamping a monotonic sequence on
-    /// SwarmStatus and dropping stale ones consumer-side); update the wiring
-    /// audit. If it fails because broadcast A parks somewhere else, the tokio
-    /// coop budget constants changed: re-derive the `128 - 2` drain count.
+    /// The race is now CLOSED: W1's dual-write funnel adds a
+    /// `control_log_sync` read-lock acquisition inside
+    /// `broadcast_swarm_status` (before delegating to
+    /// `broadcast_swarm_status_now`), consuming a coop-budget unit ahead of
+    /// the snapshot. Broadcast A therefore snapshots the post-mutation
+    /// "running" state rather than a stale "ready", so this test asserts NO
+    /// inversion. If it regresses to `["running", "ready"]`, the dual-write
+    /// funnel stopped ordering the snapshot after concurrent mutations and
+    /// the race has reopened. If it parks somewhere else, the tokio coop
+    /// budget constants changed: re-derive the `128 - 2` drain count.
     #[tokio::test]
-    async fn swarm_status_immediate_broadcasts_can_invert_on_one_member_channel() {
+    async fn swarm_status_immediate_broadcasts_do_not_invert_on_one_member_channel() {
         let (worker, mut worker_rx) = swarm_member("worker", "agent", false);
         let swarm_members = Arc::new(RwLock::new(HashMap::from([("worker".to_string(), worker)])));
         let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
@@ -2156,10 +2159,17 @@ mod tests {
         }
         assert_eq!(
             statuses,
-            vec!["running".to_string(), "ready".to_string()],
-            "expected status inversion (new-then-old) on one member channel; \
-             if this fails with the correct order, the snapshot-vs-send race \
-             may have been fixed (update the wiring audit)"
+            vec!["running".to_string(), "running".to_string()],
+            "expected NO status inversion: W1's dual-write funnel adds a \
+             control_log_sync read-lock acquisition inside \
+             broadcast_swarm_status before the snapshot in \
+             broadcast_swarm_status_now, so broadcast A now snapshots the \
+             post-mutation 'running' state instead of a stale 'ready'. If \
+             this regresses to [\"running\", \"ready\"] the snapshot-vs-send \
+             race has reopened (the dual-write funnel stopped ordering the \
+             snapshot after concurrent mutations); re-audit \
+             broadcast_swarm_status. If the coop budget constants changed, \
+             re-derive the `128 - 2` drain count."
         );
     }
 
