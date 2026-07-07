@@ -149,6 +149,7 @@ const DEFAULT_SWARM_TASK_HEARTBEAT_SECS: u64 = 10;
 const DEFAULT_SWARM_TASK_STALE_AFTER_SECS: u64 = 45;
 const DEFAULT_SWARM_TASK_SWEEP_INTERVAL_SECS: u64 = 5;
 const DEFAULT_SWARM_TASK_REAP_AFTER_SECS: u64 = 180;
+const DEFAULT_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS: u64 = 5;
 #[derive(Default, Clone, Copy)]
 struct PendingSwarmStatusBroadcast {
     scheduled: bool,
@@ -234,6 +235,80 @@ pub(super) fn swarm_task_sweep_interval() -> Duration {
         "JCODE_SWARM_TASK_SWEEP_INTERVAL_SECS",
         DEFAULT_SWARM_TASK_SWEEP_INTERVAL_SECS,
     ))
+}
+
+fn swarm_dead_pid_sweep_interval() -> Duration {
+    Duration::from_secs(configured_positive_u64(
+        "JCODE_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS",
+        DEFAULT_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS,
+    ))
+}
+
+fn last_dead_pid_sweep_ms() -> &'static AtomicU64 {
+    static LAST_SWEEP_MS: OnceLock<AtomicU64> = OnceLock::new();
+    LAST_SWEEP_MS.get_or_init(|| AtomicU64::new(0))
+}
+
+fn claim_dead_pid_sweep(now_ms: u64, interval: Duration) -> bool {
+    let interval_ms = interval.as_millis() as u64;
+    let last = last_dead_pid_sweep_ms().load(Ordering::Relaxed);
+    if now_ms.saturating_sub(last) < interval_ms {
+        return false;
+    }
+    last_dead_pid_sweep_ms()
+        .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
+
+/// Reconcile persisted Active sessions with dead owner PIDs and mirror crashed
+/// sessions into swarm member state. This is intentionally cheap and opportunistic:
+/// it runs at most once per interval from daemon-side swarm status traffic, so
+/// dead visible workers stop looking alive even when nobody opens the picker.
+pub(super) async fn sweep_dead_pid_swarm_members(
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    _swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+) -> Vec<String> {
+    let _ = crate::session::reconcile_active_sessions();
+    let session_ids: Vec<String> = {
+        let members = swarm_members.read().await;
+        members.keys().cloned().collect()
+    };
+
+    let crashed_sessions: HashSet<String> = session_ids
+        .into_iter()
+        .filter(|session_id| {
+            crate::session::Session::load(session_id).is_ok_and(|session| {
+                matches!(
+                    session.status,
+                    crate::session::SessionStatus::Crashed { .. }
+                )
+            })
+        })
+        .collect();
+    if crashed_sessions.is_empty() {
+        return Vec::new();
+    }
+
+    let mut changed_swarms = HashSet::new();
+    {
+        let mut members = swarm_members.write().await;
+        for session_id in &crashed_sessions {
+            let Some(member) = members.get_mut(session_id) else {
+                continue;
+            };
+            if member_status_is_dead(&member.status) {
+                continue;
+            }
+            member.status = "crashed".to_string();
+            member.detail = Some("client process exited".to_string());
+            member.last_status_change = Instant::now();
+            if let Some(swarm_id) = member.swarm_id.clone() {
+                changed_swarms.insert(swarm_id);
+            }
+        }
+    }
+
+    changed_swarms.into_iter().collect()
 }
 
 /// Lifecycle statuses that mean a member can no longer drive an assignment:
@@ -715,6 +790,7 @@ async fn broadcast_swarm_status_now(
                     status_age_secs: Some(status_age_secs(m.last_status_change)),
                     output_tail: m.output_tail.clone(),
                     report_back_to_session_id: m.report_back_to_session_id.clone(),
+                    initial_prompt_delivered: m.initial_prompt_delivered,
                     todo_progress: m.todo_progress,
                     todo_items: m.todo_items.clone(),
                 })
@@ -735,6 +811,16 @@ pub(super) async fn broadcast_swarm_status(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
 ) {
+    if claim_dead_pid_sweep(now_unix_ms(), swarm_dead_pid_sweep_interval()) {
+        let changed = sweep_dead_pid_swarm_members(swarm_members, swarms_by_id).await;
+        if !changed.is_empty() {
+            log_swarm_lifecycle(
+                "dead_pid_sweep",
+                vec![("changed_swarms", changed.join(","))],
+            );
+        }
+    }
+
     // W1 dual-write: broadcast_swarm_status is the funnel every membership
     // change (join/leave/status/role) flows through, including paths that do
     // not persist a snapshot (update_member_status, headless joins). Sync the
@@ -1845,6 +1931,7 @@ mod tests {
                 subagent_type: None,
                 friendly_name: Some(session_id.to_string()),
                 report_back_to_session_id: None,
+                initial_prompt_delivered: None,
                 latest_completion_report: None,
                 role: role.to_string(),
                 joined_at: Instant::now(),
@@ -1862,6 +1949,39 @@ mod tests {
         let (mut member, _rx) = swarm_member(session_id, "agent", false);
         member.report_back_to_session_id = parent.map(str::to_string);
         member
+    }
+
+    #[tokio::test]
+    async fn dead_pid_sweep_marks_swarm_member_crashed_without_picker() {
+        let _guard = crate::storage::lock_test_env();
+        let temp_home = tempfile::TempDir::new().expect("temp home");
+        crate::env::set_var("JCODE_HOME", temp_home.path());
+
+        let dead_pid = 99_999_999;
+        let mut session =
+            crate::session::Session::create_with_id("dead-visible-worker".to_string(), None, None);
+        session.mark_active_with_pid(dead_pid);
+        session.save().expect("persist active session");
+
+        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-1".to_string(),
+            HashSet::from(["dead-visible-worker".to_string()]),
+        )])));
+        let (mut member, _rx) = swarm_member("dead-visible-worker", "agent", false);
+        member.status = "ready".to_string();
+        swarm_members
+            .write()
+            .await
+            .insert("dead-visible-worker".to_string(), member);
+
+        let changed = super::sweep_dead_pid_swarm_members(&swarm_members, &swarms_by_id).await;
+
+        assert_eq!(changed, vec!["swarm-1".to_string()]);
+        let members = swarm_members.read().await;
+        let member = members.get("dead-visible-worker").expect("member");
+        assert_eq!(member.status, "crashed");
+        assert_eq!(member.detail.as_deref(), Some("client process exited"));
     }
 
     #[test]
