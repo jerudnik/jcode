@@ -651,6 +651,7 @@ impl AcpRuntime {
                 // server never sends it a handshake verdict event (NS1).
                 protocol_version: None,
                 build_hash: None,
+                spawn_swarm_id: None,
             })
             .await?;
         wait_for_done(&session, subscribe_id).await?;

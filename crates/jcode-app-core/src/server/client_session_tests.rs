@@ -1,7 +1,7 @@
 use super::{
     handle_clear_session, handle_reload, handle_resume_session, mark_remote_reload_started,
     rename_shutdown_signal, restored_session_was_interrupted, session_was_interrupted_by_reload,
-    subscribe_should_mark_ready,
+    subscribe_should_mark_ready, subscribe_swarm_id_for_working_dir,
 };
 use crate::agent::Agent;
 use crate::message::ContentBlock;
@@ -17,6 +17,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use jcode_agent_runtime::InterruptSignal;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
@@ -65,6 +66,26 @@ async fn subscribe_marks_non_running_member_ready() {
         test_swarm_member("worker", "spawned"),
     )])));
     assert!(subscribe_should_mark_ready("worker", &swarm_members).await);
+}
+
+#[test]
+fn subscribe_uses_spawn_swarm_id_instead_of_client_cwd() {
+    let client_cwd = Path::new("/tmp/wrong-cwd");
+
+    assert_eq!(
+        subscribe_swarm_id_for_working_dir(client_cwd, Some("/tmp/original/.git")).as_deref(),
+        Some("/tmp/original/.git")
+    );
+}
+
+#[test]
+fn subscribe_ignores_blank_spawn_swarm_id() {
+    let client_cwd = Path::new("/tmp/jcode-subscribe-fallback");
+
+    assert_eq!(
+        subscribe_swarm_id_for_working_dir(client_cwd, Some("  ")),
+        super::swarm_id_for_dir(Some(client_cwd.to_path_buf()))
+    );
 }
 
 #[async_trait]
