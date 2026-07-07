@@ -236,6 +236,11 @@ pub enum Request {
         /// the member based on the subscribe-time cwd.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spawn_swarm_id: Option<String>,
+        /// Session id paired with `spawn_swarm_id`. The daemon only honors the
+        /// swarm pin when this matches the subscribing session, preventing a
+        /// manually-started child process from inheriting and reusing a stale pin.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spawn_session_id: Option<String>,
         /// PID of the subscribing client process. Server-side sessions run in a
         /// daemon, so this is the process whose liveness reflects a visible TUI
         /// window or resumed client.
@@ -1537,6 +1542,8 @@ pub enum ServerEvent {
         id: u64,
         session_id: String,
         new_session_id: String,
+        #[serde(default)]
+        initial_prompt_delivered: bool,
     },
 
     /// Response to comm_list_models request

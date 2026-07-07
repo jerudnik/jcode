@@ -32,8 +32,15 @@ const RELOAD_RESTORE_MARKER_MAX_AGE: Duration = Duration::from_secs(60);
 fn subscribe_swarm_id_for_working_dir(
     subscribe_working_dir: &Path,
     spawn_swarm_id: Option<&str>,
+    spawn_session_id: Option<&str>,
+    client_session_id: &str,
 ) -> Option<String> {
     spawn_swarm_id
+        .filter(|_| {
+            spawn_session_id
+                .map(str::trim)
+                .is_some_and(|session_id| session_id == client_session_id)
+        })
         .map(str::trim)
         .filter(|id| !id.is_empty())
         .map(str::to_string)
@@ -360,6 +367,7 @@ async fn ensure_client_swarm_member(
                     subagent_type: None,
                     friendly_name: member_name.clone(),
                     report_back_to_session_id: None,
+                    initial_prompt_delivered: None,
                     latest_completion_report: None,
                     role: "agent".to_string(),
                     joined_at: now,
@@ -418,6 +426,7 @@ pub(super) async fn handle_subscribe(
     id: u64,
     subscribe_working_dir: Option<String>,
     spawn_swarm_id: Option<String>,
+    spawn_session_id: Option<String>,
     client_pid: Option<u32>,
     selfdev: Option<bool>,
     register_mcp_tools: bool,
@@ -482,7 +491,12 @@ pub(super) async fn handle_subscribe(
         drop(agent_guard);
 
         let new_path = PathBuf::from(dir);
-        let new_swarm_id = subscribe_swarm_id_for_working_dir(&new_path, spawn_swarm_id.as_deref());
+        let new_swarm_id = subscribe_swarm_id_for_working_dir(
+            &new_path,
+            spawn_swarm_id.as_deref(),
+            spawn_session_id.as_deref(),
+            client_session_id,
+        );
         let mut old_swarm_id: Option<String> = None;
         let mut updated_swarm_id: Option<String> = None;
         {

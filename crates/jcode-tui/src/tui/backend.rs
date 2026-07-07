@@ -337,6 +337,7 @@ impl RemoteConnection {
             protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
             build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
             spawn_swarm_id: std::env::var("JCODE_SPAWN_SWARM_ID").ok(),
+            spawn_session_id: std::env::var("JCODE_SPAWN_SESSION_ID").ok(),
             client_pid: Some(std::process::id()),
         })
         .await?;

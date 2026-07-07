@@ -39,6 +39,7 @@ fn test_swarm_member(session_id: &str, status: &str) -> SwarmMember {
         subagent_type: None,
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: Some("coord".to_string()),
+        initial_prompt_delivered: None,
         latest_completion_report: None,
         role: "agent".to_string(),
         joined_at: Instant::now(),
@@ -73,8 +74,29 @@ fn subscribe_uses_spawn_swarm_id_instead_of_client_cwd() {
     let client_cwd = Path::new("/tmp/wrong-cwd");
 
     assert_eq!(
-        subscribe_swarm_id_for_working_dir(client_cwd, Some("/tmp/original/.git")).as_deref(),
+        subscribe_swarm_id_for_working_dir(
+            client_cwd,
+            Some("/tmp/original/.git"),
+            Some("spawned-session"),
+            "spawned-session",
+        )
+        .as_deref(),
         Some("/tmp/original/.git")
+    );
+}
+
+#[test]
+fn subscribe_ignores_spawn_swarm_id_for_inherited_child_process() {
+    let client_cwd = Path::new("/tmp/manual-child");
+
+    assert_eq!(
+        subscribe_swarm_id_for_working_dir(
+            client_cwd,
+            Some("/tmp/original/.git"),
+            Some("spawned-session"),
+            "manual-child-session",
+        ),
+        super::swarm_id_for_dir(Some(client_cwd.to_path_buf()))
     );
 }
 
@@ -83,7 +105,7 @@ fn subscribe_ignores_blank_spawn_swarm_id() {
     let client_cwd = Path::new("/tmp/jcode-subscribe-fallback");
 
     assert_eq!(
-        subscribe_swarm_id_for_working_dir(client_cwd, Some("  ")),
+        subscribe_swarm_id_for_working_dir(client_cwd, Some("  "), Some("worker"), "worker"),
         super::swarm_id_for_dir(Some(client_cwd.to_path_buf()))
     );
 }

@@ -652,6 +652,7 @@ impl AcpRuntime {
                 protocol_version: None,
                 build_hash: None,
                 spawn_swarm_id: None,
+                spawn_session_id: None,
                 client_pid: Some(std::process::id()),
             })
             .await?;

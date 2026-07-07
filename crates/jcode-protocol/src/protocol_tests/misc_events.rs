@@ -336,6 +336,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         protocol_version: Some(1),
         build_hash: Some("abc1234".to_string()),
         spawn_swarm_id: Some("/tmp/project/.git".to_string()),
+        spawn_session_id: Some("session_spawned".to_string()),
         client_pid: Some(4242),
     };
     let json = serde_json::to_string(&req)?;
@@ -353,6 +354,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         protocol_version,
         build_hash,
         spawn_swarm_id,
+        spawn_session_id,
         client_pid,
     } = decoded
     else {
@@ -362,6 +364,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
     assert_eq!(protocol_version, Some(1));
     assert_eq!(build_hash.as_deref(), Some("abc1234"));
     assert_eq!(spawn_swarm_id.as_deref(), Some("/tmp/project/.git"));
+    assert_eq!(spawn_session_id.as_deref(), Some("session_spawned"));
     assert_eq!(client_pid, Some(4242));
     assert_eq!(working_dir.as_deref(), Some("/tmp/project"));
     assert_eq!(selfdev, Some(true));
@@ -392,6 +395,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
         protocol_version,
         build_hash,
         spawn_swarm_id,
+        spawn_session_id,
         client_pid,
     } = decoded
     else {
@@ -408,6 +412,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
     assert_eq!(protocol_version, None);
     assert_eq!(build_hash, None);
     assert_eq!(spawn_swarm_id, None);
+    assert_eq!(spawn_session_id, None);
     assert_eq!(client_pid, None);
     Ok(())
 }
