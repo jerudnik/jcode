@@ -61,6 +61,7 @@ async fn handle_resume_session_registers_live_events_before_history_replay() -> 
             subagent_type: None,
             friendly_name: Some("restore".to_string()),
             report_back_to_session_id: None,
+            initial_prompt_delivered: None,
             latest_completion_report: None,
             role: "agent".to_string(),
             joined_at: now,

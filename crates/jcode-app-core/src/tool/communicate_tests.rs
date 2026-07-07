@@ -1291,6 +1291,7 @@ impl RawClient {
             protocol_version: None,
             build_hash: None,
             spawn_swarm_id: None,
+            spawn_session_id: None,
             client_pid: None,
         })
         .await?;
@@ -1327,6 +1328,7 @@ impl RawClient {
             protocol_version,
             build_hash,
             spawn_swarm_id: None,
+            spawn_session_id: None,
             client_pid: None,
         })
         .await?;

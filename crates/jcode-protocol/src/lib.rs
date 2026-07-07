@@ -491,6 +491,9 @@ pub struct SwarmMemberStatus {
     /// client scope the inline gallery to the subtree it actually spawned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_back_to_session_id: Option<String>,
+    /// Whether the spawn initial prompt was queued/delivered for this member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_prompt_delivered: Option<bool>,
     /// Todo/plan progress as (completed, total) for this member, when known.
     /// Surfaced on the inline swarm strip as a compact "C/T" counter.
     #[serde(default, skip_serializing_if = "Option::is_none")]

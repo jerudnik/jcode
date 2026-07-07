@@ -58,6 +58,7 @@ async fn swarm_mutation_replays_persisted_spawn_response() {
         &state,
         PersistedSwarmMutationResponse::Spawn {
             new_session_id: "child-1".to_string(),
+            initial_prompt_delivered: true,
         },
     )
     .await;
@@ -67,18 +68,27 @@ async fn swarm_mutation_replays_persisted_spawn_response() {
     assert!(replay.is_none(), "retry should replay persisted response");
 
     match client_rx.recv().await.expect("initial response") {
-        ServerEvent::CommSpawnResponse { new_session_id, .. } => {
-            assert_eq!(new_session_id, "child-1")
+        ServerEvent::CommSpawnResponse {
+            new_session_id,
+            initial_prompt_delivered,
+            ..
+        } => {
+            assert_eq!(new_session_id, "child-1");
+            assert!(initial_prompt_delivered);
         }
         other => panic!("expected spawn response, got {other:?}"),
     }
 
     match retry_rx.recv().await.expect("replayed response") {
         ServerEvent::CommSpawnResponse {
-            id, new_session_id, ..
+            id,
+            new_session_id,
+            initial_prompt_delivered,
+            ..
         } => {
             assert_eq!(id, 2);
             assert_eq!(new_session_id, "child-1");
+            assert!(initial_prompt_delivered);
         }
         other => panic!("expected spawn replay, got {other:?}"),
     }

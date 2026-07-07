@@ -178,6 +178,7 @@ fn test_active_swarm_spinner_keeps_redrawing_at_deep_idle() {
             status_age_secs: Some(3),
             output_tail: None,
             report_back_to_session_id: None,
+            initial_prompt_delivered: None,
             todo_progress: None,
             todo_items: Vec::new(),
         }

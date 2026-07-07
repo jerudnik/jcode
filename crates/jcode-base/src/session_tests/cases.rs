@@ -1289,6 +1289,7 @@ fn test_redacted_for_export_redacts_replay_events() -> Result<()> {
         status_age_secs: None,
         output_tail: None,
         report_back_to_session_id: None,
+        initial_prompt_delivered: None,
         todo_progress: None,
         todo_items: Vec::new(),
         task_label: None,

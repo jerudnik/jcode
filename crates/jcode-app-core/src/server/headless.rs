@@ -191,6 +191,7 @@ pub(super) async fn create_headless_session(
                 subagent_type: None,
                 friendly_name: Some(friendly_name.clone()),
                 report_back_to_session_id: report_back_to_session_id.clone(),
+                initial_prompt_delivered: None,
                 latest_completion_report: None,
                 role: "agent".to_string(),
                 joined_at: now,
