@@ -336,6 +336,7 @@ impl RemoteConnection {
             // re-exec into the matching launcher (see tui::app::handshake).
             protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
             build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
+            spawn_swarm_id: std::env::var("JCODE_SPAWN_SWARM_ID").ok(),
         })
         .await?;
         let subscribe_ms = subscribe_start.elapsed().as_millis();
