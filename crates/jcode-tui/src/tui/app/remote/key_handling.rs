@@ -1700,6 +1700,21 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
+                // /swarm drive verbs (status/plan/start/stop/spawn) come
+                // before the feature toggle, which keeps handling bare
+                // /swarm, /swarm on, /swarm off.
+                if let Some(parsed) = app_mod::commands_swarm::parse_swarm_verb(trimmed) {
+                    match parsed {
+                        Err(error) => {
+                            app.push_display_message(DisplayMessage::error(error));
+                        }
+                        Ok(verb) => {
+                            handle_swarm_verb(app, remote, verb).await?;
+                        }
+                    }
+                    return Ok(());
+                }
+
                 if trimmed == "/swarm" || trimmed == "/swarm status" {
                     let default_enabled = crate::config::config().features.swarm;
                     app.push_display_message(DisplayMessage::system(format!(
@@ -2550,5 +2565,128 @@ async fn handle_remote_key_internal(
         _ => {}
     }
 
+    Ok(())
+}
+
+/// Dispatch a parsed `/swarm` drive verb over the wire (or render locally
+/// when the state is already client-side).
+///
+/// The wedge-jumpstart (`/swarm start`) resolves the right underlying verb
+/// via the shared `jcode_app_core::swarm_verbs::decide_jumpstart` decision so
+/// the operator never has to guess assign_task vs start vs retry.
+async fn handle_swarm_verb(
+    app: &mut App,
+    remote: &mut RemoteConnection,
+    verb: app_mod::commands_swarm::SwarmVerb,
+) -> Result<()> {
+    use app_mod::commands_swarm::SwarmVerb;
+    use crate::swarm_verbs::{JumpstartVerb, decide_jumpstart, pick_jumpstart_node};
+
+    match verb {
+        SwarmVerb::Status => {
+            let rendered = app_mod::commands_swarm::render_swarm_roster(
+                &app.remote_swarm_members,
+                &app.swarm_plan_items,
+            );
+            app.push_display_message(DisplayMessage::system(rendered));
+        }
+        SwarmVerb::Plan => {
+            // Ask the server for the authoritative summary; the response is
+            // rendered from server_events when comm_plan_status_response
+            // arrives. Fall back to a note when there is no plan yet.
+            if app.swarm_plan_items.is_empty() {
+                app.push_display_message(DisplayMessage::system(
+                    "No swarm plan for this session yet. Seed one with the swarm tool (task_graph).".to_string(),
+                ));
+                return Ok(());
+            }
+            remote.comm_plan_status().await?;
+            app.set_status_notice("Fetching plan status...");
+        }
+        SwarmVerb::Start { node_id, session } => {
+            let items = app.swarm_plan_items.clone();
+            let item = match node_id.as_deref() {
+                Some(node_id) => match items.iter().find(|item| item.id == node_id) {
+                    Some(item) => item,
+                    None => {
+                        app.push_display_message(DisplayMessage::error(format!(
+                            "No plan instance '{}'. Use /swarm plan to list instances.",
+                            node_id
+                        )));
+                        return Ok(());
+                    }
+                },
+                None => match pick_jumpstart_node(&items) {
+                    Some(item) => item,
+                    None => {
+                        app.push_display_message(DisplayMessage::system(
+                            "Nothing to jumpstart: no failed, stuck, or unassigned runnable instances.".to_string(),
+                        ));
+                        return Ok(());
+                    }
+                },
+            };
+            match decide_jumpstart(item, &items) {
+                JumpstartVerb::AssignTask => {
+                    remote
+                        .comm_assign_task(Some(item.id.clone()), session)
+                        .await?;
+                    app.push_display_message(DisplayMessage::system(format!(
+                        "Assigning instance {}...",
+                        item.id
+                    )));
+                }
+                verb @ (JumpstartVerb::Start | JumpstartVerb::Retry) => {
+                    let action = verb
+                        .task_control_action()
+                        .expect("Start/Retry map to task control actions");
+                    remote
+                        .comm_task_control(action, item.id.clone(), session)
+                        .await?;
+                    app.push_display_message(DisplayMessage::system(format!(
+                        "Sent {} for instance {}...",
+                        action, item.id
+                    )));
+                }
+                JumpstartVerb::AlreadyActive => {
+                    app.push_display_message(DisplayMessage::system(format!(
+                        "Instance {} is already running{}.",
+                        item.id,
+                        item.assigned_to
+                            .as_deref()
+                            .map(|s| format!(" on {}", s))
+                            .unwrap_or_default()
+                    )));
+                }
+                JumpstartVerb::AlreadyDone => {
+                    app.push_display_message(DisplayMessage::system(format!(
+                        "Instance {} is already completed.",
+                        item.id
+                    )));
+                }
+                JumpstartVerb::Blocked(deps) => {
+                    app.push_display_message(DisplayMessage::system(format!(
+                        "Instance {} is blocked on incomplete dependencies: {}.",
+                        item.id,
+                        deps.join(", ")
+                    )));
+                }
+            }
+        }
+        SwarmVerb::Stop { member } => {
+            remote.comm_stop(member.clone()).await?;
+            app.push_display_message(DisplayMessage::system(format!(
+                "Stopping swarm member {}...",
+                member
+            )));
+        }
+        SwarmVerb::Spawn { label, prompt } => {
+            remote.comm_spawn(label.clone(), prompt).await?;
+            app.push_display_message(DisplayMessage::system(format!(
+                "Spawning swarm member '{}'...",
+                label
+            )));
+        }
+    }
     Ok(())
 }

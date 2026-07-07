@@ -57,6 +57,7 @@ mod commands_improve;
 mod commands_overnight;
 mod commands_plan;
 mod commands_review;
+mod commands_swarm;
 mod conversation_state;
 mod copy_selection;
 mod debug;
