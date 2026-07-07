@@ -421,6 +421,7 @@ pub use crate::session_launch::{
 };
 
 pub fn list_sessions() -> Result<()> {
+    let _ = session::reconcile_active_sessions();
     fn build_resume_target_command(
         exe: &std::path::Path,
         target: &jcode_tui_session_picker::ResumeTarget,

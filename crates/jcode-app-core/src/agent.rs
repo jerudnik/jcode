@@ -905,6 +905,11 @@ impl Agent {
         &self.session.id
     }
 
+    pub(crate) fn mark_active_with_client_pid(&mut self, pid: u32) {
+        self.session.mark_active_with_pid(pid);
+        self.persist_session_best_effort("client pid refresh");
+    }
+
     fn herdr_session_path(&self) -> Option<PathBuf> {
         crate::session::session_path(&self.session.id).ok()
     }

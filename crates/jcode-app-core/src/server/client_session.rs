@@ -418,6 +418,7 @@ pub(super) async fn handle_subscribe(
     id: u64,
     subscribe_working_dir: Option<String>,
     spawn_swarm_id: Option<String>,
+    client_pid: Option<u32>,
     selfdev: Option<bool>,
     register_mcp_tools: bool,
     client_selfdev: &mut bool,
@@ -469,6 +470,11 @@ pub(super) async fn handle_subscribe(
         swarm_event_tx,
     )
     .await;
+
+    if let Some(pid) = client_pid {
+        let mut agent_guard = agent.lock().await;
+        agent_guard.mark_active_with_client_pid(pid);
+    }
 
     if let Some(ref dir) = subscribe_working_dir {
         let mut agent_guard = agent.lock().await;

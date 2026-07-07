@@ -236,6 +236,11 @@ pub enum Request {
         /// the member based on the subscribe-time cwd.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spawn_swarm_id: Option<String>,
+        /// PID of the subscribing client process. Server-side sessions run in a
+        /// daemon, so this is the process whose liveness reflects a visible TUI
+        /// window or resumed client.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_pid: Option<u32>,
     },
 
     /// Get full conversation history (for TUI sync on connect)

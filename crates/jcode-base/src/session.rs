@@ -28,6 +28,24 @@ impl StreamingGuard {
         }
     }
 }
+
+/// Reconcile active-session pid markers with persisted session state.
+///
+/// This converts sessions whose recorded owner PID has exited from Active to
+/// Crashed so session lists, crash restore, and swarm cleanup do not treat dead
+/// clients as live forever.
+pub fn reconcile_active_sessions() -> usize {
+    let mut reconciled = 0;
+    for session_id in active_session_ids() {
+        let Ok(mut session) = Session::load(&session_id) else {
+            continue;
+        };
+        if session.reconcile_dead_owner() {
+            reconciled += 1;
+        }
+    }
+    reconciled
+}
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -1062,6 +1080,15 @@ request in this new forked session, using the inherited conversation only as con
             }
         }
 
+        false
+    }
+
+    /// Persist a crash transition if this active session's owner PID is gone.
+    pub fn reconcile_dead_owner(&mut self) -> bool {
+        if self.detect_crash() {
+            let _ = self.save();
+            return true;
+        }
         false
     }
 

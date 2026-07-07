@@ -1267,6 +1267,7 @@ impl RawClient {
             protocol_version: None,
             build_hash: None,
             spawn_swarm_id: None,
+            client_pid: None,
         })
         .await?;
         self.read_until(
@@ -1302,6 +1303,7 @@ impl RawClient {
             protocol_version,
             build_hash,
             spawn_swarm_id: None,
+            client_pid: None,
         })
         .await?;
         Ok(id)
