@@ -66,6 +66,7 @@ fn test_protocol_request_roundtrip_randomized_samples() -> Result<()> {
             protocol_version: None,
             build_hash: None,
             spawn_swarm_id: None,
+            spawn_session_id: None,
             client_pid: None,
         };
         let decoded = parse_request_json(&serde_json::to_string(&req)?)?;
@@ -81,6 +82,7 @@ fn test_protocol_request_roundtrip_randomized_samples() -> Result<()> {
             protocol_version: _,
             build_hash: _,
             spawn_swarm_id: _,
+            spawn_session_id: _,
             client_pid: _,
         } = decoded
         else {
