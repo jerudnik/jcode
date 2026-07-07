@@ -403,6 +403,7 @@ fn apply_control_event_to_snapshot(state: &mut PersistedSwarmState, event: Swarm
                         subagent_type: None,
                         friendly_name,
                         report_back_to_session_id: None,
+                        initial_prompt_delivered: None,
                         latest_completion_report: None,
                         role: SwarmRole::from(role),
                         is_headless: true,

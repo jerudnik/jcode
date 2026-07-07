@@ -26,6 +26,8 @@ pub(crate) enum PersistedSwarmMutationResponse {
     },
     Spawn {
         new_session_id: String,
+        #[serde(default)]
+        initial_prompt_delivered: bool,
     },
 }
 
@@ -49,10 +51,14 @@ impl PersistedSwarmMutationResponse {
                 message,
                 retry_after_secs,
             },
-            Self::Spawn { new_session_id } => ServerEvent::CommSpawnResponse {
+            Self::Spawn {
+                new_session_id,
+                initial_prompt_delivered,
+            } => ServerEvent::CommSpawnResponse {
                 id,
                 session_id: session_id.to_string(),
                 new_session_id,
+                initial_prompt_delivered,
             },
         }
     }

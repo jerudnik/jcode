@@ -60,6 +60,7 @@ fn member(session_id: &str, swarm_id: &str, role: &str) -> SwarmMember {
         detail: None,
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: None,
+        initial_prompt_delivered: None,
         latest_completion_report: None,
         role: role.to_string(),
         joined_at: Instant::now(),

@@ -1129,6 +1129,7 @@ fn managed_member(id: &str, status: &str, role: Option<&str>) -> SwarmMemberStat
         status_age_secs: Some(3),
         output_tail: Some("streaming some work".to_string()),
         report_back_to_session_id: Some("parent".to_string()),
+        initial_prompt_delivered: None,
         todo_progress: Some((2, 5)),
         todo_items: Vec::new(),
     }
@@ -1209,6 +1210,7 @@ fn swarm_widget_renders_member_roles_and_details() {
                     status_age_secs: None,
                     output_tail: None,
                     report_back_to_session_id: None,
+                    initial_prompt_delivered: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
                 },
@@ -1224,6 +1226,7 @@ fn swarm_widget_renders_member_roles_and_details() {
                     status_age_secs: None,
                     output_tail: None,
                     report_back_to_session_id: None,
+                    initial_prompt_delivered: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
                 },
@@ -1283,6 +1286,7 @@ fn swarm_widget_handles_empty_swarm_and_zero_area_without_panic() {
         status_age_secs: None,
         output_tail: None,
         report_back_to_session_id: None,
+        initial_prompt_delivered: None,
         todo_progress: None,
         todo_items: Vec::new(),
     }];
@@ -1305,6 +1309,7 @@ fn swarm_widget_caps_member_rows_for_large_swarms() {
             status_age_secs: None,
             output_tail: None,
             report_back_to_session_id: None,
+            initial_prompt_delivered: None,
             todo_progress: None,
             todo_items: Vec::new(),
         })

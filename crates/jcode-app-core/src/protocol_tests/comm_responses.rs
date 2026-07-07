@@ -161,6 +161,7 @@ fn test_comm_members_roundtrip_includes_status() -> Result<()> {
             role: Some("agent".to_string()),
             is_headless: Some(true),
             report_back_to_session_id: Some("sess-coord".to_string()),
+            initial_prompt_delivered: None,
             latest_completion_report: None,
             live_attachments: Some(0),
             status_age_secs: Some(12),

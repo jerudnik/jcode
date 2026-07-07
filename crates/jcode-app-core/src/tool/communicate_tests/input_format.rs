@@ -316,7 +316,7 @@ fn format_members_disambiguates_duplicate_friendly_names() {
                 role: Some("agent".to_string()),
                 is_headless: None,
                 report_back_to_session_id: None,
-                latest_completion_report: None,
+                    latest_completion_report: None,
                 live_attachments: None,
                 status_age_secs: None,
                 ..Default::default()
@@ -330,7 +330,7 @@ fn format_members_disambiguates_duplicate_friendly_names() {
                 role: Some("agent".to_string()),
                 is_headless: None,
                 report_back_to_session_id: None,
-                latest_completion_report: None,
+                    latest_completion_report: None,
                 live_attachments: None,
                 status_age_secs: None,
                 ..Default::default()
