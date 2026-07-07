@@ -866,6 +866,102 @@ impl RemoteConnection {
             .await
     }
 
+    fn comm_session_id(&self) -> String {
+        self.session_id.clone().unwrap_or_default()
+    }
+
+    /// Request a plan/DAG status summary (`comm_plan_status`).
+    pub async fn comm_plan_status(&mut self) -> Result<u64> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let request = Request::CommPlanStatus {
+            id,
+            session_id: self.comm_session_id(),
+        };
+        self.send_request(request).await?;
+        Ok(id)
+    }
+
+    /// Assign a plan instance to a member (`comm_assign_task`). With no
+    /// target, the server picks a drivable worker.
+    pub async fn comm_assign_task(
+        &mut self,
+        task_id: Option<String>,
+        target_session: Option<String>,
+    ) -> Result<u64> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let request = Request::CommAssignTask {
+            id,
+            session_id: self.comm_session_id(),
+            target_session,
+            task_id,
+            message: None,
+        };
+        self.send_request(request).await?;
+        Ok(id)
+    }
+
+    /// Drive an assigned task's lifecycle (`comm_task_control`): start, wake,
+    /// resume, retry, reassign, replace, or salvage.
+    pub async fn comm_task_control(
+        &mut self,
+        action: &str,
+        task_id: String,
+        target_session: Option<String>,
+    ) -> Result<u64> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let request = Request::CommTaskControl {
+            id,
+            session_id: self.comm_session_id(),
+            action: action.to_string(),
+            task_id,
+            target_session,
+            message: None,
+        };
+        self.send_request(request).await?;
+        Ok(id)
+    }
+
+    /// Stop a swarm member (`comm_stop`).
+    pub async fn comm_stop(&mut self, target_session: String) -> Result<u64> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let request = Request::CommStop {
+            id,
+            session_id: self.comm_session_id(),
+            target_session,
+            force: None,
+        };
+        self.send_request(request).await?;
+        Ok(id)
+    }
+
+    /// Spawn a new swarm member (`comm_spawn`).
+    pub async fn comm_spawn(
+        &mut self,
+        label: String,
+        initial_message: Option<String>,
+    ) -> Result<u64> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let request = Request::CommSpawn {
+            id,
+            session_id: self.comm_session_id(),
+            working_dir: None,
+            initial_message,
+            request_nonce: None,
+            spawn_mode: None,
+            model: None,
+            effort: None,
+            label: Some(label),
+            subagent_type: None,
+        };
+        self.send_request(request).await?;
+        Ok(id)
+    }
+
     /// Split the current session - ask server to clone conversation into a new session
     pub async fn split(&mut self) -> Result<u64> {
         let id = self.next_request_id;
