@@ -48,6 +48,7 @@ pub mod session_rebuild;
 pub mod setup_hints;
 pub mod ssh_remote;
 pub mod startup_profile;
+pub mod swarm_verbs;
 pub mod tool;
 pub mod turn_cancel_registry;
 pub mod update;
