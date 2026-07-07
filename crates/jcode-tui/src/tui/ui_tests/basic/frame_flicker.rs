@@ -172,6 +172,7 @@ fn test_active_swarm_spinner_keeps_redrawing_at_deep_idle() {
             status: status.to_string(),
             detail: None,
             task_label: None,
+            subagent_type: None,
             role: None,
             is_headless: Some(true),
             live_attachments: None,

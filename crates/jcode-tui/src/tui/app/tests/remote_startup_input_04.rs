@@ -76,6 +76,7 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
         status: status.to_string(),
         detail: None,
         task_label: None,
+        subagent_type: None,
         role: None,
         is_headless: Some(true),
         live_attachments: None,
