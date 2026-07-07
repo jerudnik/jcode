@@ -82,6 +82,7 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
         status_age_secs: Some(1),
         output_tail: None,
         report_back_to_session_id: parent.map(str::to_string),
+        initial_prompt_delivered: None,
         todo_progress: None,
         todo_items: Vec::new(),
     };
