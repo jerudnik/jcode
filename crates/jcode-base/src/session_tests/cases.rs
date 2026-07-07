@@ -1,6 +1,19 @@
 use super::*;
 use anyhow::{Result, anyhow};
 
+fn isolated_jcode_home(name: &str) -> Result<(std::path::PathBuf, EnvVarGuard)> {
+    let dir = std::env::temp_dir().join(format!(
+        "jcode-{name}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| anyhow!(e))?
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir)?;
+    let guard = EnvVarGuard::set("JCODE_HOME", &dir);
+    Ok((dir, guard))
+}
+
 #[test]
 fn test_session_exists_roundtrip() -> Result<()> {
     let tmp_dir = std::env::temp_dir().join(format!(
@@ -26,6 +39,56 @@ fn test_session_exists_roundtrip() -> Result<()> {
             .as_nanos()
     );
     assert!(!session_exists(&random_id));
+    Ok(())
+}
+
+#[test]
+fn reconcile_active_sessions_marks_dead_pid_crashed() -> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("dead-pid-reconcile")?;
+
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exit 0")
+        .spawn()?;
+    let dead_pid = child.id();
+    let _ = child.wait()?;
+
+    let mut session = Session::create_with_id(
+        "session_dead_pid_reconcile".to_string(),
+        None,
+        Some("dead pid".to_string()),
+    );
+    session.mark_active_with_pid(dead_pid);
+    session.save()?;
+
+    assert_eq!(reconcile_active_sessions(), 1);
+    let refreshed = Session::load("session_dead_pid_reconcile")?;
+    assert!(matches!(refreshed.status, SessionStatus::Crashed { .. }));
+    assert!(!active_session_ids().contains(&"session_dead_pid_reconcile".to_string()));
+    Ok(())
+}
+
+#[test]
+fn mark_active_with_pid_records_client_pid() -> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("client-pid-record")?;
+
+    let pid = std::process::id();
+    let mut session = Session::create_with_id(
+        "session_client_pid_record".to_string(),
+        None,
+        Some("client pid".to_string()),
+    );
+    session.mark_active_with_pid(pid);
+    session.save()?;
+
+    let refreshed = Session::load("session_client_pid_record")?;
+    assert_eq!(refreshed.last_pid, Some(pid));
+    assert_eq!(
+        find_active_session_id_by_pid(pid).as_deref(),
+        Some("session_client_pid_record")
+    );
     Ok(())
 }
 
