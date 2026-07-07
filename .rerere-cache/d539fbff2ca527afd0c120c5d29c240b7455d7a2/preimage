@@ -1,0 +1,34 @@
+{
+<<<<<<<
+  "total": 33,
+=======
+  "total": 58,
+>>>>>>>
+  "tracked_files": {
+    "crates/jcode-app-core/src/server/comm_control.rs": 3,
+    "crates/jcode-app-core/src/session_launch.rs": 1,
+    "crates/jcode-app-core/src/tool/computer/win.rs": 3,
+    "crates/jcode-app-core/src/tool/session_search_index.rs": 1,
+    "crates/jcode-base/src/auth/oauth.rs": 3,
+    "crates/jcode-base/src/hooks.rs": 1,
+<<<<<<<
+=======
+    "crates/jcode-desktop/src/desktop_benchmarks_run.rs": 1,
+    "crates/jcode-desktop/src/desktop_benchmarks_scroll.rs": 1,
+>>>>>>>
+    "crates/jcode-desktop/src/single_session_render/wrapping.rs": 1,
+    "crates/jcode-plan/examples/swarm_agent_count.rs": 5,
+    "crates/jcode-plan/src/dag/ops.rs": 10,
+    "crates/jcode-plan/src/dag/schedule.rs": 1,
+    "crates/jcode-provider-doctor/src/lifecycle_driver.rs": 2,
+    "crates/jcode-terminal-launch/src/lib.rs": 1,
+    "crates/jcode-tui-core/src/stream_buffer.rs": 3,
+    "crates/jcode-tui/src/tui/app/helpers.rs": 1,
+    "crates/jcode-tui/src/tui/app/hotkey_feedback.rs": 2,
+    "crates/jcode-tui/src/tui/app/shortcut_hints.rs": 1,
+    "crates/jcode-tui/src/tui/session_picker.rs": 2,
+    "src/bin/memory_recall_bench.rs": 14,
+    "src/cli/commands/menubar.rs": 1
+  },
+  "version": 1
+}
