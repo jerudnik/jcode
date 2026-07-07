@@ -172,7 +172,7 @@ fn ready_headless_member_with_report_survives_reload_without_crashed_status() {
         task_label: None,
     }];
 
-    persist_swarm_state("swarm-gamma", None, None, &members);
+    persist_swarm_state("swarm-gamma", None, None, &members, 0);
     let loaded = load_runtime_state();
 
     let recovered = loaded.members.get("session-ready").expect("member");
@@ -477,7 +477,7 @@ fn migration_does_not_clobber_existing_durable_state() {
     let _env = test_env(&dir);
 
     // Durable dir already has state for this swarm.
-    persist_swarm_state("swarm-both", None, Some("coord-new"), &[]);
+    persist_swarm_state("swarm-both", None, Some("coord-new"), &[], 0);
 
     // Legacy dir has a stale snapshot for the same swarm.
     let legacy = serde_json::json!({
@@ -632,7 +632,7 @@ async fn persist_snapshot_can_regress_to_older_plan_version_when_calls_interleav
     // thread: nothing gates B on A (there is no per-swarm persist lock), so
     // B's load_runtime observes v6 and its synchronous persist_swarm_state
     // lands v6 on disk before A's task is polled again.
-    persist_swarm_state("swarm-race", Some(&v6_plan), None, &[]);
+    persist_swarm_state("swarm-race", Some(&v6_plan), None, &[], 0);
     assert_eq!(
         load_runtime_state()
             .plans
@@ -833,8 +833,8 @@ fn remove_swarm_state_leaves_orphaned_bak_that_resurrects_on_load() {
 
     // First persist creates the primary; the second overwrite makes
     // write_json_fast hard-link the previous (coord-v1) snapshot to `.bak`.
-    persist_swarm_state("swarm-zombie", None, Some("coord-v1"), &[]);
-    persist_swarm_state("swarm-zombie", None, Some("coord-v2"), &[]);
+    persist_swarm_state("swarm-zombie", None, Some("coord-v1"), &[], 0);
+    persist_swarm_state("swarm-zombie", None, Some("coord-v2"), &[], 0);
     let bak_path = state_path("swarm-zombie").with_extension("bak");
     assert!(bak_path.exists(), "write_json_fast leaves a .bak hard link");
 
@@ -867,14 +867,14 @@ fn empty_persist_dissolution_leaves_orphaned_bak_that_resurrects_on_load() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
 
-    persist_swarm_state("swarm-dissolve", None, Some("coord-v1"), &[]);
-    persist_swarm_state("swarm-dissolve", None, Some("coord-v2"), &[]);
+    persist_swarm_state("swarm-dissolve", None, Some("coord-v1"), &[], 0);
+    persist_swarm_state("swarm-dissolve", None, Some("coord-v2"), &[], 0);
     let bak_path = state_path("swarm-dissolve").with_extension("bak");
     assert!(bak_path.exists(), "write_json_fast leaves a .bak hard link");
 
     // Dissolution: no plan, no coordinator, no members hits the
     // remove_file branch instead of writing a snapshot.
-    persist_swarm_state("swarm-dissolve", None, None, &[]);
+    persist_swarm_state("swarm-dissolve", None, None, &[], 0);
     assert!(!state_path("swarm-dissolve").exists());
     assert!(
         bak_path.exists(),
@@ -921,7 +921,7 @@ async fn remove_racing_persist_deletes_fresh_snapshot_and_resurrects_stale_bak()
 
     // The previous incarnation's snapshot is on disk; the swarm has since
     // been dissolved, so the in-memory runtime is empty.
-    persist_swarm_state("swarm-del-race", None, Some("coord-stale"), &[]);
+    persist_swarm_state("swarm-del-race", None, Some("coord-stale"), &[], 0);
     let swarm_state = crate::server::SwarmState::new(
         HashMap::new(),
         HashMap::new(),
@@ -956,7 +956,7 @@ async fn remove_racing_persist_deletes_fresh_snapshot_and_resurrects_stale_bak()
     // B's own persist_swarm_state_for on another worker thread, whose
     // uncontended lock reads resolve without suspending). This overwrite
     // also hard-links the stale pre-dissolution snapshot to `.bak`.
-    persist_swarm_state("swarm-del-race", None, Some("coord-new"), &[]);
+    persist_swarm_state("swarm-del-race", None, Some("coord-new"), &[], 0);
     let on_disk = storage::read_json::<PersistedSwarmState>(&state_path("swarm-del-race"))
         .expect("fresh snapshot");
     assert_eq!(
@@ -1010,6 +1010,7 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         swarm_enabled: true,
         status: status.to_string(),
         detail: None,
+        task_label: None,
         friendly_name: Some(session_id.to_string()),
         report_back_to_session_id: None,
         latest_completion_report: None,
@@ -1160,6 +1161,7 @@ fn recovery_with_legacy_snapshot_replays_whole_log_idempotently() {
         swarm_enabled: true,
         status: "ready".to_string(),
         detail: None,
+        task_label: None,
         friendly_name: Some("owl".to_string()),
         report_back_to_session_id: None,
         latest_completion_report: None,
