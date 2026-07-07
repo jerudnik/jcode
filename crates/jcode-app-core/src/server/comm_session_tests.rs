@@ -60,6 +60,7 @@ fn member(
             detail: None,
             friendly_name: Some(session_id.to_string()),
             report_back_to_session_id: None,
+            initial_prompt_delivered: None,
             latest_completion_report: None,
             role: role.to_string(),
             joined_at: Instant::now(),
@@ -159,13 +160,13 @@ async fn stop_target_resolves_unique_friendly_name_and_suffix() {
         .insert(worker.session_id.clone(), worker);
 
     assert_eq!(
-        resolve_stop_target_session("swarm-1", "jellyfish", &swarm_members)
+        resolve_stop_target_session("coord", "swarm-1", "jellyfish", &swarm_members)
             .await
             .as_deref(),
         Ok("session_jellyfish_1234_abcd")
     );
     assert_eq!(
-        resolve_stop_target_session("swarm-1", "abcd", &swarm_members)
+        resolve_stop_target_session("coord", "swarm-1", "abcd", &swarm_members)
             .await
             .as_deref(),
         Ok("session_jellyfish_1234_abcd")
@@ -184,10 +185,30 @@ async fn stop_target_rejects_ambiguous_friendly_name() {
     members.insert(second.session_id.clone(), second);
     drop(members);
 
-    let err = resolve_stop_target_session("swarm-1", "bear", &swarm_members)
+    let err = resolve_stop_target_session("coord", "swarm-1", "bear", &swarm_members)
         .await
         .expect_err("ambiguous friendly names should be rejected");
     assert!(err.contains("Ambiguous swarm session 'bear'"));
+}
+
+#[tokio::test]
+async fn stop_target_resolves_owned_child_in_different_swarm() {
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let (coord, _coord_rx) = member("coord", Some("swarm-1"), "coordinator");
+    let (mut child, _child_rx) = member("child-2", Some("swarm-2"), "agent");
+    child.report_back_to_session_id = Some("coord".to_string());
+    child.friendly_name = Some("otter".to_string());
+    let mut members = swarm_members.write().await;
+    members.insert("coord".to_string(), coord);
+    members.insert("child-2".to_string(), child);
+    drop(members);
+
+    assert_eq!(
+        resolve_stop_target_session("coord", "swarm-1", "otter", &swarm_members)
+            .await
+            .expect("owned child should resolve"),
+        "child-2"
+    );
 }
 
 #[tokio::test]

@@ -11,8 +11,7 @@ use super::{
     record_swarm_event_for_session, remove_background_tool_signal,
     remove_session_channel_subscriptions, remove_session_from_swarm,
     remove_session_interrupt_queue, set_member_subagent_type, set_member_task_label,
-    truncate_detail, update_member_status,
-    update_member_status_with_report,
+    truncate_detail, update_member_status, update_member_status_with_report,
 };
 use crate::agent::Agent;
 use crate::config::SwarmSpawnMode;
@@ -498,6 +497,7 @@ async fn register_visible_spawned_member(
                 subagent_type: None,
                 friendly_name: Some(friendly_name),
                 report_back_to_session_id: report_back_to_session_id.map(str::to_string),
+                initial_prompt_delivered: Some(has_startup_message),
                 latest_completion_report: None,
                 role: "agent".to_string(),
                 joined_at: now,
@@ -603,9 +603,9 @@ pub(super) async fn spawn_swarm_agent(
     // cleanly when their input is absent, so a spawn with neither is unchanged.
     let startup_message = initial_message.as_deref().map(|msg| {
         let msg = match subagent_type.as_deref() {
-            Some(kind) => {
-                std::borrow::Cow::Owned(jcode_swarm_core::append_subagent_type_instructions(msg, kind))
-            }
+            Some(kind) => std::borrow::Cow::Owned(
+                jcode_swarm_core::append_subagent_type_instructions(msg, kind),
+            ),
             None => std::borrow::Cow::Borrowed(msg),
         };
         append_swarm_completion_report_instructions(&msg)
@@ -725,6 +725,12 @@ pub(super) async fn spawn_swarm_agent(
     // (before completion-report boilerplate is appended).
     if let Some(label_text) = label.as_deref().or(initial_message.as_deref()) {
         set_member_task_label(&new_session_id, label_text, swarm_members).await;
+    }
+    {
+        let mut members = swarm_members.write().await;
+        if let Some(member) = members.get_mut(&new_session_id) {
+            member.initial_prompt_delivered = Some(startup_message.is_some());
+        }
     }
     // Record the orchestrator-chosen subagent type for observability (swarm UI
     // chips, member lists). No-op when absent or unparseable.
@@ -897,6 +903,10 @@ pub(super) async fn handle_comm_spawn(
         return;
     };
 
+    let initial_prompt_delivered = initial_message
+        .as_deref()
+        .is_some_and(|msg| !msg.trim().is_empty());
+
     let response = match spawn_swarm_agent(
         &req_session_id,
         &swarm_id,
@@ -923,7 +933,10 @@ pub(super) async fn handle_comm_spawn(
     )
     .await
     {
-        Ok(new_session_id) => PersistedSwarmMutationResponse::Spawn { new_session_id },
+        Ok(new_session_id) => PersistedSwarmMutationResponse::Spawn {
+            new_session_id,
+            initial_prompt_delivered,
+        },
         Err(error) => PersistedSwarmMutationResponse::Error {
             message: format!("Failed to spawn agent: {error}"),
             retry_after_secs: None,
@@ -1006,18 +1019,24 @@ pub(super) async fn handle_comm_stop(
         return;
     };
 
-    let target_session =
-        match resolve_stop_target_session(&swarm_id, &target_session, swarm_members).await {
-            Ok(target_session) => target_session,
-            Err(message) => {
-                let _ = client_event_tx.send(ServerEvent::Error {
-                    id,
-                    message,
-                    retry_after_secs: None,
-                });
-                return;
-            }
-        };
+    let target_session = match resolve_stop_target_session(
+        &req_session_id,
+        &swarm_id,
+        &target_session,
+        swarm_members,
+    )
+    .await
+    {
+        Ok(target_session) => target_session,
+        Err(message) => {
+            let _ = client_event_tx.send(ServerEvent::Error {
+                id,
+                message,
+                retry_after_secs: None,
+            });
+            return;
+        }
+    };
 
     let stop_allowed = {
         let members = swarm_members.read().await;
@@ -1153,6 +1172,7 @@ fn swarm_stop_allowed_by_owner(
 }
 
 async fn resolve_stop_target_session(
+    req_session_id: &str,
     swarm_id: &str,
     target: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -1163,16 +1183,19 @@ async fn resolve_stop_target_session(
     }
 
     let members = swarm_members.read().await;
-    if members
-        .get(target)
-        .is_some_and(|member| member.swarm_id.as_deref() == Some(swarm_id))
-    {
+    if members.get(target).is_some_and(|member| {
+        member.swarm_id.as_deref() == Some(swarm_id)
+            || super::swarm_is_self_or_ancestor(&members, req_session_id, target)
+    }) {
         return Ok(target.to_string());
     }
 
     let mut matches = members
         .iter()
-        .filter(|(_, member)| member.swarm_id.as_deref() == Some(swarm_id))
+        .filter(|(session_id, member)| {
+            member.swarm_id.as_deref() == Some(swarm_id)
+                || super::swarm_is_self_or_ancestor(&members, req_session_id, session_id)
+        })
         .filter(|(session_id, member)| {
             member.friendly_name.as_deref() == Some(target)
                 || session_id.starts_with(target)

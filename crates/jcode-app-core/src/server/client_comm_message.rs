@@ -139,8 +139,20 @@ pub(super) async fn handle_comm_message(
                 .unwrap_or_default()
         };
 
+        let addressable_session_ids: Vec<String> = {
+            let members = swarm_members.read().await;
+            members
+                .keys()
+                .filter(|session_id| {
+                    swarm_session_ids.contains(session_id)
+                        || super::swarm_is_self_or_ancestor(&members, &from_session, session_id)
+                })
+                .cloned()
+                .collect()
+        };
+
         let resolved_to_session = if let Some(ref target) = to_session {
-            match resolve_dm_target_session(target, &swarm_session_ids, swarm_members).await {
+            match resolve_dm_target_session(target, &addressable_session_ids, swarm_members).await {
                 Ok(session_id) => Some(session_id),
                 Err(message) => {
                     crate::logging::event_warn(
@@ -167,7 +179,7 @@ pub(super) async fn handle_comm_message(
         };
 
         if let Some(ref target) = resolved_to_session
-            && !swarm_session_ids.contains(target)
+            && !addressable_session_ids.contains(target)
         {
             crate::logging::event_warn(
                 "COMM_LIFECYCLE",
@@ -182,7 +194,10 @@ pub(super) async fn handle_comm_message(
             );
             let _ = client_event_tx.send(ServerEvent::Error {
                 id,
-                message: format!("DM failed: session '{}' not in swarm", target),
+                message: format!(
+                    "DM failed: session '{}' not in swarm or owned subtree",
+                    target
+                ),
                 retry_after_secs: None,
             });
             return;
@@ -247,7 +262,7 @@ pub(super) async fn handle_comm_message(
 
         let mut delivered_targets = 0usize;
         for session_id in &target_sessions {
-            if !swarm_session_ids.contains(session_id) {
+            if !addressable_session_ids.contains(session_id) {
                 continue;
             }
             if known_member_ids.contains(session_id) {
@@ -341,11 +356,8 @@ pub(super) async fn handle_comm_message(
                             // message would rot in the queue, so watch for
                             // idleness and deliver it as a wake turn then.
                             if queued
-                                && let Some(queue) = soft_interrupt_queues
-                                    .read()
-                                    .await
-                                    .get(session_id)
-                                    .cloned()
+                                && let Some(queue) =
+                                    soft_interrupt_queues.read().await.get(session_id).cloned()
                             {
                                 super::live_turn::nudge_parked_interrupts_when_idle(
                                     session_id.clone(),
