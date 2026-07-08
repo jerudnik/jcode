@@ -324,8 +324,8 @@ mod state;
 
 use self::state::latest_peer_touches;
 pub use self::state::{
-    FileAccess, SessionControlHandle, SharedContext, SwarmEvent, SwarmEventType, SwarmMember,
-    SwarmState,
+    FileAccess, PendingPlanProposal, PlanProposalCache, SessionControlHandle, SwarmEvent,
+    SwarmEventType, SwarmMember, SwarmState,
 };
 use self::state::{
     SessionInterruptQueues, fanout_live_client_event, fanout_session_event,
@@ -420,8 +420,8 @@ pub struct Server {
     file_touch: FileTouchService,
     /// Shared ownership of core swarm coordination state.
     swarm_state: SwarmState,
-    /// Shared context by swarm (swarm_id -> key -> SharedContext)
-    shared_context: Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    /// Pending plan proposals by swarm and proposer session.
+    plan_proposals: PlanProposalCache,
     /// Active and available TUI debug channels (request_id, command)
     client_debug_state: Arc<RwLock<ClientDebugState>>,
     /// Channel to receive client debug responses from TUI (request_id, response)
@@ -511,7 +511,7 @@ impl Server {
                 restored_swarm_plans,
                 restored_swarm_coordinators,
             ),
-            shared_context: Arc::new(RwLock::new(HashMap::new())),
+            plan_proposals: Arc::new(RwLock::new(HashMap::new())),
             client_debug_state: Arc::new(RwLock::new(ClientDebugState::default())),
             client_debug_response_tx,
             debug_jobs: Arc::new(RwLock::new(HashMap::new())),
@@ -1078,7 +1078,6 @@ impl Server {
         let monitor_swarms_by_id = Arc::clone(&self.swarm_state.swarms_by_id);
         let monitor_swarm_plans = Arc::clone(&self.swarm_state.plans);
         let monitor_swarm_coordinators = Arc::clone(&self.swarm_state.coordinators);
-        let monitor_shared_context = Arc::clone(&self.shared_context);
         let monitor_sessions = Arc::clone(&self.sessions);
         let monitor_soft_interrupt_queues = Arc::clone(&self.soft_interrupt_queues);
         let monitor_event_history = Arc::clone(&self.event_history);
@@ -1091,7 +1090,6 @@ impl Server {
                 monitor_swarms_by_id,
                 monitor_swarm_plans,
                 monitor_swarm_coordinators,
-                monitor_shared_context,
                 monitor_sessions,
                 monitor_soft_interrupt_queues,
                 monitor_event_history,
@@ -1622,7 +1620,6 @@ impl Server {
         swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
         _swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
         _swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
-        _shared_context: Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
         sessions: Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>,
         soft_interrupt_queues: SessionInterruptQueues,
         event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,

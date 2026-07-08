@@ -1,17 +1,15 @@
-use super::{SharedContext, SwarmMember, SwarmState, VersionedPlan, persist_swarm_state_for};
-use crate::plan::PlanItem;
+use super::{PlanProposalCache, SwarmMember, SwarmState, VersionedPlan, persist_swarm_state_for};
 use crate::protocol::{NotificationType, ServerEvent};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::RwLock;
 
 pub(super) struct DebugSwarmWriteContext<'a> {
     pub(super) session_id: &'a Arc<RwLock<String>>,
     pub(super) swarm_members: &'a Arc<RwLock<HashMap<String, SwarmMember>>>,
     pub(super) swarms_by_id: &'a Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    pub(super) shared_context: &'a Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    pub(super) plan_proposals: &'a PlanProposalCache,
     pub(super) swarm_plans: &'a Arc<RwLock<HashMap<String, VersionedPlan>>>,
     pub(super) swarm_coordinators: &'a Arc<RwLock<HashMap<String, String>>>,
 }
@@ -205,95 +203,6 @@ pub(super) async fn maybe_handle_swarm_write_command(
         ));
     }
 
-    if cmd.starts_with("swarm:set_context:") {
-        let rest = cmd.strip_prefix("swarm:set_context:").unwrap_or("").trim();
-        let parts: Vec<&str> = rest.splitn(3, ' ').collect();
-        if parts.len() < 3 {
-            return Err(anyhow::anyhow!(
-                "Usage: swarm:set_context:<session_id> <key> <value>"
-            ));
-        }
-
-        let acting_session = parts[0];
-        let key = parts[1].to_string();
-        let value = parts[2].to_string();
-
-        let (swarm_id, friendly_name) = {
-            let members = ctx.swarm_members.read().await;
-            let swarm_id = members
-                .get(acting_session)
-                .and_then(|member| member.swarm_id.clone());
-            let name = members
-                .get(acting_session)
-                .and_then(|member| member.friendly_name.clone());
-            (swarm_id, name)
-        };
-
-        if let Some(swarm_id) = swarm_id {
-            {
-                let mut shared_ctx = ctx.shared_context.write().await;
-                let swarm_ctx = shared_ctx
-                    .entry(swarm_id.clone())
-                    .or_insert_with(HashMap::new);
-                let now = Instant::now();
-                let created_at = swarm_ctx
-                    .get(&key)
-                    .map(|context| context.created_at)
-                    .unwrap_or(now);
-                swarm_ctx.insert(
-                    key.clone(),
-                    SharedContext {
-                        key: key.clone(),
-                        value: value.clone(),
-                        from_session: acting_session.to_string(),
-                        from_name: friendly_name.clone(),
-                        created_at,
-                        updated_at: now,
-                    },
-                );
-            }
-
-            let swarm_session_ids: Vec<String> = {
-                let swarms = ctx.swarms_by_id.read().await;
-                swarms
-                    .get(&swarm_id)
-                    .map(|sessions| sessions.iter().cloned().collect())
-                    .unwrap_or_default()
-            };
-            let members = ctx.swarm_members.read().await;
-            for sid in &swarm_session_ids {
-                if sid != acting_session
-                    && let Some(member) = members.get(sid)
-                {
-                    let _ = member.event_tx.send(ServerEvent::Notification {
-                        from_session: acting_session.to_string(),
-                        from_name: friendly_name.clone(),
-                        notification_type: NotificationType::SharedContext {
-                            key: key.clone(),
-                            value: value.clone(),
-                        },
-                        message: format!("Shared context: {} = {}", key, value),
-                    });
-                }
-            }
-
-            return Ok(Some(
-                serde_json::json!({
-                    "swarm_id": swarm_id,
-                    "key": key,
-                    "value": value,
-                    "from_session": acting_session,
-                })
-                .to_string(),
-            ));
-        }
-
-        return Err(anyhow::anyhow!(
-            "Session '{}' is not in a swarm",
-            acting_session
-        ));
-    }
-
     if cmd.starts_with("swarm:approve_plan:") {
         let rest = cmd.strip_prefix("swarm:approve_plan:").unwrap_or("").trim();
         let parts: Vec<&str> = rest.splitn(2, ' ').collect();
@@ -330,57 +239,50 @@ pub(super) async fn maybe_handle_swarm_write_command(
         }
 
         if let Some(swarm_id) = swarm_id {
-            let proposal_key = format!("plan_proposal:{}", proposer_session);
-            let proposal_value = {
-                let shared_ctx = ctx.shared_context.read().await;
-                shared_ctx
+            let proposal_items = {
+                let proposals = ctx.plan_proposals.read().await;
+                proposals
                     .get(&swarm_id)
-                    .and_then(|swarm_ctx| swarm_ctx.get(&proposal_key))
-                    .map(|context| context.value.clone())
+                    .and_then(|swarm_proposals| swarm_proposals.get(proposer_session))
+                    .map(|proposal| proposal.items.clone())
             };
 
-            return match proposal_value {
+            return match proposal_items {
                 None => Err(anyhow::anyhow!(
                     "No pending plan proposal from session '{}'",
                     proposer_session
                 )),
-                Some(proposal) => {
-                    if let Ok(items) = serde_json::from_str::<Vec<PlanItem>>(&proposal) {
-                        let version = {
-                            let mut plans = ctx.swarm_plans.write().await;
-                            let versioned_plan = plans
-                                .entry(swarm_id.clone())
-                                .or_insert_with(VersionedPlan::new);
-                            versioned_plan.items.extend(items.clone());
-                            versioned_plan.version += 1;
-                            versioned_plan
-                                .participants
-                                .insert(coord_session.to_string());
-                            versioned_plan
-                                .participants
-                                .insert(proposer_session.to_string());
-                            versioned_plan.version
-                        };
-                        {
-                            let mut shared_ctx = ctx.shared_context.write().await;
-                            if let Some(swarm_ctx) = shared_ctx.get_mut(&swarm_id) {
-                                swarm_ctx.remove(&proposal_key);
-                            }
+                Some(items) => {
+                    let version = {
+                        let mut plans = ctx.swarm_plans.write().await;
+                        let versioned_plan = plans
+                            .entry(swarm_id.clone())
+                            .or_insert_with(VersionedPlan::new);
+                        versioned_plan.items.extend(items.clone());
+                        versioned_plan.version += 1;
+                        versioned_plan
+                            .participants
+                            .insert(coord_session.to_string());
+                        versioned_plan
+                            .participants
+                            .insert(proposer_session.to_string());
+                        versioned_plan.version
+                    };
+                    {
+                        let mut proposals = ctx.plan_proposals.write().await;
+                        if let Some(swarm_proposals) = proposals.get_mut(&swarm_id) {
+                            swarm_proposals.remove(proposer_session);
                         }
-                        Ok(Some(
-                            serde_json::json!({
-                                "approved": true,
-                                "items_added": items.len(),
-                                "plan_version": version,
-                                "swarm_id": swarm_id,
-                            })
-                            .to_string(),
-                        ))
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "Failed to parse plan proposal as Vec<PlanItem>"
-                        ))
                     }
+                    Ok(Some(
+                        serde_json::json!({
+                            "approved": true,
+                            "items_added": items.len(),
+                            "plan_version": version,
+                            "swarm_id": swarm_id,
+                        })
+                        .to_string(),
+                    ))
                 }
             };
         }
@@ -429,12 +331,11 @@ pub(super) async fn maybe_handle_swarm_write_command(
         }
 
         if let Some(swarm_id) = swarm_id {
-            let proposal_key = format!("plan_proposal:{}", proposer_session);
             let proposal_exists = {
-                let shared_ctx = ctx.shared_context.read().await;
-                shared_ctx
+                let proposals = ctx.plan_proposals.read().await;
+                proposals
                     .get(&swarm_id)
-                    .and_then(|swarm_ctx| swarm_ctx.get(&proposal_key))
+                    .and_then(|swarm_proposals| swarm_proposals.get(proposer_session))
                     .is_some()
             };
 
@@ -446,9 +347,9 @@ pub(super) async fn maybe_handle_swarm_write_command(
             }
 
             {
-                let mut shared_ctx = ctx.shared_context.write().await;
-                if let Some(swarm_ctx) = shared_ctx.get_mut(&swarm_id) {
-                    swarm_ctx.remove(&proposal_key);
+                let mut proposals = ctx.plan_proposals.write().await;
+                if let Some(swarm_proposals) = proposals.get_mut(&swarm_id) {
+                    swarm_proposals.remove(proposer_session);
                 }
             }
             let reason_msg = reason

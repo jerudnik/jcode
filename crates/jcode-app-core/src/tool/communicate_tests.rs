@@ -702,8 +702,8 @@ fn plan_terminal_node_count_includes_failed_without_double_counting() {
 
 #[test]
 fn canonical_swarm_action_maps_common_synonyms() {
-    assert_eq!(canonical_swarm_action("inbox"), "read");
-    assert_eq!(canonical_swarm_action("read_messages"), "read");
+    assert_eq!(canonical_swarm_action("inbox"), "inbox");
+    assert_eq!(canonical_swarm_action("read_messages"), "read_messages");
     assert_eq!(canonical_swarm_action("send"), "message");
     assert_eq!(canonical_swarm_action("msg"), "message");
     assert_eq!(canonical_swarm_action("direct_message"), "dm");
@@ -716,7 +716,7 @@ fn canonical_swarm_action_maps_common_synonyms() {
 
 #[test]
 fn canonical_swarm_action_is_case_insensitive_and_trims() {
-    assert_eq!(canonical_swarm_action("  Inbox  "), "read");
+    assert_eq!(canonical_swarm_action("  Inbox  "), "  Inbox  ");
     assert_eq!(canonical_swarm_action("SEND"), "message");
 }
 
@@ -1123,8 +1123,7 @@ fn schema_advertises_supported_swarm_fields() {
         .expect("swarm schema should have properties");
 
     assert!(props.contains_key("action"));
-    assert!(props.contains_key("key"));
-    assert!(props.contains_key("value"));
+    // `key`/`value` (shared-context) properties were removed in the comm migration.
     assert!(props.contains_key("message"));
     assert!(props.contains_key("to_session"));
     assert_eq!(

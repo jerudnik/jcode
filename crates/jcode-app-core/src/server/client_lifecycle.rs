@@ -4,9 +4,7 @@ use super::client_actions::{
     handle_set_subagent_model, handle_split, handle_stdin_response, handle_transfer,
     handle_trigger_memory_extraction,
 };
-use super::client_comm::{
-    handle_comm_list, handle_comm_message, handle_comm_read, handle_comm_share,
-};
+use super::client_comm::{handle_comm_list, handle_comm_message};
 use super::client_disconnect_cleanup::cleanup_client_connection;
 use super::client_lifecycle_logging::{
     ServerRequestLifecycleFields, interrupt_request_log_fields, request_payload_summary,
@@ -44,7 +42,7 @@ use super::provider_control::{
 };
 use super::{
     AwaitMembersRuntime, ClientConnectionInfo, ClientDebugState, FileTouchService,
-    SessionControlHandle, SessionInterruptQueues, SharedContext, SwarmEvent, SwarmMember,
+    PlanProposalCache, SessionControlHandle, SessionInterruptQueues, SwarmEvent, SwarmMember,
     SwarmMutationRuntime, VersionedPlan, format_structured_completion_report,
     register_session_interrupt_queue, send_swarm_plan_to_session, truncate_detail,
     update_member_status, update_member_status_with_report, update_member_status_with_report_tldr,
@@ -321,7 +319,7 @@ pub(super) async fn handle_client(
     client_connections: Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
     swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    shared_context: Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    plan_proposals: PlanProposalCache,
     swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
     file_touch: FileTouchService,
@@ -374,7 +372,7 @@ pub(super) async fn handle_client(
                             provider_template: &provider_template,
                             swarm_members: &swarm_members,
                             swarms_by_id: &swarms_by_id,
-                            shared_context: &shared_context,
+                            plan_proposals: &plan_proposals,
                             swarm_plans: &swarm_plans,
                             swarm_coordinators: &swarm_coordinators,
                             file_touch: &file_touch,
@@ -2016,46 +2014,6 @@ pub(super) async fn handle_client(
             }
 
             // === Agent communication ===
-            Request::CommShare {
-                id,
-                session_id: req_session_id,
-                key,
-                value,
-                append,
-            } => {
-                handle_comm_share(
-                    id,
-                    req_session_id,
-                    key,
-                    value,
-                    append,
-                    &client_event_tx,
-                    &swarm_members,
-                    &swarms_by_id,
-                    &shared_context,
-                    &event_history,
-                    &event_counter,
-                    &swarm_event_tx,
-                )
-                .await;
-            }
-
-            Request::CommRead {
-                id,
-                session_id: req_session_id,
-                key,
-            } => {
-                handle_comm_read(
-                    id,
-                    req_session_id,
-                    key,
-                    &client_event_tx,
-                    &swarm_members,
-                    &shared_context,
-                )
-                .await;
-            }
-
             Request::CommMessage {
                 id,
                 from_session,
@@ -2115,7 +2073,7 @@ pub(super) async fn handle_client(
                     &client_event_tx,
                     &swarm_members,
                     &swarms_by_id,
-                    &shared_context,
+                    &plan_proposals,
                     &swarm_plans,
                     &swarm_coordinators,
                     &sessions,
@@ -2140,7 +2098,7 @@ pub(super) async fn handle_client(
                     &client_event_tx,
                     &swarm_members,
                     &swarms_by_id,
-                    &shared_context,
+                    &plan_proposals,
                     &swarm_plans,
                     &swarm_coordinators,
                     &sessions,
@@ -2166,7 +2124,7 @@ pub(super) async fn handle_client(
                     reason,
                     &client_event_tx,
                     &swarm_members,
-                    &shared_context,
+                    &plan_proposals,
                     &swarm_coordinators,
                     &sessions,
                     &soft_interrupt_queues,
