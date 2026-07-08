@@ -551,8 +551,6 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to_session: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        channel: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         delivery: Option<CommDeliveryMode>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         wake: Option<bool>,
@@ -565,18 +563,6 @@ pub enum Request {
     /// List agents and their activity
     #[serde(rename = "comm_list")]
     CommList { id: u64, session_id: String },
-
-    /// List swarm channels and subscriber counts
-    #[serde(rename = "comm_list_channels")]
-    CommListChannels { id: u64, session_id: String },
-
-    /// List members subscribed to a swarm channel
-    #[serde(rename = "comm_channel_members")]
-    CommChannelMembers {
-        id: u64,
-        session_id: String,
-        channel: String,
-    },
 
     /// Propose a swarm plan update
     #[serde(rename = "comm_propose_plan")]
@@ -815,22 +801,6 @@ pub enum Request {
         target_session: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-    },
-
-    /// Subscribe to a named channel in the swarm
-    #[serde(rename = "comm_subscribe_channel")]
-    CommSubscribeChannel {
-        id: u64,
-        session_id: String,
-        channel: String,
-    },
-
-    /// Unsubscribe from a named channel in the swarm
-    #[serde(rename = "comm_unsubscribe_channel")]
-    CommUnsubscribeChannel {
-        id: u64,
-        session_id: String,
-        channel: String,
     },
 
     /// Wait until specified (or all) swarm members reach a target status
@@ -1477,13 +1447,6 @@ pub enum ServerEvent {
     /// Response to comm_list request
     #[serde(rename = "comm_members")]
     CommMembers { id: u64, members: Vec<AgentInfo> },
-
-    /// Response to comm_list_channels request
-    #[serde(rename = "comm_channels")]
-    CommChannels {
-        id: u64,
-        channels: Vec<SwarmChannelInfo>,
-    },
 
     /// Response to comm_summary request
     #[serde(rename = "comm_summary_response")]

@@ -34,8 +34,6 @@ use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 
-type ChannelSubscriptions = Arc<RwLock<HashMap<String, HashMap<String, HashSet<String>>>>>;
-
 #[derive(Default)]
 pub(super) struct ClientDebugState {
     pub(super) active_id: Option<String>,
@@ -245,7 +243,7 @@ pub(super) async fn inject_transcript(
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "debug client wiring fans out across sessions, swarms, files, channels, jobs, and transport state"
+    reason = "debug client wiring fans out across sessions, swarms, files, jobs, and transport state"
 )]
 pub(super) async fn handle_debug_client(
     stream: Stream,
@@ -260,8 +258,6 @@ pub(super) async fn handle_debug_client(
     swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
     file_touch: FileTouchService,
-    channel_subscriptions: ChannelSubscriptions,
-    channel_subscriptions_by_session: ChannelSubscriptions,
     client_debug_state: Arc<RwLock<ClientDebugState>>,
     client_debug_response_tx: broadcast::Sender<(u64, String)>,
     debug_jobs: Arc<RwLock<HashMap<String, DebugJob>>>,
@@ -460,8 +456,6 @@ pub(super) async fn handle_debug_client(
                             &swarm_plans,
                             &swarm_coordinators,
                             &file_touch,
-                            &channel_subscriptions,
-                            &channel_subscriptions_by_session,
                             &debug_jobs,
                             &event_history,
                             &shutdown_signals,
@@ -479,7 +473,6 @@ pub(super) async fn handle_debug_client(
                             &swarm_plans,
                             &swarm_coordinators,
                             &file_touch,
-                            &channel_subscriptions,
                             &server_identity,
                         )
                         .await?

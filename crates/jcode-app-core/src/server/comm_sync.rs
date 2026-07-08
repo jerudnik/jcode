@@ -483,7 +483,6 @@ pub(super) async fn handle_comm_resync_plan(
                     from_name: member.friendly_name.clone(),
                     notification_type: NotificationType::Message {
                         scope: Some("plan".to_string()),
-                        channel: None,
                         tldr: None,
                     },
                     message: format!(

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, ContextEntry, HistoryMessage,
-    PlanGraphStatus, SwarmChannelInfo, ToolCallSummary,
+    PlanGraphStatus, ToolCallSummary,
 };
 
 pub fn format_comm_plan_followup(summary: &PlanGraphStatus) -> String {
@@ -626,21 +626,4 @@ pub fn format_comm_awaited_members_with_reports(
     }
 
     output
-}
-
-pub fn format_comm_channels(channels: &[SwarmChannelInfo]) -> String {
-    if channels.is_empty() {
-        "No swarm channels found.".to_string()
-    } else {
-        let mut output = String::from("Swarm channels:\n\n");
-        for channel in channels {
-            output.push_str(&format!(
-                "  #{} — {} subscriber{}\n",
-                channel.channel,
-                channel.member_count,
-                if channel.member_count == 1 { "" } else { "s" }
-            ));
-        }
-        output
-    }
 }

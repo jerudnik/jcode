@@ -13,13 +13,11 @@ use crate::protocol::ServerEvent;
 use crate::provider::Provider;
 use crate::transport::{Listener, Stream};
 use jcode_agent_runtime::InterruptSignal;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 use tokio::sync::{Mutex, OnceCell, RwLock, broadcast, mpsc};
-
-type ChannelSubscriptions = Arc<RwLock<HashMap<String, HashMap<String, HashSet<String>>>>>;
 
 #[derive(Clone)]
 pub(super) struct ServerRuntime {
@@ -33,8 +31,6 @@ pub(super) struct ServerRuntime {
     swarm_state: SwarmState,
     shared_context: Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
     file_touch: FileTouchService,
-    channel_subscriptions: ChannelSubscriptions,
-    channel_subscriptions_by_session: ChannelSubscriptions,
     client_debug_state: Arc<RwLock<ClientDebugState>>,
     client_debug_response_tx: broadcast::Sender<(u64, String)>,
     debug_jobs: Arc<RwLock<HashMap<String, DebugJob>>>,
@@ -65,8 +61,6 @@ impl ServerRuntime {
             swarm_state: server.swarm_state.clone(),
             shared_context: Arc::clone(&server.shared_context),
             file_touch: server.file_touch.clone(),
-            channel_subscriptions: Arc::clone(&server.channel_subscriptions),
-            channel_subscriptions_by_session: Arc::clone(&server.channel_subscriptions_by_session),
             client_debug_state: Arc::clone(&server.client_debug_state),
             client_debug_response_tx: server.client_debug_response_tx.clone(),
             debug_jobs: Arc::clone(&server.debug_jobs),
@@ -215,8 +209,6 @@ impl ServerRuntime {
             Arc::clone(&self.swarm_state.plans),
             Arc::clone(&self.swarm_state.coordinators),
             self.file_touch.clone(),
-            Arc::clone(&self.channel_subscriptions),
-            Arc::clone(&self.channel_subscriptions_by_session),
             Arc::clone(&self.client_debug_state),
             self.client_debug_response_tx.clone(),
             Arc::clone(&self.event_history),
@@ -259,8 +251,6 @@ impl ServerRuntime {
             Arc::clone(&self.swarm_state.plans),
             Arc::clone(&self.swarm_state.coordinators),
             self.file_touch.clone(),
-            Arc::clone(&self.channel_subscriptions),
-            Arc::clone(&self.channel_subscriptions_by_session),
             Arc::clone(&self.client_debug_state),
             self.client_debug_response_tx.clone(),
             Arc::clone(&self.debug_jobs),

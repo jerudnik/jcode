@@ -5,10 +5,10 @@ use crate::background::TaskResult;
 use crate::plan::PlanItem;
 use crate::protocol::{
     AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, ContextEntry,
-    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmChannelInfo, SwarmFleetEntry,
-    ToolCallSummary, comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
+    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, ToolCallSummary,
+    comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
     default_comm_cleanup_target_statuses, default_comm_run_await_statuses,
-    format_comm_awaited_members_with_reports, format_comm_channels, format_comm_context_entries,
+    format_comm_awaited_members_with_reports, format_comm_context_entries,
     format_comm_context_history, format_comm_members, format_comm_plan_followup,
     format_comm_plan_status, format_comm_status_snapshot, format_comm_tool_summary,
     latest_assistant_comm_report, resolve_optional_comm_target_session,
@@ -1182,7 +1182,6 @@ async fn broadcast_plan_alert(ctx: &ToolContext, message: &str) -> Result<()> {
         from_session: ctx.session_id.clone(),
         message: message.to_string(),
         to_session: None,
-        channel: None,
         wake: None,
         delivery: None,
         tldr: Some("run_plan paused: credential failure wave; fix auth then retry".to_string()),
@@ -1741,10 +1740,6 @@ fn default_await_target_statuses() -> Vec<String> {
     default_comm_await_target_statuses()
 }
 
-fn format_channels(channels: &[SwarmChannelInfo]) -> ToolOutput {
-    ToolOutput::new(format_comm_channels(channels))
-}
-
 /// Render the swarm model catalog for the `list_models` action: the current
 /// (spawn-default) model, any config pin, and one line per route with
 /// availability, auth method, and a relative cost estimate.
@@ -1868,7 +1863,7 @@ pub struct CommunicateTool {
 
 impl CommunicateTool {
     pub fn new() -> Self {
-        const BASE_DESCRIPTION: &str = "Coordinate agents. Any agent can spawn child agents, and those children can spawn their own, forming a recursive spawn tree with no depth limit (growth is bounded only by the total swarm member cap). For spawn, prefer providing a prompt so the new agent starts with a concrete task instead of idling. Spawned/assigned agents automatically report their final response back to the agent that spawned them; you can stop any agent in the subtree you spawned.\n\nCommunication: prefer structural dataflow (task-graph artifacts via complete_node) over chat, and DMs for point-to-point coordination. broadcast reaches only your spawned subtree (whole swarm for the coordinator) and should be rare; channels and shared-context are discouraged legacy primitives.";
+        const BASE_DESCRIPTION: &str = "Coordinate agents. Any agent can spawn child agents, and those children can spawn their own, forming a recursive spawn tree with no depth limit (growth is bounded only by the total swarm member cap). For spawn, prefer providing a prompt so the new agent starts with a concrete task instead of idling. Spawned/assigned agents automatically report their final response back to the agent that spawned them; you can stop any agent in the subtree you spawned.\n\nCommunication: prefer structural dataflow (task-graph artifacts via complete_node) over chat, and DMs for point-to-point coordination. broadcast reaches only your spawned subtree (whole swarm for the coordinator) and should be rare; shared-context is a discouraged legacy primitive.";
         let swarm_prompt = crate::prompt::load_swarm_prompt(None);
         let description = if swarm_prompt.is_empty() {
             BASE_DESCRIPTION.to_string()
@@ -1892,8 +1887,6 @@ struct CommunicateInput {
     message: Option<String>,
     #[serde(default)]
     to_session: Option<String>,
-    #[serde(default)]
-    channel: Option<String>,
     #[serde(default)]
     proposer_session: Option<String>,
     #[serde(default)]
@@ -2026,12 +2019,12 @@ impl Tool for CommunicateTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["share", "share_append", "read", "message", "broadcast", "dm", "channel", "list", "list_channels", "channel_members",
+                    "enum": ["share", "share_append", "read", "message", "broadcast", "dm", "list",
                              "propose_plan", "approve_plan", "reject_plan", "spawn", "stop", "assign_role",
                              "status", "report", "plan_status", "summary", "read_context", "resync_plan", "assign_task", "assign_next", "fill_slots", "run_plan", "cleanup",
                              "task_graph", "expand_node", "complete_node", "inject_gap",
                              "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
-                             "subscribe_channel", "unsubscribe_channel", "await_members", "list_models", "list_swarms"],
+                             "await_members", "list_models", "list_swarms"],
                     "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection. Use list_swarms for the live fleet dashboard snapshot."
                 },
                 "key": {
@@ -2043,11 +2036,11 @@ impl Tool for CommunicateTool {
                 },
                 "message": {
                     "type": "string",
-                    "description": "Message body. For action=message, routes by fields provided: with to_session it is a DM, with channel it posts to that channel, with neither it broadcasts to your spawned subtree. For action=report, this is the completion report body."
+                    "description": "Message body. For action=message, routes by fields provided: with to_session it is a DM, with neither it broadcasts to your spawned subtree. For action=report, this is the completion report body."
                 },
                 "tldr": {
                     "type": "string",
-                    "description": "One-line summary (aim for under 120 chars) of the message/report. Required for message/broadcast/dm/channel/report when the body is longer than 240 chars. The recipient's UI shows this collapsed with an expand control instead of the full body."
+                    "description": "One-line summary (aim for under 120 chars) of the message/report. Required for message/broadcast/dm/report when the body is longer than 240 chars. The recipient's UI shows this collapsed with an expand control instead of the full body."
                 },
                 "status": {
                     "type": "string",
@@ -2064,10 +2057,6 @@ impl Tool for CommunicateTool {
                 "to_session": {
                     "type": "string",
                     "description": "Target session for actions that address one agent (dm, and as an alias for target_session). Accepts an exact session ID or a unique friendly name within the swarm. Interchangeable with target_session. If a friendly name is ambiguous, run swarm list and use the exact session ID."
-                },
-                "channel": {
-                    "type": "string",
-                    "description": "Channel name. For action=channel (or action=message with a channel) the message goes to subscribers of this channel. Also used by subscribe_channel/unsubscribe_channel/channel_members. Discouraged: prefer DMs and task-graph artifacts over ad hoc channels."
                 },
                 "proposer_session": { "type": "string" },
                 "reason": { "type": "string" },
@@ -2177,7 +2166,7 @@ impl Tool for CommunicateTool {
                 "delivery": {
                     "type": "string",
                     "enum": ["notify", "interrupt", "wake"],
-                    "description": "Optional delivery mode for dm/channel messaging."
+                    "description": "Optional delivery mode for dm messaging."
                 },
                 "plan_items": {
                     "type": "array",
@@ -2301,23 +2290,20 @@ impl Tool for CommunicateTool {
 
             "message" => {
                 // `message` is the general-purpose send: it routes by the fields
-                // provided. With `to_session` it acts as a DM, with `channel` it
-                // posts to that channel, and with neither it broadcasts to the
-                // sender's spawned subtree (whole swarm only for the coordinator).
+                // provided. With `to_session` it acts as a DM, and with neither it
+                // broadcasts to the sender's spawned subtree (whole swarm only for the coordinator).
                 let message = params
                     .message
                     .ok_or_else(|| anyhow::anyhow!("'message' is required for message action"))?;
                 let tldr = validate_swarm_tldr(params.tldr.as_deref(), &message, "this message")
                     .map_err(|e| anyhow::anyhow!(e))?;
                 let to_session = params.to_session.clone();
-                let channel = params.channel.clone();
 
                 let request = Request::CommMessage {
                     id: REQUEST_ID,
                     from_session: ctx.session_id.clone(),
                     message: message.clone(),
                     to_session: to_session.clone(),
-                    channel: channel.clone(),
                     wake: params.wake,
                     delivery: params.delivery,
                     tldr,
@@ -2326,16 +2312,11 @@ impl Tool for CommunicateTool {
                 match send_request(request).await {
                     Ok(response) => {
                         ensure_success(&response)?;
-                        let confirmation = match (to_session, channel) {
-                            (Some(target), _) => {
+                        let confirmation = match to_session {
+                            Some(target) => {
                                 format!("Direct message sent to {}: {}", target, message)
                             }
-                            (None, Some(channel)) => {
-                                format!("Channel message sent to #{}: {}", channel, message)
-                            }
-                            (None, None) => {
-                                format!("Broadcast sent to your spawned subtree: {}", message)
-                            }
+                            None => format!("Broadcast sent to your spawned subtree: {}", message),
                         };
                         Ok(ToolOutput::new(confirmation))
                     }
@@ -2345,9 +2326,9 @@ impl Tool for CommunicateTool {
 
             "broadcast" => {
                 // `broadcast` targets the sender's spawned subtree (the swarm
-                // coordinator reaches the whole swarm). Any `to_session`/
-                // `channel` is intentionally ignored so the action stays an
-                // unambiguous group send; use `message`/`dm`/`channel` to target.
+                // coordinator reaches the whole swarm). Any `to_session` is intentionally
+                // ignored so the action stays an unambiguous group send; use `message`/`dm`
+                // to target.
                 // Prefer DMs or task-graph artifacts; group sends are for rare
                 // coordination moments, not routine status updates.
                 let message = params
@@ -2361,7 +2342,6 @@ impl Tool for CommunicateTool {
                     from_session: ctx.session_id.clone(),
                     message: message.clone(),
                     to_session: None,
-                    channel: None,
                     wake: params.wake,
                     delivery: params.delivery,
                     tldr,
@@ -2394,7 +2374,6 @@ impl Tool for CommunicateTool {
                     from_session: ctx.session_id.clone(),
                     message: message.clone(),
                     to_session: Some(to_session.clone()),
-                    channel: None,
                     delivery: params.delivery,
                     wake: params.wake,
                     tldr,
@@ -2409,40 +2388,6 @@ impl Tool for CommunicateTool {
                         )))
                     }
                     Err(e) => Err(anyhow::anyhow!("Failed to send DM: {}", e)),
-                }
-            }
-
-            "channel" => {
-                let message = params
-                    .message
-                    .ok_or_else(|| anyhow::anyhow!("'message' is required for channel action"))?;
-                let tldr =
-                    validate_swarm_tldr(params.tldr.as_deref(), &message, "this channel message")
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                let channel = params
-                    .channel
-                    .ok_or_else(|| anyhow::anyhow!("'channel' is required for channel action"))?;
-
-                let request = Request::CommMessage {
-                    id: REQUEST_ID,
-                    from_session: ctx.session_id.clone(),
-                    message: message.clone(),
-                    to_session: None,
-                    channel: Some(channel.clone()),
-                    delivery: params.delivery,
-                    wake: params.wake,
-                    tldr,
-                };
-
-                match send_request(request).await {
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        Ok(ToolOutput::new(format!(
-                            "Channel message sent to #{}: {}",
-                            channel, message
-                        )))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to send channel message: {}", e)),
                 }
             }
 
@@ -2461,56 +2406,6 @@ impl Tool for CommunicateTool {
                         Ok(ToolOutput::new("No agents found."))
                     }
                     Err(e) => Err(anyhow::anyhow!("Failed to list agents: {}", e)),
-                }
-            }
-
-            "list_channels" => {
-                let request = Request::CommListChannels {
-                    id: REQUEST_ID,
-                    session_id: ctx.session_id.clone(),
-                };
-
-                match send_request(request).await {
-                    Ok(ServerEvent::CommChannels { channels, .. }) => {
-                        Ok(format_channels(&channels))
-                    }
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        Ok(ToolOutput::new("No channels found."))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to list channels: {}", e)),
-                }
-            }
-
-            "channel_members" => {
-                let channel = params.channel.ok_or_else(|| {
-                    anyhow::anyhow!("'channel' is required for channel_members action")
-                })?;
-                let request = Request::CommChannelMembers {
-                    id: REQUEST_ID,
-                    session_id: ctx.session_id.clone(),
-                    channel: channel.clone(),
-                };
-
-                match send_request(request).await {
-                    Ok(ServerEvent::CommMembers { members, .. }) => {
-                        let mut output = format!("Members subscribed to #{}:\n\n", channel);
-                        if members.is_empty() {
-                            output.push_str("  (none)\n");
-                        } else {
-                            for member in members {
-                                let name = member.friendly_name.unwrap_or(member.session_id);
-                                let status = member.status.unwrap_or_else(|| "unknown".to_string());
-                                output.push_str(&format!("  {} ({})\n", name, status));
-                            }
-                        }
-                        Ok(ToolOutput::new(output))
-                    }
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        Ok(ToolOutput::new("No channel members found."))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to list channel members: {}", e)),
                 }
             }
 
@@ -3235,46 +3130,6 @@ impl Tool for CommunicateTool {
                 }
             }
 
-            "subscribe_channel" => {
-                let channel = params.channel.ok_or_else(|| {
-                    anyhow::anyhow!("'channel' is required for subscribe_channel action")
-                })?;
-
-                let request = Request::CommSubscribeChannel {
-                    id: REQUEST_ID,
-                    session_id: ctx.session_id.clone(),
-                    channel: channel.clone(),
-                };
-
-                match send_request(request).await {
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        Ok(ToolOutput::new(format!("Subscribed to #{}", channel)))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to subscribe: {}", e)),
-                }
-            }
-
-            "unsubscribe_channel" => {
-                let channel = params.channel.ok_or_else(|| {
-                    anyhow::anyhow!("'channel' is required for unsubscribe_channel action")
-                })?;
-
-                let request = Request::CommUnsubscribeChannel {
-                    id: REQUEST_ID,
-                    session_id: ctx.session_id.clone(),
-                    channel: channel.clone(),
-                };
-
-                match send_request(request).await {
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        Ok(ToolOutput::new(format!("Unsubscribed from #{}", channel)))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to unsubscribe: {}", e)),
-                }
-            }
-
             "await_members" => {
                 let target_status = params
                     .target_status
@@ -3342,9 +3197,9 @@ impl Tool for CommunicateTool {
             }
 
             _ => Err(anyhow::anyhow!(
-                "Unknown action '{}'. Valid actions: share, share_append, read, message, broadcast, dm, channel, list, list_channels, channel_members, \
+                "Unknown action '{}'. Valid actions: share, share_append, read, message, broadcast, dm, list, \
                  propose_plan, approve_plan, reject_plan, spawn, stop, assign_role, status, report, plan_status, summary, read_context, \
-                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, subscribe_channel, unsubscribe_channel, await_members. \
+                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, await_members. \
                  To read messages addressed to you, use action='read'.",
                 params.action
             )),

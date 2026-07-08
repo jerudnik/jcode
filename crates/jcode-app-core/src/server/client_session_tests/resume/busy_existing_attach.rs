@@ -78,14 +78,6 @@ async fn handle_resume_session_allows_live_attach_when_existing_agent_is_busy() 
     let swarm_members = Arc::new(RwLock::new(HashMap::<String, SwarmMember>::new()));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::<String, HashSet<String>>::new()));
     let file_touch = FileTouchService::new();
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::<
-        String,
-        HashMap<String, HashSet<String>>,
-    >::new()));
-    let channel_subscriptions_by_session = Arc::new(RwLock::new(HashMap::<
-        String,
-        HashMap<String, HashSet<String>>,
-    >::new()));
     let swarm_plans = Arc::new(RwLock::new(HashMap::<String, VersionedPlan>::new()));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::<String, String>::new()));
     let client_count = Arc::new(RwLock::new(2usize));
@@ -120,8 +112,6 @@ async fn handle_resume_session_allows_live_attach_when_existing_agent_is_busy() 
         &swarm_members,
         &swarms_by_id,
         &file_touch,
-        &channel_subscriptions,
-        &channel_subscriptions_by_session,
         &swarm_plans,
         &swarm_coordinators,
         &client_count,
