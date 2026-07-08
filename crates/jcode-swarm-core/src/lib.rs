@@ -3,7 +3,6 @@ pub mod control_log;
 use jcode_plan::PlanItem;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 pub const MAX_SWARM_COMPLETION_REPORT_CHARS: usize = 4000;
