@@ -2681,11 +2681,16 @@ async fn handle_swarm_verb(
                 }
             }
         }
-        SwarmVerb::Stop { member } => {
-            remote.comm_stop(member.clone(), false).await?;
+        SwarmVerb::Stop {
+            member,
+            cross_swarm,
+            force,
+        } => {
+            remote.comm_stop(member.clone(), cross_swarm, force).await?;
+            let suffix = if cross_swarm { " (cross-swarm)" } else { "" };
             app.push_display_message(DisplayMessage::system(format!(
-                "Stopping swarm member {}...",
-                member
+                "Stopping swarm member {}{}...",
+                member, suffix
             )));
         }
         SwarmVerb::Spawn { label, prompt } => {

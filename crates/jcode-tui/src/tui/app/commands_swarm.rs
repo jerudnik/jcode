@@ -29,7 +29,11 @@ pub(in crate::tui::app) enum SwarmVerb {
         session: Option<String>,
     },
     /// Stop a swarm member.
-    Stop { member: String },
+    Stop {
+        member: String,
+        cross_swarm: bool,
+        force: bool,
+    },
     /// Spawn a new swarm member with a label and optional initial prompt.
     Spawn {
         label: String,
@@ -65,12 +69,30 @@ pub(in crate::tui::app) fn parse_swarm_verb(trimmed: &str) -> Option<Result<Swar
             }
             Some(Ok(SwarmVerb::Start { node_id, session }))
         }
-        "stop" => match tokens.next() {
-            Some(member) if tokens.next().is_none() => Some(Ok(SwarmVerb::Stop {
-                member: member.to_string(),
-            })),
-            _ => Some(Err("Usage: /swarm stop <member>".to_string())),
-        },
+        "stop" => {
+            let usage = "Usage: /swarm stop <member> [--cross-swarm] [--force]";
+            let mut member = None;
+            let mut cross_swarm = false;
+            let mut force = false;
+            for token in tokens {
+                match token {
+                    "--cross-swarm" | "-x" => cross_swarm = true,
+                    "--force" | "-f" => force = true,
+                    other if !other.starts_with('-') && member.is_none() => {
+                        member = Some(other.to_string());
+                    }
+                    _ => return Some(Err(usage.to_string())),
+                }
+            }
+            match member {
+                Some(member) => Some(Ok(SwarmVerb::Stop {
+                    member,
+                    cross_swarm,
+                    force,
+                })),
+                None => Some(Err(usage.to_string())),
+            }
+        }
         "spawn" => match tokens.next() {
             Some(label) => {
                 let prompt = tokens.collect::<Vec<_>>().join(" ");
@@ -303,6 +325,30 @@ pub(in crate::tui::app) fn render_swarm_fleet(swarms: &[SwarmFleetEntry]) -> Str
                 target.instance_id
             ));
         }
+        if !swarm.members.is_empty() {
+            lines.push("  members:".to_string());
+            for member in swarm.members.iter().take(8) {
+                let name = member
+                    .friendly_name
+                    .as_deref()
+                    .unwrap_or(member.session_id.as_str());
+                let kind = member.subagent_type.as_deref().unwrap_or("untyped");
+                let node = member
+                    .assigned_instance_id
+                    .as_ref()
+                    .map(|i| format!("  node:{i}"))
+                    .unwrap_or_default();
+                lines.push(format!("    • {name}  {}  {kind}{node}", member.status));
+            }
+            let more = swarm.members.len().saturating_sub(8);
+            if more > 0 {
+                lines.push(format!("  … +{more} more"));
+            }
+            lines.push(
+                "    → stop a member: /swarm stop <name> --cross-swarm  (add --force if you don't own it)"
+                    .to_string(),
+            );
+        }
     }
     lines.join("\n")
 }
@@ -434,6 +480,7 @@ pub(in crate::tui::app) fn render_plan_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::SwarmFleetMember;
     use std::collections::BTreeMap;
 
     fn member(session_id: &str, status: &str, tag: Option<&str>) -> SwarmMemberStatus {
@@ -520,9 +567,27 @@ mod tests {
     #[test]
     fn parse_stop_and_spawn() {
         assert_eq!(
-            parse_swarm_verb("/swarm stop bat"),
+            parse_swarm_verb("/swarm stop x"),
             Some(Ok(SwarmVerb::Stop {
-                member: "bat".to_string()
+                member: "x".to_string(),
+                cross_swarm: false,
+                force: false,
+            }))
+        );
+        assert_eq!(
+            parse_swarm_verb("/swarm stop x --cross-swarm"),
+            Some(Ok(SwarmVerb::Stop {
+                member: "x".to_string(),
+                cross_swarm: true,
+                force: false,
+            }))
+        );
+        assert_eq!(
+            parse_swarm_verb("/swarm stop x --cross-swarm --force"),
+            Some(Ok(SwarmVerb::Stop {
+                member: "x".to_string(),
+                cross_swarm: true,
+                force: true,
             }))
         );
         assert!(matches!(parse_swarm_verb("/swarm stop"), Some(Err(_))));
@@ -631,7 +696,26 @@ mod tests {
             coordinator_name: Some("bat".to_string()),
             coordinator_status: Some("running".to_string()),
             member_count: 3,
-            members: Vec::new(),
+            members: vec![
+                SwarmFleetMember {
+                    session_id: "session_bat".to_string(),
+                    friendly_name: Some("bat".to_string()),
+                    status: "running".to_string(),
+                    subagent_type: Some("implement".to_string()),
+                    task_label: Some("Build feature".to_string()),
+                    swarm_id: Some("swarm-a".to_string()),
+                    assigned_instance_id: Some("impl-1".to_string()),
+                },
+                SwarmFleetMember {
+                    session_id: "session_verify".to_string(),
+                    friendly_name: Some("verifier".to_string()),
+                    status: "ready".to_string(),
+                    subagent_type: None,
+                    task_label: None,
+                    swarm_id: Some("swarm-a".to_string()),
+                    assigned_instance_id: None,
+                },
+            ],
             members_by_status: BTreeMap::from([("running".to_string(), 2)]),
             members_by_type: BTreeMap::from([("implement".to_string(), 1)]),
             plan,
@@ -651,6 +735,8 @@ mod tests {
         // Actionable surface: runnable instances (failed first) and the verb.
         assert!(out.contains("runnable: fix-1 (failed), verify-1 (ready)"));
         assert!(out.contains("→ act: /swarm start fix-1"));
+        assert!(out.contains("• bat  running  implement  node:impl-1"));
+        assert!(out.contains("/swarm stop"));
     }
 
     fn fleet_entry(swarm_id: &str, attention: bool) -> SwarmFleetEntry {
