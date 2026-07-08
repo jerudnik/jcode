@@ -1,8 +1,32 @@
 # Swarm Fleet Actions Plan
 
-Status: Proposed. Execution vehicle is an inline swarm (all workers
-`spawn_mode: "inline"`). This plan seeds the swarm task graph, assigns
-instances, and defines per-instance verification so the DAG is hill-climbable.
+Status: In progress. Workstreams A and C landed. Workstream B landed its
+structured selection model (B1) and an actionable text render; the nested
+drill-in *picker* (B2/B3) was deliberately deferred, see the note below.
+Execution vehicle is an inline swarm (all workers `spawn_mode: "inline"`).
+This plan seeds the swarm task graph, assigns instances, and defines
+per-instance verification so the DAG is hill-climbable.
+
+## Workstream B outcome (why the picker was deferred)
+
+`SwarmFleetEntry` carries no per-member session ids, only the coordinator and
+the plan's instance ids, and the `/swarm` drive verbs (`start`/`stop`/`plan`/
+`status`) act on the *caller's own* swarm's session. A nested
+swarm→member→stop picker would therefore be a UI that cannot actually dispatch
+into a foreign swarm without new wire plumbing (per-member session ids in the
+fleet response plus session-addressed control). Rather than ship a picker that
+lies about its reach, B shipped:
+
+- `fleet_selection_rows()` + `FleetSelection`/`FleetTarget`: a pure, structured,
+  attention-sorted model (unit-tested) that names each swarm's coordinator and
+  the concrete runnable instances (failed → ready → active).
+- An actionable `render_swarm_fleet`: swarms needing input sort first and are
+  flagged, and each swarm surfaces its runnable instance ids plus the exact
+  `/swarm start <id>` command to run.
+
+The real picker (B2/B3) is a clean follow-up once the fleet response grows
+per-member session ids and the control verbs accept a target session; the
+`FleetSelection` model is already the right shape to feed it.
 
 ## Why a swarm
 

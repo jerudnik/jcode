@@ -95,28 +95,148 @@ pub(in crate::tui::app) fn parse_swarm_verb(trimmed: &str) -> Option<Result<Swar
     }
 }
 
+/// One actionable plan instance surfaced from a fleet row, tagged with the
+/// plan state that makes it worth acting on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::tui::app) struct FleetTarget {
+    /// Plan instance id (the `/swarm start <id>` argument).
+    pub instance_id: String,
+    /// Plan state: `"failed"`, `"ready"`, or `"active"`.
+    pub state: &'static str,
+}
+
+/// A structured, actionable view of one live swarm, derived purely from a
+/// `SwarmFleetEntry`. This is the model behind the actionable fleet output:
+/// it names the swarm, its coordinator, whether it needs operator input, and
+/// the concrete plan instances worth driving next (failed → ready → active).
+///
+/// Wire reality: `SwarmFleetEntry` carries no per-member session ids, only the
+/// coordinator and the plan's instance ids. The `/swarm` drive verbs
+/// (`start`/`stop`/`plan`/`status`) act on the caller's own swarm, so we
+/// surface the instance ids to target rather than pretend to dispatch into a
+/// different swarm's session. Selecting a foreign swarm's work still requires
+/// being attached to that swarm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::tui::app) struct FleetSelection {
+    pub swarm_id: String,
+    pub coordinator_session_id: Option<String>,
+    /// Human-facing coordinator label (name → session id → "unknown").
+    pub coordinator_display: String,
+    pub needs_operator_input: bool,
+    /// Actionable instance targets, ordered failed → ready → active.
+    pub targets: Vec<FleetTarget>,
+}
+
+impl FleetSelection {
+    /// The single best next instance to jumpstart, if any: a failed instance
+    /// first (needs a retry), else a ready one.
+    pub(in crate::tui::app) fn primary_target(&self) -> Option<&FleetTarget> {
+        self.targets
+            .iter()
+            .find(|t| t.state == "failed")
+            .or_else(|| self.targets.iter().find(|t| t.state == "ready"))
+    }
+}
+
+/// Build the structured, attention-sorted selection model for a live fleet.
+/// Swarms needing operator input sort first; ties break by `swarm_id` so the
+/// order is stable. Each swarm's actionable instance targets are pulled from
+/// its plan (failed → ready → active).
+pub(in crate::tui::app) fn fleet_selection_rows(swarms: &[SwarmFleetEntry]) -> Vec<FleetSelection> {
+    let mut rows: Vec<FleetSelection> = swarms
+        .iter()
+        .map(|swarm| {
+            let coordinator_display = swarm
+                .coordinator_name
+                .as_deref()
+                .or(swarm.coordinator_session_id.as_deref())
+                .unwrap_or("unknown")
+                .to_string();
+            let mut targets = Vec::new();
+            for id in &swarm.plan.failed_ids {
+                targets.push(FleetTarget {
+                    instance_id: id.clone(),
+                    state: "failed",
+                });
+            }
+            for id in &swarm.plan.ready_ids {
+                targets.push(FleetTarget {
+                    instance_id: id.clone(),
+                    state: "ready",
+                });
+            }
+            for id in &swarm.plan.active_ids {
+                targets.push(FleetTarget {
+                    instance_id: id.clone(),
+                    state: "active",
+                });
+            }
+            FleetSelection {
+                swarm_id: swarm.swarm_id.clone(),
+                coordinator_session_id: swarm.coordinator_session_id.clone(),
+                coordinator_display,
+                needs_operator_input: swarm.needs_operator_input,
+                targets,
+            }
+        })
+        .collect();
+    // Attention first, then stable by swarm_id.
+    rows.sort_by(|a, b| {
+        b.needs_operator_input
+            .cmp(&a.needs_operator_input)
+            .then_with(|| a.swarm_id.cmp(&b.swarm_id))
+    });
+    rows
+}
+
 /// Render a live fleet/dashboard response from the daemon.
+///
+/// The output is actionable: swarms needing operator input are listed first
+/// and flagged, and each swarm surfaces the concrete instance ids worth
+/// driving next plus the exact `/swarm start <id>` command to run. The drive
+/// verbs act on the caller's own swarm (see `FleetSelection`), so we surface
+/// targets rather than dispatch across sessions.
 pub(in crate::tui::app) fn render_swarm_fleet(swarms: &[SwarmFleetEntry]) -> String {
     if swarms.is_empty() {
         return "No live swarms found.".to_string();
     }
 
-    let mut lines = vec!["Live swarms:".to_string()];
-    for swarm in swarms {
-        let coordinator = swarm
-            .coordinator_name
-            .as_deref()
-            .or(swarm.coordinator_session_id.as_deref())
-            .unwrap_or("unknown");
+    let selections = fleet_selection_rows(swarms);
+    // Index by swarm_id so we can render swarms attention-first while still
+    // reading the rich per-swarm detail from the original entries.
+    let by_id: BTreeMap<&str, &SwarmFleetEntry> = swarms
+        .iter()
+        .map(|swarm| (swarm.swarm_id.as_str(), swarm))
+        .collect();
+
+    let attention = selections.iter().filter(|s| s.needs_operator_input).count();
+    let mut lines = if attention > 0 {
+        vec![format!(
+            "Live swarms ({} total, {} need attention):",
+            selections.len(),
+            attention
+        )]
+    } else {
+        vec![format!("Live swarms ({} total):", selections.len())]
+    };
+
+    for selection in &selections {
+        let Some(swarm) = by_id.get(selection.swarm_id.as_str()) else {
+            continue;
+        };
         let coordinator_status = swarm.coordinator_status.as_deref().unwrap_or("unknown");
-        let attention = if swarm.needs_operator_input {
-            " attention"
+        let flag = if selection.needs_operator_input {
+            " ⚠ attention"
         } else {
             ""
         };
         lines.push(format!(
             "• {}: {} member(s), coordinator {} ({}){}",
-            swarm.swarm_id, swarm.member_count, coordinator, coordinator_status, attention
+            selection.swarm_id,
+            swarm.member_count,
+            selection.coordinator_display,
+            coordinator_status,
+            flag
         ));
         if !swarm.members_by_status.is_empty() {
             let statuses = swarm
@@ -155,6 +275,33 @@ pub(in crate::tui::app) fn render_swarm_fleet(swarms: &[SwarmFleetEntry]) -> Str
         }
         if let Some(offset) = swarm.control_log_offset {
             lines.push(format!("  control log offset: {offset}"));
+        }
+        // Actionable targets: name the runnable instances and the exact verb.
+        let runnable = selection
+            .targets
+            .iter()
+            .filter(|t| t.state == "failed" || t.state == "ready")
+            .collect::<Vec<_>>();
+        if !runnable.is_empty() {
+            let listed = runnable
+                .iter()
+                .take(4)
+                .map(|t| format!("{} ({})", t.instance_id, t.state))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let more = runnable.len().saturating_sub(4);
+            let suffix = if more > 0 {
+                format!(", +{more} more")
+            } else {
+                String::new()
+            };
+            lines.push(format!("  runnable: {listed}{suffix}"));
+        }
+        if let Some(target) = selection.primary_target() {
+            lines.push(format!(
+                "  → act: /swarm start {} (this swarm's session)",
+                target.instance_id
+            ));
         }
     }
     lines.join("\n")
@@ -493,12 +640,96 @@ mod tests {
             control_log_offset: Some(42),
         };
         let out = render_swarm_fleet(&[swarm]);
-        assert!(out.contains("Live swarms:"));
-        assert!(out.contains("swarm-a: 3 member(s), coordinator bat (running) attention"));
+        assert!(out.contains("Live swarms (1 total, 1 need attention):"));
+        assert!(out.contains("swarm-a: 3 member(s), coordinator bat (running) ⚠ attention"));
         assert!(out.contains("status: running:2"));
         assert!(out.contains("type: implement:1"));
         assert!(out.contains("plan: 4 instance(s), 1 active, 1 ready, 1 failed, mode deep"));
         assert!(out.contains("last activity: 12s ago"));
         assert!(out.contains("control log offset: 42"));
+        // Actionable surface: runnable instances (failed first) and the verb.
+        assert!(out.contains("runnable: fix-1 (failed), verify-1 (ready)"));
+        assert!(out.contains("→ act: /swarm start fix-1"));
+    }
+
+    fn fleet_entry(swarm_id: &str, attention: bool) -> SwarmFleetEntry {
+        SwarmFleetEntry {
+            swarm_id: swarm_id.to_string(),
+            coordinator_session_id: Some(format!("session_{swarm_id}")),
+            coordinator_name: Some(swarm_id.to_string()),
+            coordinator_status: Some("running".to_string()),
+            member_count: 1,
+            members_by_status: BTreeMap::new(),
+            members_by_type: BTreeMap::new(),
+            plan: PlanGraphStatus::empty_for_swarm(swarm_id),
+            needs_operator_input: attention,
+            tokens: None,
+            last_activity_age_secs: None,
+            control_log_offset: None,
+        }
+    }
+
+    #[test]
+    fn fleet_selection_sorts_attention_first_then_by_id() {
+        let calm_z = fleet_entry("zulu", false);
+        let calm_a = fleet_entry("alpha", false);
+        let hot = fleet_entry("mike", true);
+        let rows = fleet_selection_rows(&[calm_z, calm_a, hot]);
+        let order: Vec<&str> = rows.iter().map(|r| r.swarm_id.as_str()).collect();
+        // Attention swarm first, then the calm swarms alphabetically.
+        assert_eq!(order, vec!["mike", "alpha", "zulu"]);
+        assert!(rows[0].needs_operator_input);
+    }
+
+    #[test]
+    fn fleet_selection_targets_order_failed_then_ready_then_active() {
+        let mut entry = fleet_entry("swarm-x", false);
+        entry.plan.failed_ids = vec!["fix-1".to_string()];
+        entry.plan.ready_ids = vec!["verify-1".to_string()];
+        entry.plan.active_ids = vec!["impl-1".to_string()];
+        let rows = fleet_selection_rows(&[entry]);
+        let selection = &rows[0];
+        let states: Vec<(&str, &str)> = selection
+            .targets
+            .iter()
+            .map(|t| (t.instance_id.as_str(), t.state))
+            .collect();
+        assert_eq!(
+            states,
+            vec![
+                ("fix-1", "failed"),
+                ("verify-1", "ready"),
+                ("impl-1", "active")
+            ]
+        );
+        // Primary target prefers the failed instance (needs a retry).
+        assert_eq!(
+            selection.primary_target().map(|t| t.instance_id.as_str()),
+            Some("fix-1")
+        );
+    }
+
+    #[test]
+    fn fleet_selection_primary_target_falls_back_to_ready() {
+        let mut entry = fleet_entry("swarm-y", false);
+        entry.plan.ready_ids = vec!["verify-2".to_string()];
+        entry.plan.active_ids = vec!["impl-2".to_string()];
+        let rows = fleet_selection_rows(&[entry]);
+        // No failed instance: primary target is the ready one, not the active.
+        assert_eq!(
+            rows[0].primary_target().map(|t| t.instance_id.as_str()),
+            Some("verify-2")
+        );
+    }
+
+    #[test]
+    fn fleet_selection_no_runnable_targets_when_only_active() {
+        let mut entry = fleet_entry("swarm-z", false);
+        entry.plan.active_ids = vec!["impl-3".to_string()];
+        let rows = fleet_selection_rows(&[entry]);
+        // An active-only swarm has an active target but nothing to jumpstart.
+        assert!(rows[0].primary_target().is_none());
+        let out = render_swarm_fleet(&[fleet_entry("swarm-z", false)]);
+        assert!(!out.contains("→ act:"));
     }
 }
