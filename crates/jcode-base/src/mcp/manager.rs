@@ -4,10 +4,10 @@
 //! are managed by the pool and reused across sessions. Servers marked `shared: false`
 //! (e.g., Playwright with browser state) are spawned per-session.
 
-use super::client::{McpClient, McpHandle};
+use super::client::{MAX_OWNED_MCP_CHILDREN, McpClient, McpHandle, OwnedChildPermit};
 use super::pool::SharedMcpPool;
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef, ToolCallResult};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -161,10 +161,24 @@ impl McpManager {
             let mut spawn_handles = Vec::new();
 
             for (name, config) in owned_servers {
+                let Some(permit) = OwnedChildPermit::try_acquire() else {
+                    crate::logging::warn(&format!(
+                        "MCP: owned child cap {} reached; not spawning '{}'",
+                        MAX_OWNED_MCP_CHILDREN, name
+                    ));
+                    total_failures.push((name.clone(), "owned MCP child cap reached".to_string()));
+                    continue;
+                };
                 let name = name.clone();
                 let config = config.clone();
                 let handle = tokio::spawn(async move {
-                    let result = McpClient::connect(name.clone(), &config).await;
+                    let result = match McpClient::connect(name.clone(), &config).await {
+                        Ok(mut client) => {
+                            client.attach_child_permit(permit);
+                            Ok(client)
+                        }
+                        Err(e) => Err(e),
+                    };
                     (name, result)
                 });
                 spawn_handles.push(handle);
@@ -226,9 +240,15 @@ impl McpManager {
         }
 
         // Owned (non-shared or no pool available)
-        let client = McpClient::connect(name.to_string(), config)
+        let Some(permit) = OwnedChildPermit::try_acquire() else {
+            return Err(anyhow!(
+                "owned MCP child cap {MAX_OWNED_MCP_CHILDREN} reached; not spawning '{name}'"
+            ));
+        };
+        let mut client = McpClient::connect(name.to_string(), config)
             .await
             .with_context(|| format!("Failed to connect to MCP server '{}'", name))?;
+        client.attach_child_permit(permit);
 
         self.owned_clients
             .write()
