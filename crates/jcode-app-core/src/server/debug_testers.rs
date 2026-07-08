@@ -1,6 +1,14 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
+/// Max concurrent live testers a single daemon may have spawned.
+const MAX_TESTERS: usize = 8;
+/// A tester must not spawn further testers. Depth 0 = the real daemon; a
+/// spawned tester runs at depth 1 and is refused if it tries to spawn again.
+const MAX_TESTER_DEPTH: u32 = 1;
+/// Env var threaded to each spawned tester carrying its spawn depth.
+const TESTER_DEPTH_ENV: &str = "JCODE_TESTER_DEPTH";
+
 /// Execute tester commands
 pub(super) async fn execute_tester_command(command: &str) -> Result<String> {
     let trimmed = command.trim();
@@ -55,8 +63,46 @@ fn save_testers(testers: &[serde_json::Value]) -> Result<()> {
     Ok(())
 }
 
+/// Policy gate for spawning a tester. Pure so it can be unit-tested.
+fn check_tester_spawn_allowed(depth: u32, live_testers: usize) -> Result<()> {
+    if depth >= MAX_TESTER_DEPTH {
+        return Err(anyhow::anyhow!(
+            "tester:spawn refused: max tester depth {MAX_TESTER_DEPTH} reached; \
+             a tester must not spawn further testers"
+        ));
+    }
+    if live_testers >= MAX_TESTERS {
+        return Err(anyhow::anyhow!(
+            "tester:spawn refused: {live_testers} live testers already running \
+             (cap {MAX_TESTERS}); stop some with tester:<id>:stop"
+        ));
+    }
+    Ok(())
+}
+
+/// Load testers.json, drop entries whose pid is no longer alive, persist the
+/// pruned list, and return it. Prevents stale entries from wedging the cap.
+fn prune_dead_testers() -> Result<Vec<serde_json::Value>> {
+    let mut testers = load_testers()?;
+    testers.retain(|t| {
+        t.get("pid")
+            .and_then(|p| p.as_u64())
+            .map(|pid| pid != 0 && crate::server::lifecycle::process_alive(pid as u32))
+            .unwrap_or(false)
+    });
+    save_testers(&testers)?;
+    Ok(testers)
+}
+
 async fn spawn_tester(opts: serde_json::Value) -> Result<String> {
     use std::process::Stdio;
+
+    let depth: u32 = std::env::var(TESTER_DEPTH_ENV)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let live = prune_dead_testers()?;
+    check_tester_spawn_allowed(depth, live.len())?;
 
     let id = format!("tester_{}", crate::id::new_id("tui"));
     let cwd = opts.get("cwd").and_then(|v| v.as_str()).unwrap_or(".");
@@ -113,6 +159,7 @@ async fn spawn_tester(opts: serde_json::Value) -> Result<String> {
     let mut cmd = tokio::process::Command::new(&binary_path);
     cmd.current_dir(cwd);
     cmd.env(jcode_selfdev_types::CLIENT_SELFDEV_ENV, "1");
+    cmd.env(TESTER_DEPTH_ENV, (depth + 1).to_string());
     cmd.env(
         "JCODE_DEBUG_CMD_PATH",
         debug_cmd.to_string_lossy().to_string(),
@@ -327,6 +374,31 @@ async fn execute_tester_subcommand(
             return Ok(response);
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+#[cfg(test)]
+mod tester_spawn_policy_tests {
+    use super::*;
+
+    #[test]
+    fn allows_root_daemon_with_no_live_testers() {
+        assert!(check_tester_spawn_allowed(0, 0).is_ok());
+    }
+
+    #[test]
+    fn refuses_at_live_tester_cap() {
+        assert!(check_tester_spawn_allowed(0, MAX_TESTERS).is_err());
+    }
+
+    #[test]
+    fn refuses_at_max_tester_depth() {
+        assert!(check_tester_spawn_allowed(MAX_TESTER_DEPTH, 0).is_err());
+    }
+
+    #[test]
+    fn allows_one_below_live_tester_cap() {
+        assert!(check_tester_spawn_allowed(0, MAX_TESTERS - 1).is_ok());
     }
 }
 
