@@ -9,8 +9,9 @@
 //! Vocabulary: a plan node is an "instance"; its kind displays as "phase".
 
 use crate::plan::PlanItem;
-use crate::protocol::{PlanGraphStatus, SwarmMemberStatus};
+use crate::protocol::{PlanGraphStatus, SwarmFleetEntry, SwarmMemberStatus};
 use crate::swarm_verbs::resolve_member_type;
+use std::collections::BTreeMap;
 
 /// A parsed `/swarm` verb. `/swarm`, `/swarm on`, and `/swarm off` are not
 /// verbs; they keep their existing feature-toggle handling.
@@ -20,6 +21,8 @@ pub(in crate::tui::app) enum SwarmVerb {
     Status,
     /// Request and render the plan/DAG status summary.
     Plan,
+    /// Request and render the live fleet dashboard summary.
+    Fleet,
     /// Wedge-jumpstart: move one instance forward with the right verb.
     Start {
         node_id: Option<String>,
@@ -34,7 +37,7 @@ pub(in crate::tui::app) enum SwarmVerb {
     },
 }
 
-pub(in crate::tui::app) const SWARM_VERB_USAGE: &str = "Usage: /swarm [status|plan|start [instance] [session]|stop <member>|spawn <label> [prompt]|on|off]";
+pub(in crate::tui::app) const SWARM_VERB_USAGE: &str = "Usage: /swarm [status|plan|fleet|start [instance] [session]|stop <member>|spawn <label> [prompt]|on|off]";
 
 /// Parse a `/swarm <verb> ...` command. Returns `None` when the input is not
 /// a swarm verb (so feature-toggle handling can run), `Some(Err)` on a
@@ -49,6 +52,9 @@ pub(in crate::tui::app) fn parse_swarm_verb(trimmed: &str) -> Option<Result<Swar
     match verb {
         "status" | "roster" | "members" => Some(Ok(SwarmVerb::Status)),
         "plan" | "dag" => Some(Ok(SwarmVerb::Plan)),
+        "fleet" | "swarms" | "list_swarms" | "fleet_status" | "list_fleet" => {
+            Some(Ok(SwarmVerb::Fleet))
+        }
         "start" | "jumpstart" => {
             let node_id = tokens.next().map(str::to_string);
             let session = tokens.next().map(str::to_string);
@@ -89,6 +95,71 @@ pub(in crate::tui::app) fn parse_swarm_verb(trimmed: &str) -> Option<Result<Swar
     }
 }
 
+/// Render a live fleet/dashboard response from the daemon.
+pub(in crate::tui::app) fn render_swarm_fleet(swarms: &[SwarmFleetEntry]) -> String {
+    if swarms.is_empty() {
+        return "No live swarms found.".to_string();
+    }
+
+    let mut lines = vec!["Live swarms:".to_string()];
+    for swarm in swarms {
+        let coordinator = swarm
+            .coordinator_name
+            .as_deref()
+            .or(swarm.coordinator_session_id.as_deref())
+            .unwrap_or("unknown");
+        let coordinator_status = swarm.coordinator_status.as_deref().unwrap_or("unknown");
+        let attention = if swarm.needs_operator_input {
+            " attention"
+        } else {
+            ""
+        };
+        lines.push(format!(
+            "• {}: {} member(s), coordinator {} ({}){}",
+            swarm.swarm_id, swarm.member_count, coordinator, coordinator_status, attention
+        ));
+        if !swarm.members_by_status.is_empty() {
+            let statuses = swarm
+                .members_by_status
+                .iter()
+                .map(|(status, count)| format!("{status}:{count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("  status: {statuses}"));
+        }
+        if !swarm.members_by_type.is_empty() {
+            let types = swarm
+                .members_by_type
+                .iter()
+                .map(|(kind, count)| format!("{kind}:{count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("  type: {types}"));
+        }
+        lines.push(format!(
+            "  plan: {} instance(s), {} active, {} ready, {} failed, mode {}",
+            swarm.plan.item_count,
+            swarm.plan.active_ids.len(),
+            swarm.plan.ready_ids.len(),
+            swarm.plan.failed_ids.len(),
+            swarm.plan.mode
+        ));
+        if let Some(tokens) = &swarm.tokens {
+            lines.push(format!(
+                "  tokens: in {}, out {}, messages {}",
+                tokens.input_tokens, tokens.output_tokens, tokens.messages_with_token_usage
+            ));
+        }
+        if let Some(age) = swarm.last_activity_age_secs {
+            lines.push(format!("  last activity: {age}s ago"));
+        }
+        if let Some(offset) = swarm.control_log_offset {
+            lines.push(format!("  control log offset: {offset}"));
+        }
+    }
+    lines.join("\n")
+}
+
 /// The plan instance a member is currently assigned to, if any.
 fn assigned_instance<'a>(
     member: &SwarmMemberStatus,
@@ -103,14 +174,12 @@ fn assigned_instance<'a>(
 /// instance's phase (when known), else Agent-tool preset, else free-form
 /// swarm tag, else untyped.
 ///
-/// Note: the `swarm_plan` wire event does not currently carry per-instance
-/// phase (`kind` lives server-side in `NodeMeta`), so tier 1 resolves from
-/// the member's tag when it matches an assigned instance; the shared
-/// resolver in `jcode_app_core::swarm_verbs` is ready for the field once the
-/// wire carries it.
+/// Note: older `swarm_plan` wire events did not carry per-instance phase;
+/// those legacy events still fall back to the assigned member tag.
 pub(in crate::tui::app) fn render_swarm_roster(
     members: &[SwarmMemberStatus],
     items: &[PlanItem],
+    phases_by_id: &BTreeMap<String, String>,
 ) -> String {
     if members.is_empty() {
         return "No swarm members known for this session yet.".to_string();
@@ -123,13 +192,11 @@ pub(in crate::tui::app) fn render_swarm_roster(
             .unwrap_or_else(|| member.session_id.chars().take(12).collect());
         let instance = assigned_instance(member, items);
         // Tier 1 uses the assigned instance's phase when the wire carries it;
-        // today it does not, so an assigned member's tag doubles as its
-        // phase and unassigned members fall through to preset/tag.
-        let resolved = resolve_member_type(
-            instance.and(member.subagent_type.as_deref()),
-            None,
-            member.subagent_type.as_deref(),
-        );
+        // legacy events without phases fall back to the member tag.
+        let assigned_phase = instance
+            .and_then(|item| phases_by_id.get(&item.id).map(String::as_str))
+            .or_else(|| instance.and(member.subagent_type.as_deref()));
+        let resolved = resolve_member_type(assigned_phase, None, member.subagent_type.as_deref());
         let mut line = format!("• {} — {} — {}", name, member.status, resolved.display());
         if let Some(role) = member.role.as_deref()
             && role == "coordinator"
@@ -267,6 +334,11 @@ mod tests {
         );
         assert_eq!(parse_swarm_verb("/swarm plan"), Some(Ok(SwarmVerb::Plan)));
         assert_eq!(parse_swarm_verb("/swarm dag"), Some(Ok(SwarmVerb::Plan)));
+        assert_eq!(parse_swarm_verb("/swarm fleet"), Some(Ok(SwarmVerb::Fleet)));
+        assert_eq!(
+            parse_swarm_verb("/swarm swarms"),
+            Some(Ok(SwarmVerb::Fleet))
+        );
     }
 
     #[test]
@@ -345,9 +417,10 @@ mod tests {
             member("owl", "ready", None),
         ];
         let items = vec![item("impl-1", "running", Some("bat"))];
-        let out = render_swarm_roster(&members, &items);
-        // Assigned member: tag doubles as phase, instance shown.
-        assert!(out.contains("bat — running — implement phase — instance impl-1"));
+        let phases_by_id = BTreeMap::from([("impl-1".to_string(), "verify".to_string())]);
+        let out = render_swarm_roster(&members, &items, &phases_by_id);
+        // Assigned member: instance phase overrides the worker tag.
+        assert!(out.contains("bat — running — verify phase — instance impl-1"));
         // Off-plan tagged member: free-form tag.
         assert!(out.contains("hen — ready — manager"));
         // Untyped member.
@@ -356,7 +429,15 @@ mod tests {
 
     #[test]
     fn roster_empty_message() {
-        assert!(render_swarm_roster(&[], &[]).contains("No swarm members"));
+        assert!(render_swarm_roster(&[], &[], &BTreeMap::new()).contains("No swarm members"));
+    }
+
+    #[test]
+    fn roster_legacy_plan_without_phase_falls_back_to_assigned_tag() {
+        let members = vec![member("bat", "running", Some("implement"))];
+        let items = vec![item("impl-1", "running", Some("bat"))];
+        let out = render_swarm_roster(&members, &items, &BTreeMap::new());
+        assert!(out.contains("bat — running — implement phase — instance impl-1"));
     }
 
     #[test]
@@ -382,5 +463,42 @@ mod tests {
     fn plan_status_empty_plan() {
         let summary = PlanGraphStatus::empty_for_swarm("s");
         assert!(render_plan_status(&summary, &[]).contains("empty"));
+    }
+
+    #[test]
+    fn fleet_empty_message() {
+        assert_eq!(render_swarm_fleet(&[]), "No live swarms found.");
+    }
+
+    #[test]
+    fn fleet_renders_live_rollup() {
+        let mut plan = PlanGraphStatus::empty_for_swarm("swarm-a");
+        plan.mode = "deep".to_string();
+        plan.item_count = 4;
+        plan.active_ids = vec!["impl-1".to_string()];
+        plan.ready_ids = vec!["verify-1".to_string()];
+        plan.failed_ids = vec!["fix-1".to_string()];
+        let swarm = SwarmFleetEntry {
+            swarm_id: "swarm-a".to_string(),
+            coordinator_session_id: Some("session_bat".to_string()),
+            coordinator_name: Some("bat".to_string()),
+            coordinator_status: Some("running".to_string()),
+            member_count: 3,
+            members_by_status: BTreeMap::from([("running".to_string(), 2)]),
+            members_by_type: BTreeMap::from([("implement".to_string(), 1)]),
+            plan,
+            needs_operator_input: true,
+            tokens: None,
+            last_activity_age_secs: Some(12),
+            control_log_offset: Some(42),
+        };
+        let out = render_swarm_fleet(&[swarm]);
+        assert!(out.contains("Live swarms:"));
+        assert!(out.contains("swarm-a: 3 member(s), coordinator bat (running) attention"));
+        assert!(out.contains("status: running:2"));
+        assert!(out.contains("type: implement:1"));
+        assert!(out.contains("plan: 4 instance(s), 1 active, 1 ready, 1 failed, mode deep"));
+        assert!(out.contains("last activity: 12s ago"));
+        assert!(out.contains("control log offset: 42"));
     }
 }

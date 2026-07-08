@@ -1972,7 +1972,7 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
 
     if trimmed.starts_with("/swarm ") {
         app.push_display_message(DisplayMessage::error(
-            "Usage: /swarm [on|off|status]".to_string(),
+            crate::tui::app::commands_swarm::SWARM_VERB_USAGE.to_string(),
         ));
         return true;
     }
