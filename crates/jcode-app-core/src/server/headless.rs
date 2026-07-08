@@ -12,6 +12,23 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
 
+/// Absolute backstop on total live sessions in one daemon. Sits well above the
+/// swarm membership cap (MAX_SWARM_MEMBERS = 1000) plus client-session headroom,
+/// so it never blocks legitimate use — it only stops a runaway session-creation
+/// loop from exhausting memory/handles.
+const MAX_TOTAL_SESSIONS: usize = 1500;
+
+/// Pure backstop gate (unit-testable): reject creation when already at the cap.
+fn session_backstop_allows(current_sessions: usize) -> anyhow::Result<()> {
+    if current_sessions >= MAX_TOTAL_SESSIONS {
+        return Err(anyhow::anyhow!(
+            "refusing to create session: {current_sessions} live sessions >= backstop \
+             cap {MAX_TOTAL_SESSIONS} — possible runaway session creation"
+        ));
+    }
+    Ok(())
+}
+
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 
 #[expect(
@@ -38,6 +55,14 @@ pub(super) async fn create_headless_session(
 ) -> Result<String> {
     let memory_enabled = crate::config::config().features.memory;
     let swarm_enabled = crate::config::config().features.swarm;
+
+    {
+        let current = sessions.read().await.len();
+        if let Err(e) = session_backstop_allows(current) {
+            crate::logging::warn(&format!("{e}"));
+            return Err(e);
+        }
+    }
 
     let working_dir = if let Some(path_str) = command.strip_prefix("create_session:") {
         let path_str = path_str.trim();
@@ -234,4 +259,24 @@ pub(super) async fn create_headless_session(
         "is_canary": selfdev_requested,
     })
     .to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_TOTAL_SESSIONS, session_backstop_allows};
+
+    #[test]
+    fn session_backstop_allows_zero_sessions() {
+        assert!(session_backstop_allows(0).is_ok());
+    }
+
+    #[test]
+    fn session_backstop_allows_one_below_cap() {
+        assert!(session_backstop_allows(MAX_TOTAL_SESSIONS - 1).is_ok());
+    }
+
+    #[test]
+    fn session_backstop_rejects_at_cap() {
+        assert!(session_backstop_allows(MAX_TOTAL_SESSIONS).is_err());
+    }
 }
