@@ -78,6 +78,23 @@ fn env_truthy(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Pure exit decision for the persistent monitor (unit-testable): exit only
+/// once no client has been connected for at least `idle_timeout_secs`.
+///
+/// We deliberately do NOT accelerate exit for "orphaned" (getppid()==1) servers:
+/// the daemon is spawned by the interactive client itself via a single setsid()
+/// (no separate launcher), so it reparents to init the instant the user quits
+/// normally. Treating that as orphaned would collapse the warm-reconnect window
+/// to the orphan grace for every ordinary session. Faster abandoned-daemon
+/// cleanup would need a real spawner-liveness heartbeat, not raw getppid().
+fn persistent_should_exit(
+    client_count: usize,
+    idle_elapsed_secs: u64,
+    idle_timeout_secs: u64,
+) -> bool {
+    client_count == 0 && idle_elapsed_secs >= idle_timeout_secs
+}
+
 pub(crate) fn metadata_path(socket_path: &Path) -> PathBuf {
     let filename = socket_path
         .file_name()
@@ -133,6 +150,41 @@ pub(crate) fn write_temporary_metadata(
 
 pub(crate) fn cleanup_temporary_metadata(socket_path: &Path) {
     let _ = std::fs::remove_file(metadata_path(socket_path));
+}
+
+/// Lifecycle monitor for the persistent (non-temporary) shared server. Runs
+/// ALWAYS - debug control (JCODE_DEBUG_CONTROL / self-dev) must NEVER disable
+/// it, which is exactly what let an orphaned self-dev daemon spin forever.
+/// Exits after `idle_timeout_secs` of no clients.
+pub(crate) fn spawn_persistent_lifecycle_monitor(
+    client_count: Arc<RwLock<usize>>,
+    server_name: String,
+    idle_timeout_secs: u64,
+) {
+    tokio::spawn(async move {
+        let mut idle_since: Option<Instant> = None;
+        let mut check_interval = tokio::time::interval(Duration::from_secs(10));
+        loop {
+            check_interval.tick().await;
+            let count = *client_count.read().await;
+            if count == 0 {
+                let since = *idle_since.get_or_insert_with(Instant::now);
+                let elapsed = since.elapsed().as_secs();
+                if persistent_should_exit(count, elapsed, idle_timeout_secs) {
+                    crate::logging::info(&format!(
+                        "Persistent server idle {elapsed}s with no clients; shutting down."
+                    ));
+                    let _ = crate::registry::unregister_server(&server_name).await;
+                    std::process::exit(super::EXIT_IDLE_TIMEOUT);
+                }
+            } else {
+                if idle_since.is_some() {
+                    crate::logging::info("Client connected. Idle timer cancelled.");
+                }
+                idle_since = None;
+            }
+        }
+    });
 }
 
 pub(crate) fn spawn_temporary_lifecycle_monitor(
@@ -311,6 +363,14 @@ mod tests {
             metadata_path(Path::new("/tmp/example/jcode.sock")),
             PathBuf::from("/tmp/example/jcode.sock.server.json")
         );
+    }
+
+    #[test]
+    fn persistent_exit_decision_respects_clients_and_idle_threshold() {
+        assert!(!persistent_should_exit(1, 99999, 300)); // client present: never
+        assert!(!persistent_should_exit(0, 299, 300)); // idle but under timeout
+        assert!(persistent_should_exit(0, 300, 300)); // idle past timeout
+        assert!(persistent_should_exit(0, 100_000, 300)); // long idle
     }
 
     #[cfg(unix)]
