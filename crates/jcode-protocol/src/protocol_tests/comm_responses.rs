@@ -167,6 +167,15 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
             coordinator_name: Some("otter".to_string()),
             coordinator_status: Some("running".to_string()),
             member_count: 2,
+            members: vec![SwarmFleetMember {
+                session_id: "sess_worker".to_string(),
+                friendly_name: Some("marten".to_string()),
+                status: "running".to_string(),
+                subagent_type: Some("verify".to_string()),
+                task_label: Some("Check fleet picker".to_string()),
+                swarm_id: Some("swarm_123".to_string()),
+                assigned_instance_id: Some("task-1".to_string()),
+            }],
             members_by_status: BTreeMap::from([("running".to_string(), 1), ("ready".to_string(), 1)]),
             members_by_type: BTreeMap::from([("verify".to_string(), 1), ("untyped".to_string(), 1)]),
             plan: PlanGraphStatus {
@@ -211,6 +220,12 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
     assert_eq!(id, 62);
     assert_eq!(swarms.len(), 1);
     assert_eq!(swarms[0].swarm_id, "swarm_123");
+    assert_eq!(swarms[0].members.len(), 1);
+    assert_eq!(swarms[0].members[0].session_id, "sess_worker");
+    assert_eq!(
+        swarms[0].members[0].assigned_instance_id.as_deref(),
+        Some("task-1")
+    );
     assert_eq!(swarms[0].members_by_type.get("verify"), Some(&1));
     assert_eq!(swarms[0].tokens.as_ref().map(|t| t.input_tokens), Some(10));
     Ok(())

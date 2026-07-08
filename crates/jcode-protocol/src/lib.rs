@@ -383,6 +383,8 @@ pub struct SwarmFleetEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coordinator_status: Option<String>,
     pub member_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<SwarmFleetMember>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub members_by_status: BTreeMap<String, usize>,
     /// Member type counts resolved for operator display. Live rows use the
@@ -477,6 +479,25 @@ impl PlanGraphStatus {
             grown_count: growth.grown(),
         }
     }
+}
+
+/// One member of a swarm as surfaced in the fleet (list_swarms) response, so an
+/// operator UI can drill in and address an individual session across swarms.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SwarmFleetMember {
+    pub session_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub friendly_name: Option<String>,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swarm_id: Option<String>,
+    /// The DAG plan item id this member is assigned to, if any (node<->member join).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assigned_instance_id: Option<String>,
 }
 
 /// Swarm member status for lifecycle updates

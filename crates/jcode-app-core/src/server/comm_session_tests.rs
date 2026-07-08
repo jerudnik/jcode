@@ -167,6 +167,14 @@ async fn comm_list_swarms_returns_live_fleet_rollup() {
             assert_eq!(entry.coordinator_name.as_deref(), Some("falcon"));
             assert_eq!(entry.coordinator_status.as_deref(), Some("ready"));
             assert_eq!(entry.member_count, 2);
+            let worker = entry
+                .members
+                .iter()
+                .find(|member| member.session_id == "worker")
+                .expect("worker member");
+            assert_eq!(worker.status, "running");
+            assert_eq!(worker.subagent_type.as_deref(), Some("implement"));
+            assert_eq!(worker.assigned_instance_id.as_deref(), Some("task-verify"));
             assert_eq!(entry.members_by_status.get("ready"), Some(&1));
             assert_eq!(entry.members_by_status.get("running"), Some(&1));
             assert_eq!(entry.members_by_type.get("verify"), Some(&1));
@@ -255,13 +263,13 @@ async fn stop_target_resolves_unique_friendly_name_and_suffix() {
         .insert(worker.session_id.clone(), worker);
 
     assert_eq!(
-        resolve_stop_target_session("coord", "swarm-1", "jellyfish", &swarm_members)
+        resolve_stop_target_session("coord", "swarm-1", "jellyfish", false, &swarm_members)
             .await
             .as_deref(),
         Ok("session_jellyfish_1234_abcd")
     );
     assert_eq!(
-        resolve_stop_target_session("coord", "swarm-1", "abcd", &swarm_members)
+        resolve_stop_target_session("coord", "swarm-1", "abcd", false, &swarm_members)
             .await
             .as_deref(),
         Ok("session_jellyfish_1234_abcd")
@@ -280,7 +288,7 @@ async fn stop_target_rejects_ambiguous_friendly_name() {
     members.insert(second.session_id.clone(), second);
     drop(members);
 
-    let err = resolve_stop_target_session("coord", "swarm-1", "bear", &swarm_members)
+    let err = resolve_stop_target_session("coord", "swarm-1", "bear", false, &swarm_members)
         .await
         .expect_err("ambiguous friendly names should be rejected");
     assert!(err.contains("Ambiguous swarm session 'bear'"));
@@ -299,11 +307,53 @@ async fn stop_target_resolves_owned_child_in_different_swarm() {
     drop(members);
 
     assert_eq!(
-        resolve_stop_target_session("coord", "swarm-1", "otter", &swarm_members)
+        resolve_stop_target_session("coord", "swarm-1", "otter", false, &swarm_members)
             .await
             .expect("owned child should resolve"),
         "child-2"
     );
+}
+
+#[tokio::test]
+async fn stop_target_requires_cross_swarm_for_unrelated_swarm_member_resolution() {
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let (coord, _coord_rx) = member("coord", Some("swarm-1"), "coordinator");
+    let (mut foreign, _foreign_rx) = member("foreign-2", Some("swarm-2"), "agent");
+    foreign.report_back_to_session_id = Some("other-coord".to_string());
+    foreign.friendly_name = Some("foreign-worker".to_string());
+    let mut members = swarm_members.write().await;
+    members.insert("coord".to_string(), coord);
+    members.insert("foreign-2".to_string(), foreign);
+    drop(members);
+
+    let err =
+        resolve_stop_target_session("coord", "swarm-1", "foreign-worker", false, &swarm_members)
+            .await
+            .expect_err("unrelated swarm member should not resolve without opt-in");
+    assert!(err.contains("Unknown swarm session 'foreign-worker'"));
+
+    let err = resolve_stop_target_session("coord", "swarm-1", "foreign-2", false, &swarm_members)
+        .await
+        .expect_err("exact unrelated swarm member should not resolve without opt-in");
+    assert!(err.contains("Unknown swarm session 'foreign-2'"));
+
+    assert_eq!(
+        resolve_stop_target_session("coord", "swarm-1", "foreign-2", true, &swarm_members)
+            .await
+            .expect("exact cross-swarm target should resolve"),
+        "foreign-2"
+    );
+    assert_eq!(
+        resolve_stop_target_session("coord", "swarm-1", "foreign-worker", true, &swarm_members,)
+            .await
+            .expect("cross-swarm opt-in should resolve unrelated member"),
+        "foreign-2"
+    );
+
+    let members = swarm_members.read().await;
+    let target = members.get("foreign-2").expect("foreign member");
+    assert!(!swarm_stop_allowed_by_owner("coord", target, false));
+    assert!(swarm_stop_allowed_by_owner("coord", target, true));
 }
 
 #[tokio::test]

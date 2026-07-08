@@ -665,6 +665,8 @@ pub enum Request {
         target_session: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         force: Option<bool>,
+        #[serde(default)]
+        cross_swarm: bool,
     },
 
     /// Assign a role to an agent (coordinator only)
