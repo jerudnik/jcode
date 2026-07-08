@@ -224,6 +224,39 @@ impl McpServerConfig {
         }
         self.enabled.unwrap_or(true)
     }
+
+    /// True when this config entry would make the daemon re-enter its own tool
+    /// registry over MCP by spawning a `jcode mcp-serve` shim. Loading such an
+    /// entry inside the daemon causes an unbounded session/process fork bomb
+    /// (the shim calls `create_session`, which reloads this config, which spawns
+    /// another shim, ...). The daemon must refuse these; an EXTERNAL MCP client
+    /// launching `jcode mcp-serve` is fine and does not reach this code.
+    ///
+    /// Detection requires BOTH signals to avoid false positives:
+    ///  - the command resolves to the jcode binary (basename `jcode`, or matches
+    ///    the current executable), AND
+    ///  - the first non-flag argument is the `mcp-serve` subcommand.
+    pub fn is_jcode_mcp_serve_shim(&self) -> bool {
+        let first_arg = self.args.iter().find(|a| !a.starts_with('-'));
+        let is_mcp_serve = first_arg.map(|a| a == "mcp-serve").unwrap_or(false);
+        if !is_mcp_serve {
+            return false;
+        }
+        let cmd = self.command.trim();
+        let basename = std::path::Path::new(cmd)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(cmd);
+        let looks_like_jcode = basename == "jcode"
+            || basename.starts_with("jcode-")
+            || std::env::current_exe()
+                .ok()
+                .and_then(|p| p.file_name().map(|s| s.to_owned()))
+                .and_then(|s| s.into_string().ok())
+                .map(|cur| cur == basename)
+                .unwrap_or(false);
+        looks_like_jcode
+    }
 }
 
 fn default_shared() -> bool {
@@ -453,6 +486,27 @@ impl McpConfig {
         Self::load_for_dir(None)
     }
 
+    /// Drop any self-referential `jcode mcp-serve` server entries, logging each.
+    /// Called by `load_for_dir` so the daemon never spawns its own shim. Returns
+    /// the number of entries dropped. See
+    /// docs/architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md.
+    pub fn drop_self_referential_servers(&mut self) -> usize {
+        let before = self.servers.len();
+        self.servers.retain(|name, cfg| {
+            if cfg.is_jcode_mcp_serve_shim() {
+                crate::logging::warn(&format!(
+                    "MCP: refusing self-referential jcode 'mcp-serve' server '{name}': the daemon \
+                 must not spawn its own tool-registry shim (would fork-bomb sessions). \
+                 See docs/architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md"
+                ));
+                false
+            } else {
+                true
+            }
+        });
+        before - self.servers.len()
+    }
+
     /// Load from default locations, resolving project-local config
     /// (`.jcode/mcp.json`, `.mcp.json`, `.claude/mcp.json`, and the per-project
     /// entries in `~/.claude.json`) against `project_dir` instead of the
@@ -530,6 +584,7 @@ impl McpConfig {
             }
             keep
         });
+        merged.drop_self_referential_servers();
 
         // Fork seam (env placeholder expansion): resolve exact `${VAR}` env
         // values against the process environment so secrets injected by tools
@@ -572,6 +627,74 @@ fn exact_env_placeholder(value: &str) -> Option<&str> {
         return None;
     }
     Some(inner)
+}
+
+#[cfg(test)]
+mod self_reference_guard_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn server(value: serde_json::Value) -> McpServerConfig {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn detects_jcode_mcp_serve_shims() {
+        let cfg = server(json!({
+            "command": "jcode",
+            "args": ["mcp-serve"]
+        }));
+        assert!(cfg.is_jcode_mcp_serve_shim());
+
+        let cfg = server(json!({
+            "command": "/x/target/selfdev/jcode",
+            "args": ["mcp-serve", "-C", "/repo"]
+        }));
+        assert!(cfg.is_jcode_mcp_serve_shim());
+    }
+
+    #[test]
+    fn ignores_non_jcode_mcp_serve_configs() {
+        let cfg = server(json!({
+            "command": "serena",
+            "args": ["start-mcp-server"]
+        }));
+        assert!(!cfg.is_jcode_mcp_serve_shim());
+
+        let cfg = server(json!({
+            "command": "jcode",
+            "args": ["serve"]
+        }));
+        assert!(!cfg.is_jcode_mcp_serve_shim());
+
+        let cfg = server(json!({
+            "command": "mcp-serve-tool",
+            "args": ["run"]
+        }));
+        assert!(!cfg.is_jcode_mcp_serve_shim());
+    }
+
+    #[test]
+    fn drops_only_self_referential_servers() {
+        let mut config: McpConfig = serde_json::from_value(json!({
+            "servers": {
+                "self": {
+                    "command": "jcode",
+                    "args": ["mcp-serve"]
+                },
+                "serena": {
+                    "command": "serena",
+                    "args": ["start-mcp-server"]
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(config.drop_self_referential_servers(), 1);
+        assert_eq!(config.servers.len(), 1);
+        assert!(!config.servers.contains_key("self"));
+        assert!(config.servers.contains_key("serena"));
+    }
 }
 
 #[cfg(test)]
