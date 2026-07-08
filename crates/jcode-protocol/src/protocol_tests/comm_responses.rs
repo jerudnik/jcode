@@ -155,6 +155,64 @@ fn test_comm_plan_status_roundtrip() -> Result<()> {
 }
 
 #[test]
+fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
+    let event = ServerEvent::CommListSwarmsResponse {
+        id: 62,
+        swarms: vec![SwarmFleetEntry {
+            swarm_id: "swarm_123".to_string(),
+            coordinator_session_id: Some("sess_coord".to_string()),
+            coordinator_name: Some("otter".to_string()),
+            coordinator_status: Some("running".to_string()),
+            member_count: 2,
+            members_by_status: BTreeMap::from([("running".to_string(), 1), ("ready".to_string(), 1)]),
+            members_by_type: BTreeMap::from([("verify".to_string(), 1), ("untyped".to_string(), 1)]),
+            plan: PlanGraphStatus {
+                swarm_id: Some("swarm_123".to_string()),
+                version: 3,
+                item_count: 1,
+                ready_ids: Vec::new(),
+                blocked_ids: Vec::new(),
+                active_ids: vec!["task-1".to_string()],
+                completed_ids: Vec::new(),
+                failed_ids: Vec::new(),
+                failed_reasons: Default::default(),
+                cycle_ids: Vec::new(),
+                unresolved_dependency_ids: Vec::new(),
+                next_ready_ids: Vec::new(),
+                newly_ready_ids: Vec::new(),
+                low_confidence_ids: Vec::new(),
+                mode: "light".to_string(),
+                seeded_count: 1,
+                grown_count: 0,
+            },
+            needs_operator_input: false,
+            tokens: Some(TokenUsageTotals {
+                messages_with_token_usage: 1,
+                input_tokens: 10,
+                output_tokens: 5,
+                cache_reported_input_tokens: 10,
+                cache_read_input_tokens: 7,
+                cache_creation_input_tokens: 3,
+            }),
+            last_activity_age_secs: Some(4),
+            control_log_offset: Some(99),
+        }],
+    };
+    let json = encode_event(&event);
+    assert!(json.contains("\"type\":\"comm_list_swarms_response\""));
+    let decoded = parse_event_json(json.trim())?;
+    let ServerEvent::CommListSwarmsResponse { id, swarms } = decoded else {
+        return Err(anyhow!("expected CommListSwarmsResponse"));
+    };
+    assert_eq!(id, 62);
+    assert_eq!(swarms.len(), 1);
+    assert_eq!(swarms[0].swarm_id, "swarm_123");
+    assert_eq!(swarms[0].members_by_type.get("verify"), Some(&1));
+    assert_eq!(swarms[0].tokens.as_ref().map(|t| t.input_tokens), Some(10));
+    Ok(())
+}
+
+#[test]
 fn test_comm_members_roundtrip_includes_status() -> Result<()> {
     let event = ServerEvent::CommMembers {
         id: 9,

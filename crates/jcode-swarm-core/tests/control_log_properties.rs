@@ -26,7 +26,10 @@ struct Lcg(u64);
 
 impl Lcg {
     fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         self.0 >> 33
     }
 
@@ -59,8 +62,7 @@ fn arbitrary_event(rng: &mut Lcg) -> SwarmControlEvent {
         },
         4 => SwarmControlEvent::TaskAssigned {
             task_id: tasks[rng.pick(tasks.len())].to_string(),
-            assigned_to: (rng.pick(3) != 0)
-                .then(|| sessions[rng.pick(sessions.len())].to_string()),
+            assigned_to: (rng.pick(3) != 0).then(|| sessions[rng.pick(sessions.len())].to_string()),
         },
         5 => SwarmControlEvent::TaskStatusChanged {
             task_id: tasks[rng.pick(tasks.len())].to_string(),
@@ -86,13 +88,11 @@ fn replay_matches_in_memory_fold_for_arbitrary_sequences() {
         let reopen_at = rng.pick(event_count.max(1));
 
         let mut expected = SwarmControlState::default();
-        let mut writer =
-            ControlLogWriter::open(&path, "swarm-prop", LOCAL_ORIGIN).expect("open");
+        let mut writer = ControlLogWriter::open(&path, "swarm-prop", LOCAL_ORIGIN).expect("open");
         for index in 0..event_count {
             if index == reopen_at {
                 // Restart in miniature: drop and reopen the writer.
-                writer =
-                    ControlLogWriter::open(&path, "swarm-prop", LOCAL_ORIGIN).expect("reopen");
+                writer = ControlLogWriter::open(&path, "swarm-prop", LOCAL_ORIGIN).expect("reopen");
             }
             let event = arbitrary_event(&mut rng);
             expected.apply(&event);

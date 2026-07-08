@@ -15,10 +15,12 @@ use super::{
 };
 use crate::agent::Agent;
 use crate::config::SwarmSpawnMode;
-use crate::protocol::{NotificationType, ServerEvent};
+use crate::protocol::{
+    NotificationType, PlanGraphStatus, ServerEvent, SwarmFleetEntry, TokenUsageTotals,
+};
 use crate::provider::Provider;
 use crate::session::Session;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -976,6 +978,156 @@ pub(super) async fn handle_comm_list_models(
         current_model: coordinator.model,
         configured_swarm_model: crate::config::config().agents.swarm_model.clone(),
         model_routes,
+    });
+}
+
+fn zero_token_usage_totals() -> TokenUsageTotals {
+    TokenUsageTotals {
+        messages_with_token_usage: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_reported_input_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+    }
+}
+
+fn add_token_usage_totals(total: &mut TokenUsageTotals, next: TokenUsageTotals) {
+    total.messages_with_token_usage += next.messages_with_token_usage;
+    total.input_tokens += next.input_tokens;
+    total.output_tokens += next.output_tokens;
+    total.cache_reported_input_tokens += next.cache_reported_input_tokens;
+    total.cache_read_input_tokens += next.cache_read_input_tokens;
+    total.cache_creation_input_tokens += next.cache_creation_input_tokens;
+}
+
+fn member_type_for_fleet(member: &SwarmMember, plan: Option<&VersionedPlan>) -> String {
+    if let Some(plan) = plan
+        && let Some(phase) = plan
+            .items
+            .iter()
+            .find(|item| item.assigned_to.as_deref() == Some(member.session_id.as_str()))
+            .and_then(|item| plan.node_meta.get(&item.id))
+            .and_then(|meta| meta.kind.as_deref())
+            .map(str::trim)
+            .filter(|phase| !phase.is_empty())
+    {
+        return phase.to_string();
+    }
+    member
+        .subagent_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .unwrap_or("untyped")
+        .to_string()
+}
+
+fn status_needs_operator_input(status: &str) -> bool {
+    let status = status.to_ascii_lowercase();
+    status.contains("input") || status.contains("stdin") || status.contains("blocked")
+}
+
+/// Handle `comm_list_swarms`: live fleet rollup for operator dashboards.
+///
+/// This first slice is intentionally live-map backed. It includes the
+/// control-log offset for each swarm so the web cockpit can later pair the
+/// snapshot with a history-read/fold path for cold swarms.
+pub(super) async fn handle_comm_list_swarms(
+    id: u64,
+    sessions: &SessionAgents,
+    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
+    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
+    send_event: impl FnOnce(ServerEvent),
+) {
+    let swarms = swarms_by_id.read().await.clone();
+    let coordinators = swarm_coordinators.read().await.clone();
+    let plans = swarm_plans.read().await.clone();
+    let members = swarm_members.read().await;
+    let agent_sessions = sessions.read().await;
+
+    let mut swarm_ids: Vec<String> = swarms
+        .keys()
+        .chain(coordinators.keys())
+        .chain(plans.keys())
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    swarm_ids.sort();
+
+    let mut entries = Vec::with_capacity(swarm_ids.len());
+    for swarm_id in swarm_ids {
+        let member_ids: Vec<String> = swarms
+            .get(&swarm_id)
+            .map(|ids| {
+                let mut ids: Vec<String> = ids.iter().cloned().collect();
+                ids.sort();
+                ids
+            })
+            .unwrap_or_default();
+        let plan = plans.get(&swarm_id);
+        let summary = plan
+            .map(|plan| PlanGraphStatus::from_versioned_plan(&swarm_id, plan, Some(8), Vec::new()))
+            .unwrap_or_else(|| PlanGraphStatus::empty_for_swarm(&swarm_id));
+        let coordinator_session_id = coordinators.get(&swarm_id).cloned();
+        let coordinator = coordinator_session_id
+            .as_ref()
+            .and_then(|id| members.get(id));
+        let mut members_by_status = BTreeMap::new();
+        let mut members_by_type = BTreeMap::new();
+        let mut tokens = zero_token_usage_totals();
+        let mut saw_tokens = false;
+        let mut last_activity_age_secs: Option<u64> = None;
+        let mut needs_operator_input = !summary.failed_ids.is_empty();
+
+        for member_id in &member_ids {
+            let Some(member) = members.get(member_id) else {
+                continue;
+            };
+            *members_by_status.entry(member.status.clone()).or_insert(0) += 1;
+            *members_by_type
+                .entry(member_type_for_fleet(member, plan))
+                .or_insert(0) += 1;
+            needs_operator_input |= status_needs_operator_input(&member.status);
+            let status_age = member.last_status_change.elapsed().as_secs();
+            last_activity_age_secs =
+                Some(last_activity_age_secs.map_or(status_age, |age| age.min(status_age)));
+            if let Some(age) = crate::session_metrics::last_activity_age_secs(member_id) {
+                last_activity_age_secs =
+                    Some(last_activity_age_secs.map_or(age, |current| current.min(age)));
+            }
+            if let Some(agent) = agent_sessions.get(member_id)
+                && let Ok(agent) = agent.try_lock()
+            {
+                add_token_usage_totals(&mut tokens, agent.token_usage_totals());
+                saw_tokens = true;
+            }
+        }
+
+        entries.push(SwarmFleetEntry {
+            swarm_id: swarm_id.clone(),
+            coordinator_session_id,
+            coordinator_name: coordinator.and_then(|member| member.friendly_name.clone()),
+            coordinator_status: coordinator.map(|member| member.status.clone()),
+            member_count: member_ids.len(),
+            members_by_status,
+            members_by_type,
+            plan: summary,
+            needs_operator_input,
+            tokens: saw_tokens.then_some(tokens),
+            last_activity_age_secs,
+            control_log_offset: Some(super::control_log_sync::current_control_log_offset(
+                &swarm_id,
+            )),
+        });
+    }
+
+    send_event(ServerEvent::CommListSwarmsResponse {
+        id,
+        swarms: entries,
     });
 }
 

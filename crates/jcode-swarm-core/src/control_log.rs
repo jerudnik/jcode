@@ -186,8 +186,7 @@ impl SwarmControlState {
                 task_id,
                 assigned_to,
             } => {
-                self.tasks.entry(task_id.clone()).or_default().assigned_to =
-                    assigned_to.clone();
+                self.tasks.entry(task_id.clone()).or_default().assigned_to = assigned_to.clone();
             }
             SwarmControlEvent::TaskStatusChanged { task_id, status } => {
                 self.tasks.entry(task_id.clone()).or_default().status = status.clone();
@@ -328,8 +327,7 @@ pub fn diff_events(
     for task_id in task_ids {
         let target = &target_tasks[task_id];
         let existing = current.tasks.get(task_id);
-        if existing.is_none()
-            || existing.map(|task| &task.assigned_to) != Some(&target.assigned_to)
+        if existing.is_none() || existing.map(|task| &task.assigned_to) != Some(&target.assigned_to)
         {
             events.push(SwarmControlEvent::TaskAssigned {
                 task_id: task_id.clone(),
@@ -618,7 +616,8 @@ mod tests {
                 .append(true)
                 .open(&path)
                 .expect("open raw");
-            file.write_all(b"{\"origin\":\"local\",\"seq\":9").expect("torn");
+            file.write_all(b"{\"origin\":\"local\",\"seq\":9")
+                .expect("torn");
         }
         let read = read_from(&path, 0).expect("read");
         assert_eq!(read.envelopes.len(), 1, "torn line must not be parsed");
@@ -666,7 +665,10 @@ mod tests {
             })
             .expect("append");
         let (state, _) = replay(&path).expect("replay");
-        assert_eq!(state.events_applied, 2, "good events on both sides of garbage");
+        assert_eq!(
+            state.events_applied, 2,
+            "good events on both sides of garbage"
+        );
     }
 
     #[test]
@@ -691,7 +693,11 @@ mod tests {
             session_id: "b".into(),
             role: "coordinator".into(),
         });
-        assert_eq!(state.coordinator(), Some("a"), "deterministic during handoff");
+        assert_eq!(
+            state.coordinator(),
+            Some("a"),
+            "deterministic during handoff"
+        );
         state.apply(&SwarmControlEvent::RoleChanged {
             session_id: "a".into(),
             role: "agent".into(),

@@ -7,6 +7,7 @@ use super::{
 };
 use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
+use crate::plan::{NodeMeta, PlanItem};
 use crate::protocol::{NotificationType, ServerEvent};
 use crate::provider::{EventStream, Provider};
 use crate::server::{SwarmEventType, SwarmMember, VersionedPlan};
@@ -18,6 +19,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+
+use super::handle_comm_list_swarms;
 
 struct MockProvider;
 
@@ -76,6 +79,19 @@ fn member(
     )
 }
 
+fn plan_item(id: &str, status: &str, priority: &str, assigned_to: Option<&str>) -> PlanItem {
+    PlanItem {
+        content: format!("task {id}"),
+        status: status.to_string(),
+        priority: priority.to_string(),
+        id: id.to_string(),
+        subsystem: None,
+        file_scope: Vec::new(),
+        blocked_by: Vec::new(),
+        assigned_to: assigned_to.map(ToString::to_string),
+    }
+}
+
 async fn test_agent_with_working_dir(session_id: &str, working_dir: &str) -> Arc<Mutex<Agent>> {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider.clone()).await;
@@ -85,6 +101,85 @@ async fn test_agent_with_working_dir(session_id: &str, working_dir: &str) -> Arc
     let mut agent = Agent::new_with_session(provider, registry, session, None);
     agent.set_working_dir(working_dir);
     Arc::new(Mutex::new(agent))
+}
+
+#[tokio::test]
+async fn comm_list_swarms_returns_live_fleet_rollup() {
+    let swarm_id = "comm-list-swarms-rollup-test".to_string();
+    let sessions = Arc::new(RwLock::new(HashMap::new()));
+    let (mut coord, _coord_rx) = member("coord", Some(&swarm_id), "coordinator");
+    coord.friendly_name = Some("falcon".to_string());
+    let (mut worker, _worker_rx) = member("worker", Some(&swarm_id), "agent");
+    worker.status = "running".to_string();
+    worker.subagent_type = Some("implement".to_string());
+
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([
+        ("coord".to_string(), coord),
+        ("worker".to_string(), worker),
+    ])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.clone(),
+        HashSet::from(["coord".to_string(), "worker".to_string()]),
+    )])));
+    let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.clone(),
+        "coord".to_string(),
+    )])));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
+        swarm_id.clone(),
+        VersionedPlan {
+            items: vec![plan_item("task-verify", "running", "high", Some("worker"))],
+            version: 7,
+            participants: HashSet::from(["coord".to_string(), "worker".to_string()]),
+            task_progress: HashMap::new(),
+            mode: "deep".to_string(),
+            node_meta: HashMap::from([(
+                "task-verify".to_string(),
+                NodeMeta {
+                    kind: Some("verify".to_string()),
+                    ..NodeMeta::default()
+                },
+            )]),
+        },
+    )])));
+
+    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
+    handle_comm_list_swarms(
+        42,
+        &sessions,
+        &swarm_members,
+        &swarms_by_id,
+        &swarm_coordinators,
+        &swarm_plans,
+        |event| {
+            let _ = client_event_tx.send(event);
+        },
+    )
+    .await;
+
+    match client_event_rx.recv().await.expect("fleet response") {
+        ServerEvent::CommListSwarmsResponse { id, swarms } => {
+            assert_eq!(id, 42);
+            assert_eq!(swarms.len(), 1);
+            let entry = &swarms[0];
+            assert_eq!(entry.swarm_id, swarm_id);
+            assert_eq!(entry.coordinator_session_id.as_deref(), Some("coord"));
+            assert_eq!(entry.coordinator_name.as_deref(), Some("falcon"));
+            assert_eq!(entry.coordinator_status.as_deref(), Some("ready"));
+            assert_eq!(entry.member_count, 2);
+            assert_eq!(entry.members_by_status.get("ready"), Some(&1));
+            assert_eq!(entry.members_by_status.get("running"), Some(&1));
+            assert_eq!(entry.members_by_type.get("verify"), Some(&1));
+            assert_eq!(entry.members_by_type.get("untyped"), Some(&1));
+            assert_eq!(entry.plan.version, 7);
+            assert_eq!(entry.plan.mode, "deep");
+            assert_eq!(entry.plan.active_ids, vec!["task-verify".to_string()]);
+            assert_eq!(entry.tokens, None);
+            assert!(entry.last_activity_age_secs.is_some());
+            assert!(entry.control_log_offset.is_some());
+        }
+        other => panic!("unexpected response: {other:?}"),
+    }
 }
 
 #[tokio::test]

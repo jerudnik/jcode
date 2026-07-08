@@ -2388,6 +2388,24 @@ pub(super) async fn handle_client(
                 .await;
             }
 
+            Request::CommListSwarms {
+                id,
+                session_id: _req_session_id,
+            } => {
+                super::comm_session::handle_comm_list_swarms(
+                    id,
+                    &sessions,
+                    &swarm_members,
+                    &swarms_by_id,
+                    &swarm_coordinators,
+                    &swarm_plans,
+                    |event| {
+                        let _ = client_event_tx.send(event);
+                    },
+                )
+                .await;
+            }
+
             Request::CommStop {
                 id,
                 session_id: req_session_id,

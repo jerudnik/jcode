@@ -39,9 +39,7 @@ pub(in crate::tui::app) const SWARM_VERB_USAGE: &str = "Usage: /swarm [status|pl
 /// Parse a `/swarm <verb> ...` command. Returns `None` when the input is not
 /// a swarm verb (so feature-toggle handling can run), `Some(Err)` on a
 /// malformed verb.
-pub(in crate::tui::app) fn parse_swarm_verb(
-    trimmed: &str,
-) -> Option<Result<SwarmVerb, String>> {
+pub(in crate::tui::app) fn parse_swarm_verb(trimmed: &str) -> Option<Result<SwarmVerb, String>> {
     let rest = trimmed.strip_prefix("/swarm")?;
     if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
         return None;
@@ -55,9 +53,9 @@ pub(in crate::tui::app) fn parse_swarm_verb(
             let node_id = tokens.next().map(str::to_string);
             let session = tokens.next().map(str::to_string);
             if tokens.next().is_some() {
-                return Some(Err(format!(
-                    "Too many arguments. Usage: /swarm start [instance] [session]"
-                )));
+                return Some(Err(
+                    "Too many arguments. Usage: /swarm start [instance] [session]".to_string(),
+                ));
             }
             Some(Ok(SwarmVerb::Start { node_id, session }))
         }
@@ -259,8 +257,14 @@ mod tests {
 
     #[test]
     fn parse_status_plan_and_aliases() {
-        assert_eq!(parse_swarm_verb("/swarm status"), Some(Ok(SwarmVerb::Status)));
-        assert_eq!(parse_swarm_verb("/swarm roster"), Some(Ok(SwarmVerb::Status)));
+        assert_eq!(
+            parse_swarm_verb("/swarm status"),
+            Some(Ok(SwarmVerb::Status))
+        );
+        assert_eq!(
+            parse_swarm_verb("/swarm roster"),
+            Some(Ok(SwarmVerb::Status))
+        );
         assert_eq!(parse_swarm_verb("/swarm plan"), Some(Ok(SwarmVerb::Plan)));
         assert_eq!(parse_swarm_verb("/swarm dag"), Some(Ok(SwarmVerb::Plan)));
     }
@@ -363,8 +367,7 @@ mod tests {
         summary.ready_ids = vec!["b".to_string()];
         summary.completed_ids = vec!["a".to_string()];
         summary.failed_ids = vec!["c".to_string()];
-        summary.failed_reasons =
-            BTreeMap::from([("c".to_string(), "API error (401)".to_string())]);
+        summary.failed_reasons = BTreeMap::from([("c".to_string(), "API error (401)".to_string())]);
         summary.low_confidence_ids = vec!["a".to_string()];
         let items = vec![item("c", "failed", None)];
         let out = render_plan_status(&summary, &items);

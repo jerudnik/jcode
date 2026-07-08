@@ -102,7 +102,7 @@ pub fn decide_jumpstart(item: &PlanItem, items: &[PlanItem]) -> JumpstartVerb {
 /// Pick the instance most in need of a jumpstart when the operator did not
 /// name one: failed/stale first (retry), then assigned-but-unstarted (start),
 /// then unassigned runnable (assign).
-pub fn pick_jumpstart_node<'a>(items: &'a [PlanItem]) -> Option<&'a PlanItem> {
+pub fn pick_jumpstart_node(items: &[PlanItem]) -> Option<&PlanItem> {
     let actionable = |verbs: &[fn(&JumpstartVerb) -> bool]| {
         items.iter().find(|item| {
             let verb = decide_jumpstart(item, items);
@@ -183,9 +183,15 @@ mod tests {
     #[test]
     fn completed_instance_is_already_done() {
         let items = vec![item("a", "completed")];
-        assert_eq!(decide_jumpstart(&items[0], &items), JumpstartVerb::AlreadyDone);
+        assert_eq!(
+            decide_jumpstart(&items[0], &items),
+            JumpstartVerb::AlreadyDone
+        );
         let items = vec![item("a", "done")];
-        assert_eq!(decide_jumpstart(&items[0], &items), JumpstartVerb::AlreadyDone);
+        assert_eq!(
+            decide_jumpstart(&items[0], &items),
+            JumpstartVerb::AlreadyDone
+        );
     }
 
     #[test]
@@ -235,7 +241,10 @@ mod tests {
         let mut node = item("b", "queued");
         node.blocked_by = vec!["a".to_string()];
         let items = vec![item("a", "completed"), node];
-        assert_eq!(decide_jumpstart(&items[1], &items), JumpstartVerb::AssignTask);
+        assert_eq!(
+            decide_jumpstart(&items[1], &items),
+            JumpstartVerb::AssignTask
+        );
     }
 
     #[test]
@@ -249,7 +258,10 @@ mod tests {
     #[test]
     fn unassigned_runnable_instance_needs_assign() {
         let items = vec![item("a", "queued")];
-        assert_eq!(decide_jumpstart(&items[0], &items), JumpstartVerb::AssignTask);
+        assert_eq!(
+            decide_jumpstart(&items[0], &items),
+            JumpstartVerb::AssignTask
+        );
     }
 
     #[test]
@@ -269,7 +281,10 @@ mod tests {
             assigned.clone(),
             item("broken", "failed"),
         ];
-        assert_eq!(pick_jumpstart_node(&items).map(|i| i.id.as_str()), Some("broken"));
+        assert_eq!(
+            pick_jumpstart_node(&items).map(|i| i.id.as_str()),
+            Some("broken")
+        );
 
         let items = vec![item("free", "queued"), assigned];
         assert_eq!(
@@ -278,7 +293,10 @@ mod tests {
         );
 
         let items = vec![item("done", "completed"), item("free", "queued")];
-        assert_eq!(pick_jumpstart_node(&items).map(|i| i.id.as_str()), Some("free"));
+        assert_eq!(
+            pick_jumpstart_node(&items).map(|i| i.id.as_str()),
+            Some("free")
+        );
 
         let items = vec![item("done", "completed")];
         assert_eq!(pick_jumpstart_node(&items), None);
@@ -298,7 +316,10 @@ mod tests {
             resolve_member_type(None, None, Some("manager")),
             ResolvedMemberType::Tag("manager".to_string())
         );
-        assert_eq!(resolve_member_type(None, None, None), ResolvedMemberType::Untyped);
+        assert_eq!(
+            resolve_member_type(None, None, None),
+            ResolvedMemberType::Untyped
+        );
         // Blank strings do not count as typing.
         assert_eq!(
             resolve_member_type(Some("  "), None, Some("")),

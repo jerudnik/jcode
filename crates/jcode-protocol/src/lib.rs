@@ -383,6 +383,36 @@ pub struct PlanGraphStatus {
     pub grown_count: usize,
 }
 
+/// One fleet-dashboard row for a swarm known to the daemon.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SwarmFleetEntry {
+    pub swarm_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator_status: Option<String>,
+    pub member_count: usize,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub members_by_status: BTreeMap<String, usize>,
+    /// Member type counts resolved for operator display. Live rows use the
+    /// assigned instance's phase when known, otherwise the member's free-form
+    /// swarm tag, otherwise `untyped`. Future Agent-tool preset overlay can slot
+    /// into the same response without changing the shape.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub members_by_type: BTreeMap<String, usize>,
+    pub plan: PlanGraphStatus,
+    #[serde(default)]
+    pub needs_operator_input: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<TokenUsageTotals>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_age_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_log_offset: Option<u64>,
+}
+
 fn default_plan_mode() -> String {
     "light".to_string()
 }
@@ -657,6 +687,7 @@ impl Request {
             Request::CommInjectGap { id, .. } => *id,
             Request::CommSpawn { id, .. } => *id,
             Request::CommListModels { id, .. } => *id,
+            Request::CommListSwarms { id, .. } => *id,
             Request::CommStop { id, .. } => *id,
             Request::CommAssignRole { id, .. } => *id,
             Request::CommSummary { id, .. } => *id,
@@ -693,6 +724,7 @@ impl Request {
                 | Request::CommInjectGap { .. }
                 | Request::CommSpawn { .. }
                 | Request::CommListModels { .. }
+                | Request::CommListSwarms { .. }
                 | Request::CommStop { .. }
                 | Request::CommAssignRole { .. }
                 | Request::CommSummary { .. }

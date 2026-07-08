@@ -2579,8 +2579,8 @@ async fn handle_swarm_verb(
     remote: &mut RemoteConnection,
     verb: app_mod::commands_swarm::SwarmVerb,
 ) -> Result<()> {
-    use app_mod::commands_swarm::SwarmVerb;
     use crate::swarm_verbs::{JumpstartVerb, decide_jumpstart, pick_jumpstart_node};
+    use app_mod::commands_swarm::SwarmVerb;
 
     match verb {
         SwarmVerb::Status => {
