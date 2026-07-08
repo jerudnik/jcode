@@ -1518,50 +1518,15 @@ impl Server {
                 self.identity.name.clone(),
                 policy,
             );
-        } else if debug_control_allowed() {
-            crate::logging::info("Debug control enabled; idle timeout monitor disabled.");
         } else {
-            let idle_client_count = Arc::clone(&self.client_count);
-            let idle_server_name = self.identity.name.clone();
-            tokio::spawn(async move {
-                let mut idle_since: Option<std::time::Instant> = None;
-                let mut check_interval = tokio::time::interval(std::time::Duration::from_secs(10));
-
-                loop {
-                    check_interval.tick().await;
-
-                    let count = *idle_client_count.read().await;
-
-                    if count == 0 {
-                        // No clients connected
-                        if idle_since.is_none() {
-                            idle_since = Some(std::time::Instant::now());
-                            crate::logging::info(&format!(
-                                "No clients connected. Server will exit after {} minutes of idle.",
-                                IDLE_TIMEOUT_SECS / 60
-                            ));
-                        }
-
-                        if let Some(since) = idle_since {
-                            let idle_duration = since.elapsed().as_secs();
-                            if idle_duration >= IDLE_TIMEOUT_SECS {
-                                crate::logging::info(&format!(
-                                    "Server idle for {} minutes with no clients. Shutting down.",
-                                    idle_duration / 60
-                                ));
-                                let _ = crate::registry::unregister_server(&idle_server_name).await;
-                                std::process::exit(EXIT_IDLE_TIMEOUT);
-                            }
-                        }
-                    } else {
-                        // Clients connected - reset idle timer
-                        if idle_since.is_some() {
-                            crate::logging::info("Client connected. Idle timer cancelled.");
-                        }
-                        idle_since = None;
-                    }
-                }
-            });
+            // Persistent shared server: the safety exit runs ALWAYS. Debug
+            // control (JCODE_DEBUG_CONTROL / self-dev) must never disable it -
+            // that is what let an orphaned self-dev daemon spin forever.
+            lifecycle::spawn_persistent_lifecycle_monitor(
+                Arc::clone(&self.client_count),
+                self.identity.name.clone(),
+                IDLE_TIMEOUT_SECS,
+            );
         }
     }
 
