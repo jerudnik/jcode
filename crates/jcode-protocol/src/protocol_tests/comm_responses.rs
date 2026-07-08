@@ -25,6 +25,7 @@ fn test_swarm_plan_event_roundtrip_with_summary() -> Result<()> {
             completed_ids: Vec::new(),
             failed_ids: Vec::new(),
             failed_reasons: Default::default(),
+            phases_by_id: BTreeMap::from([("task-1".to_string(), "verify".to_string())]),
             cycle_ids: Vec::new(),
             unresolved_dependency_ids: Vec::new(),
             next_ready_ids: vec!["task-1".to_string()],
@@ -58,6 +59,7 @@ fn test_swarm_plan_event_roundtrip_with_summary() -> Result<()> {
     let summary = summary.ok_or_else(|| anyhow!("expected plan summary"))?;
     assert_eq!(summary.ready_ids, vec!["task-1"]);
     assert_eq!(summary.next_ready_ids, vec!["task-1"]);
+    assert_eq!(summary.phases_by_id.get("task-1").map(String::as_str), Some("verify"));
     Ok(())
 }
 
@@ -79,6 +81,7 @@ fn test_comm_task_control_response_roundtrip() -> Result<()> {
             completed_ids: vec!["setup".to_string()],
             failed_ids: Vec::new(),
             failed_reasons: Default::default(),
+            phases_by_id: BTreeMap::new(),
             cycle_ids: Vec::new(),
             unresolved_dependency_ids: Vec::new(),
             next_ready_ids: vec!["task-2".to_string()],
@@ -176,6 +179,7 @@ fn test_comm_list_swarms_response_roundtrip() -> Result<()> {
                 completed_ids: Vec::new(),
                 failed_ids: Vec::new(),
                 failed_reasons: Default::default(),
+                phases_by_id: BTreeMap::new(),
                 cycle_ids: Vec::new(),
                 unresolved_dependency_ids: Vec::new(),
                 next_ready_ids: Vec::new(),

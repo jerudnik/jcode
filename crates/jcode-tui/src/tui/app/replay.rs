@@ -454,6 +454,7 @@ pub(super) fn apply_replay_event(
             app.swarm_enabled = true;
             app.swarm_plan_swarm_id = Some(swarm_id.clone());
             app.swarm_plan_version = Some(*version);
+            app.swarm_plan_phases_by_id.clear();
             app.swarm_plan_items = items.clone();
         }
         ReplayEvent::Server(server_event) => {

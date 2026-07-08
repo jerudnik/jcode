@@ -1700,7 +1700,7 @@ async fn handle_remote_key_internal(
                     return Ok(());
                 }
 
-                // /swarm drive verbs (status/plan/start/stop/spawn) come
+                // /swarm drive verbs (status/plan/fleet/start/stop/spawn) come
                 // before the feature toggle, which keeps handling bare
                 // /swarm, /swarm on, /swarm off.
                 if let Some(parsed) = app_mod::commands_swarm::parse_swarm_verb(trimmed) {
@@ -1759,7 +1759,7 @@ async fn handle_remote_key_internal(
 
                 if trimmed.starts_with("/swarm ") {
                     app.push_display_message(DisplayMessage::error(
-                        "Usage: /swarm [on|off|status]".to_string(),
+                        app_mod::commands_swarm::SWARM_VERB_USAGE.to_string(),
                     ));
                     return Ok(());
                 }
@@ -2587,6 +2587,7 @@ async fn handle_swarm_verb(
             let rendered = app_mod::commands_swarm::render_swarm_roster(
                 &app.remote_swarm_members,
                 &app.swarm_plan_items,
+                &app.swarm_plan_phases_by_id,
             );
             app.push_display_message(DisplayMessage::system(rendered));
         }
@@ -2602,6 +2603,13 @@ async fn handle_swarm_verb(
             }
             remote.comm_plan_status().await?;
             app.set_status_notice("Fetching plan status...");
+        }
+        SwarmVerb::Fleet => {
+            // Ask the server for the authoritative cross-swarm fleet snapshot;
+            // the response is rendered from server_events when
+            // comm_list_swarms_response arrives.
+            remote.comm_list_swarms().await?;
+            app.set_status_notice("Fetching swarm fleet...");
         }
         SwarmVerb::Start { node_id, session } => {
             let items = app.swarm_plan_items.clone();

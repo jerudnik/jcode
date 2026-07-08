@@ -882,6 +882,18 @@ impl RemoteConnection {
         Ok(id)
     }
 
+    /// Request the live swarm fleet dashboard snapshot (`comm_list_swarms`).
+    pub async fn comm_list_swarms(&mut self) -> Result<u64> {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        let request = Request::CommListSwarms {
+            id,
+            session_id: self.comm_session_id(),
+        };
+        self.send_request(request).await?;
+        Ok(id)
+    }
+
     /// Assign a plan instance to a member (`comm_assign_task`). With no
     /// target, the server picks a drivable worker.
     pub async fn comm_assign_task(

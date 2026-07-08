@@ -82,6 +82,7 @@ mod tests {
     use super::RemoteSwarmPlanSnapshot;
     use crate::plan::PlanItem;
     use crate::protocol::PlanGraphStatus;
+    use std::collections::BTreeMap;
 
     fn plan_item(id: &str, status: &str) -> PlanItem {
         PlanItem {
@@ -121,6 +122,7 @@ mod tests {
             completed_ids: vec!["task-1".to_string()],
             failed_ids: Vec::new(),
             failed_reasons: Default::default(),
+            phases_by_id: BTreeMap::new(),
             cycle_ids: Vec::new(),
             unresolved_dependency_ids: Vec::new(),
             next_ready_ids: vec!["task-2".to_string()],

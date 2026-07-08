@@ -1650,6 +1650,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.remote_side_pane_images.clear();
                 app.remote_swarm_members.clear();
                 app.swarm_plan_items.clear();
+                app.swarm_plan_phases_by_id.clear();
                 app.swarm_plan_version = None;
                 app.swarm_plan_swarm_id = None;
                 remote.reset_call_output_tokens_seen();
@@ -2156,6 +2157,11 @@ pub(in crate::tui::app) fn handle_server_event(
                 let notice = snapshot.status_notice();
                 app.swarm_plan_swarm_id = Some(snapshot.swarm_id.clone());
                 app.swarm_plan_version = Some(snapshot.version);
+                app.swarm_plan_phases_by_id = snapshot
+                    .summary
+                    .as_ref()
+                    .map(|summary| summary.phases_by_id.clone())
+                    .unwrap_or_default();
                 app.swarm_plan_items = snapshot.items.clone();
                 // Render the plan's task DAG as an inline chat diagram: the graph
                 // is pushed as a normal swarm message containing a mermaid fence,
@@ -2756,6 +2762,16 @@ pub(in crate::tui::app) fn handle_server_event(
                 &app.swarm_plan_items,
             );
             app.push_display_message(DisplayMessage::system(rendered));
+            false
+        }
+        ServerEvent::CommListSwarmsResponse { swarms, .. } => {
+            let rendered = crate::tui::app::commands_swarm::render_swarm_fleet(&swarms);
+            app.push_display_message(DisplayMessage::system(rendered));
+            app.set_status_notice(format!(
+                "{} live swarm{}",
+                swarms.len(),
+                if swarms.len() == 1 { "" } else { "s" }
+            ));
             false
         }
         ServerEvent::CommAssignTaskResponse {
