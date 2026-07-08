@@ -1,8 +1,9 @@
 # Swarm Architecture
 
 Status: Largely implemented (see `SWARM_TASK_GRAPH.md` for the DAG-first model
-that supersedes the agent-first framing here; its staged comm migration is in
-progress)
+that supersedes the agent-first framing here). The Communication section's
+channels and shared-context primitives are removed; only DM, subtree-broadcast,
+and DAG artifact-dataflow remain. See `SWARM_TASK_GRAPH.md` §8a.
 
 This document captures the swarm coordination design. It describes how agents
 coordinate, plan, communicate, and integrate work with optional git worktrees.
@@ -13,7 +14,7 @@ coordinate, plan, communicate, and integrate work with optional git worktrees.
 - A comprehensive initial plan, but allowed to evolve as work progresses.
 - Plan distribution is out-of-band (not stored in the repo).
 - Swarm runtime state survives reloads and crash recovery via daemon snapshots.
-- Explicit coordination via broadcast updates, DMs, and channels.
+- Explicit coordination via subtree broadcasts, DMs, and DAG artifact-dataflow.
 - Optional git worktrees used only when they make sense.
 - Integration handled by worktree managers, not the coordinator.
 
@@ -74,7 +75,7 @@ concurrently would make the shared plan incoherent.
 - Execute tasks in parallel.
 - Receive the full plan plus their scoped instructions on spawn.
 - Propose plan updates when they discover issues or new requirements.
-- Coordinate directly with other agents via DM or channels.
+- Coordinate directly with other agents via DM or subtree broadcast.
 - Emit lifecycle events when they start, finish, or stop unexpectedly.
 - May spawn their own child agents (no depth cap; bounded only by the total
   swarm member cap) and stop any
@@ -194,9 +195,8 @@ resolution. The system supports:
 - Direct messages (DMs) - the preferred exception channel
 - Subtree broadcast (reaches only the sender's spawned subtree; the swarm
   coordinator keeps whole-swarm reach as an escape hatch)
-- Topic channels and shared context keys were retired; prefer DMs and
-  task-graph artifacts.
-- Channel discovery and member inspection
+- Topic channels and shared context keys are removed; use DMs and task-graph
+  artifacts.
 
 All agents can send DMs and subtree broadcasts.
 
@@ -230,9 +230,9 @@ flowchart LR
   A2[Agent 2] -->|DM| Comms
   A3[Agent 3] -->|DM| Comms
 
-  A1 -->|channel| Comms
-  A2 -->|channel| Comms
-  A3 -->|swarm| Comms
+  A1 -->|subtree broadcast| Comms
+  A2 -->|subtree broadcast| Comms
+  A3 -->|coordinator broadcast| Comms
 
   Comms --> A1
   Comms --> A2
@@ -254,8 +254,9 @@ info widget. Both update continuously from event streams.
 
 ### Swarm info widget
 
-- Graph view of agents, worktree managers, coordinator, and channels.
-- Edges represent communication paths: DM, channel, and swarm broadcast.
+- Graph view of agents, worktree managers, coordinator, and subtree broadcasts.
+- Edges represent communication paths: DM, subtree broadcast, and task-artifact
+  dataflow.
 - Nodes show status (idle, running, blocked) and current task or intent.
 - Updates in real time based on communication events, lifecycle events, and tool intent events.
 
@@ -266,8 +267,8 @@ flowchart LR
   Coord[Coordinator] -->|broadcast| A1[Agent 1]
   Coord -->|broadcast| A2[Agent 2]
   A1 -->|DM| A2
-  A2 -->|channel:#parser| Chan[Channel]
-  A1 -->|channel:#parser| Chan
+  A2 -->|artifact| T2[Task Artifact]
+  T2 -->|hydrates| A1
   WTM[Worktree Manager] --> A1
   WTM --> A2
 ```
@@ -302,7 +303,8 @@ flowchart TB
 
 - The system is optimistic by default (no locks).
 - Conflicts should prompt the involved agents to communicate directly.
-- Coordination happens via DM or channel, not through the coordinator.
+- Coordination happens via DM, subtree broadcast, or task artifacts, not through
+  the coordinator.
 
 ## Summary
 

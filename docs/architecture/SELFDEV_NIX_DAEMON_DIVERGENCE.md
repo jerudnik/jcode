@@ -1,9 +1,16 @@
 # Daemon / Self-Dev Binary Divergence: Friction Analysis and Proposed Path
 
 Date: 2026-06-26
-Status: research + recommendation (no code shipped; proposes next steps)
+Status: NS1/NS2/NS4 shipped (see
+[patch-ledger.md](../fork/patch-ledger.md)); NS3 and NS5 remain proposed.
 Scope: the friction around the jcode shared daemon, self-developed binaries that differ
 substantially from the running one, and the NixOS/Home-Manager packaging.
+
+The supervision hardening from the fork-bomb response (always-on idle exit and
+bounded shutdown) is now covered by
+[SERVER_LIFECYCLE_INVARIANTS.md](../SERVER_LIFECYCLE_INVARIANTS.md). Those are
+process-lifecycle fixes; NS5 remains the distinct listener-survival proposal for
+keeping the daemon socket available across reload.
 
 ## 1. The friction, stated precisely (verified in code + on this machine)
 
@@ -162,12 +169,15 @@ over in-place patching for a stateful daemon).
   the build manifest/version label and surface it in `selfdev status` / chrome, so checkout
   divergence is visible. Fixes G4.
 - **NS5 (deferred, measure first): socket-activation / fd-handoff** so the listener survives a
-  binary swap. Only if reload reconnect cost proves annoying in practice.
+  binary swap. This is distinct from the incident's process-lifecycle fixes
+  (idle exit, bounded unregister, and watchdog shutdown), which make exits
+  bounded but do not preserve the listener across reload. Only if reload
+  reconnect cost proves annoying in practice.
 
 ## 5. Validation stance
 
-- NS1/NS2/NS4 are unit/integration-testable in an isolated `JCODE_HOME` sandbox (the existing
-  selfdev test pattern), no live-daemon risk.
+- NS1/NS2/NS4 are shipped and unit/integration-testable in an isolated `JCODE_HOME`
+  sandbox (the existing selfdev test pattern), no live-daemon risk.
 - NS3 is validated by `nix develop` entering the devshell and `which jcode` resolving as
   intended, plus a Home-Manager build.
 - NS5 would need a VM/host test that a reload across a socket-activated unit keeps clients
