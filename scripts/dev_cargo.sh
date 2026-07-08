@@ -4,6 +4,43 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
+# ── Self-healing toolchain guard ─────────────────────────────────────────────
+# The coordinated `selfdev build` path invokes this wrapper via `bash -lc`,
+# which inherits the caller's PATH. Outside the Nix dev shell that PATH has no
+# `cargo`, and the build failed with an opaque `cargo: not found`. Recover a
+# toolchain before doing any real work so the wrapper behaves the same whether
+# or not the caller entered `nix develop` first.
+#
+# Order of recovery when cargo is absent:
+#   1. Already in a Nix shell but still no cargo -> genuine breakage, error out
+#      (never re-enter, that would loop).
+#   2. A repo flake.nix + `nix` exist -> re-exec self under `nix develop`
+#      (guarded by a sentinel so a devshell that somehow lacks cargo can't loop).
+#   3. A rustup/cargo home install exists -> put it on PATH.
+#   4. Nothing found -> precise, actionable error naming both remedies.
+if ! command -v cargo >/dev/null 2>&1; then
+  if [[ -n "${IN_NIX_SHELL:-}" ]]; then
+    printf 'dev_cargo: cargo not found even inside the Nix dev shell (IN_NIX_SHELL=%s).\n' \
+      "${IN_NIX_SHELL}" >&2
+    printf 'dev_cargo: the devshell is missing a Rust toolchain; check flake.nix.\n' >&2
+    exit 127
+  elif [[ -z "${DEV_CARGO_NIX_REEXEC:-}" && -f "$repo_root/flake.nix" ]] \
+    && command -v nix >/dev/null 2>&1; then
+    printf 'dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...\n' >&2
+    export DEV_CARGO_NIX_REEXEC=1
+    exec nix develop "$repo_root" --command "$repo_root/scripts/dev_cargo.sh" "$@"
+  elif [[ -x "$HOME/.cargo/bin/cargo" ]]; then
+    printf 'dev_cargo: cargo not on PATH; using ~/.cargo/bin toolchain.\n' >&2
+    export PATH="$HOME/.cargo/bin:$PATH"
+  else
+    printf 'dev_cargo: cargo not found on PATH and no toolchain could be recovered.\n' >&2
+    printf 'dev_cargo: remedies:\n' >&2
+    printf 'dev_cargo:   - enter the repo dev shell:  nix develop\n' >&2
+    printf 'dev_cargo:   - or install Rust via rustup: https://rustup.rs\n' >&2
+    exit 127
+  fi
+fi
+
 # shellcheck source=scripts/remote_config.sh
 source "$repo_root/scripts/remote_config.sh"
 jcode_load_remote_config
