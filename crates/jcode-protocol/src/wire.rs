@@ -687,6 +687,10 @@ pub enum Request {
     #[serde(rename = "comm_list_models")]
     CommListModels { id: u64, session_id: String },
 
+    /// List live swarm fleet rollups for operator dashboards.
+    #[serde(rename = "comm_list_swarms")]
+    CommListSwarms { id: u64, session_id: String },
+
     /// Stop/destroy an agent session (coordinator only)
     #[serde(rename = "comm_stop")]
     CommStop {
@@ -1561,6 +1565,14 @@ pub enum ServerEvent {
         /// method + availability + rough cost estimate).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         model_routes: Vec<jcode_provider_core::ModelRoute>,
+    },
+
+    /// Response to comm_list_swarms request
+    #[serde(rename = "comm_list_swarms_response")]
+    CommListSwarmsResponse {
+        id: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        swarms: Vec<crate::SwarmFleetEntry>,
     },
 
     /// Response to comm_await_members request

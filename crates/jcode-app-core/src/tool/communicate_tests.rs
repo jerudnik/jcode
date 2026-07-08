@@ -2,14 +2,15 @@ use super::{
     CommunicateInput, CommunicateTool, RunPlanChurnGuard, canonical_swarm_action,
     cleanup_candidate_session_ids, coordination_in_flight_count, default_await_target_statuses,
     default_cleanup_target_statuses, format_awaited_members, format_awaited_members_with_reports,
-    format_members, format_plan_status, format_swarm_model_list, latest_assistant_report,
-    resolve_optional_target_session, resolve_run_plan_concurrency, swarm_member_is_drivable_worker,
-    swarm_member_is_in_flight,
+    format_members, format_plan_status, format_swarm_fleet, format_swarm_model_list,
+    latest_assistant_report, resolve_optional_target_session, resolve_run_plan_concurrency,
+    swarm_member_is_drivable_worker, swarm_member_is_in_flight,
 };
 use crate::message::{Message, StreamEvent, ToolDefinition};
 use crate::protocol::{
-    AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, HistoryMessage, NotificationType, Request,
-    ServerEvent, SessionActivitySnapshot, ToolCallSummary,
+    AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, HistoryMessage, NotificationType,
+    PlanGraphStatus, Request, ServerEvent, SessionActivitySnapshot, SwarmFleetEntry,
+    TokenUsageTotals, ToolCallSummary,
 };
 use crate::provider::{EventStream, Provider};
 use crate::server::Server;
@@ -19,7 +20,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -996,6 +997,64 @@ fn schema_advertises_model_and_effort_spawn_overrides() {
             .expect("action enum")
             .contains(&json!("list_models"))
     );
+    assert!(
+        schema["properties"]["action"]["enum"]
+            .as_array()
+            .expect("action enum")
+            .contains(&json!("list_swarms"))
+    );
+}
+
+#[test]
+fn format_swarm_fleet_renders_live_rollup() {
+    let output = format_swarm_fleet(&[SwarmFleetEntry {
+        swarm_id: "swarm_a".to_string(),
+        coordinator_session_id: Some("session_coord".to_string()),
+        coordinator_name: Some("falcon".to_string()),
+        coordinator_status: Some("running".to_string()),
+        member_count: 3,
+        members_by_status: BTreeMap::from([("running".to_string(), 1), ("ready".to_string(), 2)]),
+        members_by_type: BTreeMap::from([("verify".to_string(), 1), ("untyped".to_string(), 2)]),
+        plan: PlanGraphStatus {
+            swarm_id: Some("swarm_a".to_string()),
+            version: 4,
+            item_count: 5,
+            ready_ids: vec!["ready-1".to_string()],
+            blocked_ids: Vec::new(),
+            active_ids: vec!["active-1".to_string(), "active-2".to_string()],
+            completed_ids: Vec::new(),
+            failed_ids: vec!["failed-1".to_string()],
+            failed_reasons: Default::default(),
+            cycle_ids: Vec::new(),
+            unresolved_dependency_ids: Vec::new(),
+            next_ready_ids: Vec::new(),
+            newly_ready_ids: Vec::new(),
+            low_confidence_ids: Vec::new(),
+            mode: "deep".to_string(),
+            seeded_count: 5,
+            grown_count: 0,
+        },
+        needs_operator_input: true,
+        tokens: Some(TokenUsageTotals {
+            messages_with_token_usage: 2,
+            input_tokens: 100,
+            output_tokens: 40,
+            cache_reported_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+        }),
+        last_activity_age_secs: Some(7),
+        control_log_offset: Some(12),
+    }])
+    .output;
+
+    assert!(output.contains("Live swarms:"));
+    assert!(output.contains("`swarm_a`: 3 member(s), coordinator `falcon` (running) attention"));
+    assert!(output.contains("status:"));
+    assert!(output.contains("type:"));
+    assert!(output.contains("plan: 5 item(s), 2 active, 1 ready, 1 failed, mode deep"));
+    assert!(output.contains("tokens: in 100, out 40, messages 2"));
+    assert!(output.contains("control log offset: 12"));
 }
 
 #[test]
