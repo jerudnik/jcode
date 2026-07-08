@@ -1,7 +1,5 @@
 use super::client_comm::{
-    handle_comm_channel_members, handle_comm_list, handle_comm_list_channels, handle_comm_message,
-    handle_comm_read, handle_comm_share, handle_comm_subscribe_channel,
-    handle_comm_unsubscribe_channel,
+    handle_comm_list, handle_comm_message, handle_comm_read, handle_comm_share,
 };
 use super::client_writer::write_direct_event;
 use super::comm_await::{CommAwaitMembersContext, handle_comm_await_members};
@@ -20,9 +18,9 @@ use super::comm_sync::{
     handle_comm_resync_plan, handle_comm_status, handle_comm_summary,
 };
 use super::{
-    AwaitMembersRuntime, ChannelSubscriptions, ClientConnectionInfo, FileTouchService,
-    SessionAgents, SessionInterruptQueues, SharedContext, SwarmEvent, SwarmMember,
-    SwarmMutationRuntime, VersionedPlan, format_structured_completion_report, truncate_detail,
+    AwaitMembersRuntime, ClientConnectionInfo, FileTouchService, SessionAgents,
+    SessionInterruptQueues, SharedContext, SwarmEvent, SwarmMember, SwarmMutationRuntime,
+    VersionedPlan, format_structured_completion_report, truncate_detail,
     update_member_status_with_report_tldr,
 };
 use crate::config::SwarmSpawnMode;
@@ -66,8 +64,6 @@ pub(super) struct LightweightControlContext<'a> {
     pub(super) swarm_plans: &'a Arc<RwLock<HashMap<String, VersionedPlan>>>,
     pub(super) swarm_coordinators: &'a Arc<RwLock<HashMap<String, String>>>,
     pub(super) file_touch: &'a FileTouchService,
-    pub(super) channel_subscriptions: &'a ChannelSubscriptions,
-    pub(super) channel_subscriptions_by_session: &'a ChannelSubscriptions,
     pub(super) client_connections: &'a Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
     pub(super) event_history: &'a Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     pub(super) event_counter: &'a Arc<std::sync::atomic::AtomicU64>,
@@ -93,8 +89,6 @@ pub(super) async fn handle_lightweight_control_request(
         swarm_plans,
         swarm_coordinators,
         file_touch,
-        channel_subscriptions,
-        channel_subscriptions_by_session,
         client_connections,
         event_history,
         event_counter,
@@ -172,7 +166,6 @@ pub(super) async fn handle_lightweight_control_request(
             from_session,
             message,
             to_session,
-            channel,
             delivery,
             wake,
             tldr,
@@ -182,7 +175,6 @@ pub(super) async fn handle_lightweight_control_request(
                 from_session,
                 message,
                 to_session,
-                channel,
                 delivery,
                 wake,
                 tldr,
@@ -191,7 +183,6 @@ pub(super) async fn handle_lightweight_control_request(
                 soft_interrupt_queues,
                 swarm_members,
                 swarms_by_id,
-                channel_subscriptions,
                 event_history,
                 event_counter,
                 swarm_event_tx,
@@ -212,34 +203,6 @@ pub(super) async fn handle_lightweight_control_request(
                 file_touch,
                 sessions,
                 client_connections,
-            )
-            .await;
-        }
-        Request::CommListChannels {
-            id,
-            session_id: req_session_id,
-        } => {
-            handle_comm_list_channels(
-                id,
-                req_session_id,
-                &client_event_tx,
-                swarm_members,
-                channel_subscriptions,
-            )
-            .await;
-        }
-        Request::CommChannelMembers {
-            id,
-            session_id: req_session_id,
-            channel,
-        } => {
-            handle_comm_channel_members(
-                id,
-                req_session_id,
-                channel,
-                &client_event_tx,
-                swarm_members,
-                channel_subscriptions,
             )
             .await;
         }
@@ -438,8 +401,6 @@ pub(super) async fn handle_lightweight_control_request(
                 swarms_by_id,
                 swarm_coordinators,
                 swarm_plans,
-                channel_subscriptions,
-                channel_subscriptions_by_session,
                 event_history,
                 event_counter,
                 swarm_event_tx,
@@ -493,8 +454,6 @@ pub(super) async fn handle_lightweight_control_request(
                 swarms_by_id,
                 swarm_coordinators,
                 swarm_plans,
-                channel_subscriptions,
-                channel_subscriptions_by_session,
                 event_history,
                 event_counter,
                 swarm_event_tx,
@@ -739,44 +698,6 @@ pub(super) async fn handle_lightweight_control_request(
                 event_counter,
                 swarm_event_tx,
                 swarm_mutation_runtime,
-            )
-            .await;
-        }
-        Request::CommSubscribeChannel {
-            id,
-            session_id: req_session_id,
-            channel,
-        } => {
-            handle_comm_subscribe_channel(
-                id,
-                req_session_id,
-                channel,
-                &client_event_tx,
-                swarm_members,
-                channel_subscriptions,
-                channel_subscriptions_by_session,
-                event_history,
-                event_counter,
-                swarm_event_tx,
-            )
-            .await;
-        }
-        Request::CommUnsubscribeChannel {
-            id,
-            session_id: req_session_id,
-            channel,
-        } => {
-            handle_comm_unsubscribe_channel(
-                id,
-                req_session_id,
-                channel,
-                &client_event_tx,
-                swarm_members,
-                channel_subscriptions,
-                channel_subscriptions_by_session,
-                event_history,
-                event_counter,
-                swarm_event_tx,
             )
             .await;
         }

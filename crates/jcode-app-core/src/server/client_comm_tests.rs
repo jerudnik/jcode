@@ -44,166 +44,6 @@ async fn test_agent() -> Arc<Mutex<Agent>> {
 }
 
 #[tokio::test]
-async fn comm_message_default_does_not_queue_soft_interrupt_for_connected_session() {
-    let sender = test_agent().await;
-    let target = test_agent().await;
-
-    let sender_id = sender.lock().await.session_id().to_string();
-    let target_id = target.lock().await.session_id().to_string();
-    let target_queue = target.lock().await.soft_interrupt_queue();
-
-    let sessions = Arc::new(RwLock::new(HashMap::from([
-        (sender_id.clone(), sender.clone()),
-        (target_id.clone(), target.clone()),
-    ])));
-    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
-
-    let (sender_event_tx, _sender_event_rx) = mpsc::unbounded_channel();
-    let (target_event_tx, mut target_event_rx) = mpsc::unbounded_channel();
-    let (client_event_tx, mut client_event_rx) = mpsc::unbounded_channel();
-
-    let swarm_id = "swarm-test".to_string();
-    let swarm_members = Arc::new(RwLock::new(HashMap::from([
-        (
-            sender_id.clone(),
-            SwarmMember {
-                session_id: sender_id.clone(),
-                event_tx: sender_event_tx,
-                event_txs: HashMap::new(),
-                working_dir: None,
-                swarm_id: Some(swarm_id.clone()),
-                swarm_enabled: true,
-                status: "ready".to_string(),
-                detail: None,
-                friendly_name: Some("falcon".to_string()),
-                report_back_to_session_id: None,
-                initial_prompt_delivered: None,
-                latest_completion_report: None,
-                role: "coordinator".to_string(),
-                joined_at: Instant::now(),
-                last_status_change: Instant::now(),
-                is_headless: false,
-                output_tail: None,
-                todo_progress: None,
-                todo_items: Vec::new(),
-                task_label: None,
-                subagent_type: None,
-            },
-        ),
-        (
-            target_id.clone(),
-            SwarmMember {
-                session_id: target_id.clone(),
-                event_tx: target_event_tx,
-                event_txs: HashMap::new(),
-                working_dir: None,
-                swarm_id: Some(swarm_id.clone()),
-                swarm_enabled: true,
-                status: "ready".to_string(),
-                detail: None,
-                friendly_name: Some("bear".to_string()),
-                report_back_to_session_id: None,
-                initial_prompt_delivered: None,
-                latest_completion_report: None,
-                role: "agent".to_string(),
-                joined_at: Instant::now(),
-                last_status_change: Instant::now(),
-                is_headless: false,
-                output_tail: None,
-                todo_progress: None,
-                todo_items: Vec::new(),
-                task_label: None,
-                subagent_type: None,
-            },
-        ),
-    ])));
-    let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
-        swarm_id.clone(),
-        HashSet::from([sender_id.clone(), target_id.clone()]),
-    )])));
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::from([(
-        swarm_id.clone(),
-        HashMap::from([(
-            "religion-debate".to_string(),
-            HashSet::from([target_id.clone()]),
-        )]),
-    )])));
-    let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
-        Arc::new(RwLock::new(std::collections::VecDeque::new()));
-    let event_counter = Arc::new(AtomicU64::new(0));
-    let (swarm_event_tx, _) = broadcast::channel(16);
-    let client_connections = Arc::new(RwLock::new(HashMap::from([(
-        "client-1".to_string(),
-        ClientConnectionInfo {
-            client_id: "client-1".to_string(),
-            session_id: target_id.clone(),
-            client_instance_id: None,
-            debug_client_id: None,
-            connected_at: Instant::now(),
-            last_seen: Instant::now(),
-            is_processing: false,
-            current_tool_name: None,
-            terminal_env: Vec::new(),
-            disconnect_tx: mpsc::unbounded_channel().0,
-        },
-    )])));
-
-    handle_comm_message(
-        1,
-        sender_id.clone(),
-        "hello".to_string(),
-        None,
-        Some("religion-debate".to_string()),
-        None,
-        None,
-        None,
-        &client_event_tx,
-        &sessions,
-        &soft_interrupt_queues,
-        &swarm_members,
-        &swarms_by_id,
-        &channel_subscriptions,
-        &event_history,
-        &event_counter,
-        &swarm_event_tx,
-        &client_connections,
-    )
-    .await;
-
-    match target_event_rx.recv().await.expect("target notification") {
-        ServerEvent::Notification {
-            from_session,
-            from_name,
-            notification_type,
-            message,
-        } => {
-            assert_eq!(from_session, sender_id);
-            assert_eq!(from_name.as_deref(), Some("falcon"));
-            match notification_type {
-                NotificationType::Message { scope, channel, .. } => {
-                    assert_eq!(scope.as_deref(), Some("channel"));
-                    assert_eq!(channel.as_deref(), Some("religion-debate"));
-                }
-                other => panic!("unexpected notification type: {:?}", other),
-            }
-            assert_eq!(message, "#religion-debate from falcon: hello");
-        }
-        other => panic!("unexpected event: {:?}", other),
-    }
-
-    match client_event_rx.recv().await.expect("done event") {
-        ServerEvent::Done { id } => assert_eq!(id, 1),
-        other => panic!("unexpected client event: {:?}", other),
-    }
-
-    let pending = target_queue.lock().expect("target queue lock");
-    assert!(
-        pending.is_empty(),
-        "connected interactive session should not get synthetic user-message interrupt"
-    );
-}
-
-#[tokio::test]
 async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session() {
     let sender = test_agent().await;
     let target = test_agent().await;
@@ -287,7 +127,6 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
         swarm_id.clone(),
         HashSet::from([sender_id.clone(), target_id.clone()]),
     )])));
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
         Arc::new(RwLock::new(std::collections::VecDeque::new()));
     let event_counter = Arc::new(AtomicU64::new(0));
@@ -317,7 +156,6 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
             sender_id.clone(),
             "hello now".to_string(),
             Some(target_id.clone()),
-            None,
             Some(CommDeliveryMode::Wake),
             None,
             None,
@@ -326,7 +164,6 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
             &soft_interrupt_queues,
             &swarm_members,
             &swarms_by_id,
-            &channel_subscriptions,
             &event_history,
             &event_counter,
             &swarm_event_tx,
@@ -346,9 +183,8 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
             assert_eq!(from_session, sender_id);
             assert_eq!(from_name.as_deref(), Some("falcon"));
             match notification_type {
-                NotificationType::Message { scope, channel, .. } => {
+                NotificationType::Message { scope, .. } => {
                     assert_eq!(scope.as_deref(), Some("dm"));
-                    assert_eq!(channel, None);
                 }
                 other => panic!("unexpected notification type: {:?}", other),
             }
@@ -552,7 +388,6 @@ async fn comm_message_accepts_friendly_name_dm_target() {
         swarm_id.clone(),
         HashSet::from([sender_id.clone(), target_id.clone()]),
     )])));
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
         Arc::new(RwLock::new(std::collections::VecDeque::new()));
     let event_counter = Arc::new(AtomicU64::new(0));
@@ -564,7 +399,6 @@ async fn comm_message_accepts_friendly_name_dm_target() {
         sender_id.clone(),
         "hello bear".to_string(),
         Some("bear".to_string()),
-        None,
         Some(CommDeliveryMode::Notify),
         None,
         None,
@@ -573,7 +407,6 @@ async fn comm_message_accepts_friendly_name_dm_target() {
         &soft_interrupt_queues,
         &swarm_members,
         &swarms_by_id,
-        &channel_subscriptions,
         &event_history,
         &event_counter,
         &swarm_event_tx,
@@ -591,9 +424,8 @@ async fn comm_message_accepts_friendly_name_dm_target() {
             assert_eq!(from_session, sender_id);
             assert_eq!(from_name.as_deref(), Some("falcon"));
             match notification_type {
-                NotificationType::Message { scope, channel, .. } => {
+                NotificationType::Message { scope, .. } => {
                     assert_eq!(scope.as_deref(), Some("dm"));
-                    assert_eq!(channel, None);
                 }
                 other => panic!("unexpected notification type: {:?}", other),
             }
@@ -719,7 +551,6 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
             target_two_id.clone(),
         ]),
     )])));
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
         Arc::new(RwLock::new(std::collections::VecDeque::new()));
     let event_counter = Arc::new(AtomicU64::new(0));
@@ -734,13 +565,11 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
         None,
         None,
         None,
-        None,
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
         &swarm_members,
         &swarms_by_id,
-        &channel_subscriptions,
         &event_history,
         &event_counter,
         &swarm_event_tx,
@@ -830,7 +659,6 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
     )])));
     let sessions = Arc::new(RwLock::new(HashMap::new()));
     let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
         Arc::new(RwLock::new(std::collections::VecDeque::new()));
     let event_counter = Arc::new(AtomicU64::new(0));
@@ -846,13 +674,11 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
         None,
         None,
         None,
-        None,
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
         &swarm_members,
         &swarms_by_id,
-        &channel_subscriptions,
         &event_history,
         &event_counter,
         &swarm_event_tx,
@@ -887,13 +713,11 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
         None,
         None,
         None,
-        None,
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
         &swarm_members,
         &swarms_by_id,
-        &channel_subscriptions,
         &event_history,
         &event_counter,
         &swarm_event_tx,
@@ -1052,7 +876,6 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
         swarm_id.clone(),
         HashSet::from([sender_id.clone(), target_id.clone()]),
     )])));
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
     let event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>> =
         Arc::new(RwLock::new(std::collections::VecDeque::new()));
     let event_counter = Arc::new(AtomicU64::new(0));
@@ -1070,7 +893,6 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
             sender_id.clone(),
             "urgent assignment: fix the build".to_string(),
             Some(target_id.clone()),
-            None,
             Some(CommDeliveryMode::Wake),
             None,
             None,
@@ -1079,7 +901,6 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
             &soft_interrupt_queues,
             &swarm_members,
             &swarms_by_id,
-            &channel_subscriptions,
             &event_history,
             &event_counter,
             &swarm_event_tx,

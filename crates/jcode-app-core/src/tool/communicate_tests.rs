@@ -1133,7 +1133,6 @@ fn schema_advertises_supported_swarm_fields() {
             "Target session for actions that address one agent (dm, and as an alias for target_session). Accepts an exact session ID or a unique friendly name within the swarm. Interchangeable with target_session. If a friendly name is ambiguous, run swarm list and use the exact session ID."
         )
     );
-    assert!(props.contains_key("channel"));
     assert!(props.contains_key("proposer_session"));
     assert!(props.contains_key("reason"));
     assert!(props.contains_key("target_session"));
@@ -1486,7 +1485,7 @@ impl RawClient {
     }
 
     /// Wait for the next `Message` notification and return its scope
-    /// ("dm", "channel", or "broadcast"). Other events are skipped.
+    /// ("dm" or "broadcast"). Other events are skipped.
     async fn next_message_notification(&mut self, timeout: Duration) -> Result<Option<String>> {
         match self
             .read_until(timeout, |event| {

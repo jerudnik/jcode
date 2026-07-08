@@ -675,7 +675,6 @@ fn test_plan_scope_notification_stays_off_the_transcript() {
             from_name: Some("dove".to_string()),
             notification_type: crate::protocol::NotificationType::Message {
                 scope: Some("plan".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: "Plan updated: task 'fix-debug-tests' assigned to session_blowfish_9."
@@ -697,7 +696,6 @@ fn test_plan_scope_notification_stays_off_the_transcript() {
             from_name: Some("dove".to_string()),
             notification_type: crate::protocol::NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: "DM from dove: hello".to_string(),
@@ -736,7 +734,6 @@ fn test_non_plan_swarm_message_between_plan_versions_moves_plan_graph_to_bottom(
             from_name: Some("dove".to_string()),
             notification_type: crate::protocol::NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: "DM from dove: hello".to_string(),

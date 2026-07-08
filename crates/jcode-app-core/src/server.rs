@@ -3,7 +3,6 @@ mod background_tasks;
 mod client_actions;
 mod client_api;
 mod client_comm;
-mod client_comm_channels;
 mod client_comm_context;
 mod client_comm_message;
 mod client_disconnect_cleanup;
@@ -45,7 +44,6 @@ mod reload_trace;
 mod runtime;
 mod socket;
 mod swarm;
-mod swarm_channels;
 mod swarm_mutation_state;
 mod swarm_persistence;
 mod util;
@@ -68,10 +66,6 @@ use self::swarm::{
     rename_plan_participant, run_swarm_message, send_swarm_plan_to_session,
     set_member_subagent_type, set_member_task_label, swarm_is_self_or_ancestor,
     update_member_status, update_member_status_with_report, update_member_status_with_report_tldr,
-};
-use self::swarm_channels::{
-    remove_session_channel_subscriptions, subscribe_session_to_channel,
-    unsubscribe_session_from_channel,
 };
 pub(super) use self::swarm_mutation_state::SwarmMutationRuntime;
 use self::swarm_persistence::{
@@ -106,8 +100,6 @@ use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, OnceCell, RwLock, broadcast, mpsc};
 
 pub(super) type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
-pub(super) type ChannelSubscriptions =
-    Arc<RwLock<HashMap<String, HashMap<String, HashSet<String>>>>>;
 
 pub(super) async fn persist_swarm_state_for(swarm_id: &str, swarm_state: &SwarmState) {
     let runtime = swarm_state.load_runtime(swarm_id).await;
@@ -436,10 +428,6 @@ pub struct Server {
     client_debug_response_tx: broadcast::Sender<(u64, String)>,
     /// Background debug jobs (async debug commands)
     debug_jobs: Arc<RwLock<HashMap<String, DebugJob>>>,
-    /// Channel subscriptions (swarm_id -> channel -> session_ids)
-    channel_subscriptions: ChannelSubscriptions,
-    /// Reverse index for channel subscriptions: session_id -> swarm_id -> channels
-    channel_subscriptions_by_session: ChannelSubscriptions,
     /// Event history for real-time event subscription (ring buffer)
     event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     /// Counter for event IDs
@@ -527,8 +515,6 @@ impl Server {
             client_debug_state: Arc::new(RwLock::new(ClientDebugState::default())),
             client_debug_response_tx,
             debug_jobs: Arc::new(RwLock::new(HashMap::new())),
-            channel_subscriptions: Arc::new(RwLock::new(HashMap::new())),
-            channel_subscriptions_by_session: Arc::new(RwLock::new(HashMap::new())),
             event_history: Arc::new(RwLock::new(std::collections::VecDeque::new())),
             event_counter: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             swarm_event_tx: broadcast::channel(256).0,

@@ -79,7 +79,6 @@ SWARM COMMANDS (swarm: prefix):
   swarm:context            - List all shared context
   swarm:touches            - List all file touches
   swarm:conflicts          - Files touched by multiple sessions
-  swarm:channels           - List channel subscriptions
   swarm:broadcast:<msg>    - Broadcast to swarm members
   swarm:notify:<sid> <msg> - Send DM to specific session
   swarm:help               - Full swarm command reference
@@ -223,9 +222,6 @@ NOTIFICATIONS:
 EXECUTION STATE:
   swarm:session:<id>       - Detailed session state (interrupts, provider, usage)
   swarm:interrupts         - List pending interrupts across all sessions
-
-CHANNELS:
-  swarm:channels           - List channel subscriptions per swarm
 
 OPERATIONS (debug-only, bypass tool:communicate):
   swarm:set_context:<sess> <key> <value> - Set shared context as session

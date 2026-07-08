@@ -1,4 +1,3 @@
-use super::swarm_channels::list_channels_for_swarm;
 use super::{
     FileTouchService, ServerIdentity, SharedContext, SwarmMember, SwarmState, VersionedPlan,
     git_common_dir_for, swarm_id_for_dir,
@@ -12,11 +11,10 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
-type ChannelSubscriptions = Arc<RwLock<HashMap<String, HashMap<String, HashSet<String>>>>>;
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "swarm read debug commands inspect sessions, swarm state, shared context, plans, channels, and file touches together"
+    reason = "swarm read debug commands inspect sessions, swarm state, shared context, plans, and file touches together"
 )]
 pub(super) async fn maybe_handle_swarm_read_command(
     cmd: &str,
@@ -27,7 +25,6 @@ pub(super) async fn maybe_handle_swarm_read_command(
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     file_touch: &FileTouchService,
-    channel_subscriptions: &ChannelSubscriptions,
     server_identity: &ServerIdentity,
 ) -> Result<Option<String>> {
     let swarm_state = SwarmState {
@@ -185,28 +182,6 @@ pub(super) async fn maybe_handle_swarm_read_command(
                 "swarm_id": member.swarm_id,
                 "status": member.status,
                 "is_coordinator": is_coordinator,
-            }));
-        }
-        return Ok(Some(
-            serde_json::to_string_pretty(&out).unwrap_or_else(|_| "[]".to_string()),
-        ));
-    }
-
-    if cmd == "swarm:channels" {
-        let subs = channel_subscriptions.read().await;
-        let mut out: Vec<serde_json::Value> = Vec::new();
-        for swarm_id in subs.keys() {
-            let channels = list_channels_for_swarm(swarm_id, channel_subscriptions).await;
-            let mut channel_data: Vec<serde_json::Value> = Vec::new();
-            for (channel, member_count) in channels {
-                channel_data.push(serde_json::json!({
-                    "channel": channel,
-                    "count": member_count,
-                }));
-            }
-            out.push(serde_json::json!({
-                "swarm_id": swarm_id,
-                "channels": channel_data,
             }));
         }
         return Ok(Some(
