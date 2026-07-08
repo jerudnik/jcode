@@ -423,16 +423,19 @@ fn test_comm_stop_roundtrip_with_force() -> Result<()> {
         session_id: "sess_coord".to_string(),
         target_session: "sess_worker".to_string(),
         force: Some(true),
+        cross_swarm: true,
     };
     let json = serde_json::to_string(&req)?;
     assert!(json.contains("\"type\":\"comm_stop\""));
     assert!(json.contains("\"force\":true"));
+    assert!(json.contains("\"cross_swarm\":true"));
     let decoded = parse_request_json(&json)?;
     assert_eq!(decoded.id(), 61);
     let Request::CommStop {
         session_id,
         target_session,
         force,
+        cross_swarm,
         ..
     } = decoded
     else {
@@ -441,6 +444,13 @@ fn test_comm_stop_roundtrip_with_force() -> Result<()> {
     assert_eq!(session_id, "sess_coord");
     assert_eq!(target_session, "sess_worker");
     assert_eq!(force, Some(true));
+    assert!(cross_swarm);
+
+    let legacy = r#"{"type":"comm_stop","id":62,"session_id":"sess_coord","target_session":"sess_worker","force":true}"#;
+    let Request::CommStop { cross_swarm, .. } = parse_request_json(legacy)? else {
+        return Err(anyhow!("expected legacy CommStop"));
+    };
+    assert!(!cross_swarm);
     Ok(())
 }
 

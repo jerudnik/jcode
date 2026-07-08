@@ -1023,6 +1023,7 @@ fn format_swarm_fleet_renders_live_rollup() {
         coordinator_name: Some("falcon".to_string()),
         coordinator_status: Some("running".to_string()),
         member_count: 3,
+        members: Vec::new(),
         members_by_status: BTreeMap::from([("running".to_string(), 1), ("ready".to_string(), 2)]),
         members_by_type: BTreeMap::from([("verify".to_string(), 1), ("untyped".to_string(), 2)]),
         plan: PlanGraphStatus {

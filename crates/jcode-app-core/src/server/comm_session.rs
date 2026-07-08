@@ -15,7 +15,8 @@ use super::{
 use crate::agent::Agent;
 use crate::config::SwarmSpawnMode;
 use crate::protocol::{
-    NotificationType, PlanGraphStatus, ServerEvent, SwarmFleetEntry, TokenUsageTotals,
+    NotificationType, PlanGraphStatus, ServerEvent, SwarmFleetEntry, SwarmFleetMember,
+    TokenUsageTotals,
 };
 use crate::provider::Provider;
 use crate::session::Session;
@@ -1019,6 +1020,18 @@ fn member_type_for_fleet(member: &SwarmMember, plan: Option<&VersionedPlan>) -> 
         .to_string()
 }
 
+fn assigned_instance_id_for_fleet(
+    member: &SwarmMember,
+    plan: Option<&VersionedPlan>,
+) -> Option<String> {
+    plan.and_then(|plan| {
+        plan.items
+            .iter()
+            .find(|item| item.assigned_to.as_deref() == Some(member.session_id.as_str()))
+            .map(|item| item.id.clone())
+    })
+}
+
 fn status_needs_operator_input(status: &str) -> bool {
     let status = status.to_ascii_lowercase();
     status.contains("input") || status.contains("stdin") || status.contains("blocked")
@@ -1074,6 +1087,7 @@ pub(super) async fn handle_comm_list_swarms(
             .and_then(|id| members.get(id));
         let mut members_by_status = BTreeMap::new();
         let mut members_by_type = BTreeMap::new();
+        let mut fleet_members = Vec::new();
         let mut tokens = zero_token_usage_totals();
         let mut saw_tokens = false;
         let mut last_activity_age_secs: Option<u64> = None;
@@ -1087,6 +1101,15 @@ pub(super) async fn handle_comm_list_swarms(
             *members_by_type
                 .entry(member_type_for_fleet(member, plan))
                 .or_insert(0) += 1;
+            fleet_members.push(SwarmFleetMember {
+                session_id: member.session_id.clone(),
+                friendly_name: member.friendly_name.clone(),
+                status: member.status.clone(),
+                subagent_type: member.subagent_type.clone(),
+                task_label: member.task_label.clone(),
+                swarm_id: member.swarm_id.clone(),
+                assigned_instance_id: assigned_instance_id_for_fleet(member, plan),
+            });
             needs_operator_input |= status_needs_operator_input(&member.status);
             let status_age = member.last_status_change.elapsed().as_secs();
             last_activity_age_secs =
@@ -1109,6 +1132,7 @@ pub(super) async fn handle_comm_list_swarms(
             coordinator_name: coordinator.and_then(|member| member.friendly_name.clone()),
             coordinator_status: coordinator.map(|member| member.status.clone()),
             member_count: member_ids.len(),
+            members: fleet_members,
             members_by_status,
             members_by_type,
             plan: summary,
@@ -1133,6 +1157,7 @@ pub(super) async fn handle_comm_stop(
     req_session_id: String,
     target_session: String,
     force: bool,
+    cross_swarm: bool,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     sessions: &SessionAgents,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -1169,6 +1194,7 @@ pub(super) async fn handle_comm_stop(
         &req_session_id,
         &swarm_id,
         &target_session,
+        cross_swarm,
         swarm_members,
     )
     .await
@@ -1314,6 +1340,7 @@ async fn resolve_stop_target_session(
     req_session_id: &str,
     swarm_id: &str,
     target: &str,
+    cross_swarm: bool,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
 ) -> std::result::Result<String, String> {
     let target = target.trim();
@@ -1323,7 +1350,8 @@ async fn resolve_stop_target_session(
 
     let members = swarm_members.read().await;
     if members.get(target).is_some_and(|member| {
-        member.swarm_id.as_deref() == Some(swarm_id)
+        cross_swarm
+            || member.swarm_id.as_deref() == Some(swarm_id)
             || super::swarm_is_self_or_ancestor(&members, req_session_id, target)
     }) {
         return Ok(target.to_string());
@@ -1332,7 +1360,8 @@ async fn resolve_stop_target_session(
     let mut matches = members
         .iter()
         .filter(|(session_id, member)| {
-            member.swarm_id.as_deref() == Some(swarm_id)
+            cross_swarm
+                || member.swarm_id.as_deref() == Some(swarm_id)
                 || super::swarm_is_self_or_ancestor(&members, req_session_id, session_id)
         })
         .filter(|(session_id, member)| {

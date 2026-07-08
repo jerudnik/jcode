@@ -250,6 +250,7 @@ async fn stop_swarm_sessions(
             session_id: ctx.session_id.clone(),
             target_session: target.clone(),
             force: Some(force),
+            cross_swarm: false,
         };
         match send_request(request).await {
             Ok(response) => match ensure_success(&response) {
@@ -2626,6 +2627,7 @@ impl Tool for CommunicateTool {
                     session_id: ctx.session_id.clone(),
                     target_session: target.clone(),
                     force: params.force,
+                    cross_swarm: false,
                 };
 
                 match send_request(request).await {
