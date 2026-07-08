@@ -269,9 +269,17 @@ pub(super) async fn sweep_dead_pid_swarm_members(
     _swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
 ) -> Vec<String> {
     let _ = crate::session::reconcile_active_sessions();
+    // Only members not already in a terminal (dead) state can newly transition
+    // to crashed, so skip the rest BEFORE touching disk. This keeps the per-sweep
+    // `Session::load` count proportional to live members instead of O(all members)
+    // — dead members otherwise accumulate and get re-loaded from disk every tick.
     let session_ids: Vec<String> = {
         let members = swarm_members.read().await;
-        members.keys().cloned().collect()
+        members
+            .iter()
+            .filter(|(_, member)| !member_status_is_dead(&member.status))
+            .map(|(session_id, _)| session_id.clone())
+            .collect()
     };
 
     let crashed_sessions: HashSet<String> = session_ids
