@@ -6,10 +6,59 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, oneshot};
+
+/// Max concurrent OWNED (non-shared) MCP child processes across the whole
+/// process. Shared servers are pool-deduped and not counted here.
+pub(crate) const MAX_OWNED_MCP_CHILDREN: usize = 64;
+static OWNED_MCP_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+
+/// Pure bounded-CAS reservation against `counter`, capped at `cap`. Returns
+/// true if a slot was reserved (the caller must release exactly once), false if
+/// already at `cap`. Factored out of `try_acquire` so the cap logic can be
+/// unit-tested on an isolated counter, free of the shared global static.
+fn try_reserve(counter: &AtomicUsize, cap: usize) -> bool {
+    let mut cur = counter.load(Ordering::Relaxed);
+    loop {
+        if cur >= cap {
+            return false;
+        }
+        match counter.compare_exchange_weak(cur, cur + 1, Ordering::AcqRel, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(actual) => cur = actual,
+        }
+    }
+}
+
+/// RAII permit for one owned MCP child. Acquire before spawning; hold it for
+/// the child's lifetime (store inside McpClient). Drop decrements the count.
+#[derive(Debug)]
+pub struct OwnedChildPermit;
+
+impl OwnedChildPermit {
+    /// Try to reserve a slot. Returns None if the cap is already reached.
+    pub fn try_acquire() -> Option<Self> {
+        if try_reserve(&OWNED_MCP_CHILDREN, MAX_OWNED_MCP_CHILDREN) {
+            Some(OwnedChildPermit)
+        } else {
+            None
+        }
+    }
+
+    /// Current owned-child count (for tests/telemetry).
+    pub fn current() -> usize {
+        OWNED_MCP_CHILDREN.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for OwnedChildPermit {
+    fn drop(&mut self) {
+        OWNED_MCP_CHILDREN.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// Shared communication handle for an MCP server.
 /// Multiple sessions can hold clones of this and send concurrent requests.
@@ -120,6 +169,9 @@ impl McpHandle {
 pub struct McpClient {
     handle: McpHandle,
     child: Child,
+    /// Set for owned (non-shared) clients; keeps the process-cap slot reserved
+    /// until this client is dropped. None for pool/shared clients.
+    _child_permit: Option<OwnedChildPermit>,
 }
 
 impl McpClient {
@@ -236,7 +288,11 @@ impl McpClient {
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
         };
 
-        let mut client = Self { handle, child };
+        let mut client = Self {
+            handle,
+            child,
+            _child_permit: None,
+        };
 
         client
             .initialize()
@@ -261,6 +317,10 @@ impl McpClient {
     /// Get a shareable handle to this client
     pub fn handle(&self) -> McpHandle {
         self.handle.clone()
+    }
+
+    pub fn attach_child_permit(&mut self, permit: OwnedChildPermit) {
+        self._child_permit = Some(permit);
     }
 
     /// Initialize the MCP connection
@@ -349,5 +409,35 @@ impl McpClient {
 impl Drop for McpClient {
     fn drop(&mut self) {
         let _ = self.child.start_kill();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_OWNED_MCP_CHILDREN, OwnedChildPermit, try_reserve};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn try_reserve_enforces_cap_on_isolated_counter() {
+        // Deterministic: a private counter, immune to the shared global static
+        // that other tests in this binary mutate concurrently.
+        let counter = AtomicUsize::new(0);
+        for _ in 0..3 {
+            assert!(try_reserve(&counter, 3), "reserve under cap succeeds");
+        }
+        assert!(!try_reserve(&counter, 3), "at cap: refused");
+        counter.fetch_sub(1, Ordering::AcqRel); // release one slot
+        assert!(try_reserve(&counter, 3), "reserve succeeds after release");
+    }
+
+    #[test]
+    fn acquire_returns_some_under_cap_and_drop_is_safe() {
+        // Only non-flaky facts: cap is positive, a permit acquires under cap,
+        // and dropping it does not panic. No assertion on the shared global's
+        // absolute value (other tests mutate it in parallel).
+        assert!(MAX_OWNED_MCP_CHILDREN > 0);
+        let permit = OwnedChildPermit::try_acquire();
+        assert!(permit.is_some(), "should acquire while far under cap");
+        drop(permit);
     }
 }
