@@ -16,8 +16,8 @@ use crate::{
 };
 
 use super::{
-    acp, assistant, commands, debug, hot_exec, login, output, provider_init, selfdev, terminal,
-    tui_launch,
+    acp, assistant, commands, debug, hot_exec, login, mcp_serve, output, provider_init, selfdev,
+    terminal, tui_launch,
 };
 use provider_init::ProviderChoice;
 
@@ -120,6 +120,9 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                 args.tool_profile.is_some(),
             )
             .await?;
+        }
+        Some(Command::McpServe { session }) => {
+            mcp_serve::run_mcp_serve_command(session, args.cwd.clone()).await?;
         }
         Some(Command::Connect) => {
             tui_launch::run_client().await?;
