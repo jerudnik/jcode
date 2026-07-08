@@ -76,7 +76,6 @@ SWARM COMMANDS (swarm: prefix):
   swarm:plans              - List all swarm plans
   swarm:plan_version:<id>  - Show plan version for a swarm
   swarm:proposals          - List pending plan proposals
-  swarm:context            - List all shared context
   swarm:touches            - List all file touches
   swarm:conflicts          - Files touched by multiple sessions
   swarm:broadcast:<msg>    - Broadcast to swarm members
@@ -184,7 +183,7 @@ MEMBERS & STRUCTURE:
   swarm                    - List all swarm members (alias for swarm:members)
   swarm:members            - List all swarm members with full details
   swarm:list               - List all swarm IDs with member counts and coordinators
-  swarm:info:<swarm_id>    - Full info: members, coordinator, plan, context, conflicts
+  swarm:info:<swarm_id>    - Full info: members, coordinator, plan, conflicts
 
 COORDINATORS & ROLES:
   swarm:coordinators            - List all coordinators (swarm_id -> session_id)
@@ -203,11 +202,6 @@ PLAN PROPOSALS (pending approval):
   swarm:proposals:<swarm>  - List proposals for a specific swarm (with items)
   swarm:proposals:<sess>   - Get detailed proposal from a session
 
-SHARED CONTEXT (key-value store):
-  swarm:context            - List all shared context entries
-  swarm:context:<swarm_id> - List context for specific swarm
-  swarm:context:<swarm_id>:<key> - Get specific context value
-
 FILE TOUCHES (conflict detection):
   swarm:touches            - List all file touches (path, session, op, age, timestamp)
   swarm:touches:<path>     - Get touches for specific file
@@ -224,7 +218,6 @@ EXECUTION STATE:
   swarm:interrupts         - List pending interrupts across all sessions
 
 OPERATIONS (debug-only, bypass tool:communicate):
-  swarm:set_context:<sess> <key> <value> - Set shared context as session
   swarm:approve_plan:<coord> <proposer>  - Approve plan proposal (coordinator only)
   swarm:reject_plan:<coord> <proposer> [reason] - Reject plan proposal
 

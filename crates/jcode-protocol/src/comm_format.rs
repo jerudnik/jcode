@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::{
-    AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, ContextEntry, HistoryMessage,
-    PlanGraphStatus, ToolCallSummary,
+    AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, HistoryMessage, PlanGraphStatus,
+    ToolCallSummary,
 };
 
 pub fn format_comm_plan_followup(summary: &PlanGraphStatus) -> String {
@@ -77,22 +77,6 @@ pub fn comm_cleanup_candidate_session_ids(
         .collect::<Vec<_>>();
     ids.sort();
     ids
-}
-
-pub fn format_comm_context_entries(entries: &[ContextEntry]) -> String {
-    if entries.is_empty() {
-        "No shared context found.".to_string()
-    } else {
-        let mut output = String::from("Shared context from other agents:\n\n");
-        for entry in entries {
-            let from = entry.from_name.as_deref().unwrap_or(&entry.from_session);
-            output.push_str(&format!(
-                "  {} (from {}): {}\n",
-                entry.key, from, entry.value
-            ));
-        }
-        output
-    }
 }
 
 pub fn duplicate_comm_friendly_names<'a>(

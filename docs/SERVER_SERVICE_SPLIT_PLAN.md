@@ -71,7 +71,7 @@ flowchart TD
 
 - sessions and default session id
 - client count and client connection map
-- swarm membership, plans, shared context, coordinator map
+- swarm membership, plans, pending plan proposals, coordinator map
 - file touch tracking and reverse indexes
 - channel subscriptions and reverse indexes
 - debug client routing and debug jobs
@@ -252,7 +252,7 @@ It can expose lifecycle events or return session metadata that another layer use
 
 - `swarm_members`
 - `swarms_by_id`
-- `shared_context`
+- `plan_proposals`
 - `swarm_plans`
 - `swarm_coordinators`
 - channel subscriptions and reverse indexes

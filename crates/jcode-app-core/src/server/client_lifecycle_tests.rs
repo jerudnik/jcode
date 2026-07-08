@@ -906,7 +906,7 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
     let client_connections = Arc::new(RwLock::new(HashMap::new()));
     let swarm_members = Arc::new(RwLock::new(HashMap::new()));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::new()));
-    let shared_context = Arc::new(RwLock::new(HashMap::new()));
+    let plan_proposals = Arc::new(RwLock::new(HashMap::new()));
     let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
     let file_touch = FileTouchService::new();
@@ -932,7 +932,7 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
         Arc::clone(&client_connections),
         swarm_members,
         swarms_by_id,
-        shared_context,
+        plan_proposals,
         swarm_plans,
         swarm_coordinators,
         file_touch,

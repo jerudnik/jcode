@@ -1,6 +1,6 @@
 use super::{
     ClientConnectionInfo, ClientDebugState, DebugJob, FileAccess, FileTouchService, ServerIdentity,
-    SessionInterruptQueues, SharedContext, SwarmEvent, SwarmMember, VersionedPlan,
+    SessionInterruptQueues, SwarmEvent, SwarmMember, VersionedPlan,
 };
 use crate::agent::Agent;
 use anyhow::Result;
@@ -24,7 +24,6 @@ pub(super) async fn maybe_handle_server_state_command(
     server_identity: &ServerIdentity,
     server_start_time: Instant,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    shared_context: &Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     file_touch: &FileTouchService,
@@ -116,7 +115,6 @@ pub(super) async fn maybe_handle_server_state_command(
             server_identity,
             server_start_time,
             swarms_by_id,
-            shared_context,
             swarm_plans,
             swarm_coordinators,
             file_touch,
@@ -261,7 +259,6 @@ async fn build_server_memory_payload(
     server_identity: &ServerIdentity,
     server_start_time: Instant,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    shared_context: &Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     file_touch: &FileTouchService,
@@ -430,16 +427,6 @@ async fn build_server_memory_payload(
     let swarm_count = swarms.len();
     drop(swarms);
 
-    let context = shared_context.read().await;
-    let shared_context_entry_count: usize = context.values().map(|entries| entries.len()).sum();
-    let shared_context_estimate_bytes: usize = context
-        .values()
-        .flat_map(|entries| entries.values())
-        .map(estimate_shared_context_bytes)
-        .sum();
-    let shared_context_swarm_count = context.len();
-    drop(context);
-
     let plans = swarm_plans.read().await;
     let swarm_plan_count = plans.len();
     let swarm_plan_item_count: usize = plans.values().map(|plan| plan.items.len()).sum();
@@ -564,9 +551,6 @@ async fn build_server_memory_payload(
             "swarm_count": swarm_count,
             "swarm_membership_count": swarm_membership_count,
             "swarms_estimate_bytes": swarms_estimate_bytes,
-            "shared_context_swarm_count": shared_context_swarm_count,
-            "shared_context_entry_count": shared_context_entry_count,
-            "shared_context_estimate_bytes": shared_context_estimate_bytes,
             "plan_count": swarm_plan_count,
             "plan_item_count": swarm_plan_item_count,
             "plan_estimate_bytes": swarm_plan_estimate_bytes,
@@ -660,17 +644,6 @@ fn estimate_swarm_member_bytes(member: &SwarmMember) -> usize {
             .unwrap_or(0)
         + member
             .swarm_id
-            .as_ref()
-            .map(|value| value.len())
-            .unwrap_or(0)
-}
-
-fn estimate_shared_context_bytes(context: &SharedContext) -> usize {
-    context.key.len()
-        + context.value.len()
-        + context.from_session.len()
-        + context
-            .from_name
             .as_ref()
             .map(|value| value.len())
             .unwrap_or(0)

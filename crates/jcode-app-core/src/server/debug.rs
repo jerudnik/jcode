@@ -18,7 +18,7 @@ use super::debug_swarm_read::maybe_handle_swarm_read_command;
 use super::debug_swarm_write::{DebugSwarmWriteContext, maybe_handle_swarm_write_command};
 use super::debug_testers::execute_tester_command;
 use super::{
-    FileTouchService, ServerIdentity, SharedContext, SwarmEvent, SwarmMember, VersionedPlan,
+    FileTouchService, PlanProposalCache, ServerIdentity, SwarmEvent, SwarmMember, VersionedPlan,
     debug_control_allowed, fanout_session_event,
 };
 use crate::agent::Agent;
@@ -254,7 +254,7 @@ pub(super) async fn handle_debug_client(
     client_connections: Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
     swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    shared_context: Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    plan_proposals: PlanProposalCache,
     swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
     file_touch: FileTouchService,
@@ -452,7 +452,6 @@ pub(super) async fn handle_debug_client(
                             &server_identity,
                             server_start_time,
                             &swarms_by_id,
-                            &shared_context,
                             &swarm_plans,
                             &swarm_coordinators,
                             &file_touch,
@@ -469,7 +468,7 @@ pub(super) async fn handle_debug_client(
                             &sessions,
                             &swarm_members,
                             &swarms_by_id,
-                            &shared_context,
+                            &plan_proposals,
                             &swarm_plans,
                             &swarm_coordinators,
                             &file_touch,
@@ -484,7 +483,7 @@ pub(super) async fn handle_debug_client(
                                 session_id: &session_id,
                                 swarm_members: &swarm_members,
                                 swarms_by_id: &swarms_by_id,
-                                shared_context: &shared_context,
+                                plan_proposals: &plan_proposals,
                                 swarm_plans: &swarm_plans,
                                 swarm_coordinators: &swarm_coordinators,
                             },

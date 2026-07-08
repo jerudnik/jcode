@@ -3,9 +3,9 @@ use super::swarm_mutation_state::{
     request_key,
 };
 use super::{
-    SessionInterruptQueues, SharedContext, SwarmEvent, SwarmEventType, SwarmMember, SwarmState,
-    VersionedPlan, broadcast_swarm_plan, persist_swarm_state_for, queue_soft_interrupt_for_session,
-    record_swarm_event, summarize_plan_items,
+    PendingPlanProposal, PlanProposalCache, SessionInterruptQueues, SwarmEvent, SwarmEventType,
+    SwarmMember, SwarmState, VersionedPlan, broadcast_swarm_plan, persist_swarm_state_for,
+    queue_soft_interrupt_for_session, record_swarm_event, summarize_plan_items,
 };
 use crate::agent::Agent;
 use crate::plan::PlanItem;
@@ -38,7 +38,7 @@ fn plan_cycle_error(items: &[PlanItem]) -> Option<String> {
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "plan proposal updates sessions, swarm coordination, shared context, interrupts, and event history"
+    reason = "plan proposal updates sessions, swarm coordination, proposal cache, interrupts, and event history"
 )]
 pub(super) async fn handle_comm_propose_plan(
     id: u64,
@@ -47,7 +47,7 @@ pub(super) async fn handle_comm_propose_plan(
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    shared_context: &Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    plan_proposals: &PlanProposalCache,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     sessions: &SessionAgents,
@@ -210,21 +210,13 @@ pub(super) async fn handle_comm_propose_plan(
         return;
     }
 
-    let proposal_key = format!("plan_proposal:{req_session_id}");
-    let proposal_value = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
     {
-        let mut context = shared_context.write().await;
-        let swarm_context = context.entry(swarm_id.clone()).or_insert_with(HashMap::new);
-        let now = Instant::now();
-        swarm_context.insert(
-            proposal_key.clone(),
-            SharedContext {
-                key: proposal_key.clone(),
-                value: proposal_value,
-                from_session: req_session_id.clone(),
-                from_name: from_name.clone(),
-                created_at: now,
-                updated_at: now,
+        let mut cache = plan_proposals.write().await;
+        cache.entry(swarm_id.clone()).or_default().insert(
+            req_session_id.clone(),
+            PendingPlanProposal {
+                items: items.clone(),
+                created_at: Instant::now(),
             },
         );
     }
@@ -245,11 +237,10 @@ pub(super) async fn handle_comm_propose_plan(
 
     let summary = summarize_plan_items(&items, 3);
     let notification_msg = format!(
-        "Plan proposal from {} ({} items). Summary: {}. Review with communicate read key '{}'.",
+        "Plan proposal from {} ({} items). Summary: {}. Review with communicate approve_plan/reject_plan.",
         from_label,
         items.len(),
-        summary,
-        proposal_key
+        summary
     );
 
     let members = swarm_members.read().await;
@@ -269,7 +260,7 @@ pub(super) async fn handle_comm_propose_plan(
             proposer_name: from_name.clone(),
             items: items.clone(),
             summary: summary.clone(),
-            proposal_key: proposal_key.clone(),
+            proposal_key: req_session_id.clone(),
         });
     }
     let _ = queue_soft_interrupt_for_session(
@@ -318,7 +309,7 @@ pub(super) async fn handle_comm_approve_plan(
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    shared_context: &Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    plan_proposals: &PlanProposalCache,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     sessions: &SessionAgents,
@@ -360,17 +351,16 @@ pub(super) async fn handle_comm_approve_plan(
         return;
     };
 
-    let proposal_key = format!("plan_proposal:{proposer_session}");
-    let proposal_value = {
-        let context = shared_context.read().await;
-        context
+    let proposal_items = {
+        let cache = plan_proposals.read().await;
+        cache
             .get(&swarm_id)
-            .and_then(|swarm_context| swarm_context.get(&proposal_key))
-            .map(|context| context.value.clone())
+            .and_then(|proposals| proposals.get(&proposer_session))
+            .map(|proposal| proposal.items.clone())
     };
 
-    let proposal = match proposal_value {
-        Some(proposal) => proposal,
+    let items = match proposal_items {
+        Some(items) => items,
         None => {
             finish_request(
                 swarm_mutation_runtime,
@@ -385,124 +375,122 @@ pub(super) async fn handle_comm_approve_plan(
         }
     };
 
-    if let Ok(items) = serde_json::from_str::<Vec<PlanItem>>(&proposal) {
-        // Validate the merged graph (existing plan + proposed items) for
-        // dependency cycles before committing. A cycle here permanently wedges
-        // every task that depends on it, so reject the approval and keep the
-        // proposal pending for the proposer to fix and re-propose.
-        let merged_cycle_error = {
-            let plans = swarm_plans.read().await;
-            let mut merged: Vec<PlanItem> = plans
-                .get(&swarm_id)
-                .map(|plan| plan.items.clone())
-                .unwrap_or_default();
-            merged.extend(items.iter().cloned());
-            plan_cycle_error(&merged)
-        };
-        if let Some(message) = merged_cycle_error {
-            finish_request(
-                swarm_mutation_runtime,
-                &mutation_state,
-                PersistedSwarmMutationResponse::Error {
-                    message,
-                    retry_after_secs: None,
-                },
-            )
-            .await;
-            return;
-        }
-
-        let participant_ids = {
-            let mut plans = swarm_plans.write().await;
-            let plan = plans
-                .entry(swarm_id.clone())
-                .or_insert_with(VersionedPlan::new);
-            plan.items.extend(items.clone());
-            plan.version += 1;
-            plan.participants.insert(req_session_id.clone());
-            plan.participants.insert(proposer_session.clone());
-            for item in &items {
-                if let Some(owner) = &item.assigned_to {
-                    plan.participants.insert(owner.clone());
-                }
-            }
-            plan.participants.clone()
-        };
-
-        {
-            let mut context = shared_context.write().await;
-            if let Some(swarm_context) = context.get_mut(&swarm_id) {
-                swarm_context.remove(&proposal_key);
-            }
-        }
-
-        broadcast_swarm_plan(
-            &swarm_id,
-            Some("proposal_approved".to_string()),
-            swarm_plans,
-            swarm_members,
-            swarms_by_id,
-        )
-        .await;
-        record_swarm_event(
-            event_history,
-            event_counter,
-            swarm_event_tx,
-            req_session_id.clone(),
-            None,
-            Some(swarm_id.clone()),
-            SwarmEventType::PlanUpdate {
-                swarm_id: swarm_id.clone(),
-                item_count: items.len(),
+    // Validate the merged graph (existing plan + proposed items) for
+    // dependency cycles before committing. A cycle here permanently wedges
+    // every task that depends on it, so reject the approval and keep the
+    // proposal pending for the proposer to fix and re-propose.
+    let merged_cycle_error = {
+        let plans = swarm_plans.read().await;
+        let mut merged: Vec<PlanItem> = plans
+            .get(&swarm_id)
+            .map(|plan| plan.items.clone())
+            .unwrap_or_default();
+        merged.extend(items.iter().cloned());
+        plan_cycle_error(&merged)
+    };
+    if let Some(message) = merged_cycle_error {
+        finish_request(
+            swarm_mutation_runtime,
+            &mutation_state,
+            PersistedSwarmMutationResponse::Error {
+                message,
+                retry_after_secs: None,
             },
         )
         .await;
+        return;
+    }
 
-        let coordinator_name = {
-            let members = swarm_members.read().await;
-            members
-                .get(&req_session_id)
-                .and_then(|member| member.friendly_name.clone())
-        };
-
-        let members = swarm_members.read().await;
-        for sid in participant_ids {
-            if let Some(member) = members.get(&sid) {
-                let message = format!(
-                    "Plan approved by coordinator: {} items added from {}",
-                    items.len(),
-                    proposer_session
-                );
-                let _ = member.event_tx.send(ServerEvent::Notification {
-                    from_session: req_session_id.clone(),
-                    from_name: coordinator_name.clone(),
-                    notification_type: NotificationType::Message {
-                        scope: Some("plan".to_string()),
-                        tldr: None,
-                    },
-                    message: message.clone(),
-                });
-
-                let _ = queue_soft_interrupt_for_session(
-                    &sid,
-                    message.clone(),
-                    false,
-                    SoftInterruptSource::System,
-                    soft_interrupt_queues,
-                    sessions,
-                )
-                .await;
+    let participant_ids = {
+        let mut plans = swarm_plans.write().await;
+        let plan = plans
+            .entry(swarm_id.clone())
+            .or_insert_with(VersionedPlan::new);
+        plan.items.extend(items.clone());
+        plan.version += 1;
+        plan.participants.insert(req_session_id.clone());
+        plan.participants.insert(proposer_session.clone());
+        for item in &items {
+            if let Some(owner) = &item.assigned_to {
+                plan.participants.insert(owner.clone());
             }
         }
+        plan.participants.clone()
+    };
 
-        let swarm_state = SwarmState {
-            members: Arc::clone(swarm_members),
-            swarms_by_id: Arc::clone(swarms_by_id),
-            plans: Arc::clone(swarm_plans),
-            coordinators: Arc::clone(swarm_coordinators),
-        };
-        persist_swarm_state_for(&swarm_id, &swarm_state).await;
+    {
+        let mut cache = plan_proposals.write().await;
+        if let Some(proposals) = cache.get_mut(&swarm_id) {
+            proposals.remove(&proposer_session);
+        }
     }
+
+    broadcast_swarm_plan(
+        &swarm_id,
+        Some("proposal_approved".to_string()),
+        swarm_plans,
+        swarm_members,
+        swarms_by_id,
+    )
+    .await;
+    record_swarm_event(
+        event_history,
+        event_counter,
+        swarm_event_tx,
+        req_session_id.clone(),
+        None,
+        Some(swarm_id.clone()),
+        SwarmEventType::PlanUpdate {
+            swarm_id: swarm_id.clone(),
+            item_count: items.len(),
+        },
+    )
+    .await;
+
+    let coordinator_name = {
+        let members = swarm_members.read().await;
+        members
+            .get(&req_session_id)
+            .and_then(|member| member.friendly_name.clone())
+    };
+
+    let members = swarm_members.read().await;
+    for sid in participant_ids {
+        if let Some(member) = members.get(&sid) {
+            let message = format!(
+                "Plan approved by coordinator: {} items added from {}",
+                items.len(),
+                proposer_session
+            );
+            let _ = member.event_tx.send(ServerEvent::Notification {
+                from_session: req_session_id.clone(),
+                from_name: coordinator_name.clone(),
+                notification_type: NotificationType::Message {
+                    scope: Some("plan".to_string()),
+                    tldr: None,
+                },
+                message: message.clone(),
+            });
+
+            let _ = queue_soft_interrupt_for_session(
+                &sid,
+                message.clone(),
+                false,
+                SoftInterruptSource::System,
+                soft_interrupt_queues,
+                sessions,
+            )
+            .await;
+        }
+    }
+
+    let swarm_state = SwarmState {
+        members: Arc::clone(swarm_members),
+        swarms_by_id: Arc::clone(swarms_by_id),
+        plans: Arc::clone(swarm_plans),
+        coordinators: Arc::clone(swarm_coordinators),
+    };
+    persist_swarm_state_for(&swarm_id, &swarm_state).await;
 
     finish_request(
         swarm_mutation_runtime,
@@ -523,7 +511,7 @@ pub(super) async fn handle_comm_reject_plan(
     reason: Option<String>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
-    shared_context: &Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    plan_proposals: &PlanProposalCache,
     swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     sessions: &SessionAgents,
     soft_interrupt_queues: &SessionInterruptQueues,
@@ -568,12 +556,11 @@ pub(super) async fn handle_comm_reject_plan(
         return;
     };
 
-    let proposal_key = format!("plan_proposal:{proposer_session}");
     let proposal_exists = {
-        let context = shared_context.read().await;
-        context
+        let cache = plan_proposals.read().await;
+        cache
             .get(&swarm_id)
-            .and_then(|swarm_context| swarm_context.get(&proposal_key))
+            .and_then(|proposals| proposals.get(&proposer_session))
             .is_some()
     };
 
@@ -591,9 +578,9 @@ pub(super) async fn handle_comm_reject_plan(
     }
 
     {
-        let mut context = shared_context.write().await;
-        if let Some(swarm_context) = context.get_mut(&swarm_id) {
-            swarm_context.remove(&proposal_key);
+        let mut cache = plan_proposals.write().await;
+        if let Some(proposals) = cache.get_mut(&swarm_id) {
+            proposals.remove(&proposer_session);
         }
     }
 

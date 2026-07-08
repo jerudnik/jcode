@@ -522,26 +522,6 @@ pub enum Request {
     AgentContext { id: u64 },
 
     // === Agent communication ===
-    /// Share context with other agents
-    #[serde(rename = "comm_share")]
-    CommShare {
-        id: u64,
-        session_id: String,
-        key: String,
-        value: String,
-        #[serde(default)]
-        append: bool,
-    },
-
-    /// Read shared context from other agents
-    #[serde(rename = "comm_read")]
-    CommRead {
-        id: u64,
-        session_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        key: Option<String>,
-    },
-
     /// Send a message to other agents
     #[serde(rename = "comm_message")]
     CommMessage {
@@ -1414,7 +1394,7 @@ pub enum ServerEvent {
         available_model_routes: Vec<jcode_provider_core::ModelRoute>,
     },
 
-    /// Notification from another agent (file conflict, message, shared context)
+    /// Notification from another agent (file conflict or message)
     #[serde(rename = "notification")]
     Notification {
         /// Session ID of the agent that triggered the notification
@@ -1435,14 +1415,6 @@ pub enum ServerEvent {
     /// Completed `!cmd` shell execution for a connected remote client.
     #[serde(rename = "input_shell_result")]
     InputShellResult { result: InputShellResult },
-
-    /// Response to comm_read request
-    #[serde(rename = "comm_context")]
-    CommContext {
-        id: u64,
-        /// Shared context entries
-        entries: Vec<ContextEntry>,
-    },
 
     /// Response to comm_list request
     #[serde(rename = "comm_members")]

@@ -256,11 +256,6 @@ fn present_swarm_notification_inner(
                 status_notice: "Swarm update".to_string(),
             },
         },
-        NotificationType::SharedContext { key, value } => SwarmNotificationPresentation {
-            title: format!("Shared context · {}", sender),
-            message: format!("{} = {}", key, value).trim().to_string(),
-            status_notice: format!("Shared context: {}", key),
-        },
         NotificationType::FileConflict {
             path,
             operation,

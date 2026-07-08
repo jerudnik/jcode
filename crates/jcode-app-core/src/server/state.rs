@@ -1,5 +1,5 @@
 use crate::bus::FileOp;
-use crate::plan::VersionedPlan;
+use crate::plan::{PlanItem, VersionedPlan};
 use crate::protocol::ServerEvent;
 use jcode_agent_runtime::{
     InterruptSignal, SoftInterruptMessage, SoftInterruptQueue, SoftInterruptSource,
@@ -303,18 +303,16 @@ impl SwarmMember {
     }
 }
 
-/// A shared context entry stored by the server
+/// A pending swarm plan proposal awaiting coordinator approval/rejection.
+/// Carved out of the removed swarm KV store (its one load-bearing consumer).
 #[derive(Clone, Debug)]
-pub struct SharedContext {
-    pub key: String,
-    pub value: String,
-    pub from_session: String,
-    pub from_name: Option<String>,
-    /// When this context was created
+pub struct PendingPlanProposal {
+    pub items: Vec<PlanItem>,
     pub created_at: Instant,
-    /// When this context was last updated
-    pub updated_at: Instant,
 }
+
+/// swarm_id -> proposer_session_id -> pending proposal
+pub type PlanProposalCache = Arc<RwLock<HashMap<String, HashMap<String, PendingPlanProposal>>>>;
 
 /// Event types for real-time event subscription
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -343,8 +341,6 @@ pub enum SwarmEventType {
         proposer_session: String,
         item_count: usize,
     },
-    /// Shared context was updated
-    ContextUpdate { swarm_id: String, key: String },
     /// Session status changed
     StatusChange {
         old_status: String,
