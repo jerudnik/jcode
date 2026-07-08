@@ -937,14 +937,19 @@ impl RemoteConnection {
     }
 
     /// Stop a swarm member (`comm_stop`).
-    pub async fn comm_stop(&mut self, target_session: String, cross_swarm: bool) -> Result<u64> {
+    pub async fn comm_stop(
+        &mut self,
+        target_session: String,
+        cross_swarm: bool,
+        force: bool,
+    ) -> Result<u64> {
         let id = self.next_request_id;
         self.next_request_id += 1;
         let request = Request::CommStop {
             id,
             session_id: self.comm_session_id(),
             target_session,
-            force: None,
+            force: force.then_some(true),
             cross_swarm,
         };
         self.send_request(request).await?;
