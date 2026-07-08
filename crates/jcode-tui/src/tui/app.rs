@@ -1114,6 +1114,7 @@ pub struct App {
     remote_swarm_members: Vec<crate::protocol::SwarmMemberStatus>,
     // Latest swarm plan snapshot (local or remote server event stream)
     swarm_plan_items: Vec<crate::plan::PlanItem>,
+    swarm_plan_phases_by_id: std::collections::BTreeMap<String, String>,
     swarm_plan_version: Option<u64>,
     swarm_plan_swarm_id: Option<String>,
     // Number of connected clients (remote mode only)

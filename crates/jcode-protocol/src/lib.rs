@@ -353,6 +353,11 @@ pub struct PlanGraphStatus {
     /// listing failed ids. Only failed items with a recorded reason appear.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub failed_reasons: BTreeMap<String, String>,
+    /// Plan instance phase by item id. This carries server-side `NodeMeta.kind`
+    /// to clients without bloating persisted `PlanItem`s, so UI member typing can
+    /// resolve assigned instance phase before falling back to tags.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub phases_by_id: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cycle_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -429,6 +434,7 @@ impl PlanGraphStatus {
             completed_ids: Vec::new(),
             failed_ids: Vec::new(),
             failed_reasons: BTreeMap::new(),
+            phases_by_id: BTreeMap::new(),
             cycle_ids: Vec::new(),
             unresolved_dependency_ids: Vec::new(),
             next_ready_ids: Vec::new(),
@@ -458,6 +464,14 @@ impl PlanGraphStatus {
                     .map(|reason| (id.clone(), reason))
             })
             .collect();
+        let phases_by_id = plan
+            .node_meta
+            .iter()
+            .filter_map(|(id, meta)| {
+                let phase = meta.kind.as_deref()?.trim();
+                (!phase.is_empty()).then(|| (id.clone(), phase.to_string()))
+            })
+            .collect();
         Self {
             swarm_id: Some(swarm_id.into()),
             version: plan.version,
@@ -468,6 +482,7 @@ impl PlanGraphStatus {
             completed_ids: graph.completed_ids,
             failed_ids: graph.failed_ids,
             failed_reasons,
+            phases_by_id,
             cycle_ids: graph.cycle_ids,
             unresolved_dependency_ids: graph.unresolved_dependency_ids,
             next_ready_ids: next_runnable_item_ids(&plan.items, next_ready_limit),
