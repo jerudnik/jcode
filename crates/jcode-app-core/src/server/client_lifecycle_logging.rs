@@ -58,8 +58,6 @@ pub(super) fn request_type_is_read_only(kind: &str) -> bool {
             | "agent_context"
             | "comm_read"
             | "comm_list"
-            | "comm_list_channels"
-            | "comm_channel_members"
             | "comm_summary"
             | "comm_status"
             | "comm_plan_status"

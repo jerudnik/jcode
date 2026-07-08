@@ -413,7 +413,6 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
                     from_session,
                     notification_type: crate::protocol::NotificationType::Message {
                         scope: Some(scope),
-                        channel: None,
                         tldr: None,
                     },
                     message,
@@ -534,7 +533,7 @@ async fn communicate_spawn_with_prompt_and_summary_work_end_to_end() {
 /// broadcast otherwise), while `broadcast` is a group send scoped to the
 /// sender's spawned subtree (whole swarm when the sender is the coordinator).
 /// Regression test for the bug where `message` and `broadcast` were identical
-/// because the tool discarded `to_session`/`channel` for both.
+/// because the tool discarded `to_session` for both.
 #[tokio::test]
 async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
     let _env_lock = crate::storage::lock_test_env();

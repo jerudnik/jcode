@@ -910,8 +910,6 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
     let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
     let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
     let file_touch = FileTouchService::new();
-    let channel_subscriptions = Arc::new(RwLock::new(HashMap::new()));
-    let channel_subscriptions_by_session = Arc::new(RwLock::new(HashMap::new()));
     let client_debug_state = Arc::new(RwLock::new(ClientDebugState::default()));
     let (_debug_response_tx, _) = broadcast::channel(8);
     let event_history = Arc::new(RwLock::new(std::collections::VecDeque::new()));
@@ -938,8 +936,6 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
         swarm_plans,
         swarm_coordinators,
         file_touch,
-        channel_subscriptions,
-        channel_subscriptions_by_session,
         client_debug_state,
         _debug_response_tx,
         event_history,

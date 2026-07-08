@@ -515,7 +515,6 @@ async fn notify_coordinator_of_salvage(
             from_name: Some(label.clone()),
             notification_type: NotificationType::Message {
                 scope: Some("swarm".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: outcome.describe(&label),
@@ -1204,7 +1203,6 @@ pub(super) async fn remove_session_from_swarm(
                     from_name: member.friendly_name.clone(),
                     notification_type: NotificationType::Message {
                         scope: Some("swarm".to_string()),
-                        channel: None,
                         tldr: None,
                     },
                     message: "You are now the coordinator for this swarm.".to_string(),
@@ -1631,7 +1629,6 @@ pub(super) async fn update_member_status_with_report_tldr(
                         from_name: agent_name.clone(),
                         notification_type: NotificationType::Message {
                             scope: Some("swarm".to_string()),
-                            channel: None,
                             tldr: report_tldr.clone(),
                         },
                         message: msg,

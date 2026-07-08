@@ -196,12 +196,6 @@ pub struct ToolCallSummary {
     pub timestamp_secs: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SwarmChannelInfo {
-    pub channel: String,
-    pub member_count: usize,
-}
-
 /// A shared context entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextEntry {
@@ -691,8 +685,6 @@ impl Request {
             Request::CommRead { id, .. } => *id,
             Request::CommMessage { id, .. } => *id,
             Request::CommList { id, .. } => *id,
-            Request::CommListChannels { id, .. } => *id,
-            Request::CommChannelMembers { id, .. } => *id,
             Request::CommProposePlan { id, .. } => *id,
             Request::CommApprovePlan { id, .. } => *id,
             Request::CommRejectPlan { id, .. } => *id,
@@ -714,8 +706,6 @@ impl Request {
             Request::CommAssignTask { id, .. } => *id,
             Request::CommAssignNext { id, .. } => *id,
             Request::CommTaskControl { id, .. } => *id,
-            Request::CommSubscribeChannel { id, .. } => *id,
-            Request::CommUnsubscribeChannel { id, .. } => *id,
             Request::CommAwaitMembers { id, .. } => *id,
         }
     }
@@ -728,8 +718,6 @@ impl Request {
                 | Request::CommRead { .. }
                 | Request::CommMessage { .. }
                 | Request::CommList { .. }
-                | Request::CommListChannels { .. }
-                | Request::CommChannelMembers { .. }
                 | Request::CommProposePlan { .. }
                 | Request::CommApprovePlan { .. }
                 | Request::CommRejectPlan { .. }
@@ -751,8 +739,6 @@ impl Request {
                 | Request::CommAssignTask { .. }
                 | Request::CommAssignNext { .. }
                 | Request::CommTaskControl { .. }
-                | Request::CommSubscribeChannel { .. }
-                | Request::CommUnsubscribeChannel { .. }
                 | Request::CommAwaitMembers { .. }
         )
     }

@@ -32,16 +32,6 @@ fn compact_direct_message_body(message: &str) -> String {
     message.to_string()
 }
 
-fn compact_channel_message_body(message: &str) -> String {
-    if let Some((_, body)) = message
-        .strip_prefix('#')
-        .and_then(|rest| rest.split_once(": "))
-    {
-        return body.trim().to_string();
-    }
-    message.to_string()
-}
-
 fn compact_broadcast_message_body(message: &str) -> String {
     if let Some((_, body)) = message
         .strip_prefix("broadcast from ")
@@ -189,7 +179,7 @@ fn present_swarm_notification_inner(
 ) -> SwarmNotificationPresentation {
     let trimmed = message.trim();
     match notification_type {
-        NotificationType::Message { scope, channel, .. } => match scope.as_deref() {
+        NotificationType::Message { scope, .. } => match scope.as_deref() {
             Some("dm") => {
                 if let Some(task_body) =
                     strip_message_prefix(trimmed, "Task assigned to you by coordinator: ")
@@ -207,14 +197,6 @@ fn present_swarm_notification_inner(
                     }
                 }
             }
-            Some("channel") => SwarmNotificationPresentation {
-                title: format!("#{} · {}", channel.as_deref().unwrap_or("channel"), sender),
-                message: compact_channel_message_body(trimmed),
-                status_notice: format!(
-                    "Channel message · #{}",
-                    channel.as_deref().unwrap_or("channel")
-                ),
-            },
             Some("broadcast") => SwarmNotificationPresentation {
                 title: format!("Broadcast · {}", sender),
                 message: compact_broadcast_message_body(trimmed),
@@ -328,7 +310,6 @@ mod tests {
             "sheep",
             &NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: Some("fixed the flaky test".to_string()),
             },
             "DM from sheep: The flaky test was caused by a race in the setup helper. I rewrote it to use a barrier and verified 200 consecutive runs pass.",
@@ -353,7 +334,6 @@ mod tests {
             "sheep",
             &NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: None,
             },
             "DM from sheep: short note",
@@ -371,7 +351,6 @@ mod tests {
             "sheep",
             &NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: None,
             },
             "Task assigned to you by coordinator: Implement compaction asymptotic fixes - You own the compaction task.",
@@ -392,7 +371,6 @@ mod tests {
             "swarm await",
             &NotificationType::Message {
                 scope: Some("swarm_await".to_string()),
-                channel: None,
                 tldr: None,
             },
             "🐝 **Swarm await finished**\n\nAll members done. All 2 members are done: fox, wolf",
@@ -413,7 +391,6 @@ mod tests {
             "background task",
             &NotificationType::Message {
                 scope: Some("background_task".to_string()),
-                channel: None,
                 tldr: None,
             },
             "Background task failed · selfdev-build · exit 101",
@@ -434,7 +411,6 @@ mod tests {
             "background task",
             &NotificationType::Message {
                 scope: Some("background_task".to_string()),
-                channel: None,
                 tldr: None,
             },
             "**Background task progress** `bg123` · `bash`\n\n[#####-------] 42% · Running tests (reported)",
@@ -454,7 +430,6 @@ mod tests {
             "sheep",
             &NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: None,
             },
             "DM from sheep: I can see your worktree diff.",
@@ -472,7 +447,6 @@ mod tests {
             "sheep",
             &NotificationType::Message {
                 scope: Some("plan".to_string()),
-                channel: None,
                 tldr: None,
             },
             "Plan updated by sheep (4 items, v1)",

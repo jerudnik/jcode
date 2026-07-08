@@ -146,7 +146,6 @@ pub(super) async fn handle_comm_propose_plan(
                     from_name: from_name.clone(),
                     notification_type: NotificationType::Message {
                         scope: Some("plan".to_string()),
-                        channel: None,
                         tldr: None,
                     },
                     message: notification_msg.clone(),
@@ -260,7 +259,6 @@ pub(super) async fn handle_comm_propose_plan(
             from_name: from_name.clone(),
             notification_type: NotificationType::Message {
                 scope: Some("plan_proposal".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: notification_msg.clone(),
@@ -291,7 +289,6 @@ pub(super) async fn handle_comm_propose_plan(
             from_name: from_name.clone(),
             notification_type: NotificationType::Message {
                 scope: Some("plan_proposal".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: proposer_confirmation.clone(),
@@ -481,7 +478,6 @@ pub(super) async fn handle_comm_approve_plan(
                     from_name: coordinator_name.clone(),
                     notification_type: NotificationType::Message {
                         scope: Some("plan".to_string()),
-                        channel: None,
                         tldr: None,
                     },
                     message: message.clone(),
@@ -620,7 +616,6 @@ pub(super) async fn handle_comm_reject_plan(
             from_name: coordinator_name.clone(),
             notification_type: NotificationType::Message {
                 scope: Some("dm".to_string()),
-                channel: None,
                 tldr: None,
             },
             message: message.clone(),
