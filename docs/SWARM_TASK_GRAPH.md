@@ -3,7 +3,7 @@
 Status: Being implemented (supersedes the agent-first framing in
 `SWARM_ARCHITECTURE.md`). The DAG engine, deep/light modes, gates, growth
 mechanics, and comm migration steps 1-2 (artifact dataflow, subtree-scoped
-broadcast) are live; channel/shared-context deprecation (steps 3-4) is pending.
+broadcast) are live; channel/shared-context deprecation steps have landed.
 
 This document captures the planned reframe of the swarm module from an
 agent-centric model into a **task DAG (directed acyclic graph)**. The DAG becomes
@@ -417,15 +417,15 @@ much and the wrong shape. The rework is **by subtraction, not addition**.
    comm primitive yet. The most important "communication" in the new model is the
    one thing the current toolset cannot express, so agents would have to simulate
    dataflow by DMing each other - exactly the lossy coordination we are replacing.
-2. **Too many overlapping primitives.** DM vs broadcast vs channel vs
-   shared-context-fanout are four ways to push text at other agents, and `message`
+2. **Too many overlapping primitives.** DM vs broadcast vs the retired channel and
+   shared-context fanout paths created too many ways to push text at other agents, and `message`
    already auto-routes among three of them. The codebase already carries an
    action-synonym normalization layer because models keep inventing verbs; that is
    a smell that the surface is too large. More actions means more model error.
 3. **Broadcasts must not scale to the member cap.** Whole-swarm fanout at the
    1000-member cap (section 10) would be a 1000-way notification storm per send.
    This is why broadcast-style sends are subtree-scoped (migration step 2,
-   implemented in `handle_comm_message`/`handle_comm_share`): a sender reaches
+   implemented in `handle_comm_message`): a sender reaches
    only its spawned subtree, and only the coordinator retains whole-swarm reach.
 
 ### The two-tier target model
@@ -443,9 +443,9 @@ Keep two tiers and drop the middle:
   That is **DM + a subtree-scoped broadcast**, nothing more.
 
 ### What is demoted or cut
-- **Shared-context key-value store**: largely redundant with the repo (the real
-  shared medium) plus typed artifacts. Keep only for a concrete non-repo
-  shared-state need; otherwise it is a second source of truth and should go.
+- **Shared-context key-value store**: removed as redundant with the repo (the real
+  shared medium) plus typed artifacts. Pending plan proposals now use a dedicated
+  in-memory proposal cache instead of the generic store.
 - **Swarm-wide broadcast**: replaced with **subtree-scoped broadcast** that reaches
   only an agent's owned descendants, so it cannot become a member-cap-sized storm.
   Whole-swarm broadcast becomes a rare coordinator-only operation.
@@ -459,17 +459,15 @@ agent-to-agent messaging shrinks to a small exception path (DM + subtree
 broadcast). This aligns comm with the DAG, removes the broadcast-storm risk at the
 member cap, and shrinks the error-prone tool surface.
 
-### Staged migration (do not rip out up front)
-Cutting channels/shared-context is a real behavior change for existing swarm flows.
-Stage it:
+### Staged migration
+Cutting channels/shared-context was staged to avoid breaking active swarm flows:
 1. **Done.** Artifact dataflow: completion artifacts flow to dependents and
    hydrate their input.
-2. **Done.** Broadcast scoped to the sender's spawned subtree (including the
-   no-subscriber channel fallback and shared-context notifications); whole-swarm
+2. **Done.** Broadcast scoped to the sender's spawned subtree; whole-swarm
    broadcast remains only as a coordinator escape hatch.
-3. Migrate existing flows off channels/shared-context (tool schema now
-   discourages them).
-4. Deprecate, then remove, the redundant chat primitives once flows have migrated.
+3. **Done.** Migrate plan proposals off the generic shared-context store.
+4. **Done.** Remove the redundant channel/shared-context primitives from the
+   agent-facing surface.
 
 ---
 

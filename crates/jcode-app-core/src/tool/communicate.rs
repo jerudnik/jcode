@@ -4,14 +4,13 @@ use super::{Tool, ToolContext, ToolOutput};
 use crate::background::TaskResult;
 use crate::plan::PlanItem;
 use crate::protocol::{
-    AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, ContextEntry,
-    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, ToolCallSummary,
+    AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, HistoryMessage,
+    PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, ToolCallSummary,
     comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
     default_comm_cleanup_target_statuses, default_comm_run_await_statuses,
-    format_comm_awaited_members_with_reports, format_comm_context_entries,
-    format_comm_context_history, format_comm_members, format_comm_plan_followup,
-    format_comm_plan_status, format_comm_status_snapshot, format_comm_tool_summary,
-    latest_assistant_comm_report, resolve_optional_comm_target_session,
+    format_comm_awaited_members_with_reports, format_comm_context_history, format_comm_members,
+    format_comm_plan_followup, format_comm_plan_status, format_comm_status_snapshot,
+    format_comm_tool_summary, latest_assistant_comm_report, resolve_optional_comm_target_session,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -1606,10 +1605,6 @@ async fn assign_task_to_session(
     }
 }
 
-fn format_context_entries(entries: &[ContextEntry]) -> ToolOutput {
-    ToolOutput::new(format_comm_context_entries(entries))
-}
-
 fn format_members(ctx: &ToolContext, members: &[AgentInfo]) -> ToolOutput {
     ToolOutput::new(format_comm_members(&ctx.session_id, members))
 }
@@ -1863,7 +1858,7 @@ pub struct CommunicateTool {
 
 impl CommunicateTool {
     pub fn new() -> Self {
-        const BASE_DESCRIPTION: &str = "Coordinate agents. Any agent can spawn child agents, and those children can spawn their own, forming a recursive spawn tree with no depth limit (growth is bounded only by the total swarm member cap). For spawn, prefer providing a prompt so the new agent starts with a concrete task instead of idling. Spawned/assigned agents automatically report their final response back to the agent that spawned them; you can stop any agent in the subtree you spawned.\n\nCommunication: prefer structural dataflow (task-graph artifacts via complete_node) over chat, and DMs for point-to-point coordination. broadcast reaches only your spawned subtree (whole swarm for the coordinator) and should be rare; shared-context is a discouraged legacy primitive.";
+        const BASE_DESCRIPTION: &str = "Coordinate agents. Any agent can spawn child agents, and those children can spawn their own, forming a recursive spawn tree with no depth limit (growth is bounded only by the total swarm member cap). For spawn, prefer providing a prompt so the new agent starts with a concrete task instead of idling. Spawned/assigned agents automatically report their final response back to the agent that spawned them; you can stop any agent in the subtree you spawned.\n\nCommunication: prefer structural dataflow (task-graph artifacts via complete_node) over chat, and DMs for point-to-point coordination. broadcast reaches only your spawned subtree (whole swarm for the coordinator) and should be rare.";
         let swarm_prompt = crate::prompt::load_swarm_prompt(None);
         let description = if swarm_prompt.is_empty() {
             BASE_DESCRIPTION.to_string()
@@ -1879,10 +1874,6 @@ impl CommunicateTool {
 #[derive(Clone, Deserialize)]
 struct CommunicateInput {
     action: String,
-    #[serde(default)]
-    key: Option<String>,
-    #[serde(default)]
-    value: Option<String>,
     #[serde(default)]
     message: Option<String>,
     #[serde(default)]
@@ -1987,7 +1978,6 @@ impl CommunicateInput {
 /// inputs are returned unchanged so the normal validation path still reports them.
 fn canonical_swarm_action(action: &str) -> &str {
     match action.trim().to_ascii_lowercase().as_str() {
-        "inbox" | "messages" | "check_messages" | "read_messages" | "read_inbox" => "read",
         "send" | "msg" | "send_message" => "message",
         "dm_session" | "direct_message" | "whisper" => "dm",
         "broadcast_all" | "announce" => "broadcast",
@@ -2019,20 +2009,13 @@ impl Tool for CommunicateTool {
                 "intent": super::intent_schema_property(),
                 "action": {
                     "type": "string",
-                    "enum": ["share", "share_append", "read", "message", "broadcast", "dm", "list",
+                    "enum": ["message", "broadcast", "dm", "list",
                              "propose_plan", "approve_plan", "reject_plan", "spawn", "stop", "assign_role",
                              "status", "report", "plan_status", "summary", "read_context", "resync_plan", "assign_task", "assign_next", "fill_slots", "run_plan", "cleanup",
                              "task_graph", "expand_node", "complete_node", "inject_gap",
                              "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
                              "await_members", "list_models", "list_swarms"],
                     "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection. Use list_swarms for the live fleet dashboard snapshot."
-                },
-                "key": {
-                    "type": "string",
-                    "description": "Shared-context key for share/share_append/read. Discouraged: prefer the repo and typed node artifacts as the shared medium; use shared context only for small non-repo state."
-                },
-                "value": {
-                    "type": "string"
                 },
                 "message": {
                     "type": "string",
@@ -2239,55 +2222,6 @@ impl Tool for CommunicateTool {
         params.action = canonical_swarm_action(&params.action).to_string();
 
         match params.action.as_str() {
-            "share" | "share_append" => {
-                let key = params
-                    .key
-                    .ok_or_else(|| anyhow::anyhow!("'key' is required for share action"))?;
-                let value = params
-                    .value
-                    .ok_or_else(|| anyhow::anyhow!("'value' is required for share action"))?;
-
-                let request = Request::CommShare {
-                    id: REQUEST_ID,
-                    session_id: ctx.session_id.clone(),
-                    key: key.clone(),
-                    value: value.clone(),
-                    append: params.action == "share_append",
-                };
-
-                match send_request(request).await {
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        let verb = if params.action == "share_append" {
-                            "Appended shared context"
-                        } else {
-                            "Shared with other agents"
-                        };
-                        Ok(ToolOutput::new(format!("{}: {} = {}", verb, key, value)))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to share: {}", e)),
-                }
-            }
-
-            "read" => {
-                let request = Request::CommRead {
-                    id: REQUEST_ID,
-                    session_id: ctx.session_id.clone(),
-                    key: params.key.clone(),
-                };
-
-                match send_request(request).await {
-                    Ok(ServerEvent::CommContext { entries, .. }) => {
-                        Ok(format_context_entries(&entries))
-                    }
-                    Ok(response) => {
-                        ensure_success(&response)?;
-                        Ok(ToolOutput::new("No shared context found."))
-                    }
-                    Err(e) => Err(anyhow::anyhow!("Failed to read shared context: {}", e)),
-                }
-            }
-
             "message" => {
                 // `message` is the general-purpose send: it routes by the fields
                 // provided. With `to_session` it acts as a DM, and with neither it
@@ -3197,10 +3131,9 @@ impl Tool for CommunicateTool {
             }
 
             _ => Err(anyhow::anyhow!(
-                "Unknown action '{}'. Valid actions: share, share_append, read, message, broadcast, dm, list, \
+                "Unknown action '{}'. Valid actions: message, broadcast, dm, list, \
                  propose_plan, approve_plan, reject_plan, spawn, stop, assign_role, status, report, plan_status, summary, read_context, \
-                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, await_members. \
-                 To read messages addressed to you, use action='read'.",
+                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, await_members.",
                 params.action
             )),
         }

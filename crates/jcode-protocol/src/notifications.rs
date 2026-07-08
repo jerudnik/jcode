@@ -17,9 +17,6 @@ pub enum NotificationType {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail: Option<String>,
     },
-    /// Another agent shared context
-    #[serde(rename = "shared_context")]
-    SharedContext { key: String, value: String },
     /// Direct message from another agent
     #[serde(rename = "message")]
     Message {

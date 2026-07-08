@@ -196,16 +196,6 @@ pub struct ToolCallSummary {
     pub timestamp_secs: Option<u64>,
 }
 
-/// A shared context entry
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextEntry {
-    pub key: String,
-    pub value: String,
-    pub from_session: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from_name: Option<String>,
-}
-
 /// Info about an agent
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentInfo {
@@ -681,8 +671,6 @@ impl Request {
             Request::AgentTask { id, .. } => *id,
             Request::AgentCapabilities { id } => *id,
             Request::AgentContext { id } => *id,
-            Request::CommShare { id, .. } => *id,
-            Request::CommRead { id, .. } => *id,
             Request::CommMessage { id, .. } => *id,
             Request::CommList { id, .. } => *id,
             Request::CommProposePlan { id, .. } => *id,
@@ -714,8 +702,6 @@ impl Request {
         matches!(
             self,
             Request::Ping { .. }
-                | Request::CommShare { .. }
-                | Request::CommRead { .. }
                 | Request::CommMessage { .. }
                 | Request::CommList { .. }
                 | Request::CommProposePlan { .. }

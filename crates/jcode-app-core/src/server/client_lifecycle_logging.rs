@@ -56,7 +56,6 @@ pub(super) fn request_type_is_read_only(kind: &str) -> bool {
             | "get_compacted_history"
             | "agent_capabilities"
             | "agent_context"
-            | "comm_read"
             | "comm_list"
             | "comm_summary"
             | "comm_status"

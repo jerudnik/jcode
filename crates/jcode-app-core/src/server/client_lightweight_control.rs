@@ -1,6 +1,4 @@
-use super::client_comm::{
-    handle_comm_list, handle_comm_message, handle_comm_read, handle_comm_share,
-};
+use super::client_comm::{handle_comm_list, handle_comm_message};
 use super::client_writer::write_direct_event;
 use super::comm_await::{CommAwaitMembersContext, handle_comm_await_members};
 use super::comm_control::{
@@ -18,10 +16,9 @@ use super::comm_sync::{
     handle_comm_resync_plan, handle_comm_status, handle_comm_summary,
 };
 use super::{
-    AwaitMembersRuntime, ClientConnectionInfo, FileTouchService, SessionAgents,
-    SessionInterruptQueues, SharedContext, SwarmEvent, SwarmMember, SwarmMutationRuntime,
-    VersionedPlan, format_structured_completion_report, truncate_detail,
-    update_member_status_with_report_tldr,
+    AwaitMembersRuntime, ClientConnectionInfo, FileTouchService, PlanProposalCache, SessionAgents,
+    SessionInterruptQueues, SwarmEvent, SwarmMember, SwarmMutationRuntime, VersionedPlan,
+    format_structured_completion_report, truncate_detail, update_member_status_with_report_tldr,
 };
 use crate::config::SwarmSpawnMode;
 use crate::protocol::{Request, ServerEvent};
@@ -60,7 +57,7 @@ pub(super) struct LightweightControlContext<'a> {
     pub(super) provider_template: &'a Arc<dyn Provider>,
     pub(super) swarm_members: &'a Arc<RwLock<HashMap<String, SwarmMember>>>,
     pub(super) swarms_by_id: &'a Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    pub(super) shared_context: &'a Arc<RwLock<HashMap<String, HashMap<String, SharedContext>>>>,
+    pub(super) plan_proposals: &'a PlanProposalCache,
     pub(super) swarm_plans: &'a Arc<RwLock<HashMap<String, VersionedPlan>>>,
     pub(super) swarm_coordinators: &'a Arc<RwLock<HashMap<String, String>>>,
     pub(super) file_touch: &'a FileTouchService,
@@ -85,7 +82,7 @@ pub(super) async fn handle_lightweight_control_request(
         provider_template,
         swarm_members,
         swarms_by_id,
-        shared_context,
+        plan_proposals,
         swarm_plans,
         swarm_coordinators,
         file_touch,
@@ -123,44 +120,6 @@ pub(super) async fn handle_lightweight_control_request(
     });
 
     match request {
-        Request::CommShare {
-            id,
-            session_id: req_session_id,
-            key,
-            value,
-            append,
-        } => {
-            handle_comm_share(
-                id,
-                req_session_id,
-                key,
-                value,
-                append,
-                &client_event_tx,
-                swarm_members,
-                swarms_by_id,
-                shared_context,
-                event_history,
-                event_counter,
-                swarm_event_tx,
-            )
-            .await;
-        }
-        Request::CommRead {
-            id,
-            session_id: req_session_id,
-            key,
-        } => {
-            handle_comm_read(
-                id,
-                req_session_id,
-                key,
-                &client_event_tx,
-                swarm_members,
-                shared_context,
-            )
-            .await;
-        }
         Request::CommMessage {
             id,
             from_session,
@@ -218,7 +177,7 @@ pub(super) async fn handle_lightweight_control_request(
                 &client_event_tx,
                 swarm_members,
                 swarms_by_id,
-                shared_context,
+                plan_proposals,
                 swarm_plans,
                 swarm_coordinators,
                 sessions,
@@ -242,7 +201,7 @@ pub(super) async fn handle_lightweight_control_request(
                 &client_event_tx,
                 swarm_members,
                 swarms_by_id,
-                shared_context,
+                plan_proposals,
                 swarm_plans,
                 swarm_coordinators,
                 sessions,
@@ -267,7 +226,7 @@ pub(super) async fn handle_lightweight_control_request(
                 reason,
                 &client_event_tx,
                 swarm_members,
-                shared_context,
+                plan_proposals,
                 swarm_coordinators,
                 sessions,
                 soft_interrupt_queues,
