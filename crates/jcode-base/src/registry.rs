@@ -223,6 +223,20 @@ pub async fn unregister_server(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Unregister a server without ever blocking shutdown: if the registry I/O
+/// stalls or errors, give up after a short timeout and let the caller exit.
+/// Shutdown/signal paths MUST use this instead of `unregister_server` so a
+/// slow or contended registry file can never wedge process exit.
+pub async fn unregister_server_bounded(name: &str) {
+    match tokio::time::timeout(std::time::Duration::from_secs(2), unregister_server(name)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => crate::logging::warn(&format!("unregister_server('{name}') failed: {e:#}")),
+        Err(_) => crate::logging::warn(&format!(
+            "unregister_server('{name}') timed out; exiting anyway"
+        )),
+    }
+}
+
 /// List all running servers
 pub async fn list_servers() -> Result<Vec<ServerInfo>> {
     let mut registry = ServerRegistry::load().await?;

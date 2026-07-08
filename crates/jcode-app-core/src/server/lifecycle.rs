@@ -174,7 +174,7 @@ pub(crate) fn spawn_persistent_lifecycle_monitor(
                     crate::logging::info(&format!(
                         "Persistent server idle {elapsed}s with no clients; shutting down."
                     ));
-                    let _ = crate::registry::unregister_server(&server_name).await;
+                    crate::registry::unregister_server_bounded(&server_name).await;
                     std::process::exit(super::EXIT_IDLE_TIMEOUT);
                 }
             } else {
@@ -248,7 +248,7 @@ async fn shutdown_temporary_server(
     socket_path: &Path,
     debug_socket_path: &Path,
 ) -> ! {
-    let _ = crate::registry::unregister_server(server_name).await;
+    crate::registry::unregister_server_bounded(server_name).await;
     crate::transport::remove_socket(socket_path);
     crate::transport::remove_socket(debug_socket_path);
     cleanup_temporary_metadata(socket_path);
