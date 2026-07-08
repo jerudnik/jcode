@@ -1,32 +1,33 @@
 # Swarm Fleet Actions Plan
 
-Status: In progress. Workstreams A and C landed. Workstream B landed its
-structured selection model (B1) and an actionable text render; the nested
-drill-in *picker* (B2/B3) was deliberately deferred, see the note below.
+Status: In progress. Workstreams A and C landed. Workstream B landed structured
+selection (B1), per-member fleet data, cross-swarm stop control, and an
+actionable text render. The nested drill-in *picker* overlay remains deferred,
+see the note below.
 Execution vehicle is an inline swarm (all workers `spawn_mode: "inline"`).
 This plan seeds the swarm task graph, assigns instances, and defines
 per-instance verification so the DAG is hill-climbable.
 
 ## Workstream B outcome (why the picker was deferred)
 
-`SwarmFleetEntry` carries no per-member session ids, only the coordinator and
-the plan's instance ids, and the `/swarm` drive verbs (`start`/`stop`/`plan`/
-`status`) act on the *caller's own* swarm's session. A nested
-swarm→member→stop picker would therefore be a UI that cannot actually dispatch
-into a foreign swarm without new wire plumbing (per-member session ids in the
-fleet response plus session-addressed control). Rather than ship a picker that
-lies about its reach, B shipped:
+`SwarmFleetEntry.members` now carries per-member `SwarmFleetMember` rows with
+session ids, and `Request::CommStop` accepts `cross_swarm`. The `/swarm stop`
+verb accepts `--cross-swarm` and `--force`, so the text fleet view can provide
+operator-actionable stop hints for foreign swarm members. Rather than add a
+bespoke nested picker before the TUI has the right overlay type, B shipped:
 
 - `fleet_selection_rows()` + `FleetSelection`/`FleetTarget`: a pure, structured,
   attention-sorted model (unit-tested) that names each swarm's coordinator and
-  the concrete runnable instances (failed → ready → active).
+  the concrete member and runnable instance rows (failed → ready → active).
 - An actionable `render_swarm_fleet`: swarms needing input sort first and are
-  flagged, and each swarm surfaces its runnable instance ids plus the exact
-  `/swarm start <id>` command to run.
+  flagged, and each swarm surfaces per-member rows plus exact `/swarm start`
+  and `/swarm stop <member> [--cross-swarm --force]` hints.
 
-The real picker (B2/B3) is a clean follow-up once the fleet response grows
-per-member session ids and the control verbs accept a target session; the
-`FleetSelection` model is already the right shape to feed it.
+B2/B3 are delivered as an actionable TEXT view. The real nested picker remains a
+clean follow-up because it needs a bespoke TUI overlay type for swarm → member →
+verb drill-in and destructive confirmation. Cap/guard-rejection fleet rows are
+also deferred: rejected spawns never become members, so showing them needs a new
+persisted side-channel rather than another field on `SwarmFleetEntry`.
 
 ## Why a swarm
 
@@ -90,11 +91,15 @@ Staged so each stage is independently shippable:
   that returns a structured `FleetSelection` list (swarm_id, coordinator
   session, member/instance ids, needs-attention flag). Unit-tested against the
   same `SwarmFleetEntry` fixtures already in `commands_swarm.rs::tests`.
-- B2 (picker): add `PickerKind::SwarmFleet`; `/swarm fleet` opens a picker of
+- B2 (text view shipped; picker deferred): `/swarm fleet` lists actionable
+  member rows with session ids and stop hints. A future `PickerKind::SwarmFleet`
+  can open a picker of
   swarm rows (attention-sorted). Selecting a swarm expands to its members/
   instances (reuse roster's phase-first type resolution). Escape closes; no
   live swarms → keep the existing "No live swarms found." text path.
-- B3 (verbs): a selected member/instance offers status / plan / start / stop.
+- B3 (text view shipped; picker verbs deferred): the text view exposes start and
+  stop command hints, including cross-swarm stop. A selected member/instance can
+  later offer status / plan / start / stop.
   These dispatch the existing `comm_*` verbs (do not add new wire verbs) by
   synthesizing the same command `parse_swarm_verb` already produces, so the
   drill-in is a thin front-end over Workstream-shipped logic. `stop` is the
@@ -110,10 +115,10 @@ Constraints:
 Verification (instance done-state):
 - New pure tests for B1 selection extraction pass (`cargo test -p jcode-tui
   --lib fleet` scoped to exact names).
-- B2/B3: a `debug_socket` tester frame shows `/swarm fleet` opening the picker,
-  arrow/enter drilling swarm→member, and a verb firing; capture one frame per
-  stage as the visual proof. Add a headless key-handling unit test for the
-  picker state machine where feasible (mirror remote_model_picker_hotkeys.rs).
+- B2/B3 text view: a `debug_socket` tester frame shows `/swarm fleet` listing
+  per-member rows with actionable start/stop hints, including cross-swarm stop.
+  The future picker adds arrow/enter drilling swarm → member and a destructive
+  confirmation row once a bespoke overlay type exists.
 - fmt/check green via `scripts/dev_cargo.sh`.
 
 ### C. Fix the coordinated selfdev build outside Nix (`cargo: not found`)
@@ -154,9 +159,9 @@ No cross-instance dependencies; the coordinator integrates on green.
 
 ```
 A: fork-touched-clippy   (phase: tooling)     ready
-B1: fleet selection model (phase: implement)  ready
-  └─ B2: fleet picker      (phase: implement)  blocked_by B1
-       └─ B3: fleet verbs   (phase: implement) blocked_by B2
+B1: fleet selection model (phase: implement)  shipped
+  └─ B2/B3: actionable text view (phase: implement) shipped
+       └─ picker overlay     (phase: tui)      deferred
 C: selfdev PATH recovery  (phase: implement)   ready
 ```
 
@@ -165,9 +170,8 @@ legible in `/swarm status`: A → tooling, B* → implement, C → implement. Th
 coordinator holds verify/integration and lands commits per workstream (three
 focused commits, not one) after each instance's done-state check passes.
 
-Execution order: A, B1, C can start immediately in parallel. B2 waits on B1,
-B3 on B2. Integrate each workstream independently so a slip in B does not hold
-A or C.
+Execution order: A and C can start immediately in parallel. B's text path is
+shipped; the picker overlay is deferred and does not hold A or C.
 
 ## Guardrails (repo conventions)
 

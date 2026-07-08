@@ -1,5 +1,10 @@
 # Option B feasibility: standalone MCP shim for native swarm
 
+> **Warning:** A daemon-owned `jcode mcp-serve` entry in `~/.jcode/mcp.json`
+> caused a fork-bomb incident. The daemon now drops self-referential entries;
+> keep `jcode mcp-serve` external. See
+> [MCP_SERVER_REGISTRATION_GUARDRAILS.md](MCP_SERVER_REGISTRATION_GUARDRAILS.md).
+
 ## Verdict
 
 **Feasible as a fallback, low divergence, moderate polish cost.** A small stdio MCP server can expose a narrow `swarm_*` MCP surface and forward each call to an existing live jcode daemon session via `jcode debug --quiet -S <session_id> 'tool:swarm {json}'`. The primitive is already implemented, live-tested, and returns structured JSON. The shim does not need to link against jcode internals, so it can live outside the tree or as one small helper plus a `~/.jcode/mcp.json` entry.
@@ -150,6 +155,10 @@ Workable session strategies:
    - If missing, run `jcode debug --quiet create_session:<working_dir>` or `create_session`.
    - Cache the returned `session_id` in process memory and optionally in `~/.jcode/swarm-mcp-session.json`.
    - If forwarding returns unknown session, create a fresh session and retry once.
+   - This is the risky session pattern when the shim is daemon-owned: recursive
+     `tools/list`/`tools/call` can keep auto-creating sessions. The
+     no-auto-create-session guard for daemon-owned `jcode mcp-serve` entries is
+     the control that addresses it.
 
 3. **Per-call targeting**
    - Add optional `session_id` to every MCP tool schema.

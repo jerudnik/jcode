@@ -3,7 +3,7 @@
 Status: Being implemented (supersedes the agent-first framing in
 `SWARM_ARCHITECTURE.md`). The DAG engine, deep/light modes, gates, growth
 mechanics, and comm migration steps 1-2 (artifact dataflow, subtree-scoped
-broadcast) are live; channel/shared-context deprecation steps have landed.
+broadcast) are live; channel and shared-context primitives are removed.
 
 This document captures the planned reframe of the swarm module from an
 agent-centric model into a **task DAG (directed acyclic graph)**. The DAG becomes
@@ -15,12 +15,12 @@ guarantees, the bias budget, and the tool surface, based on the design discussio
 
 ## 1. Motivation and core reframe
 
-Today swarm is **agent-first**: you drive work by spawning agents and talking to
-them (DMs, channels, roles), with a `VersionedPlan` of `PlanItem`s bolted on the
-side. The dependency graph already exists under the hood (`PlanItem.blocked_by`
-edges, `summarize_plan_graph`, `next_runnable_item_ids`, `run_plan`/`fill_slots`),
-but it is an implementation detail. Coverage and thoroughness are left to whoever
-happens to be driving.
+The legacy swarm model is **agent-first**: you drive work by spawning agents and
+talking to them (DMs, roles, and formerly channels), with a `VersionedPlan` of
+`PlanItem`s bolted on the side. The dependency graph already exists under the
+hood (`PlanItem.blocked_by` edges, `summarize_plan_graph`,
+`next_runnable_item_ids`, `run_plan`/`fill_slots`), but it is an implementation
+detail. Coverage and thoroughness are left to whoever happens to be driving.
 
 The reframe makes the **task DAG the primary abstraction**:
 
@@ -393,7 +393,7 @@ flowchart TB
   edge_cases_considered, open_questions, confidence, what_i_did_not_check}}` -
   typed handoff that the gates inspect.
 - `swarm run` - hand off to the scheduler.
-- `spawn` / `dm` / `channel` remain as low-level escape hatches.
+- `spawn`, `dm`, and subtree broadcast remain as low-level escape hatches.
 
 The "more control" agents actually want is per-node prompts, computed fan-out, and
 conditional expansion. Those are served by (a) the agent computing the node list
@@ -404,7 +404,7 @@ however it likes *then* submitting it as a validated spec, and (b) runtime
 
 ## 8a. Communication rework: dataflow first, chat second
 
-The current swarm tool gives agents a rich human-chat surface: DMs, swarm-wide
+The legacy swarm tool gave agents a rich human-chat surface: DMs, swarm-wide
 broadcast, topic channels (subscribe/members), a shared key-value context store,
 plus delivery modes (`notify`/`interrupt`/`wake`) and `await_members`. That is a
 human-collaboration metaphor bolted onto agents. For the DAG model it is both too
@@ -417,7 +417,7 @@ much and the wrong shape. The rework is **by subtraction, not addition**.
    comm primitive yet. The most important "communication" in the new model is the
    one thing the current toolset cannot express, so agents would have to simulate
    dataflow by DMing each other - exactly the lossy coordination we are replacing.
-2. **Too many overlapping primitives.** DM vs broadcast vs the retired channel and
+2. **Too many overlapping primitives.** DM vs broadcast vs the removed channel and
    shared-context fanout paths created too many ways to push text at other agents, and `message`
    already auto-routes among three of them. The codebase already carries an
    action-synonym normalization layer because models keep inventing verbs; that is
@@ -449,7 +449,7 @@ Keep two tiers and drop the middle:
 - **Swarm-wide broadcast**: replaced with **subtree-scoped broadcast** that reaches
   only an agent's owned descendants, so it cannot become a member-cap-sized storm.
   Whole-swarm broadcast becomes a rare coordinator-only operation.
-- **Generic topic channels**: unnecessary once dataflow is structural. Channels are
+- **Generic topic channels**: removed as unnecessary once dataflow is structural. Channels are
   how *humans* organize ad hoc collaboration; agents should collaborate through
   graph edges, not freeform rooms.
 
@@ -466,8 +466,11 @@ Cutting channels/shared-context was staged to avoid breaking active swarm flows:
 2. **Done.** Broadcast scoped to the sender's spawned subtree; whole-swarm
    broadcast remains only as a coordinator escape hatch.
 3. **Done.** Migrate plan proposals off the generic shared-context store.
+   `share`, `share_append`, and `read` are removed in the fork; pending plan
+   proposals use `PlanProposalCache`.
 4. **Done.** Remove the redundant channel/shared-context primitives from the
-   agent-facing surface.
+   agent-facing surface. `channel`, `subscribe_channel`, `unsubscribe_channel`,
+   `channel_members`, and `list_channels` are removed in the fork.
 
 ---
 
@@ -574,6 +577,12 @@ refused with a clear error. This is implemented in `ensure_spawn_coordinator_swa
 (`server/comm_session.rs`) by counting live members of the swarm and rejecting the
 spawn once the count reaches the cap. The older `MAX_SWARM_SPAWN_DEPTH` depth limit
 is removed.
+
+This swarm member cap is separate from the daemon/process-level runaway guards:
+`MAX_TESTERS`, `MAX_TESTER_DEPTH`, the owned-MCP child cap, the headless
+`MAX_TOTAL_SESSIONS` backstop, bounded shutdown, and the MCP self-reference
+guard. Those invariants protect process/session creation outside the swarm
+membership model; see [SERVER_LIFECYCLE_INVARIANTS.md](SERVER_LIFECYCLE_INVARIANTS.md).
 
 ### Honest tradeoffs / limits
 - The single member cap is the only throttle. It bounds total concurrency/cost but

@@ -1,5 +1,12 @@
 # MCP Bridge — Feasibility Verdict (DAG swarm, Option C preferred)
 
+> **Warning:** Do not register `jcode mcp-serve` in `~/.jcode/mcp.json` as a
+> daemon-owned MCP server. That self-reference caused a fork-bomb incident; the
+> daemon now refuses self-referential `jcode mcp-serve` entries at MCP config
+> load. See [MCP_SERVE_FORKBOMB_INCIDENT.md](../architecture/MCP_SERVE_FORKBOMB_INCIDENT.md)
+> and
+> [MCP_SERVER_REGISTRATION_GUARDRAILS.md](MCP_SERVER_REGISTRATION_GUARDRAILS.md).
+
 Date: 2026-07-08. Driven via the Option-A bridge (`jcode debug tool:swarm ...`)
 against coordinator session `humpback`, workers `crocodile` (C-native) and `ox`
 (B-shim). The native swarm was reachable and functional throughout (proven live:
@@ -8,12 +15,16 @@ ground truth; the coordinator (this session) finalized the verdict directly afte
 the workers stalled mid-investigation on the same reload/idle flakiness noted in
 FORK_HARDENING_FINDINGS.
 
-## Verdict: OPTION C is FEASIBLE and PREFERRED. Implement C. B not needed.
+## Verdict: OPTION C is FEASIBLE and PREFERRED when guardrails are active. B not needed.
 
 Every primitive Option C requires already exists in-tree, so C is a pure additive
 seam (new file + one clap arm + one dispatch arm), not a new subsystem. Because C
 subsumes B (it exposes the whole tool registry, swarm included, to any MCP client),
-the B shim is unnecessary once C lands.
+the B shim is unnecessary once C lands. This recommendation is conditional on
+the shipped self-reference guard and daemon/process caps documented in
+[MCP_SERVER_REGISTRATION_GUARDRAILS.md](MCP_SERVER_REGISTRATION_GUARDRAILS.md);
+without those guardrails, registering a daemon-owned `jcode mcp-serve` shim is
+unsafe.
 
 ## Why C is feasible (all evidence file:line)
 
@@ -77,4 +88,8 @@ C is a small additive seam that exposes *all* tools to *any* MCP client (includi
 this SDK harness via `~/.jcode/mcp.json`), C strictly dominates. B remains the
 fallback only if C's in-tree wiring proves harder than measured (it did not).
 
-## Decision: implement C (`jcode mcp-serve`), register it in `~/.jcode/mcp.json`.
+## Decision: implement C (`jcode mcp-serve`); register it only for external clients.
+
+`jcode mcp-serve` is safe as an externally launched MCP server. It must not be
+registered as a daemon-owned server in `~/.jcode/mcp.json` unless the shipped
+self-reference guard and caps are present and rejecting self-referential entries.
