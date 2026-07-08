@@ -119,7 +119,13 @@ fn take_over_node_transfers_ownership_of_running_node() {
 
     take_over_node(&mut g, "a", "coordinator").unwrap();
     assert_eq!(g.get("a").unwrap().owner.as_deref(), Some("coordinator"));
-    complete_node(&mut g, "a", "coordinator", HandoffArtifact::brief("salvaged")).unwrap();
+    complete_node(
+        &mut g,
+        "a",
+        "coordinator",
+        HandoffArtifact::brief("salvaged"),
+    )
+    .unwrap();
     assert_eq!(g.get("a").unwrap().status, NodeStatus::Done);
 
     // Mechanics still enforced: only running nodes can be taken over.

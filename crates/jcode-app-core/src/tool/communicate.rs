@@ -5,8 +5,8 @@ use crate::background::TaskResult;
 use crate::plan::PlanItem;
 use crate::protocol::{
     AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, ContextEntry,
-    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmChannelInfo, ToolCallSummary,
-    comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
+    HistoryMessage, PlanGraphStatus, Request, ServerEvent, SwarmChannelInfo, SwarmFleetEntry,
+    ToolCallSummary, comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
     default_comm_cleanup_target_statuses, default_comm_run_await_statuses,
     format_comm_awaited_members_with_reports, format_comm_channels, format_comm_context_entries,
     format_comm_context_history, format_comm_members, format_comm_plan_followup,
@@ -1795,6 +1795,70 @@ fn format_swarm_model_list(
     out
 }
 
+fn format_swarm_fleet(swarms: &[SwarmFleetEntry]) -> ToolOutput {
+    if swarms.is_empty() {
+        return ToolOutput::new("No live swarms found.");
+    }
+
+    let mut out = String::from("Live swarms:\n\n");
+    for swarm in swarms {
+        let coordinator = swarm
+            .coordinator_name
+            .as_deref()
+            .or(swarm.coordinator_session_id.as_deref())
+            .unwrap_or("unknown");
+        let coordinator_status = swarm.coordinator_status.as_deref().unwrap_or("unknown");
+        let attention = if swarm.needs_operator_input {
+            " attention"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "- `{}`: {} member(s), coordinator `{}` ({}){}\n",
+            swarm.swarm_id, swarm.member_count, coordinator, coordinator_status, attention
+        ));
+        if !swarm.members_by_status.is_empty() {
+            let statuses = swarm
+                .members_by_status
+                .iter()
+                .map(|(status, count)| format!("{status}:{count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!("  - status: {statuses}\n"));
+        }
+        if !swarm.members_by_type.is_empty() {
+            let types = swarm
+                .members_by_type
+                .iter()
+                .map(|(kind, count)| format!("{kind}:{count}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!("  - type: {types}\n"));
+        }
+        out.push_str(&format!(
+            "  - plan: {} item(s), {} active, {} ready, {} failed, mode {}\n",
+            swarm.plan.item_count,
+            swarm.plan.active_ids.len(),
+            swarm.plan.ready_ids.len(),
+            swarm.plan.failed_ids.len(),
+            swarm.plan.mode
+        ));
+        if let Some(tokens) = &swarm.tokens {
+            out.push_str(&format!(
+                "  - tokens: in {}, out {}, messages {}\n",
+                tokens.input_tokens, tokens.output_tokens, tokens.messages_with_token_usage
+            ));
+        }
+        if let Some(age) = swarm.last_activity_age_secs {
+            out.push_str(&format!("  - last activity: {age}s ago\n"));
+        }
+        if let Some(offset) = swarm.control_log_offset {
+            out.push_str(&format!("  - control log offset: {offset}\n"));
+        }
+    }
+    ToolOutput::new(out)
+}
+
 pub struct CommunicateTool {
     /// Full tool description including the user-tunable swarm prompt
     /// (model-routing guidance loaded from `swarm-prompt.md`). Computed once at
@@ -1935,6 +1999,7 @@ fn canonical_swarm_action(action: &str) -> &str {
         "dm_session" | "direct_message" | "whisper" => "dm",
         "broadcast_all" | "announce" => "broadcast",
         "agents" | "members" | "list_agents" | "list_members" | "roster" => "list",
+        "swarms" | "fleet" | "fleet_status" | "list_fleet" => "list_swarms",
         "models" | "model_list" | "list_model" | "list_providers" | "list_routes" => "list_models",
         "plan" | "status_plan" => "plan_status",
         "assign" => "assign_task",
@@ -1966,8 +2031,8 @@ impl Tool for CommunicateTool {
                              "status", "report", "plan_status", "summary", "read_context", "resync_plan", "assign_task", "assign_next", "fill_slots", "run_plan", "cleanup",
                              "task_graph", "expand_node", "complete_node", "inject_gap",
                              "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
-                             "subscribe_channel", "unsubscribe_channel", "await_members", "list_models"],
-                    "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection."
+                             "subscribe_channel", "unsubscribe_channel", "await_members", "list_models", "list_swarms"],
+                    "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection. Use list_swarms for the live fleet dashboard snapshot."
                 },
                 "key": {
                     "type": "string",
@@ -2702,6 +2767,23 @@ impl Tool for CommunicateTool {
                         Ok(ToolOutput::new("No model catalog returned."))
                     }
                     Err(e) => Err(anyhow::anyhow!("Failed to list models: {}", e)),
+                }
+            }
+
+            "list_swarms" => {
+                let request = Request::CommListSwarms {
+                    id: REQUEST_ID,
+                    session_id: ctx.session_id.clone(),
+                };
+                match send_request(request).await {
+                    Ok(ServerEvent::CommListSwarmsResponse { swarms, .. }) => {
+                        Ok(format_swarm_fleet(&swarms))
+                    }
+                    Ok(response) => {
+                        ensure_success(&response)?;
+                        Ok(ToolOutput::new("No live swarms found."))
+                    }
+                    Err(e) => Err(anyhow::anyhow!("Failed to list swarms: {}", e)),
                 }
             }
 

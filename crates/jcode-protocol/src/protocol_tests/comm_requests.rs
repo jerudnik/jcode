@@ -525,6 +525,24 @@ fn test_comm_list_models_roundtrip() -> Result<()> {
 }
 
 #[test]
+fn test_comm_list_swarms_roundtrip() -> Result<()> {
+    let req = Request::CommListSwarms {
+        id: 62,
+        session_id: "sess_coord".to_string(),
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("\"type\":\"comm_list_swarms\""));
+    let decoded = parse_request_json(&json)?;
+    assert_eq!(decoded.id(), 62);
+    assert!(decoded.is_lightweight_control_request());
+    let Request::CommListSwarms { session_id, .. } = decoded else {
+        return Err(anyhow!("expected CommListSwarms"));
+    };
+    assert_eq!(session_id, "sess_coord");
+    Ok(())
+}
+
+#[test]
 fn test_reload_force_defaults_true_for_legacy_clients() -> Result<()> {
     // Old clients (and the desktop Swift enum, which has no reload case) send a
     // reload request with no `force` field. It must default to true so their

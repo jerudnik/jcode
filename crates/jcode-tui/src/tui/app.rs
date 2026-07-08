@@ -193,9 +193,9 @@ struct KvCacheBaseline {
     session_id: Option<String>,
     /// Effective prompt size of the last completed request (input + cache read
     /// + cache creation for split-accounting providers like Anthropic). This is
-    /// the reusable cached prefix, i.e. what gets resent if the cache goes
-    /// cold, NOT the bare `input` field, which for split providers is only the
-    /// uncached remainder of that one request.
+    ///   the reusable cached prefix, i.e. what gets resent if the cache goes
+    ///   cold, NOT the bare `input` field, which for split providers is only the
+    ///   uncached remainder of that one request.
     input_tokens: u64,
     completed_at: Instant,
     provider: String,

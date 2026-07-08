@@ -234,8 +234,7 @@ pub(super) fn nudge_parked_interrupts_when_idle(
                 return;
             }
 
-            let Some(agent) = idle_live_agent(&session_id, &sessions, &swarm.members).await
-            else {
+            let Some(agent) = idle_live_agent(&session_id, &sessions, &swarm.members).await else {
                 continue;
             };
 
