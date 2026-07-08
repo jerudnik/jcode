@@ -1071,8 +1071,16 @@ impl Server {
                 use tokio::signal::unix::{SignalKind, signal};
                 if let Ok(mut sigterm) = signal(SignalKind::terminate()) {
                     sigterm.recv().await;
-                    crate::logging::info("Server received SIGTERM, shutting down gracefully");
-                    let _ = crate::registry::unregister_server(&sigterm_server_name).await;
+                    crate::logging::info("Server received SIGTERM, shutting down");
+                    // Watchdog: guarantee exit even if cleanup stalls or the
+                    // runtime is momentarily saturated. An OS-scheduled thread
+                    // fires independent of tokio worker availability.
+                    std::thread::spawn(|| {
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        crate::logging::warn("Shutdown watchdog fired; forcing exit.");
+                        std::process::exit(0);
+                    });
+                    crate::registry::unregister_server_bounded(&sigterm_server_name).await;
                     std::process::exit(0);
                 }
             });
