@@ -1,91 +1,105 @@
-# Zero-loss daemon reload — design synthesis
+# Zero-loss Daemon Reload
 
-> Synthesis of a 3-model design council (GLM-5.2, GPT-5.5, Sonnet-5), each proposing
-> independently from the same brief. Raw proposals are archived alongside this doc.
-> Goal: reload the daemon binary (selfdev hot-update, auth/config/logging changes)
-> without losing in-flight work — running LLM turns, subagent processes, swarm progress.
+Goal: reload the daemon binary for selfdev hot-updates, auth/config changes, and
+logging changes without losing in-flight work: running LLM turns, subagent
+processes, swarm progress, and attached clients.
 
-## The one thing all three agree on (the hard constraint)
+## Hard constraint
 
-A live LLM stream (TCP + TLS + HTTP/SSE parser state + provider-side request id) and an
-arbitrary child OS process **cannot be portably transplanted** into a new `execve`'d
-process. `SCM_RIGHTS` can pass a *listening* socket fd (that's the nginx/Envoy/systemd
-trick), but the daemon is the *client* of the LLM — there's no listener to duck-pass, and
-the TLS/HTTP state lives in library memory. CRIU can checkpoint on Linux but is
-Linux-only, heavy, and wrong as a default. **Conclusion: you don't move live state — you
-either drain it before the swap or checkpoint-and-resume it. The only way to survive a
-*mid-turn* stream is to keep it in a process that doesn't reload.**
+A live LLM stream and an arbitrary child OS process cannot be portably
+transplanted into a new `execve`'d process. The stream includes TCP, TLS,
+HTTP/SSE parser state, and provider-side request identity. `SCM_RIGHTS` can pass
+a listening socket fd, which is the nginx/Envoy/systemd trick, but the daemon is
+the client of the LLM provider; there is no listener to hand off, and the stream
+state lives in library memory. CRIU can checkpoint on Linux, but it is
+Linux-only, heavy, and not a default answer to the TLS/HTTP problem.
 
-What already survives: the fork's **W1/W2 control log** durably replays swarm
-membership/task/artifact state. What's lost today: mid-turn LLM streams, running child
-processes, live client UI state, and any in-memory work not yet in the control log.
+The reload design should not pretend live state can be moved. It must either
+drain work before the swap or checkpoint semantic state and resume it after the
+swap. The only way to preserve a mid-turn stream itself is to keep that stream
+owned by a process that does not reload.
 
-## Where the council split — the cheap Stage-1
+The fork already has durable W1/W2 control-log replay for swarm membership,
+tasks, and artifacts. The current loss surface is mid-turn LLM streams, running
+child processes, live client UI state, and in-memory work not yet reflected in
+the control log.
 
-| Model | Stage-1 proposal | Trade |
-|---|---|---|
-| **Sonnet-5** | Formalize the existing checkpoint: replace the 2s `graceful_shutdown_sessions` timeout race with a real per-session **ack**, snapshot `(partial assistant msg, tool calls in flight, resume cursor)` into a new `TurnStashed` control-log event, `SIGSTOP`/replay children. | Smallest change, extends W1/W2, no new processes. Doesn't help clients stay connected. |
-| **GLM-5.2** | Drop `execve`; spawn successor, pass client UDS sockets via `SCM_RIGHTS` so **clients never disconnect**, drain LLM turns on a timer, respawn children. | Clients stay attached; still drops mid-turn streams on timeout. |
-| **GPT-5.5** | **Blue-green graceful drain**: gen N+1 starts, N stops taking new work and drains, clients migrate at idle, N exits on drain/timeout (nginx/Envoy semantics — connections finish in the old process). | Cheapest to reach zero *new* loss; two daemons need generation routing + no-pile-up. |
+## Recommendation
 
-Sonnet explicitly **rejects full blue-green** as the default (dual state-locks on the
-session store/control log, two socket paths) unless reload cadence is low vs session
-length. GPT and GLM accept a second process but only transiently (drain, then exit).
+Build Stage 1 first and stop there until it is measured insufficient. Stage 1
+extends the reload path that already exists:
 
-## Recommendation: do Stage 1, stop there until it's measured insufficient
+`await_reload_signal` -> `graceful_shutdown_sessions` ->
+`persist_reload_recovery_intents` -> `replace_process` -> `--resume` /
+`JCODE_RESUMING`.
 
-**Stage 1 — harden checkpoint-and-resume.** The only stage worth building right now.
-It's a weekend of hardening code that already exists (`await_reload_signal` →
-`graceful_shutdown_sessions` → `persist_reload_recovery_intents` → `replace_process` →
-`--resume`/`JCODE_RESUMING`). Exact diff:
+Stage 2 is a stable LLM-stream owner. It is the right shape if measured reload
+loss remains meaningful after Stage 1, but it is a new service boundary and
+should not be introduced preemptively.
 
-1. `crates/jcode-app-core/src/server/reload.rs`,
-   `graceful_shutdown_sessions_with_timeout`: today the wait loop treats any
-   `SwarmEventType::StatusChange` or `MemberChange{action:"left"}` as "this session is
-   handled, stop waiting" — a bare liveness flip, not proof anything was saved. Change
-   what it waits for: a session only counts as handled once it completed normally or
-   appended the checkpoint event below — not merely because its status changed. Leave
-   the 2s `RELOAD_GRACEFUL_SHUTDOWN_TIMEOUT` bound alone; a hard cutoff is fine. The bug
-   is that "timed out" and "left with nothing saved" are currently indistinguishable.
-2. `crates/jcode-swarm-core/src/control_log.rs`: add one `SwarmControlEvent` variant —
-   `TurnStashed { session_id, partial_content, resume_request }` (same shape discipline
-   as the existing `ArtifactFiled`: an event, not a blob). Emit it from wherever the
-   agent turn loop reacts to `InterruptSignal::fire()`, before it tears down the
-   in-flight request — `reload.rs` only fires the signal, it doesn't consume it.
-3. On resume (`src/cli/hot_exec.rs`, unchanged), read back any `TurnStashed` event for
-   the session and re-issue the request instead of silently dropping it. Lean on
-   provider prompt-prefix caching for the resend; don't build a custom dedup layer.
-4. Children: don't migrate them. `SIGTERM` + replay from control-log task state on
-   resume — `persist_reload_recovery_intents` already recovers session/task role, it
-   just doesn't resume a stashed turn yet. Reparenting live child stdio is out of scope.
-5. Clients: already reconnect via `--resume`. No change needed beyond making sure a
-   stashed turn's resume request actually reaches them.
+## Stage 1: checkpoint-and-resume
 
-That's the whole diff: one changed wait condition, one new control-log event, one
-read-back on resume. No new process, no new supervision surface.
+Stage 1 makes reload acknowledge saved turn state instead of treating any
+liveness update as proof that a session is safe.
 
-**Stage 2 — LLM-stream sidecar: don't build this yet.** All three models converge on a
-broker process that owns the HTTP/TLS/SSE connection so mid-turn tokens survive a
-reload (PgBouncer/tmux for LLM calls). That's real infrastructure — a new long-lived
-process, a UDS protocol, its own crash/restart handling, generation handoff. It's YAGNI
-until Stage 1 is shipped and measured:
-- If checkpointing at turn boundaries plus prompt-prefix caching already recovers most
-  of the loss, the sidecar buys shrinking returns for a permanent new failure domain.
-- Reload cadence is the deciding number. Infrequent reloads (selfdev builds, occasional
-  config changes) make "lose the tail of one turn, resend it" a non-problem. Only build
-  the broker if measured post-Stage-1 loss is still real.
-- If it does become worth it: reuse the host/worker split already designed for desktop
-  UI reload (`docs/DESKTOP_STABLE_HOST_RELOAD_STARTUP.md`) rather than inventing a
-  second supervision pattern — that doc solves a different problem (OS window/renderer
-  continuity across a UI binary reload), not this one, but the shape (stable owner +
-  reloadable client) is the same template. Reuse it, don't re-propose it.
+1. In `crates/jcode-app-core/src/server/reload.rs`,
+   `graceful_shutdown_sessions_with_timeout`, change the wait condition. Today
+   the loop treats any `SwarmEventType::StatusChange` or
+   `MemberChange { action: "left" }` as "this session is handled." That is only
+   a liveness flip, not proof that work was saved. A session should count as
+   handled only after it completed normally or appended the checkpoint event
+   below. Keep the 2s `RELOAD_GRACEFUL_SHUTDOWN_TIMEOUT`; the bug is that
+   "timed out" and "left with nothing saved" are currently indistinguishable.
+2. In `crates/jcode-swarm-core/src/control_log.rs`, add a
+   `SwarmControlEvent::TurnStashed { session_id, partial_content,
+   resume_request }` variant. Keep it shaped like the existing `ArtifactFiled`:
+   an event, not an opaque blob.
+3. Emit `TurnStashed` from the agent turn loop when it reacts to
+   `InterruptSignal::fire()`, before it tears down the in-flight request.
+   `reload.rs` should continue to fire the signal; it should not own the turn
+   checkpoint logic.
+4. On resume, read any `TurnStashed` event for the session and re-issue the
+   request instead of silently dropping it. Lean on provider prompt-prefix
+   caching for the resend rather than adding a custom deduplication layer.
+5. Do not migrate live child processes. Send `SIGTERM` and replay from
+   control-log task state on resume. `persist_reload_recovery_intents` already
+   recovers session/task role; it needs to resume a stashed turn as well.
+   Reparenting live child stdio is out of scope.
+6. Keep client behavior simple. Clients already reconnect via `--resume`; the
+   missing piece is ensuring that a stashed turn's resume request reaches them.
 
-**Not doing:**
-- Full permanent blue-green — dual state-locks on the session store/control log for a
-  cadence-dependent benefit. Revisit only if reload frequency approaches session length.
-- Manual switchover — strictly worse than what exists today.
-- CRIU — Linux-only, heavy, and doesn't touch the actual TLS/HTTP problem anyway.
+This is a narrow diff: one changed wait condition, one new control-log event,
+one read-back path on resume, and no new supervision surface.
+
+## Stage 2: stable LLM-stream owner
+
+Stage 2 introduces a broker process that owns HTTP/TLS/SSE provider connections
+so mid-turn tokens can survive daemon reload. It is effectively a small
+PgBouncer/tmux for LLM calls: a long-lived owner, a UDS protocol, crash/restart
+handling, and generation handoff.
+
+Do not build it until Stage 1 is shipped and measured:
+
+- If checkpointing at turn boundaries plus prompt-prefix caching recovers most
+  reload loss, the broker adds a permanent failure domain for shrinking returns.
+- Reload cadence is the deciding number. Infrequent reloads make losing and
+  resending the tail of one turn acceptable. The broker is justified only if
+  post-Stage-1 loss remains common enough to matter.
+- If the broker becomes worth it, reuse the stable-owner/reloadable-client shape
+  from `docs/DESKTOP_STABLE_HOST_RELOAD_STARTUP.md`. That document solves UI
+  process continuity rather than daemon LLM streams, but the ownership pattern
+  is the right template.
+
+## Out of scope
+
+- Permanent blue-green daemon operation. Dual state-locks on the session store
+  and control log are too much surface for a cadence-dependent benefit. Revisit
+  only if reload frequency approaches session length.
+- Manual switchover. It is less reliable than the current automatic reload path.
+- CRIU. It is Linux-only, operationally heavy, and still does not solve the
+  provider stream ownership problem.
 
 ## Next step
-Build Stage 1. Measure token loss on reload before/after. Only then decide whether
-Stage 2 is worth its supervision cost.
+
+Build Stage 1. Measure token loss on reload before and after. Decide on Stage 2
+only from those measurements.
