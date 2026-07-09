@@ -106,6 +106,7 @@ pub async fn run() -> Result<()> {
     startup_profile::mark("telemetry_check");
 
     let args = parse_and_prepare_args()?;
+    maybe_warn_nix_version_drift(&args);
     spawn_background_update_check(&args);
 
     if let Err(e) = dispatch::run_main(args).await {
@@ -226,6 +227,15 @@ fn parse_and_prepare_args() -> Result<Args> {
     crate::cli::proctitle::set_initial_title(&args);
 
     Ok(args)
+}
+
+fn maybe_warn_nix_version_drift(args: &Args) {
+    if args.command.is_some() {
+        return;
+    }
+    if let Some(message) = crate::cli::commands::doctor::running_vs_installed_drift() {
+        logging::warn(&message);
+    }
 }
 
 fn spawn_background_update_check(args: &Args) {
