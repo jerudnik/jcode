@@ -534,7 +534,37 @@ pub fn update_launcher_symlink_to_stable() -> Result<PathBuf> {
 /// - Then launcher path
 /// - Then stable channel path
 /// - Finally currently running executable
+/// In nix-managed mode the nix profile owns the binary, so non-self-dev callers
+/// must ignore the self-managed `builds/` shadow (current/canary/shared-server/
+/// stable) and resolve straight to the launcher — the profile binary that `nix`
+/// updates on rebuild. This is what keeps the running server from drifting onto
+/// a stale self-dev build (the self-certifying-channel version-drift incident).
+/// Explicit self-dev sessions still opt into local builds. Returns `None` when
+/// the override does not apply, so callers fall through to normal resolution.
+fn nix_managed_launcher_override(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
+    nix_managed_override_target(is_externally_managed(), is_selfdev_session)
+}
+
+/// Pure gate for [`nix_managed_launcher_override`], split out so the decision is
+/// testable without mutating the process-global `JCODE_NIX_MANAGED` env var.
+fn nix_managed_override_target(
+    externally_managed: bool,
+    is_selfdev_session: bool,
+) -> Option<(PathBuf, &'static str)> {
+    if externally_managed && !is_selfdev_session {
+        // Prefer the launcher (picks up `nix` rebuilds); fall back to the running
+        // executable so we still bypass the shadow when no launcher symlink exists.
+        return existing_binary(launcher_binary_path(), "nix-managed")
+            .or_else(|| std::env::current_exe().ok().map(|exe| (exe, "nix-managed")));
+    }
+    None
+}
+
 pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
+    if let Some(nix) = nix_managed_launcher_override(is_selfdev_session) {
+        return Some(nix);
+    }
+
     if let Some(current) = existing_binary(current_binary_path(), "current") {
         return Some(current);
     }
@@ -569,6 +599,10 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
 /// shared-server channel (or stable as fallback), so local dirty self-dev builds
 /// stop taking out every client by accident.
 pub fn shared_server_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
+    if let Some(nix) = nix_managed_launcher_override(is_selfdev_session) {
+        return Some(nix);
+    }
+
     let shared_server = existing_binary(shared_server_binary_path(), "shared-server");
     if is_selfdev_session {
         if let Some(shared_server) = shared_server {
@@ -659,6 +693,11 @@ pub fn version_matches_installed_channel(version: &str, git_hash: &str) -> bool 
 /// that so local rebuilds can reload correctly even if publishing the build
 /// failed.
 pub fn preferred_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
+    // Nix-managed: the launcher is authoritative; never prefer a repo build.
+    if let Some(nix) = nix_managed_launcher_override(is_selfdev_session) {
+        return Some(nix);
+    }
+
     let candidate = client_update_candidate(is_selfdev_session);
 
     let repo_binary = get_repo_dir().and_then(|repo_dir| {
@@ -721,6 +760,22 @@ pub fn is_jcode_repo(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nix_managed_override_only_for_managed_non_selfdev() {
+        // Not nix-managed: never override; normal shadow resolution applies.
+        assert!(nix_managed_override_target(false, false).is_none());
+        assert!(nix_managed_override_target(false, true).is_none());
+        // Nix-managed but a self-dev session: opt into local builds, no override.
+        assert!(nix_managed_override_target(true, true).is_none());
+        // Nix-managed, non-self-dev: resolve to a nix binary (launcher or the
+        // running exe), NEVER the builds/ shadow. current_exe always resolves in
+        // a test process, so the fallback guarantees a Some here.
+        let (path, label) = nix_managed_override_target(true, false)
+            .expect("managed non-selfdev must resolve to a nix binary");
+        assert_eq!(label, "nix-managed");
+        assert!(path.exists(), "resolved nix binary should exist on disk");
+    }
 
     fn repo_fixture(git_file: bool) -> tempfile::TempDir {
         let temp = tempfile::TempDir::new().expect("temp repo");
