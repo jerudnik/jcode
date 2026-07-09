@@ -831,7 +831,11 @@ async fn run_default_command(args: Args) -> Result<()> {
         setup_hints::record_launch_dirs(&cwd, repo_dir.as_deref());
     }
 
-    if in_jcode_repo && !already_in_selfdev && !args.no_selfdev {
+    // Nix-managed installs must NOT auto-enter self-dev just because the cwd is
+    // the jcode repo — that path builds and pins the self-managed `builds/`
+    // shadow, which is exactly what drifts the shared server onto a stale build.
+    // Explicit `jcode selfdev` still works for real dev.
+    if in_jcode_repo && !already_in_selfdev && !args.no_selfdev && !build::is_externally_managed() {
         output::stderr_info("📍 Detected jcode repository - enabling self-dev mode");
         output::stderr_info("   Using shared server with self-dev session mode");
         output::stderr_info("   (use --no-selfdev to disable auto-detection)");
