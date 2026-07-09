@@ -3,7 +3,7 @@
 > **Status:** Implemented (Core), Planned (Graph-Based Hybrid)
 > **Updated:** 2026-01-27
 
-Local embeddings + lightweight sidecar (GPT-5.3 Codex Spark) are implemented and running in production. This document describes both the current implementation and the planned graph-based hybrid architecture.
+Local embeddings plus a lightweight relevance-verification sidecar are implemented and running in production. This document describes both the current implementation and the planned graph-based hybrid architecture.
 
 ## Overview
 
@@ -34,7 +34,7 @@ graph TB
         EMB[Embedder<br/>all-MiniLM-L6-v2]
         SR[Similarity Search]
         CR[Cascade Retrieval]
-        HC[Sidecar<br/>GPT-5.3 Codex Spark]
+        HC[Sidecar<br/>relevance verifier]
     end
 
     subgraph "Memory Graph"
@@ -716,7 +716,7 @@ memory { action: "tag", id: "...", tags: ["new", "tags"] }
 
 ### Phase 3: Memory Agent ✅
 - [x] Async channel communication
-- [x] Lightweight sidecar for relevance verification (currently GPT-5.3 Codex Spark)
+- [x] Lightweight sidecar for relevance verification
 - [x] Topic change detection
 - [x] Surfaced memory tracking
 
