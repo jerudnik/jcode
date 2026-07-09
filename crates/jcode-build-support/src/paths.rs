@@ -477,8 +477,24 @@ pub fn launcher_binary_path() -> Result<PathBuf> {
     Ok(launcher_dir()?.join(binary_name()))
 }
 
+/// True when jcode is managed by an external package manager (e.g. Nix) that
+/// owns the launcher binary. In that mode jcode must NOT install or rewrite the
+/// `~/.local/bin/jcode` shadow symlink — doing so silently overrides the
+/// externally-installed binary and causes version drift. Hot-reload of the
+/// running process is unaffected; only the persistent launcher pointer is left
+/// alone so a fresh `jcode` deterministically starts from the managed binary.
+pub fn is_externally_managed() -> bool {
+    std::env::var_os("JCODE_NIX_MANAGED").is_some()
+}
+
 fn update_launcher_symlink(target: &Path) -> Result<PathBuf> {
     let launcher = launcher_binary_path()?;
+
+    // Nix-managed installs own the launcher; never rewrite it (see version-drift
+    // incident). The current binary still hot-reloads; the persistent pointer stays.
+    if is_externally_managed() {
+        return Ok(launcher);
+    }
 
     if let Some(parent) = launcher.parent() {
         storage::ensure_dir(parent)?;
