@@ -182,7 +182,7 @@ graph LR
 
 ## Implementation status (2026-06-14)
 
-Benchmark (Mode 1, private ~/jcode-memory-bench, Sonnet judge):
+Benchmark (Mode 1, private ~/jcode-memory-bench, LLM judge):
 - DONE: harness `memory_recall_bench` (queries/pool/judge/metrics), committed.
 - Baseline: production dense (0.5 thr) = 0.0 recall@5; hybrid = 0.53.
 
@@ -203,13 +203,13 @@ Next (high value, larger change):
 
 ## Update 2026-06-14 (rerank breakthrough, multi-agent)
 
-Benchmark-driven results (Sonnet judge, 28 judged queries, jcode self-dev corpus):
+Benchmark-driven results (LLM judge, 28 judged queries, jcode self-dev corpus):
 | Config       | recall@5 | recall@10 | precision@5 | MRR   |
 |--------------|----------|-----------|-------------|-------|
 | baseline (prod dense, 0.5 thr) | 0.000 | 0.000 | 0.000 | 0.000 |
 | hybrid (SHIPPED)               | 0.530 | 0.679 | 0.229 | 0.504 |
 | ce_rerank (local CE, rejected) | 0.325 | 0.420 | 0.129 | 0.322 |
-| llm_rerank (listwise Sonnet)   | 0.754 | 0.832 | 0.346 | 0.762 |
+| llm_rerank (listwise LLM)      | 0.754 | 0.832 | 0.346 | 0.762 |
 | oracle ceiling                 | 0.990 | 1.000 | 0.443 | 1.000 |
 
 - Hybrid (dense+BM25+RRF) shipped: 0.0 -> 0.53 recall@5.
@@ -246,10 +246,10 @@ These remain as future work, each blocked or deliberately deprioritized:
    only because the shared worktree currently has an unrelated agent's
    uncommitted changes; not a code issue.
 
-3. **GPT-5.5 judge re-run** (blocked ~18 days). Re-run the bench LLM judge with
-   GPT-5.5 (`--backend=openai --reasoning=none`) once the OpenAI account quota
-   resets, and compare judge agreement against the current Claude-Sonnet gold
-   labels. Infrastructure is already in place (Sidecar::with_openai_model).
+3. **Alternate judge re-run** (blocked ~18 days). Re-run the bench LLM judge
+   with the alternate OpenAI backend (`--backend=openai --reasoning=none`) once
+   the account quota resets, and compare judge agreement against the current
+   gold labels. Infrastructure is already in place (Sidecar::with_openai_model).
 
 ## Fork-the-judge / KV-reuse reranker (validated design, future)
 
@@ -257,7 +257,7 @@ Idea (user, 2026-06-14): instead of a separate tiny sidecar call for the memory
 rerank, reuse the main agent's warm transcript KV cache and run the reranker as
 a branch off it, so the judge's marginal cost is just the rerank suffix.
 
-Benchmark findings (claude-sonnet-4-6, 28 judged queries, see
+Benchmark findings (frontier LLM judge, 28 judged queries, see
 ~/jcode-memory-bench/results/BASELINE_SUMMARY.md):
 - Naive (full transcript as the rerank query): QUALITY REGRESSION. recall@5
   0.81 -> 0.58, precision@5 0.34 -> 0.25. Noise dilutes even a frontier model.
