@@ -169,6 +169,30 @@ owned by the upstream `CI` workflow and its Rust toolchain. `cargo audit` runs i
 Nix CI as a report-only advisory job so dependency advisories are visible without
 blocking unrelated packaging changes.
 
+### Self-development loop
+
+jcode's "self-dev" is a save-triggered incremental rebuild + re-exec — **plain
+`cargo`, not Nix**. Crane is correct for the *installed* binary (hermetic,
+Cachix-cached), but its two-phase derivation can't feed a running cargo daemon's
+incremental state; every edit would re-evaluate the source derivation. So the
+loop runs on `cargo` inside this devShell, which already inherits the crane
+package's build inputs (openssl, apple-sdk) via `inherit (self') checks;` — you
+get the *same* toolchain as the installed binary, just incremental.
+
+```sh
+nix develop        # this shell: pinned toolchain + build inputs + cargo-watch/nextest/rust-analyzer
+just dev-check     # type-check + test on save (fast feedback)
+just dev-build     # incremental `build --bin jcode` on save
+just dev-selfdev   # same, with the [profile.selfdev] profile → target/selfdev/jcode
+```
+
+On Linux the shell links with `mold` (`RUSTFLAGS=-C link-arg=-fuse-ld=mold`),
+scoped to the devShell so it never touches the hermetic crane build. Incremental
+state lives in the worktree `target/` (survives shell exits). Under Nix
+management the installed `jcode` is the Nix build; a self-dev build hot-reloads
+the *running* process but does not replace the installed binary (see
+`JCODE_NIX_MANAGED`), so `jcode` stays predictable.
+
 ## Cargo git dependencies
 
 Every Cargo git source locked in `Cargo.lock` needs a fixed-output hash in

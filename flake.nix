@@ -108,14 +108,21 @@
               pkgs.cargo-nextest
               pkgs.cargo-audit
               pkgs.cargo-watch
+              pkgs.rust-analyzer
               pkgs.nixfmt
               pkgs.pkg-config
               pkgs.cmake
               pkgs.perl
             ]
-            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ];
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [ pkgs.libiconv ]
+            # mold cuts link time 5-10x on the ~720-dep workspace (Linux only;
+            # no-op on Darwin, whose linker mold does not target).
+            ++ lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.mold ];
 
             JCODE_BUILD_SEMVER = version;
+            # Use mold as the linker for the self-dev loop on Linux. Scoped to
+            # the devShell so it never affects the hermetic crane build.
+            RUSTFLAGS = lib.optionalString pkgs.stdenv.hostPlatform.isLinux "-C link-arg=-fuse-ld=mold";
             shellHook = ''
               echo "jcode dev shell — rust $(rustc --version 2>/dev/null || echo '?')"
               # Enable git rerere for this clone and import shared recorded
