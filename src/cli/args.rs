@@ -248,9 +248,12 @@ pub(crate) enum Command {
     /// Self-development mode: run as a canary session on the shared server
     #[command(alias = "selfdev")]
     SelfDev {
-        /// Build and test a new canary version before launching
+        /// Force a rebuild before launching, even if the binary is already current
         #[arg(long)]
         build: bool,
+        /// Skip the automatic stale-binary rebuild and launch whatever is present
+        #[arg(long)]
+        no_build: bool,
     },
 
     /// Debug socket CLI - interact with running jcode server

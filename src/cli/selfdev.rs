@@ -98,7 +98,11 @@ async fn wait_for_reloading_server() -> bool {
     }
 }
 
-pub async fn run_self_dev(should_build: bool, resume_session: Option<String>) -> Result<()> {
+pub async fn run_self_dev(
+    should_build: bool,
+    no_build: bool,
+    resume_session: Option<String>,
+) -> Result<()> {
     startup_profile::mark("run_self_dev_enter");
     crate::env::set_var(CLIENT_SELFDEV_ENV, "1");
 
@@ -124,8 +128,24 @@ pub async fn run_self_dev(should_build: bool, resume_session: Option<String>) ->
 
     crate::process_title::set_client_session_title(&session_id, true);
 
-    if should_build {
-        let source = build::current_source_state(&repo_dir)?;
+    // Decide whether to (re)build before launching. `--build` forces it;
+    // otherwise we auto-rebuild when the binary a launch would use is stale
+    // versus the current source — the footgun that silently ran a pre-fix
+    // binary. `--no-build` opts out for deliberate stale launches.
+    let source = build::current_source_state(&repo_dir)?;
+    let stale = build::client_update_candidate(true)
+        .map(|(path, _)| path)
+        .or_else(|| build::find_dev_binary(&repo_dir))
+        .map(|bin| !build::dev_binary_matches_source(&bin, &source))
+        .unwrap_or(true);
+
+    if should_build || (!no_build && stale) {
+        if stale && !should_build {
+            output::stderr_info(format!(
+                "Self-dev binary is stale vs current source ({}); rebuilding...",
+                source.version_label
+            ));
+        }
         let build = build::selfdev_build_command(&repo_dir);
         output::stderr_info(format!("Building with {}...", build.display));
 
