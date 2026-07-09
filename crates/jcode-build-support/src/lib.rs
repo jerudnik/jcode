@@ -427,6 +427,23 @@ fn validate_dev_binary_source_metadata(binary: &Path, source: &SourceState) -> R
     Ok(true)
 }
 
+/// True only if `binary` carries source metadata that exactly matches `source`.
+/// Missing metadata, a read error, or any field mismatch all return false —
+/// a stale-check must never fail a launch on its own; worst case it triggers a
+/// rebuild. Used by the self-dev launcher to auto-rebuild a stale binary.
+pub fn dev_binary_matches_source(binary: &Path, source: &SourceState) -> bool {
+    let path = binary_source_metadata_path(binary);
+    let metadata: DevBinarySourceMetadata = match storage::read_json(&path) {
+        Ok(metadata) => metadata,
+        Err(_) => return false,
+    };
+    metadata.source_fingerprint == source.fingerprint
+        && metadata.version_label == source.version_label
+        && metadata.short_hash == source.short_hash
+        && metadata.full_hash == source.full_hash
+        && metadata.dirty == source.dirty
+}
+
 fn validate_dev_binary_matches_source(
     repo_dir: &Path,
     binary: &Path,

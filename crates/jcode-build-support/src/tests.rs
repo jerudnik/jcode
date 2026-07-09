@@ -85,6 +85,23 @@ fn source_state_fixture(short_hash: &str, fingerprint: &str) -> SourceState {
 }
 
 #[test]
+fn dev_binary_matches_source_only_on_exact_metadata() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let binary = dir.path().join("jcode");
+    let source = source_state_fixture("abc123", "fingerprint-aaaaaaaa");
+
+    // No sidecar metadata yet -> treated as stale.
+    assert!(!dev_binary_matches_source(&binary, &source));
+
+    write_dev_binary_source_metadata(&binary, &source).expect("write metadata");
+    assert!(dev_binary_matches_source(&binary, &source));
+
+    // A different source (newer commit) -> stale, triggers rebuild.
+    let other = source_state_fixture("def456", "fingerprint-bbbbbbbb");
+    assert!(!dev_binary_matches_source(&binary, &other));
+}
+
+#[test]
 fn test_build_manifest_default() {
     let manifest = BuildManifest::default();
     assert!(manifest.stable.is_none());
