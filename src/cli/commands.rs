@@ -12,7 +12,7 @@ use crate::{browser, gateway, memory, session, storage, tui};
 
 use super::terminal::init_tui_runtime;
 
-mod doctor;
+pub(crate) mod doctor;
 mod menubar;
 mod mobile_server;
 mod provider_setup;
