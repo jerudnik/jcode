@@ -380,14 +380,29 @@ route regresses.
 #### Exact changes
 
 1. **`crates/jcode-provider-core/src/lib.rs`**
-   - Add a default `Provider::fork_with_model_spec(&self, model_spec: &str) ->
-     Result<Arc<dyn Provider>>` method that returns an actionable unsupported
-     error by default. Existing concrete mock/leaf providers need no changes
-     because the default is safe.
+   - Add the object-safe synchronous default
+     `Provider::fork_with_model_spec(&self, model_spec: &str) ->
+     Result<Arc<dyn Provider>>` as exactly:
+
+     ```rust
+     let fork = self.fork();
+     fork.set_model(model_spec)?;
+     Ok(fork)
+     ```
+
+     This is isolation by construction, not an "unsupported" default. It adds
+     no fan-out across the 62 implementations: `Provider` is already object-safe
+     `Send + Sync` (`jcode-provider-core/src/lib.rs:66-77`) with synchronous
+     `fork(&self) -> Arc<dyn Provider>` (407-415), and `set_model` errors remain
+     the actionable capability diagnostic for leaf registrations.
 2. **`crates/jcode-base/src/provider/mod.rs`**
-   - Build on WI-0's independent `MultiProvider::fork` and expose a
-     `fork_with_model_spec` override that runs `set_model(model_spec)` on that
-     isolated instance before erasing it to `Arc<dyn Provider>`.
+   - Build on WI-0's independent `MultiProvider::fork`; its default
+     `fork_with_model_spec` must call `set_model(model_spec)` on that isolated
+     `MultiProvider`. Source proves this retains explicit route pinning:
+     `MultiProvider::set_model` parses a prefix with
+     `AuthRoute::parse_explicit_credential_prefix` and applies the resulting
+     API-key/OAuth mode before setting the target (provider `mod.rs:1767-1810`).
+     It therefore receives the full original spec unchanged.
    - Propagate `set_model` failure with the requested model and active provider
      as context. In particular, Copilot's `try_write` can return `Err` while a
      request is in flight. `Sidecar::with_configured_model` must handle this as
@@ -398,22 +413,36 @@ route regresses.
      `active_provider_fork`; it delegates to the registered live provider's new
      trait method. It must never mutate the live agent's selection.
 3. **`crates/jcode-base/src/sidecar.rs`**
-   - Change `SidecarBackend::Provider` to hold the forked `Arc<dyn Provider>`
-     (or add an equivalent field on `Sidecar`), rather than re-fetching and
-     forking the active provider during every completion.
+   - Keep the copyable `SidecarBackend::{OpenAI, Claude, Provider}` discriminator
+     and add `provider: Option<Arc<dyn Provider>>` on `Sidecar`. `Provider`
+     construction stores the model-configured fork once; `complete_via_provider`
+     consumes that stored handle and must never re-fetch/fork `ACTIVE_PROVIDER`.
+     This is necessary because current `complete_via_provider` does re-fork at
+     completion time (`sidecar.rs:204-218`) and would otherwise discard the
+     configured model.
    - In `Sidecar::with_configured_model`, call WI-2's
-     `resolve_current_model_spec`. For a configured model:
-     - retain the dedicated OpenAI/Claude fast paths only when the resolved
-       native provider and its explicit route are compatible with those clients;
-     - otherwise call `active_provider_fork_with_model_spec` with the original
-       model specification, including named/profile prefix, and store it in
-       `SidecarBackend::Provider`;
-     - if the active provider cannot fork that model, log an explicit error
-       containing the model and resolver result, then use the existing
-       auto-selection policy. Do not silently say the model is unsupported.
-   - Make `complete_via_provider` use the stored fork. Today it ignores
-     `self.model` and re-forks the active provider, so merely selecting
-     `SidecarBackend::Provider` would still fail to honor the configured model.
+     `resolve_current_model_spec`. The routing rule is intentionally singular:
+     **only an unprefixed, native OpenAI or Claude model uses its specialized
+     ambient-auth fast path. Every `prefix:model` string, including all explicit
+     auth-route spellings and named/catalog profiles, goes to
+     `active_provider_fork_with_model_spec` with the original, unstripped text.**
+
+     | Configured model class | Sidecar backend | Wire/configured model and auth reason |
+     |---|---|---|
+     | Bare native OpenAI or Claude model, no `:` prefix | specialized OpenAI/Claude | Bare `self.model`; retain existing ambient credential behavior and OAuth fallback ladder. |
+     | `openai-api:`, `openai-oauth:`, `claude-api:`, `claude-oauth:`, `anthropic-api:`, `anthropic-oauth:` | stored `MultiProvider` fork | Full prefix unchanged. `MultiProvider::set_model` already pins credential mode (provider `mod.rs:1767-1810`). |
+     | Any other recognized builtin prefix, catalog profile, or `[providers.<name>]` prefix | stored `MultiProvider` fork | Full prefix unchanged so the resolver-selected route/profile remains intact. |
+     | Unknown prefix or fork/set failure | existing auto-selection fallback | Log requested string plus `ResolvedModelSpec`; no silent unsupported-model message. |
+
+     The specialized branches **cannot** implement explicit pinning safely: they
+     send `self.model` directly through their request builders (`sidecar.rs:226-255`
+     for OpenAI and 434-480 for Claude) and select credential mode from ambient
+     auth (`227-235`, `397-431`), not `ResolvedModelSpec.explicit_prefix`. An
+     unstripped `openai-api:`/`claude-api:` would be an invalid wire model.
+   - Make `complete_via_provider` require and use the stored fork. A runtime
+     `complete_simple` error after successful construction is not retried through
+     the OpenAI-specific fallback ladder. It returns a plain provider error, the
+     present generic-provider behavior (sidecar.rs:196-218).
    - Retain `SidecarBackend::{OpenAI, Claude, Provider}`. The specialized OAuth
      request and fallback ladder are real behavior, so enum removal is not
      justified by the audited evidence.
@@ -422,18 +451,28 @@ route regresses.
      ladder. It surfaces as a plain error to the memory caller, matching today's
      generic `SidecarBackend::Provider` behavior. This item adds no fallback
      logic for that path.
-4. **Tests**
-   - Add a small test `Provider` implementation whose `fork_with_model_spec`
-     records the requested spec. Assert `omlx:Qwen3.6-MoE` is preserved and the
-     provider path is selected rather than auto-selecting OAuth.
-   - Assert an `openai-api:gpt-5.5` and a catalog profile prefix arrive at the
-     selected fork unchanged, while the default no-override OAuth preference
-     remains unchanged.
-   - Assert fork failure produces the explicit fallback diagnostic and never
-     mutates the registered live provider model.
-   - Assert a `set_model` failure from a model-configured fork follows that same
-     explicit fallback path. The test must not treat Copilot's transient
-     `try_write` error as an impossible condition.
+4. **Tests: use the existing no-network seams, never concrete downstream runtimes**
+   - Extend `provider/tests.rs::StubExternalRuntime` rather than construct real
+     Gemini/Antigravity/Copilot runtimes. It exists precisely because downstream
+     runtimes cannot be constructed in `jcode-base` tests (763-790), owns an
+     independent `RwLock<String>` model, validates models, and forks fresh
+     state (830-914). Inject it directly into each private `MultiProvider` slot
+     for WI-0 isolation tests.
+   - Extend `sidecar.rs`'s existing `StubProvider` (1123-1163) with an
+     `RwLock<Vec<String>>` record of fork/set specs and configurable fork/set or
+     `complete_simple` failure. It exercises real sidecar dispatch without
+     credentials/network. Keep `crate::storage::lock_test_env()` in each test:
+     `ACTIVE_PROVIDER` and auth environment/account overrides are process-global
+     (sidecar.rs:1038-1045, 1169-1179).
+   - Table-test the routing table above: bare OpenAI and bare Claude choose their
+     specialized paths; every explicit API/OAuth prefix, `omlx:Qwen3.6-MoE`, and
+     a catalog profile reach the stored provider fork with the **exact original
+     spec**; the default no-override OAuth preference remains unchanged.
+   - Assert fork failure and `set_model` failure log the explicit fallback
+     diagnostic and do not mutate the registered live provider. Copilot's
+     transient `try_write` error is an ordinary tested failure, not impossible.
+   - Assert a failure from `complete_simple` after a successful stored-fork
+     construction is returned directly and does not invoke OpenAI/Claude fallback.
 
 #### Before/after sketch
 
