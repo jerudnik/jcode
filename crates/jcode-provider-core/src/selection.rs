@@ -13,6 +13,57 @@ pub enum ActiveProvider {
     OpenRouter,
 }
 
+impl ActiveProvider {
+    pub const ALL: [Self; 8] = [
+        Self::Claude,
+        Self::OpenAI,
+        Self::Copilot,
+        Self::Antigravity,
+        Self::Gemini,
+        Self::Cursor,
+        Self::Bedrock,
+        Self::OpenRouter,
+    ];
+
+    /// Stable machine-facing key for this built-in provider.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::OpenAI => "openai",
+            Self::Copilot => "copilot",
+            Self::Antigravity => "antigravity",
+            Self::Gemini => "gemini",
+            Self::Cursor => "cursor",
+            Self::Bedrock => "bedrock",
+            Self::OpenRouter => "openrouter",
+        }
+    }
+
+    /// Accepted human/config aliases in addition to [`ActiveProvider::key`].
+    pub const fn aliases(self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &["anthropic"],
+            Self::OpenAI => &[],
+            Self::Copilot => &["github copilot"],
+            Self::Antigravity => &[],
+            Self::Gemini => &["google gemini"],
+            Self::Cursor => &[],
+            Self::Bedrock => &["aws-bedrock", "aws_bedrock"],
+            Self::OpenRouter => &[],
+        }
+    }
+
+    /// Parse a canonical key or alias, ignoring surrounding whitespace and
+    /// ASCII case.
+    pub fn from_key_or_alias(value: &str) -> Option<Self> {
+        let normalized = value.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|provider| {
+            normalized == provider.key()
+                || provider.aliases().iter().any(|alias| normalized == *alias)
+        })
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct ProviderAvailability {
     pub openai: bool,
@@ -66,17 +117,7 @@ pub fn auto_default_provider(availability: ProviderAvailability) -> ActiveProvid
 }
 
 pub fn parse_provider_hint(value: &str) -> Option<ActiveProvider> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "claude" | "anthropic" => Some(ActiveProvider::Claude),
-        "openai" => Some(ActiveProvider::OpenAI),
-        "copilot" => Some(ActiveProvider::Copilot),
-        "antigravity" => Some(ActiveProvider::Antigravity),
-        "gemini" => Some(ActiveProvider::Gemini),
-        "cursor" => Some(ActiveProvider::Cursor),
-        "bedrock" | "aws-bedrock" | "aws_bedrock" => Some(ActiveProvider::Bedrock),
-        "openrouter" => Some(ActiveProvider::OpenRouter),
-        _ => None,
-    }
+    ActiveProvider::from_key_or_alias(value)
 }
 
 pub fn provider_label(provider: ActiveProvider) -> &'static str {
@@ -93,30 +134,11 @@ pub fn provider_label(provider: ActiveProvider) -> &'static str {
 }
 
 pub fn provider_key(provider: ActiveProvider) -> &'static str {
-    match provider {
-        ActiveProvider::Claude => "claude",
-        ActiveProvider::OpenAI => "openai",
-        ActiveProvider::Copilot => "copilot",
-        ActiveProvider::Antigravity => "antigravity",
-        ActiveProvider::Gemini => "gemini",
-        ActiveProvider::Cursor => "cursor",
-        ActiveProvider::Bedrock => "bedrock",
-        ActiveProvider::OpenRouter => "openrouter",
-    }
+    provider.key()
 }
 
 pub fn provider_from_model_key(key: &str) -> Option<ActiveProvider> {
-    match key {
-        "claude" => Some(ActiveProvider::Claude),
-        "openai" => Some(ActiveProvider::OpenAI),
-        "copilot" => Some(ActiveProvider::Copilot),
-        "antigravity" => Some(ActiveProvider::Antigravity),
-        "gemini" => Some(ActiveProvider::Gemini),
-        "cursor" => Some(ActiveProvider::Cursor),
-        "bedrock" => Some(ActiveProvider::Bedrock),
-        "openrouter" => Some(ActiveProvider::OpenRouter),
-        _ => None,
-    }
+    ActiveProvider::from_key_or_alias(key)
 }
 
 /// Translate a persisted session/runtime provider key (the `RuntimeKey`
@@ -146,13 +168,10 @@ pub fn cli_provider_arg_for_session_key(key: &str) -> Option<&'static str> {
     if let Some(route) = crate::auth_mode::AuthRoute::parse(base) {
         return Some(route.cli_provider_arg());
     }
+    if let Some(provider) = ActiveProvider::from_key_or_alias(base) {
+        return Some(provider.key());
+    }
     match base {
-        "openrouter" => Some("openrouter"),
-        "copilot" => Some("copilot"),
-        "gemini" => Some("gemini"),
-        "cursor" => Some("cursor"),
-        "bedrock" => Some("bedrock"),
-        "antigravity" => Some("antigravity"),
         "code-assist-oauth" | "google" => Some("google"),
         // openai-compatible / custom profiles, remote-catalog, current, and any
         // unknown key have no clean standalone CLI provider value (they need a
@@ -162,35 +181,31 @@ pub fn cli_provider_arg_for_session_key(key: &str) -> Option<&'static str> {
 }
 
 pub fn explicit_model_provider_prefix(model: &str) -> Option<(ActiveProvider, &'static str, &str)> {
-    if let Some(rest) = model.strip_prefix("claude-api:") {
-        Some((ActiveProvider::Claude, "claude-api:", rest))
-    } else if let Some(rest) = model.strip_prefix("claude-oauth:") {
-        Some((ActiveProvider::Claude, "claude-oauth:", rest))
-    } else if let Some(rest) = model.strip_prefix("claude:") {
-        Some((ActiveProvider::Claude, "claude:", rest))
-    } else if let Some(rest) = model.strip_prefix("anthropic:") {
-        Some((ActiveProvider::Claude, "anthropic:", rest))
-    } else if let Some(rest) = model.strip_prefix("openai-api:") {
-        Some((ActiveProvider::OpenAI, "openai-api:", rest))
-    } else if let Some(rest) = model.strip_prefix("openai-oauth:") {
-        Some((ActiveProvider::OpenAI, "openai-oauth:", rest))
-    } else if let Some(rest) = model.strip_prefix("openai:") {
-        Some((ActiveProvider::OpenAI, "openai:", rest))
-    } else if let Some(rest) = model.strip_prefix("copilot:") {
-        Some((ActiveProvider::Copilot, "copilot:", rest))
-    } else if let Some(rest) = model.strip_prefix("antigravity:") {
-        Some((ActiveProvider::Antigravity, "antigravity:", rest))
-    } else if let Some(rest) = model.strip_prefix("gemini:") {
-        Some((ActiveProvider::Gemini, "gemini:", rest))
-    } else if let Some(rest) = model.strip_prefix("cursor:") {
-        Some((ActiveProvider::Cursor, "cursor:", rest))
-    } else if let Some(rest) = model.strip_prefix("bedrock:") {
-        Some((ActiveProvider::Bedrock, "bedrock:", rest))
-    } else if let Some(rest) = model.strip_prefix("openrouter:") {
-        Some((ActiveProvider::OpenRouter, "openrouter:", rest))
-    } else {
-        None
+    const PREFIXES: &[(&str, ActiveProvider)] = &[
+        ("claude-api:", ActiveProvider::Claude),
+        ("claude-oauth:", ActiveProvider::Claude),
+        ("claude:", ActiveProvider::Claude),
+        ("anthropic:", ActiveProvider::Claude),
+        ("openai-api:", ActiveProvider::OpenAI),
+        ("openai-oauth:", ActiveProvider::OpenAI),
+        ("openai:", ActiveProvider::OpenAI),
+        ("copilot:", ActiveProvider::Copilot),
+        ("antigravity:", ActiveProvider::Antigravity),
+        ("gemini:", ActiveProvider::Gemini),
+        ("cursor:", ActiveProvider::Cursor),
+        ("bedrock:", ActiveProvider::Bedrock),
+        ("openrouter:", ActiveProvider::OpenRouter),
+    ];
+
+    for &(prefix, builtin_provider) in PREFIXES {
+        if let Some(rest) = model.strip_prefix(prefix) {
+            let provider = crate::auth_mode::AuthRoute::parse_explicit_credential_prefix(prefix)
+                .map(crate::auth_mode::AuthRoute::active_provider)
+                .unwrap_or(builtin_provider);
+            return Some((provider, prefix, rest));
+        }
     }
+    None
 }
 
 pub fn model_name_for_provider(provider: ActiveProvider, model: &str) -> Cow<'_, str> {
@@ -374,13 +389,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_provider_hints() {
-        assert_eq!(
-            parse_provider_hint("Anthropic"),
-            Some(ActiveProvider::Claude)
-        );
-        assert_eq!(parse_provider_hint("openai"), Some(ActiveProvider::OpenAI));
+    fn active_provider_owns_all_canonical_keys_and_aliases() {
+        let expected = [
+            (ActiveProvider::Claude, "claude", &["anthropic"][..]),
+            (ActiveProvider::OpenAI, "openai", &[][..]),
+            (ActiveProvider::Copilot, "copilot", &["github copilot"][..]),
+            (ActiveProvider::Antigravity, "antigravity", &[][..]),
+            (ActiveProvider::Gemini, "gemini", &["google gemini"][..]),
+            (ActiveProvider::Cursor, "cursor", &[][..]),
+            (
+                ActiveProvider::Bedrock,
+                "bedrock",
+                &["aws-bedrock", "aws_bedrock"][..],
+            ),
+            (ActiveProvider::OpenRouter, "openrouter", &[][..]),
+        ];
+
+        assert_eq!(ActiveProvider::ALL.len(), expected.len());
+        for (provider, key, aliases) in expected {
+            assert_eq!(provider.key(), key);
+            assert_eq!(provider.aliases(), aliases);
+            assert_eq!(provider_key(provider), key);
+            assert_eq!(ActiveProvider::from_key_or_alias(key), Some(provider));
+            assert_eq!(provider_from_model_key(key), Some(provider));
+            assert_eq!(
+                parse_provider_hint(&format!("  {}  ", key.to_uppercase())),
+                Some(provider)
+            );
+
+            for alias in aliases {
+                assert_eq!(ActiveProvider::from_key_or_alias(alias), Some(provider));
+                assert_eq!(parse_provider_hint(alias), Some(provider));
+            }
+        }
+
         assert_eq!(parse_provider_hint("unknown"), None);
+        assert_eq!(ActiveProvider::from_key_or_alias(""), None);
     }
 
     #[test]
@@ -418,6 +462,10 @@ mod tests {
         assert_eq!(cli_provider_arg_for_session_key("copilot"), Some("copilot"));
         assert_eq!(cli_provider_arg_for_session_key("gemini"), Some("gemini"));
         assert_eq!(cli_provider_arg_for_session_key("bedrock"), Some("bedrock"));
+        assert_eq!(
+            cli_provider_arg_for_session_key("aws-bedrock"),
+            Some("bedrock")
+        );
         // Case-insensitive and whitespace tolerant.
         assert_eq!(
             cli_provider_arg_for_session_key("  Anthropic-API-Key "),
@@ -518,7 +566,24 @@ mod tests {
             assert_eq!(prefix, expected_prefix, "{raw}");
             assert_eq!(model, expected_model, "{raw}");
         }
-        assert_eq!(explicit_model_provider_prefix("unknown:sonnet"), None);
+        for raw in [
+            "anthropic-api:sonnet",
+            "anthropic-oauth:sonnet",
+            "anthropic-api-key:sonnet",
+            "claude-api-key:sonnet",
+            "anthropic-key:sonnet",
+            "claude-key:sonnet",
+            "api-key:sonnet",
+            "openai-api-key:gpt-5",
+            "openai-key:gpt-5",
+            "openai-apikey:gpt-5",
+            "openai-platform:gpt-5",
+            "platform-openai:gpt-5",
+            "unknown:sonnet",
+            "Claude:sonnet",
+        ] {
+            assert_eq!(explicit_model_provider_prefix(raw), None, "{raw}");
+        }
     }
 
     #[test]

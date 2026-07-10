@@ -52,3 +52,17 @@
   - Final `nix develop --command cargo check --workspace` -> exit 0.
   - `git diff --check` and the WI-0 ancestry assertion -> exit 0.
 - Only pre-existing dead-code, unused-code, unnecessary-unsafe, and future-incompatibility warnings were emitted.
+
+## 2026-07-10 — WI-2A: centralize built-in provider identity
+
+- Files: `crates/jcode-provider-core/src/selection.rs`, `models.rs`, `lib.rs`, and the required `crates/jcode-base/src/provider/models.rs` compile adaptation.
+- `ActiveProvider` now owns canonical keys and aliases. Provider hint/key parsing and built-in CLI session-key translation delegate to that typed identity, including the previously omitted Bedrock hints.
+- Replaced the explicit model-prefix arm chain with an exact-vocabulary table. Credential-pinning entries validate through `AuthRoute::parse_explicit_credential_prefix` while preserving the original prefix spelling; `anthropic-api:` remains non-native.
+- Added typed `builtin_provider_for_model[_with_hint]` helpers and retained string-returning compatibility wrappers for WI-2B/2C. The private core OpenRouter catalog normalizer and the base fallback caller now consume the typed helper.
+- Added exhaustive key/alias, Bedrock, builtin-classification, compatibility-wrapper, accepted-prefix, and rejected broad-AuthRoute-prefix coverage.
+- Validation:
+  - `nix develop --command cargo test -p jcode-provider-core` -> exit 0; 86 passed, 0 failed, doc tests 0 failed.
+  - `nix develop --command cargo check -p jcode-provider-core -p jcode-base` -> exit 0.
+  - `nix develop --command cargo fmt --all` -> exit 0.
+  - `git diff --check` -> exit 0.
+- Only pre-existing dead-code warnings were emitted.
