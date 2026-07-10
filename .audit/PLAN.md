@@ -516,7 +516,11 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
      documented safe/unset value and log the field, bad value, accepted domain,
      and applied fallback.
    - Validate all audited domains at this single choke point:
-     - `agents.memory_embedding_backend`: `local|openai`, fallback `local`.
+     - `agents.memory_embedding_backend`: accept and normalize only to the
+       exact lowercase literals `"local"` or `"openai"`; every invalid value
+       normalizes to exact lowercase `"local"`. These literals deliberately
+       match `default_memory_embedding_backend()` and WI-5's existing
+       `eq_ignore_ascii_case("openai")` selection check.
      - `tools.profile`: `full|acp|minimal|lite|none`, fallback the empty/default
        profile.
      - `acp.profile`: `standard|extended|full`, fallback `standard`.
