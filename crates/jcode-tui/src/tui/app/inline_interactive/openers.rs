@@ -1,7 +1,6 @@
 use super::helpers::{
     agent_model_default_summary, agent_model_target_config_path, agent_model_target_label,
-    agent_model_target_slug, load_agent_model_override, model_entry_base_name,
-    model_entry_saved_spec,
+    agent_model_target_slug, load_agent_model_override, model_entry_saved_spec,
 };
 use super::*;
 use crate::tui::{
@@ -185,20 +184,11 @@ impl App {
         }
 
         if let Some(ref mut picker) = self.inline_interactive_state {
-            if target == AgentModelTarget::Memory {
-                picker.entries.retain(|entry| {
-                    matches!(
-                        crate::provider::provider_for_model(&model_entry_base_name(entry)),
-                        Some("openai" | "claude")
-                    )
-                });
-            }
-
             for entry in &mut picker.entries {
-                let matches_saved = configured.as_deref().map(|saved| {
-                    let base = model_entry_base_name(entry);
-                    model_entry_saved_spec(entry) == saved || base == saved
-                }) == Some(true);
+                let matches_saved = configured
+                    .as_deref()
+                    .map(|saved| model_entry_saved_spec(entry) == saved)
+                    == Some(true);
                 entry.action = PickerAction::AgentModelChoice {
                     target,
                     clear_override: false,
@@ -208,9 +198,10 @@ impl App {
             }
 
             if let Some(saved) = configured.as_deref() {
-                let already_present = picker.entries.iter().any(|entry| {
-                    model_entry_saved_spec(entry) == saved || model_entry_base_name(entry) == saved
-                });
+                let already_present = picker
+                    .entries
+                    .iter()
+                    .any(|entry| model_entry_saved_spec(entry) == saved);
                 if !already_present {
                     picker.entries.insert(
                         0,
