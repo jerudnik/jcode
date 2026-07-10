@@ -297,10 +297,14 @@ coupling, but warrants a user-facing release-note callout.
      `parse_provider_hint`, `provider_key`, `provider_from_model_key`, and the
      builtin portion of `cli_provider_arg_for_session_key` to delegate to it.
      This removes the current divergent `bedrock` vocabulary.
-   - Replace the 13-arm `explicit_model_provider_prefix` chain with parsing of
-     the prefix before `:` followed by `AuthRoute::parse` or
-     `ActiveProvider::from_key_or_alias`. Retain exact auth-route spelling in
-     the result, because OAuth/API prefix intent must survive.
+   - Replace the 13-arm `explicit_model_provider_prefix` chain with a table
+     encoding **the current model-prefix vocabulary**, then parse its recognized
+     dual-auth spellings through `AuthRoute::parse_explicit_credential_prefix`.
+     Do not use broad `AuthRoute::parse` as a prefix recognizer: it accepts
+     runtime/CLI aliases such as `anthropic-api` (`auth_mode.rs:128-146`) that
+     current model-prefix parsing intentionally does **not** recognize
+     (`selection.rs::explicit_model_provider_prefix`, 164-193). Retain exact
+     auth-route spelling in the result because OAuth/API intent must survive.
 2. **`crates/jcode-provider-core/src/models.rs`**
    - Demote the public static `provider_for_model[_with_hint]` logic to an
      explicitly named builtin-only helper returning `ActiveProvider`. It remains
@@ -329,10 +333,18 @@ coupling, but warrants a user-facing release-note callout.
      `cfg.providers` profile prefix, `model@provider` OpenRouter form, then the
      base builtin detector (including Bedrock, Antigravity, and Cursor). An
      unrecognized `prefix:model` remains an unclassified model, not an implicit
-     provider. `openai-api:` and `anthropic-api:` are permanently reserved
-     dual-auth spellings: they must win before the same-named catalog profile
-     ids and can never select the OpenAI-compatible runtime by prefix. This
-     preserves the native HTTP-client, auth, pricing, and billing path.
+     provider. `openai-api:` is permanently reserved by the current explicit-
+     prefix vocabulary and must win before the same-named catalog profile id.
+     **Sol's proposed equivalent `anthropic-api:` reservation is not adopted**:
+     source disproves it. `explicit_model_provider_prefix` recognizes
+     `claude-api:` but has no `anthropic-api:` arm (provider-core
+     `selection.rs:164-193`), while the static catalog defines
+     `ANTHROPIC_OPENAI_COMPAT_PROFILE.id = "anthropic-api"`
+     (`provider-metadata/src/catalog.rs:99-115`). Thus
+     `anthropic-api:<model>` remains a catalog-profile prefix today and after
+     this refactor. The resolver table must preserve both behaviors rather than
+     broadening `AuthRoute::parse` aliases into model prefixes, preserving the
+     existing HTTP-client, auth, pricing, and billing paths.
    - Expose only thin compatibility wrappers while moving callers. A convenience
      `resolve_current_model_spec(model)` may read `config()` for read-only UI
      paths, but all selection paths that already possess a `&Config` must pass
@@ -392,10 +404,11 @@ coupling, but warrants a user-facing release-note callout.
    - Table-test one resolver result for bare Claude/OpenAI/Gemini, Bedrock,
      Cursor, OpenRouter `@`, each dual-auth prefix, a catalog profile prefix,
      a named `[providers.omlx]` profile prefix, and an unknown prefix.
-     Add explicit negative cases for `openai-api:gpt-5.5` and
-     `anthropic-api:<model>`: each must resolve as the native pinned dual-auth
-     route and prove the same-named catalog-profile lookup is unreachable via
-     prefix parsing.
+     Add a negative collision case for `openai-api:gpt-5.5`: it must resolve
+     as the native pinned dual-auth route and prove the same-named catalog
+     profile lookup is unreachable. Add the converse preservation test for
+     `anthropic-api:<model>`: it must resolve as the OpenAI-compatible catalog
+     profile, not a newly accepted native model-prefix alias.
    - Assert both spawn and Jade relay return the same provider key for every
      explicit/named case. Put shared parser tests in base and focused wrapper
      tests in app-core. Include `explicit_route_for_configured_model` asserting
@@ -463,8 +476,8 @@ nix develop --command cargo check -p jcode-base -p jcode-app-core -p jcode-provi
 #### Risk and rollback
 
 This is the largest semantic change: provider/auth selection can be altered by
-prefix precedence. The resolver table tests, including the permanent
-`openai-api:`/`anthropic-api:` reservation negatives, are the rollback safety
+prefix precedence. The resolver table tests, including the `openai-api:` reservation negative and
+`anthropic-api:` catalog-profile preservation positive, are the rollback safety
 net against silently rerouting a prefix to a different HTTP client or billing
 path. Keep legacy wrappers only for the commit while all callers migrate, mark
 them deprecated, then remove them before merging the same work item. Revert the
@@ -532,8 +545,8 @@ route regresses.
      | Configured model class | Sidecar backend | Wire/configured model and auth reason |
      |---|---|---|
      | Bare native OpenAI or Claude model, no `:` prefix | specialized OpenAI/Claude | Bare `self.model`; retain existing ambient credential behavior and OAuth fallback ladder. |
-     | `openai-api:`, `openai-oauth:`, `claude-api:`, `claude-oauth:`, `anthropic-api:`, `anthropic-oauth:` | stored `MultiProvider` fork | Full prefix unchanged. `MultiProvider::set_model` already pins credential mode (provider `mod.rs:1767-1810`). |
-     | Any other recognized builtin prefix, catalog profile, or `[providers.<name>]` prefix | stored `MultiProvider` fork | Full prefix unchanged so the resolver-selected route/profile remains intact. |
+     | `openai-api:`, `openai-oauth:`, `claude-api:`, `claude-oauth:` | stored `MultiProvider` fork | Full prefix unchanged. `MultiProvider::set_model` already pins credential mode (provider `mod.rs:1767-1810`). |
+     | Any other recognized builtin prefix, catalog profile (including `anthropic-api:`), or `[providers.<name>]` prefix | stored `MultiProvider` fork | Full prefix unchanged so the resolver-selected route/profile remains intact. `anthropic-api:` remains a catalog profile, not an explicit native pin. |
      | Unknown prefix or fork/set failure | existing auto-selection fallback | Log requested string plus `ResolvedModelSpec`; no silent unsupported-model message. |
 
      The specialized branches **cannot** implement explicit pinning safely: they
