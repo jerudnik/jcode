@@ -710,9 +710,10 @@ mod tests {
             "CLI login should create provider env file"
         );
         assert_eq!(
-            crate::provider_catalog::load_api_key_from_env_or_config(
-                &resolved.api_key_env,
-                &resolved.env_file,
+            crate::provider_catalog::load_api_key(
+                &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                    &resolved,
+                ),
             )
             .as_deref(),
             Some("test-cerebras-cli-key")

@@ -92,7 +92,7 @@ fn auth_issue_profile_metadata_matches_direct_provider_endpoints() {
     assert_eq!(DEEPSEEK_PROFILE.default_model, Some("deepseek-v4-flash"));
     assert_eq!(DEEPSEEK_PROFILE.setup_url, "https://api-docs.deepseek.com/");
     assert_eq!(MINIMAX_PROFILE.api_base, "https://api.minimax.io/v1");
-    assert_eq!(MINIMAX_PROFILE.api_key_env, "OPENAI_API_KEY");
+    assert_eq!(MINIMAX_PROFILE.api_key_env, "MINIMAX_API_KEY");
     assert_eq!(
         ALIBABA_CODING_PLAN_PROFILE.api_base,
         "https://coding-intl.dashscope.aliyuncs.com/v1"
@@ -470,16 +470,13 @@ fn matrix_openrouter_like_sources_include_all_static_profiles() {
     let sources = openrouter_like_api_key_sources();
     drop(guard);
 
-    assert!(sources.contains(&(
-        "OPENROUTER_API_KEY".to_string(),
-        "openrouter.env".to_string()
+    assert!(sources.contains(&ApiKeyCredentialSource::primary_only(
+        "OPENROUTER_API_KEY",
+        "openrouter.env",
     )));
     for profile in openai_compatible_profiles() {
         if profile.requires_api_key {
-            assert!(sources.contains(&(
-                profile.api_key_env.to_string(),
-                profile.env_file.to_string()
-            )));
+            assert!(sources.contains(&ApiKeyCredentialSource::from_catalog_profile(*profile)));
         }
     }
 }
@@ -500,11 +497,14 @@ fn matrix_openrouter_like_sources_accept_valid_overrides() {
     crate::env::set_var("JCODE_OPENAI_COMPAT_ENV_FILE", "alt-compat.env");
 
     let sources = openrouter_like_api_key_sources();
-    assert!(sources.contains(&(
-        "ALT_OPENROUTER_KEY".to_string(),
-        "alt-openrouter.env".to_string()
+    assert!(sources.contains(&ApiKeyCredentialSource::primary_only(
+        "ALT_OPENROUTER_KEY",
+        "alt-openrouter.env",
     )));
-    assert!(sources.contains(&("ALT_COMPAT_KEY".to_string(), "alt-compat.env".to_string())));
+    assert!(sources.contains(&ApiKeyCredentialSource::primary_only(
+        "ALT_COMPAT_KEY",
+        "alt-compat.env",
+    )));
 }
 
 #[test]
@@ -744,12 +744,12 @@ fn matrix_openrouter_like_sources_reject_invalid_overrides() {
     assert!(
         !sources
             .iter()
-            .any(|(key, _)| key == "bad-key-name" || key == "bad key")
+            .any(|source| matches!(source.primary_env(), "bad-key-name" | "bad key"))
     );
     assert!(
         !sources
             .iter()
-            .any(|(_, file)| file == "../bad.env" || file == "../bad-compat.env")
+            .any(|source| matches!(source.env_file(), "../bad.env" | "../bad-compat.env"))
     );
 }
 
@@ -861,7 +861,7 @@ fn matrix_openai_compatible_localhost_override_allows_no_auth() {
 }
 
 #[test]
-fn matrix_load_api_key_from_env_or_config_prefers_env() {
+fn matrix_catalog_api_key_prefers_primary_env() {
     let _lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let config_root = temp.path().join("config").join("jcode");
@@ -877,13 +877,16 @@ fn matrix_load_api_key_from_env_or_config_prefers_env() {
     .expect("env file");
 
     assert_eq!(
-        load_api_key_from_env_or_config("OPENCODE_API_KEY", "opencode.env").as_deref(),
+        load_api_key(&ApiKeyCredentialSource::from_catalog_profile(
+            OPENCODE_PROFILE
+        ))
+        .as_deref(),
         Some("env-secret")
     );
 }
 
 #[test]
-fn matrix_load_api_key_from_env_or_config_reads_config_file() {
+fn matrix_catalog_api_key_reads_primary_config_file_entry() {
     let _lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let config_root = temp.path().join("config").join("jcode");
@@ -899,13 +902,16 @@ fn matrix_load_api_key_from_env_or_config_reads_config_file() {
     .expect("env file");
 
     assert_eq!(
-        load_api_key_from_env_or_config("OPENCODE_API_KEY", "opencode.env").as_deref(),
+        load_api_key(&ApiKeyCredentialSource::from_catalog_profile(
+            OPENCODE_PROFILE
+        ))
+        .as_deref(),
         Some("file-secret")
     );
 }
 
 #[test]
-fn load_api_key_accepts_legacy_zai_key_name() {
+fn catalog_api_key_accepts_legacy_zai_key_name() {
     let _lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let config_root = temp.path().join("config").join("jcode");
@@ -918,7 +924,7 @@ fn load_api_key_accepts_legacy_zai_key_name() {
     std::fs::write(config_root.join("zai.env"), "ZAI_API_KEY=legacy-secret\n").expect("env file");
 
     assert_eq!(
-        load_api_key_from_env_or_config("ZHIPU_API_KEY", "zai.env").as_deref(),
+        load_api_key(&ApiKeyCredentialSource::from_catalog_profile(ZAI_PROFILE)).as_deref(),
         Some("legacy-secret")
     );
 }
@@ -1114,10 +1120,10 @@ fn open_weight_family_context_limits_match_published_windows() {
 }
 
 #[test]
-fn minimax_default_provider_applies_openai_api_key_env_not_openrouter() {
+fn minimax_default_provider_applies_minimax_api_key_env_not_openrouter() {
     // Regression for #407: `default_provider = "minimax"` (the built-in MiniMax
     // profile) must resolve credentials from the profile's documented
-    // OPENAI_API_KEY / minimax.env, not the generic OPENROUTER_API_KEY /
+    // MINIMAX_API_KEY / minimax.env, not the generic OPENROUTER_API_KEY /
     // openrouter.env. The earlier bug surfaced as
     // "OPENROUTER_API_KEY not found ..." when applying the configured
     // default_model.
@@ -1154,8 +1160,8 @@ fn minimax_default_provider_applies_openai_api_key_env_not_openrouter() {
         std::env::var("JCODE_OPENROUTER_API_KEY_NAME")
             .ok()
             .as_deref(),
-        Some("OPENAI_API_KEY"),
-        "MiniMax profile must use OPENAI_API_KEY, not OPENROUTER_API_KEY"
+        Some("MINIMAX_API_KEY"),
+        "MiniMax profile must use MINIMAX_API_KEY, not OPENROUTER_API_KEY"
     );
     assert_eq!(
         std::env::var("JCODE_OPENROUTER_ENV_FILE").ok().as_deref(),

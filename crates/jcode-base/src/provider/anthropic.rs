@@ -85,9 +85,11 @@ pub const AVAILABLE_MODELS: &[&str] = &[
 ];
 
 pub fn load_anthropic_api_key() -> Result<String> {
-    let key = crate::provider_catalog::load_api_key_from_env_or_config(
-        "ANTHROPIC_API_KEY",
-        "anthropic.env",
+    let key = crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+            "ANTHROPIC_API_KEY",
+            "anthropic.env",
+        ),
     )
     .context("No Anthropic API key found")?;
     if std::env::var("JCODE_LOG_SERVICE_TIER").is_ok() {

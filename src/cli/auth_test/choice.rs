@@ -138,9 +138,8 @@ async fn discover_openai_compatible_validation_model(
             .header("User-Agent", "claude-cli/1.0.0")
             .header("x-app", "cli");
     }
-    if let Some(api_key) = crate::provider_catalog::load_api_key_from_env_or_config(
-        &profile.api_key_env,
-        &profile.env_file,
+    if let Some(api_key) = crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(profile),
     ) {
         request = request.bearer_auth(api_key);
     }

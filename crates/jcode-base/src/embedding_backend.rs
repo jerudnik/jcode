@@ -303,7 +303,9 @@ pub fn openai_backend_from_config() -> Option<OpenAiEmbeddingBackend> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("OPENAI_API_KEY");
-    let api_key = crate::provider_catalog::load_api_key_from_env_or_config(api_key_env, "openai.env")?;
+    let api_key = crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::primary_only(api_key_env, "openai.env"),
+    )?;
     let model = agents
         .memory_embedding_model
         .clone()

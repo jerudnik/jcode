@@ -14,9 +14,9 @@
 //!   `jcode-provider-openrouter`.
 
 use crate::provider_catalog::{
-    OPENAI_COMPAT_PROFILE, is_safe_env_file_name, is_safe_env_key_name,
-    load_api_key_from_env_or_config, normalize_api_base, openai_compatible_profiles,
-    resolve_openai_compatible_profile,
+    ApiKeyCredentialSource, OPENAI_COMPAT_PROFILE, active_openai_compatible_profile,
+    is_safe_env_file_name, is_safe_env_key_name, load_api_key, normalize_api_base,
+    openai_compatible_profiles, resolve_openai_compatible_profile,
 };
 pub use jcode_provider_openrouter::{
     EndpointInfo, ModelInfo, ModelPricing, ModelTimestampIndex, ProviderRouting,
@@ -56,9 +56,17 @@ pub fn has_credentials() -> bool {
 
 /// Resolve the configured API key for the OpenRouter/OpenAI-compatible slot.
 pub fn get_api_key() -> Option<String> {
-    let key_name = configured_api_key_name();
-    let env_file = configured_env_file_name();
-    load_api_key_from_env_or_config(&key_name, &env_file)
+    let source = activated_openai_compatible_profile()
+        .or_else(autodetected_openai_compatible_profile)
+        .as_ref()
+        .map(ApiKeyCredentialSource::from_resolved_catalog_profile)
+        .unwrap_or_else(|| {
+            ApiKeyCredentialSource::primary_only(
+                configured_api_key_name(),
+                configured_env_file_name(),
+            )
+        });
+    load_api_key(&source)
 }
 
 /// OpenRouter API base URL
@@ -78,18 +86,44 @@ fn explicit_openrouter_runtime_configured() -> bool {
     .any(|var| std::env::var_os(var).is_some())
 }
 
+fn activated_openai_compatible_profile()
+-> Option<crate::provider_catalog::ResolvedOpenAiCompatibleProfile> {
+    let profile = active_openai_compatible_profile()?;
+    let matches = [
+        ("JCODE_OPENROUTER_API_BASE", profile.api_base.as_str()),
+        (
+            "JCODE_OPENROUTER_API_KEY_NAME",
+            profile.api_key_env.as_str(),
+        ),
+        ("JCODE_OPENROUTER_ENV_FILE", profile.env_file.as_str()),
+        ("JCODE_OPENROUTER_CACHE_NAMESPACE", profile.id.as_str()),
+    ]
+    .into_iter()
+    .all(|(name, expected)| std::env::var(name).ok().as_deref() == Some(expected));
+    matches.then_some(profile)
+}
+
 fn autodetected_openai_compatible_profile()
 -> Option<crate::provider_catalog::ResolvedOpenAiCompatibleProfile> {
     if explicit_openrouter_runtime_configured() {
         return None;
     }
 
-    if load_api_key_from_env_or_config(DEFAULT_API_KEY_NAME, DEFAULT_ENV_FILE).is_some() {
+    if load_api_key(&ApiKeyCredentialSource::primary_only(
+        DEFAULT_API_KEY_NAME,
+        DEFAULT_ENV_FILE,
+    ))
+    .is_some()
+    {
         return None;
     }
 
     let compat = resolve_openai_compatible_profile(OPENAI_COMPAT_PROFILE);
-    if load_api_key_from_env_or_config(&compat.api_key_env, &compat.env_file).is_some() {
+    if load_api_key(&ApiKeyCredentialSource::from_resolved_catalog_profile(
+        &compat,
+    ))
+    .is_some()
+    {
         return Some(compat);
     }
 

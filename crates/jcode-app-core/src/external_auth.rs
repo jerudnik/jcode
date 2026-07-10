@@ -534,9 +534,9 @@ async fn validate_cursor_import() -> Result<String> {
 }
 
 fn validate_openrouter_like_import() -> Result<String> {
-    for (env_key, env_file) in crate::provider_catalog::openrouter_like_api_key_sources() {
-        if crate::provider_catalog::load_api_key_from_env_or_config(&env_key, &env_file).is_some() {
-            return Ok(format!("Loaded API key for `{}`.", env_key));
+    for source in crate::provider_catalog::openrouter_like_api_key_sources() {
+        if crate::provider_catalog::load_api_key(&source).is_some() {
+            return Ok(format!("Loaded API key for `{}`.", source.primary_env()));
         }
     }
     anyhow::bail!("No reusable API key became available after import.")
