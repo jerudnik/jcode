@@ -39,3 +39,16 @@ Structure guidance for spawned swarm agents:
   a prompt like "own X: decompose it, spawn workers for the pieces, synthesize
   their reports, and report back", and let it own that subtree. This keeps your
   own context on your task and keeps report-back traffic structured.
+
+Monitoring delegated subtrees:
+
+- A sub-orchestrator's spawned workers form their own swarm. `swarm status` on
+  a member of another swarm fails by design ("not in the same swarm as
+  requester"); do not retry variations. You observe a delegated subtree through
+  its owner's report and through shared artifacts, not by introspecting its
+  members.
+- Prefer artifact-based progress signals over polling or DMs: instruct
+  delegates to write a shared ledger/progress file and commit work as it lands,
+  then monitoring is reading that file and the repo log. A DM interrupts the
+  delegate's turn; reserve it for when artifacts have been silent well past the
+  expected cadence.
