@@ -223,6 +223,9 @@ The main risk is changing legacy-key precedence. Preserve the existing primary
 then alias order, and keep the public primary env name unchanged for every
 profile except the verified MiniMax defect. Roll back this single commit to
 restore old lookup behavior. No credential value is migrated or written.
+Any user with only `OPENAI_API_KEY` will see MiniMax flip from “configured” to
+“not configured.” This is the intended correction of accidental credential
+coupling, but warrants a user-facing release-note callout.
 
 ---
 
