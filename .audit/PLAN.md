@@ -743,13 +743,15 @@ needed, without deleting memories or vectors.
 
 1. Commit the already-complete `memory_embedding_api_key_env` baseline first
    (or keep it in the WI-5 commit). Do not duplicate it.
-2. Commit **WI-1** independently.
-3. Commit **WI-2** independently.
-4. Commit **WI-3** immediately after WI-2.
-5. Commit **WI-4** independently. It may be developed in parallel, but merge
+2. Commit **WI-0** independently. Its Gemini/Antigravity/Copilot fork-isolation
+   regression must pass before any consumer can call `set_model` on a fork.
+3. Commit **WI-1** independently.
+4. Commit **WI-2** independently.
+5. Commit **WI-3** only after both WI-0 and WI-2.
+6. Commit **WI-4** independently. It may be developed in parallel, but merge
    before WI-5.
-6. Commit **WI-5** after the credential baseline and WI-4.
-7. Final workspace validation:
+7. Commit **WI-5** after the credential baseline and WI-4.
+8. Final workspace validation:
 
 ```bash
 nix develop --command cargo check -p jcode-provider-metadata -p jcode-provider-env -p jcode-provider-core -p jcode-config-types -p jcode-base -p jcode-app-core -p jcode-tui
