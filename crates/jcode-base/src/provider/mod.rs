@@ -57,9 +57,9 @@ pub use jcode_provider_core::{
     ModelCapabilities, ModelCatalogRefreshSummary, ModelRoute, ModelRouteApiMethod,
     NativeCompactionResult, NativeToolResult, NativeToolResultSender, PremiumMode, Provider,
     RouteBillingKind, RouteCheapnessEstimate, RouteCostConfidence, RouteCostSource, RouteSelection,
-    RuntimeKey, dedupe_model_routes, explicit_model_provider_prefix, fresh_transport_client,
-    model_name_for_provider, normalize_copilot_model_name, provider_from_model_key,
-    shared_http_client, summarize_model_catalog_refresh,
+    RuntimeKey, dedupe_model_routes, fresh_transport_client, model_name_for_provider,
+    normalize_copilot_model_name, provider_from_model_key, shared_http_client,
+    summarize_model_catalog_refresh,
 };
 pub use jcode_provider_core::{
     FallbackPickOptions, error_looks_like_credential_failure, model_route_provider_labels_match,
@@ -304,11 +304,11 @@ pub use self::models::{
     note_openai_model_catalog_refresh_attempt, persist_anthropic_model_catalog,
     persist_openai_model_catalog, populate_account_models, populate_anthropic_models,
     populate_context_limits, populate_context_limits_from_config,
-    populate_context_limits_from_config_value, provider_for_model, provider_for_model_with_hint,
-    provider_unavailability_detail_for_account, record_model_unavailable_for_account,
-    record_provider_unavailable_for_account, refresh_openai_model_catalog_in_background,
-    resolve_current_model_spec, resolve_model_capabilities, resolve_model_spec,
-    should_refresh_anthropic_model_catalog, should_refresh_openai_model_catalog,
+    populate_context_limits_from_config_value, provider_unavailability_detail_for_account,
+    record_model_unavailable_for_account, record_provider_unavailable_for_account,
+    refresh_openai_model_catalog_in_background, resolve_current_model_spec,
+    resolve_model_capabilities, resolve_model_spec, should_refresh_anthropic_model_catalog,
+    should_refresh_openai_model_catalog,
 };
 pub use self::selection::DefaultModelSelection;
 use self::selection::{ActiveProvider, ProviderAvailability};
@@ -1719,8 +1719,11 @@ impl Provider for MultiProvider {
         // Provider-prefixed model names are explicit routing directives. They
         // must never silently fall through to another provider when the target
         // is unavailable or when --provider locks a different backend.
-        if let Some((target, prefix, target_model)) =
-            explicit_model_provider_prefix(requested_model)
+        if let Some(prefix) = resolved.explicit_prefix.as_deref()
+            && let Some(target) = resolved
+                .provider_key
+                .as_deref()
+                .and_then(ActiveProvider::from_key_or_alias)
         {
             self.ensure_provider_lock_allows_model_target(target, requested_model)?;
             // The single canonical parser decides whether this prefix pins a
@@ -1754,12 +1757,12 @@ impl Provider for MultiProvider {
             if openai_credential_mode.is_some() || anthropic_credential_mode.is_some() {
                 return self.set_model_on_provider_with_credential_modes(
                     target,
-                    target_model,
+                    &resolved.bare_model,
                     openai_credential_mode,
                     anthropic_credential_mode,
                 );
             }
-            return self.set_model_on_provider(target, target_model);
+            return self.set_model_on_provider(target, &resolved.bare_model);
         }
 
         if let Some(profile) = resolved

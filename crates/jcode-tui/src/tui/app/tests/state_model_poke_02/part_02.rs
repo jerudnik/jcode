@@ -73,6 +73,73 @@ fn test_agents_review_picker_saves_config_override() {
 }
 
 #[test]
+fn test_memory_agent_model_picker_keeps_all_entries_and_matches_exact_saved_spec() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        configure_test_remote_models(&mut app);
+        std::fs::write(
+            crate::storage::jcode_dir()
+                .expect("jcode home")
+                .join("config.toml"),
+            r#"
+[providers.omlx]
+type = "openai-compatible"
+base_url = "https://omlx.example/v1"
+auth = "none"
+
+[agents]
+memory_model = "omlx:Qwen3.6-MoE"
+"#,
+        )
+        .expect("write config");
+        crate::config::invalidate_config_cache();
+
+        app.remote_available_entries.push("Qwen3.6-MoE".to_string());
+        app.remote_model_options.push(crate::provider::ModelRoute {
+            model: "Qwen3.6-MoE".to_string(),
+            provider: "omlx".to_string(),
+            api_method: "openai-compatible:omlx".to_string(),
+            available: true,
+            detail: String::new(),
+            cheapness: None,
+        });
+
+        app.open_agent_model_picker(crate::tui::AgentModelTarget::Memory);
+
+        let picker = app
+            .inline_interactive_state
+            .as_ref()
+            .expect("memory agent model picker should open");
+        assert!(
+            picker
+                .entries
+                .iter()
+                .any(|entry| entry.name.starts_with("inherit (")),
+            "inherit entry should remain available"
+        );
+        assert!(
+            picker.entries.iter().any(|entry| {
+                entry
+                    .options
+                    .iter()
+                    .any(|route| route.api_method == "openai-compatible:omlx")
+            }),
+            "memory picker must not filter out named/generic provider routes"
+        );
+        assert!(picker.entries.iter().any(|entry| {
+            entry.name == "Qwen3.6-MoE"
+                && entry.is_current
+                && entry.options[entry.selected_option].api_method == "openai-compatible:omlx"
+        }));
+        assert!(picker.entries.iter().all(|entry| {
+            entry.name != "Qwen3.6-MoE"
+                || entry.options[entry.selected_option].api_method == "openai-compatible:omlx"
+                || !entry.is_current
+        }));
+    });
+}
+
+#[test]
 fn test_model_command_suggestions_include_matching_models() {
     let mut app = create_test_app();
     configure_test_remote_models(&mut app);

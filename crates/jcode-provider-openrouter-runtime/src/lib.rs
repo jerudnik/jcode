@@ -1390,42 +1390,60 @@ impl OpenRouterProvider {
     /// prefix is a routing token, not part of the model id, and must not reach
     /// the wire. We strip it when:
     /// - the spec has a `:` separator, and
-    /// - the prefix is NOT a built-in routing prefix
-    ///   (`explicit_model_provider_prefix`), and
-    /// - the prefix matches either this provider's own `profile_id` or a known
-    ///   built-in OpenAI-compatible profile id.
+    /// - the resolved prefix targets this provider's own profile/compatible
+    ///   profile identity.
     ///
-    /// Built-in routing prefixes (`claude:`, `openai:`, `copilot:`, ...) are
-    /// left intact so switching the active provider from a saved session still
-    /// round-trips verbatim.
+    /// Built-in routing prefixes (`claude:`, `openai-api:`, `copilot:`, ...) are
+    /// left intact by the resolver-backed provider-instance guard so switching
+    /// the active provider from a saved session still round-trips verbatim.
     fn strip_session_profile_prefix<'a>(&self, model: &'a str) -> &'a str {
         let Some((prefix, rest)) = model.split_once(':') else {
             return model;
         };
-        if jcode_provider_core::explicit_model_provider_prefix(model).is_some() {
-            return model;
-        }
+        let prefix = prefix.trim();
         let rest = rest.trim();
         if rest.is_empty() {
             return model;
         }
-        let prefix = prefix.trim();
-        let matches_known_profile = self
+        if self
             .profile_id
             .as_deref()
             .is_some_and(|id| id.eq_ignore_ascii_case(prefix))
-            || openai_compatible_profile_by_id(prefix).is_some()
-            // A user-defined named provider profile (`[providers.<name>]` in
-            // config.toml) is also a valid session-routing prefix. The shared
-            // server may boot via the deferred-auth path without binding this
-            // provider's `profile_id`, so without this check a `<name>:` prefix
-            // (e.g. `cline:`) would leak verbatim to the upstream API and be
-            // rejected with a 404 model_not_found.
-            || jcode_base::config::config()
-                .providers
-                .keys()
-                .any(|id| id.eq_ignore_ascii_case(prefix));
-        if matches_known_profile { rest } else { model }
+            && jcode_provider_core::ActiveProvider::from_key_or_alias(prefix).is_none()
+        {
+            return rest;
+        }
+        let cfg = jcode_base::config::config();
+        let resolved = jcode_base::provider::resolve_model_spec(model, cfg);
+        let Some(provider_key) = resolved.provider_key.as_deref() else {
+            return model;
+        };
+        if jcode_provider_core::ActiveProvider::from_key_or_alias(provider_key).is_some() {
+            return model;
+        }
+        let matches_this_profile = self
+            .profile_id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case(provider_key));
+        let matches_deferred_profile = self.profile_id.is_none() && {
+            let resolved_api_base = openai_compatible_profile_by_id(provider_key)
+                .map(resolve_openai_compatible_profile)
+                .map(|profile| profile.api_base)
+                .or_else(|| {
+                    cfg.providers
+                        .get(provider_key)
+                        .and_then(|profile| normalize_api_base(&profile.base_url))
+                });
+            resolved_api_base
+                .as_deref()
+                .is_some_and(|api_base| api_base.eq_ignore_ascii_case(&self.api_base))
+        };
+        let matches_served_compatible_profile = matches_this_profile || matches_deferred_profile;
+        if matches_served_compatible_profile {
+            rest
+        } else {
+            model
+        }
     }
 
     /// Return true when this request targets Moonshot's dedicated Kimi coding

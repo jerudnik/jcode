@@ -154,7 +154,7 @@ fn spawn_visible_session_window_with_context(
     }
 }
 
-fn provider_key_for_spawn_model(
+pub(super) fn provider_key_for_spawn_model(
     model: Option<&str>,
     provider_key_override: Option<&str>,
 ) -> Option<String> {
@@ -170,18 +170,7 @@ fn provider_key_for_spawn_model(
         return None;
     }
 
-    if let Some((prefix, _rest)) = model.split_once(':') {
-        let prefix = prefix.trim();
-        if crate::provider::provider_from_model_key(prefix).is_some()
-            || crate::provider_catalog::resolve_openai_compatible_profile_selection(prefix)
-                .is_some()
-            || crate::config::config().providers.contains_key(prefix)
-        {
-            return Some(prefix.to_string());
-        }
-    }
-
-    crate::provider::provider_for_model(model).map(str::to_string)
+    crate::provider::resolve_model_spec(model, crate::config::config()).provider_key
 }
 
 /// The model/auth identity a spawned swarm agent should inherit from its
@@ -274,8 +263,9 @@ async fn resolve_coordinator_spawn_identity(
 /// Those keep their prefixed model and route correctly via the existing
 /// session-restore path.
 fn explicit_route_for_configured_model(model: &str) -> Option<SwarmSpawnSelection> {
-    let (_, prefix, bare) = crate::provider::explicit_model_provider_prefix(model)?;
-    let bare = bare.trim();
+    let resolved = crate::provider::resolve_model_spec(model, crate::config::config());
+    let prefix = resolved.explicit_prefix.as_deref()?;
+    let bare = resolved.bare_model.trim();
     if bare.is_empty() {
         return None;
     }
@@ -283,8 +273,8 @@ fn explicit_route_for_configured_model(model: &str) -> Option<SwarmSpawnSelectio
     // explicit credential decision worth pinning. The canonical parser maps the
     // prefix to its stable route id, which `ModelRouteApiMethod::parse` round-
     // trips back to the exact auth method when the spawned session is restored.
-    let route_id = jcode_provider_core::AuthRoute::parse_explicit_credential_prefix(prefix)?
-        .route_api_method();
+    let route = jcode_provider_core::AuthRoute::parse_explicit_credential_prefix(prefix)?;
+    let route_id = route.route_api_method();
     Some(SwarmSpawnSelection {
         model: Some(bare.to_string()),
         provider_key: Some(route_id.to_string()),

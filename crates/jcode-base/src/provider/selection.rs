@@ -231,15 +231,17 @@ impl MultiProvider {
         let model_request = model_request.trim();
         let resolved = crate::provider::resolve_current_model_spec(model_request);
         if let Some(prefix) = resolved.explicit_prefix.as_deref() {
-            if jcode_provider_core::explicit_model_provider_prefix(model_request).is_some() {
+            if let Some(provider) = resolved
+                .provider_key
+                .as_deref()
+                .and_then(ActiveProvider::from_key_or_alias)
+            {
                 if let Some(route) =
                     jcode_provider_core::AuthRoute::parse_explicit_credential_prefix(prefix)
                 {
                     return Some(route.session_provider_key().to_string());
                 }
-                if let Some(provider) = ActiveProvider::from_key_or_alias(prefix) {
-                    return Some(provider.key().to_string());
-                }
+                return Some(provider.key().to_string());
             }
             return resolved.provider_key;
         }
@@ -438,8 +440,10 @@ impl MultiProvider {
         let probe = format!("{trimmed}:__jcode_provider_probe__");
         let resolved = crate::provider::resolve_model_spec(&probe, cfg);
         if resolved.explicit_prefix.is_some() {
-            if let Some((provider, _prefix, _model)) =
-                jcode_provider_core::explicit_model_provider_prefix(&probe)
+            if let Some(provider) = resolved
+                .provider_key
+                .as_deref()
+                .and_then(ActiveProvider::from_key_or_alias)
             {
                 return Some(ConfigProviderSelection::BuiltIn(provider));
             }

@@ -1200,6 +1200,25 @@ fn make_custom_compatible_provider() -> OpenRouterProvider {
     }
 }
 
+#[test]
+fn strip_session_profile_prefix_only_for_this_resolved_compatible_profile() {
+    let mut provider = make_custom_compatible_provider();
+    provider.profile_id = Some("anthropic-api".to_string());
+
+    assert_eq!(
+        provider.strip_session_profile_prefix("anthropic-api:claude-sonnet-4-6"),
+        "claude-sonnet-4-6"
+    );
+    assert_eq!(
+        provider.strip_session_profile_prefix("openai-api:gpt-5.5"),
+        "openai-api:gpt-5.5"
+    );
+    assert_eq!(
+        provider.strip_session_profile_prefix("claude:claude-sonnet-4-6"),
+        "claude:claude-sonnet-4-6"
+    );
+}
+
 fn spawn_single_response_models_server(body: &'static str) -> (String, mpsc::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider server");
     let addr = listener.local_addr().expect("fake provider addr");
@@ -1831,31 +1850,12 @@ fn custom_compatible_provider_preserves_at_sign_model_ids() {
 }
 
 #[test]
-fn named_profile_set_model_strips_own_session_routing_prefix() {
+fn named_catalog_profile_set_model_strips_own_session_routing_prefix() {
     // Session restore persists `<profile>:<model>`; the standalone provider
-    // must normalize its own profile prefix back to the bare model id so the
-    // upstream API never sees `tokenrouter:MiniMax-M3` (issues #382/#383/#363).
+    // must normalize its own catalog profile prefix back to the bare model id so
+    // the upstream API never sees `kimi:kimi-for-coding`.
     let provider = OpenRouterProvider {
-        profile_id: Some("tokenrouter".to_string()),
-        supports_provider_features: false,
-        supports_model_catalog: false,
-        ..make_custom_compatible_provider()
-    };
-
-    provider.set_model("tokenrouter:MiniMax-M3").unwrap();
-    assert_eq!(provider.model(), "MiniMax-M3");
-
-    // Bare ids still work unchanged.
-    provider.set_model("MiniMax-M3").unwrap();
-    assert_eq!(provider.model(), "MiniMax-M3");
-}
-
-#[test]
-fn named_profile_set_model_strips_other_known_profile_prefix() {
-    // A session saved under one built-in OpenAI-compatible profile and
-    // reattached under another must still normalize to the bare model id.
-    let provider = OpenRouterProvider {
-        profile_id: Some("tokenrouter".to_string()),
+        profile_id: Some("kimi".to_string()),
         supports_provider_features: false,
         supports_model_catalog: false,
         ..make_custom_compatible_provider()
@@ -1863,6 +1863,39 @@ fn named_profile_set_model_strips_other_known_profile_prefix() {
 
     provider.set_model("kimi:kimi-for-coding").unwrap();
     assert_eq!(provider.model(), "kimi-for-coding");
+
+    // Bare ids still work unchanged.
+    provider.set_model("kimi-for-coding").unwrap();
+    assert_eq!(provider.model(), "kimi-for-coding");
+}
+
+#[test]
+fn named_profile_set_model_keeps_other_known_profile_prefix() {
+    // A provider instance must only strip its own profile prefix. Another
+    // OpenAI-compatible profile's prefix is a switch-away route and must be
+    // preserved for the multi-provider/session restore path.
+    let provider = OpenRouterProvider {
+        profile_id: Some("deepseek".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        ..make_custom_compatible_provider()
+    };
+
+    provider.set_model("kimi:kimi-for-coding").unwrap();
+    assert_eq!(provider.model(), "kimi:kimi-for-coding");
+}
+
+#[test]
+fn openrouter_provider_without_profile_id_keeps_named_profile_prefix() {
+    let provider = OpenRouterProvider {
+        profile_id: None,
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        ..make_custom_compatible_provider()
+    };
+
+    provider.set_model("kimi:kimi-for-coding").unwrap();
+    assert_eq!(provider.model(), "kimi:kimi-for-coding");
 }
 
 #[test]
@@ -1884,6 +1917,19 @@ fn named_profile_set_model_keeps_builtin_routing_prefixes() {
         provider.set_model(spec).unwrap();
         assert_eq!(provider.model(), spec, "spec {spec} must be preserved");
     }
+}
+
+#[test]
+fn builtin_prefix_is_kept_when_it_collides_with_runtime_profile_id() {
+    let provider = OpenRouterProvider {
+        profile_id: Some("openai".to_string()),
+        supports_provider_features: false,
+        supports_model_catalog: false,
+        ..make_custom_compatible_provider()
+    };
+
+    provider.set_model("openai:gpt-5.5").unwrap();
+    assert_eq!(provider.model(), "openai:gpt-5.5");
 }
 
 #[test]
@@ -2686,16 +2732,13 @@ fn named_profile_construction_reads_openai_reasoning_effort_config() {
         .expect("explicitly-enabled profile accepts effort");
 }
 
-/// Regression: when the shared interactive server boots an `OpenRouterProvider`
-/// without binding `profile_id` (the deferred-auth bootstrap path used by the
-/// TUI server), a session-routing `<name>:` prefix for a *user-defined* named
-/// provider profile (`[providers.<name>]` in config.toml) must still be
-/// stripped before the model id reaches the upstream API. Without this, a
-/// resumed/new TUI session sends e.g. `cline:cline-pass/qwen3.7-max` verbatim
-/// and the gateway rejects it with 404 model_not_found, even though headless
-/// `jcode run` (which binds profile_id in-process) works fine.
+/// Regression: a session-routing `<name>:` prefix for this runtime's own
+/// user-defined named provider profile (`[providers.<name>]` in config.toml)
+/// must be stripped before the model id reaches the upstream API. The
+/// provider-instance guard must still retain the prefix when this runtime is not
+/// bound to that profile.
 #[test]
-fn user_named_profile_prefix_is_stripped_even_without_profile_id() {
+fn user_named_profile_prefix_is_stripped_for_own_profile_wire_model() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp home");
     let jcode_home = temp.path().join("jcode-home");
@@ -2708,23 +2751,25 @@ fn user_named_profile_prefix_is_stripped_even_without_profile_id() {
     std::fs::create_dir_all(&jcode_home).expect("create test config dir");
     std::fs::write(
         jcode_home.join("config.toml"),
-        r#"
+        format!(
+            r#"
 [provider]
 default_provider = "cline"
 
 [providers.cline]
 type = "openai-compatible"
-base_url = "https://api.cline.bot/api/v1"
+base_url = "{api_base}"
 api_key_env = "TEST_CLINE_KEY"
 default_model = "cline-pass/qwen3.7-max"
 model_catalog = false
 "#,
+        ),
     )
     .expect("write test config");
     jcode_base::config::invalidate_config_cache();
 
-    // Simulate the shared-server provider slot: a generic OpenAI-compatible
-    // provider with NO profile_id bound (deferred-auth bootstrap path).
+    // Simulate the deferred-auth provider slot: no profile_id is bound, so the
+    // runtime must identify its own named profile by resolved API base.
     let provider = OpenRouterProvider {
         api_base,
         profile_id: None,

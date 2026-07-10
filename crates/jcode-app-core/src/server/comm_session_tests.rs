@@ -1,9 +1,10 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use super::{
-    CoordinatorSpawnIdentity, ensure_spawn_coordinator_swarm, prepare_visible_spawn_session,
-    register_visible_spawned_member, resolve_coordinator_spawn_identity, resolve_spawn_working_dir,
-    resolve_stop_target_session, resolve_swarm_spawn_selection, swarm_stop_allowed_by_owner,
+    CoordinatorSpawnIdentity, ensure_spawn_coordinator_swarm, explicit_route_for_configured_model,
+    prepare_visible_spawn_session, provider_key_for_spawn_model, register_visible_spawned_member,
+    resolve_coordinator_spawn_identity, resolve_spawn_working_dir, resolve_stop_target_session,
+    resolve_swarm_spawn_selection, swarm_stop_allowed_by_owner,
 };
 use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
@@ -77,6 +78,44 @@ fn member(
         },
         event_rx,
     )
+}
+
+#[test]
+fn spawn_provider_key_uses_resolver_for_explicit_catalog_and_native_models() {
+    assert_eq!(
+        provider_key_for_spawn_model(Some("openai-api:gpt-5.5"), None).as_deref(),
+        Some("openai")
+    );
+    assert_eq!(
+        provider_key_for_spawn_model(Some("anthropic-api:claude-sonnet-4-6"), None).as_deref(),
+        Some("anthropic-api")
+    );
+    assert_eq!(
+        provider_key_for_spawn_model(Some("composer-2-fast"), None).as_deref(),
+        Some("cursor")
+    );
+    assert_eq!(
+        provider_key_for_spawn_model(Some("unknown:gpt-5.5"), None).as_deref(),
+        None
+    );
+    assert_eq!(
+        provider_key_for_spawn_model(Some("openai-api:gpt-5.5"), Some("override")).as_deref(),
+        Some("override")
+    );
+}
+
+#[test]
+fn configured_explicit_route_uses_single_resolver_result() {
+    let selection =
+        explicit_route_for_configured_model("openai-api:gpt-5.5").expect("explicit route");
+    assert_eq!(selection.model.as_deref(), Some("gpt-5.5"));
+    assert_eq!(selection.provider_key.as_deref(), Some("openai-api-key"));
+    assert_eq!(
+        selection.route_api_method.as_deref(),
+        Some("openai-api-key")
+    );
+
+    assert!(explicit_route_for_configured_model("anthropic-api:claude-sonnet-4-6").is_none());
 }
 
 fn plan_item(id: &str, status: &str, priority: &str, assigned_to: Option<&str>) -> PlanItem {
