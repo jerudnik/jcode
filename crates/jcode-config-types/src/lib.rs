@@ -522,8 +522,18 @@ pub struct AgentsConfig {
     /// Env: `JCODE_MEMORY_EMBEDDING_BASE_URL`.
     #[serde(default)]
     pub memory_embedding_base_url: Option<String>,
-    /// Optional override for the remote embedding dimensionality (vector-space
-    /// metadata / sanity checks). Unset = inferred from the model name.
+    /// Explicit embedding dimensionality for `memory_embedding_backend =
+    /// "openai"`. For supported OpenAI v3 models (`text-embedding-3-small`,
+    /// `-3-large`) an explicit value is sent as a server-side `dimensions`
+    /// truncation request. For all other models (ada-002, custom/gateway
+    /// models) it is NOT a truncation request, only a vector-identity/sanity
+    /// declaration. The value forms part of the persisted vector identity, so
+    /// changing it makes prior embeddings dense-ineligible (still BM25-reachable).
+    /// REQUIRED for custom models whose dimension jcode cannot infer (e.g.
+    /// `bge-m3` -> 1024); without it the remote backend refuses and falls back
+    /// to local. Unset for a known OpenAI model = that model's native dimension.
+    /// The ada-002/v3 dimensions-capability distinction is taken from OpenAI's
+    /// public API docs, not live-verified.
     #[serde(default)]
     pub memory_embedding_dim: Option<usize>,
     /// Maximum seconds a direct (blocking) `subagent` tool call will wait for the
