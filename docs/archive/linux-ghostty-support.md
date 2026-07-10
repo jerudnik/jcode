@@ -1,5 +1,7 @@
 # Implementation Prompt: Linux Ghostty Terminal Spawn Support
 
+> Status: **Archived - implemented.** Linux/non-macOS Ghostty spawn support landed in `326336bf6` (`fix(terminal): support Linux Ghostty spawns`): detection, candidate inclusion, and the `build_spawn_command` arm with tests in `crates/jcode-terminal-launch/src/lib.rs`. Preserved as the historical implementation brief.
+
 We are in `/home/john/infrastructure/jcode` in a self-dev context. Please add native Linux Ghostty support to Jcode's terminal auto-spawn logic, with tests and documentation.
 
 ## Goal / intent
