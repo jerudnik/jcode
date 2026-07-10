@@ -219,3 +219,30 @@ pre-existing at baseline. Batch complete: WI-0 through WI-5 landed
 (`dcb213dbd`, `c0ff07874`, `c957ae14b`, `e5f0b0469`, `9780f352b`,
 `68ee7ba5e`, `47608034d`, `c5dbe8a14`) plus the app-core resolver guard
 follow-up.
+
+## 2026-07-10 — WI-4 follow-up: complete runtime parser fallback observability
+
+- Commit: pending in this working tree.
+- Completed the final-design gap left by `47608034d`: OpenAI, Anthropic, OpenRouter, Copilot, `tools.profile`, ACP profile, and `display.performance` configured string parsers now distinguish recognized aliases from fallback paths and emit WARN-ONCE keyed by setting + raw value + selected fallback when a configured raw value is unrecognized.
+- Preserved existing parser-owned vocabularies and fallbacks, including OpenRouter's context-dependent DeepSeek `max` and unified `max -> xhigh` behavior. Direct setters that return `Err` remain errors.
+- Added a small dependency-safe keyed warn-once seam in `jcode-base::config` without introducing a centralized alias/canonicalization table. Runtime parsers remain authoritative.
+- Added focused parser coverage for recognized aliases without warnings by construction, invalid values returning the existing fallback, and keyed once-only fallback warning behavior.
+- Validation, run in one `nix develop --command bash -lc ...` shell to avoid hook/rerere races:
+  - `cargo fmt --all` -> exit 0.
+  - `cargo test -p jcode-config-types` -> exit 0; 16 passed, 0 failed; doc tests 0 failed.
+  - `cargo test -p jcode-base --lib config_tests` -> exit 0.
+  - `cargo test -p jcode-provider-openai-runtime wi4_openai_config_parsers_preserve_aliases_and_fallbacks` -> exit 0; 1 passed, 0 failed.
+  - `cargo test -p jcode-provider-anthropic-runtime wi4_anthropic_configured_reasoning_preserves_aliases_and_fallback` -> exit 0; 1 passed, 0 failed.
+  - `cargo test -p jcode-provider-copilot-runtime wi4_copilot_premium_preserves_values_and_fallback` -> exit 0; 1 passed, 0 failed.
+  - `cargo test -p jcode-provider-openrouter-runtime wi4_openrouter_reasoning_preserves_contextual_aliases_and_fallbacks` -> exit 0; 1 passed, 0 failed.
+  - `cargo test -p jcode-app-core --lib wi4_display_performance_preserves_aliases_and_fallback` -> exit 0; 1 passed, 0 failed.
+  - `cargo check -p jcode-base -p jcode-provider-openai-runtime -p jcode-provider-anthropic-runtime -p jcode-provider-copilot-runtime -p jcode-provider-openrouter-runtime -p jcode-app-core` -> exit 0.
+  - `git diff --check` -> exit 0.
+  - After removing the new OpenAI unused-binding warning: `nix develop --command bash -lc 'cargo check -p jcode-provider-openai-runtime && git diff --check'` -> exit 0.
+- Only pre-existing dead-code/test warnings remained after the cleanup check.
+- Exact next stage final stop suite for WI-5:
+  - `nix develop --command cargo test -p jcode-base --lib embedding_backend`
+  - `nix develop --command cargo test -p jcode-base --lib memory`
+  - `nix develop --command cargo check -p jcode-base`
+  - `nix develop --command cargo fmt --all`
+  - `git diff --check`

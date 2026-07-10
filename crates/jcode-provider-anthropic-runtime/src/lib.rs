@@ -563,10 +563,12 @@ impl AnthropicProvider {
                 Some(value)
             }
             other => {
-                jcode_base::logging::info(&format!(
-                    "Warning: Unsupported Anthropic reasoning effort '{}'; expected none|low|medium|high|xhigh|max alias. Using the model maximum.",
-                    other
-                ));
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.anthropic_reasoning_effort",
+                    other,
+                    "max",
+                    "none|low|medium|high|xhigh|max|swarm|swarm-deep",
+                );
                 Some("max".to_string())
             }
         }
