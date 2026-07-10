@@ -273,7 +273,20 @@ fn explicit_route_for_configured_model(model: &str) -> Option<SwarmSpawnSelectio
     // explicit credential decision worth pinning. The canonical parser maps the
     // prefix to its stable route id, which `ModelRouteApiMethod::parse` round-
     // trips back to the exact auth method when the spawned session is restored.
+    // `ResolvedModelSpec::explicit_prefix` also carries catalog and named-profile
+    // prefixes. Only the exact native model-prefix vocabulary may pin a
+    // dual-auth route here; broader AuthRoute aliases such as `anthropic-api`
+    // are catalog profile ids and must stay on the profile restore path.
+    if !matches!(
+        prefix,
+        "openai-api" | "openai-oauth" | "claude-api" | "claude-oauth"
+    ) {
+        return None;
+    }
     let route = jcode_provider_core::AuthRoute::parse_explicit_credential_prefix(prefix)?;
+    if resolved.provider_key.as_deref() != Some(route.active_provider().key()) {
+        return None;
+    }
     let route_id = route.route_api_method();
     Some(SwarmSpawnSelection {
         model: Some(bare.to_string()),
