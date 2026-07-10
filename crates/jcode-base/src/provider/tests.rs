@@ -813,6 +813,10 @@ impl StubExternalRuntime {
         )
     }
 
+    fn gemini() -> Self {
+        Self::new("gemini", "Gemini", "https", gemini::AVAILABLE_MODELS)
+    }
+
     fn anthropic() -> Self {
         Self::new(
             "anthropic",
@@ -924,6 +928,79 @@ fn test_antigravity_runtime() -> Arc<dyn Provider> {
 
 fn test_copilot_runtime() -> Arc<dyn Provider> {
     Arc::new(StubExternalRuntime::copilot())
+}
+
+fn test_multi_provider_with_isolated_slot(
+    active: ActiveProvider,
+    runtime: Arc<StubExternalRuntime>,
+) -> MultiProvider {
+    let runtime: Arc<dyn Provider> = runtime;
+    MultiProvider {
+        claude: RwLock::new(None),
+        anthropic: RwLock::new(None),
+        openai: RwLock::new(None),
+        copilot_api: RwLock::new(
+            matches!(active, ActiveProvider::Copilot).then(|| Arc::clone(&runtime)),
+        ),
+        antigravity: RwLock::new(
+            matches!(active, ActiveProvider::Antigravity).then(|| Arc::clone(&runtime)),
+        ),
+        gemini: RwLock::new(matches!(active, ActiveProvider::Gemini).then(|| Arc::clone(&runtime))),
+        cursor: RwLock::new(None),
+        bedrock: RwLock::new(None),
+        openrouter: RwLock::new(None),
+        openai_compatible_profiles: RwLock::new(std::collections::HashMap::new()),
+        active_openai_compatible_profile: RwLock::new(None),
+        active: RwLock::new(active),
+        use_claude_cli: false,
+        startup_notices: RwLock::new(Vec::new()),
+        forced_provider: None,
+        routes_memo: std::sync::Mutex::new(None),
+    }
+}
+
+#[test]
+fn fork_isolates_external_runtime_model_state() {
+    with_clean_provider_test_env(|| {
+        let rt = enter_test_runtime();
+        let _runtime_guard = rt.enter();
+        let cases = [
+            (
+                ActiveProvider::Copilot,
+                Arc::new(StubExternalRuntime::copilot()),
+            ),
+            (
+                ActiveProvider::Antigravity,
+                Arc::new(StubExternalRuntime::antigravity()),
+            ),
+            (
+                ActiveProvider::Gemini,
+                Arc::new(StubExternalRuntime::gemini()),
+            ),
+        ];
+
+        for (active, live) in cases {
+            let original_model = live.model();
+            let alternate_model = live
+                .available_models()
+                .into_iter()
+                .find(|model| *model != original_model)
+                .expect("external runtime test catalog must contain an alternate model");
+            let provider = test_multi_provider_with_isolated_slot(active, Arc::clone(&live));
+
+            let fork = provider.fork();
+            let routed_model = format!("{}:{alternate_model}", MultiProvider::provider_key(active));
+            fork.set_model(&routed_model)
+                .expect("fork should accept an alternate model");
+
+            assert_eq!(fork.model(), alternate_model);
+            assert_eq!(
+                live.model(),
+                original_model,
+                "forking {active:?} must not mutate the live provider"
+            );
+        }
+    });
 }
 
 fn test_anthropic_runtime() -> Arc<StubExternalRuntime> {

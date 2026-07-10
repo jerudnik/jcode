@@ -2555,21 +2555,30 @@ impl Provider for MultiProvider {
         } else {
             None
         };
-        let copilot_api = self
-            .copilot_api
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let antigravity_provider = self
-            .antigravity
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        let gemini_provider = self
-            .gemini
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
+        let copilot_api = {
+            let live = self
+                .copilot_api
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            live.map(|provider| provider.fork())
+        };
+        let antigravity_provider = {
+            let live = self
+                .antigravity
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            live.map(|provider| provider.fork())
+        };
+        let gemini_provider = {
+            let live = self
+                .gemini
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            live.map(|provider| provider.fork())
+        };
         let cursor_provider = if self
             .cursor
             .read()
