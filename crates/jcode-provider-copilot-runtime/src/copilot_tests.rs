@@ -660,3 +660,32 @@ fn build_messages_sanitizes_missing_tool_output_ids() {
     assert_eq!(built[1]["tool_calls"][0]["id"], "call_with_dots_orphan");
     assert_eq!(built[2]["tool_call_id"], "call_with_dots_orphan");
 }
+
+#[test]
+fn wi4_copilot_premium_preserves_values_and_fallback() {
+    let previous = std::env::var_os("JCODE_COPILOT_PREMIUM");
+
+    jcode_base::env::set_var("JCODE_COPILOT_PREMIUM", "0");
+    assert_eq!(
+        CopilotApiProvider::env_premium_mode(),
+        PremiumMode::Zero as u8
+    );
+
+    jcode_base::env::set_var("JCODE_COPILOT_PREMIUM", "1");
+    assert_eq!(
+        CopilotApiProvider::env_premium_mode(),
+        PremiumMode::OnePerSession as u8
+    );
+
+    jcode_base::env::set_var("JCODE_COPILOT_PREMIUM", "bogus-wi4-copilot");
+    assert_eq!(
+        CopilotApiProvider::env_premium_mode(),
+        PremiumMode::Normal as u8
+    );
+
+    if let Some(previous) = previous {
+        jcode_base::env::set_var("JCODE_COPILOT_PREMIUM", previous);
+    } else {
+        jcode_base::env::remove_var("JCODE_COPILOT_PREMIUM");
+    }
+}

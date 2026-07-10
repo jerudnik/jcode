@@ -1095,10 +1095,12 @@ impl OpenRouterProvider {
             // Match the existing OpenAI UX: accept unknown non-empty effort values
             // by snapping to the strongest setting instead of rejecting the command.
             other => {
-                jcode_base::logging::info(&format!(
-                    "Warning: Unsupported DeepSeek reasoning effort '{}'; expected none|low|medium|high|max. Using 'max'.",
-                    other
-                ));
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openrouter.deepseek_reasoning_effort",
+                    other,
+                    "max",
+                    "none|low|medium|high|max|swarm|swarm-deep",
+                );
                 Some("max".to_string())
             }
         }
@@ -1113,10 +1115,12 @@ impl OpenRouterProvider {
             "none" | "low" | "medium" | "high" | "xhigh" | "swarm" | "swarm-deep" => Some(value),
             "max" => Some("xhigh".to_string()),
             other => {
-                jcode_base::logging::info(&format!(
-                    "Warning: Unsupported OpenRouter reasoning effort '{}'; expected none|low|medium|high|xhigh|max alias. Using 'xhigh'.",
-                    other
-                ));
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openrouter.reasoning_effort",
+                    other,
+                    "xhigh",
+                    "none|low|medium|high|xhigh|max|swarm|swarm-deep",
+                );
                 Some("xhigh".to_string())
             }
         }

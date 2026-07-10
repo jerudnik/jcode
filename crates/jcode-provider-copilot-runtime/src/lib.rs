@@ -40,14 +40,12 @@ enum CatalogSource {
 /// vocabulary (`0`/`1`, plus the config-side `zero`/`one` mapping) is unchanged;
 /// this only makes the silent fallback observable.
 fn warn_once_unrecognized_copilot_premium(value: &str) {
-    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-        return;
-    }
-    jcode_base::logging::warn(&format!(
-        "Unrecognized JCODE_COPILOT_PREMIUM '{}'; expected 0 or 1. Using normal mode.",
-        value
-    ));
+    jcode_base::config::warn_once_configured_string_fallback(
+        "JCODE_COPILOT_PREMIUM",
+        value,
+        "normal",
+        "0|1",
+    );
 }
 
 /// Copilot API provider - uses GitHub Copilot's OpenAI-compatible API.

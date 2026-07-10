@@ -2822,3 +2822,23 @@ model_catalog = false
 
     jcode_base::config::invalidate_config_cache();
 }
+
+#[test]
+fn wi4_openrouter_reasoning_preserves_contextual_aliases_and_fallbacks() {
+    assert_eq!(
+        OpenRouterProvider::normalize_reasoning_effort("max").as_deref(),
+        Some("max")
+    );
+    assert_eq!(
+        OpenRouterProvider::normalize_reasoning_effort("bogus-wi4-deepseek").as_deref(),
+        Some("max")
+    );
+    assert_eq!(
+        OpenRouterProvider::normalize_unified_reasoning_effort("max").as_deref(),
+        Some("xhigh")
+    );
+    assert_eq!(
+        OpenRouterProvider::normalize_unified_reasoning_effort("bogus-wi4-unified").as_deref(),
+        Some("xhigh")
+    );
+}
