@@ -727,6 +727,15 @@ impl WarnOnce {
     pub(crate) fn should_fire(&self) -> bool {
         !self.fired.swap(true, std::sync::atomic::Ordering::Relaxed)
     }
+
+    /// Reset the guard so `should_fire` can fire again. Test-only: process-once
+    /// guards are otherwise permanent, so a once-only unit test needs to clear
+    /// prior state (e.g. from another test in the same binary).
+    #[cfg(test)]
+    pub(crate) fn reset(&self) {
+        self.fired
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 /// Warn exactly once, process-wide, when `tools.profile` holds an unrecognized
