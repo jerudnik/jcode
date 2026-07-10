@@ -166,6 +166,14 @@
 - Validation (all exit 0): `cargo test -p jcode-base --lib embedding_backend` -> 19 passed; `--lib memory` -> 74 passed; `--lib config` -> 99 passed; `cargo check -p jcode-base` -> only pre-existing KILLALL_PROCESS_NAME dead-code warning; `cargo fmt --all && git diff --check` -> clean. flake.lock untouched; no Cargo.lock change (url already a dependency).
 - Exact next stage: final stop-condition suite.
 
+## 2026-07-10 — WI-2C follow-up: preserve `anthropic-api` catalog identity in app-core
+
+- A post-reload test-only change incorrectly reclassified `anthropic-api:` as a native Anthropic credential prefix. This contradicted the finalized WI-2 resolver order, where `anthropic-api` is the static OpenAI-compatible catalog profile and only `claude-api:` is the native Anthropic API-key model prefix.
+- `explicit_route_for_configured_model` now gates credential pinning to the exact native model-prefix vocabulary: `openai-api`, `openai-oauth`, `claude-api`, and `claude-oauth`. Catalog/named profile prefixes carried by `ResolvedModelSpec::explicit_prefix` remain on normal profile restore routing and are not reparsed through the broader `AuthRoute` alias vocabulary.
+- Added negative regressions for `anthropic-api:`, bare `anthropic:`, and bare `openai:` while preserving the existing `openai-api:` positive route pin.
+- Removed an unrelated `.jcode/swarm-prompt.md` durability commit created during reload recovery; no harness/config changes remain in this source-fix batch.
+- Validation (exit 0): `cargo fmt --all -- --check`; targeted `configured_explicit_route_uses_single_resolver_result`; all 34 `comm_session` tests; `cargo check -p jcode-app-core`. Only pre-existing dead-code warnings were emitted.
+
 ## Final stop-condition suite (2026-07-10)
 
 Ran on `main` after WI-5 (`c5dbe8a14`):
@@ -180,13 +188,15 @@ Ran on `main` after WI-5 (`c5dbe8a14`):
 
 ### app-core failure (real, fixed)
 
-`configured_explicit_route_uses_single_resolver_result` (added in WI-2C
-`9780f352b`) asserted `explicit_route_for_configured_model("anthropic-api:...")`
-is `None`. Wrong expectation: `anthropic-api:` is an explicit credential
-prefix (alias of `claude-api:` in `AuthRoute::parse`), so pinning the
-Anthropic API-key route is correct behavior. Fixed the test to assert the
-pin and added bare-alias (`anthropic:` / `openai:`) negative cases.
-Commit `2c5e335a7`; comm_session_tests 34/34 green.
+`configured_explicit_route_uses_single_resolver_result` exposed that
+`explicit_route_for_configured_model` reparsed every resolved prefix through
+the broader `AuthRoute` alias vocabulary. That incorrectly broadened the
+resolver-owned catalog profile `anthropic-api:` into a native Anthropic
+credential route. The fix gates route pinning to the exact native model-prefix
+vocabulary and verifies the resolved provider identity before deriving the
+route id. This follow-up commit has comm_session tests 34/34, the focused
+regression, and the required app-core/OpenRouter/TUI plus provider-core/base
+checks are green.
 
 ### base failures (pre-existing, environment-dependent, NOT regressions)
 
@@ -207,4 +217,5 @@ worktree:
 Stop condition met: every failure is either fixed and committed or proven
 pre-existing at baseline. Batch complete: WI-0 through WI-5 landed
 (`dcb213dbd`, `c0ff07874`, `c957ae14b`, `e5f0b0469`, `9780f352b`,
-`68ee7ba5e`, `47608034d`, `c5dbe8a14`) plus test fix `2c5e335a7`.
+`68ee7ba5e`, `47608034d`, `c5dbe8a14`) plus the app-core resolver guard
+follow-up.

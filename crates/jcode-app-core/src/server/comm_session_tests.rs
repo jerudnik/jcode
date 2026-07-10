@@ -116,6 +116,8 @@ fn configured_explicit_route_uses_single_resolver_result() {
     );
 
     assert!(explicit_route_for_configured_model("anthropic-api:claude-sonnet-4-6").is_none());
+    assert!(explicit_route_for_configured_model("anthropic:claude-sonnet-4-6").is_none());
+    assert!(explicit_route_for_configured_model("openai:gpt-5.5").is_none());
 }
 
 fn plan_item(id: &str, status: &str, priority: &str, assigned_to: Option<&str>) -> PlanItem {
