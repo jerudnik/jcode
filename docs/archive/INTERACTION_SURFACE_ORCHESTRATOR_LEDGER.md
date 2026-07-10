@@ -1,6 +1,8 @@
 # Interaction Surface Orchestrator Ledger and Launch Prompt
 
-Status: next-session orchestration scaffold, 2026-06-30
+Status: **Archived - superseded.** The work surfaces this run scaffolds largely landed: browser + server surface workspace stores, command palette/verb log, and the rendered smoke harness under `web/jcode-mobile/` and `crates/jcode-base/src/surface_workspace.rs`. Durable design lives in `INTERACTION_SURFACES.md`, `INTERACTION_SURFACE_REQUIREMENTS.md`, and `SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`. Residual WS7 (Kanidm OIDC) is deferred; access policy in `INTERACTION_SURFACE_SECURE_ACCESS.md`.
+
+Original status: next-session orchestration scaffold, 2026-06-30
 
 This document governs the next full interaction-surface implementation session. The next agent should act as an orchestrator over swarms of subagents and must not stop until the strict definition of done is met.
 
