@@ -1,6 +1,6 @@
 use super::{ALL_OPENAI_MODELS, openrouter};
 use crate::auth;
-use crate::provider::models::provider_for_model;
+use crate::provider::models::resolve_current_model_spec;
 use jcode_provider_core::pricing as core_pricing;
 use jcode_provider_core::{RouteCheapnessEstimate, RouteCostConfidence, RouteCostSource};
 use std::sync::Mutex;
@@ -280,7 +280,7 @@ pub(crate) fn cheapness_for_route(
         "openrouter" => {
             let model_id = if model.contains('/') {
                 model.to_string()
-            } else if provider_for_model(model) == Some("claude") {
+            } else if resolve_current_model_spec(model).provider_key.as_deref() == Some("claude") {
                 format!("anthropic/{}", model)
             } else if ALL_OPENAI_MODELS.contains(&model) {
                 format!("openai/{}", model)

@@ -16,9 +16,9 @@ pub use catalog::{
 };
 use catalog_service::{ModelCatalogService, RuntimeModelUnavailability};
 use jcode_provider_core::{
-    ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, ModelCapabilities, ModelRoute,
+    ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, ActiveProvider, ModelCapabilities, ModelRoute,
     builtin_provider_for_model_with_hint, context_limit_for_model_with_provider_and_cache,
-    provider_key_from_hint, shared_http_client,
+    explicit_model_provider_prefix, provider_key_from_hint, shared_http_client,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,117 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const OPENAI_MODEL_CATALOG_CACHE_FILE: &str = "openai_model_catalog_cache.json";
 const ANTHROPIC_MODEL_CATALOG_CACHE_FILE: &str = "anthropic_model_catalog_cache.json";
+
+/// Runtime interpretation of a configured model specification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedModelSpec {
+    /// Provider/profile key selected by the specification, if one is known.
+    pub provider_key: Option<String>,
+    /// Model value after removing a recognized `prefix:`. OpenRouter
+    /// `model@provider` pins remain intact because they are part of the wire id.
+    pub bare_model: String,
+    /// Exact recognized `prefix` spelling, without the trailing colon.
+    pub explicit_prefix: Option<String>,
+}
+
+fn base_builtin_provider_for_model(model: &str) -> Option<ActiveProvider> {
+    if crate::provider::bedrock::BedrockProvider::is_bedrock_model_id(model) {
+        Some(ActiveProvider::Bedrock)
+    } else if jcode_provider_core::model_id::matches_known_model(model, ALL_CLAUDE_MODELS)
+        || jcode_provider_core::model_id::matches_known_model(model, ALL_OPENAI_MODELS)
+        || model.starts_with("gemini-")
+    {
+        builtin_provider_for_model_with_hint(model, None)
+    } else if crate::provider::antigravity::is_known_model(model) {
+        Some(ActiveProvider::Antigravity)
+    } else if let Some(provider) = builtin_provider_for_model_with_hint(model, None) {
+        Some(provider)
+    } else if cursor::is_known_model(model) {
+        Some(ActiveProvider::Cursor)
+    } else {
+        None
+    }
+}
+
+/// Resolve a model specification using the one base-layer precedence order.
+///
+/// Exact native prefixes are reserved before catalog and user profile names.
+/// Unknown `prefix:model` strings remain unclassified and retain their full
+/// value as `bare_model`.
+pub fn resolve_model_spec(model: &str, cfg: &crate::config::Config) -> ResolvedModelSpec {
+    let model = model.trim();
+
+    if let Some((provider, prefix, bare_model)) = explicit_model_provider_prefix(model) {
+        let bare_model = bare_model.trim();
+        if !bare_model.is_empty() {
+            let prefix = prefix.trim_end_matches(':');
+            return ResolvedModelSpec {
+                provider_key: Some(provider.key().to_string()),
+                bare_model: bare_model.to_string(),
+                explicit_prefix: Some(prefix.to_string()),
+            };
+        }
+    }
+
+    if let Some((prefix, bare_model)) = model.split_once(':') {
+        let prefix = prefix.trim();
+        let bare_model = bare_model.trim();
+        if !prefix.is_empty() && !bare_model.is_empty() {
+            if let Some(profile) = crate::provider_catalog::openai_compatible_profile_by_id(prefix)
+            {
+                return ResolvedModelSpec {
+                    provider_key: Some(profile.id.to_string()),
+                    bare_model: bare_model.to_string(),
+                    explicit_prefix: Some(prefix.to_string()),
+                };
+            }
+
+            if cfg.providers.contains_key(prefix) {
+                return ResolvedModelSpec {
+                    provider_key: Some(prefix.to_string()),
+                    bare_model: bare_model.to_string(),
+                    explicit_prefix: Some(prefix.to_string()),
+                };
+            }
+        }
+    }
+
+    if let Some((prefix, bare_model)) = model.split_once(':')
+        && !prefix.trim().is_empty()
+        && !bare_model.trim().is_empty()
+        && !prefix.contains('/')
+    {
+        return ResolvedModelSpec {
+            provider_key: crate::provider::bedrock::BedrockProvider::is_bedrock_model_id(model)
+                .then(|| ActiveProvider::Bedrock.key().to_string()),
+            bare_model: model.to_string(),
+            explicit_prefix: None,
+        };
+    }
+
+    if let Some((bare_model, provider)) = model.rsplit_once('@')
+        && !bare_model.trim().is_empty()
+        && !provider.trim().is_empty()
+    {
+        return ResolvedModelSpec {
+            provider_key: Some(ActiveProvider::OpenRouter.key().to_string()),
+            bare_model: model.to_string(),
+            explicit_prefix: None,
+        };
+    }
+
+    ResolvedModelSpec {
+        provider_key: base_builtin_provider_for_model(model)
+            .map(|provider| provider.key().to_string()),
+        bare_model: model.to_string(),
+        explicit_prefix: None,
+    }
+}
+
+/// Resolve against the current reloadable process configuration.
+pub fn resolve_current_model_spec(model: &str) -> ResolvedModelSpec {
+    resolve_model_spec(model, crate::config::config())
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct PersistedModelCatalogStore {
@@ -1054,8 +1165,27 @@ pub fn context_limit_for_model_with_provider(
 }
 
 pub fn resolve_model_capabilities(model: &str, provider_hint: Option<&str>) -> ModelCapabilities {
-    let provider = provider_for_model_with_hint(model, provider_hint).map(str::to_string);
-    let context_window = context_limit_for_model_with_provider(model, provider_hint);
+    let cfg = crate::config::config();
+    let resolved = resolve_model_spec(model, cfg);
+    let provider = provider_hint
+        .and_then(|hint| {
+            provider_key_from_hint(Some(hint))
+                .map(str::to_string)
+                .or_else(|| {
+                    let probe = format!("{}:__jcode_provider_probe__", hint.trim());
+                    let resolved_hint = resolve_model_spec(&probe, cfg);
+                    resolved_hint
+                        .explicit_prefix
+                        .is_some()
+                        .then_some(resolved_hint.provider_key)
+                        .flatten()
+                })
+        })
+        .or(resolved.provider_key);
+    let context_window = context_limit_for_model_with_provider(
+        &resolved.bare_model,
+        provider.as_deref().or(provider_hint),
+    );
     ModelCapabilities {
         provider,
         context_window,
@@ -1071,32 +1201,7 @@ pub fn provider_for_model_with_hint(
         return Some(provider);
     }
 
-    let model = model.trim();
-    if model.contains('@') {
-        Some("openrouter")
-    } else if jcode_provider_core::model_id::matches_known_model(model, ALL_CLAUDE_MODELS) {
-        Some("claude")
-    } else if jcode_provider_core::model_id::matches_known_model(model, ALL_OPENAI_MODELS) {
-        Some("openai")
-    } else if crate::provider::bedrock::BedrockProvider::is_bedrock_model_id(model) {
-        Some("bedrock")
-    } else if model.contains('/') {
-        Some("openrouter")
-    } else if model.starts_with("claude-") {
-        Some("claude")
-    } else if model.starts_with("gpt-") {
-        Some("openai")
-    } else if model.starts_with("gemini-") {
-        Some("gemini")
-    } else if let Some(provider) = builtin_provider_for_model_with_hint(model, None) {
-        Some(provider.key())
-    } else if crate::provider::antigravity::is_known_model(model) {
-        Some("antigravity")
-    } else if cursor::is_known_model(model) {
-        Some("cursor")
-    } else {
-        None
-    }
+    base_builtin_provider_for_model(model.trim()).map(ActiveProvider::key)
 }
 
 /// Detect which provider a model belongs to

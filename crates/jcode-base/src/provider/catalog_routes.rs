@@ -10,7 +10,8 @@ use super::{
     copilot, dedupe_model_routes, direct_openai_compatible_profile_routes,
     format_account_model_availability_detail, is_listable_model_name, known_anthropic_model_ids,
     known_openai_model_ids, model_availability_for_account, openrouter,
-    openrouter_catalog_model_id, provider_for_model, standard_openrouter_profile_configured,
+    openrouter_catalog_model_id, resolve_current_model_spec,
+    standard_openrouter_profile_configured,
 };
 
 /// Build the fast local route snapshot used by the TUI model picker while the
@@ -28,7 +29,9 @@ pub fn simplified_model_routes_for_picker(
     let mut routes = Vec::new();
 
     for model in display_models {
-        if !model.contains('/') && provider_for_model(&model) == Some("openai") {
+        if !model.contains('/')
+            && resolve_current_model_spec(&model).provider_key.as_deref() == Some("openai")
+        {
             if auth.openai_has_oauth {
                 routes.push(ModelRoute {
                     model: model.clone(),
@@ -82,7 +85,7 @@ pub fn simplified_model_routes_for_picker(
                     "simplified catalog".to_string(),
                 )
             } else {
-                match provider_for_model(&model) {
+                match resolve_current_model_spec(&model).provider_key.as_deref() {
                     Some("claude") => {
                         append_simplified_anthropic_model_routes(&mut routes, model, &auth);
                         continue;
@@ -868,7 +871,7 @@ pub fn remote_model_routes_fallback(
 
         let mut added_any = false;
 
-        if provider_for_model(model) == Some("claude") {
+        if resolve_current_model_spec(model).provider_key.as_deref() == Some("claude") {
             if auth.anthropic.has_oauth {
                 let (available, detail) = anthropic_oauth_route_availability(model);
                 routes.push(build_anthropic_oauth_route(model, available, detail));
@@ -917,7 +920,10 @@ pub fn remote_model_routes_fallback(
         }
 
         if auth.openrouter != AuthState::NotConfigured {
-            match (provider_for_model(model), openrouter_cached.as_ref()) {
+            match (
+                resolve_current_model_spec(model).provider_key.as_deref(),
+                openrouter_cached.as_ref(),
+            ) {
                 (_, Some((endpoints, _age))) => {
                     for ep in endpoints {
                         routes.push(build_openrouter_endpoint_route(model, ep, true, None));
@@ -1033,7 +1039,10 @@ pub fn remote_current_openai_compatible_route_for_model(
     remote_provider_name: Option<&str>,
     model: &str,
 ) -> Option<ModelRoute> {
-    if model.trim().is_empty() || model.contains('/') || provider_for_model(model).is_some() {
+    if model.trim().is_empty()
+        || model.contains('/')
+        || resolve_current_model_spec(model).provider_key.is_some()
+    {
         return None;
     }
 
@@ -1138,7 +1147,7 @@ pub fn remote_model_is_server_copilot_only(model: &str) -> bool {
         && !model.contains('/')
         && remote_openai_compatible_route_for_model(model).is_none()
         && !matches!(
-            provider_for_model(model),
+            resolve_current_model_spec(model).provider_key.as_deref(),
             Some("claude" | "openai" | "gemini" | "cursor")
         )
 }

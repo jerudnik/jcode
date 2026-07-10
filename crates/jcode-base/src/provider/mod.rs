@@ -290,8 +290,8 @@ pub fn set_model_with_auth_refresh(provider: &dyn Provider, model: &str) -> Resu
 use self::dispatch::CompletionMode;
 pub use self::models::{
     AccountModelAvailability, AccountModelAvailabilityState, AnthropicModelCatalog,
-    OpenAIModelCatalog, begin_anthropic_model_catalog_refresh, begin_openai_model_catalog_refresh,
-    cached_anthropic_model_ids, cached_openai_model_ids,
+    OpenAIModelCatalog, ResolvedModelSpec, begin_anthropic_model_catalog_refresh,
+    begin_openai_model_catalog_refresh, cached_anthropic_model_ids, cached_openai_model_ids,
     clear_all_model_unavailability_for_account, clear_all_provider_unavailability_for_account,
     clear_model_unavailable_for_account, clear_provider_unavailable_for_account,
     context_limit_for_model, context_limit_for_model_with_provider, fetch_anthropic_model_catalog,
@@ -307,8 +307,8 @@ pub use self::models::{
     populate_context_limits_from_config_value, provider_for_model, provider_for_model_with_hint,
     provider_unavailability_detail_for_account, record_model_unavailable_for_account,
     record_provider_unavailable_for_account, refresh_openai_model_catalog_in_background,
-    resolve_model_capabilities, should_refresh_anthropic_model_catalog,
-    should_refresh_openai_model_catalog,
+    resolve_current_model_spec, resolve_model_capabilities, resolve_model_spec,
+    should_refresh_anthropic_model_catalog, should_refresh_openai_model_catalog,
 };
 pub use self::selection::DefaultModelSelection;
 use self::selection::{ActiveProvider, ProviderAvailability};
@@ -823,43 +823,6 @@ impl MultiProvider {
             }
             other => Self::provider_key(other).to_string(),
         }
-    }
-
-    fn openai_compatible_model_prefix(
-        model: &str,
-    ) -> Option<(crate::provider_catalog::OpenAiCompatibleProfile, &str)> {
-        let (prefix, rest) = model.split_once(':')?;
-        if explicit_model_provider_prefix(model).is_some() {
-            return None;
-        }
-        let rest = rest.trim();
-        if rest.is_empty() {
-            return None;
-        }
-
-        let profile = crate::provider_catalog::openai_compatible_profile_by_id(prefix)?;
-        Some((profile, rest))
-    }
-
-    /// Parse a `<name>:<model>` spec whose prefix is a user-defined named
-    /// provider profile from config (`[providers.<name>]`). Built-in provider
-    /// prefixes and catalog profile ids take precedence and never reach here.
-    fn named_provider_profile_model_prefix(model: &str) -> Option<(String, String)> {
-        let (prefix, rest) = model.split_once(':')?;
-        if explicit_model_provider_prefix(model).is_some()
-            || Self::openai_compatible_model_prefix(model).is_some()
-        {
-            return None;
-        }
-        let prefix = prefix.trim();
-        let rest = rest.trim();
-        if prefix.is_empty() || rest.is_empty() {
-            return None;
-        }
-        crate::config::config()
-            .providers
-            .contains_key(prefix)
-            .then(|| (prefix.to_string(), rest.to_string()))
     }
 
     /// Bind (or reuse) the runtime for a named config provider profile and
@@ -1382,8 +1345,9 @@ impl MultiProvider {
         // through the canonical prefix-aware path. Handing the raw spec to a
         // single provider would make it reject the id and silently keep its
         // fallback default model.
-        if explicit_model_provider_prefix(model).is_some()
-            || Self::openai_compatible_model_prefix(model).is_some()
+        if resolve_model_spec(model, crate::config::config())
+            .explicit_prefix
+            .is_some()
         {
             return self.set_model(model);
         }
@@ -1749,22 +1713,8 @@ impl Provider for MultiProvider {
             anyhow::bail!("Model cannot be empty");
         }
 
-        if let Some((profile, target_model)) = Self::openai_compatible_model_prefix(requested_model)
-        {
-            self.ensure_provider_lock_allows_openai_compatible_profile(requested_model)?;
-            return self.set_model_on_openai_compatible_profile(profile, target_model);
-        }
-
-        // User-defined named provider profiles from config (`[providers.<name>]`).
-        // The model picker emits `<name>:<model>` specs for their routes
-        // (issue #444), so the switch must bind that profile's runtime instead
-        // of falling through to global model-name heuristics.
-        if let Some((profile_name, target_model)) =
-            Self::named_provider_profile_model_prefix(requested_model)
-        {
-            self.ensure_provider_lock_allows_openai_compatible_profile(requested_model)?;
-            return self.set_model_on_named_provider_profile(&profile_name, &target_model);
-        }
+        let cfg = crate::config::config();
+        let resolved = resolve_model_spec(requested_model, cfg);
 
         // Provider-prefixed model names are explicit routing directives. They
         // must never silently fall through to another provider when the target
@@ -1812,6 +1762,27 @@ impl Provider for MultiProvider {
             return self.set_model_on_provider(target, target_model);
         }
 
+        if let Some(profile) = resolved
+            .provider_key
+            .as_deref()
+            .and_then(crate::provider_catalog::openai_compatible_profile_by_id)
+            .filter(|_| resolved.explicit_prefix.is_some())
+        {
+            self.ensure_provider_lock_allows_openai_compatible_profile(requested_model)?;
+            return self.set_model_on_openai_compatible_profile(profile, &resolved.bare_model);
+        }
+
+        // User-defined named provider profiles from config (`[providers.<name>]`).
+        // The model picker emits `<name>:<model>` specs for their routes
+        // (issue #444), so the switch must bind that profile's runtime instead
+        // of falling through to global model-name heuristics.
+        if let Some(profile_name) = resolved.provider_key.as_deref().filter(|profile| {
+            resolved.explicit_prefix.is_some() && cfg.providers.contains_key(*profile)
+        }) {
+            self.ensure_provider_lock_allows_openai_compatible_profile(requested_model)?;
+            return self.set_model_on_named_provider_profile(profile_name, &resolved.bare_model);
+        }
+
         // A CLI --provider lock means the model string is provider-local. Do
         // not apply global Claude/OpenAI/OpenRouter heuristics here: custom
         // OpenAI-compatible endpoints often use model IDs that look like other
@@ -1828,7 +1799,8 @@ impl Provider for MultiProvider {
             requested_model
         };
 
-        if let Some((base_model, provider_pin)) = model.rsplit_once('@')
+        if resolved.provider_key.as_deref() == Some(ActiveProvider::OpenRouter.key())
+            && let Some((base_model, provider_pin)) = model.rsplit_once('@')
             && !provider_pin.trim().is_empty()
             && let Some(openrouter_model) = openrouter_catalog_model_id(base_model)
         {
@@ -1840,9 +1812,9 @@ impl Provider for MultiProvider {
 
         // Detect which provider this model belongs to when no explicit
         // --provider lock was requested.
-        let target_provider = provider_for_model(model);
+        let target_provider = resolve_model_spec(model, cfg).provider_key;
         if let Some(target_provider) = target_provider
-            && let Some(target) = provider_from_model_key(target_provider)
+            && let Some(target) = provider_from_model_key(&target_provider)
         {
             self.set_model_on_provider(target, model)
         } else {
