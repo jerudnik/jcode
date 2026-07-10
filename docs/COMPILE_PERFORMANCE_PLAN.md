@@ -18,6 +18,13 @@ See also:
 
 ## Current Baseline (2026-03-24)
 
+> Note (2026-07-10): the numbers, Linux/earlyoom notes, and `--touch src/...`
+> example commands in this document predate the crate-workspace migration and
+> are historical. Touched-file paths now live under `crates/*` (e.g.
+> `src/server.rs` -> `crates/jcode-app-core/src/server.rs`). Re-measure with
+> `scripts/bench_compile.sh` / `scripts/compile_time_probe.sh` against current
+> paths before treating any figure below as authoritative.
+
 Measured locally on the current tree:
 
 - Warm `cargo check --quiet`: **~8.5s**

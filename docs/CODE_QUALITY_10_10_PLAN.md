@@ -30,6 +30,12 @@ The main issues observed in the codebase today are:
 
 Several files are dramatically larger than they should be for long-term maintainability. Major hotspots currently include:
 
+> Note (2026-07-10): the `src/` paths below predate the crate-workspace
+> migration and are illustrative. These modules now live under `crates/*`
+> (e.g. `src/server.rs` -> `crates/jcode-app-core/src/server.rs`). The standards
+> in this charter still apply; see `docs/CODE_QUALITY_AUDIT_2026-04-18.md` for
+> the current file inventory.
+
 - `src/provider/openai.rs`
 - `src/provider/mod.rs`
 - `src/agent.rs`
