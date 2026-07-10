@@ -503,44 +503,63 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
      `serde_ignored::deserialize(toml::Deserializer::new(&content), ...)`.
    - Collect every ignored path, sort/deduplicate it, and issue one
      `logging::warn` per path in the form
-     `Unknown config key 'display.redraw_fpss' ignored`. Return normal TOML
-     errors unchanged. This is warning-only by design for version-skew
-     tolerance.
+     `Unknown config key 'display.redraw_fpss' ignored` **only after
+     `serde_ignored::deserialize` succeeds**. On malformed TOML, discard the
+     partial collection and return the original parse error unchanged, without
+     unknown-key warnings. This preserves the present error contract in
+     `config_file.rs::load_from_file_strict` (40-54) while making successful,
+     permissive parsing observable. The composition is sound because `Config`
+     is `Deserialize + Default` with `#[serde(default)]` (`config.rs:436-439`),
+     nested fields use defaults, and this config shape has no `serde(flatten)`
+     fields.
    - Invoke `config.validate()` after `display.apply_legacy_compat()` and, in
      both `Config::load` and `Config::load_strict`, invoke it again after
      `apply_env_overrides()`. The latter is required because env precedence can
      introduce an invalid value after file validation.
-3. **`crates/jcode-base/src/config.rs`**
+3. **`crates/jcode-base/src/config.rs` — a single canonicalization policy**
    - Add `pub(crate) fn Config::validate(&mut self)` plus small local
-     normalize-and-warn helpers. It must normalize invalid values to the
-     documented safe/unset value and log the field, bad value, accepted domain,
-     and applied fallback.
-   - Validate all audited domains at this single choke point:
-     - `agents.memory_embedding_backend`: accept and normalize only to the
-       exact lowercase literals `"local"` or `"openai"`; every invalid value
-       normalizes to exact lowercase `"local"`. These literals deliberately
-       match `default_memory_embedding_backend()` and WI-5's existing
-       `eq_ignore_ascii_case("openai")` selection check.
-     - `tools.profile`: `full|acp|minimal|lite|none`, fallback the empty/default
-       profile.
-     - `acp.profile`: `standard|extended|full`, fallback `standard`.
-     - `display.performance`: empty/`auto|full|reduced|minimal`, fallback empty
-       (`auto` behavior).
-     - optional OpenAI/Anthropic reasoning effort, transport, service tier, and
-       Copilot premium: invalid values become `None` (unset).
-     - `openai_native_compaction_mode`: `auto|explicit|off`, fallback `auto`.
-   - Normalization uses lowercase/trimmed values where the existing env path
-     already does, so file and env behavior converge.
-   - Keep the string fields in this item. Converting each into a serialized enum
-     is a larger compatibility migration and a strict/lenient enum either
-     rejects old config or silently hides a typo. `Config::validate()` is the
-     shared source of actual policy.
+     normalize-and-warn helpers. It must trim and ASCII-lowercase the values
+     below, emit field, raw value, accepted spellings, canonical result, and
+     fallback, and write the canonical string (or `None`) back to config.
+   - **This table is the sole policy table.** It is deliberately a transcription
+     of each current consumer parser, not a documentation-only whitelist. The
+     source-of-truth evidence is: tools' branch ordering in
+     `jcode-base/src/config.rs::ToolsConfig::base_allowed_tools` (627-675),
+     OpenAI transport (openai-runtime `OpenAITransportMode::from_config`,
+     129-145), reasoning (727-745), and service tier (792-806), Anthropic
+     reasoning (553-573) and service tier (667-679), and Copilot config-to-env
+     propagation (base `env_overrides.rs`, 715-727) followed by its runtime
+     reader (copilot-runtime `env_premium_mode`, 150-155). Centralization must
+     mirror, never broaden or narrow, these existing accepted spellings.
+
+     | Config field | All accepted input spellings | Canonical stored value | Invalid fallback | Evidence / preserved behavior |
+     |---|---|---|---|---|
+     | `agents.memory_embedding_backend` | `local`, `openai` | same lowercase | `local` | Default is exactly `local` (`jcode-config-types/src/lib.rs:555-557`); selector checks `openai` in `embedding_backend.rs:292-299`. |
+     | `tools.profile` | empty, `full`, `acp`, `minimal`, `lite`, `small`, `none`, `off`, `disabled` | empty/full -> empty (full/default set), `acp` -> `acp`, `small` -> `minimal`, `minimal`/`lite` unchanged, `none`/`off`/`disabled` -> `none` | empty | `none|off|disabled` produces `Some(empty set)` at `config.rs:635-637`, while the final else is `None` full/default at 673-675. Thus **off/disabled must never normalize to empty**. |
+     | `acp.profile` | `standard`, `extended`, `full` | same | `standard` | Existing configuration default/test contract is `standard` (`config_tests.rs::acp_config_defaults_to_standard_profile_and_acp_tools`, 331-337); this is a new validated config domain, not a runtime alias parser. |
+     | `display.performance` | empty, `auto`, `full`, `reduced`, `minimal` | empty/`auto` -> empty; others unchanged | empty | `app-core/src/perf.rs::PerformanceTier::detect` (309-337) consumes these display strings; empty is the auto/default branch. |
+     | `provider.openai_transport` | empty, `auto`, `websocket`, `ws`, `wss`, `https`, `http`, `sse` | empty/`auto` -> `auto`; `ws`/`wss` -> `websocket`; `http`/`sse` -> `https` | `auto` | Exact OpenAI runtime parser set at 129-145. |
+     | `provider.openai_reasoning_effort` | empty, `none`, `low`, `medium`, `high`, `xhigh`, `swarm`, `swarm-deep` | empty -> `None`; others unchanged | `xhigh` | Exact parser and current unsupported fallback at openai-runtime 727-745. |
+     | `provider.openai_service_tier` | empty, `fast`, `priority`, `flex`, `default`, `auto`, `none`, `off` | empty/`default`/`auto`/`none`/`off` -> `None`; `fast`/`priority` -> `priority`; `flex` unchanged | `None` | Exact parser at openai-runtime 792-806. |
+     | `provider.anthropic_reasoning_effort` | empty, `default`, `auto`, `off`, `disabled`, `none`, `low`, `medium`, `high`, `xhigh`, `max`, `swarm`, `swarm-deep` | empty/`default`/`auto` -> `None`; `off`/`disabled` -> `none`; remaining levels unchanged | `max` | Exact parser and fallback at anthropic-runtime 553-573. |
+     | `provider.anthropic_service_tier` | empty, `default`, `off`, `standard`, `standard_only`, `priority`, `auto` | empty/`default` -> `None`; `off`/`standard`/`standard_only` -> `standard_only`; `priority`/`auto` -> `auto` | `None` | Exact parser at anthropic-runtime 667-679. |
+     | `provider.copilot_premium` | `zero`, `0`, `one`, `1` | `zero`/`0` -> `0`; `one`/`1` -> `1` | `None` | Base mapping only exports `0|1` (env_overrides 715-727) and runtime recognizes only `0|1` (copilot-runtime 150-155). |
+     | `provider.openai_native_compaction_mode` | `auto`, `explicit`, `off` | same | `auto` | Default is `auto` in `ProviderConfig::default` (`jcode-config-types/src/lib.rs:1245-1266`); OpenAI construction consumes this configured field (`openai-runtime::new`, 543-632). |
+
+   - Retain downstream runtime parsers as **defensive consumers** for direct
+     environment/programmatic construction, but refactor them to delegate to
+     the shared canonical helper where crate layering permits. They must accept
+     the same table during transition and must not own a divergent second policy.
+     `Config::validate()` is authoritative for file/config-derived values.
+   - Keep these fields serialized as strings. A serialized enum migration is a
+     separate compatibility change and would either reject old files or hide
+     typos before this observable validation point.
 4. **`crates/jcode-base/src/config/env_overrides.rs`**
-   - Simplify its local domain tests where safe, but do not add a second policy
-     table. It may still parse primitive values; `validate()` is authoritative.
-   - Do not alter the `copilot_premium` config-to-env propagation until after
-     validation. Invalid file values must be cleared before they can write an
-     environment value.
+   - It may parse primitive values, but must not make its own domain decision.
+     Run `Config::validate()` immediately after all overrides **and before**
+     any config-to-env propagation. In particular `copilot_premium` may export
+     only the canonical `0`/`1`; invalid file/env values become `None` and are
+     never written to `JCODE_COPILOT_PREMIUM`.
 5. **`crates/jcode-config-types/src/lib.rs`**
    - Correct `DisplayConfig::redraw_fps` rustdoc from default 30 to default 60.
    - Update embedding backend documentation: unknown values are warned and
@@ -549,8 +568,15 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
 6. **`crates/jcode-base/src/config_tests.rs`**
    - Factor the parser/validator enough to test unknown TOML paths without
      requiring a user home. Add tests for a top-level and nested unknown key,
-     a known key producing no unknown paths, every invalid audited string field
-     normalized consistently from TOML and from env, and valid values retained.
+     a known key producing no unknown paths, and malformed TOML returning its
+     parse error with **no** unknown-key warnings.
+   - Table-test every accepted alias in the canonicalization table from TOML
+     and env, asserting its exact canonical output. In particular assert
+     `tools.profile=off|disabled -> none` remains an empty allow-list and
+     `small -> minimal`, not default/full tools; assert every OpenAI/Anthropic
+     transport/reasoning/service-tier alias and both Copilot spellings. Also
+     test each invalid fallback exactly as tabulated. These compatibility tests
+     are a merge prerequisite before the runtime parser logic is centralized.
    - Retain `config_env_fingerprint_tracks_every_apply_env_override_var`.
      Extend it to assert `CONFIG_ENV_KEYS` has no duplicates, and add
      a targeted reload-fingerprint test for `JCODE_MEMORY_EMBEDDING_API_KEY_ENV`.
