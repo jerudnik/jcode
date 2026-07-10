@@ -650,25 +650,59 @@ commit. The config file is never rewritten during load.
      `text-embedding-3-large` (3072, supports dimensions), and
      `text-embedding-ada-002` (1536, no dimensions). Unknown/custom models
      have no inferred dimension.
-   - Resolve an effective dimension as: explicit
-     `agents.memory_embedding_dim`, otherwise a known-native dimension,
-     otherwise emit one clear configuration warning and use a documented
-     `unknown` identity component. Do not call an arbitrary gateway model
-     1536-dimensional by fiat. The configuration template must tell custom
-     endpoints such as bge-m3 to set `memory_embedding_dim = 1024`.
+   - **Correct the rejected `dim=unknown` design.** Do not create a remote
+     backend with an unknown dimension. `EmbeddingBackend::dim()` and
+     `OpenAiEmbeddingBackend::dim` remain `usize`: source proves the existing
+     public contract is numeric (`embedding_backend.rs:33-40,109-121`),
+     constructor resolution is numeric (138-159), and response checking compares
+     against it (168-176,220-231). Represent resolution internally as
+     `ResolvedEmbeddingDimension::{Known(usize), MissingForCustomModel}` only.
+     Change `openai_backend_from_config` from `Option<OpenAiEmbeddingBackend>`
+     to `Result<Option<OpenAiEmbeddingBackend>>`: `MissingForCustomModel`, an
+     invalid canonical URL, and any declared/response dimension mismatch return
+     `Err`; the existing not-selected/no-key cases remain `Ok(None)`. `active_backend`
+     logs that `Err` once and chooses local. Thus no error is silently confused
+     with an intentional local selection, and no failed remote configuration
+     constructs an `EmbeddingBackend` or persists an identity. This is a
+     deliberate alternative to an `Option<usize>` public trait change: with
+     `active_backend()` freshly constructing a backend on every call
+     (278-283, 321-345), an observed-first-response dimension could not remain
+     stable across passage/query calls, and a static `dim=unknown` tag would let
+     future changed-length vectors pass `memory.rs`'s exact-ID equality gate.
+   - Resolution is therefore: explicit `agents.memory_embedding_dim` first,
+     otherwise known-native dimension, otherwise `MissingForCustomModel`.
+     The template must tell custom endpoints such as bge-m3 to set
+     `memory_embedding_dim = 1024`. This makes the memory equality gate sound:
+     every remote model ID carries a known declared dimension, and a known
+     response length mismatch is a hard request error, never a warning or a
+     vector persisted under a false `dim=N` identity. Validate every vector in a
+     batch has that declared length, not merely the first.
    - Extract request JSON construction to a pure helper. Include
      `"dimensions": configured_dim` only when the user explicitly supplied a
      dimension **and** the selected model is in the known dimensions-capable
      table. For a requested dimension on a known non-capable/unknown model,
      omit the unsupported field and warn once explaining that the value is an
      identity/sanity declaration, not a server truncation request.
-   - Make the persisted `OpenAiEmbeddingBackend::model_id` include the normalized
-     full base URL (scheme, host, port, and path), bare model, and effective
-     dimension identity. Example:
+   - Add pure `normalize_embedding_base_url(raw: Option<&str>) -> Result<String>`
+     using the existing `url` dependency (`jcode-base/Cargo.toml:61`), then use
+     its one canonical output for both request construction and model identity.
+     `None` selects `https://api.openai.com/v1`; otherwise require an absolute
+     `http` or `https` URL with a host, reject userinfo, query, and fragment,
+     lowercase scheme/host through `url::Url`, remove only the scheme default
+     port (`:80` HTTP, `:443` HTTPS), remove a single/all redundant trailing
+     path slashes so root becomes `/` and `/v1///` becomes `/v1`, and retain
+     non-default ports plus path case and interior slashes. An invalid URL is a
+     configuration error causing the explicit local fallback, not a guessed
+     string normalization. This replaces the current trailing-slash-only logic
+     (`embedding_backend.rs:138-152`) with specified behavior.
+   - Make the persisted `OpenAiEmbeddingBackend::model_id` include that canonical
+     full base URL, bare model, and known declared dimension. Example:
      `openai:https://api.openai.com/v1|text-embedding-3-small|dim=1536`.
-     Use the full normalized endpoint, not merely hostname, because two
-     gateway paths at one host can be different vector services. Never include
-     a key in this identifier.
+     Use the full endpoint, not merely hostname, because two gateway paths at
+     one host can be distinct vector services. Never include a key. The exact
+     equality gate already compares the opaque ID (`memory.rs::score_and_filter`,
+     843-873), so endpoint/model/dimension differences are dense-ineligible by
+     construction.
    - Keep `memory.rs` equality gates unchanged: once the ID is complete, its
      existing exact comparison in both retrieval paths is precisely the desired
      guard. New embeddings after URL/model/dimension changes receive a new tag;
@@ -698,10 +732,20 @@ commit. The config file is never rewritten during load.
    - Replace the old test that only verifies `dim()` with table tests asserting
      request JSON: v3+explicit 256 sends `dimensions: 256`; v3 without an
      override omits it; ada/custom omit it.
+   - Table-test URL canonicalization: equivalent scheme/host case, default-port,
+     and trailing-slash forms produce exactly one request URL/ID; non-default
+     ports and distinct gateway paths produce different IDs; userinfo, query,
+     fragment, unsupported scheme, missing host, and malformed URLs fail remote
+     construction and select the explicit local fallback.
    - Assert model IDs differ for a different normalized endpoint and for
-     dimension 256 versus 1536, while local remains distinct.
-   - Assert a custom `bge-m3` with explicit 1024 is tagged `dim=1024`, not
-     `1536`; test missing custom dimension uses the `unknown` identity path.
+     dimension 256 versus 1536, while local remains distinct. Assert a custom
+     `bge-m3` with explicit 1024 is tagged `dim=1024`, not `1536`; missing custom
+     dimension refuses remote construction and emits the actionable declaration
+     warning, rather than creating an unsafe `dim=unknown` identity.
+   - Feed mocked response payloads through the pure response validator: a known
+     declared dimension accepts vectors of exactly that length, rejects a first
+     vector of another length, and rejects a later heterogeneous batch vector.
+     This test is the proof that no vector survives under a false declared ID.
    - Test that a missing selected remote credential returns local and flips the
      one-time warning state only once (provide a `#[cfg(test)]` reset helper).
 
@@ -712,8 +756,9 @@ commit. The config file is never rewritten during load.
 model_id: format!("openai:{model}"),
 json!({ "model": model, "input": inputs })
 
-// After: vector space is identified by endpoint, model, and dimension.
-model_id: embedding_model_id(&base_url, &model, effective_dim),
+// After: only a known vector space is constructed and persisted.
+let dim = resolve_embedding_dimension(model, configured_dim)?;
+model_id: embedding_model_id(&canonical_base_url, &model, dim),
 json!({ "model": model, "input": inputs, "dimensions": requested_dim })
 // `dimensions` is conditionally inserted only for models that support it.
 ```
