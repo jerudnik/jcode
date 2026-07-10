@@ -670,21 +670,40 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
      both `Config::load` and `Config::load_strict`, invoke it again after
      `apply_env_overrides()`. The latter is required because env precedence can
      introduce an invalid value after file validation.
-3. **`crates/jcode-base/src/config.rs` — a single canonicalization policy**
-   - Add `pub(crate) fn Config::validate(&mut self)` plus small local
-     normalize-and-warn helpers. It must trim and ASCII-lowercase the values
-     below, emit field, raw value, accepted spellings, canonical result, and
-     fallback, and write the canonical string (or `None`) back to config.
-   - **This table is the sole policy table.** It is deliberately a transcription
-     of each current consumer parser, not a documentation-only whitelist. The
-     source-of-truth evidence is: tools' branch ordering in
+3. **`crates/jcode-config-types/src/lib.rs` and `crates/jcode-base/src/config.rs` — one executable canonicalization policy**
+   - Add a dependency-free `config_value_policy` module in `jcode-config-types`
+     with a `StringConfigDomain` enum, one canonicalizer per table row, and a
+     public `accepted_spellings(domain)` iterator. Each canonicalizer trims and
+     ASCII-lowercases, returns the canonical string (or `None`) and its defined
+     invalid fallback. `Config::validate(&mut self)` in `jcode-base` must call
+     this module, emit field, raw value, accepted spellings, canonical result,
+     and fallback, then write the canonical value back to config.
+   - **This is executable shared policy, not a documentation-only whitelist.**
+     Add direct `jcode-config-types` dependencies to the OpenAI, Anthropic, and
+     Copilot runtime crates and replace their alias-accepting configuration
+     matches with the corresponding `StringConfigDomain` canonicalizer before
+     converting the canonical result to their runtime enum/wire value. There
+     must be no second runtime `match` that decides which spelling is accepted.
+     Thus the same code, rather than a hand-maintained duplicate table, governs
+     load-time validation and runtime parsing. Tools/display remain base-only
+     consumers but still use this module from `Config::validate`.
+   - The source-of-truth behavior to transcribe is tools' branch ordering in
      `jcode-base/src/config.rs::ToolsConfig::base_allowed_tools` (627-675),
-     OpenAI transport (openai-runtime `OpenAITransportMode::from_config`,
-     129-145), reasoning (727-745), and service tier (792-806), Anthropic
-     reasoning (553-573) and service tier (667-679), and Copilot config-to-env
-     propagation (base `env_overrides.rs`, 715-727) followed by its runtime
-     reader (copilot-runtime `env_premium_mode`, 150-155). Centralization must
-     mirror, never broaden or narrow, these existing accepted spellings.
+     OpenAI transport (`OpenAITransportMode::from_config`, 129-145), reasoning
+     (727-745), service tier (792-806), and native compaction
+     (`OpenAINativeCompactionMode::from_config`, 199-212), Anthropic reasoning
+     (553-573), and Copilot config-to-env propagation (base `env_overrides.rs`,
+     715-727) followed by its runtime reader (copilot-runtime
+     `env_premium_mode`, 150-155). Centralization must mirror, never broaden or
+     narrow, these accepted spellings.
+   - **Anthropic service tier is intentionally excluded.** It is a runtime/UI
+     setter, not a load-time config field: `ProviderConfig` has no
+     `anthropic_service_tier` member (`jcode-config-types/src/lib.rs`,
+     1210-1242), no `JCODE_ANTHROPIC_SERVICE_TIER` override exists
+     (`jcode-base/src/config/env_overrides.rs`, 655-684), and
+     `anthropic-runtime::normalize_service_tier` returns an error for invalid
+     setter input (667-679). Do not add a schema field or invent a load-time
+     fallback in this work item.
 
      | Config field | All accepted input spellings | Canonical stored value | Invalid fallback | Evidence / preserved behavior |
      |---|---|---|---|---|
@@ -696,15 +715,14 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
      | `provider.openai_reasoning_effort` | empty, `none`, `low`, `medium`, `high`, `xhigh`, `swarm`, `swarm-deep` | empty -> `None`; others unchanged | `xhigh` | Exact parser and current unsupported fallback at openai-runtime 727-745. |
      | `provider.openai_service_tier` | empty, `fast`, `priority`, `flex`, `default`, `auto`, `none`, `off` | empty/`default`/`auto`/`none`/`off` -> `None`; `fast`/`priority` -> `priority`; `flex` unchanged | `None` | Exact parser at openai-runtime 792-806. |
      | `provider.anthropic_reasoning_effort` | empty, `default`, `auto`, `off`, `disabled`, `none`, `low`, `medium`, `high`, `xhigh`, `max`, `swarm`, `swarm-deep` | empty/`default`/`auto` -> `None`; `off`/`disabled` -> `none`; remaining levels unchanged | `max` | Exact parser and fallback at anthropic-runtime 553-573. |
-     | `provider.anthropic_service_tier` | empty, `default`, `off`, `standard`, `standard_only`, `priority`, `auto` | empty/`default` -> `None`; `off`/`standard`/`standard_only` -> `standard_only`; `priority`/`auto` -> `auto` | `None` | Exact parser at anthropic-runtime 667-679. |
      | `provider.copilot_premium` | `zero`, `0`, `one`, `1` | `zero`/`0` -> `0`; `one`/`1` -> `1` | `None` | Base mapping only exports `0|1` (env_overrides 715-727) and runtime recognizes only `0|1` (copilot-runtime 150-155). |
-     | `provider.openai_native_compaction_mode` | `auto`, `explicit`, `off` | same | `auto` | Default is `auto` in `ProviderConfig::default` (`jcode-config-types/src/lib.rs:1245-1266`); OpenAI construction consumes this configured field (`openai-runtime::new`, 543-632). |
+     | `provider.openai_native_compaction_mode` | empty, `auto`, `explicit`, `manual`, `off`, `disabled`, `none` | empty/`auto` -> `auto`; `explicit`/`manual` -> `explicit`; `off`/`disabled`/`none` -> `off` | `auto` | Exact parser at `openai-runtime::OpenAINativeCompactionMode::from_config` (199-212): `manual` is explicit, while `disabled`/`none` are an explicit opt-out. Default is `auto` in `ProviderConfig::default` (1245-1266). |
 
    - Retain downstream runtime parsers as **defensive consumers** for direct
-     environment/programmatic construction, but refactor them to delegate to
-     the shared canonical helper where crate layering permits. They must accept
-     the same table during transition and must not own a divergent second policy.
-     `Config::validate()` is authoritative for file/config-derived values.
+     environment/programmatic construction, but make them delegate to the
+     shared `jcode-config-types` helper. `Config::validate()` is authoritative
+     for file/config-derived values, and the shared helper remains the sole
+     alias-to-canonical decision point for direct runtime construction too.
    - Keep these fields serialized as strings. A serialized enum migration is a
      separate compatibility change and would either reject old files or hide
      typos before this observable validation point.
@@ -727,10 +745,22 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
    - Table-test every accepted alias in the canonicalization table from TOML
      and env, asserting its exact canonical output. In particular assert
      `tools.profile=off|disabled -> none` remains an empty allow-list and
-     `small -> minimal`, not default/full tools; assert every OpenAI/Anthropic
-     transport/reasoning/service-tier alias and both Copilot spellings. Also
-     test each invalid fallback exactly as tabulated. These compatibility tests
-     are a merge prerequisite before the runtime parser logic is centralized.
+     `small -> minimal`, not default/full tools; assert every OpenAI transport,
+     reasoning, service-tier, and native-compaction spelling, including
+     `manual -> explicit` and `disabled|none -> off`; assert every Anthropic
+     reasoning and both Copilot spellings. Also test each invalid fallback
+     exactly as tabulated.
+   - Add the **WI-4 mechanical completeness guard** in
+     `jcode-config-types` tests: iterate every `StringConfigDomain` whose
+     runtime accepts config aliases and every `accepted_spellings(domain)`
+     member, then assert the shared canonicalizer produces the exact canonical
+     bucket that the runtime enum/wire adapter consumes. Runtime-crate unit
+     tests must call their adapters for that same iterator. Because both
+     `Config::validate` and runtime adapters call the one shared canonicalizer,
+     adding an accepted runtime alias requires changing its declared shared
+     spelling set and makes this suite fail until TOML and env compatibility
+     expectations are added. This replaces a second hand-maintained policy
+     table with an executable equivalence invariant.
    - Retain `config_env_fingerprint_tracks_every_apply_env_override_var`.
      Extend it to assert `CONFIG_ENV_KEYS` has no duplicates, and add
      a targeted reload-fingerprint test for `JCODE_MEMORY_EMBEDDING_API_KEY_ENV`.
@@ -775,6 +805,9 @@ serialized strings and defaults.
 nix develop --command cargo test -p jcode-config-types
 nix develop --command cargo test -p jcode-base --lib config_tests
 nix develop --command cargo test -p jcode-base --lib default_file
+nix develop --command cargo test -p jcode-provider-openai-runtime
+nix develop --command cargo test -p jcode-provider-anthropic-runtime
+nix develop --command cargo test -p jcode-provider-copilot-runtime
 nix develop --command cargo check -p jcode-base
 ```
 
