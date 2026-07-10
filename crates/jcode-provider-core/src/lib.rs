@@ -37,9 +37,10 @@ pub use fallback_pick::{
 pub use fingerprint::{log_provider_canonical_input, stable_hash_json, stable_hash_str};
 pub use models::{
     ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, DEFAULT_CONTEXT_LIMIT, ModelCapabilities,
-    context_limit_for_model, context_limit_for_model_with_provider,
-    context_limit_for_model_with_provider_and_cache, is_listable_model_name,
-    normalize_copilot_model_name, provider_for_model as core_provider_for_model,
+    builtin_provider_for_model, builtin_provider_for_model_with_hint, context_limit_for_model,
+    context_limit_for_model_with_provider, context_limit_for_model_with_provider_and_cache,
+    is_listable_model_name, normalize_copilot_model_name,
+    provider_for_model as core_provider_for_model,
     provider_for_model_with_hint as core_provider_for_model_with_hint, provider_key_from_hint,
 };
 pub use selection::{
@@ -811,9 +812,9 @@ impl RouteSelection {
 /// lives here so [`RouteSelection::routed_model_spec`] has no upward dep.
 fn openrouter_catalog_model_id(model: &str) -> String {
     let trimmed = model.trim();
-    match crate::models::provider_for_model(trimmed) {
-        Some("claude") => format!("anthropic/{trimmed}"),
-        Some("openai") => format!("openai/{trimmed}"),
+    match crate::models::builtin_provider_for_model(trimmed) {
+        Some(ActiveProvider::Claude) => format!("anthropic/{trimmed}"),
+        Some(ActiveProvider::OpenAI) => format!("openai/{trimmed}"),
         _ => trimmed.to_string(),
     }
 }
