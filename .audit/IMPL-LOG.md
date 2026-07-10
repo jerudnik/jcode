@@ -108,3 +108,24 @@
   - `nix develop --command cargo check -p jcode-base -p jcode-app-core -p jcode-tui -p jcode-provider-openrouter-runtime` -> exit 0.
 - Only pre-existing dead-code/test warnings were emitted.
 - Exact next stage WI-3: implement `Provider::fork_with_model_spec`, add `MultiProvider::active_provider_fork_with_model_spec`, and change `Sidecar::with_configured_model` to use `resolve_current_model_spec` so only unprefixed native OpenAI/Claude models keep specialized ambient-auth fast paths while every prefixed/catalog/named profile routes through an isolated configured provider fork.
+
+## 2026-07-10 — WI-3: sidecar model overrides route through a forked resolved provider
+
+- Commit: `68ee7ba5e fix(sidecar): route model overrides through a forked resolved provider`
+- Files: `crates/jcode-provider-core/src/lib.rs`, `crates/jcode-base/src/provider/mod.rs`, `crates/jcode-base/src/sidecar.rs`.
+- Changes:
+  - Added the object-safe synchronous default `Provider::fork_with_model_spec(&self, model_spec) -> Result<Arc<dyn Provider>>` (fork, `set_model(model_spec)?`, return). No edits to the ~62 impls.
+  - Added `MultiProvider::fork_with_model_spec` override building on the WI-0-isolated `fork()` (fork, `set_model` on the isolated instance with model+provider context via `anyhow::Context`, erase to Arc). Imported `Context`.
+  - Added free fn `active_provider_fork_with_model_spec(model_spec) -> Option<Result<Arc<dyn Provider>>>` beside `active_provider_fork()`, delegating to the registered live provider's trait method; never mutates the live selection.
+  - Sidecar: added `provider: Option<Arc<dyn Provider>>` field storing the model-configured fork ONCE. `with_configured_model` now delegates to new `backend_for_configured_model`: bare native OpenAI/Claude (no `explicit_prefix`) keep `SidecarBackend::{OpenAI,Claude}`; every prefixed spec routes through `active_provider_fork_with_model_spec` with the ORIGINAL spec into `SidecarBackend::Provider`. Fork/`set_model` failure or no-live-provider logs `crate::logging::error` naming the model + `ResolvedModelSpec` and falls back to auto-selection. `auto_select_backend` returns the 3-tuple and stores its fork. `complete_via_provider` now consumes `self.provider` (no re-fork); runtime `complete_simple` failures surface plainly with no new fallback ladder. `SidecarBackend` enum retained.
+  - Tests: extended `StubProvider` with shared `set_model_specs` recording plus `fail_set_model`/`fail_complete` flags and a per-instance model cell. Added 4 tests: exact-spec fork routing for `omlx:Qwen3.6-MoE`/`openai-api:gpt-5.5`/`anthropic-api:...` (live provider unchanged); bare `gpt-5.5`/claude keep specialized path with no stored fork; fork `set_model` (Copilot `try_write` style) failure -> explicit fallback with live provider selection preserved; runtime `complete_simple` failure surfaces plainly and is not retried.
+- Adaptations:
+  - Test call `stub.model()` collided with the `Provider::model()` trait method (trait not in scope in the test module); read the `stub.model` `RwLock` field directly instead. No production change.
+- Validation:
+  - `nix develop --command cargo test -p jcode-provider-core` -> exit 0; 86 passed, 0 failed, doc tests 0 failed.
+  - `nix develop --command cargo test -p jcode-base --lib sidecar` -> exit 0; 16 passed, 0 failed (4 new WI-3 tests included).
+  - `nix develop --command cargo test -p jcode-base --lib provider` -> exit 0; 232 passed, 0 failed (pre-existing minimax failure did not reproduce this run).
+  - `nix develop --command cargo check -p jcode-base -p jcode-app-core` -> exit 0.
+  - `nix develop --command cargo fmt --all` -> exit 0; `git diff --check` -> exit 0.
+  - Only pre-existing dead-code warnings were emitted.
+- Exact next stage: WI-4.
