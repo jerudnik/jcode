@@ -108,9 +108,10 @@ fn tui_openai_compatible_key_save_persists_key_for_current_session() -> anyhow::
             )
         );
         assert_eq!(
-            crate::provider_catalog::load_api_key_from_env_or_config(
-                &resolved.api_key_env,
-                &resolved.env_file,
+            crate::provider_catalog::load_api_key(
+                &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                    &resolved,
+                ),
             )
             .as_deref(),
             Some("sk-test-tui-login")
@@ -138,9 +139,10 @@ fn tui_api_key_logout_clears_saved_key_and_process_env() -> anyhow::Result<()> {
 
         assert!(std::env::var_os(&resolved.api_key_env).is_none());
         assert!(
-            crate::provider_catalog::load_api_key_from_env_or_config(
-                &resolved.api_key_env,
-                &resolved.env_file,
+            crate::provider_catalog::load_api_key(
+                &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                    &resolved,
+                ),
             )
             .is_none()
         );
@@ -222,9 +224,10 @@ fn tui_openai_compatible_local_key_save_allows_empty_key() -> anyhow::Result<()>
             )
         );
         assert!(
-            crate::provider_catalog::load_api_key_from_env_or_config(
-                &resolved.api_key_env,
-                &resolved.env_file,
+            crate::provider_catalog::load_api_key(
+                &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                    &resolved,
+                ),
             )
             .is_none()
         );

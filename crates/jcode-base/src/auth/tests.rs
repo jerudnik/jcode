@@ -739,10 +739,10 @@ fn configured_api_key_source_uses_valid_overrides() {
         "OPENAI_COMPAT_API_KEY",
         "compat.env",
     );
-    assert_eq!(
-        source,
-        Some(("GROQ_API_KEY".to_string(), "groq.env".to_string()))
-    );
+    let source = source.expect("valid source");
+    assert_eq!(source.primary_env(), "GROQ_API_KEY");
+    assert_eq!(source.env_file(), "groq.env");
+    assert!(!source.is_catalog());
 
     if let Some(v) = prev_key {
         crate::env::set_var(key_var, v);
@@ -884,6 +884,36 @@ fn claude_oauth_provider_reports_oauth_independently_of_api_key() {
     // The API-key row still owns that credential.
     let api = status.assessment_for_provider(crate::provider_catalog::ANTHROPIC_API_LOGIN_PROVIDER);
     assert_eq!(api.state, AuthState::Available);
+
+    for (key, value) in saved {
+        restore_env_var(key, value);
+    }
+    AuthStatus::invalidate_cache();
+}
+
+#[test]
+fn zai_alias_only_auth_assessment_reports_legacy_candidate_metadata() {
+    let _lock = crate::storage::lock_test_env();
+    let temp = tempfile::TempDir::new().expect("create temp dir");
+    let saved = ["JCODE_HOME", "ZHIPU_API_KEY", "ZAI_API_KEY"]
+        .into_iter()
+        .map(|key| (key, std::env::var_os(key)))
+        .collect::<Vec<_>>();
+
+    crate::env::set_var("JCODE_HOME", temp.path());
+    crate::env::remove_var("ZHIPU_API_KEY");
+    crate::env::set_var("ZAI_API_KEY", "legacy-zai-only");
+    AuthStatus::invalidate_cache();
+
+    let status = AuthStatus::check_fast();
+    let assessment = status.assessment_for_provider(crate::provider_catalog::ZAI_LOGIN_PROVIDER);
+    assert_eq!(assessment.state, AuthState::Available);
+    assert!(assessment.method_detail.contains("ZHIPU_API_KEY"));
+    assert!(
+        assessment.credential_source_detail.contains("ZAI_API_KEY"),
+        "alias-aware diagnostics must enumerate the credential that made auth available: {}",
+        assessment.credential_source_detail
+    );
 
     for (key, value) in saved {
         restore_env_var(key, value);

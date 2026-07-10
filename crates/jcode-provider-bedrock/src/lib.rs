@@ -235,7 +235,10 @@ impl BedrockProvider {
     }
 
     pub fn configured_bearer_token() -> Option<String> {
-        jcode_provider_env::load_api_key_from_env_or_config(API_KEY_ENV, ENV_FILE)
+        jcode_provider_env::load_api_key(&jcode_provider_env::ApiKeyCredentialSource::primary_only(
+            API_KEY_ENV,
+            ENV_FILE,
+        ))
     }
 
     fn env_or_config(name: &str) -> Option<String> {

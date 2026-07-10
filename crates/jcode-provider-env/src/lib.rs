@@ -1,8 +1,73 @@
 use std::sync::{LazyLock, RwLock};
 
-use jcode_provider_metadata::{is_safe_env_file_name, is_safe_env_key_name};
+use jcode_provider_metadata::{
+    OpenAiCompatibleProfile, ResolvedOpenAiCompatibleProfile, is_safe_env_file_name,
+    is_safe_env_key_name,
+};
 
-/// Fallback resolvers consulted by [`load_api_key_from_env_or_config`] after the
+/// Provenance-preserving API-key lookup description.
+///
+/// Catalog sources retain their ordered compatibility aliases. Primary-only
+/// sources are reserved for genuinely non-catalog inputs such as explicit user
+/// overrides and named profiles.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ApiKeyCredentialSource {
+    primary_env: String,
+    env_file: String,
+    aliases: Vec<String>,
+    catalog: bool,
+}
+
+impl ApiKeyCredentialSource {
+    pub fn from_catalog_profile(profile: OpenAiCompatibleProfile) -> Self {
+        Self {
+            primary_env: profile.api_key_env.to_string(),
+            env_file: profile.env_file.to_string(),
+            aliases: profile
+                .api_key_aliases
+                .iter()
+                .map(|alias| (*alias).to_string())
+                .collect(),
+            catalog: true,
+        }
+    }
+
+    pub fn from_resolved_catalog_profile(profile: &ResolvedOpenAiCompatibleProfile) -> Self {
+        Self {
+            primary_env: profile.api_key_env.clone(),
+            env_file: profile.env_file.clone(),
+            aliases: profile.api_key_aliases.clone(),
+            catalog: true,
+        }
+    }
+
+    pub fn primary_only(env_key: impl Into<String>, env_file: impl Into<String>) -> Self {
+        Self {
+            primary_env: env_key.into(),
+            env_file: env_file.into(),
+            aliases: Vec::new(),
+            catalog: false,
+        }
+    }
+
+    pub fn primary_env(&self) -> &str {
+        &self.primary_env
+    }
+
+    pub fn env_file(&self) -> &str {
+        &self.env_file
+    }
+
+    pub fn candidate_env_keys(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.primary_env()).chain(self.aliases.iter().map(String::as_str))
+    }
+
+    pub fn is_catalog(&self) -> bool {
+        self.catalog
+    }
+}
+
+/// Fallback resolvers consulted by [`load_api_key`] after the
 /// environment and config-file lookups fail. Higher-level crates register
 /// resolvers at startup so this leaf crate does not need to depend on auth.
 type ApiKeyFallbackResolver = fn(&str) -> Option<String>;
@@ -54,7 +119,7 @@ fn is_invisible_boundary_char(c: char) -> bool {
 /// secret or config value.
 ///
 /// Exposed so other credential loaders (e.g. the Cursor key reader) can apply
-/// the same sanitizing as [`load_api_key_from_env_or_config`].
+/// the same sanitizing as [`load_api_key`].
 pub fn sanitize_secret_value(raw: &str) -> &str {
     raw.trim_matches(is_invisible_boundary_char)
         .trim_matches('"')
@@ -82,10 +147,19 @@ fn clean_loaded_value(raw: &str, env_key: &str) -> Option<String> {
     Some(cleaned.to_string())
 }
 
-pub fn load_api_key_from_env_or_config(env_key: &str, file_name: &str) -> Option<String> {
-    if !is_safe_env_key_name(env_key) {
+/// Load an API key while preserving the source's catalog provenance.
+///
+/// Lookup order is primary process env, primary env-file entry, then each
+/// catalog alias in declaration order with process env before env-file entry.
+pub fn load_api_key(source: &ApiKeyCredentialSource) -> Option<String> {
+    let env_key = source.primary_env();
+    let file_name = source.env_file();
+    if source
+        .candidate_env_keys()
+        .any(|candidate| !is_safe_env_key_name(candidate))
+    {
         jcode_logging::warn(&format!(
-            "Ignoring invalid API key variable name '{}' while loading credentials",
+            "Ignoring invalid API key variable name in source for '{}' while loading credentials",
             env_key
         ));
         return None;
@@ -98,38 +172,27 @@ pub fn load_api_key_from_env_or_config(env_key: &str, file_name: &str) -> Option
         return None;
     }
 
-    if let Ok(key) = std::env::var(env_key)
-        && let Some(key) = clean_loaded_value(&key, env_key)
-    {
-        return Some(key);
-    }
+    let content = jcode_storage::app_config_dir().ok().and_then(|config_dir| {
+        let config_path = config_dir.join(file_name);
+        jcode_storage::harden_secret_file_permissions(&config_path);
+        std::fs::read_to_string(config_path).ok()
+    });
 
-    let config_path = jcode_storage::app_config_dir().ok()?.join(file_name);
-    jcode_storage::harden_secret_file_permissions(&config_path);
-    let content = std::fs::read_to_string(config_path).ok()?;
-    let prefix = format!("{}=", env_key);
-
-    for line in content.lines() {
-        if let Some(key) = line.strip_prefix(&prefix)
-            && let Some(key) = clean_loaded_value(key, env_key)
-        {
-            return Some(key);
-        }
-    }
-
-    if env_key == "ZHIPU_API_KEY" {
-        if let Ok(key) = std::env::var("ZAI_API_KEY")
-            && let Some(key) = clean_loaded_value(&key, "ZAI_API_KEY")
+    for candidate in source.candidate_env_keys() {
+        if let Ok(key) = std::env::var(candidate)
+            && let Some(key) = clean_loaded_value(&key, candidate)
         {
             return Some(key);
         }
 
-        let legacy_prefix = "ZAI_API_KEY=";
-        for line in content.lines() {
-            if let Some(key) = line.strip_prefix(legacy_prefix)
-                && let Some(key) = clean_loaded_value(key, "ZAI_API_KEY")
-            {
-                return Some(key);
+        if let Some(content) = content.as_deref() {
+            let prefix = format!("{}=", candidate);
+            for line in content.lines() {
+                if let Some(key) = line.strip_prefix(&prefix)
+                    && let Some(key) = clean_loaded_value(key, candidate)
+                {
+                    return Some(key);
+                }
             }
         }
     }
@@ -139,6 +202,11 @@ pub fn load_api_key_from_env_or_config(env_key: &str, file_name: &str) -> Option
     }
 
     None
+}
+
+#[cfg(test)]
+fn load_api_key_from_env_or_config(env_key: &str, file_name: &str) -> Option<String> {
+    load_api_key(&ApiKeyCredentialSource::primary_only(env_key, file_name))
 }
 
 pub fn load_env_value_from_env_or_config(env_key: &str, file_name: &str) -> Option<String> {
@@ -239,6 +307,56 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    fn rust_sources(root: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(root).expect("read source directory") {
+            let path = entry.expect("source entry").path();
+            if path.is_dir() {
+                if !matches!(
+                    path.file_name().and_then(|name| name.to_str()),
+                    Some("target" | ".git")
+                ) {
+                    rust_sources(&path, files);
+                }
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn catalog_consumers_cannot_reach_or_reconstruct_the_bare_pair_loader() {
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root");
+        let provider_env_lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
+        let mut files = Vec::new();
+        rust_sources(workspace, &mut files);
+
+        for path in files {
+            if path == provider_env_lib {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("read Rust source");
+            assert!(
+                !source.contains("load_api_key_from_env_or_config"),
+                "bare pair loader escaped provider-env: {}",
+                path.display()
+            );
+            for suffix in source
+                .split("ApiKeyCredentialSource::primary_only(")
+                .skip(1)
+            {
+                let arguments = &suffix[..suffix.find(')').unwrap_or(suffix.len())];
+                assert!(
+                    !arguments.contains(".api_key_env") && !arguments.contains(".env_file"),
+                    "catalog profile fields were laundered into a primary-only source: {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
     struct EnvGuard {
         _lock: MutexGuard<'static, ()>,
         saved: Vec<(&'static str, Option<OsString>)>,
@@ -331,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn accepts_legacy_zai_key_for_zhipu() {
+    fn catalog_source_loads_legacy_zai_alias_from_file() {
         let temp = tempfile::tempdir().expect("tempdir");
         let _guard = EnvGuard::new(&["JCODE_HOME", "ZHIPU_API_KEY", "ZAI_API_KEY"]);
         jcode_core::env::set_var("JCODE_HOME", temp.path());
@@ -341,9 +459,89 @@ mod tests {
         jcode_core::env::remove_var("ZAI_API_KEY");
 
         assert_eq!(
-            load_api_key_from_env_or_config("ZHIPU_API_KEY", "zai.env").as_deref(),
+            load_api_key(&ApiKeyCredentialSource::from_catalog_profile(
+                jcode_provider_metadata::ZAI_PROFILE,
+            ))
+            .as_deref(),
             Some("legacy-zai-key")
         );
+    }
+
+    #[test]
+    fn catalog_source_preserves_primary_then_ordered_alias_precedence() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _guard = EnvGuard::new(&[
+            "JCODE_HOME",
+            "TEST_PRIMARY_API_KEY",
+            "TEST_ALIAS_ONE_API_KEY",
+            "TEST_ALIAS_TWO_API_KEY",
+        ]);
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+        let source = ApiKeyCredentialSource {
+            primary_env: "TEST_PRIMARY_API_KEY".to_string(),
+            env_file: "test-aliases.env".to_string(),
+            aliases: vec![
+                "TEST_ALIAS_ONE_API_KEY".to_string(),
+                "TEST_ALIAS_TWO_API_KEY".to_string(),
+            ],
+            catalog: true,
+        };
+
+        save_env_value_to_env_file(
+            "TEST_PRIMARY_API_KEY",
+            "test-aliases.env",
+            Some("primary-file"),
+        )
+        .expect("primary file");
+        jcode_core::env::set_var("TEST_PRIMARY_API_KEY", "primary-env");
+        jcode_core::env::set_var("TEST_ALIAS_ONE_API_KEY", "alias-one-env");
+        assert_eq!(load_api_key(&source).as_deref(), Some("primary-env"));
+
+        jcode_core::env::remove_var("TEST_PRIMARY_API_KEY");
+        assert_eq!(load_api_key(&source).as_deref(), Some("primary-file"));
+
+        save_env_value_to_env_file("TEST_PRIMARY_API_KEY", "test-aliases.env", None)
+            .expect("remove primary file");
+        save_env_value_to_env_file(
+            "TEST_ALIAS_ONE_API_KEY",
+            "test-aliases.env",
+            Some("alias-one-file"),
+        )
+        .expect("alias one file");
+        jcode_core::env::remove_var("TEST_ALIAS_ONE_API_KEY");
+        jcode_core::env::set_var("TEST_ALIAS_TWO_API_KEY", "alias-two-env");
+        assert_eq!(load_api_key(&source).as_deref(), Some("alias-one-file"));
+
+        jcode_core::env::set_var("TEST_ALIAS_ONE_API_KEY", "  \u{200B}alias-one-env\u{FEFF} ");
+        assert_eq!(load_api_key(&source).as_deref(), Some("alias-one-env"));
+    }
+
+    #[test]
+    fn primary_only_source_does_not_probe_catalog_aliases() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _guard = EnvGuard::new(&["JCODE_HOME", "ZHIPU_API_KEY", "ZAI_API_KEY"]);
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+        jcode_core::env::set_var("ZAI_API_KEY", "legacy-zai-key");
+
+        let source = ApiKeyCredentialSource::primary_only("ZHIPU_API_KEY", "zai.env");
+        assert_eq!(load_api_key(&source), None);
+        assert!(!source.is_catalog());
+    }
+
+    #[test]
+    fn minimax_and_openai_catalog_credentials_are_isolated() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _guard = EnvGuard::new(&["JCODE_HOME", "MINIMAX_API_KEY", "OPENAI_API_KEY"]);
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+        jcode_core::env::set_var("OPENAI_API_KEY", "openai-only");
+
+        let minimax =
+            ApiKeyCredentialSource::from_catalog_profile(jcode_provider_metadata::MINIMAX_PROFILE);
+        let openai = ApiKeyCredentialSource::from_catalog_profile(
+            jcode_provider_metadata::OPENAI_NATIVE_OPENAI_COMPAT_PROFILE,
+        );
+        assert_eq!(load_api_key(&minimax), None);
+        assert_eq!(load_api_key(&openai).as_deref(), Some("openai-only"));
     }
 
     #[test]

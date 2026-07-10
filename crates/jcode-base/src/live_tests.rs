@@ -1723,9 +1723,10 @@ fn doctor_supports_provider(provider_id: &str) -> bool {
 fn provider_has_credential(provider_id: &str) -> bool {
     if let Some(profile) = crate::provider_catalog::openai_compatible_profile_by_id(provider_id) {
         let resolved = crate::provider_catalog::resolve_openai_compatible_profile(profile);
-        return crate::provider_catalog::load_api_key_from_env_or_config(
-            &resolved.api_key_env,
-            &resolved.env_file,
+        return crate::provider_catalog::load_api_key(
+            &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                &resolved,
+            ),
         )
         .is_some();
     }

@@ -1091,9 +1091,11 @@ fn cmd_metrics(args: &[String]) -> Result<()> {
             .cloned()
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .or_else(|| {
-                jcode::provider_catalog::load_api_key_from_env_or_config(
-                    "OPENAI_API_KEY",
-                    "openai.env",
+                jcode::provider_catalog::load_api_key(
+                    &jcode::provider_catalog::ApiKeyCredentialSource::primary_only(
+                        "OPENAI_API_KEY",
+                        "openai.env",
+                    ),
                 )
             })
             .expect("openai_dense/openai_hybrid require OPENAI_API_KEY or --openai_key");
