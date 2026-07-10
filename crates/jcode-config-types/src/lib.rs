@@ -1008,7 +1008,7 @@ pub struct DisplayConfig {
     pub performance: String,
     /// FPS for animations (startup, idle donut): 1-120 (default: 60)
     pub animation_fps: u32,
-    /// FPS for active redraw (processing, streaming): 1-120 (default: 30)
+    /// FPS for active redraw (processing, streaming): 1-120 (default: 60)
     pub redraw_fps: u32,
     /// Show a truncated preview of the previous prompt at the top when it scrolls out of view (default: true)
     pub prompt_preview: bool,
