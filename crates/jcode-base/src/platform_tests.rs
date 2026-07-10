@@ -12,27 +12,35 @@ fn desired_nofile_soft_limit_only_raises_when_possible() {
 fn spawn_detached_creates_new_session() {
     use tempfile::NamedTempFile;
 
+    let _guard = crate::storage::lock_test_env();
     let output = NamedTempFile::new().expect("temp file");
     let output_path = output.path().to_string_lossy().to_string();
     let parent_sid = unsafe { libc::getsid(0) };
 
-    let mut cmd = std::process::Command::new("sh");
-    cmd.arg("-c")
-        .arg("ps -o sid= -p $$ > \"$JCODE_TEST_OUTPUT\"")
-        .env("JCODE_TEST_OUTPUT", &output_path)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    let mut cmd = std::process::Command::new(std::env::current_exe().expect("current test binary"));
+    cmd.args([
+        "--ignored",
+        "--exact",
+        "platform::platform_tests::spawn_detached_child_probe",
+    ])
+    .env("JCODE_TEST_OUTPUT", &output_path)
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null());
 
     let mut child = super::spawn_detached(&mut cmd).expect("spawn detached child");
     let status = child.wait().expect("wait for child");
     assert!(status.success(), "child should exit successfully");
 
-    let child_sid = std::fs::read_to_string(&output_path)
-        .expect("read child sid")
-        .trim()
-        .parse::<u32>()
-        .expect("parse child sid");
+    let probe = std::fs::read_to_string(&output_path).expect("read child pid and sid");
+    let mut values = probe.split_whitespace().map(|value| {
+        value
+            .parse::<u32>()
+            .expect("parse detached child probe value")
+    });
+    let child_pid = values.next().expect("child pid");
+    let child_sid = values.next().expect("child sid");
 
+    assert_eq!(child_pid, child.id(), "probe should run in spawned child");
     assert_eq!(
         child_sid,
         child.id(),
@@ -42,6 +50,16 @@ fn spawn_detached_creates_new_session() {
         child_sid as i32, parent_sid,
         "detached child should not share parent session"
     );
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "helper process for spawn_detached_creates_new_session"]
+fn spawn_detached_child_probe() {
+    let output_path = std::env::var_os("JCODE_TEST_OUTPUT").expect("probe output path");
+    let pid = std::process::id();
+    let sid = unsafe { libc::getsid(0) };
+    std::fs::write(output_path, format!("{pid} {sid}\n")).expect("write child pid and sid");
 }
 
 #[cfg(windows)]

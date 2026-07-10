@@ -25,6 +25,31 @@ pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 #[cfg(any(test, feature = "test-support"))]
+pub struct TestCurrentDirGuard {
+    original: std::path::PathBuf,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl TestCurrentDirGuard {
+    pub fn set(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let original = std::env::current_dir()?;
+        std::env::set_current_dir(path)?;
+        Ok(Self { original })
+    }
+
+    pub fn change_to(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        std::env::set_current_dir(path)
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for TestCurrentDirGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.original);
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
 pub fn test_env_lock() -> &'static Mutex<()> {
     static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     ENV_LOCK.get_or_init(|| Mutex::new(()))

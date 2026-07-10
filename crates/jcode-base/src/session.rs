@@ -20,10 +20,12 @@ pub struct StreamingGuard {
 
 impl StreamingGuard {
     pub fn new(session_id: impl Into<String>) -> Self {
+        let session_id = session_id.into();
+        let reason = format!("Jcode streaming model response ({session_id})");
         Self {
             _marker: crate::storage::StreamingGuard::new(session_id),
             sleep_assertion: crate::platform::PowerAssertion::prevent_user_idle_system_sleep(
-                "Jcode streaming model response",
+                &reason,
             ),
         }
     }

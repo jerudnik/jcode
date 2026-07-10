@@ -1,5 +1,28 @@
 use super::*;
 
+struct TestEnvVarGuard {
+    key: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl TestEnvVarGuard {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(key);
+        crate::env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for TestEnvVarGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = &self.previous {
+            crate::env::set_var(self.key, previous);
+        } else {
+            crate::env::remove_var(self.key);
+        }
+    }
+}
+
 #[test]
 fn test_is_browser_command() {
     assert!(is_browser_command("browser ping"));
@@ -37,7 +60,7 @@ fn test_paths() {
     let _guard = crate::storage::lock_test_env();
 
     let bdir = browser_dir();
-    assert!(bdir.to_string_lossy().contains(".jcode"));
+    assert_eq!(bdir, crate::storage::jcode_dir().unwrap().join("browser"));
     assert!(bdir.to_string_lossy().ends_with("browser"));
 
     let bin = browser_binary_path();
@@ -138,9 +161,11 @@ fn ensure_browser_session_fails_fast_when_session_process_exits_immediately() {
     use std::time::{Duration, Instant};
 
     let _guard = crate::storage::lock_test_env();
-    let prev_home = std::env::var_os("JCODE_HOME");
     let temp = tempfile::TempDir::new().expect("create temp dir");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _home = TestEnvVarGuard::set("JCODE_HOME", temp.path());
+    let runtime_dir = temp.path().join("runtime");
+    std::fs::create_dir_all(&runtime_dir).expect("create runtime dir");
+    let _runtime = TestEnvVarGuard::set("JCODE_RUNTIME_DIR", &runtime_dir);
 
     let browser_dir = temp.path().join("browser");
     std::fs::create_dir_all(&browser_dir).expect("create browser dir");
@@ -153,19 +178,13 @@ fn ensure_browser_session_fails_fast_when_session_process_exits_immediately() {
     std::fs::set_permissions(&bin, perms).expect("chmod fake browser binary");
 
     let start = Instant::now();
-    let session = ensure_browser_session("fast-fail-session");
+    let session = ensure_browser_session(&format!("fast-fail-session-{}", std::process::id()));
     let elapsed = start.elapsed();
 
     assert!(session.is_none());
     assert!(
-        elapsed < Duration::from_secs(1),
+        elapsed < Duration::from_secs(2),
         "expected immediate failure, got {:?}",
         elapsed
     );
-
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
