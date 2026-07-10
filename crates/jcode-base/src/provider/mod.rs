@@ -35,7 +35,7 @@ use account_failover::{
     same_provider_account_candidates, same_provider_account_failover_enabled,
     set_account_override_for_provider,
 };
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 #[cfg(test)]
 use jcode_provider_core::FailoverDecision;
@@ -106,6 +106,20 @@ pub fn active_provider_fork() -> Option<Arc<dyn Provider>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .as_ref()
         .map(|p| p.fork())
+}
+
+/// Fetch the registered active provider, if any, and return a fork pinned to
+/// `model_spec`. Delegates to [`Provider::fork_with_model_spec`], so the fork is
+/// an independent instance and the live agent's own selection is never mutated.
+/// Returns `None` when no provider is registered, and propagates a
+/// fork/`set_model` failure (e.g. Copilot's transient `try_write`) so callers
+/// can fall back explicitly instead of silently running the wrong model.
+pub fn active_provider_fork_with_model_spec(model_spec: &str) -> Option<Result<Arc<dyn Provider>>> {
+    ACTIVE_PROVIDER
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .as_ref()
+        .map(|p| p.fork_with_model_spec(model_spec))
 }
 
 /// Provider-agnostic streaming idle timeout: max seconds to wait between
@@ -2606,6 +2620,24 @@ impl Provider for MultiProvider {
         let switch_request = self.fork_model_switch_request(active, &current_model);
         let _ = provider.set_model(&switch_request);
         Arc::new(provider)
+    }
+
+    fn fork_with_model_spec(&self, model_spec: &str) -> Result<Arc<dyn Provider>> {
+        // Fork first (WI-0 guarantees each external runtime slot is forked into
+        // an independent instance), then pin the requested model on that
+        // isolated instance only. The live agent's selection is never touched.
+        // `MultiProvider::set_model` parses any explicit auth-route prefix and
+        // applies the pinned credential mode, so the full original spec must be
+        // passed through unchanged.
+        let fork = self.fork();
+        fork.set_model(model_spec).with_context(|| {
+            format!(
+                "Failed to pin sidecar model '{}' on forked {} provider",
+                model_spec,
+                self.display_name()
+            )
+        })?;
+        Ok(fork)
     }
 
     fn native_result_sender(&self) -> Option<NativeToolResultSender> {

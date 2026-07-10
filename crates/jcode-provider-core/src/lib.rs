@@ -412,6 +412,21 @@ pub trait Provider: Send + Sync {
     /// Create a new provider instance with independent mutable state.
     fn fork(&self) -> Arc<dyn Provider>;
 
+    /// Fork this provider and pin the fork to `model_spec` before returning it.
+    ///
+    /// This is isolation by construction: it forks (giving an independent
+    /// instance per the [`Provider::fork`] contract), sets the requested model
+    /// on the *fork only*, and returns it. The live provider's own selection is
+    /// never touched. A `set_model` failure (including a provider whose
+    /// `set_model` uses `try_write` and can legitimately fail mid-request) is
+    /// propagated as an ordinary fork-construction error so callers can fall
+    /// back explicitly instead of silently running the wrong model.
+    fn fork_with_model_spec(&self, model_spec: &str) -> Result<Arc<dyn Provider>> {
+        let fork = self.fork();
+        fork.set_model(model_spec)?;
+        Ok(fork)
+    }
+
     /// Get a sender for native tool results (if the provider supports it).
     fn native_result_sender(&self) -> Option<NativeToolResultSender> {
         None
