@@ -132,24 +132,36 @@ error and must not be hidden.
      `MINIMAX_API_KEY`, matching `minimax.env` and the external-import map.
    - Keep the OpenAI profile as the single primary owner of
      `OPENAI_API_KEY`.
-3. **`crates/jcode-provider-env/src/lib.rs` — typed source, exact precedence**
-   - Add a public credential-source type that cannot erase catalog aliases:
+3. **`crates/jcode-provider-env/src/lib.rs` — provenance-typed source, exact precedence**
+   - Replace the public bare-pair loader with the only public loading entrypoint,
+     `load_api_key(&ApiKeyCredentialSource)`. Make
+     `load_api_key_from_env_or_config(&str, &str)` private to
+     `jcode-provider-env` (or delete it after moving its scanner body), so no
+     other crate can give a catalog profile's two strings to a primary-only
+     loader. Add a public credential-source type that cannot erase catalog
+     aliases:
 
      ```rust
      enum ApiKeyCredentialSource {
-         OpenAiCompatible(OpenAiCompatibleProfile),
-         ResolvedOpenAiCompatible(ResolvedOpenAiCompatibleProfile),
-         PrimaryOnly { env_key: String, env_file: String },
+         Catalog(CatalogCredentialSource),
+         PrimaryOnly(PrimaryOnlyCredentialSource),
      }
      ```
 
-     `load_api_key(source)` dispatches to a private ordered candidate scanner;
-     the two profile variants carry primary plus `legacy_api_key_envs`, while
-     `PrimaryOnly` is the compatibility escape hatch only for non-catalog
-     origins (Azure, Bedrock, named user profiles, and explicit runtime-env
-     overrides). Retain `load_api_key_from_env_or_config(primary, file)` as a
-     thin `PrimaryOnly` wrapper so non-catalog callers do not acquire invented
-     aliases.
+     `CatalogCredentialSource` is constructible only from
+     `OpenAiCompatibleProfile` or `ResolvedOpenAiCompatibleProfile` and carries
+     the primary plus `legacy_api_key_envs`. Its profile-aware constructors and
+     loader are the **only public API that accepts either profile type**.
+     `PrimaryOnlyCredentialSource` has private fields and no generic
+     `(env_key, env_file)` constructor. Give it explicit provenance variants or
+     constructors only for known non-catalog origins: OpenRouter explicit
+     runtime overrides, active named user profiles, Azure, Bedrock, and other
+     direct-provider configurations. These constructors receive their owning
+     typed config/origin, not a catalog profile. This makes a catalog profile
+     unable to reach the primary-only path by construction, while preserving
+     deliberately primary-only behavior for named user profiles and explicit
+     `JCODE_OPENROUTER_API_KEY_NAME`/`JCODE_OPENROUTER_ENV_FILE` overrides.
+     `load_api_key(source)` dispatches to the private ordered candidate scanner.
    - Preserve the source-proven total order, rather than merely saying
      "primary first": **primary process env -> primary env-file entry -> each
      alias in declared metadata order, alias process env -> alias env-file
@@ -196,7 +208,8 @@ error and must not be hidden.
 
    | Consumer and source proof | Object in hand | Required replacement / behavior |
    |---|---|---|
-   | `jcode-provider-openrouter-runtime/src/lib.rs::autodetected_openai_compatible_profile` (95-107), background refresh (761-788), and `new_openai_compatible_profile_runtime` (1588-1619) | `compat`/`resolved` is a resolved profile at each pair call | Use resolved-profile source for detection, refresh auth, and the actual request runtime. For errors/labels, name primary plus aliases, so alias-only Z.AI works end-to-end. |
+   | `jcode-provider-openrouter-runtime/src/lib.rs::autodetected_openai_compatible_profile` (95-128), background refresh (761-788), and `new_openai_compatible_profile_runtime` (1588-1619) | `compat`/`resolved` is a resolved profile at each pair call | Use resolved-profile source for detection, refresh auth, and the dedicated profile request runtime. For errors/labels, name primary plus aliases, so alias-only Z.AI works end-to-end. |
+   | `jcode-provider-openrouter-runtime/src/lib.rs::OpenRouterProvider::new` (1453-1545) through `resolve_auth`/`get_api_key` (2305-2373) | `new` already computes one `autodetected_profile`, but the downstream helpers discard it and reconstruct primary strings through `configured_api_key_name`/`configured_env_file_name` (146-179) | Construct one `ApiKeyCredentialSource` beside `autodetected_profile` and pass `&source` into `resolve_auth` and `get_api_key`; do not recompute configured primary strings. The resolved catalog source must remain intact through the actual default request-auth construction. When autodetection is disabled by an explicit `JCODE_OPENROUTER_API_KEY_NAME` or `JCODE_OPENROUTER_ENV_FILE`, construct the explicit-override `PrimaryOnlyCredentialSource`; keep `new_named_openai_compatible`/`load_named_profile_api_key` (1245-1266, 182-199) on the named-user `PrimaryOnlyCredentialSource`. Refactor base `provider/openrouter.rs::get_api_key` (57-61) to use the same source-selection helper for status/readiness consistency. |
    | `jcode-base/src/usage/api_keys.rs::enqueue_api_key_usage_tasks` (94-113) and `fetch_compatible_profile_report` (200-238) | Loop/fn parameter is static `profile` | Use static-profile source in every configured/balance/probe check. |
    | `jcode-base/src/usage.rs::activity_source_has_dedicated_report` (345-369) | `openai_compatible_profile_by_id` returns `profile` | Profile loader decides sweeper eligibility. |
    | `jcode-base/src/provider/openrouter.rs::autodetected_openai_compatible_profile` and configured key flow (81-156) | `compat`/each candidate is resolved profile | Keep profile object through credential lookup instead of extracting `api_key_env`/`env_file`; explicit OpenRouter runtime env remains `PrimaryOnly`. |
@@ -211,6 +224,15 @@ error and must not be hidden.
    | `src/cli/provider_init.rs::maybe_enable_external_api_key_auth_for_auto` (729-759) | It destructures `openrouter_like_api_key_sources()` into `(env_key, _)`, discarding any aliases | Iterate `Vec<ApiKeyCredentialSource>` and each source's ordered `candidate_env_keys()` (primary, then metadata aliases). Check `preferred_unconsented_api_key_source_for_env` for each candidate, while deriving the prompt label/login hint from the typed source rather than an alias-erased pair. This permits an alias-only Z.AI external key to reach the normal trust prompt. |
    | `jcode-base/src/provider_catalog.rs::openai_compatible_profile_is_configured` and profile probes | Static/resolved catalog profile | Use a profile source, never reconstruct a pair. This is the common leaf for remaining catalog checks. |
 
+   **Type-level reachability proof:** every catalog-bearing production caller is
+   covered by a row whose middle column identifies its static or resolved profile
+   value. In particular, OpenRouter's default constructor retains its local
+   `autodetected_profile` (runtime 1453-1469), the CLI doctor resolves one
+   (root `provider_doctor.rs` 47-55), auth-test receives one by reference
+   (`auth_test/choice.rs` 131-133), and provider-init receives typed sources
+   from the producer (base `provider_catalog.rs` 802-837). Therefore all have a
+   profile-aware constructor available and none require a string-pair escape.
+
 7. **Tests and mechanical guard**
    - Add a metadata test that primary credential env names are unique among
      `requires_api_key` profiles, specifically asserting MiniMax is
@@ -220,12 +242,22 @@ error and must not be hidden.
      env works; aliases are tried in metadata declaration order; alias in
      `zai.env` works. Assert a MiniMax key configures MiniMax without an OpenAI
      key and vice versa.
-   - Add a workspace guard test (source-level/compile-time fixture is acceptable)
-     that fails if a catalog/resolved-profile expression feeds `.api_key_env`
-     and `.env_file` to `load_api_key_from_env_or_config` or constructs a
-     pair-only `ApiKeyCredentialSource::PrimaryOnly`. Its allowlist names only
-     deliberate non-catalog sources. Run the precise grep as a final gate before
-     deleting the Z.AI special case.
+   - Implement the **WI-1 mechanical guard** as
+     `jcode-base::catalog_profile_pair_loader_guard`, with type-level protection
+     as the primary invariant and its source-level audit as a backstop. A
+     `trybuild` compile-fail fixture in `jcode-provider-env` proves that neither `OpenAiCompatibleProfile` nor
+     `ResolvedOpenAiCompatibleProfile` can construct a
+     `PrimaryOnlyCredentialSource`, and another proves external crates cannot
+     call the now-private bare pair loader. A workspace test also parses/scans
+     Rust call expressions and fails on any catalog/resolved-profile field pair
+     (`.api_key_env` plus `.env_file`) passed to a bare loader or any
+     `PrimaryOnlyCredentialSource` construction outside the small named
+     non-catalog origin allowlist. The guard covers every profile-holding table
+     row because each now has a profile-aware public constructor, as evidenced
+     by its `Object in hand` column. Run it before deleting the Z.AI leaf special
+     case. The table remains a migration checklist, but the API privacy and
+     compile test, not hand enumeration, answer whether a future caller can
+     erase aliases.
    - Add a Codex loader regression with leading BOM/NBSP and trailing Unicode
      whitespace, asserting the result matches
      `sanitize_secret_value`/the common profile loader.
@@ -235,6 +267,14 @@ error and must not be hidden.
      by `maybe_enable_external_api_key_auth_for_auto` in metadata declaration
      order. Keep the primary-file-over-alias-env precedence assertion from the
      profile-loader matrix in these integration seams.
+   - Add an OpenRouter default-path regression that sets only `ZAI_API_KEY`
+     (with no OpenRouter key and no `JCODE_OPENROUTER_*` override), constructs
+     `OpenRouterProvider::new` rather than
+     `new_openai_compatible_profile_runtime`, and asserts the selected Z.AI
+     profile's actual `resolve_auth -> get_api_key` result is bearer auth with
+     the alias token. Pair it with a control proving explicit key-name/env-file
+     overrides and `new_named_openai_compatible` remain `PrimaryOnly` and do
+     not probe catalog aliases.
 
 #### Before/after sketch
 
@@ -248,7 +288,7 @@ if env_key == "ZHIPU_API_KEY" { /* read ZAI_API_KEY */ }
 api_key_env: "ZHIPU_API_KEY",
 legacy_api_key_envs: &["ZAI_API_KEY"],
 // generic ordered loader has no vendor literals:
-load_api_key_from_openai_compatible_profile(ZAI_PROFILE)
+load_api_key(&CatalogCredentialSource::from(ZAI_PROFILE).into())
 ```
 
 #### Why this is the right seam
@@ -279,7 +319,8 @@ nix develop --command cargo test -p jcode-base --lib provider_catalog_tests
 nix develop --command cargo test -p jcode-base --lib codex
 nix develop --command cargo test -p jcode --bin jcode
 nix develop --command cargo check -p jcode-base -p jcode-provider-openrouter-runtime -p jcode-app-core -p jcode-provider-doctor -p jcode-tui
-# The source-level catalog-pair guard added above must run as part of this test suite.
+# `catalog_profile_pair_loader_guard` plus provider-env's trybuild fixture are
+# mandatory WI-1 mechanical gates.
 nix develop --command cargo test -p jcode-base --lib catalog_profile_pair_loader_guard
 ```
 
