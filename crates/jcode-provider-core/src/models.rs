@@ -1,3 +1,5 @@
+use crate::selection::ActiveProvider;
+
 /// Available Claude models used by model lists and provider routing.
 ///
 /// NOTE: The Mythos preview family was retired by Anthropic and 404s, so it is
@@ -52,22 +54,8 @@ pub struct ModelCapabilities {
     pub context_window: Option<usize>,
 }
 
-fn normalize_provider_id(provider: &str) -> String {
-    provider.trim().to_ascii_lowercase()
-}
-
 pub fn provider_key_from_hint(provider_hint: Option<&str>) -> Option<&'static str> {
-    let normalized = normalize_provider_id(provider_hint?);
-    match normalized.as_str() {
-        "anthropic" | "claude" => Some("claude"),
-        "openai" => Some("openai"),
-        "openrouter" => Some("openrouter"),
-        "copilot" | "github copilot" => Some("copilot"),
-        "antigravity" => Some("antigravity"),
-        "gemini" | "google gemini" => Some("gemini"),
-        "cursor" => Some("cursor"),
-        _ => None,
-    }
+    ActiveProvider::from_key_or_alias(provider_hint?).map(ActiveProvider::key)
 }
 
 pub fn is_listable_model_name(model: &str) -> bool {
@@ -75,11 +63,11 @@ pub fn is_listable_model_name(model: &str) -> bool {
     !trimmed.is_empty() && !matches!(trimmed, "copilot models" | "openrouter models")
 }
 
-fn model_id_for_capability_lookup(model: &str, provider: Option<&str>) -> (String, bool) {
+fn model_id_for_capability_lookup(model: &str, provider: Option<ActiveProvider>) -> (String, bool) {
     let normalized = model.trim().to_ascii_lowercase();
     let (base, is_1m) = crate::model_id::split_long_context(&normalized);
 
-    let lookup = if matches!(provider, Some("openrouter")) || base.contains('/') {
+    let lookup = if matches!(provider, Some(ActiveProvider::OpenRouter)) || base.contains('/') {
         crate::model_id::slash_base(base).to_string()
     } else {
         base.to_string()
@@ -110,36 +98,52 @@ fn copilot_context_limit_for_model(model: &str) -> usize {
 /// Return the static provider class for a built-in model name.
 ///
 /// Root providers may layer runtime-only provider catalogs on top of this.
-pub fn provider_for_model_with_hint(
+pub fn builtin_provider_for_model_with_hint(
     model: &str,
     provider_hint: Option<&str>,
-) -> Option<&'static str> {
-    if let Some(provider) = provider_key_from_hint(provider_hint) {
+) -> Option<ActiveProvider> {
+    if let Some(provider) = provider_hint.and_then(ActiveProvider::from_key_or_alias) {
         return Some(provider);
     }
 
     let model = model.trim();
     if model.contains('@') {
-        Some("openrouter")
+        Some(ActiveProvider::OpenRouter)
     } else if ALL_CLAUDE_MODELS.contains(&model) {
-        Some("claude")
+        Some(ActiveProvider::Claude)
     } else if ALL_OPENAI_MODELS.contains(&model) {
-        Some("openai")
+        Some(ActiveProvider::OpenAI)
     } else if model.contains('/') {
-        Some("openrouter")
+        Some(ActiveProvider::OpenRouter)
     } else if model.starts_with("claude-") {
-        Some("claude")
+        Some(ActiveProvider::Claude)
     } else if model.starts_with("gpt-") {
-        Some("openai")
+        Some(ActiveProvider::OpenAI)
     } else if model.starts_with("gemini-") {
-        Some("gemini")
+        Some(ActiveProvider::Gemini)
     } else {
         None
     }
 }
 
+pub fn builtin_provider_for_model(model: &str) -> Option<ActiveProvider> {
+    builtin_provider_for_model_with_hint(model, None)
+}
+
+/// Compatibility wrapper for callers migrating to the context-aware resolver
+/// in WI-2B/2C. New core-only code should use
+/// [`builtin_provider_for_model_with_hint`] and keep the typed provider value.
+pub fn provider_for_model_with_hint(
+    model: &str,
+    provider_hint: Option<&str>,
+) -> Option<&'static str> {
+    builtin_provider_for_model_with_hint(model, provider_hint).map(ActiveProvider::key)
+}
+
+/// Compatibility wrapper for callers migrating to the context-aware resolver
+/// in WI-2B/2C.
 pub fn provider_for_model(model: &str) -> Option<&'static str> {
-    provider_for_model_with_hint(model, None)
+    builtin_provider_for_model(model).map(ActiveProvider::key)
 }
 
 /// Whether `model` resolves to a Claude family jcode classifies statically
@@ -180,11 +184,13 @@ pub fn context_limit_for_model_with_provider_and_cache(
     provider_hint: Option<&str>,
     cached_context_limit: impl Fn(&str) -> Option<usize>,
 ) -> Option<usize> {
-    let provider = provider_key_from_hint(provider_hint).or_else(|| provider_for_model(model));
+    let provider = provider_hint
+        .and_then(ActiveProvider::from_key_or_alias)
+        .or_else(|| builtin_provider_for_model(model));
     let (model, is_1m) = model_id_for_capability_lookup(model, provider);
     let model = model.as_str();
 
-    if matches!(provider, Some("copilot")) {
+    if matches!(provider, Some(ActiveProvider::Copilot)) {
         return Some(copilot_context_limit_for_model(model));
     }
 
@@ -388,6 +394,60 @@ pub fn normalize_copilot_model_name(model: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_key_hints_delegate_to_active_provider_aliases() {
+        for provider in ActiveProvider::ALL {
+            assert_eq!(
+                provider_key_from_hint(Some(provider.key())),
+                Some(provider.key())
+            );
+            for alias in provider.aliases() {
+                assert_eq!(provider_key_from_hint(Some(alias)), Some(provider.key()));
+            }
+        }
+        assert_eq!(provider_key_from_hint(Some("AWS-BEDROCK")), Some("bedrock"));
+        assert_eq!(provider_key_from_hint(None), None);
+        assert_eq!(provider_key_from_hint(Some("custom-profile")), None);
+    }
+
+    #[test]
+    fn builtin_provider_detector_returns_typed_builtin_only_results() {
+        for (model, expected) in [
+            ("claude-sonnet-5", Some(ActiveProvider::Claude)),
+            ("gpt-5.5", Some(ActiveProvider::OpenAI)),
+            ("gemini-3-pro", Some(ActiveProvider::Gemini)),
+            (
+                "anthropic/claude-sonnet-5",
+                Some(ActiveProvider::OpenRouter),
+            ),
+            (
+                "claude-sonnet-5@Anthropic",
+                Some(ActiveProvider::OpenRouter),
+            ),
+            ("custom-model", None),
+        ] {
+            assert_eq!(builtin_provider_for_model(model), expected, "{model}");
+        }
+
+        for provider in ActiveProvider::ALL {
+            assert_eq!(
+                builtin_provider_for_model_with_hint("custom-model", Some(provider.key())),
+                Some(provider)
+            );
+        }
+        assert_eq!(
+            builtin_provider_for_model_with_hint("custom-model", Some("aws_bedrock")),
+            Some(ActiveProvider::Bedrock)
+        );
+
+        // Compatibility wrappers remain until WI-2B/2C callers migrate.
+        assert_eq!(provider_for_model("gpt-5.5"), Some("openai"));
+        assert_eq!(
+            provider_for_model_with_hint("custom-model", Some("aws-bedrock")),
+            Some("bedrock")
+        );
+    }
 
     #[test]
     fn context_limit_handles_claude_1m_aliases() {

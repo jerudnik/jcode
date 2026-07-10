@@ -17,7 +17,7 @@ pub use catalog::{
 use catalog_service::{ModelCatalogService, RuntimeModelUnavailability};
 use jcode_provider_core::{
     ALL_CLAUDE_MODELS, ALL_OPENAI_MODELS, ModelCapabilities, ModelRoute,
-    context_limit_for_model_with_provider_and_cache, core_provider_for_model_with_hint,
+    builtin_provider_for_model_with_hint, context_limit_for_model_with_provider_and_cache,
     provider_key_from_hint, shared_http_client,
 };
 use serde::{Deserialize, Serialize};
@@ -1088,8 +1088,8 @@ pub fn provider_for_model_with_hint(
         Some("openai")
     } else if model.starts_with("gemini-") {
         Some("gemini")
-    } else if let Some(provider) = core_provider_for_model_with_hint(model, None) {
-        Some(provider)
+    } else if let Some(provider) = builtin_provider_for_model_with_hint(model, None) {
+        Some(provider.key())
     } else if crate::provider::antigravity::is_known_model(model) {
         Some("antigravity")
     } else if cursor::is_known_model(model) {
