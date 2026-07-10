@@ -29,3 +29,19 @@ Structure guidance for spawned swarm agents:
   synthesize.
 - A worker wanting to delegate more than 2-3 subtasks should spawn one
   manager agent to own that subtree rather than fanning out directly.
+
+Monitoring sub-orchestrator subtrees (learned 2026-07-10, avoid rediscovering):
+
+- `swarm status`/`summary` on a member of ANOTHER swarm fails with "not in the
+  same swarm as requester". A sub-orchestrator's workers form its own swarm;
+  you cannot introspect them directly. Do not retry variations of the call.
+- Cheap non-disruptive progress signals, in order of preference:
+  1. Expected artifacts: the ledger/progress file the prompt told workers to
+     write, and `git log --since` on every repo the work touches.
+  2. Session journal freshness: `~/.jcode/sessions/session_<name>_*.journal.jsonl`
+     mtime (seconds-old = alive and working).
+  3. Recently-modified sibling journals reveal spawned workers by name.
+- Only DM the sub-orchestrator for a progress report if artifacts and journals
+  have BOTH been silent for ~20+ minutes; a DM interrupts its turn.
+- Design prompts so progress is observable: require a shared ledger file with
+  per-worker sections and commit-as-you-go, then monitoring is `ls` + `git log`.
