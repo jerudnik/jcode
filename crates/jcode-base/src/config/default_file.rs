@@ -372,14 +372,19 @@ swarm_max_concurrent_agents = 32
 #
 # Embedding backend for memory dense-retrieval. "local" (default) uses the
 # bundled all-MiniLM-L6-v2 ONNX model (no network); "openai" uses a remote
-# OpenAI / OpenAI-compatible /v1/embeddings endpoint (requires OPENAI_API_KEY;
-# silently falls back to local when no key is found). Vectors from different
-# models live in separate spaces and are never compared, so switching is safe.
+# OpenAI / OpenAI-compatible /v1/embeddings endpoint. When "openai" is selected
+# but no credential is found (or the config is invalid), jcode logs a warning
+# and falls back to local. Vectors from different models/endpoints/dimensions
+# live in separate spaces and are never compared, so switching is safe.
 # Env override: JCODE_MEMORY_EMBEDDING_BACKEND
 # memory_embedding_backend = "local"
 # memory_embedding_model = "text-embedding-3-small"
 # memory_embedding_api_key_env = "OPENAI_API_KEY"
 # memory_embedding_base_url = "https://api.openai.com/v1"
+# memory_embedding_dim: server-side truncation for supported OpenAI v3 models
+# (3-small/3-large); part of the vector identity; REQUIRED for custom models
+# whose dimension cannot be inferred (e.g. bge-m3 -> 1024), else remote falls
+# back to local.
 # memory_embedding_dim = 1536
 
 [terminal]
