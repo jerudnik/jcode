@@ -313,7 +313,6 @@ fn initial_session_context_is_persisted_once_and_not_overwritten() {
 #[allow(clippy::redundant_closure_call)]
 fn initial_session_context_uses_current_cwd_when_inserted() -> Result<()> {
     let _env_lock = lock_env();
-    let original_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
     let first_dir = tempfile::Builder::new()
         .prefix("jcode-session-context-first-")
         .tempdir()
@@ -323,7 +322,8 @@ fn initial_session_context_uses_current_cwd_when_inserted() -> Result<()> {
         .tempdir()
         .map_err(|e| anyhow!(e))?;
 
-    std::env::set_current_dir(first_dir.path()).map_err(|e| anyhow!(e))?;
+    let cwd_guard = crate::storage::TestCurrentDirGuard::set(first_dir.path())?;
+    let first_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
     let mut session = Session::create_with_id(
         "session_context_cwd_refresh_test".to_string(),
         None,
@@ -331,28 +331,21 @@ fn initial_session_context_uses_current_cwd_when_inserted() -> Result<()> {
     );
     assert_eq!(
         session.working_dir.as_deref(),
-        Some(first_dir.path().to_str().unwrap())
+        Some(first_cwd.to_str().unwrap())
     );
 
-    std::env::set_current_dir(second_dir.path()).map_err(|e| anyhow!(e))?;
-    let result: std::result::Result<(), anyhow::Error> = (|| {
-        assert!(session.ensure_initial_session_context_message());
-        let first = session.messages[0].content_preview();
-        assert!(
-            first.contains(&format!(
-                "Working directory: {}",
-                second_dir.path().display()
-            )),
-            "session context should use cwd at insertion time, got: {first}"
-        );
-        assert_eq!(
-            session.working_dir.as_deref(),
-            Some(second_dir.path().to_str().unwrap())
-        );
-        Ok(())
-    })();
-    std::env::set_current_dir(original_cwd).map_err(|e| anyhow!(e))?;
-    result?;
+    cwd_guard.change_to(second_dir.path())?;
+    let second_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
+    assert!(session.ensure_initial_session_context_message());
+    let first = session.messages[0].content_preview();
+    assert!(
+        first.contains(&format!("Working directory: {}", second_cwd.display())),
+        "session context should use cwd at insertion time, got: {first}"
+    );
+    assert_eq!(
+        session.working_dir.as_deref(),
+        Some(second_cwd.to_str().unwrap())
+    );
 
     Ok(())
 }
@@ -361,7 +354,6 @@ fn initial_session_context_uses_current_cwd_when_inserted() -> Result<()> {
 #[allow(clippy::redundant_closure_call)]
 fn initial_session_context_can_refresh_before_real_conversation() -> Result<()> {
     let _env_lock = lock_env();
-    let original_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
     let first_dir = tempfile::Builder::new()
         .prefix("jcode-session-context-stale-")
         .tempdir()
@@ -371,37 +363,31 @@ fn initial_session_context_can_refresh_before_real_conversation() -> Result<()> 
         .tempdir()
         .map_err(|e| anyhow!(e))?;
 
-    std::env::set_current_dir(first_dir.path()).map_err(|e| anyhow!(e))?;
-    let result: std::result::Result<(), anyhow::Error> = (|| {
-        let mut session = Session::create_with_id(
-            "session_context_remote_cwd_refresh_test".to_string(),
-            None,
-            Some("Remote cwd refresh".to_string()),
-        );
-        assert!(session.ensure_initial_session_context_message());
-        assert!(session.messages[0].content_preview().contains(&format!(
-            "Working directory: {}",
-            first_dir.path().display()
-        )));
+    let _cwd_guard = crate::storage::TestCurrentDirGuard::set(first_dir.path())?;
+    let first_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
+    let mut session = Session::create_with_id(
+        "session_context_remote_cwd_refresh_test".to_string(),
+        None,
+        Some("Remote cwd refresh".to_string()),
+    );
+    assert!(session.ensure_initial_session_context_message());
+    assert!(
+        session.messages[0]
+            .content_preview()
+            .contains(&format!("Working directory: {}", first_cwd.display()))
+    );
 
-        session.working_dir = Some(second_dir.path().display().to_string());
-        assert!(session.refresh_initial_session_context_message());
-        let refreshed = session.messages[0].content_preview();
-        assert!(
-            refreshed.contains(&format!(
-                "Working directory: {}",
-                second_dir.path().display()
-            )),
-            "session context should refresh to subscribed cwd, got: {refreshed}"
-        );
-        assert!(!refreshed.contains(&format!(
+    session.working_dir = Some(second_dir.path().display().to_string());
+    assert!(session.refresh_initial_session_context_message());
+    let refreshed = session.messages[0].content_preview();
+    assert!(
+        refreshed.contains(&format!(
             "Working directory: {}",
-            first_dir.path().display()
-        )));
-        Ok(())
-    })();
-    std::env::set_current_dir(original_cwd).map_err(|e| anyhow!(e))?;
-    result?;
+            second_dir.path().display()
+        )),
+        "session context should refresh to subscribed cwd, got: {refreshed}"
+    );
+    assert!(!refreshed.contains(&format!("Working directory: {}", first_cwd.display())));
 
     Ok(())
 }
@@ -410,7 +396,6 @@ fn initial_session_context_can_refresh_before_real_conversation() -> Result<()> 
 #[allow(clippy::redundant_closure_call)]
 fn initial_session_context_does_not_refresh_after_real_conversation() -> Result<()> {
     let _env_lock = lock_env();
-    let original_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
     let first_dir = tempfile::Builder::new()
         .prefix("jcode-session-context-original-")
         .tempdir()
@@ -420,37 +405,30 @@ fn initial_session_context_does_not_refresh_after_real_conversation() -> Result<
         .tempdir()
         .map_err(|e| anyhow!(e))?;
 
-    std::env::set_current_dir(first_dir.path()).map_err(|e| anyhow!(e))?;
-    let result: std::result::Result<(), anyhow::Error> = (|| {
-        let mut session = Session::create_with_id(
-            "session_context_late_cwd_refresh_test".to_string(),
-            None,
-            Some("Late cwd refresh".to_string()),
-        );
-        assert!(session.ensure_initial_session_context_message());
-        session.add_message(
-            Role::User,
-            vec![ContentBlock::Text {
-                text: "hello".to_string(),
-                cache_control: None,
-            }],
-        );
+    let _cwd_guard = crate::storage::TestCurrentDirGuard::set(first_dir.path())?;
+    let first_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
+    let mut session = Session::create_with_id(
+        "session_context_late_cwd_refresh_test".to_string(),
+        None,
+        Some("Late cwd refresh".to_string()),
+    );
+    assert!(session.ensure_initial_session_context_message());
+    session.add_message(
+        Role::User,
+        vec![ContentBlock::Text {
+            text: "hello".to_string(),
+            cache_control: None,
+        }],
+    );
 
-        session.working_dir = Some(second_dir.path().display().to_string());
-        assert!(!session.refresh_initial_session_context_message());
-        let original = session.messages[0].content_preview();
-        assert!(original.contains(&format!(
-            "Working directory: {}",
-            first_dir.path().display()
-        )));
-        assert!(!original.contains(&format!(
-            "Working directory: {}",
-            second_dir.path().display()
-        )));
-        Ok(())
-    })();
-    std::env::set_current_dir(original_cwd).map_err(|e| anyhow!(e))?;
-    result?;
+    session.working_dir = Some(second_dir.path().display().to_string());
+    assert!(!session.refresh_initial_session_context_message());
+    let original = session.messages[0].content_preview();
+    assert!(original.contains(&format!("Working directory: {}", first_cwd.display())));
+    assert!(!original.contains(&format!(
+        "Working directory: {}",
+        second_dir.path().display()
+    )));
 
     Ok(())
 }
@@ -2349,9 +2327,10 @@ fn streaming_guard_creates_visible_macos_sleep_assertion() {
     let temp = tempfile::tempdir().expect("tempdir");
     let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
 
-    let reason = "Jcode streaming model response";
+    let session_id = format!("session_power_{}", std::process::id());
+    let reason = format!("Jcode streaming model response ({session_id})");
     {
-        let _streaming = StreamingGuard::new("session_power");
+        let _streaming = StreamingGuard::new(session_id);
 
         let output = std::process::Command::new("pmset")
             .args(["-g", "assertions"])
@@ -2360,7 +2339,7 @@ fn streaming_guard_creates_visible_macos_sleep_assertion() {
         assert!(output.status.success(), "pmset should succeed");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
-            stdout.contains(reason),
+            stdout.contains(&reason),
             "pmset output should show the streaming assertion; output was:\n{stdout}"
         );
     }
@@ -2371,7 +2350,7 @@ fn streaming_guard_creates_visible_macos_sleep_assertion() {
         .expect("pmset -g assertions should run on macOS");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stdout.contains(reason),
+        !stdout.contains(&reason),
         "streaming assertion should be released after guard drop; output was:\n{stdout}"
     );
 }
