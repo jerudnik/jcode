@@ -168,61 +168,16 @@
 
 ## 2026-07-10 — WI-2C follow-up: preserve `anthropic-api` catalog identity in app-core
 
+- Commit: `727273b7b fix(app-core): Preserve catalog model prefix identity.`
 - A post-reload test-only change incorrectly reclassified `anthropic-api:` as a native Anthropic credential prefix. This contradicted the finalized WI-2 resolver order, where `anthropic-api` is the static OpenAI-compatible catalog profile and only `claude-api:` is the native Anthropic API-key model prefix.
 - `explicit_route_for_configured_model` now gates credential pinning to the exact native model-prefix vocabulary: `openai-api`, `openai-oauth`, `claude-api`, and `claude-oauth`. Catalog/named profile prefixes carried by `ResolvedModelSpec::explicit_prefix` remain on normal profile restore routing and are not reparsed through the broader `AuthRoute` alias vocabulary.
 - Added negative regressions for `anthropic-api:`, bare `anthropic:`, and bare `openai:` while preserving the existing `openai-api:` positive route pin.
 - Removed an unrelated `.jcode/swarm-prompt.md` durability commit created during reload recovery; no harness/config changes remain in this source-fix batch.
 - Validation (exit 0): `cargo fmt --all -- --check`; targeted `configured_explicit_route_uses_single_resolver_result`; all 34 `comm_session` tests; `cargo check -p jcode-app-core`. Only pre-existing dead-code warnings were emitted.
 
-## Final stop-condition suite (2026-07-10)
-
-Ran on `main` after WI-5 (`c5dbe8a14`):
-
-| Command | Result |
-| --- | --- |
-| `cargo check --workspace` | exit 0 (pre-existing `block v0.1.6` future-incompat note only) |
-| `cargo test -p jcode-provider-core -p jcode-provider-env -p jcode-provider-metadata -p jcode-config-types` | exit 0 |
-| `cargo test -p jcode-base --lib` | 1087 passed, 5 failed — **all 5 pre-existing** (see below) |
-| `cargo test -p jcode-app-core --lib` | 1016 passed, 1 failed — **batch bug, fixed** in `2c5e335a7`; suite green after |
-| `cargo check -p jcode-tui` | exit 0 |
-
-### app-core failure (real, fixed)
-
-`configured_explicit_route_uses_single_resolver_result` exposed that
-`explicit_route_for_configured_model` reparsed every resolved prefix through
-the broader `AuthRoute` alias vocabulary. That incorrectly broadened the
-resolver-owned catalog profile `anthropic-api:` into a native Anthropic
-credential route. The fix gates route pinning to the exact native model-prefix
-vocabulary and verifies the resolved provider identity before deriving the
-route id. This follow-up commit has comm_session tests 34/34, the focused
-regression, and the required app-core/OpenRouter/TUI plus provider-core/base
-checks are green.
-
-### base failures (pre-existing, environment-dependent, NOT regressions)
-
-Verified identical failures at pre-batch baseline `0d242297e` in a clean
-worktree:
-
-- `platform::platform_tests::spawn_detached_creates_new_session` — child
-  process fails inside the nix dev shell sandbox.
-- `session::tests::cases::initial_session_context_*` (3 tests) — `/tmp` vs
-  `/private/tmp` symlink canonicalization mismatch in TMPDIR-based asserts.
-- `session::tests::cases::streaming_guard_creates_visible_macos_sleep_assertion`
-  — macOS sleep-assertion visibility not available in this environment
-  (fails at baseline too; introduced by menubar commit `3ccc34332`,
-  before this batch).
-
-### Verdict
-
-Stop condition met: every failure is either fixed and committed or proven
-pre-existing at baseline. Batch complete: WI-0 through WI-5 landed
-(`dcb213dbd`, `c0ff07874`, `c957ae14b`, `e5f0b0469`, `9780f352b`,
-`68ee7ba5e`, `47608034d`, `c5dbe8a14`) plus the app-core resolver guard
-follow-up.
-
 ## 2026-07-10 — WI-4 follow-up: complete runtime parser fallback observability
 
-- Commit: pending in this working tree.
+- Commit: `c30da1cad fix(config): warn once for runtime parser fallbacks`.
 - Completed the final-design gap left by `47608034d`: OpenAI, Anthropic, OpenRouter, Copilot, `tools.profile`, ACP profile, and `display.performance` configured string parsers now distinguish recognized aliases from fallback paths and emit WARN-ONCE keyed by setting + raw value + selected fallback when a configured raw value is unrecognized.
 - Preserved existing parser-owned vocabularies and fallbacks, including OpenRouter's context-dependent DeepSeek `max` and unified `max -> xhigh` behavior. Direct setters that return `Err` remain errors.
 - Added a small dependency-safe keyed warn-once seam in `jcode-base::config` without introducing a centralized alias/canonicalization table. Runtime parsers remain authoritative.
@@ -246,3 +201,39 @@ follow-up.
   - `nix develop --command cargo check -p jcode-base`
   - `nix develop --command cargo fmt --all`
   - `git diff --check`
+
+## 2026-07-10 — Final stabilization and hard stop
+
+- Commit: `c7d99311e test(base): harden environment-sensitive suites`.
+- The first full `jcode-base` run exposed seven environment-sensitive test failures rather than WI regressions. The fixes isolate test homes/environment, serialize shared process state where required, and make process-identification assertions deterministic. No production behavior was relaxed.
+- Rebuilt the final source-fix history without unrelated swarm prompt/model-routing commits. The intentionally untracked audit source reports remain untouched.
+- Ran the five required commands sequentially from the repository root. Exact result excerpts:
+
+```text
+$ nix develop --command cargo check --workspace
+    Finished `dev` profile [unoptimized] target(s) in 5.90s
+--- Command finished with exit code: 0 ---
+
+$ nix develop --command cargo test -p jcode-provider-core -p jcode-provider-env -p jcode-provider-metadata -p jcode-config-types
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 86 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+--- Command finished with exit code: 0 ---
+
+$ nix develop --command cargo test -p jcode-base --lib
+test result: ok. 1094 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 37.24s
+--- Command finished with exit code: 0 ---
+
+$ nix develop --command cargo test -p jcode-app-core --lib
+test result: ok. 1018 passed; 0 failed; 23 ignored; 0 measured; 0 filtered out; finished in 35.87s
+--- Command finished with exit code: 0 ---
+
+$ nix develop --command cargo check -p jcode-tui
+    Finished `dev` profile [unoptimized] target(s) in 4.55s
+--- Command finished with exit code: 0 ---
+```
+
+- `git diff --check` -> exit 0.
+- Only pre-existing warnings and the existing `block v0.1.6` future-incompatibility notice were emitted.
+- **STOP CONDITION MET:** every WI is committed compile-green, all required regressions exist and pass, and every required command exits 0.
