@@ -1,5 +1,7 @@
 # Next Session Prep: Kanidm Auth for jcode Gateway
 
+> Status: **Archived - deferred, tracked in notes.** Gateway access-mode scaffolding (`local`/`mesh`/`public_reviewed` and `oidc_*` config fields that fail closed) landed in `crates/jcode-base/src/gateway.rs`. The full Kanidm OIDC login/callback/ws-ticket implementation is intentionally not built yet. Durable access-policy decision: `INTERACTION_SURFACE_SECURE_ACCESS.md`.
+
 ## Goal
 
 Set up a reviewed Kanidm OIDC Authorization Code + PKCE auth path for the jcode web/mobile gateway without weakening the existing local/mesh default.
