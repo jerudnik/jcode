@@ -274,7 +274,10 @@ coupling, but warrants a user-facing release-note callout.
      `cfg.providers` profile prefix, `model@provider` OpenRouter form, then the
      base builtin detector (including Bedrock, Antigravity, and Cursor). An
      unrecognized `prefix:model` remains an unclassified model, not an implicit
-     provider.
+     provider. `openai-api:` and `anthropic-api:` are permanently reserved
+     dual-auth spellings: they must win before the same-named catalog profile
+     ids and can never select the OpenAI-compatible runtime by prefix. This
+     preserves the native HTTP-client, auth, pricing, and billing path.
    - Expose only thin compatibility wrappers while moving callers. A convenience
      `resolve_current_model_spec(model)` may read `config()` for read-only UI
      paths, but all selection paths that already possess a `&Config` must pass
@@ -289,10 +292,13 @@ coupling, but warrants a user-facing release-note callout.
    - Base: `provider/catalog_routes.rs`, `pricing.rs`, `route_builders.rs`,
      `provider/mod.rs`, capability lookup, selection, and all public
      `provider_for_model[_with_hint]` exports.
-   - App-core: replace byte-identical
+   - App-core: retain the existing override-precedes-model policy in
      `provider_key_for_spawn_model` and `provider_key_for_launch_model` in
-     `src/server/comm_session.rs` and `src/server/jade_relay.rs` with one
-     base-exported provider-key helper backed by `resolve_model_spec`.
+     `src/server/comm_session.rs` and `src/server/jade_relay.rs`. Only replace
+     each helper's inner `split_once(':')` classification block with
+     `resolve_model_spec(model, cfg).provider_key`; do not move spawn/launch
+     override policy into `jcode-base` or collapse these helpers into a base
+     provider-key API.
    - TUI: `jcode-tui/src/tui/app/tui_state.rs` header/effort classification
      must use the context-aware resolver, so a selected named profile is not
      displayed as unknown.
@@ -303,6 +309,10 @@ coupling, but warrants a user-facing release-note callout.
    - Table-test one resolver result for bare Claude/OpenAI/Gemini, Bedrock,
      Cursor, OpenRouter `@`, each dual-auth prefix, a catalog profile prefix,
      a named `[providers.omlx]` profile prefix, and an unknown prefix.
+     Add explicit negative cases for `openai-api:gpt-5.5` and
+     `anthropic-api:<model>`: each must resolve as the native pinned dual-auth
+     route and prove the same-named catalog-profile lookup is unreachable via
+     prefix parsing.
    - Assert both spawn and Jade relay return the same provider key for every
      explicit/named case. Put shared parser tests in base and focused wrapper
      tests in app-core.
@@ -351,9 +361,11 @@ nix develop --command cargo check -p jcode-base -p jcode-app-core -p jcode-tui
 #### Risk and rollback
 
 This is the largest semantic change: provider/auth selection can be altered by
-prefix precedence. The resolver table tests are the rollback safety net. Keep
-legacy wrappers only for the commit while all callers migrate, mark them
-deprecated, then remove them before merging the same work item. Revert the
+prefix precedence. The resolver table tests, including the permanent
+`openai-api:`/`anthropic-api:` reservation negatives, are the rollback safety
+net against silently rerouting a prefix to a different HTTP client or billing
+path. Keep legacy wrappers only for the commit while all callers migrate, mark
+them deprecated, then remove them before merging the same work item. Revert the
 commit to restore the previous independent parsers if any persisted-session
 route regresses.
 
