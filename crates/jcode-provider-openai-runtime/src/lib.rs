@@ -136,10 +136,12 @@ impl OpenAITransportMode {
             "websocket" | "ws" | "wss" => Self::WebSocket,
             "https" | "http" | "sse" => Self::HTTPS,
             other => {
-                jcode_base::logging::warn(&format!(
-                    "Unknown JCODE_OPENAI_TRANSPORT '{}'; using auto. Use: auto, websocket, or https.",
-                    other
-                ));
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "JCODE_OPENAI_TRANSPORT",
+                    other,
+                    "auto",
+                    "auto|websocket|https",
+                );
                 Self::Auto
             }
         }
@@ -203,10 +205,12 @@ impl OpenAINativeCompactionMode {
             "explicit" | "manual" => Self::Explicit,
             "off" | "disabled" | "none" => Self::Off,
             other => {
-                jcode_base::logging::warn(&format!(
-                    "Unknown OpenAI native compaction mode '{}'; using auto. Use: auto, explicit, or off.",
-                    other
-                ));
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openai_native_compaction",
+                    other,
+                    "auto",
+                    "auto|explicit|off",
+                );
                 Self::Auto
             }
         }
@@ -736,10 +740,12 @@ impl OpenAIProvider {
             // by `api_reasoning_effort`.
             "none" | "low" | "medium" | "high" | "xhigh" | "swarm" | "swarm-deep" => Some(value),
             other => {
-                jcode_base::logging::info(&format!(
-                    "Warning: Unsupported OpenAI reasoning effort '{}'; expected none|low|medium|high|xhigh. Using 'xhigh'.",
-                    other
-                ));
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openai_reasoning_effort",
+                    other,
+                    "xhigh",
+                    "none|low|medium|high|xhigh|swarm|swarm-deep",
+                );
                 Some("xhigh".to_string())
             }
         }
@@ -810,11 +816,13 @@ impl OpenAIProvider {
         let raw = raw?;
         match Self::normalize_service_tier(raw) {
             Ok(value) => value,
-            Err(err) => {
-                jcode_base::logging::warn(&format!(
-                    "{}; ignoring configured service tier override",
-                    err
-                ));
+            Err(_) => {
+                jcode_base::config::warn_once_configured_string_fallback(
+                    "provider.openai_service_tier",
+                    raw.trim(),
+                    "none",
+                    "priority|fast|flex|default|off",
+                );
                 None
             }
         }

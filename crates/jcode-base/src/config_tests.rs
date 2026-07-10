@@ -1,5 +1,5 @@
 use super::{
-    AmbientConfig, Config, DiffDisplayMode, DisplayConfig, ProviderConfig,
+    AcpConfig, AmbientConfig, Config, DiffDisplayMode, DisplayConfig, ProviderConfig,
     SessionPickerResumeAction, SwarmSpawnMode, ToolConfig, WarnOnce, config_env_fingerprint,
     populate_context_limits_from_config_ref,
 };
@@ -1049,4 +1049,37 @@ fn warn_once_fires_exactly_once_across_repeated_calls() {
     for _ in 0..5 {
         assert!(!guard.should_fire(), "subsequent calls must not fire");
     }
+}
+
+#[test]
+fn wi4_keyed_config_fallback_warning_only_fires_once_per_setting_raw_fallback() {
+    let setting = "wi4.test.setting";
+    let raw = "bogus-wi4-once";
+    assert!(crate::config::warn_once_configured_string_fallback(
+        setting,
+        raw,
+        "fallback-a",
+        "fallback-a|known"
+    ));
+    assert!(!crate::config::warn_once_configured_string_fallback(
+        setting,
+        raw,
+        "fallback-a",
+        "fallback-a|known"
+    ));
+    assert!(crate::config::warn_once_configured_string_fallback(
+        setting,
+        raw,
+        "fallback-b",
+        "fallback-b|known"
+    ));
+}
+
+#[test]
+fn wi4_acp_profile_parser_preserves_aliases_and_fallback() {
+    let mut cfg = AcpConfig::default();
+    cfg.profile = " extended ".to_string();
+    assert_eq!(cfg.normalized_profile(), "extended");
+    cfg.profile = "bogus-wi4-acp".to_string();
+    assert_eq!(cfg.normalized_profile(), "standard");
 }

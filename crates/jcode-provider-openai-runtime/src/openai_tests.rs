@@ -200,3 +200,41 @@ fn openai_credential_mode_runtime_provider_identity_round_trips() {
         None => jcode_base::env::remove_var("JCODE_RUNTIME_PROVIDER"),
     }
 }
+
+#[test]
+fn wi4_openai_config_parsers_preserve_aliases_and_fallbacks() {
+    assert!(matches!(
+        OpenAITransportMode::from_config(Some(" ws ")),
+        OpenAITransportMode::WebSocket
+    ));
+    assert!(matches!(
+        OpenAITransportMode::from_config(Some("bogus-wi4-openai-transport")),
+        OpenAITransportMode::Auto
+    ));
+
+    assert!(matches!(
+        OpenAINativeCompactionMode::from_config("manual"),
+        OpenAINativeCompactionMode::Explicit
+    ));
+    assert!(matches!(
+        OpenAINativeCompactionMode::from_config("bogus-wi4-compaction"),
+        OpenAINativeCompactionMode::Auto
+    ));
+
+    assert_eq!(
+        OpenAIProvider::normalize_reasoning_effort("swarm-deep").as_deref(),
+        Some("swarm-deep")
+    );
+    assert_eq!(
+        OpenAIProvider::normalize_reasoning_effort("bogus-wi4-reasoning").as_deref(),
+        Some("xhigh")
+    );
+
+    assert_eq!(
+        OpenAIProvider::normalize_service_tier("fast")
+            .unwrap()
+            .as_deref(),
+        Some("priority")
+    );
+    assert!(OpenAIProvider::load_service_tier(Some("bogus-wi4-tier")).is_none());
+}

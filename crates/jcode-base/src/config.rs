@@ -534,6 +534,28 @@ impl Default for AcpConfig {
     }
 }
 
+impl AcpConfig {
+    /// Normalized ACP compatibility profile. Unknown configured values preserve
+    /// the existing permissive fallback to `standard`, but are now observable.
+    pub fn normalized_profile(&self) -> &str {
+        let profile = self.profile.trim().to_ascii_lowercase();
+        match profile.as_str() {
+            "" | "standard" => "standard",
+            "extended" => "extended",
+            "full" => "full",
+            other => {
+                warn_once_configured_string_fallback(
+                    "acp.profile",
+                    other,
+                    "standard",
+                    "standard|extended|full",
+                );
+                "standard"
+            }
+        }
+    }
+}
+
 /// Controls which tools are sent to the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -716,6 +738,33 @@ pub(crate) struct WarnOnce {
     fired: std::sync::atomic::AtomicBool,
 }
 
+static WARNED_CONFIG_FALLBACKS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashSet<(String, String, String)>>,
+> = std::sync::OnceLock::new();
+
+/// Emit a warning at most once for a parser-owned configured string fallback.
+///
+/// The key is exactly the WI-4 contract: setting + raw configured value +
+/// selected fallback. Runtime parsers remain the source of truth for aliases and
+/// fallback values; this helper only de-duplicates the observable warning.
+pub fn warn_once_configured_string_fallback(
+    setting: &str,
+    raw: &str,
+    fallback: &str,
+    expected: &str,
+) -> bool {
+    let key = (setting.to_string(), raw.to_string(), fallback.to_string());
+    let warned = WARNED_CONFIG_FALLBACKS.get_or_init(|| std::sync::Mutex::new(Default::default()));
+    if !warned.lock().unwrap().insert(key) {
+        return false;
+    }
+    crate::logging::warn(&format!(
+        "Unrecognized {} '{}'; expected {}. Using '{}'.",
+        setting, raw, expected, fallback
+    ));
+    true
+}
+
 impl WarnOnce {
     pub(crate) const fn new() -> Self {
         Self {
@@ -742,14 +791,12 @@ impl WarnOnce {
 /// value that silently falls back to the full tool surface. The accepted
 /// vocabulary is unchanged; this only makes the silent fallback observable.
 fn warn_once_unrecognized_tool_profile(profile: &str) {
-    static WARNED: WarnOnce = WarnOnce::new();
-    if !WARNED.should_fire() {
-        return;
-    }
-    crate::logging::warn(&format!(
-        "Unrecognized tools.profile '{}'; expected full|acp|minimal|lite|none. Using 'full'.",
-        profile
-    ));
+    warn_once_configured_string_fallback(
+        "tools.profile",
+        profile,
+        "full",
+        "full|acp|minimal|lite|none",
+    );
 }
 
 /// External dictation / speech-to-text integration.

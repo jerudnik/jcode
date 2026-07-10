@@ -306,12 +306,8 @@ fn detect() -> SystemProfile {
         &terminal,
     );
 
-    let tier = match crate::config::config().display.performance.as_str() {
-        "full" => PerformanceTier::Full,
-        "reduced" => PerformanceTier::Reduced,
-        "minimal" => PerformanceTier::Minimal,
-        _ => auto_tier,
-    };
+    let tier =
+        performance_tier_from_config(&crate::config::config().display.performance, auto_tier);
 
     SystemProfile {
         load_avg_1m,
@@ -323,6 +319,27 @@ fn detect() -> SystemProfile {
         fragile_glyph_cache: detect_fragile_glyph_cache(&terminal),
         terminal,
         tier,
+    }
+}
+
+fn performance_tier_from_config(
+    configured_performance: &str,
+    auto_tier: PerformanceTier,
+) -> PerformanceTier {
+    match configured_performance.trim().to_ascii_lowercase().as_str() {
+        "full" => PerformanceTier::Full,
+        "reduced" => PerformanceTier::Reduced,
+        "minimal" => PerformanceTier::Minimal,
+        "" | "auto" => auto_tier,
+        other => {
+            jcode_base::config::warn_once_configured_string_fallback(
+                "display.performance",
+                other,
+                auto_tier.label(),
+                "auto|full|reduced|minimal",
+            );
+            auto_tier
+        }
     }
 }
 
@@ -895,5 +912,20 @@ mod tests {
                 std::env::set_var("JCODE_GLYPH_SAFE_MODE", prev);
             }
         }
+    }
+    #[test]
+    fn wi4_display_performance_preserves_aliases_and_fallback() {
+        assert_eq!(
+            performance_tier_from_config(" FULL ", PerformanceTier::Minimal),
+            PerformanceTier::Full
+        );
+        assert_eq!(
+            performance_tier_from_config("auto", PerformanceTier::Reduced),
+            PerformanceTier::Reduced
+        );
+        assert_eq!(
+            performance_tier_from_config("bogus-wi4-display", PerformanceTier::Reduced),
+            PerformanceTier::Reduced
+        );
     }
 }

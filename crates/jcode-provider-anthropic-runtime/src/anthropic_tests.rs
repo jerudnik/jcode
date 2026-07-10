@@ -1781,3 +1781,19 @@ fn ping_keepalive_emits_streaming_phase_event() {
         "expected ping to emit a Streaming ConnectionPhase event, got {events:?}"
     );
 }
+
+#[test]
+fn wi4_anthropic_configured_reasoning_preserves_aliases_and_fallback() {
+    assert_eq!(
+        AnthropicProvider::normalize_reasoning_effort("OFF").as_deref(),
+        Some("none")
+    );
+    assert_eq!(
+        AnthropicProvider::normalize_reasoning_effort("swarm-deep").as_deref(),
+        Some("swarm-deep")
+    );
+    assert_eq!(
+        AnthropicProvider::normalize_reasoning_effort("bogus-wi4-anthropic").as_deref(),
+        Some("max")
+    );
+}
