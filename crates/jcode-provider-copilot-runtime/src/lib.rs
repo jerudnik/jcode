@@ -35,6 +35,21 @@ enum CatalogSource {
     Live,
 }
 
+/// Warn exactly once, process-wide, when `JCODE_COPILOT_PREMIUM` holds an
+/// unrecognized value that silently falls back to normal mode. The accepted
+/// vocabulary (`0`/`1`, plus the config-side `zero`/`one` mapping) is unchanged;
+/// this only makes the silent fallback observable.
+fn warn_once_unrecognized_copilot_premium(value: &str) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    jcode_base::logging::warn(&format!(
+        "Unrecognized JCODE_COPILOT_PREMIUM '{}'; expected 0 or 1. Using normal mode.",
+        value
+    ));
+}
+
 /// Copilot API provider - uses GitHub Copilot's OpenAI-compatible API.
 /// Authenticates via GitHub OAuth token, exchanges for Copilot bearer token,
 /// and sends requests to api.githubcopilot.com.
@@ -151,6 +166,10 @@ impl CopilotApiProvider {
         match std::env::var("JCODE_COPILOT_PREMIUM").ok().as_deref() {
             Some("0") => PremiumMode::Zero as u8,
             Some("1") => PremiumMode::OnePerSession as u8,
+            Some(other) if !other.trim().is_empty() => {
+                warn_once_unrecognized_copilot_premium(other);
+                PremiumMode::Normal as u8
+            }
             _ => PremiumMode::Normal as u8,
         }
     }

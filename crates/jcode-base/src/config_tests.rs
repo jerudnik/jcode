@@ -1,6 +1,6 @@
 use super::{
     AmbientConfig, Config, DiffDisplayMode, DisplayConfig, ProviderConfig,
-    SessionPickerResumeAction, SwarmSpawnMode, ToolConfig, config_env_fingerprint,
+    SessionPickerResumeAction, SwarmSpawnMode, ToolConfig, WarnOnce, config_env_fingerprint,
     populate_context_limits_from_config_ref,
 };
 use std::ffi::OsString;
@@ -933,4 +933,120 @@ fn populate_context_limits_from_config_seeds_qualified_runtime_model_shapes() {
         Some(131_072),
         "profile-qualified slash-path spec must resolve the configured context_window"
     );
+}
+
+// ---------------------------------------------------------------------------
+// WI-4: observable config parsing (unknown keys), the one load-time
+// normalization (memory_embedding_backend), and warn-once semantics.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unknown_top_level_and_nested_config_keys_are_collected() {
+    let toml = "\
+redraw_fpss = 30\n\
+[display]\n\
+redraw_fps = 45\n\
+totally_unknown = true\n\
+[provider]\n\
+default_model = \"gpt-5.5\"\n";
+    let (config, unknown) =
+        Config::parse_toml_collecting_unknown(toml).expect("permissive parse should succeed");
+    // Known keys still deserialize.
+    assert_eq!(config.display.redraw_fps, 45);
+    assert_eq!(config.provider.default_model.as_deref(), Some("gpt-5.5"));
+    // Unknown keys are collected, sorted, and deduped.
+    let collected: Vec<&str> = unknown.iter().map(String::as_str).collect();
+    assert_eq!(collected, vec!["display.totally_unknown", "redraw_fpss"]);
+}
+
+#[test]
+fn fully_known_config_produces_no_unknown_keys() {
+    let toml = "\
+[display]\n\
+redraw_fps = 45\n\
+animation_fps = 30\n\
+[provider]\n\
+default_model = \"gpt-5.5\"\n";
+    let (_config, unknown) =
+        Config::parse_toml_collecting_unknown(toml).expect("known-only parse should succeed");
+    assert!(
+        unknown.is_empty(),
+        "expected no unknown keys, got: {:?}",
+        unknown
+    );
+}
+
+#[test]
+fn malformed_config_returns_parse_error_and_no_keys() {
+    // Missing closing quote -> syntactically invalid TOML.
+    let toml = "[provider]\ndefault_model = \"unterminated\n";
+    let result = Config::parse_toml_collecting_unknown(toml);
+    assert!(
+        result.is_err(),
+        "malformed TOML must return the underlying parse error"
+    );
+}
+
+#[test]
+fn memory_embedding_backend_normalizes_case_from_file() {
+    for raw in ["OpenAI", "OPENAI", "  openai  "] {
+        let toml = format!("[agents]\nmemory_embedding_backend = \"{raw}\"\n");
+        let (mut config, _unknown) =
+            Config::parse_toml_collecting_unknown(&toml).expect("parse should succeed");
+        config.normalize_memory_embedding_backend();
+        assert_eq!(
+            config.agents.memory_embedding_backend, "openai",
+            "'{raw}' should normalize to exact lowercase 'openai'"
+        );
+    }
+
+    let toml = "[agents]\nmemory_embedding_backend = \"LOCAL\"\n";
+    let (mut config, _unknown) =
+        Config::parse_toml_collecting_unknown(toml).expect("parse should succeed");
+    config.normalize_memory_embedding_backend();
+    assert_eq!(config.agents.memory_embedding_backend, "local");
+}
+
+#[test]
+fn memory_embedding_backend_garbage_falls_back_to_local() {
+    let toml = "[agents]\nmemory_embedding_backend = \"garbage\"\n";
+    let (mut config, _unknown) =
+        Config::parse_toml_collecting_unknown(toml).expect("parse should succeed");
+    config.normalize_memory_embedding_backend();
+    assert_eq!(
+        config.agents.memory_embedding_backend, "local",
+        "unrecognized backend must fall back to 'local'"
+    );
+}
+
+#[test]
+fn memory_embedding_backend_normalizes_env_reintroduced_bad_value() {
+    // Env override can reintroduce a bad value; the normalizer runs AFTER
+    // apply_env_overrides so this must still land on a valid backend.
+    let key = "JCODE_MEMORY_EMBEDDING_BACKEND";
+    let previous = std::env::var_os(key);
+    crate::env::set_var(key, "OpenAI");
+    let mut config = Config::default();
+    config.apply_env_overrides();
+    // Sanity: env override applied the raw (mixed-case) value.
+    assert_eq!(config.agents.memory_embedding_backend, "OpenAI");
+    config.normalize_memory_embedding_backend();
+    assert_eq!(config.agents.memory_embedding_backend, "openai");
+
+    crate::env::set_var(key, "garbage");
+    let mut config = Config::default();
+    config.apply_env_overrides();
+    config.normalize_memory_embedding_backend();
+    assert_eq!(config.agents.memory_embedding_backend, "local");
+
+    restore_env_var(key, previous);
+}
+
+#[test]
+fn warn_once_fires_exactly_once_across_repeated_calls() {
+    let guard = WarnOnce::new();
+    assert!(guard.should_fire(), "first call must fire");
+    for _ in 0..5 {
+        assert!(!guard.should_fire(), "subsequent calls must not fire");
+    }
 }

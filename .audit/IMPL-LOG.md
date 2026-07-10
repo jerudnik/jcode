@@ -129,3 +129,25 @@
   - `nix develop --command cargo fmt --all` -> exit 0; `git diff --check` -> exit 0.
   - Only pre-existing dead-code warnings were emitted.
 - Exact next stage: WI-4.
+
+## 2026-07-10 — WI-4: observable config parsing, load-time backend normalization, runtime warn-once
+
+- Files: `crates/jcode-base/Cargo.toml` (+`serde_ignored = "0.1"`), `Cargo.lock`, `crates/jcode-base/src/config/config_file.rs`, `crates/jcode-base/src/config.rs`, `crates/jcode-base/src/config/env_overrides.rs`, `crates/jcode-base/src/config_tests.rs`, `crates/jcode-config-types/src/lib.rs`, `crates/jcode-provider-copilot-runtime/src/lib.rs`.
+- Part A (unknown-key observability): extracted pure `Config::parse_toml_collecting_unknown(&str) -> Result<(Self, BTreeSet<String>), toml::de::Error>` using `serde_ignored::deserialize(toml::Deserializer::new(..), collector)`. `load_from_file_strict` now calls it, emits one `logging::warn("Unknown config key '<path>' ignored")` per sorted/deduped path AFTER successful deserialize; malformed TOML still returns the original parse error with zero warnings (BTreeSet gives sort+dedup; error path emits nothing).
+- Part B (one load-time normalization): added `Config::normalize_memory_embedding_backend()` normalizing `agents.memory_embedding_backend` to exact lowercase `local`/`openai`; any other value warns (field, bad value, accepted domain, applied `local` fallback). Called after `apply_env_overrides()` in BOTH `Config::load` and `Config::load_strict`, so an env-reintroduced bad value is still normalized.
+- Part C (runtime warn-once on silent fallbacks): added reusable `WarnOnce` guard (const-new atomic, `should_fire()` fires exactly once) in `config.rs`; `tools.profile` unrecognized branch now warns once via `warn_once_unrecognized_tool_profile` (vocabulary full|acp|minimal|lite|small|none|off|disabled unchanged; only the previously-silent else arm warns, excluding empty and `full`). Copilot premium: `env_premium_mode` (`JCODE_COPILOT_PREMIUM`) and `env_overrides` config->env propagation (`provider.copilot_premium`) each got a warn-once on unrecognized non-empty values (accepted `0`/`1` and `normal`/`one`/`zero` unchanged).
+  - NOTE / adaptation: the other listed Part C parsers were NOT silent and were left as-is with no vocabulary change:
+    - openai-runtime transport (`logging::warn`), native compaction (`logging::warn`), reasoning effort (`logging::info` "Using 'xhigh'"), service tier (`normalize_service_tier` returns Err -> `load_service_tier` warns), max output tokens (`logging::warn`) already emit on unrecognized input.
+    - anthropic-runtime reasoning effort already emits `logging::info` "Using the model maximum"; its service-tier normalizer already returns Err (left untouched per instructions).
+    - openrouter-runtime DeepSeek + unified reasoning normalizers already emit `logging::info`; both accept `max` (unified maps it to `xhigh`) so no false-positive warning on the `max` alias.
+  - Adding a second warn there would have been redundant/noisy, so per the "already error loudly -> note it" escape hatch, only the genuinely-silent `tools.profile` and copilot-premium fallbacks got new warn-once guards.
+- Part D: `DisplayConfig::redraw_fps` rustdoc corrected from "default: 30" to "default: 60" (matches the `Default` impl).
+- Tests (config_tests.rs, +6): unknown top-level+nested keys collected/sorted/deduped; known-only config yields empty set; malformed TOML returns Err with no keys; `OpenAI`/`OPENAI`/whitespace/`LOCAL` -> exact lowercase, `garbage` -> `local`, env-reintroduced `OpenAI`/`garbage` normalized after `apply_env_overrides`; `WarnOnce` fires exactly once across repeated calls. No new env keys added, so `config_env_fingerprint_tracks_every_apply_env_override_var` needed no change (still green).
+- Validation:
+  - `nix develop --command cargo test -p jcode-config-types` -> exit 0; 16 passed, doc 0.
+  - `nix develop --command cargo test -p jcode-base --lib config` -> exit 0; 99 passed, 0 failed (6 new WI-4 tests included).
+  - `nix develop --command cargo check -p jcode-base -p jcode-provider-openai-runtime -p jcode-provider-anthropic-runtime -p jcode-provider-openrouter-runtime -p jcode-provider-copilot-runtime` -> exit 0.
+  - `nix develop --command cargo fmt --all && git diff --check` -> exit 0.
+  - Only the pre-existing `KILLALL_PROCESS_NAME` dead-code warning was emitted.
+- Cargo.lock changed for `serde_ignored` only (committed with this change); flake.lock untouched.
+- Exact next stage: WI-5.

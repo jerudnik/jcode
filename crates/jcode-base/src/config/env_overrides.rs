@@ -720,13 +720,33 @@ impl Config {
             let env_val = match mode.as_str() {
                 "zero" | "0" => "0",
                 "one" | "1" => "1",
-                _ => "",
+                other => {
+                    if !other.trim().is_empty() && other != "normal" {
+                        warn_once_unrecognized_copilot_premium_config(other);
+                    }
+                    ""
+                }
             };
             if !env_val.is_empty() {
                 crate::env::set_var("JCODE_COPILOT_PREMIUM", env_val);
             }
         }
     }
+}
+
+/// Warn exactly once, process-wide, when `provider.copilot_premium` holds an
+/// unrecognized value that silently fails to propagate to the env var. The
+/// accepted vocabulary (`normal`/`zero`/`one`, plus `0`/`1`) is unchanged; this
+/// only makes the silent no-op observable.
+fn warn_once_unrecognized_copilot_premium_config(value: &str) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    crate::logging::warn(&format!(
+        "Unrecognized provider.copilot_premium '{}'; expected normal|one|zero. Using normal mode.",
+        value
+    ));
 }
 
 fn parse_env_bool(raw: &str) -> Option<bool> {

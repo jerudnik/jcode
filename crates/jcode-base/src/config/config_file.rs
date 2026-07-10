@@ -12,6 +12,7 @@ impl Config {
     pub fn load() -> Self {
         let mut config = Self::load_from_file().unwrap_or_default();
         config.apply_env_overrides();
+        config.normalize_memory_embedding_backend();
         config
     }
 
@@ -22,6 +23,7 @@ impl Config {
     pub fn load_strict() -> anyhow::Result<Self> {
         let mut config = Self::load_from_file_strict()?.unwrap_or_default();
         config.apply_env_overrides();
+        config.normalize_memory_embedding_backend();
         Ok(config)
     }
 
@@ -47,11 +49,68 @@ impl Config {
 
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", path.display(), e))?;
-        let mut config = toml::from_str::<Self>(&content).map_err(|e| {
-            anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
-        })?;
+
+        // Parse permissively (version-skew tolerance by design) while collecting
+        // any unknown/ignored key paths so we can surface them for observability.
+        // Warnings are emitted ONLY after a successful deserialization: a
+        // malformed TOML must return the original parse error with no partial
+        // warning spam.
+        let (mut config, unknown_keys) =
+            Self::parse_toml_collecting_unknown(&content).map_err(|e| {
+                anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
+            })?;
+
+        for key in &unknown_keys {
+            crate::logging::warn(&format!("Unknown config key '{}' ignored", key));
+        }
+
         config.display.apply_legacy_compat();
         Ok(Some(config))
+    }
+
+    /// Deserialize a config TOML string permissively, returning the parsed
+    /// config alongside the sorted/deduped set of unknown (ignored) key paths.
+    ///
+    /// Extracted as a pure function so unknown-key observability is unit-testable
+    /// without touching the on-disk config path or the logging sink. Malformed
+    /// TOML returns the underlying parse error (and no keys); the caller is
+    /// responsible for emitting one warning per returned key.
+    pub(crate) fn parse_toml_collecting_unknown(
+        content: &str,
+    ) -> Result<(Self, std::collections::BTreeSet<String>), toml::de::Error> {
+        let mut unknown_keys: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        let config: Self = serde_ignored::deserialize(toml::Deserializer::new(content), |path| {
+            unknown_keys.insert(path.to_string());
+        })?;
+        Ok((config, unknown_keys))
+    }
+
+    /// Normalize `agents.memory_embedding_backend` to exactly `"local"` or
+    /// `"openai"`.
+    ///
+    /// This is the one genuine load-time normalization: WI-5 depends on the
+    /// invariant that the stored value is always one of those two exact
+    /// lowercase strings. Any other value warns and falls back to `"local"`.
+    /// Applied after file parse AND after env overrides (env can reintroduce a
+    /// bad value), so it must run in both `load` and `load_strict`.
+    pub(crate) fn normalize_memory_embedding_backend(&mut self) {
+        let raw = self.agents.memory_embedding_backend.trim();
+        let normalized = raw.to_ascii_lowercase();
+        match normalized.as_str() {
+            "local" | "openai" => {
+                if self.agents.memory_embedding_backend != normalized {
+                    self.agents.memory_embedding_backend = normalized;
+                }
+            }
+            _ => {
+                crate::logging::warn(&format!(
+                    "Invalid agents.memory_embedding_backend '{}'; expected 'local' or 'openai'. Using 'local'.",
+                    raw
+                ));
+                self.agents.memory_embedding_backend = "local".to_string();
+            }
+        }
     }
 
     /// Save config to file
