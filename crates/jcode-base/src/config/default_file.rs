@@ -378,6 +378,7 @@ swarm_max_concurrent_agents = 32
 # Env override: JCODE_MEMORY_EMBEDDING_BACKEND
 # memory_embedding_backend = "local"
 # memory_embedding_model = "text-embedding-3-small"
+# memory_embedding_api_key_env = "OPENAI_API_KEY"
 # memory_embedding_base_url = "https://api.openai.com/v1"
 # memory_embedding_dim = 1536
 

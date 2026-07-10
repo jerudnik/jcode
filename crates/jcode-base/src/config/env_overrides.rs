@@ -347,6 +347,14 @@ impl Config {
                 Some(trimmed.to_string())
             };
         }
+        if let Ok(v) = std::env::var("JCODE_MEMORY_EMBEDDING_API_KEY_ENV") {
+            let trimmed = v.trim();
+            self.agents.memory_embedding_api_key_env = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+        }
         if let Ok(v) = std::env::var("JCODE_MEMORY_EMBEDDING_BASE_URL") {
             let trimmed = v.trim();
             self.agents.memory_embedding_base_url = if trimmed.is_empty() {

@@ -512,6 +512,11 @@ pub struct AgentsConfig {
     /// Unset = `text-embedding-3-small`. Env: `JCODE_MEMORY_EMBEDDING_MODEL`.
     #[serde(default)]
     pub memory_embedding_model: Option<String>,
+    /// Environment variable containing the bearer credential for the remote
+    /// embedding endpoint. Unset = `OPENAI_API_KEY`. Env:
+    /// `JCODE_MEMORY_EMBEDDING_API_KEY_ENV`.
+    #[serde(default)]
+    pub memory_embedding_api_key_env: Option<String>,
     /// Optional override for the embeddings API base URL (no trailing slash),
     /// for OpenAI-compatible gateways. Unset = `https://api.openai.com/v1`.
     /// Env: `JCODE_MEMORY_EMBEDDING_BASE_URL`.
@@ -581,6 +586,7 @@ impl Default for AgentsConfig {
             memory_rerank_min_agree: default_memory_rerank_min_agree(),
             memory_embedding_backend: default_memory_embedding_backend(),
             memory_embedding_model: None,
+            memory_embedding_api_key_env: None,
             memory_embedding_base_url: None,
             memory_embedding_dim: None,
             subagent_timeout_secs: default_subagent_timeout_secs(),
