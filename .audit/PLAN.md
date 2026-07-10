@@ -19,12 +19,13 @@ passed on that baseline. It is a prerequisite, not work to be repeated below.
   OpenAI and Claude arms contain real OAuth-only endpoint/fallback behavior.
   Removing the enum would be an unverified redesign. Instead, make the
   generic arm correctly fork a provider for the configured model.
-- **Use warn-and-normalize validation, not `deny_unknown_fields` or lenient
-  enum deserialization.** `Config::load()` deliberately survives stale config,
-  and `UpdateChannel` is a special reload-handoff compatibility exception.
-  Silently defaulting all bad strings would reproduce the defect. A single
-  post-load/post-env `Config::validate()` can warn and restore a documented
-  safe value.
+- **Use observable permissive parsing, not `deny_unknown_fields`.**
+  `Config::load()` deliberately survives stale config, and `UpdateChannel` is a
+  reload-handoff compatibility exception. Runtime-owned string parsers remain
+  authoritative for their aliases and fallbacks, but must warn once when an
+  unrecognized configured value falls back. Only the embedding-backend selector
+  is normalized at load time because WI-5 depends on an exact `local|openai`
+  value.
 - **Do not replace `CONFIG_ENV_KEYS` with a giant macro/table in this pass.**
   The current extraction test verifies every direct `apply_env_overrides`
   `std::env::var` reader is listed, while `CONFIG_ENV_KEYS` also correctly
@@ -109,230 +110,56 @@ error and must not be hidden.
 
 ---
 
-### WI-1 — Catalog-owned provider credentials and aliases
+### WI-1 — Provider credentials are config-first, one path
 
-- **Findings addressed:** A1, A2, A3.
-- **Dependencies:** None. It may land before or after the already-present
-  embedding `api_key_env` baseline, but does not modify that feature.
+- **Findings addressed:** A1, A2, A3, plus the catalog-provenance hole documented in `.audit/SOL-ASSESSMENT-R3.md`.
+- **Dependencies:** None. It may land before or after the already-present embedding `api_key_env` baseline, but does not modify that feature.
 
 #### Exact changes
 
-1. **`crates/jcode-provider-metadata/src/lib.rs`**
-   - Add `legacy_api_key_envs: &'static [&'static str]` to
-     `OpenAiCompatibleProfile`. This is deliberately a slice, not an
-     `Option`, so future aliases do not need another schema change.
-   - Add the corresponding owned field to `ResolvedOpenAiCompatibleProfile`.
-     Preserve it when resolving a static profile. Runtime OpenAI-compatible
-     overrides may change the primary key name but do not synthesize aliases.
-2. **`crates/jcode-provider-metadata/src/catalog.rs`**
-   - Populate `legacy_api_key_envs: &[]` on every profile.
-   - Set `ZAI_PROFILE.legacy_api_key_envs` to `&["ZAI_API_KEY"]` while retaining
-     primary `ZHIPU_API_KEY`.
-   - Change `MINIMAX_PROFILE.api_key_env` from `OPENAI_API_KEY` to
-     `MINIMAX_API_KEY`, matching `minimax.env` and the external-import map.
-   - Keep the OpenAI profile as the single primary owner of
-     `OPENAI_API_KEY`.
-3. **`crates/jcode-provider-env/src/lib.rs` — provenance-typed source, exact precedence**
-   - Replace the public bare-pair loader with the only public loading entrypoint,
-     `load_api_key(&ApiKeyCredentialSource)`. Make
-     `load_api_key_from_env_or_config(&str, &str)` private to
-     `jcode-provider-env` (or delete it after moving its scanner body), so no
-     other crate can give a catalog profile's two strings to a primary-only
-     loader. Add a public credential-source type that cannot erase catalog
-     aliases:
+1. **Make profile-aware credential loading the single catalog path.**
+   - Add ordered legacy credential aliases to static and resolved OpenAI-compatible profiles. Z.AI keeps primary `ZHIPU_API_KEY` with the one real legacy alias `ZAI_API_KEY`.
+   - Correct MiniMax from the erroneous `OPENAI_API_KEY` primary to `MINIMAX_API_KEY`.
+   - Expose one typed, profile-aware credential source/loading path for every caller holding an `OpenAiCompatibleProfile` or `ResolvedOpenAiCompatibleProfile`.
+   - Make the lossy bare `(api_key_env, env_file)` loader private or otherwise unreachable outside `jcode-provider-env`. Reserve primary-only credential sources for genuinely non-catalog origins such as Azure, Bedrock, named-user profiles, and explicit user env overrides.
+   - Preserve the exact lookup order: primary process env, primary env-file entry, then each metadata alias in declaration order with process env before env-file entry. Apply the common secret sanitation to every candidate.
 
-     ```rust
-     enum ApiKeyCredentialSource {
-         Catalog(CatalogCredentialSource),
-         PrimaryOnly(PrimaryOnlyCredentialSource),
-     }
-     ```
+2. **Carry typed catalog provenance through OpenRouter auth.**
+   - Do not use the presence of `JCODE_OPENROUTER_*` variables as the provenance boundary. `apply_openai_compatible_profile_env` currently writes internally selected catalog profiles into those variables during startup, which makes catalog activation indistinguishable from a genuine user override if strings are re-read later.
+   - Carry a typed catalog-profile credential source through `OpenRouterProvider::new`, `resolve_auth`, and `get_api_key`. Internally activated/default catalog profiles must retain their aliases even when startup compatibility variables have been populated.
+   - Genuine explicit `JCODE_OPENROUTER_API_KEY_NAME` / `JCODE_OPENROUTER_ENV_FILE` overrides and named user profiles remain primary-only.
+   - Delete the hardcoded `ZHIPU_API_KEY` special case only after every profile-holding consumer uses the typed path.
 
-     `CatalogCredentialSource` is constructible only from
-     `OpenAiCompatibleProfile` or `ResolvedOpenAiCompatibleProfile` and carries
-     the primary plus `legacy_api_key_envs`. Its profile-aware constructors and
-     loader are the **only public API that accepts either profile type**.
-     `PrimaryOnlyCredentialSource` has private fields and no generic
-     `(env_key, env_file)` constructor. Give it explicit provenance variants or
-     constructors only for known non-catalog origins: OpenRouter explicit
-     runtime overrides, active named user profiles, Azure, Bedrock, and other
-     direct-provider configurations. These constructors receive their owning
-     typed config/origin, not a catalog profile. This makes a catalog profile
-     unable to reach the primary-only path by construction, while preserving
-     deliberately primary-only behavior for named user profiles and explicit
-     `JCODE_OPENROUTER_API_KEY_NAME`/`JCODE_OPENROUTER_ENV_FILE` overrides.
-     `load_api_key(source)` dispatches to the private ordered candidate scanner.
-   - Preserve the source-proven total order, rather than merely saying
-     "primary first": **primary process env -> primary env-file entry -> each
-     alias in declared metadata order, alias process env -> alias env-file
-     entry**. This is the existing Z.AI order in `jcode-provider-env/src/lib.rs`
-     101-135. Apply the existing `clean_loaded_value` sanitation at every
-     candidate. Tests must distinguish alias-env from primary-file precedence.
-   - Delete the `if env_key == "ZHIPU_API_KEY"` leaf special case (120-135) only
-     after every catalog source below uses `load_api_key(ApiKeyCredentialSource)`.
-     Do not wire the dormant fallback-resolver registry into this behavior.
-4. **`crates/jcode-base/src/provider_catalog.rs`**
-   - Re-export the typed source and profile-aware loader. Change
-     `openrouter_like_api_key_sources()` from `Vec<(String, String)>` to
-     `Vec<ApiKeyCredentialSource>`: static catalog entries are profile variants,
-     while OpenRouter and runtime-configured values are explicitly `PrimaryOnly`.
-     This corrects the present alias-erasing producer at 802-837 before
-     `external_auth.rs` consumes it.
-   - Add profile-aware source-description helpers for status UI. A resolved
-     catalog profile must report its primary and all alias candidate names in
-     order, rather than claiming only `resolved.api_key_env` is possible.
-5. **OpenAI literal consumers in `jcode-base`**
-   - In `src/auth/codex.rs::load_env_api_key`, replace the raw
-     `std::env::var("OPENAI_API_KEY").trim()` branch and the literal fallback
-     with one profile-aware call using `OPENAI_COMPAT_PROFILE`. This makes its
-     sanitation exactly match the common loader.
-   - In `src/auth/mod.rs::openai_api_key_configured` and
-     `src/provider/pricing.rs::openai_effective_auth_mode`, replace the
-     `OPENAI_API_KEY`/`openai.env` literals with the same catalog profile and
-     loader. Keep pricing's OAuth-vs-key decision unchanged.
-   - Replace remaining OpenAI-primary literal *reads* in the audited paths
-     with the catalog profile. `usage/api_keys.rs` is **not** already correct:
-     its `configured_key(&str, &str)` and profile loop discard aliases
-     (`usage/api_keys.rs:17-19,94-99,200-238`). Split it into an explicit
-     `configured_primary_key` helper for genuine literals and
-     `configured_profile_key(profile)` for catalog entries.
-6. **Exhaustive catalog/resolved-profile migration table**
+3. **Migrate every profile-holding consumer rather than reconstructing pairs.**
+   - Update OpenRouter runtime autodetection, refresh, default construction, and dedicated compatible-profile construction.
+   - Update base catalog/configuration probes, auth status/lifecycle, usage reporting, pricing, live tests, Codex/OpenAI key reads, external-auth validation, provider doctor/init/auth-test CLI paths, provider-doctor lifecycle, and TUI credential migration wherever the source already owns a static or resolved profile.
+   - `openrouter_like_api_key_sources()` returns typed sources rather than string pairs. Diagnostics and prompts derive candidate names from the typed source.
+   - Alias discovery is read-only compatibility. Login/save/sync continues writing only the canonical primary key and env file.
 
-   The table is a merge checklist, not illustrative "especially" wording. Each
-   cited site demonstrably already possesses an `OpenAiCompatibleProfile` or a
-   `ResolvedOpenAiCompatibleProfile`, so the profile-aware source is reachable
-   without guessing a profile from a pair. Replace every listed pair-loader call
-   with `load_api_key(ApiKeyCredentialSource::...)`; the only retained pair
-   loader uses are the explicitly non-catalog `PrimaryOnly` cases described
-   above.
+4. **Tests and mechanical guard.**
+   - Metadata tests assert catalog primary env names are unique, MiniMax owns `MINIMAX_API_KEY`, and OpenAI alone owns `OPENAI_API_KEY`.
+   - Loader tests cover primary-env/file precedence over aliases, alias declaration order, alias env/file loading, sanitation, MiniMax/OpenAI isolation, and genuine primary-only controls.
+   - Add a guard that fails if a catalog/resolved-profile-holding call site can reach the bare pair loader. Type/API privacy is the primary invariant, with a focused source audit/compile-fail guard as a backstop.
+   - Add the required end-to-end regression: activate Z.AI with only `ZAI_API_KEY` through `apply_openai_compatible_profile_env` or default-provider startup, construct the default OpenRouter runtime, and prove `resolve_auth -> get_api_key` retains bearer auth after removal of the leaf special case.
+   - Keep explicit override and named-user controls proving those sources do not probe catalog aliases.
 
-   | Consumer and source proof | Object in hand | Required replacement / behavior |
-   |---|---|---|
-   | `jcode-provider-openrouter-runtime/src/lib.rs::autodetected_openai_compatible_profile` (95-128), background refresh (761-788), and `new_openai_compatible_profile_runtime` (1588-1619) | `compat`/`resolved` is a resolved profile at each pair call | Use resolved-profile source for detection, refresh auth, and the dedicated profile request runtime. For errors/labels, name primary plus aliases, so alias-only Z.AI works end-to-end. |
-   | `jcode-provider-openrouter-runtime/src/lib.rs::OpenRouterProvider::new` (1453-1545) through `resolve_auth`/`get_api_key` (2305-2373) | `new` already computes one `autodetected_profile`, but the downstream helpers discard it and reconstruct primary strings through `configured_api_key_name`/`configured_env_file_name` (146-179) | Construct one `ApiKeyCredentialSource` beside `autodetected_profile` and pass `&source` into `resolve_auth` and `get_api_key`; do not recompute configured primary strings. The resolved catalog source must remain intact through the actual default request-auth construction. When autodetection is disabled by an explicit `JCODE_OPENROUTER_API_KEY_NAME` or `JCODE_OPENROUTER_ENV_FILE`, construct the explicit-override `PrimaryOnlyCredentialSource`; keep `new_named_openai_compatible`/`load_named_profile_api_key` (1245-1266, 182-199) on the named-user `PrimaryOnlyCredentialSource`. Refactor base `provider/openrouter.rs::get_api_key` (57-61) to use the same source-selection helper for status/readiness consistency. |
-   | `jcode-base/src/usage/api_keys.rs::enqueue_api_key_usage_tasks` (94-113) and `fetch_compatible_profile_report` (200-238) | Loop/fn parameter is static `profile` | Use static-profile source in every configured/balance/probe check. |
-   | `jcode-base/src/usage.rs::activity_source_has_dedicated_report` (345-369) | `openai_compatible_profile_by_id` returns `profile` | Profile loader decides sweeper eligibility. |
-   | `jcode-base/src/provider/openrouter.rs::autodetected_openai_compatible_profile` and configured key flow (81-156) | `compat`/each candidate is resolved profile | Keep profile object through credential lookup instead of extracting `api_key_env`/`env_file`; explicit OpenRouter runtime env remains `PrimaryOnly`. |
-   | `jcode-app-core/src/external_auth.rs::validate_openrouter_like_import` (536-543) | Producer must now return typed sources | Iterate sources and call `load_api_key(source)`, using `source.primary_env_key()` only for safe display. |
-   | `jcode-base/src/auth/mod.rs` status detail (490-500) and source assessment (714-738) | `resolved` profile | Profile loader determines optional-key availability; status includes ordered alias candidates rather than reporting primary only. |
-   | `jcode-base/src/auth/lifecycle.rs::api_key_env_bindings_for_provider` and sync (797-859,872-915) | Lookup resolves a catalog profile | Replace its catalog branch with a typed profile source for reads. **Aliases are discovery-only:** login saves/syncs only the canonical primary key/file, never writes or overwrites a legacy alias. Primary env/file then outranks legacy aliases by the preserved total order. |
-   | `jcode-base/src/live_tests.rs::provider_has_credential` (1719-1730) | `profile` then `resolved` | Use resolved-profile loader for monitoring annotation. |
-   | `jcode-provider-doctor/src/lifecycle_driver.rs::live_opencode_api_key` and `live_openai_compatible_api_key` (616-646) | `resolved` profile | Use resolved-profile loader before constructing redacted live-test auth metadata. |
-   | `jcode-tui/src/tui/app/auth_account_commands.rs::save_openai_compat_setting` (803-808) | `old` is resolved profile | Read old credential through resolved-profile source before settings migration. |
-   | `src/cli/provider_doctor.rs::run_provider_doctor_command` (47-68) | It resolves the catalog `profile` to `resolved`, then passes `resolved.api_key_env` and `resolved.env_file` to the pair loader | Load the resolved-profile source. Build the missing-credential diagnostic from its ordered candidate description so alias-only Z.AI is correctly recognized and reported. |
-   | `src/cli/auth_test/choice.rs::discover_openai_compatible_validation_model` (131-146) | Its parameter is `&ResolvedOpenAiCompatibleProfile`, then it pair-loads the primary fields before the live `/models` request | Load that resolved profile directly through the profile-aware loader before adding bearer auth. Preserve the present unauthenticated request when no key is found. |
-   | `src/cli/provider_init.rs::maybe_enable_external_api_key_auth_for_auto` (729-759) | It destructures `openrouter_like_api_key_sources()` into `(env_key, _)`, discarding any aliases | Iterate `Vec<ApiKeyCredentialSource>` and each source's ordered `candidate_env_keys()` (primary, then metadata aliases). Check `preferred_unconsented_api_key_source_for_env` for each candidate, while deriving the prompt label/login hint from the typed source rather than an alias-erased pair. This permits an alias-only Z.AI external key to reach the normal trust prompt. |
-   | `jcode-base/src/provider_catalog.rs::openai_compatible_profile_is_configured` and profile probes | Static/resolved catalog profile | Use a profile source, never reconstruct a pair. This is the common leaf for remaining catalog checks. |
+#### Superseded approach (why)
 
-   **Type-level reachability proof:** every catalog-bearing production caller is
-   covered by a row whose middle column identifies its static or resolved profile
-   value. In particular, OpenRouter's default constructor retains its local
-   `autodetected_profile` (runtime 1453-1469), the CLI doctor resolves one
-   (root `provider_doctor.rs` 47-55), auth-test receives one by reference
-   (`auth_test/choice.rs` 131-133), and provider-init receives typed sources
-   from the producer (base `provider_catalog.rs` 802-837). Therefore all have a
-   profile-aware constructor available and none require a string-pair escape.
-
-7. **Tests and mechanical guard**
-   - Add a metadata test that primary credential env names are unique among
-     `requires_api_key` profiles, specifically asserting MiniMax is
-     `MINIMAX_API_KEY` and OpenAI remains `OPENAI_API_KEY`.
-   - Replace the old Z.AI test with a full profile-loader matrix: primary env
-     wins over primary file and aliases; primary file wins over alias env; alias
-     env works; aliases are tried in metadata declaration order; alias in
-     `zai.env` works. Assert a MiniMax key configures MiniMax without an OpenAI
-     key and vice versa.
-   - Implement the **WI-1 mechanical guard** as
-     `jcode-base::catalog_profile_pair_loader_guard`, with type-level protection
-     as the primary invariant and its source-level audit as a backstop. A
-     `trybuild` compile-fail fixture in `jcode-provider-env` proves that neither `OpenAiCompatibleProfile` nor
-     `ResolvedOpenAiCompatibleProfile` can construct a
-     `PrimaryOnlyCredentialSource`, and another proves external crates cannot
-     call the now-private bare pair loader. A workspace test also parses/scans
-     Rust call expressions and fails on any catalog/resolved-profile field pair
-     (`.api_key_env` plus `.env_file`) passed to a bare loader or any
-     `PrimaryOnlyCredentialSource` construction outside the small named
-     non-catalog origin allowlist. The guard covers every profile-holding table
-     row because each now has a profile-aware public constructor, as evidenced
-     by its `Object in hand` column. Run it before deleting the Z.AI leaf special
-     case. The table remains a migration checklist, but the API privacy and
-     compile test, not hand enumeration, answer whether a future caller can
-     erase aliases.
-   - Add a Codex loader regression with leading BOM/NBSP and trailing Unicode
-     whitespace, asserting the result matches
-     `sanitize_secret_value`/the common profile loader.
-   - Add root-CLI regressions: alias-only `ZAI_API_KEY` makes
-     `provider-doctor` obtain the resolved profile key and adds bearer auth to
-     auth-test model discovery; alias-only external Z.AI credentials are offered
-     by `maybe_enable_external_api_key_auth_for_auto` in metadata declaration
-     order. Keep the primary-file-over-alias-env precedence assertion from the
-     profile-loader matrix in these integration seams.
-   - Add an OpenRouter default-path regression that sets only `ZAI_API_KEY`
-     (with no OpenRouter key and no `JCODE_OPENROUTER_*` override), constructs
-     `OpenRouterProvider::new` rather than
-     `new_openai_compatible_profile_runtime`, and asserts the selected Z.AI
-     profile's actual `resolve_auth -> get_api_key` result is bearer auth with
-     the alias token. Pair it with a control proving explicit key-name/env-file
-     overrides and `new_named_openai_compatible` remain `PrimaryOnly` and do
-     not probe catalog aliases.
-
-#### Before/after sketch
-
-```rust
-// Before: metadata has no place for the alias.
-api_key_env: "ZHIPU_API_KEY",
-// provider-env special-cases one vendor:
-if env_key == "ZHIPU_API_KEY" { /* read ZAI_API_KEY */ }
-
-// After: catalog owns the complete credential declaration.
-api_key_env: "ZHIPU_API_KEY",
-legacy_api_key_envs: &["ZAI_API_KEY"],
-// generic ordered loader has no vendor literals:
-load_api_key(&CatalogCredentialSource::from(ZAI_PROFILE).into())
-```
-
-#### Why this is the right seam
-
-`OpenAiCompatibleProfile` is already the shared source for profile id, base
-URL, key name, file, setup URL, and configured-state checks. Making it own
-aliases eliminates the only provider-specific branch in the leaf crate and
-prevents a profile's import, auth, usage, and readiness surfaces from naming
-different credentials. MiniMax becomes independent of OpenAI at the metadata
-source rather than being patched in every consumer.
-
-#### Blast radius
-
-All profile construction sites must receive the new field. The exhaustive table
-above is the mandatory blast radius: it includes the default and dedicated
-request runtimes, provider-catalog producer, usage sweeper, auth
-lifecycle/status, root CLI doctor/auth-test/provider-init, live/doctor
-operational checks, external-auth import, and TUI settings migration, not only
-UI probes. Do not change unrelated direct providers such as Azure until they
-have a catalog profile.
+The previous WI-1 attempted to contain a static catalog through a hand-enumerated caller table and treated `JCODE_OPENROUTER_*` presence as an explicit-override boundary. `.audit/SOL-ASSESSMENT-R3.md` hole #1 proved startup launders catalog profiles through those same variables. The real cut is a typed credential source carried end-to-end, so provenance cannot be erased and future catalog callers cannot bypass aliases through a pair loader.
 
 #### Validation
 
 ```bash
-nix develop --command cargo test -p jcode-provider-metadata
-nix develop --command cargo test -p jcode-provider-env
-nix develop --command cargo test -p jcode-base --lib provider_catalog_tests
-nix develop --command cargo test -p jcode-base --lib codex
-nix develop --command cargo test -p jcode --bin jcode
-nix develop --command cargo check -p jcode-base -p jcode-provider-openrouter-runtime -p jcode-app-core -p jcode-provider-doctor -p jcode-tui
-# `catalog_profile_pair_loader_guard` plus provider-env's trybuild fixture are
-# mandatory WI-1 mechanical gates.
-nix develop --command cargo test -p jcode-base --lib catalog_profile_pair_loader_guard
+nix develop --command cargo test -p jcode-provider-metadata -p jcode-provider-env
+nix develop --command cargo test -p jcode-provider-openrouter-runtime
+nix develop --command cargo test -p jcode-base --lib provider_catalog
+nix develop --command cargo test -p jcode-app-core --lib external_auth
+nix develop --command cargo check --workspace
 ```
 
 #### Risk and rollback
 
-The main risk is changing legacy-key precedence. Preserve the existing primary
-then alias order, and keep the public primary env name unchanged for every
-profile except the verified MiniMax defect. Roll back this single commit to
-restore old lookup behavior. No credential value is migrated or written.
-Any user with only `OPENAI_API_KEY` will see MiniMax flip from “configured” to
-“not configured.” This is the intended correction of accidental credential
-coupling, but warrants a user-facing release-note callout.
+The behavioral risk is changing precedence or accidentally applying catalog aliases to a genuine explicit override. Keep the ordered scanner covered by matrix tests and keep primary-only constructors typed by non-catalog origin. Land as one focused commit after the catalog-path guard and alias-only default-runtime regression pass.
 
 ---
 
@@ -692,187 +519,53 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
 
 ---
 
-### WI-4 — Observable configuration parsing and one validation pass
+### WI-4 — Runtime parser is the source of truth; fallback is observable
 
-- **Findings addressed:** C1, C2, C3, C4, C5, D4, A4 (guarded, not a risky
-  macro collapse).
-- **Dependencies:** None. This may land in parallel with WI-1/WI-2.
+- **Findings addressed:** C1, C2, C3, C4, C5, D4, A4.
+- **Dependencies:** None, but its lowercase embedding-backend normalization must land before WI-5.
 
 #### Exact changes
 
-1. **`crates/jcode-base/Cargo.toml` and `Cargo.lock`**
-   - Add the small `serde_ignored` dependency. It reports Serde-ignored fields
-     while preserving the repository's permissive `#[serde(default)]` parsing.
-2. **`crates/jcode-base/src/config/config_file.rs`**
-   - Replace direct `toml::from_str::<Config>(&content)` in
-     `load_from_file_strict` with a private parser helper backed by
-     `serde_ignored::deserialize(toml::Deserializer::new(&content), ...)`.
-   - Collect every ignored path, sort/deduplicate it, and issue one
-     `logging::warn` per path in the form
-     `Unknown config key 'display.redraw_fpss' ignored` **only after
-     `serde_ignored::deserialize` succeeds**. On malformed TOML, discard the
-     partial collection and return the original parse error unchanged, without
-     unknown-key warnings. This preserves the present error contract in
-     `config_file.rs::load_from_file_strict` (40-54) while making successful,
-     permissive parsing observable. The composition is sound because `Config`
-     is `Deserialize + Default` with `#[serde(default)]` (`config.rs:436-439`),
-     nested fields use defaults, and this config shape has no `serde(flatten)`
-     fields.
-   - Invoke `config.validate()` after `display.apply_legacy_compat()` and, in
-     both `Config::load` and `Config::load_strict`, invoke it again after
-     `apply_env_overrides()`. The latter is required because env precedence can
-     introduce an invalid value after file validation.
-3. **`crates/jcode-config-types/src/lib.rs` and `crates/jcode-base/src/config.rs` — one executable canonicalization policy**
-   - Add a dependency-free `config_value_policy` module in `jcode-config-types`
-     with a `StringConfigDomain` enum, one canonicalizer per table row, and a
-     public `accepted_spellings(domain)` iterator. Each canonicalizer trims and
-     ASCII-lowercases, returns the canonical string (or `None`) and its defined
-     invalid fallback. `Config::validate(&mut self)` in `jcode-base` must call
-     this module, emit field, raw value, accepted spellings, canonical result,
-     and fallback, then write the canonical value back to config.
-   - **This is executable shared policy, not a documentation-only whitelist.**
-     Add direct `jcode-config-types` dependencies to the OpenAI, Anthropic, and
-     Copilot runtime crates and replace their alias-accepting configuration
-     matches with the corresponding `StringConfigDomain` canonicalizer before
-     converting the canonical result to their runtime enum/wire value. There
-     must be no second runtime `match` that decides which spelling is accepted.
-     Thus the same code, rather than a hand-maintained duplicate table, governs
-     load-time validation and runtime parsing. Tools/display remain base-only
-     consumers but still use this module from `Config::validate`.
-   - The source-of-truth behavior to transcribe is tools' branch ordering in
-     `jcode-base/src/config.rs::ToolsConfig::base_allowed_tools` (627-675),
-     OpenAI transport (`OpenAITransportMode::from_config`, 129-145), reasoning
-     (727-745), service tier (792-806), and native compaction
-     (`OpenAINativeCompactionMode::from_config`, 199-212), Anthropic reasoning
-     (553-573), and Copilot config-to-env propagation (base `env_overrides.rs`,
-     715-727) followed by its runtime reader (copilot-runtime
-     `env_premium_mode`, 150-155). Centralization must mirror, never broaden or
-     narrow, these accepted spellings.
-   - **Anthropic service tier is intentionally excluded.** It is a runtime/UI
-     setter, not a load-time config field: `ProviderConfig` has no
-     `anthropic_service_tier` member (`jcode-config-types/src/lib.rs`,
-     1210-1242), no `JCODE_ANTHROPIC_SERVICE_TIER` override exists
-     (`jcode-base/src/config/env_overrides.rs`, 655-684), and
-     `anthropic-runtime::normalize_service_tier` returns an error for invalid
-     setter input (667-679). Do not add a schema field or invent a load-time
-     fallback in this work item.
+1. **Warn on ignored configuration keys without rejecting compatible files.**
+   - Add `serde_ignored` to `jcode-base` and parse successful TOML loads through it.
+   - Collect, sort, and deduplicate ignored paths, then emit one warning per unknown path only after deserialization succeeds. Malformed TOML retains the existing parse error and emits no partial unknown-key warnings.
 
-     | Config field | All accepted input spellings | Canonical stored value | Invalid fallback | Evidence / preserved behavior |
-     |---|---|---|---|---|
-     | `agents.memory_embedding_backend` | `local`, `openai` | same lowercase | `local` | Default is exactly `local` (`jcode-config-types/src/lib.rs:555-557`); selector checks `openai` in `embedding_backend.rs:292-299`. |
-     | `tools.profile` | empty, `full`, `acp`, `minimal`, `lite`, `small`, `none`, `off`, `disabled` | empty/full -> empty (full/default set), `acp` -> `acp`, `small` -> `minimal`, `minimal`/`lite` unchanged, `none`/`off`/`disabled` -> `none` | empty | `none|off|disabled` produces `Some(empty set)` at `config.rs:635-637`, while the final else is `None` full/default at 673-675. Thus **off/disabled must never normalize to empty**. |
-     | `acp.profile` | `standard`, `extended`, `full` | same | `standard` | Existing configuration default/test contract is `standard` (`config_tests.rs::acp_config_defaults_to_standard_profile_and_acp_tools`, 331-337); this is a new validated config domain, not a runtime alias parser. |
-     | `display.performance` | empty, `auto`, `full`, `reduced`, `minimal` | empty/`auto` -> empty; others unchanged | empty | `app-core/src/perf.rs::PerformanceTier::detect` (309-337) consumes these display strings; empty is the auto/default branch. |
-     | `provider.openai_transport` | empty, `auto`, `websocket`, `ws`, `wss`, `https`, `http`, `sse` | empty/`auto` -> `auto`; `ws`/`wss` -> `websocket`; `http`/`sse` -> `https` | `auto` | Exact OpenAI runtime parser set at 129-145. |
-     | `provider.openai_reasoning_effort` | empty, `none`, `low`, `medium`, `high`, `xhigh`, `swarm`, `swarm-deep` | empty -> `None`; others unchanged | `xhigh` | Exact parser and current unsupported fallback at openai-runtime 727-745. |
-     | `provider.openai_service_tier` | empty, `fast`, `priority`, `flex`, `default`, `auto`, `none`, `off` | empty/`default`/`auto`/`none`/`off` -> `None`; `fast`/`priority` -> `priority`; `flex` unchanged | `None` | Exact parser at openai-runtime 792-806. |
-     | `provider.anthropic_reasoning_effort` | empty, `default`, `auto`, `off`, `disabled`, `none`, `low`, `medium`, `high`, `xhigh`, `max`, `swarm`, `swarm-deep` | empty/`default`/`auto` -> `None`; `off`/`disabled` -> `none`; remaining levels unchanged | `max` | Exact parser and fallback at anthropic-runtime 553-573. |
-     | `provider.copilot_premium` | `zero`, `0`, `one`, `1` | `zero`/`0` -> `0`; `one`/`1` -> `1` | `None` | Base mapping only exports `0|1` (env_overrides 715-727) and runtime recognizes only `0|1` (copilot-runtime 150-155). |
-     | `provider.openai_native_compaction_mode` | empty, `auto`, `explicit`, `manual`, `off`, `disabled`, `none` | empty/`auto` -> `auto`; `explicit`/`manual` -> `explicit`; `off`/`disabled`/`none` -> `off` | `auto` | Exact parser at `openai-runtime::OpenAINativeCompactionMode::from_config` (199-212): `manual` is explicit, while `disabled`/`none` are an explicit opt-out. Default is `auto` in `ProviderConfig::default` (1245-1266). |
+2. **Keep runtime parsers authoritative for runtime string vocabularies.**
+   - Do not add a second load-time alias/canonicalization table for tools profile, transports, reasoning effort, service tier, compaction, or other runtime-owned strings.
+   - Refactor each runtime string parser touched by the audit to report whether the configured spelling was recognized or whether its existing fallback was applied. Preserve every runtime's current aliases and context-sensitive behavior, including OpenRouter reasoning-effort handling and `max`.
+   - When a configured value is unrecognized and a fallback is applied, emit a WARN-ONCE containing the setting, raw value, and selected fallback. Repeated requests/config reads for the same invalid setting/value must not spam logs.
+   - Direct runtime setters that intentionally return an error may retain that contract. This item targets silent fallback paths, not successful aliases or explicit errors.
 
-   - Retain downstream runtime parsers as **defensive consumers** for direct
-     environment/programmatic construction, but make them delegate to the
-     shared `jcode-config-types` helper. `Config::validate()` is authoritative
-     for file/config-derived values, and the shared helper remains the sole
-     alias-to-canonical decision point for direct runtime construction too.
-   - Keep these fields serialized as strings. A serialized enum migration is a
-     separate compatibility change and would either reject old files or hide
-     typos before this observable validation point.
-4. **`crates/jcode-base/src/config/env_overrides.rs`**
-   - It may parse primitive values, but must not make its own domain decision.
-     Run `Config::validate()` immediately after all overrides **and before**
-     any config-to-env propagation. In particular `copilot_premium` may export
-     only the canonical `0`/`1`; invalid file/env values become `None` and are
-     never written to `JCODE_COPILOT_PREMIUM`.
-5. **`crates/jcode-config-types/src/lib.rs`**
+3. **Keep only genuinely load-time normalization in `Config`.**
+   - Normalize `agents.memory_embedding_backend` by trimming and ASCII-lowercasing. Accept only `local` and `openai`; warn and fall back to `local` for any other value. Apply after file parsing and again after env overrides so WI-5 sees exactly lowercase `local|openai`.
+   - Do not add an `anthropic_service_tier` config field. It does not exist in the schema and remains runtime/UI-only.
    - Correct `DisplayConfig::redraw_fps` rustdoc from default 30 to default 60.
-   - Update embedding backend documentation: unknown values are warned and
-     normalized, and a selected remote backend with missing credentials is
-     reported by WI-5 rather than silently described as normal behavior.
-6. **`crates/jcode-base/src/config_tests.rs`**
-   - Factor the parser/validator enough to test unknown TOML paths without
-     requiring a user home. Add tests for a top-level and nested unknown key,
-     a known key producing no unknown paths, and malformed TOML returning its
-     parse error with **no** unknown-key warnings.
-   - Table-test every accepted alias in the canonicalization table from TOML
-     and env, asserting its exact canonical output. In particular assert
-     `tools.profile=off|disabled -> none` remains an empty allow-list and
-     `small -> minimal`, not default/full tools; assert every OpenAI transport,
-     reasoning, service-tier, and native-compaction spelling, including
-     `manual -> explicit` and `disabled|none -> off`; assert every Anthropic
-     reasoning and both Copilot spellings. Also test each invalid fallback
-     exactly as tabulated.
-   - Add the **WI-4 mechanical completeness guard** without reversing crate
-     dependencies. `jcode-config-types` exposes a
-     `RUNTIME_ALIAS_DOMAINS` const and each domain's exhaustive
-     `accepted_spellings(domain)` mapping; its unit test iterates that const,
-     rejects duplicate spellings, and asserts every spelling's documented
-     canonical bucket and invalid fallback. The OpenAI, Anthropic, and Copilot
-     runtime unit tests each iterate `accepted_spellings` for the domain(s) they
-     adapt and assert the shared canonical result converts to their expected
-     runtime enum/wire bucket. Thus config-types never depends upward on a
-     runtime crate, but both `Config::validate` and every runtime adapter call
-     the one shared canonicalizer. Adding an accepted runtime alias requires
-     changing its declared shared spelling set and makes these TOML/env and
-     adapter tests fail until its canonical behavior is specified. This replaces
-     a second hand-maintained policy table with an executable equivalence
-     invariant.
-   - Retain `config_env_fingerprint_tracks_every_apply_env_override_var`.
-     Extend it to assert `CONFIG_ENV_KEYS` has no duplicates, and add
-     a targeted reload-fingerprint test for `JCODE_MEMORY_EMBEDDING_API_KEY_ENV`.
-     This is the proportionate protection for A4; do not create a 130-entry
-     callback macro merely to remove a list that also has non-override members.
+   - Preserve serialized string/config compatibility and do not rewrite user config files during load.
 
-#### Before/after sketch
+4. **Tests and guards.**
+   - Add parser tests proving each affected runtime accepts its existing aliases without warnings, returns its existing fallback for an invalid value, and warns only once for repeated use of the same invalid configured value.
+   - Include OpenRouter's context-dependent reasoning parser in coverage so aliases such as `max` remain runtime-owned and accepted where currently supported.
+   - Add config tests for top-level/nested unknown keys, known keys, malformed TOML with no ignored-key warning, file/env lowercase embedding-backend normalization, invalid fallback to `local`, env fingerprint coverage, and duplicate-free `CONFIG_ENV_KEYS`.
 
-```rust
-// Before: unknown TOML fields vanish; file and env strings take different paths.
-let mut config = toml::from_str::<Self>(&content)?;
-config.apply_env_overrides();
+#### Superseded approach (why)
 
-// After: permissive parsing is observable and policy is centralized.
-let (mut config, unknown_paths) = parse_config_toml(&content)?;
-warn_unknown_paths(unknown_paths);
-config.validate();
-config.apply_env_overrides();
-config.validate();
-```
-
-#### Why this is the right seam
-
-`Config::load` is the only point every file configuration crosses, and
-`apply_env_overrides` is the only precedence mutation point. Instrumenting
-Serde's ignored fields there catches all nested unknown keys without a manually
-maintained schema walker. Post-merge validation makes TOML and environment
-values obey one policy, rather than attempting N partial deserializers or
-making config loading brittle.
-
-#### Blast radius
-
-All configuration entry points (`load`, `load_strict`, direct parsing helper
-used by tests, and config cache reload) must call the same parser/validator.
-The impacted user-facing values are provider request settings, ACP/tools,
-display policy, and the embedding selector. Preserve the existing public
-serialized strings and defaults.
+The previous WI-4 proposed a shared load-time canonicalization table mirrored into runtime adapters. `.audit/SOL-ASSESSMENT-R3.md` hole #2 showed OpenRouter already has context-dependent reasoning aliases, including `max`, outside that table. A second validator would inevitably diverge. Runtime parsers now remain the single source of truth, while warn-once observability fixes the actual defect: silent fallback on unrecognized configured strings.
 
 #### Validation
 
 ```bash
 nix develop --command cargo test -p jcode-config-types
 nix develop --command cargo test -p jcode-base --lib config_tests
-nix develop --command cargo test -p jcode-base --lib default_file
 nix develop --command cargo test -p jcode-provider-openai-runtime
 nix develop --command cargo test -p jcode-provider-anthropic-runtime
 nix develop --command cargo test -p jcode-provider-copilot-runtime
+nix develop --command cargo test -p jcode-provider-openrouter-runtime
 nix develop --command cargo check -p jcode-base
 ```
 
 #### Risk and rollback
 
-Warnings can be noisy on legacy configs, and normalization changes a formerly
-ignored bad value into an explicit default. This is intentional and documented.
-Avoid hard failure, so rollback is simply reverting the parser/validation
-commit. The config file is never rewritten during load.
+Warnings can expose long-standing invalid values and must remain once-only to avoid request-path noise. The runtime fallback and alias behavior must not change. Rollback is isolated to parser observability and load-time-only config handling; permissive file parsing remains intact.
 
 ---
 
