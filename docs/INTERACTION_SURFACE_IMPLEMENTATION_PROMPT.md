@@ -1,6 +1,6 @@
 # Interaction Surface Implementation Prompt
 
-Status: Next-session execution prompt, 2026-06-30
+Status: Partially superseded next-session execution prompt (2026-06-30). Kept in place because `INTERACTION_SURFACES.md` and `INTERACTION_SURFACE_REQUIREMENTS.md` link to it as the canonical implementation prompt. The early surface slices largely landed (browser/server surface workspace stores, command palette, rendered smoke harness); the residual open work is WS7 Kanidm OIDC (see `INTERACTION_SURFACE_SECURE_ACCESS.md`).
 
 Use this prompt to start the next implementation session.
 
