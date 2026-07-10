@@ -671,6 +671,12 @@ impl ToolConfig {
                 .collect(),
             )
         } else {
+            // Any other (unrecognized) profile string silently falls back to the
+            // full tool surface. Surface that once so a typo like
+            // `profile = "minimla"` is observable instead of silently ignored.
+            if !profile.is_empty() && profile != "full" {
+                warn_once_unrecognized_tool_profile(&profile);
+            }
             None
         }
     }
@@ -698,6 +704,43 @@ impl ToolConfig {
 fn normalize_tool_name(name: &str) -> String {
     let trimmed = name.trim().trim_matches('"');
     jcode_tool_types::resolve_tool_name(trimmed).to_string()
+}
+
+/// A process-wide "fire exactly once" guard for warn-once diagnostics.
+///
+/// [`Self::should_fire`] returns `true` the first time it is called and `false`
+/// on every subsequent call, so a warning is emitted at most once per guard for
+/// the lifetime of the process. Extracted as a named type so the once-only
+/// semantics are unit-testable independently of any log sink.
+pub(crate) struct WarnOnce {
+    fired: std::sync::atomic::AtomicBool,
+}
+
+impl WarnOnce {
+    pub(crate) const fn new() -> Self {
+        Self {
+            fired: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Returns `true` exactly once (on the first call); `false` thereafter.
+    pub(crate) fn should_fire(&self) -> bool {
+        !self.fired.swap(true, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Warn exactly once, process-wide, when `tools.profile` holds an unrecognized
+/// value that silently falls back to the full tool surface. The accepted
+/// vocabulary is unchanged; this only makes the silent fallback observable.
+fn warn_once_unrecognized_tool_profile(profile: &str) {
+    static WARNED: WarnOnce = WarnOnce::new();
+    if !WARNED.should_fire() {
+        return;
+    }
+    crate::logging::warn(&format!(
+        "Unrecognized tools.profile '{}'; expected full|acp|minimal|lite|none. Using 'full'.",
+        profile
+    ));
 }
 
 /// External dictation / speech-to-text integration.
