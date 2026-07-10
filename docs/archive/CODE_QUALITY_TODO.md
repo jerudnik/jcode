@@ -1,5 +1,13 @@
 # Code Quality Program Todo List
 
+> **Archived 2026-07-10.** The file-level backlog below (especially the
+> 2026-04-18 audit snapshot) enumerates `src/*.rs` paths and LOC counts that no
+> longer exist after the workspace migrated the monolith into `crates/*`
+> (e.g. `src/server.rs` now lives at `crates/jcode-app-core/src/server.rs`).
+> The evergreen quality standards remain in `docs/CODE_QUALITY_10_10_PLAN.md`;
+> the current audit lives in `docs/CODE_QUALITY_AUDIT_2026-04-18.md`. Kept for
+> history only.
+
 This file tracks the execution backlog for the code-quality uplift program described in `docs/CODE_QUALITY_10_10_PLAN.md`.
 
 Status values:
