@@ -65,6 +65,13 @@ pub struct Sidecar {
     model: String,
     max_tokens: u32,
     backend: SidecarBackend,
+    /// Model-configured provider fork used by `SidecarBackend::Provider`.
+    ///
+    /// Stored ONCE at construction so completion never re-forks `ACTIVE_PROVIDER`
+    /// and never discards the configured model. Isolated from the live agent's
+    /// selection (see `Provider::fork_with_model_spec`). `None` for the
+    /// specialized OpenAI/Claude backends.
+    provider: Option<std::sync::Arc<dyn crate::provider::Provider>>,
     /// Optional explicit reasoning effort override (OpenAI Responses API).
     /// When `Some`, this effort is always sent; when `None`, the default
     /// per-model behavior applies. Used by the memory benchmark to pin
@@ -81,21 +88,8 @@ impl Sidecar {
     }
 
     fn with_configured_model(configured_model: Option<String>) -> Self {
-        let (backend, model) = if let Some(model) = configured_model {
-            match crate::provider::resolve_current_model_spec(&model)
-                .provider_key
-                .as_deref()
-            {
-                Some("openai") => (SidecarBackend::OpenAI, model),
-                Some("claude") => (SidecarBackend::Claude, model),
-                _ => {
-                    crate::logging::warn(&format!(
-                        "Ignoring unsupported memory sidecar model override '{}'; expected an OpenAI or Claude model",
-                        model
-                    ));
-                    Self::auto_select_backend()
-                }
-            }
+        let (backend, model, provider) = if let Some(model) = configured_model {
+            Self::backend_for_configured_model(model)
         } else {
             Self::auto_select_backend()
         };
@@ -105,7 +99,58 @@ impl Sidecar {
             model,
             max_tokens: DEFAULT_MAX_TOKENS,
             backend,
+            provider,
             reasoning_override: None,
+        }
+    }
+
+    /// Route an explicitly configured `agents.memory_model` to a sidecar backend.
+    ///
+    /// Only an unprefixed, native OpenAI or Claude model keeps its specialized
+    /// ambient-auth fast path. EVERY prefixed spec (dual-auth `openai-api:` etc.,
+    /// catalog profile, named `[providers.X]` profile, OpenRouter pin) routes
+    /// through an isolated `active_provider_fork_with_model_spec` fork carrying
+    /// the ORIGINAL, unstripped spec, so the resolver-selected route/profile and
+    /// any pinned credential mode stay intact. A fork/`set_model` failure or an
+    /// unroutable spec logs an explicit diagnostic and falls back to
+    /// auto-selection; it never silently claims an unsupported model.
+    fn backend_for_configured_model(
+        model: String,
+    ) -> (
+        SidecarBackend,
+        String,
+        Option<std::sync::Arc<dyn crate::provider::Provider>>,
+    ) {
+        let spec = crate::provider::resolve_current_model_spec(&model);
+
+        // Bare native OpenAI/Claude models (no recognized `prefix:`) keep their
+        // dedicated OAuth fast paths and ambient-credential fallback ladders.
+        if spec.explicit_prefix.is_none() {
+            match spec.provider_key.as_deref() {
+                Some("openai") => return (SidecarBackend::OpenAI, model, None),
+                Some("claude") => return (SidecarBackend::Claude, model, None),
+                _ => {}
+            }
+        }
+
+        // Everything else routes through a model-configured, isolated provider
+        // fork built from the ORIGINAL spec.
+        match crate::provider::active_provider_fork_with_model_spec(&model) {
+            Some(Ok(provider)) => (SidecarBackend::Provider, model, Some(provider)),
+            Some(Err(err)) => {
+                crate::logging::error(&format!(
+                    "Sidecar memory model override '{}' (resolved {:?}) failed to fork a configured provider: {:#}; falling back to auto-selection",
+                    model, spec, err
+                ));
+                Self::auto_select_backend()
+            }
+            None => {
+                crate::logging::error(&format!(
+                    "Sidecar memory model override '{}' (resolved {:?}) has no live provider to fork; falling back to auto-selection",
+                    model, spec
+                ));
+                Self::auto_select_backend()
+            }
         }
     }
 
@@ -120,20 +165,38 @@ impl Sidecar {
     ///
     /// Only when no provider is registered at all do we fall back to Claude,
     /// which then fails on use with a clear credentials error.
-    fn auto_select_backend() -> (SidecarBackend, String) {
+    fn auto_select_backend() -> (
+        SidecarBackend,
+        String,
+        Option<std::sync::Arc<dyn crate::provider::Provider>>,
+    ) {
         if auth::codex::load_credentials().is_ok() {
-            (SidecarBackend::OpenAI, SIDECAR_OPENAI_MODEL.to_string())
+            (
+                SidecarBackend::OpenAI,
+                SIDECAR_OPENAI_MODEL.to_string(),
+                None,
+            )
         } else if auth::claude::load_credentials().is_ok() {
-            (SidecarBackend::Claude, SIDECAR_CLAUDE_MODEL.to_string())
+            (
+                SidecarBackend::Claude,
+                SIDECAR_CLAUDE_MODEL.to_string(),
+                None,
+            )
         } else if let Some(provider) = crate::provider::active_provider_fork() {
             // Dispatch through whatever provider the user is running on. The
             // model string is informational here; the provider already has the
-            // user's selected model and routes accordingly.
-            (SidecarBackend::Provider, provider.model())
+            // user's selected model and routes accordingly. Store the fork so
+            // completion consumes it directly instead of re-forking.
+            let model = provider.model();
+            (SidecarBackend::Provider, model, Some(provider))
         } else {
             // No credentials and no live provider: default to Claude so the
             // eventual error message is actionable.
-            (SidecarBackend::Claude, SIDECAR_CLAUDE_MODEL.to_string())
+            (
+                SidecarBackend::Claude,
+                SIDECAR_CLAUDE_MODEL.to_string(),
+                None,
+            )
         }
     }
 
@@ -168,6 +231,7 @@ impl Sidecar {
             model: model.into(),
             max_tokens: DEFAULT_MAX_TOKENS,
             backend: SidecarBackend::Claude,
+            provider: None,
             reasoning_override: None,
         }
     }
@@ -181,6 +245,7 @@ impl Sidecar {
             model: model.into(),
             max_tokens: DEFAULT_MAX_TOKENS,
             backend: SidecarBackend::OpenAI,
+            provider: None,
             reasoning_override: reasoning_effort,
         }
     }
@@ -209,10 +274,14 @@ impl Sidecar {
     /// This is the universal path: it works for every provider jcode supports,
     /// because `complete_simple` is a default method on the `Provider` trait that
     /// collects the streamed `TextDelta`s into a single string. The provider was
-    /// forked at construction time, so it carries the user's selected model.
+    /// forked and pinned to the configured model ONCE at construction, so this
+    /// consumes the stored handle and never re-forks `ACTIVE_PROVIDER` (which
+    /// would discard the configured model). A runtime `complete_simple` failure
+    /// after successful construction surfaces directly and is NOT retried through
+    /// the OpenAI-specific fallback ladder.
     async fn complete_via_provider(&self, system: &str, user_message: &str) -> Result<String> {
-        let provider = crate::provider::active_provider_fork().context(
-            "No active provider registered for sidecar; memory features require a logged-in provider",
+        let provider = self.provider.as_ref().context(
+            "No active provider stored for sidecar; memory features require a logged-in provider",
         )?;
         provider
             .complete_simple(user_message, system)
@@ -323,6 +392,7 @@ impl Sidecar {
                             model: SIDECAR_CLAUDE_MODEL.to_string(),
                             max_tokens: self.max_tokens,
                             backend: SidecarBackend::Claude,
+                            provider: None,
                             reasoning_override: None,
                         };
                         claude.complete_claude(system, user_message).await
@@ -1127,10 +1197,41 @@ mod tests {
 
     /// Minimal provider stub that echoes a fixed reply for `complete`, so the
     /// default `complete_simple` path the sidecar uses can be exercised without
-    /// network access. Stands in for any of the 8 real providers.
+    /// network access. Stands in for any of the real providers.
+    ///
+    /// `shared` state is cloned by reference into every fork so a test can
+    /// inspect exactly which model spec was pinned on the fork
+    /// (`fork_with_model_spec`), and can force the fork's `set_model` (Copilot
+    /// `try_write` style) or the live provider's own `set_model` to fail.
+    #[derive(Default)]
+    struct StubShared {
+        /// Model specs passed to `set_model` across the live provider and every
+        /// fork, in call order.
+        set_model_specs: std::sync::RwLock<Vec<String>>,
+        /// When true, `set_model` returns an error (fork-construction failure).
+        fail_set_model: std::sync::atomic::AtomicBool,
+        /// When true, `complete` yields a runtime error (post-construction).
+        fail_complete: std::sync::atomic::AtomicBool,
+    }
+
     struct StubProvider {
         name: &'static str,
         reply: String,
+        /// The live model this instance reports; independent per instance so a
+        /// fork's `set_model` never mutates the registered live provider.
+        model: std::sync::RwLock<String>,
+        shared: std::sync::Arc<StubShared>,
+    }
+
+    impl StubProvider {
+        fn new(name: &'static str, reply: impl Into<String>) -> Self {
+            Self {
+                name,
+                reply: reply.into(),
+                model: std::sync::RwLock::new(format!("{name}-model")),
+                shared: std::sync::Arc::new(StubShared::default()),
+            }
+        }
     }
 
     #[async_trait::async_trait]
@@ -1142,6 +1243,13 @@ mod tests {
             _system: &str,
             _resume_session_id: Option<&str>,
         ) -> Result<crate::provider::EventStream> {
+            if self
+                .shared
+                .fail_complete
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                anyhow::bail!("stub provider runtime failure");
+            }
             let reply = self.reply.clone();
             let stream = futures::stream::once(async move {
                 Ok(jcode_message_types::StreamEvent::TextDelta(reply))
@@ -1154,13 +1262,35 @@ mod tests {
         }
 
         fn model(&self) -> String {
-            format!("{}-model", self.name)
+            self.model.read().unwrap_or_else(|p| p.into_inner()).clone()
+        }
+
+        fn set_model(&self, model: &str) -> Result<()> {
+            self.shared
+                .set_model_specs
+                .write()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(model.to_string());
+            if self
+                .shared
+                .fail_set_model
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                anyhow::bail!("stub provider set_model failure (try_write style)");
+            }
+            *self.model.write().unwrap_or_else(|p| p.into_inner()) = model.to_string();
+            Ok(())
         }
 
         fn fork(&self) -> std::sync::Arc<dyn crate::provider::Provider> {
+            // Share the recording/failure state so the test can observe what the
+            // fork did, but give the fork its own model cell so pinning the fork
+            // never mutates this (live) instance.
             std::sync::Arc::new(StubProvider {
                 name: self.name,
                 reply: self.reply.clone(),
+                model: std::sync::RwLock::new(self.model()),
+                shared: std::sync::Arc::clone(&self.shared),
             })
         }
     }
@@ -1176,10 +1306,9 @@ mod tests {
         let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
 
         // Simulate running on a non-OpenAI/Claude provider (e.g. Gemini).
-        crate::provider::set_active_provider(std::sync::Arc::new(StubProvider {
-            name: "gemini",
-            reply: "[2,1]".to_string(),
-        }));
+        crate::provider::set_active_provider(std::sync::Arc::new(StubProvider::new(
+            "gemini", "[2,1]",
+        )));
 
         let sidecar = Sidecar::with_configured_model(None);
         assert_eq!(
@@ -1223,10 +1352,9 @@ mod tests {
             "bedrock",
             "openrouter",
         ] {
-            crate::provider::set_active_provider(std::sync::Arc::new(StubProvider {
-                name: provider,
-                reply: "[1]".to_string(),
-            }));
+            crate::provider::set_active_provider(std::sync::Arc::new(StubProvider::new(
+                provider, "[1]",
+            )));
             let sidecar = Sidecar::with_configured_model(None);
             assert_eq!(
                 sidecar.backend_name(),
@@ -1238,6 +1366,168 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{provider}: provider-backed completion failed: {e}"));
             assert_eq!(out, "[1]", "{provider}: sidecar must echo provider output");
         }
+    }
+
+    // ---- WI-3: sidecar model overrides route through a forked provider ------
+
+    /// Every PREFIXED override (dual-auth, unknown/named/catalog prefix)
+    /// reaches the stored provider fork carrying the EXACT original spec, and
+    /// never mutates the registered live provider's own model selection.
+    #[test]
+    fn sidecar_prefixed_override_reaches_isolated_fork_with_exact_spec() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("create temp jcode home");
+        let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+        let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
+
+        // omlx:Qwen3.6-MoE (the exact bug), an explicit dual-auth pin, and a
+        // catalog-profile prefix must all arrive unchanged at the fork.
+        for spec in [
+            "omlx:Qwen3.6-MoE",
+            "openai-api:gpt-5.5",
+            "anthropic-api:claude-sonnet-4-5-20250929",
+        ] {
+            let stub = std::sync::Arc::new(StubProvider::new("gemini", "[9]"));
+            crate::provider::set_active_provider(stub.clone());
+
+            let sidecar = Sidecar::with_configured_model(Some(spec.to_string()));
+            assert_eq!(
+                sidecar.backend_name(),
+                "provider",
+                "{spec}: prefixed override must route through the provider fork"
+            );
+            assert_eq!(
+                sidecar.model_name(),
+                spec,
+                "{spec}: the configured spec must be preserved on the sidecar"
+            );
+
+            let recorded = stub
+                .shared
+                .set_model_specs
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
+            assert_eq!(
+                recorded,
+                vec![spec.to_string()],
+                "{spec}: the fork must be pinned with the EXACT original spec"
+            );
+            assert_eq!(
+                stub.model.read().unwrap().clone(),
+                "gemini-model",
+                "{spec}: the live registered provider selection must be untouched"
+            );
+        }
+    }
+
+    /// A bare, unprefixed native OpenAI or Claude model keeps its specialized
+    /// ambient-auth fast path and does NOT fork the active provider.
+    #[test]
+    fn sidecar_bare_native_model_keeps_specialized_path() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("create temp jcode home");
+        let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+
+        // A live provider is registered but must be ignored for bare natives.
+        crate::provider::set_active_provider(std::sync::Arc::new(StubProvider::new(
+            "gemini", "[1]",
+        )));
+
+        for (model, backend) in [("gpt-5.5", "openai"), (SIDECAR_CLAUDE_MODEL, "claude")] {
+            let sidecar = Sidecar::with_configured_model(Some(model.to_string()));
+            assert_eq!(
+                sidecar.backend_name(),
+                backend,
+                "{model}: bare native model must keep its specialized path"
+            );
+            assert!(
+                sidecar.provider.is_none(),
+                "{model}: specialized path must not store a provider fork"
+            );
+            assert_eq!(sidecar.model_name(), model);
+        }
+    }
+
+    /// A construction failure (fork `set_model`, e.g. Copilot's transient
+    /// `try_write`) logs the explicit diagnostic and falls back to
+    /// auto-selection WITHOUT mutating the live registered provider.
+    #[test]
+    fn sidecar_fork_set_model_failure_falls_back_and_preserves_live_provider() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("create temp jcode home");
+        let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+        let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
+
+        let stub = std::sync::Arc::new(StubProvider::new("gemini", "[1]"));
+        stub.shared
+            .fail_set_model
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::provider::set_active_provider(stub.clone());
+
+        let sidecar = Sidecar::with_configured_model(Some("omlx:Qwen3.6-MoE".to_string()));
+
+        // The override attempt was made against the fork (recorded) but failed,
+        // so we fell back to auto-selection. With no OAuth creds and a live
+        // provider registered, that fallback is the provider path with the
+        // provider's own default model, NOT the failed override spec.
+        let recorded = stub
+            .shared
+            .set_model_specs
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        assert_eq!(
+            recorded,
+            vec!["omlx:Qwen3.6-MoE".to_string()],
+            "the failing override must have been attempted on the fork exactly once"
+        );
+        assert_eq!(
+            sidecar.backend_name(),
+            "provider",
+            "fallback with a live provider and no OAuth creds is the provider path"
+        );
+        assert_ne!(
+            sidecar.model_name(),
+            "omlx:Qwen3.6-MoE",
+            "the failed override spec must not be claimed as the active model"
+        );
+        assert_eq!(
+            stub.model.read().unwrap().clone(),
+            "gemini-model",
+            "a fork/set_model failure must never mutate the live provider selection"
+        );
+    }
+
+    /// A RUNTIME `complete_simple` failure after successful construction
+    /// surfaces as a plain error and is NOT retried through any fallback ladder.
+    #[test]
+    fn sidecar_runtime_provider_failure_is_not_retried() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("create temp jcode home");
+        let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+        let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
+
+        let stub = std::sync::Arc::new(StubProvider::new("gemini", "[1]"));
+        stub.shared
+            .fail_complete
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::provider::set_active_provider(stub.clone());
+
+        let sidecar = Sidecar::with_configured_model(Some("omlx:Qwen3.6-MoE".to_string()));
+        assert_eq!(sidecar.backend_name(), "provider");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let err = rt
+            .block_on(sidecar.complete("sys", "user"))
+            .expect_err("runtime provider failure must surface as an error");
+        assert!(
+            format!("{err:#}").contains("active provider"),
+            "runtime failure must surface as a plain provider error, got: {err:#}"
+        );
     }
 
     #[test]
