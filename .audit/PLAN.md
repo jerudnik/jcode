@@ -342,7 +342,7 @@ coupling, but warrants a user-facing release-note callout.
      `resolve_config_provider_selection` to consume `ResolvedModelSpec`. Keep
      their session-key/auth-route normalization after parsing, not in another
      prefix parser.
-4. **Move every former runtime classifier caller in the same commit.**
+4. **Move every production model-spec classifier.**
    - Base: `provider/catalog_routes.rs`, `pricing.rs`, `route_builders.rs`,
      `provider/mod.rs`, capability lookup, selection, and all public
      `provider_for_model[_with_hint]` exports.
@@ -352,10 +352,38 @@ coupling, but warrants a user-facing release-note callout.
      each helper's inner `split_once(':')` classification block with
      `resolve_model_spec(model, cfg).provider_key`; do not move spawn/launch
      override policy into `jcode-base` or collapse these helpers into a base
-     provider-key API.
-   - TUI: `jcode-tui/src/tui/app/tui_state.rs` header/effort classification
-     must use the context-aware resolver, so a selected named profile is not
-     displayed as unknown.
+     provider-key API. Also rewrite
+     `comm_session.rs::explicit_route_for_configured_model` (262-293) to consume
+     `ResolvedModelSpec::{explicit_prefix,bare_model,provider_key}`. This source
+     currently both parses `explicit_model_provider_prefix` and independently
+     reparses `AuthRoute`; the resolver output is the one parsed authority.
+   - **TUI migration table.** These are semantic policies, not mechanical name
+     substitutions. Each source currently calls the static classifier or parses
+     `prefix:model`, shown by the cited lines; each must receive current config
+     through `resolve_current_model_spec`/`resolve_model_spec`.
+
+     | TUI function and source proof | Authoritative input / precedence | Required resolver behavior |
+     |---|---|---|
+     | `inline_interactive.rs::model_picker_provider_hint_from_model_spec` (238-264), used by default-route marking (278-325) | Full configured default model spec is authoritative, then explicit `config_default_provider` still constrains route matching | Delete hand parser/nine-name table. Use `ResolvedModelSpec` (`bare_model` for name match, `provider_key` for route match) so named `omlx:` and dual-auth aliases mark defaults. |
+     | `inline_interactive.rs::extend_remote_routes_for_uncovered_models` (396-425) | Each remote catalog model plus current config/auth status; only Claude identity controls dual-auth route synthesis | Resolve each model with current config before deciding Claude. A named profile must not synthesize Claude API/OAuth routes just because its bare model resembles Claude. |
+     | `inline_interactive/openers.rs::open_agent_model_picker` (173-207) | Full picker entry/saved spec, not `model_entry_base_name(entry)` | Replace the OpenAI/Claude-only memory filter with **no provider-family filter**: keep all full picker entries and preserve saved override matching against the exact persisted spec. This is deliberate because WI-3 accepts all resolver-recognized profiles/builtins and reports a fork failure at sidecar construction. Do not probe `fork_with_model_spec` merely to populate a UI picker, because it can allocate clients or mutate a temporary provider. |
+     | `tui_lifecycle_runtime.rs::new_for_replay_with_title` (14-46) | Persisted `session.provider_key` is authoritative when present; only otherwise resolve persisted `session.model`; final fallback remains current demo Claude | Never overwrite a saved route key by re-resolving a bare model. Map saved key to display identity first, then resolver fallback. |
+     | `tui_state.rs::remote_effort_identity` (95-105) | Server `remote_provider_name` wins, then resolver of server/session/config model, then configured hint | Use resolver only for model-derived fallback so named profile effort identity is stable without overriding server truth. |
+     | `tui_state.rs::remote_header_provider_name` (179-190) | Server provider name wins, then resolver of effective remote model, then configured hint | Same precedence as existing UI but resolver supplies configured profile key. |
+
+     `ui_header.rs::parse_provider_hint` is excluded from this resolver migration:
+     it receives an already-derived provider display/name rather than a model
+     spec (`ui_header.rs:421-454`). It should instead benefit from
+     `ActiveProvider` canonical aliases.
+   - **OpenRouter runtime:** replace
+     `jcode-provider-openrouter-runtime/src/lib.rs::strip_session_profile_prefix`
+     (1360-1404) with a resolver-backed predicate. This crate demonstrably has
+     `Config` (`config().providers` at 1399-1402), so it is not eligible for the
+     provider-core no-Config exception. Preserve its critical provider-instance
+     guard: strip only a prefix resolving to this `OpenRouterProvider`'s own
+     profile/compatible profile it serves; never strip a recognized builtin
+     prefix that intends to switch away from OpenRouter. The current builtin
+     guard at 1377-1381 is source evidence for that invariant.
    - Preserve core's isolated builtin helper only where a no-`Config` core API
      genuinely needs a static classification. It must no longer be named or
      documented as the general resolver.
@@ -369,9 +397,23 @@ coupling, but warrants a user-facing release-note callout.
      prefix parsing.
    - Assert both spawn and Jade relay return the same provider key for every
      explicit/named case. Put shared parser tests in base and focused wrapper
-     tests in app-core.
+     tests in app-core. Include `explicit_route_for_configured_model` asserting
+     its bare model/provider key comes from the one resolver result.
+   - Add focused TUI tests for configured `omlx:` default-route marking, memory
+     picker eligibility, replay identity with saved provider key overriding a
+     conflicting model inference, remote Claude dual-auth route synthesis,
+     remote effort identity, and header identity.
+   - Add OpenRouter runtime tests that strip its own named/catalog profile prefix
+     for the wire model but retain `openai-api:`/other builtin prefixes intended
+     to switch providers. Add session-restore wire-model coverage.
    - Add regression coverage that pricing, catalog route classification, and
      TUI header resolution see the named `omlx` key, not `None`.
+   - Before removing wrappers, workspace-search for
+     `provider_for_model`, `provider_for_model_with_hint`,
+     `explicit_model_provider_prefix`, and `split_once(':')` in model-selection
+     code. Every production hit must be either the named core-only fallback or
+     explicitly documented non-model parsing; no public general classifier
+     wrapper survives WI-2C.
 
 #### Before/after sketch
 
@@ -396,20 +438,25 @@ the one owner of builtin names and aliases instead of nine string tables.
 
 #### Blast radius
 
-This is intentionally a broad but atomic rename/move. Do not merge the parser
-without moving all listed callers, or named profiles will remain write-only.
-The public base exports, app-core server helpers, and TUI consumers must
-compile together. Saved-session vocabulary and `AuthRoute` spellings are
-compatibility contracts and must retain their existing serialized values.
+This is broad but **not** a mega-commit. Develop it through three compile-green
+checkpoints: **WI-2A** provider-core `ActiveProvider` canonical APIs plus clearly
+named builtin-only helpers while forwarding wrappers remain; **WI-2B** base
+`ResolvedModelSpec` plus every base caller; **WI-2C** app-core, OpenRouter runtime,
+and all six TUI surfaces, then remove forwarding general-classifier wrappers only
+when the required workspace search is clean. Dependency direction makes this
+safe: app-core/TUI consume base, and base consumes provider-core. Saved-session
+vocabulary and `AuthRoute` spellings retain their serialized values throughout.
 
 #### Validation
 
 ```bash
+# Run at each WI-2A/B/C checkpoint so every staging commit is compile-green.
 nix develop --command cargo test -p jcode-provider-core
 nix develop --command cargo test -p jcode-base --lib model_resolution
 nix develop --command cargo test -p jcode-app-core --lib comm_session
 nix develop --command cargo test -p jcode-app-core --lib jade_relay
-nix develop --command cargo check -p jcode-base -p jcode-app-core -p jcode-tui
+nix develop --command cargo test -p jcode-provider-openrouter-runtime
+nix develop --command cargo check -p jcode-base -p jcode-app-core -p jcode-provider-openrouter-runtime -p jcode-tui
 ```
 
 #### Risk and rollback
