@@ -611,9 +611,9 @@ commit. The config file is never rewritten during load.
 
 - **Findings addressed:** D1, D2, D3, D5 (embedding-dimension half).
 - **Dependencies:** The already-present `memory_embedding_api_key_env` baseline
-  must be committed or included in this commit. WI-4 should land first or be
-  included so `memory_embedding_backend` is validated before this selector
-  relies on it.
+  must be committed or included in this commit. **WI-4 MUST land first.** It
+  guarantees that `memory_embedding_backend` is exactly lowercase `"local"` or
+  `"openai"` before this selector reads it.
 
 #### Exact changes
 
@@ -646,12 +646,19 @@ commit. The config file is never rewritten during load.
    - Keep `memory.rs` equality gates unchanged: once the ID is complete, its
      existing exact comparison in both retrieval paths is precisely the desired
      guard. New embeddings after URL/model/dimension changes receive a new tag;
-     old entries stay BM25-eligible but dense-ineligible.
+     old entries stay BM25-eligible but dense-ineligible. This shrink is
+     observable already: `memory.rs::score_and_filter` counts
+     `skipped_model_mismatch` and emits its existing info log (`~848-873`) with
+     the active model, so no duplicate re-tagging instrumentation is needed.
    - In `active_backend`, if validated config selects `openai` but
      `openai_backend_from_config()` returns `None`, emit a process-once warning
      naming the selected credential env (`memory_embedding_api_key_env` or
      `OPENAI_API_KEY`) and the local fallback. Use a module-private
      `AtomicBool` compare-exchange guard so a query loop cannot spam logs.
+   - WI-5 deliberately does **not** validate `memory_embedding_backend` again.
+     `embedding_backend.rs` continues to trust WI-4's load-time invariant and
+     uses its existing `eq_ignore_ascii_case("openai")` check only for backend
+     selection. A second validation choke point is prohibited.
 2. **`crates/jcode-config-types/src/lib.rs` and
    `crates/jcode-base/src/config/default_file.rs`**
    - Revise `memory_embedding_dim` documentation from “vector-space metadata /
@@ -712,12 +719,24 @@ nix develop --command cargo test -p jcode-base --lib config_tests
 nix develop --command cargo check -p jcode-base
 ```
 
+If CI can securely reach OpenAI, add a live smoke test, or a VCR-style recorded
+fixture captured from it, for a dimensions-capable `text-embedding-3-small` and
+non-capable `text-embedding-ada-002`. It must verify the request/response
+contract behind the include-versus-omit `dimensions` branch. The ada-002/v3
+capability distinction is community knowledge in this audit, not verified
+against a live API. If network validation is unavailable, record that as an
+accepted residual risk rather than treating the unit table as proof of the live
+contract.
+
 #### Risk and rollback
 
 The primary behavioral change is that historical remote vectors may cease to
 participate in dense ranking after endpoint/dimension identity changes. That is
 safer than comparing incompatible vectors and is already the documented gate
-policy. BM25 remains available. Roll back one commit to restore legacy tags if
+policy. BM25 remains available, and the existing `skipped_model_mismatch` info
+log makes the change visible at retrieval. The capability-table behavior retains
+the explicit residual risk described in Validation until it is checked against a
+live or recorded OpenAI response. Roll back one commit to restore legacy tags if
 needed, without deleting memories or vectors.
 
 ## Integration and commit sequence
