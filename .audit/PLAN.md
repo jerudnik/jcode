@@ -374,7 +374,8 @@ route regresses.
 ### WI-3 — Sidecar model overrides route through a forked resolved provider
 
 - **Findings addressed:** B1, B5, D5 (sidecar override half).
-- **Dependencies:** WI-2.
+- **Dependencies:** WI-0 and WI-2. WI-0's successful isolation regression is a
+  merge gate, because this item calls `set_model` on the fork.
 
 #### Exact changes
 
@@ -384,10 +385,15 @@ route regresses.
      error by default. Existing concrete mock/leaf providers need no changes
      because the default is safe.
 2. **`crates/jcode-base/src/provider/mod.rs`**
-   - Refactor `MultiProvider::fork` so it first builds an independent
-     `MultiProvider` fork in a private helper, then exposes a
+   - Build on WI-0's independent `MultiProvider::fork` and expose a
      `fork_with_model_spec` override that runs `set_model(model_spec)` on that
-     independent instance before erasing it to `Arc<dyn Provider>`.
+     isolated instance before erasing it to `Arc<dyn Provider>`.
+   - Propagate `set_model` failure with the requested model and active provider
+     as context. In particular, Copilot's `try_write` can return `Err` while a
+     request is in flight. `Sidecar::with_configured_model` must handle this as
+     an ordinary fork-construction failure, emit its explicit diagnostic, and
+     use the existing auto-selection fallback. It must never assume set-model
+     succeeds or mutate the registered live provider as a workaround.
    - Add `active_provider_fork_with_model_spec` beside
      `active_provider_fork`; it delegates to the registered live provider's new
      trait method. It must never mutate the live agent's selection.
@@ -411,6 +417,11 @@ route regresses.
    - Retain `SidecarBackend::{OpenAI, Claude, Provider}`. The specialized OAuth
      request and fallback ladder are real behavior, so enum removal is not
      justified by the audited evidence.
+   - A runtime failure from the forked provider's `complete_simple` after it
+     was constructed is **not** retried through the OpenAI-specific fallback
+     ladder. It surfaces as a plain error to the memory caller, matching today's
+     generic `SidecarBackend::Provider` behavior. This item adds no fallback
+     logic for that path.
 4. **Tests**
    - Add a small test `Provider` implementation whose `fork_with_model_spec`
      records the requested spec. Assert `omlx:Qwen3.6-MoE` is preserved and the
@@ -420,6 +431,9 @@ route regresses.
      remains unchanged.
    - Assert fork failure produces the explicit fallback diagnostic and never
      mutates the registered live provider model.
+   - Assert a `set_model` failure from a model-configured fork follows that same
+     explicit fallback path. The test must not treat Copilot's transient
+     `try_write` error as an impossible condition.
 
 #### Before/after sketch
 
@@ -440,16 +454,18 @@ The defect is not only weak classification. The existing generic sidecar path
 is model-blind because it forks the active selection at call time. A
 model-configured fork is the minimal extension that uses the already-working
 `MultiProvider::set_model` machinery without changing the active session or
-reimplementing every provider transport. It keeps the dedicated OAuth paths
-where they add value.
+reimplementing every provider transport. WI-0 establishes that isolation for
+every affected slot before this item depends on it. It keeps the dedicated OAuth
+paths where they add value.
 
 #### Blast radius
 
 The `Provider` trait is shared across the workspace, so the default method
 must compile for every implementation. `ACTIVE_PROVIDER` registration,
 `MultiProvider::fork`, sidecar tests, and any test mock that overrides/fakes
-forking are the coupled sites. WI-2 must land first because this work consumes
-its authoritative parser.
+forking are the coupled sites. WI-0 must land first to preserve the active
+session, and WI-2 must land first because this work consumes its authoritative
+parser.
 
 #### Validation
 
@@ -464,8 +480,9 @@ nix develop --command cargo check -p jcode-base -p jcode-app-core
 
 The risk is an override selecting an unavailable provider/model where the old
 code silently chose OAuth. Make the fallback explicit and preserve the old
-fallback only on an actual fork error. The item is one commit and can be
-reverted without undoing WI-2's general resolver.
+fallback only on an actual construction or `set_model` error. Do not expand that
+fallback to runtime generic-provider failures. The item is one commit and can
+be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
 
 ---
 
