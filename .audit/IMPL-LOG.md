@@ -165,3 +165,46 @@
 - Adaptations: (1) fallback warn helper returns bool so once-semantics is unit-testable without driving global config; (2) identity-only-dimension warn added at construction (design-implied by request-semantics rule 3, made observable). No memory.rs instrumentation added (per instructions).
 - Validation (all exit 0): `cargo test -p jcode-base --lib embedding_backend` -> 19 passed; `--lib memory` -> 74 passed; `--lib config` -> 99 passed; `cargo check -p jcode-base` -> only pre-existing KILLALL_PROCESS_NAME dead-code warning; `cargo fmt --all && git diff --check` -> clean. flake.lock untouched; no Cargo.lock change (url already a dependency).
 - Exact next stage: final stop-condition suite.
+
+## Final stop-condition suite (2026-07-10)
+
+Ran on `main` after WI-5 (`c5dbe8a14`):
+
+| Command | Result |
+| --- | --- |
+| `cargo check --workspace` | exit 0 (pre-existing `block v0.1.6` future-incompat note only) |
+| `cargo test -p jcode-provider-core -p jcode-provider-env -p jcode-provider-metadata -p jcode-config-types` | exit 0 |
+| `cargo test -p jcode-base --lib` | 1087 passed, 5 failed — **all 5 pre-existing** (see below) |
+| `cargo test -p jcode-app-core --lib` | 1016 passed, 1 failed — **batch bug, fixed** in `2c5e335a7`; suite green after |
+| `cargo check -p jcode-tui` | exit 0 |
+
+### app-core failure (real, fixed)
+
+`configured_explicit_route_uses_single_resolver_result` (added in WI-2C
+`9780f352b`) asserted `explicit_route_for_configured_model("anthropic-api:...")`
+is `None`. Wrong expectation: `anthropic-api:` is an explicit credential
+prefix (alias of `claude-api:` in `AuthRoute::parse`), so pinning the
+Anthropic API-key route is correct behavior. Fixed the test to assert the
+pin and added bare-alias (`anthropic:` / `openai:`) negative cases.
+Commit `2c5e335a7`; comm_session_tests 34/34 green.
+
+### base failures (pre-existing, environment-dependent, NOT regressions)
+
+Verified identical failures at pre-batch baseline `0d242297e` in a clean
+worktree:
+
+- `platform::platform_tests::spawn_detached_creates_new_session` — child
+  process fails inside the nix dev shell sandbox.
+- `session::tests::cases::initial_session_context_*` (3 tests) — `/tmp` vs
+  `/private/tmp` symlink canonicalization mismatch in TMPDIR-based asserts.
+- `session::tests::cases::streaming_guard_creates_visible_macos_sleep_assertion`
+  — macOS sleep-assertion visibility not available in this environment
+  (fails at baseline too; introduced by menubar commit `3ccc34332`,
+  before this batch).
+
+### Verdict
+
+Stop condition met: every failure is either fixed and committed or proven
+pre-existing at baseline. Batch complete: WI-0 through WI-5 landed
+(`dcb213dbd`, `c0ff07874`, `c957ae14b`, `e5f0b0469`, `9780f352b`,
+`68ee7ba5e`, `47608034d`, `c5dbe8a14`) plus test fix `2c5e335a7`.
