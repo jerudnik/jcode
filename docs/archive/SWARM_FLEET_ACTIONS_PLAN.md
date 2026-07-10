@@ -1,9 +1,6 @@
 # Swarm Fleet Actions Plan
 
-Status: In progress. Workstreams A and C landed. Workstream B landed structured
-selection (B1), per-member fleet data, cross-swarm stop control, and an
-actionable text render. The nested drill-in *picker* overlay remains deferred,
-see the note below.
+Status: superseded — all three workstreams landed 2026-07-08 (ffe601d39, 2f2d08e58, d84bac935, 814c2ed99, d2177930f); two deliberate deferrals folded into notes swarm-control-plane plan.
 Execution vehicle is an inline swarm (all workers `spawn_mode: "inline"`).
 This plan seeds the swarm task graph, assigns instances, and defines
 per-instance verification so the DAG is hill-climbable.
