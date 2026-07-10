@@ -39,6 +39,75 @@ passed on that baseline. It is a prerequisite, not work to be repeated below.
 
 ## Ordered work items
 
+### WI-0 — Repair `MultiProvider::fork()` provider-state isolation
+
+- **Findings addressed:** New HIGH finding from council review: `MultiProvider::fork()` currently shares the live Copilot, Antigravity, and Gemini provider objects.
+- **Dependencies:** None. **WI-3 is blocked on this item.**
+
+#### Exact changes
+
+1. **`crates/jcode-base/src/provider/mod.rs`**
+   - In `MultiProvider::fork()` (current `2538-2623`), replace the bare
+     `Arc::clone` retrieval for `copilot_api`, `antigravity`, and `gemini` with
+     a read of the optional inner `Arc<dyn Provider>` followed by
+     `provider.fork()`. Preserve `None` when a slot is absent. The cloned
+     `Arc` is the live object and is not an isolation boundary.
+   - Keep the existing factory-based fresh-instance behavior for Claude,
+     Anthropic, OpenAI, Cursor, Bedrock, and OpenRouter unchanged. This is a
+     surgical repair to the three asymmetric slots, not a rewrite of fork
+     construction or selection restoration.
+   - Source verification confirms all three inner implementations provide a
+     safe model fork: `GeminiProvider::fork` creates a fresh
+     `Arc<RwLock<String>>` model (`jcode-provider-gemini-runtime/src/lib.rs`
+     `1006-1013`), as do `AntigravityProvider::fork`
+     (`jcode-provider-antigravity-runtime/src/lib.rs` `736-743`) and
+     `CopilotApiProvider::fork` (`jcode-provider-copilot-runtime/src/lib.rs`
+     `1021-1037`).
+2. **Regression tests in the existing `jcode-base` provider test module**
+   - For each active slot Gemini, Antigravity, and Copilot: capture the
+     registered live provider's `model()`, call `MultiProvider::fork()`, set a
+     distinct valid model on the returned fork, then assert the originally
+     registered provider's `model()` is unchanged.
+   - Exercise successful mutation of the fork, not only fork/set failure. The
+     previous bug succeeds while silently changing the live session.
+   - For Copilot, arrange the test so the fork is idle and select a valid
+     non-1M model. `CopilotApiProvider::set_model` uses `try_write` and can
+     return `Cannot change model while a request is in progress`; this expected
+     error must be propagated/handled by callers rather than assumed impossible.
+
+#### Why this is the right seam
+
+`MultiProvider::fork()` is the shared isolation boundary used by the sidecar
+and other fork consumers. The concrete runtime providers already know which
+state may be shared and explicitly allocate independent model state in their
+own `fork()` implementations. Calling that trait method at the aggregation
+boundary fixes the actual ownership error once, rather than attempting to
+protect only the new sidecar caller.
+
+#### Blast radius
+
+Only forks of the three affected provider slots change. Their clients,
+credentials, catalogs, and other immutable/shared runtime resources retain the
+leaf providers' existing fork semantics. The active session's provider and
+model must remain untouched.
+
+#### Validation
+
+```bash
+nix develop --command cargo test -p jcode-base --lib provider
+nix develop --command cargo check -p jcode-base
+```
+
+#### Risk and rollback
+
+The regression test gates the sole behavior change: model selection on a fork
+can no longer leak into the active session. If a leaf provider's fork proves
+incomplete, revert this isolated commit rather than restoring shared mutable
+state. Copilot's transient `try_write` failure remains an ordinary recoverable
+error and must not be hidden.
+
+---
+
 ### WI-1 — Catalog-owned provider credentials and aliases
 
 - **Findings addressed:** A1, A2, A3.
