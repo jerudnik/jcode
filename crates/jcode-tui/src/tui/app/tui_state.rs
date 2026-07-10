@@ -97,9 +97,7 @@ impl App {
         let provider = self.remote_provider_name.clone().or_else(|| {
             model
                 .as_deref()
-                .and_then(|model| {
-                    crate::provider::provider_for_model_with_hint(model, None).map(str::to_string)
-                })
+                .and_then(|model| crate::provider::resolve_current_model_spec(model).provider_key)
                 .or_else(|| self.configured_remote_provider_hint())
         });
         (provider, model)
@@ -177,16 +175,14 @@ impl App {
     }
 
     fn remote_header_provider_name(&self) -> Option<String> {
-        let configured_provider_hint = self.configured_remote_provider_hint();
         self.remote_provider_name
             .clone()
             .or_else(|| {
                 self.effective_remote_provider_model().and_then(|model| {
-                    crate::provider::provider_for_model_with_hint(&model, None)
-                        .or(configured_provider_hint.as_deref())
-                        .map(str::to_string)
+                    crate::provider::resolve_current_model_spec(&model).provider_key
                 })
             })
+            .or_else(|| self.configured_remote_provider_hint())
             .filter(|provider| !provider.trim().is_empty())
     }
 

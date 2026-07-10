@@ -1191,20 +1191,3 @@ pub fn resolve_model_capabilities(model: &str, provider_hint: Option<&str>) -> M
         context_window,
     }
 }
-
-/// Detect which provider a model belongs to
-pub fn provider_for_model_with_hint(
-    model: &str,
-    provider_hint: Option<&str>,
-) -> Option<&'static str> {
-    if let Some(provider) = provider_key_from_hint(provider_hint) {
-        return Some(provider);
-    }
-
-    base_builtin_provider_for_model(model.trim()).map(ActiveProvider::key)
-}
-
-/// Detect which provider a model belongs to
-pub fn provider_for_model(model: &str) -> Option<&'static str> {
-    provider_for_model_with_hint(model, None)
-}

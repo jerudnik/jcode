@@ -130,22 +130,6 @@ pub fn builtin_provider_for_model(model: &str) -> Option<ActiveProvider> {
     builtin_provider_for_model_with_hint(model, None)
 }
 
-/// Compatibility wrapper for callers migrating to the context-aware resolver
-/// in WI-2B/2C. New core-only code should use
-/// [`builtin_provider_for_model_with_hint`] and keep the typed provider value.
-pub fn provider_for_model_with_hint(
-    model: &str,
-    provider_hint: Option<&str>,
-) -> Option<&'static str> {
-    builtin_provider_for_model_with_hint(model, provider_hint).map(ActiveProvider::key)
-}
-
-/// Compatibility wrapper for callers migrating to the context-aware resolver
-/// in WI-2B/2C.
-pub fn provider_for_model(model: &str) -> Option<&'static str> {
-    builtin_provider_for_model(model).map(ActiveProvider::key)
-}
-
 /// Whether `model` resolves to a Claude family jcode classifies statically
 /// (i.e. one whose long-context behavior we have verified). Matches by family
 /// prefix so dated aliases (`claude-opus-4-5-20251101`) and `[1m]` suffixes are
@@ -439,13 +423,6 @@ mod tests {
         assert_eq!(
             builtin_provider_for_model_with_hint("custom-model", Some("aws_bedrock")),
             Some(ActiveProvider::Bedrock)
-        );
-
-        // Compatibility wrappers remain until WI-2B/2C callers migrate.
-        assert_eq!(provider_for_model("gpt-5.5"), Some("openai"));
-        assert_eq!(
-            provider_for_model_with_hint("custom-model", Some("aws-bedrock")),
-            Some("bedrock")
         );
     }
 

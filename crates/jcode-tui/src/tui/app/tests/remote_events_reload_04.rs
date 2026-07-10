@@ -1081,6 +1081,147 @@ fn test_remote_effort_identity_falls_back_to_session_model_before_history() {
 }
 
 #[test]
+fn test_remote_effort_identity_resolves_named_profile_without_overriding_server_truth() {
+    with_tui_named_omlx_config(|| {
+        let mut app = App::new_for_remote(None);
+        app.session.model = Some("omlx:claude-sonnet-4-20250514".to_string());
+
+        let (provider, model) = app.remote_effort_identity();
+        assert_eq!(provider.as_deref(), Some("omlx"));
+        assert_eq!(model.as_deref(), Some("omlx:claude-sonnet-4-20250514"));
+
+        app.remote_provider_name = Some("openai".to_string());
+        let (provider, _) = app.remote_effort_identity();
+        assert_eq!(provider.as_deref(), Some("openai"));
+    });
+}
+
+#[test]
+fn test_remote_header_provider_name_resolves_named_omlx_and_uses_configured_fallback() {
+    with_tui_named_omlx_config(|| {
+        let mut app = App::new_for_remote(None);
+        app.session.model = Some("omlx:gpt-oss-120b".to_string());
+        assert_eq!(crate::tui::TuiState::provider_name(&app), "omlx");
+
+        app.session.model = None;
+        app.remote_provider_model = None;
+        assert_eq!(crate::tui::TuiState::provider_name(&app), "omlx");
+    });
+}
+
+#[test]
+fn test_replay_saved_provider_key_wins_over_conflicting_model_inference() {
+    let mut session = crate::session::Session::create_with_id(
+        "replay-provider-precedence".to_string(),
+        None,
+        None,
+    );
+    session.provider_key = Some("omlx".to_string());
+    session.model = Some("claude-sonnet-4-20250514".to_string());
+
+    let app = App::new_for_replay_silent(session);
+    assert_eq!(app.remote_provider_name.as_deref(), Some("omlx"));
+    assert_eq!(app.remote_provider_model.as_deref(), Some("claude-sonnet-4-20250514"));
+}
+
+#[test]
+fn test_configured_omlx_default_marks_matching_picker_route() {
+    with_tui_named_omlx_config(|| {
+        let route = crate::tui::PickerOption {
+            provider: "omlx".to_string(),
+            api_method: "openai-compatible:omlx".to_string(),
+            available: true,
+            detail: String::new(),
+            estimated_reference_cost_micros: None,
+        };
+
+        assert!(crate::tui::app::inline_interactive::model_picker_route_is_default(
+            "gpt-oss-120b",
+            &route,
+            Some("omlx:gpt-oss-120b"),
+            None,
+        ));
+
+        let other_route = crate::tui::PickerOption {
+            provider: "OpenAI".to_string(),
+            api_method: "openai-api".to_string(),
+            available: true,
+            detail: String::new(),
+            estimated_reference_cost_micros: None,
+        };
+        assert!(!crate::tui::app::inline_interactive::model_picker_route_is_default(
+            "gpt-oss-120b",
+            &other_route,
+            Some("omlx:gpt-oss-120b"),
+            None,
+        ));
+    });
+}
+
+
+#[test]
+fn test_remote_claude_route_synthesis_ignores_named_profile_with_claude_model_name() {
+    with_tui_named_omlx_config(|| {
+        let mut app = App::new_for_remote(None);
+        app.remote_available_entries = vec!["omlx:claude-sonnet-4-20250514".to_string()];
+        app.open_model_picker();
+        wait_for_model_picker_load(&mut app);
+        let picker = app
+            .inline_interactive_state
+            .as_ref()
+            .expect("model picker should open");
+        let entry = picker
+            .entries
+            .iter()
+            .find(|entry| entry.name == "omlx:claude-sonnet-4-20250514")
+            .expect("named Claude-looking model should remain in picker");
+
+        assert!(entry.options.iter().all(|route| route.api_method != "claude-api"
+            && route.api_method != "claude-oauth"));
+    });
+}
+
+fn with_tui_named_omlx_config(test: impl FnOnce()) {
+    let _guard = crate::storage::lock_test_env();
+    let old_jcode_home = std::env::var_os("JCODE_HOME");
+    let tmp = tempfile::tempdir().expect("temp jcode home");
+    crate::env::set_var("JCODE_HOME", tmp.path());
+    crate::config::invalidate_config_cache();
+    std::fs::write(
+        tmp.path().join("config.toml"),
+        r#"
+[provider]
+default_provider = "omlx"
+default_model = "omlx:gpt-oss-120b"
+
+[providers.omlx]
+type = "openai-compatible"
+base_url = "https://omlx.example/v1"
+auth = "none"
+default_model = "gpt-oss-120b"
+
+[[providers.omlx.models]]
+id = "gpt-oss-120b"
+input = ["text"]
+
+[[providers.omlx.models]]
+id = "claude-sonnet-4-20250514"
+input = ["text"]
+"#,
+    )
+    .expect("write config");
+    crate::config::invalidate_config_cache();
+    test();
+
+    if let Some(value) = old_jcode_home {
+        crate::env::set_var("JCODE_HOME", value);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+    crate::config::invalidate_config_cache();
+}
+
+#[test]
 fn test_openai_compatible_login_preserves_profile_for_runtime_activation() {
     let mut app = create_test_app();
 

@@ -1,3 +1,11 @@
+fn resolved_provider_key(model: &str) -> Option<&'static str> {
+    resolve_model_spec(model, &crate::config::Config::default())
+        .provider_key
+        .as_deref()
+        .and_then(ActiveProvider::from_key_or_alias)
+        .map(ActiveProvider::key)
+}
+
 #[test]
 fn resolved_model_spec_uses_one_context_aware_precedence_table() {
     let mut cfg = crate::config::Config::default();
@@ -152,37 +160,37 @@ fn resolved_model_spec_uses_one_context_aware_precedence_table() {
 }
 
 #[test]
-fn test_provider_for_model_claude() {
-    assert_eq!(provider_for_model("claude-opus-4-6"), Some("claude"));
-    assert_eq!(provider_for_model("claude-opus-4-6[1m]"), Some("claude"));
-    assert_eq!(provider_for_model("claude-sonnet-4-6"), Some("claude"));
+fn test_resolved_provider_key_claude() {
+    assert_eq!(resolved_provider_key("claude-opus-4-6"), Some("claude"));
+    assert_eq!(resolved_provider_key("claude-opus-4-6[1m]"), Some("claude"));
+    assert_eq!(resolved_provider_key("claude-sonnet-4-6"), Some("claude"));
 }
 
 #[test]
-fn test_provider_for_model_openai() {
-    assert_eq!(provider_for_model("gpt-5.2-codex"), Some("openai"));
-    assert_eq!(provider_for_model("gpt-5.5"), Some("openai"));
-    assert_eq!(provider_for_model("gpt-5.4"), Some("openai"));
-    assert_eq!(provider_for_model("gpt-5.4[1m]"), Some("openai"));
-    assert_eq!(provider_for_model("gpt-5.4-pro"), Some("openai"));
+fn test_resolved_provider_key_openai() {
+    assert_eq!(resolved_provider_key("gpt-5.2-codex"), Some("openai"));
+    assert_eq!(resolved_provider_key("gpt-5.5"), Some("openai"));
+    assert_eq!(resolved_provider_key("gpt-5.4"), Some("openai"));
+    assert_eq!(resolved_provider_key("gpt-5.4[1m]"), Some("openai"));
+    assert_eq!(resolved_provider_key("gpt-5.4-pro"), Some("openai"));
 }
 
 #[test]
-fn test_provider_for_model_gemini() {
-    assert_eq!(provider_for_model("gemini-2.5-pro"), Some("gemini"));
-    assert_eq!(provider_for_model("gemini-2.5-flash"), Some("gemini"));
-    assert_eq!(provider_for_model("gemini-3-pro-preview"), Some("gemini"));
+fn test_resolved_provider_key_gemini() {
+    assert_eq!(resolved_provider_key("gemini-2.5-pro"), Some("gemini"));
+    assert_eq!(resolved_provider_key("gemini-2.5-flash"), Some("gemini"));
+    assert_eq!(resolved_provider_key("gemini-3-pro-preview"), Some("gemini"));
 }
 
 #[test]
-fn test_provider_for_model_bedrock() {
-    assert_eq!(provider_for_model("amazon.nova-pro-v1:0"), Some("bedrock"));
+fn test_resolved_provider_key_bedrock() {
+    assert_eq!(resolved_provider_key("amazon.nova-pro-v1:0"), Some("bedrock"));
     assert_eq!(
-        provider_for_model("us.amazon.nova-micro-v1:0"),
+        resolved_provider_key("us.amazon.nova-micro-v1:0"),
         Some("bedrock")
     );
     assert_eq!(
-        provider_for_model(
+        resolved_provider_key(
             "arn:aws:bedrock:us-east-2:302154194530:inference-profile/us.deepseek.r1-v1:0"
         ),
         Some("bedrock")
@@ -190,19 +198,19 @@ fn test_provider_for_model_bedrock() {
 }
 
 #[test]
-fn test_provider_for_model_openrouter() {
+fn test_resolved_provider_key_openrouter() {
     // OpenRouter uses provider/model format
     assert_eq!(
-        provider_for_model("anthropic/claude-sonnet-4"),
+        resolved_provider_key("anthropic/claude-sonnet-4"),
         Some("openrouter")
     );
-    assert_eq!(provider_for_model("openai/gpt-4o"), Some("openrouter"));
+    assert_eq!(resolved_provider_key("openai/gpt-4o"), Some("openrouter"));
     assert_eq!(
-        provider_for_model("google/gemini-2.0-flash"),
+        resolved_provider_key("google/gemini-2.0-flash"),
         Some("openrouter")
     );
     assert_eq!(
-        provider_for_model("meta-llama/llama-3.1-405b"),
+        resolved_provider_key("meta-llama/llama-3.1-405b"),
         Some("openrouter")
     );
 }
@@ -1859,16 +1867,16 @@ fn test_provider_specific_model_prefix_cannot_bypass_provider_lock() {
 }
 
 #[test]
-fn test_provider_for_model_unknown() {
-    assert_eq!(provider_for_model("unknown-model"), None);
+fn test_resolved_provider_key_unknown() {
+    assert_eq!(resolved_provider_key("unknown-model"), None);
 }
 
 #[test]
-fn test_provider_for_model_cursor() {
-    assert_eq!(provider_for_model("composer-2-fast"), Some("cursor"));
-    assert_eq!(provider_for_model("composer-2"), Some("cursor"));
-    assert_eq!(provider_for_model("sonnet-4.6"), Some("cursor"));
-    assert_eq!(provider_for_model("gpt-5"), Some("openai"));
+fn test_resolved_provider_key_cursor() {
+    assert_eq!(resolved_provider_key("composer-2-fast"), Some("cursor"));
+    assert_eq!(resolved_provider_key("composer-2"), Some("cursor"));
+    assert_eq!(resolved_provider_key("sonnet-4.6"), Some("cursor"));
+    assert_eq!(resolved_provider_key("gpt-5"), Some("openai"));
 }
 
 #[test]

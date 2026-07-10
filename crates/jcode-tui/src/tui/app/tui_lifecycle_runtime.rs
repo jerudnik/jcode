@@ -32,16 +32,17 @@ impl App {
         };
         app.remote_provider_model = Some(effective_model.clone());
         // Infer provider name from model string
-        let provider_name = match crate::provider::provider_for_model(&effective_model) {
-            Some("claude") => "anthropic",
-            Some("openai") => "openai",
-            Some("openrouter") => "openrouter",
-            Some("bedrock") => "bedrock",
-            Some("gemini") => "gemini",
-            Some("cursor") => "cursor",
-            Some("antigravity") => "antigravity",
-            Some(other) => other,
-            None => "claude",
+        let provider_key = app
+            .session
+            .provider_key
+            .as_deref()
+            .map(str::to_string)
+            .or_else(|| crate::provider::resolve_current_model_spec(&effective_model).provider_key)
+            .unwrap_or_else(|| "claude".to_string());
+        let provider_name = if provider_key == "claude" {
+            "anthropic"
+        } else {
+            provider_key.as_str()
         };
         app.remote_provider_name = Some(provider_name.to_string());
 

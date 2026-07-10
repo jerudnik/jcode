@@ -1094,17 +1094,7 @@ fn provider_key_for_launch_model(
     if model.is_empty() {
         return None;
     }
-    if let Some((prefix, _rest)) = model.split_once(':') {
-        let prefix = prefix.trim();
-        if crate::provider::provider_from_model_key(prefix).is_some()
-            || crate::provider_catalog::resolve_openai_compatible_profile_selection(prefix)
-                .is_some()
-            || crate::config::config().providers.contains_key(prefix)
-        {
-            return Some(prefix.to_string());
-        }
-    }
-    crate::provider::provider_for_model(model).map(str::to_string)
+    crate::provider::resolve_model_spec(model, crate::config::config()).provider_key
 }
 
 fn create_launch_session(request: &LaunchRequest) -> Result<(String, PathBuf)> {
@@ -1389,6 +1379,71 @@ mod tests {
         assert_eq!(parsed.model.as_deref(), Some("openai:gpt-test"));
         assert_eq!(parsed.provider_key.as_deref(), Some("openai"));
         assert!(parsed.selfdev);
+    }
+
+    #[test]
+    fn provider_key_for_launch_model_uses_resolver_after_override_policy() {
+        assert_eq!(
+            provider_key_for_launch_model(Some("openai-api:gpt-5.5"), Some("override-key")),
+            Some("override-key".to_string()),
+            "explicit launch override must precede model-derived resolution"
+        );
+        assert_eq!(
+            provider_key_for_launch_model(Some("openai-api:gpt-5.5"), None).as_deref(),
+            Some("openai")
+        );
+        assert_eq!(
+            provider_key_for_launch_model(Some("anthropic-api:claude-test"), None).as_deref(),
+            Some("anthropic-api")
+        );
+        assert_eq!(
+            provider_key_for_launch_model(Some("unknown-prefix:model"), None),
+            None
+        );
+    }
+
+    #[test]
+    fn launch_and_spawn_provider_resolution_stay_in_parity() {
+        let _guard = crate::storage::lock_test_env();
+        let temp_home = tempfile::TempDir::new().expect("temp home");
+        let previous_jcode_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp_home.path());
+        std::fs::write(
+            temp_home.path().join("config.toml"),
+            r#"
+[providers.omlx]
+type = "openai-compatible"
+base_url = "https://omlx.example.test/v1"
+api_key_env = "TEST_OMLX_API_KEY"
+default_model = "omlx-model"
+model_catalog = false
+"#,
+        )
+        .expect("write named provider config");
+        crate::config::invalidate_config_cache();
+
+        for (model, expected) in [
+            ("openai-api:gpt-5.5", Some("openai")),
+            ("claude-oauth:claude-opus-4-8", Some("claude")),
+            ("anthropic-api:claude-test", Some("anthropic-api")),
+            ("omlx:omlx-model", Some("omlx")),
+            ("unknown-prefix:model", None),
+        ] {
+            let launch = provider_key_for_launch_model(Some(model), None);
+            let spawn =
+                crate::server::comm_session::provider_key_for_spawn_model(Some(model), None);
+            assert_eq!(launch.as_deref(), expected, "launch resolution for {model}");
+            assert_eq!(spawn.as_deref(), expected, "spawn resolution for {model}");
+            assert_eq!(launch, spawn, "launch/spawn parity for {model}");
+        }
+
+        crate::config::invalidate_config_cache();
+        if let Some(previous) = previous_jcode_home {
+            crate::env::set_var("JCODE_HOME", previous);
+        } else {
+            crate::env::remove_var("JCODE_HOME");
+        }
+        crate::config::invalidate_config_cache();
     }
 
     #[test]

@@ -235,32 +235,15 @@ fn model_picker_route_is_recommended(model_name: &str, route: &PickerOption) -> 
         )
 }
 
-fn model_picker_provider_hint_from_model_spec(model_spec: &str) -> Option<(&str, &str)> {
-    let (provider_hint, bare_model) = model_spec.split_once(':')?;
-    let provider_hint = provider_hint.trim();
-    let bare_model = bare_model.trim();
-    if provider_hint.is_empty() || bare_model.is_empty() {
+fn model_picker_resolved_model_spec(
+    model_spec: &str,
+) -> Option<crate::provider::ResolvedModelSpec> {
+    let resolved = crate::provider::resolve_current_model_spec(model_spec);
+    if resolved.bare_model.trim().is_empty() {
         return None;
     }
-
-    let normalized = provider_hint.to_ascii_lowercase();
-    if matches!(
-        normalized.as_str(),
-        "claude"
-            | "anthropic"
-            | "openai"
-            | "copilot"
-            | "cursor"
-            | "antigravity"
-            | "bedrock"
-            | "openrouter"
-            | "gemini"
-    ) || crate::provider_catalog::openai_compatible_profile_by_id(provider_hint).is_some()
-    {
-        Some((provider_hint, bare_model))
-    } else {
-        None
-    }
+    resolved.provider_key.as_ref()?;
+    Some(resolved)
 }
 
 fn model_picker_route_provider_matches_key(
@@ -275,7 +258,7 @@ fn model_picker_route_provider_matches_key(
     )
 }
 
-fn model_picker_route_is_default(
+pub(crate) fn model_picker_route_is_default(
     model_name: &str,
     route: &PickerOption,
     config_default_model: Option<&str>,
@@ -303,8 +286,8 @@ fn model_picker_route_is_default(
 
     let model_matches_bare_or_exact = default_model == selection.model_spec
         || default_model == model_name
-        || model_picker_provider_hint_from_model_spec(default_model)
-            .map(|(_, bare_model)| bare_model == model_name)
+        || model_picker_resolved_model_spec(default_model)
+            .map(|resolved| resolved.bare_model == model_name)
             .unwrap_or(false);
 
     if let Some(default_provider) = config_default_provider
@@ -318,10 +301,12 @@ fn model_picker_route_is_default(
         return true;
     }
 
-    if let Some((provider_hint, bare_model)) =
-        model_picker_provider_hint_from_model_spec(default_model)
-    {
-        return bare_model == model_name && provider_matches(provider_hint);
+    if let Some(resolved) = model_picker_resolved_model_spec(default_model) {
+        return resolved.bare_model == model_name
+            && resolved
+                .provider_key
+                .as_deref()
+                .is_some_and(provider_matches);
     }
 
     if let Some((bare_model, provider_label)) = default_model.rsplit_once('@') {
@@ -415,7 +400,10 @@ impl App {
             .filter(|model| match methods_by_model.get(model.as_str()) {
                 None => true,
                 Some(methods) => {
-                    crate::provider::provider_for_model(model) == Some("claude")
+                    crate::provider::resolve_current_model_spec(model)
+                        .provider_key
+                        .as_deref()
+                        == Some("claude")
                         && !model.contains('/')
                         && ((auth.anthropic.has_api_key && !methods.contains("claude-api"))
                             || (auth.anthropic.has_oauth && !methods.contains("claude-oauth")))

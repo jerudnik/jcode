@@ -208,11 +208,11 @@ fn test_normalize_copilot_model_name_unknown() {
 }
 
 #[test]
-fn test_provider_for_model_copilot_dot_notation() {
-    assert_eq!(provider_for_model("claude-opus-4.6"), Some("claude"));
-    assert_eq!(provider_for_model("claude-sonnet-4.6"), Some("claude"));
-    assert_eq!(provider_for_model("claude-haiku-4.5"), Some("claude"));
-    assert_eq!(provider_for_model("gpt-4.1"), Some("openai"));
+fn test_resolved_provider_key_copilot_dot_notation() {
+    assert_eq!(resolved_provider_key("claude-opus-4.6"), Some("claude"));
+    assert_eq!(resolved_provider_key("claude-sonnet-4.6"), Some("claude"));
+    assert_eq!(resolved_provider_key("claude-haiku-4.5"), Some("claude"));
+    assert_eq!(resolved_provider_key("gpt-4.1"), Some("openai"));
 }
 
 #[test]
