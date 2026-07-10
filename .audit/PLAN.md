@@ -802,17 +802,21 @@ be reverted without undoing WI-0's isolation repair or WI-2's general resolver.
      `manual -> explicit` and `disabled|none -> off`; assert every Anthropic
      reasoning and both Copilot spellings. Also test each invalid fallback
      exactly as tabulated.
-   - Add the **WI-4 mechanical completeness guard** in
-     `jcode-config-types` tests: iterate every `StringConfigDomain` whose
-     runtime accepts config aliases and every `accepted_spellings(domain)`
-     member, then assert the shared canonicalizer produces the exact canonical
-     bucket that the runtime enum/wire adapter consumes. Runtime-crate unit
-     tests must call their adapters for that same iterator. Because both
-     `Config::validate` and runtime adapters call the one shared canonicalizer,
-     adding an accepted runtime alias requires changing its declared shared
-     spelling set and makes this suite fail until TOML and env compatibility
-     expectations are added. This replaces a second hand-maintained policy
-     table with an executable equivalence invariant.
+   - Add the **WI-4 mechanical completeness guard** without reversing crate
+     dependencies. `jcode-config-types` exposes a
+     `RUNTIME_ALIAS_DOMAINS` const and each domain's exhaustive
+     `accepted_spellings(domain)` mapping; its unit test iterates that const,
+     rejects duplicate spellings, and asserts every spelling's documented
+     canonical bucket and invalid fallback. The OpenAI, Anthropic, and Copilot
+     runtime unit tests each iterate `accepted_spellings` for the domain(s) they
+     adapt and assert the shared canonical result converts to their expected
+     runtime enum/wire bucket. Thus config-types never depends upward on a
+     runtime crate, but both `Config::validate` and every runtime adapter call
+     the one shared canonicalizer. Adding an accepted runtime alias requires
+     changing its declared shared spelling set and makes these TOML/env and
+     adapter tests fail until its canonical behavior is specified. This replaces
+     a second hand-maintained policy table with an executable equivalence
+     invariant.
    - Retain `config_env_fingerprint_tracks_every_apply_env_override_var`.
      Extend it to assert `CONFIG_ENV_KEYS` has no duplicates, and add
      a targeted reload-fingerprint test for `JCODE_MEMORY_EMBEDDING_API_KEY_ENV`.
