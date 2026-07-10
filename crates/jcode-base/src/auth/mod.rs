@@ -125,9 +125,14 @@ fn auth_timing_logging_enabled() -> bool {
 }
 
 fn openai_api_key_configured() -> bool {
-    crate::provider_catalog::load_api_key_from_env_or_config("OPENAI_API_KEY", "openai.env")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
+    crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+            "OPENAI_API_KEY",
+            "openai.env",
+        ),
+    )
+    .map(|value| !value.trim().is_empty())
+    .unwrap_or(false)
 }
 
 fn auth_state_label(state: AuthState) -> &'static str {
@@ -492,9 +497,10 @@ impl AuthStatus {
                 if self.state_for_provider(provider) == AuthState::Available {
                     if resolved.requires_api_key {
                         format!("API key (`{}`)", resolved.api_key_env)
-                    } else if crate::provider_catalog::load_api_key_from_env_or_config(
-                        &resolved.api_key_env,
-                        &resolved.env_file,
+                    } else if crate::provider_catalog::load_api_key(
+                        &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                            &resolved,
+                        ),
                     )
                     .is_some()
                     {
@@ -726,15 +732,21 @@ impl AuthStatus {
                 } else {
                     let resolved =
                         crate::provider_catalog::resolve_openai_compatible_profile(profile);
-                    summarize_sources(vec![
-                        env_source(&resolved.api_key_env),
-                        config_source(
-                            &resolved.api_key_env,
-                            &resolved.env_file,
-                            format!("~/.config/jcode/{}", resolved.env_file),
-                        ),
-                        external_api_key_source(&resolved.api_key_env),
-                    ])
+                    let credential_source =
+                        crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                            &resolved,
+                        );
+                    let mut sources = Vec::new();
+                    for env_key in credential_source.candidate_env_keys() {
+                        sources.push(env_source(env_key));
+                        sources.push(config_source(
+                            env_key,
+                            credential_source.env_file(),
+                            format!("~/.config/jcode/{}", credential_source.env_file()),
+                        ));
+                        sources.push(external_api_key_source(env_key));
+                    }
+                    summarize_sources(sources)
                 };
                 (
                     source,
@@ -1447,7 +1459,10 @@ fn config_file_contains_assignment(path: &Path, env_key: &str) -> bool {
 }
 
 fn api_key_available(env_key: &str, file_name: &str) -> bool {
-    crate::provider_catalog::load_api_key_from_env_or_config(env_key, file_name).is_some()
+    crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::primary_only(env_key, file_name),
+    )
+    .is_some()
 }
 
 #[cfg(test)]

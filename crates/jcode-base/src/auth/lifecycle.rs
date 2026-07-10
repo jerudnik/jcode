@@ -863,7 +863,7 @@ fn api_key_env_bindings_for_provider(provider_id: &str) -> Vec<(String, String)>
 ///
 /// `/login` persists API keys to the per-provider env file under the jcode
 /// config dir, but credential resolution
-/// ([`crate::provider_catalog::load_api_key_from_env_or_config`]) prefers the
+/// ([`crate::provider_catalog::load_api_key`]) prefers the
 /// process env var. A long-lived server that inherited a stale
 /// `ANTHROPIC_API_KEY` (or similar) would therefore keep 401-ing forever even
 /// though the login succeeded and the file holds a valid key. On an explicit
@@ -1142,9 +1142,11 @@ mod tests {
             Ok("fresh-login-key")
         );
         assert_eq!(
-            crate::provider_catalog::load_api_key_from_env_or_config(
-                "ANTHROPIC_API_KEY",
-                "anthropic.env"
+            crate::provider_catalog::load_api_key(
+                &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+                    "ANTHROPIC_API_KEY",
+                    "anthropic.env",
+                ),
             )
             .as_deref(),
             Some("fresh-login-key"),

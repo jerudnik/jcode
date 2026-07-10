@@ -214,9 +214,11 @@ fn current_anthropic_catalog_scope() -> String {
     // anthropic.env file. Checking only the env var made env-file-keyed
     // sessions read/write the OAuth scope while requests actually used the
     // API key, so the `api-key` catalog scope went permanently stale.
-    if crate::provider_catalog::load_api_key_from_env_or_config(
-        "ANTHROPIC_API_KEY",
-        "anthropic.env",
+    if crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+            "ANTHROPIC_API_KEY",
+            "anthropic.env",
+        ),
     )
     .is_some()
     {

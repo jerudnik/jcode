@@ -202,9 +202,11 @@ pub(super) fn multiprovider_model_routes(provider: &MultiProvider) -> Vec<ModelR
     let mut openrouter_stats = OpenRouterRouteStats::default();
 
     let has_oauth = provider.has_claude_runtime();
-    let has_api_key = crate::provider_catalog::load_api_key_from_env_or_config(
-        "ANTHROPIC_API_KEY",
-        "anthropic.env",
+    let has_api_key = crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+            "ANTHROPIC_API_KEY",
+            "anthropic.env",
+        ),
     )
     .is_some();
     let openai_auth = crate::auth::AuthStatus::check_fast();

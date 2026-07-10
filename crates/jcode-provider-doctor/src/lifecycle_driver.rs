@@ -616,9 +616,10 @@ mod tests {
         let resolved = jcode_base::provider_catalog::resolve_openai_compatible_profile(
             jcode_base::provider_catalog::OPENCODE_PROFILE,
         );
-        jcode_base::provider_catalog::load_api_key_from_env_or_config(
-            &resolved.api_key_env,
-            &resolved.env_file,
+        jcode_base::provider_catalog::load_api_key(
+            &jcode_base::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                &resolved,
+            ),
         )
         .map(|secret| LiveTestApiKey {
             auth: jcode_base::live_tests::LiveVerificationAuth::from_secret(
@@ -632,9 +633,10 @@ mod tests {
 
     fn live_openai_compatible_api_key(profile: OpenAiCompatibleProfile) -> Option<LiveTestApiKey> {
         let resolved = jcode_base::provider_catalog::resolve_openai_compatible_profile(profile);
-        jcode_base::provider_catalog::load_api_key_from_env_or_config(
-            &resolved.api_key_env,
-            &resolved.env_file,
+        jcode_base::provider_catalog::load_api_key(
+            &jcode_base::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                &resolved,
+            ),
         )
         .map(|secret| LiveTestApiKey {
             auth: jcode_base::live_tests::LiveVerificationAuth::from_secret(
@@ -1940,9 +1942,10 @@ mod tests {
             env_file.display()
         );
         assert_eq!(
-            jcode_base::provider_catalog::load_api_key_from_env_or_config(
-                &resolved.api_key_env,
-                &resolved.env_file,
+            jcode_base::provider_catalog::load_api_key(
+                &jcode_base::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                    &resolved,
+                ),
             ),
             None,
             "fresh sandbox should not inherit credentials from the developer machine"
@@ -1967,9 +1970,10 @@ mod tests {
             "TUI paste-key lifecycle should create env file"
         );
         assert_eq!(
-            jcode_base::provider_catalog::load_api_key_from_env_or_config(
-                &resolved.api_key_env,
-                &resolved.env_file,
+            jcode_base::provider_catalog::load_api_key(
+                &jcode_base::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                    &resolved,
+                ),
             )
             .as_deref(),
             Some(spec.api_key.as_str())

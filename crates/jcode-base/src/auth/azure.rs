@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::provider_catalog::{
-    load_api_key_from_env_or_config, load_env_value_from_env_or_config, normalize_api_base,
+    ApiKeyCredentialSource, load_api_key, load_env_value_from_env_or_config, normalize_api_base,
 };
 
 pub const ENV_FILE: &str = "azure-openai.env";
@@ -38,7 +38,7 @@ pub fn load_model() -> Option<String> {
 }
 
 pub fn has_api_key() -> bool {
-    load_api_key_from_env_or_config(API_KEY_ENV, ENV_FILE).is_some()
+    load_api_key(&ApiKeyCredentialSource::primary_only(API_KEY_ENV, ENV_FILE)).is_some()
 }
 
 pub fn uses_entra_id() -> bool {

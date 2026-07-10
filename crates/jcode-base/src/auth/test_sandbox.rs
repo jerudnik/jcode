@@ -187,9 +187,10 @@ mod tests {
             .expect("write key");
 
         assert_eq!(
-            crate::provider_catalog::load_api_key_from_env_or_config(
-                "CEREBRAS_API_KEY",
-                "cerebras.env",
+            crate::provider_catalog::load_api_key(
+                &crate::provider_catalog::ApiKeyCredentialSource::from_catalog_profile(
+                    crate::provider_catalog::CEREBRAS_PROFILE,
+                ),
             )
             .as_deref(),
             Some("test-cerebras-key")

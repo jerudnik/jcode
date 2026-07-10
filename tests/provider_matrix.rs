@@ -6,8 +6,8 @@ use jcode::cli::provider_init::{
 };
 use jcode::provider::Provider;
 use jcode::provider_catalog::{
-    LoginProviderDescriptor, LoginProviderTarget, OPENAI_COMPAT_PROFILE, OpenAiCompatibleProfile,
-    apply_openai_compatible_profile_env, load_api_key_from_env_or_config, login_providers,
+    ApiKeyCredentialSource, LoginProviderDescriptor, LoginProviderTarget, OPENAI_COMPAT_PROFILE,
+    OpenAiCompatibleProfile, apply_openai_compatible_profile_env, load_api_key, login_providers,
     openai_compatible_profile_is_configured, openai_compatible_profiles,
     resolve_openai_compatible_profile, save_env_value_to_env_file,
     server_bootstrap_login_providers,
@@ -680,8 +680,9 @@ fn provider_matrix_openai_compatible_auth_state_space_material_states_preserve_l
                         "default model mismatch for {state_label}"
                     );
 
-                    let loaded_key =
-                        load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file);
+                    let loaded_key = load_api_key(
+                        &ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved),
+                    );
                     assert_eq!(
                         loaded_key.as_deref(),
                         has_key.then_some("sk-state-space-login"),

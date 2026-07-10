@@ -804,8 +804,9 @@ fn save_openai_compat_setting(app: &mut App, setting: OpenAiCompatSetting, value
     let old = crate::provider_catalog::resolve_openai_compatible_profile(
         crate::provider_catalog::OPENAI_COMPAT_PROFILE,
     );
-    let current_key =
-        crate::provider_catalog::load_api_key_from_env_or_config(&old.api_key_env, &old.env_file);
+    let current_key = crate::provider_catalog::load_api_key(
+        &crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(&old),
+    );
     let (env_key, normalized_value) = match setting {
         OpenAiCompatSetting::ApiBase => {
             let normalized = match value {

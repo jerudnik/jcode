@@ -20,9 +20,9 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use jcode_base::provider_catalog::{
-    OPENAI_COMPAT_PROFILE, is_safe_env_file_name, is_safe_env_key_name,
-    load_api_key_from_env_or_config, load_env_value_from_env_or_config, normalize_api_base,
-    openai_compatible_profile_by_id, openai_compatible_profile_id_for_api_base,
+    ApiKeyCredentialSource, OPENAI_COMPAT_PROFILE, active_openai_compatible_profile,
+    is_safe_env_file_name, is_safe_env_key_name, load_api_key, load_env_value_from_env_or_config,
+    normalize_api_base, openai_compatible_profile_by_id, openai_compatible_profile_id_for_api_base,
     openai_compatible_profile_static_context_limits, openai_compatible_profile_static_models,
     openai_compatible_profiles, resolve_openai_compatible_profile,
 };
@@ -92,18 +92,44 @@ fn explicit_openrouter_runtime_configured() -> bool {
     .any(|var| std::env::var_os(var).is_some())
 }
 
+fn activated_openai_compatible_profile()
+-> Option<jcode_base::provider_catalog::ResolvedOpenAiCompatibleProfile> {
+    let profile = active_openai_compatible_profile()?;
+    let matches = [
+        ("JCODE_OPENROUTER_API_BASE", profile.api_base.as_str()),
+        (
+            "JCODE_OPENROUTER_API_KEY_NAME",
+            profile.api_key_env.as_str(),
+        ),
+        ("JCODE_OPENROUTER_ENV_FILE", profile.env_file.as_str()),
+        ("JCODE_OPENROUTER_CACHE_NAMESPACE", profile.id.as_str()),
+    ]
+    .into_iter()
+    .all(|(name, expected)| std::env::var(name).ok().as_deref() == Some(expected));
+    matches.then_some(profile)
+}
+
 fn autodetected_openai_compatible_profile()
 -> Option<jcode_base::provider_catalog::ResolvedOpenAiCompatibleProfile> {
     if explicit_openrouter_runtime_configured() {
         return None;
     }
 
-    if load_api_key_from_env_or_config(DEFAULT_API_KEY_NAME, DEFAULT_ENV_FILE).is_some() {
+    if load_api_key(&ApiKeyCredentialSource::primary_only(
+        DEFAULT_API_KEY_NAME,
+        DEFAULT_ENV_FILE,
+    ))
+    .is_some()
+    {
         return None;
     }
 
     let compat = resolve_openai_compatible_profile(OPENAI_COMPAT_PROFILE);
-    if load_api_key_from_env_or_config(&compat.api_key_env, &compat.env_file).is_some() {
+    if load_api_key(&ApiKeyCredentialSource::from_resolved_catalog_profile(
+        &compat,
+    ))
+    .is_some()
+    {
         return Some(compat);
     }
 
@@ -189,7 +215,7 @@ fn load_named_profile_api_key(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        return load_api_key_from_env_or_config(env_key, env_file);
+        return load_api_key(&ApiKeyCredentialSource::primary_only(env_key, env_file));
     }
 
     std::env::var(env_key)
@@ -771,9 +797,8 @@ pub fn maybe_schedule_openai_compatible_profile_catalog_refresh(
         finish_profile_catalog_refresh(&resolved.id);
         return false;
     };
-    let auth = if let Some(key) =
-        load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file)
-    {
+    let credential_source = ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved);
+    let auth = if let Some(key) = load_api_key(&credential_source) {
         ProviderAuth::AuthorizationBearer {
             token: key,
             label: resolved.api_key_env.clone(),
@@ -859,8 +884,8 @@ pub fn maybe_schedule_standard_openrouter_catalog_refresh(context: &'static str)
     // shared slot and points the live runtime elsewhere, but standard
     // OpenRouter's catalog still needs its own refresh so `/model` can list it
     // (issue #292). Hence we deliberately ignore the shared-slot runtime env.
-    let Some(api_key) = load_api_key_from_env_or_config(DEFAULT_API_KEY_NAME, DEFAULT_ENV_FILE)
-    else {
+    let source = ApiKeyCredentialSource::primary_only(DEFAULT_API_KEY_NAME, DEFAULT_ENV_FILE);
+    let Some(api_key) = load_api_key(&source) else {
         return false;
     };
 
@@ -1451,22 +1476,22 @@ impl OpenRouterProvider {
     }
 
     pub fn new() -> Result<Self> {
-        let autodetected_profile = autodetected_openai_compatible_profile();
+        let catalog_profile =
+            activated_openai_compatible_profile().or_else(autodetected_openai_compatible_profile);
+        let credential_source = catalog_profile
+            .as_ref()
+            .map(ApiKeyCredentialSource::from_resolved_catalog_profile);
         let api_base = configured_api_base();
         let supports_provider_features = provider_features_enabled(&api_base);
         let supports_model_catalog = model_catalog_enabled();
         let send_openrouter_headers = supports_provider_features;
-        let auth = Self::resolve_auth()?;
+        let auth = Self::resolve_auth(credential_source.as_ref())?;
         let profile_id = std::env::var("JCODE_OPENROUTER_CACHE_NAMESPACE")
             .ok()
             .map(|value| value.trim().to_ascii_lowercase())
             .filter(|value| !value.is_empty())
             .and_then(|id| openai_compatible_profile_by_id(&id).map(|_| id))
-            .or_else(|| {
-                autodetected_profile
-                    .as_ref()
-                    .map(|profile| profile.id.clone())
-            })
+            .or_else(|| catalog_profile.as_ref().map(|profile| profile.id.clone()))
             .or_else(|| {
                 openai_compatible_profile_id_for_api_base(&api_base).map(ToString::to_string)
             });
@@ -1485,7 +1510,7 @@ impl OpenRouterProvider {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_else(|| {
-                autodetected_profile
+                catalog_profile
                     .as_ref()
                     .and_then(|profile| openai_compatible_profile_by_id(&profile.id))
                     .map(openai_compatible_profile_static_models)
@@ -1493,7 +1518,7 @@ impl OpenRouterProvider {
             });
 
         if std::env::var_os("JCODE_OPENROUTER_CACHE_NAMESPACE").is_none()
-            && let Some(profile) = autodetected_profile.as_ref()
+            && let Some(profile) = catalog_profile.as_ref()
         {
             jcode_base::env::set_var("JCODE_OPENROUTER_CACHE_NAMESPACE", &profile.id);
         }
@@ -1503,7 +1528,7 @@ impl OpenRouterProvider {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .or_else(|| {
-                autodetected_profile
+                catalog_profile
                     .as_ref()
                     .and_then(|profile| profile.default_model.clone())
             })
@@ -1546,17 +1571,17 @@ impl OpenRouterProvider {
     }
 
     pub fn new_openrouter_api_key_runtime() -> Result<Self> {
-        let api_key = load_api_key_from_env_or_config(DEFAULT_API_KEY_NAME, DEFAULT_ENV_FILE)
-            .ok_or_else(|| {
-                let path = jcode_base::storage::app_config_dir()
-                    .map(|dir| dir.join(DEFAULT_ENV_FILE).display().to_string())
-                    .unwrap_or_else(|_| DEFAULT_ENV_FILE.to_string());
-                anyhow::anyhow!(
-                    "{} not found in environment or {}",
-                    DEFAULT_API_KEY_NAME,
-                    path
-                )
-            })?;
+        let source = ApiKeyCredentialSource::primary_only(DEFAULT_API_KEY_NAME, DEFAULT_ENV_FILE);
+        let api_key = load_api_key(&source).ok_or_else(|| {
+            let path = jcode_base::storage::app_config_dir()
+                .map(|dir| dir.join(DEFAULT_ENV_FILE).display().to_string())
+                .unwrap_or_else(|_| DEFAULT_ENV_FILE.to_string());
+            anyhow::anyhow!(
+                "{} not found in environment or {}",
+                DEFAULT_API_KEY_NAME,
+                path
+            )
+        })?;
 
         Ok(Self {
             client: jcode_provider_core::shared_http_client(),
@@ -1596,8 +1621,8 @@ impl OpenRouterProvider {
                 resolved.api_base
             )
         })?;
-        let auth = match load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file)
-        {
+        let credential_source = ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved);
+        let auth = match load_api_key(&credential_source) {
             Some(token) => ProviderAuth::AuthorizationBearer {
                 token,
                 label: resolved.api_key_env.clone(),
@@ -2299,10 +2324,15 @@ impl OpenRouterProvider {
         if configured_allow_no_auth() {
             return true;
         }
-        Self::get_api_key().is_some()
+        let profile =
+            activated_openai_compatible_profile().or_else(autodetected_openai_compatible_profile);
+        let source = profile
+            .as_ref()
+            .map(ApiKeyCredentialSource::from_resolved_catalog_profile);
+        Self::get_api_key(source.as_ref()).is_some()
     }
 
-    fn resolve_auth() -> Result<ProviderAuth> {
+    fn resolve_auth(credential_source: Option<&ApiKeyCredentialSource>) -> Result<ProviderAuth> {
         if let Some(provider) = configured_dynamic_bearer_provider() {
             return match provider.as_str() {
                 "azure" => {
@@ -2324,8 +2354,11 @@ impl OpenRouterProvider {
         }
 
         if configured_allow_no_auth() {
-            if let Some(api_key) = Self::get_api_key() {
-                let key_name = configured_api_key_name();
+            if let Some(api_key) = Self::get_api_key(credential_source) {
+                let key_name = credential_source
+                    .map(ApiKeyCredentialSource::primary_env)
+                    .map(ToString::to_string)
+                    .unwrap_or_else(configured_api_key_name);
                 return Ok(match configured_auth_header_mode() {
                     AuthHeaderMode::AuthorizationBearer => ProviderAuth::AuthorizationBearer {
                         token: api_key,
@@ -2343,9 +2376,15 @@ impl OpenRouterProvider {
             });
         }
 
-        let key_name = configured_api_key_name();
-        let api_key = Self::get_api_key().ok_or_else(|| {
-            let env_file = configured_env_file_name();
+        let key_name = credential_source
+            .map(ApiKeyCredentialSource::primary_env)
+            .map(ToString::to_string)
+            .unwrap_or_else(configured_api_key_name);
+        let api_key = Self::get_api_key(credential_source).ok_or_else(|| {
+            let env_file = credential_source
+                .map(ApiKeyCredentialSource::env_file)
+                .map(ToString::to_string)
+                .unwrap_or_else(configured_env_file_name);
             let path = jcode_base::storage::app_config_dir()
                 .map(|dir| dir.join(&env_file).display().to_string())
                 .unwrap_or_else(|_| env_file.clone());
@@ -2366,10 +2405,18 @@ impl OpenRouterProvider {
     }
 
     /// Get API key from environment or config file
-    fn get_api_key() -> Option<String> {
-        let key_name = configured_api_key_name();
-        let env_file = configured_env_file_name();
-        load_api_key_from_env_or_config(&key_name, &env_file)
+    fn get_api_key(credential_source: Option<&ApiKeyCredentialSource>) -> Option<String> {
+        let fallback_source;
+        let source = if let Some(source) = credential_source {
+            source
+        } else {
+            fallback_source = ApiKeyCredentialSource::primary_only(
+                configured_api_key_name(),
+                configured_env_file_name(),
+            );
+            &fallback_source
+        };
+        load_api_key(source)
     }
 
     /// Fetch available models from OpenRouter API (with disk caching)

@@ -1,10 +1,32 @@
 pub use jcode_provider_env::{
-    load_api_key_from_env_or_config, load_env_value_from_config_file,
+    ApiKeyCredentialSource, load_api_key, load_env_value_from_config_file,
     load_env_value_from_env_or_config, register_api_key_fallback_resolver,
     save_env_value_to_env_file,
 };
 pub use jcode_provider_metadata::*;
 use std::collections::{HashMap, HashSet};
+use std::sync::{LazyLock, RwLock};
+
+static ACTIVE_OPENAI_COMPATIBLE_PROFILE: LazyLock<RwLock<Option<ResolvedOpenAiCompatibleProfile>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// The catalog profile activated in this process, if any.
+///
+/// This typed marker is deliberately separate from `JCODE_OPENROUTER_*`: those
+/// compatibility variables are also valid explicit user overrides and cannot
+/// preserve catalog credential aliases on their own.
+pub fn active_openai_compatible_profile() -> Option<ResolvedOpenAiCompatibleProfile> {
+    ACTIVE_OPENAI_COMPATIBLE_PROFILE
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+}
+
+fn set_active_openai_compatible_profile(profile: Option<ResolvedOpenAiCompatibleProfile>) {
+    *ACTIVE_OPENAI_COMPATIBLE_PROFILE
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = profile;
+}
 
 pub const OPENAI_COMPAT_LOCAL_ENABLED_ENV: &str = "JCODE_OPENAI_COMPAT_LOCAL_ENABLED";
 pub const MINIMAX_CHINA_API_BASE: &str = "https://api.minimaxi.com/v1";
@@ -39,6 +61,11 @@ pub fn resolve_openai_compatible_profile_with_api_key_hint(
         display_name: profile.display_name.to_string(),
         api_base: profile.api_base.to_string(),
         api_key_env: profile.api_key_env.to_string(),
+        api_key_aliases: profile
+            .api_key_aliases
+            .iter()
+            .map(|alias| (*alias).to_string())
+            .collect(),
         env_file: profile.env_file.to_string(),
         setup_url: profile.setup_url.to_string(),
         default_model: profile.default_model.map(ToString::to_string),
@@ -222,7 +249,7 @@ fn apply_profile_key_based_endpoint_overrides(
         .map(str::trim)
         .filter(|key| !key.is_empty())
         .map(ToString::to_string)
-        .or_else(|| load_env_value_from_env_or_config(profile.api_key_env, profile.env_file));
+        .or_else(|| load_api_key(&ApiKeyCredentialSource::from_catalog_profile(profile)));
 
     if key
         .as_deref()
@@ -599,9 +626,11 @@ fn apply_openai_compatible_profile_env_impl(
     for var in vars {
         crate::env::remove_var(var);
     }
+    set_active_openai_compatible_profile(None);
 
     if let Some(profile) = profile {
         let resolved = resolve_openai_compatible_profile(profile);
+        set_active_openai_compatible_profile(Some(resolved.clone()));
         crate::env::set_var("JCODE_OPENROUTER_API_BASE", &resolved.api_base);
         crate::env::set_var("JCODE_OPENROUTER_API_KEY_NAME", &resolved.api_key_env);
         crate::env::set_var("JCODE_OPENROUTER_ENV_FILE", &resolved.env_file);
@@ -799,19 +828,16 @@ pub fn apply_named_provider_profile_env_from_config(
     Ok(profile_name.to_string())
 }
 
-pub fn openrouter_like_api_key_sources() -> Vec<(String, String)> {
+pub fn openrouter_like_api_key_sources() -> Vec<ApiKeyCredentialSource> {
     let mut sources = Vec::with_capacity(10);
-    sources.push((
-        "OPENROUTER_API_KEY".to_string(),
-        "openrouter.env".to_string(),
+    sources.push(ApiKeyCredentialSource::primary_only(
+        "OPENROUTER_API_KEY",
+        "openrouter.env",
     ));
 
     for profile in openai_compatible_profiles() {
         if profile.requires_api_key {
-            sources.push((
-                profile.api_key_env.to_string(),
-                profile.env_file.to_string(),
-            ));
+            sources.push(ApiKeyCredentialSource::from_catalog_profile(*profile));
         }
     }
 
@@ -854,7 +880,11 @@ pub fn openai_compatible_profile_is_configured(profile: OpenAiCompatibleProfile)
     }
 
     let resolved = resolve_openai_compatible_profile(profile);
-    if load_api_key_from_env_or_config(&resolved.api_key_env, &resolved.env_file).is_some() {
+    if load_api_key(&ApiKeyCredentialSource::from_resolved_catalog_profile(
+        &resolved,
+    ))
+    .is_some()
+    {
         return true;
     }
 
@@ -912,7 +942,7 @@ fn active_named_provider_profile_is_configured() -> Option<bool> {
         return Some(true);
     }
 
-    Some(load_api_key_from_env_or_config(&key_env, &env_file).is_some())
+    Some(load_api_key(&ApiKeyCredentialSource::primary_only(key_env, env_file)).is_some())
 }
 
 pub fn configured_api_key_source(
@@ -920,7 +950,7 @@ pub fn configured_api_key_source(
     file_var: &str,
     default_key: &str,
     default_file: &str,
-) -> Option<(String, String)> {
+) -> Option<ApiKeyCredentialSource> {
     if std::env::var_os(key_var).is_none() && std::env::var_os(file_var).is_none() {
         return None;
     }
@@ -951,7 +981,7 @@ pub fn configured_api_key_source(
         return None;
     }
 
-    Some((env_key, file_name))
+    Some(ApiKeyCredentialSource::primary_only(env_key, file_name))
 }
 
 fn env_override(name: &str) -> Option<String> {
@@ -962,12 +992,12 @@ fn env_override(name: &str) -> Option<String> {
         .or_else(|| load_env_value_from_env_or_config(name, OPENAI_COMPAT_PROFILE.env_file))
 }
 
-fn dedup_sources(sources: Vec<(String, String)>) -> Vec<(String, String)> {
+fn dedup_sources(sources: Vec<ApiKeyCredentialSource>) -> Vec<ApiKeyCredentialSource> {
     let mut seen = HashSet::new();
     let mut deduped = Vec::with_capacity(sources.len());
-    for (env_key, env_file) in sources {
-        if seen.insert((env_key.clone(), env_file.clone())) {
-            deduped.push((env_key, env_file));
+    for source in sources {
+        if seen.insert(source.clone()) {
+            deduped.push(source);
         }
     }
     deduped

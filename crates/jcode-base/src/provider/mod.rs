@@ -1202,9 +1202,11 @@ impl MultiProvider {
             }
         } else if self.anthropic_provider().is_none()
             && (crate::auth::claude::load_credentials().is_ok()
-                || crate::provider_catalog::load_api_key_from_env_or_config(
-                    "ANTHROPIC_API_KEY",
-                    "anthropic.env",
+                || crate::provider_catalog::load_api_key(
+                    &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+                        "ANTHROPIC_API_KEY",
+                        "anthropic.env",
+                    ),
                 )
                 .is_some())
         {

@@ -55,15 +55,19 @@ pub async fn run_provider_doctor_command(
 
     // Resolve the API key when the tier needs one.
     let api_key = if tier.requires_api_key() {
-        let key = crate::provider_catalog::load_api_key_from_env_or_config(
-            &resolved.api_key_env,
-            &resolved.env_file,
+        let credential_source =
+            crate::provider_catalog::ApiKeyCredentialSource::from_resolved_catalog_profile(
+                &resolved,
+            );
+        let key = crate::provider_catalog::load_api_key(
+            &credential_source,
         )
         .with_context(|| {
             format!(
-                "no API key found for `{provider}` (looked in env `{}` and `{}`). \
+                "no API key found for `{provider}` (looked for env keys [{}] in `{}`). \
                  Run `jcode login --provider {provider}`, or use `--tier offline` to check wiring only.",
-                resolved.api_key_env, resolved.env_file
+                credential_source.candidate_env_keys().collect::<Vec<_>>().join(", "),
+                credential_source.env_file(),
             )
         })?;
         Some(key)

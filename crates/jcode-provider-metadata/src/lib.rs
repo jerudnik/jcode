@@ -122,6 +122,9 @@ pub struct OpenAiCompatibleProfile {
     pub display_name: &'static str,
     pub api_base: &'static str,
     pub api_key_env: &'static str,
+    /// Ordered read-only compatibility aliases for credentials. New credentials
+    /// are always written under [`Self::api_key_env`].
+    pub api_key_aliases: &'static [&'static str],
     pub env_file: &'static str,
     pub setup_url: &'static str,
     pub default_model: Option<&'static str>,
@@ -134,6 +137,7 @@ pub struct ResolvedOpenAiCompatibleProfile {
     pub display_name: String,
     pub api_base: String,
     pub api_key_env: String,
+    pub api_key_aliases: Vec<String>,
     pub env_file: String,
     pub setup_url: String,
     pub default_model: Option<String>,
@@ -315,6 +319,7 @@ mod tests {
     #[test]
     fn matrix_profiles_have_unique_ids_and_safe_metadata() {
         let mut ids = HashSet::new();
+        let mut primary_envs = HashSet::new();
         for profile in openai_compatible_profiles() {
             assert!(
                 ids.insert(profile.id),
@@ -322,6 +327,15 @@ mod tests {
                 profile.id
             );
             assert!(is_safe_env_key_name(profile.api_key_env));
+            assert!(
+                primary_envs.insert(profile.api_key_env),
+                "duplicate catalog primary credential env: {}",
+                profile.api_key_env
+            );
+            for alias in profile.api_key_aliases {
+                assert!(is_safe_env_key_name(alias));
+                assert_ne!(*alias, profile.api_key_env);
+            }
             assert!(is_safe_env_file_name(profile.env_file));
             assert_eq!(
                 normalize_api_base(profile.api_base).as_deref(),
@@ -421,7 +435,16 @@ mod tests {
     #[test]
     fn minimax_profile_uses_official_openai_compatible_configuration() {
         assert_eq!(MINIMAX_PROFILE.api_base, "https://api.minimax.io/v1");
-        assert_eq!(MINIMAX_PROFILE.api_key_env, "OPENAI_API_KEY");
+        assert_eq!(MINIMAX_PROFILE.api_key_env, "MINIMAX_API_KEY");
+        assert_eq!(
+            openai_compatible_profiles()
+                .iter()
+                .filter(|profile| profile.api_key_env == "OPENAI_API_KEY")
+                .map(|profile| profile.id)
+                .collect::<Vec<_>>(),
+            vec!["openai-api"]
+        );
+        assert_eq!(ZAI_PROFILE.api_key_aliases, &["ZAI_API_KEY"]);
     }
 
     #[test]

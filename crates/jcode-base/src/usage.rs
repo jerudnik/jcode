@@ -360,9 +360,10 @@ fn activity_source_has_dedicated_report(source_key: &str) -> bool {
                 .strip_prefix("openai-compatible:")
                 .and_then(crate::provider_catalog::openai_compatible_profile_by_id)
                 .map(|profile| {
-                    crate::provider_catalog::load_api_key_from_env_or_config(
-                        profile.api_key_env,
-                        profile.env_file,
+                    crate::provider_catalog::load_api_key(
+                        &crate::provider_catalog::ApiKeyCredentialSource::from_catalog_profile(
+                            profile,
+                        ),
                     )
                     .is_some()
                 })

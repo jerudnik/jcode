@@ -38,9 +38,11 @@ pub const GEMINI_API_KEY_ENV_FILE: &str = "gemini.env";
 /// the env var keeps it consistent with every other API-key provider in jcode.
 pub fn api_key() -> Option<String> {
     for env_key in GEMINI_API_KEY_ENV_VARS {
-        if let Some(key) = crate::provider_catalog::load_api_key_from_env_or_config(
-            env_key,
-            GEMINI_API_KEY_ENV_FILE,
+        if let Some(key) = crate::provider_catalog::load_api_key(
+            &crate::provider_catalog::ApiKeyCredentialSource::primary_only(
+                *env_key,
+                GEMINI_API_KEY_ENV_FILE,
+            ),
         ) {
             return Some(key);
         }

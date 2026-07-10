@@ -56,6 +56,21 @@ impl Drop for EnvVarGuard {
     }
 }
 
+struct CatalogActivationGuard;
+
+impl CatalogActivationGuard {
+    fn activate(profile: jcode_base::provider_catalog::OpenAiCompatibleProfile) -> Self {
+        jcode_base::provider_catalog::apply_openai_compatible_profile_env(Some(profile));
+        Self
+    }
+}
+
+impl Drop for CatalogActivationGuard {
+    fn drop(&mut self) {
+        jcode_base::provider_catalog::force_apply_openai_compatible_profile_env(None);
+    }
+}
+
 fn test_config_dir(temp: &TempDir) -> std::path::PathBuf {
     #[cfg(target_os = "macos")]
     {
@@ -108,7 +123,11 @@ fn isolate_openrouter_autodetect_env() -> Vec<EnvVarGuard> {
     guards.extend(
         jcode_base::provider_catalog::openai_compatible_profiles()
             .iter()
-            .map(|profile| EnvVarGuard::remove(profile.api_key_env)),
+            .flat_map(|profile| {
+                std::iter::once(profile.api_key_env)
+                    .chain(profile.api_key_aliases.iter().copied())
+                    .map(EnvVarGuard::remove)
+            }),
     );
     guards
 }
@@ -1004,6 +1023,79 @@ fn autodetected_profile_seeds_default_model_and_cache_namespace() {
 }
 
 #[test]
+fn activated_zai_alias_survives_openrouter_compat_env_laundering() {
+    let _lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("create temp dir");
+    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _home = EnvVarGuard::set("HOME", temp.path());
+    let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
+    let _env = isolate_openrouter_autodetect_env();
+    let _legacy_alias = EnvVarGuard::set("ZAI_API_KEY", "legacy-zai-only");
+    let _activation = CatalogActivationGuard::activate(jcode_base::provider_catalog::ZAI_PROFILE);
+
+    assert_eq!(
+        std::env::var("JCODE_OPENROUTER_API_KEY_NAME").as_deref(),
+        Ok("ZHIPU_API_KEY"),
+        "startup compatibility env contains only the canonical key name"
+    );
+    let provider = OpenRouterProvider::new().expect("alias-aware default runtime");
+    match &provider.auth {
+        ProviderAuth::AuthorizationBearer { token, label } => {
+            assert_eq!(token, "legacy-zai-only");
+            assert_eq!(label, "ZHIPU_API_KEY");
+        }
+        other => panic!("expected Z.AI bearer auth, got {other:?}"),
+    }
+}
+
+#[test]
+fn explicit_openrouter_override_does_not_probe_zai_alias() {
+    let _lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("create temp dir");
+    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _home = EnvVarGuard::set("HOME", temp.path());
+    let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
+    let _env = isolate_openrouter_autodetect_env();
+    let _legacy_alias = EnvVarGuard::set("ZAI_API_KEY", "legacy-zai-only");
+    let _base = EnvVarGuard::set(
+        "JCODE_OPENROUTER_API_BASE",
+        jcode_base::provider_catalog::ZAI_PROFILE.api_base,
+    );
+    let _key_name = EnvVarGuard::set("JCODE_OPENROUTER_API_KEY_NAME", "ZHIPU_API_KEY");
+    let _env_file = EnvVarGuard::set("JCODE_OPENROUTER_ENV_FILE", "zai.env");
+
+    let error = OpenRouterProvider::new()
+        .err()
+        .expect("primary-only override must fail");
+    assert!(error.to_string().contains("ZHIPU_API_KEY not found"));
+}
+
+#[test]
+fn named_profile_does_not_probe_zai_catalog_alias() {
+    let _lock = ENV_LOCK.lock();
+    let temp = TempDir::new().expect("create temp dir");
+    let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
+    let _home = EnvVarGuard::set("HOME", temp.path());
+    let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
+    let _env = isolate_openrouter_autodetect_env();
+    let _legacy_alias = EnvVarGuard::set("ZAI_API_KEY", "legacy-zai-only");
+    let config = jcode_base::config::NamedProviderConfig {
+        base_url: jcode_base::provider_catalog::ZAI_PROFILE
+            .api_base
+            .to_string(),
+        api_key_env: Some("ZHIPU_API_KEY".to_string()),
+        env_file: Some("zai.env".to_string()),
+        default_model: Some("glm-4.5".to_string()),
+        ..Default::default()
+    };
+
+    let error = OpenRouterProvider::new_named_openai_compatible("custom-zai", &config)
+        .err()
+        .expect("named profile must remain primary-only");
+    assert!(error.to_string().contains("ZHIPU_API_KEY not found"));
+}
+
+#[test]
 fn test_parse_model_spec() {
     let (model, provider) = parse_model_spec("anthropic/claude-sonnet-4@Fireworks");
     assert_eq!(model, "anthropic/claude-sonnet-4");
@@ -1322,7 +1414,7 @@ async fn collect_openrouter_live_smoke_stream(
 #[ignore = "live smoke: requires OPENROUTER_API_KEY or configured OpenRouter credentials"]
 async fn live_openrouter_unified_reasoning_smoke() -> Result<()> {
     let _env_lock = ENV_LOCK.lock();
-    let Some(token) = OpenRouterProvider::get_api_key() else {
+    let Some(token) = OpenRouterProvider::get_api_key(None) else {
         eprintln!(
             "skipping live OpenRouter smoke: OPENROUTER_API_KEY or configured OpenRouter credentials not found"
         );

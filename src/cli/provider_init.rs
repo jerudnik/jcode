@@ -734,28 +734,31 @@ fn maybe_enable_external_api_key_auth_for_auto(has_other_provider: bool) -> Resu
         return Ok(false);
     }
 
-    for (env_key, _) in crate::provider_catalog::openrouter_like_api_key_sources() {
-        let Some(source) = auth::external::preferred_unconsented_api_key_source_for_env(&env_key)
-        else {
-            continue;
-        };
-        let path = source.path()?;
-        let provider_name = provider_label_for_api_key_env(&env_key);
-        let login_hint = provider_login_hint_for_api_key_env(&env_key);
-        if !can_prompt_for_external_auth() {
-            crate::logging::warn(&external_auth_blocked_message(
-                &provider_name,
-                source.display_name(),
-                &path,
-                &login_hint,
-            ));
+    for credential_source in crate::provider_catalog::openrouter_like_api_key_sources() {
+        for env_key in credential_source.candidate_env_keys() {
+            let Some(source) =
+                auth::external::preferred_unconsented_api_key_source_for_env(env_key)
+            else {
+                continue;
+            };
+            let path = source.path()?;
+            let provider_name = provider_label_for_api_key_env(env_key);
+            let login_hint = provider_login_hint_for_api_key_env(env_key);
+            if !can_prompt_for_external_auth() {
+                crate::logging::warn(&external_auth_blocked_message(
+                    &provider_name,
+                    source.display_name(),
+                    &path,
+                    &login_hint,
+                ));
+                return Ok(false);
+            }
+            if prompt_to_trust_external_auth(&provider_name, source.display_name(), &path)? {
+                auth::external::trust_external_auth_source(source)?;
+                return Ok(provider::openrouter::has_credentials());
+            }
             return Ok(false);
         }
-        if prompt_to_trust_external_auth(&provider_name, source.display_name(), &path)? {
-            auth::external::trust_external_auth_source(source)?;
-            return Ok(provider::openrouter::has_credentials());
-        }
-        return Ok(false);
     }
 
     Ok(false)
