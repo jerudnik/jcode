@@ -66,3 +66,21 @@
   - `nix develop --command cargo fmt --all` -> exit 0.
   - `git diff --check` -> exit 0.
 - Only pre-existing dead-code warnings were emitted.
+
+## 2026-07-10 — WI-2B: centralize base model-spec resolution
+
+- Files: `crates/jcode-base/src/provider/models.rs`, `provider/selection.rs`, `provider/mod.rs`, `provider/catalog_routes.rs`, `provider/pricing.rs`, `provider/route_builders.rs`, `provider/tests/model_resolution.rs`, and `sidecar.rs`.
+- Added public `ResolvedModelSpec` plus `resolve_model_spec(model, &Config)` and the read-only `resolve_current_model_spec` convenience. Native prefixes return the canonical execution provider while preserving the exact auth spelling in `explicit_prefix`; catalog/named profiles retain their profile keys; OpenRouter pins retain the full `model@provider` wire id.
+- Enforced the required precedence: exact provider-core native prefix, static OpenAI-compatible catalog profile, named config profile, valid OpenRouter pin, then the typed base detector. Unknown prefixes remain unclassified, while Bedrock ARN/model ids with colons still resolve as Bedrock.
+- Removed the duplicate base classifier body and local catalog/named prefix parsers. Base catalog routes, pricing, route builders, capability lookup, selection/session helpers, `MultiProvider`, and sidecar classification now consume the resolved specification. Static string-returning wrappers remain only as thin WI-2C compatibility shims.
+- Added table coverage for bare Claude/OpenAI/Gemini, Bedrock, Cursor, Antigravity, OpenRouter pins, all four dual-auth prefixes, static and named profiles, unknown prefixes, the `openai-api` native collision, and `anthropic-api` catalog preservation. Added focused config/session normalization coverage.
+- Adaptations during implementation:
+  - The first resolver test showed the core detector's broad `gpt-*` fallback swallowed Antigravity's known `gpt-oss-*` model. The base typed detector now preserves exact native Claude/OpenAI and Gemini identities before accepting distinct known Antigravity models.
+  - The existing `default_provider = "anthropic-api"` test encoded the disproven native alias behavior. It now covers only native Claude keys; resolver/config-selection tests assert that `anthropic-api` remains the catalog profile.
+- Validation:
+  - `nix develop --command cargo test -p jcode-base --lib provider` -> exit 0; 230 passed, 0 failed.
+  - `nix develop --command cargo test -p jcode-base --lib resolved_model_spec_uses_one_context_aware_precedence_table` -> exit 0; 1 passed, 0 failed.
+  - `nix develop --command cargo test -p jcode-base --lib session_model_helpers_preserve_native_and_catalog_prefix_identity` -> exit 0; 1 passed, 0 failed.
+  - `nix develop --command cargo check -p jcode-base` -> exit 0.
+  - `nix develop --command cargo fmt --all` and `git diff --check` -> exit 0.
+- Only pre-existing dead-code and unused test warnings were emitted.
