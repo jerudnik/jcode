@@ -284,6 +284,11 @@ pub fn active_backend() -> Box<dyn EmbeddingBackend> {
 
 /// Build an [`OpenAiEmbeddingBackend`] from config + resolved credentials, or
 /// `None` when remote embeddings are not selected/available.
+///
+/// By default the credential comes from `OPENAI_API_KEY`, but
+/// `agents.memory_embedding_api_key_env` can point at a different bearer key for
+/// OpenAI-compatible local gateways such as oMLX without making the normal
+/// OpenAI provider appear configured.
 pub fn openai_backend_from_config() -> Option<OpenAiEmbeddingBackend> {
     let agents = &crate::config::config().agents;
     if !agents
@@ -292,8 +297,13 @@ pub fn openai_backend_from_config() -> Option<OpenAiEmbeddingBackend> {
     {
         return None;
     }
-    let api_key =
-        crate::provider_catalog::load_api_key_from_env_or_config("OPENAI_API_KEY", "openai.env")?;
+    let api_key_env = agents
+        .memory_embedding_api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("OPENAI_API_KEY");
+    let api_key = crate::provider_catalog::load_api_key_from_env_or_config(api_key_env, "openai.env")?;
     let model = agents
         .memory_embedding_model
         .clone()
