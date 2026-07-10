@@ -47,7 +47,7 @@ passed on that baseline. It is a prerequisite, not work to be repeated below.
 #### Exact changes
 
 1. **`crates/jcode-base/src/provider/mod.rs`**
-   - In `MultiProvider::fork()` (current `2538-2623`), replace the bare
+   - In `MultiProvider::fork()` (currently beginning at `provider/mod.rs:2538`), replace the bare
      `Arc::clone` retrieval for `copilot_api`, `antigravity`, and `gemini` with
      a read of the optional inner `Arc<dyn Provider>` followed by
      `provider.fork()`. Preserve `None` when a slot is absent. The cloned
@@ -59,10 +59,11 @@ passed on that baseline. It is a prerequisite, not work to be repeated below.
    - Source verification confirms all three inner implementations provide a
      safe model fork: `GeminiProvider::fork` creates a fresh
      `Arc<RwLock<String>>` model (`jcode-provider-gemini-runtime/src/lib.rs`
-     `1006-1013`), as do `AntigravityProvider::fork`
-     (`jcode-provider-antigravity-runtime/src/lib.rs` `736-743`) and
-     `CopilotApiProvider::fork` (`jcode-provider-copilot-runtime/src/lib.rs`
-     `1021-1037`).
+     `GeminiProvider::fork`, 1006-1014), as do `AntigravityProvider::fork`
+     (`jcode-provider-antigravity-runtime/src/lib.rs`
+     `AntigravityProvider::fork`, 736-748) and `CopilotApiProvider::fork`
+     (`jcode-provider-copilot-runtime/src/lib.rs` `CopilotApiProvider::fork`,
+     1021-1042).
 2. **Regression tests in the existing `jcode-base` provider test module**
    - For each active slot Gemini, Antigravity, and Copilot: capture the
      registered live provider's `model()`, call `MultiProvider::fork()`, set a
@@ -952,20 +953,36 @@ needed, without deleting memories or vectors.
 
 ## Integration and commit sequence
 
-1. Commit the already-complete `memory_embedding_api_key_env` baseline first
-   (or keep it in the WI-5 commit). Do not duplicate it.
-2. Commit **WI-0** independently. Its Gemini/Antigravity/Copilot fork-isolation
-   regression must pass before any consumer can call `set_model` on a fork.
-3. Commit **WI-1** independently.
-4. Commit **WI-2** independently.
-5. Commit **WI-3** only after both WI-0 and WI-2.
-6. Commit **WI-4** independently. It may be developed in parallel, but merge
-   before WI-5.
-7. Commit **WI-5** after the credential baseline and WI-4.
-8. Final workspace validation:
+1. **Baseline commit:** commit only the already-present
+   `memory_embedding_api_key_env` change after its focused tests. Do not fold
+   audit fixes into it.
+2. **WI-0:** repair the three shared `Arc` slots and land the `StubExternalRuntime`
+   isolation tests first. It is the hard merge gate for every model-setting fork
+   consumer.
+3. **WI-1:** land the alias schema and behaviorally complete typed credential-source
+   slice, including OpenRouter runtime, usage/auth/lifecycle, doctor/live, app-core,
+   and TUI consumers. The catalog-pair guard must pass before removing Z.AI's leaf
+   special case.
+4. **WI-2A:** add provider-core `ActiveProvider` canonical APIs and explicitly
+   builtin-only helpers while compatibility forwarding wrappers remain.
+5. **WI-2B:** add base `ResolvedModelSpec` and migrate all base callers.
+6. **WI-2C:** migrate app-core, OpenRouter runtime, and all six TUI surfaces; run
+   the classifier/parser workspace search, then remove wrappers. Each A/B/C
+   checkpoint must compile independently, though release history may squash them.
+7. **WI-3:** only after WI-0 and WI-2. Implement the stored provider fork with the
+   explicit-prefix routing table and the existing sidecar stub seam.
+8. **WI-4:** land parser observability and the alias-preserving canonicalization
+   table together. Keep runtime parsers defensive until table compatibility tests
+   establish equivalent behavior.
+9. **WI-5:** after WI-4 and the baseline, with strict known-dimension construction
+   and URL canonicalization. Unknown custom dimensions deliberately fall back to
+   local rather than create a false vector identity.
+10. **Final validation:** run all affected-crate tests/checks and the two mechanical
+    guards: no catalog pair-loader erosion and no former general classifier/parser
+    caller outside its documented core-only exception.
 
 ```bash
-nix develop --command cargo check -p jcode-provider-metadata -p jcode-provider-env -p jcode-provider-core -p jcode-config-types -p jcode-base -p jcode-app-core -p jcode-tui
+nix develop --command cargo check -p jcode-provider-metadata -p jcode-provider-env -p jcode-provider-core -p jcode-config-types -p jcode-base -p jcode-app-core -p jcode-provider-openrouter-runtime -p jcode-provider-doctor -p jcode-tui
 nix develop --command cargo test -p jcode-provider-env -p jcode-provider-core -p jcode-config-types
 nix develop --command cargo test -p jcode-base --lib
 ```
