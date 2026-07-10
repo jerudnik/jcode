@@ -206,6 +206,9 @@ error and must not be hidden.
    | `jcode-base/src/live_tests.rs::provider_has_credential` (1719-1730) | `profile` then `resolved` | Use resolved-profile loader for monitoring annotation. |
    | `jcode-provider-doctor/src/lifecycle_driver.rs::live_opencode_api_key` and `live_openai_compatible_api_key` (616-646) | `resolved` profile | Use resolved-profile loader before constructing redacted live-test auth metadata. |
    | `jcode-tui/src/tui/app/auth_account_commands.rs::save_openai_compat_setting` (803-808) | `old` is resolved profile | Read old credential through resolved-profile source before settings migration. |
+   | `src/cli/provider_doctor.rs::run_provider_doctor_command` (47-68) | It resolves the catalog `profile` to `resolved`, then passes `resolved.api_key_env` and `resolved.env_file` to the pair loader | Load the resolved-profile source. Build the missing-credential diagnostic from its ordered candidate description so alias-only Z.AI is correctly recognized and reported. |
+   | `src/cli/auth_test/choice.rs::discover_openai_compatible_validation_model` (131-146) | Its parameter is `&ResolvedOpenAiCompatibleProfile`, then it pair-loads the primary fields before the live `/models` request | Load that resolved profile directly through the profile-aware loader before adding bearer auth. Preserve the present unauthenticated request when no key is found. |
+   | `src/cli/provider_init.rs::maybe_enable_external_api_key_auth_for_auto` (729-759) | It destructures `openrouter_like_api_key_sources()` into `(env_key, _)`, discarding any aliases | Iterate `Vec<ApiKeyCredentialSource>` and each source's ordered `candidate_env_keys()` (primary, then metadata aliases). Check `preferred_unconsented_api_key_source_for_env` for each candidate, while deriving the prompt label/login hint from the typed source rather than an alias-erased pair. This permits an alias-only Z.AI external key to reach the normal trust prompt. |
    | `jcode-base/src/provider_catalog.rs::openai_compatible_profile_is_configured` and profile probes | Static/resolved catalog profile | Use a profile source, never reconstruct a pair. This is the common leaf for remaining catalog checks. |
 
 7. **Tests and mechanical guard**
@@ -226,6 +229,12 @@ error and must not be hidden.
    - Add a Codex loader regression with leading BOM/NBSP and trailing Unicode
      whitespace, asserting the result matches
      `sanitize_secret_value`/the common profile loader.
+   - Add root-CLI regressions: alias-only `ZAI_API_KEY` makes
+     `provider-doctor` obtain the resolved profile key and adds bearer auth to
+     auth-test model discovery; alias-only external Z.AI credentials are offered
+     by `maybe_enable_external_api_key_auth_for_auto` in metadata declaration
+     order. Keep the primary-file-over-alias-env precedence assertion from the
+     profile-loader matrix in these integration seams.
 
 #### Before/after sketch
 
@@ -254,8 +263,9 @@ source rather than being patched in every consumer.
 #### Blast radius
 
 All profile construction sites must receive the new field. The exhaustive table
-above is the mandatory blast radius: it includes the request runtime,
-provider-catalog producer, usage sweeper, auth lifecycle/status, live/doctor
+above is the mandatory blast radius: it includes the default and dedicated
+request runtimes, provider-catalog producer, usage sweeper, auth
+lifecycle/status, root CLI doctor/auth-test/provider-init, live/doctor
 operational checks, external-auth import, and TUI settings migration, not only
 UI probes. Do not change unrelated direct providers such as Azure until they
 have a catalog profile.
@@ -267,6 +277,7 @@ nix develop --command cargo test -p jcode-provider-metadata
 nix develop --command cargo test -p jcode-provider-env
 nix develop --command cargo test -p jcode-base --lib provider_catalog_tests
 nix develop --command cargo test -p jcode-base --lib codex
+nix develop --command cargo test -p jcode --bin jcode
 nix develop --command cargo check -p jcode-base -p jcode-provider-openrouter-runtime -p jcode-app-core -p jcode-provider-doctor -p jcode-tui
 # The source-level catalog-pair guard added above must run as part of this test suite.
 nix develop --command cargo test -p jcode-base --lib catalog_profile_pair_loader_guard
