@@ -1,5 +1,5 @@
 use super::pricing::{cheapness_for_route, openrouter_pricing_from_model_pricing};
-use super::{ModelRoute, RouteCostConfidence, RouteCostSource, provider_for_model};
+use super::{ModelRoute, RouteCostConfidence, RouteCostSource, resolve_current_model_spec};
 use std::collections::BTreeSet;
 
 pub fn is_listable_model_name(model: &str) -> bool {
@@ -99,10 +99,11 @@ pub fn openrouter_catalog_model_id(model: &str) -> Option<String> {
         return None;
     }
 
-    match provider_for_model(trimmed) {
-        Some("claude") => Some(format!("anthropic/{}", trimmed)),
-        Some("openai") => Some(format!("openai/{}", trimmed)),
-        Some("openrouter") => Some(trimmed.to_string()),
+    let resolved = resolve_current_model_spec(trimmed);
+    match resolved.provider_key.as_deref() {
+        Some("claude") => Some(format!("anthropic/{}", resolved.bare_model)),
+        Some("openai") => Some(format!("openai/{}", resolved.bare_model)),
+        Some("openrouter") => Some(resolved.bare_model),
         _ => None,
     }
 }

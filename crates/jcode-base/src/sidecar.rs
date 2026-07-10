@@ -82,7 +82,10 @@ impl Sidecar {
 
     fn with_configured_model(configured_model: Option<String>) -> Self {
         let (backend, model) = if let Some(model) = configured_model {
-            match crate::provider::provider_for_model(&model) {
+            match crate::provider::resolve_current_model_spec(&model)
+                .provider_key
+                .as_deref()
+            {
                 Some("openai") => (SidecarBackend::OpenAI, model),
                 Some("claude") => (SidecarBackend::Claude, model),
                 _ => {

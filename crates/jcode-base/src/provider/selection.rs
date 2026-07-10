@@ -163,12 +163,18 @@ impl MultiProvider {
         let provider_key = match &api_method_kind {
             ModelRouteApiMethod::AnthropicApiKey
                 if provider_display == "Anthropic"
-                    && crate::provider::provider_for_model(bare_name) == Some("claude") =>
+                    && crate::provider::resolve_current_model_spec(bare_name)
+                        .provider_key
+                        .as_deref()
+                        == Some("claude") =>
             {
                 Some("claude-api".to_string())
             }
             ModelRouteApiMethod::ClaudeOAuth
-                if crate::provider::provider_for_model(bare_name) == Some("claude") =>
+                if crate::provider::resolve_current_model_spec(bare_name)
+                    .provider_key
+                    .as_deref()
+                    == Some("claude") =>
             {
                 Some("claude".to_string())
             }
@@ -223,33 +229,24 @@ impl MultiProvider {
 
     fn explicit_session_provider_key_for_model_request(model_request: &str) -> Option<String> {
         let model_request = model_request.trim();
-        if let Some((prefix, rest)) = model_request.split_once(':') {
-            let prefix = prefix.trim();
-            if !prefix.is_empty() && !rest.trim().is_empty() {
-                // Dual-auth (Anthropic/OpenAI) prefixes fold onto their canonical
-                // session key via the single shared parser.
-                if let Some(route) = jcode_provider_core::AuthRoute::parse(prefix) {
+        let resolved = crate::provider::resolve_current_model_spec(model_request);
+        if let Some(prefix) = resolved.explicit_prefix.as_deref() {
+            if jcode_provider_core::explicit_model_provider_prefix(model_request).is_some() {
+                if let Some(route) =
+                    jcode_provider_core::AuthRoute::parse_explicit_credential_prefix(prefix)
+                {
                     return Some(route.session_provider_key().to_string());
                 }
-                match prefix {
-                    "copilot" | "antigravity" | "gemini" | "cursor" | "bedrock" | "openrouter" => {
-                        return Some(prefix.to_string());
-                    }
-                    _ => {
-                        if crate::provider_catalog::resolve_openai_compatible_profile_selection(
-                            prefix,
-                        )
-                        .is_some()
-                            || crate::config::config().providers.contains_key(prefix)
-                        {
-                            return Some(prefix.to_string());
-                        }
-                    }
+                if let Some(provider) = ActiveProvider::from_key_or_alias(prefix) {
+                    return Some(provider.key().to_string());
                 }
             }
+            return resolved.provider_key;
         }
 
-        if model_request.contains('@') {
+        if model_request.contains('@')
+            && resolved.provider_key.as_deref() == Some(ActiveProvider::OpenRouter.key())
+        {
             return Some("openrouter".to_string());
         }
 
@@ -348,20 +345,12 @@ impl MultiProvider {
             return String::new();
         }
 
-        if crate::provider::explicit_model_provider_prefix(model).is_some() {
+        let cfg = crate::config::config();
+        if crate::provider::resolve_model_spec(model, cfg)
+            .explicit_prefix
+            .is_some()
+        {
             return model.to_string();
-        }
-
-        if let Some((prefix, rest)) = model.split_once(':') {
-            let prefix = prefix.trim();
-            if !prefix.is_empty()
-                && !rest.trim().is_empty()
-                && (crate::provider_catalog::resolve_openai_compatible_profile_selection(prefix)
-                    .is_some()
-                    || crate::config::config().providers.contains_key(prefix))
-            {
-                return model.to_string();
-            }
         }
 
         let Some(provider_key) = provider_key
@@ -374,6 +363,16 @@ impl MultiProvider {
         // `openai-oauth`, ...) onto the canonical keys so the OAuth-vs-API-key
         // route survives even when only `provider_key` was persisted (e.g. a
         // forked/child session that inherited it without `route_api_method`).
+        if matches!(
+            Self::resolve_config_provider_selection(provider_key, cfg),
+            Some(
+                ConfigProviderSelection::OpenAiCompatibleProfile(_)
+                    | ConfigProviderSelection::NamedProfile(_)
+            )
+        ) {
+            return format!("{provider_key}:{model}");
+        }
+
         let provider_key = Self::canonical_session_provider_key(provider_key);
 
         // Dual-auth keys map to their canonical model prefix via the single
@@ -386,18 +385,7 @@ impl MultiProvider {
             "copilot" | "antigravity" | "gemini" | "cursor" | "bedrock" | "openrouter" => {
                 format!("{provider_key}:{model}")
             }
-            _ => {
-                if crate::provider_catalog::resolve_openai_compatible_profile_selection(
-                    provider_key,
-                )
-                .is_some()
-                    || crate::config::config().providers.contains_key(provider_key)
-                {
-                    format!("{provider_key}:{model}")
-                } else {
-                    model.to_string()
-                }
-            }
+            _ => model.to_string(),
         }
     }
 
@@ -447,14 +435,27 @@ impl MultiProvider {
             return None;
         }
 
-        if let Some(profile) =
-            crate::provider_catalog::resolve_openai_compatible_profile_selection(trimmed)
-        {
-            return Some(ConfigProviderSelection::OpenAiCompatibleProfile(profile.id));
-        }
-
-        if cfg.providers.contains_key(trimmed) {
-            return Some(ConfigProviderSelection::NamedProfile(trimmed.to_string()));
+        let probe = format!("{trimmed}:__jcode_provider_probe__");
+        let resolved = crate::provider::resolve_model_spec(&probe, cfg);
+        if resolved.explicit_prefix.is_some() {
+            if let Some((provider, _prefix, _model)) =
+                jcode_provider_core::explicit_model_provider_prefix(&probe)
+            {
+                return Some(ConfigProviderSelection::BuiltIn(provider));
+            }
+            if let Some(profile) = resolved
+                .provider_key
+                .as_deref()
+                .and_then(crate::provider_catalog::openai_compatible_profile_by_id)
+            {
+                return Some(ConfigProviderSelection::OpenAiCompatibleProfile(profile.id));
+            }
+            if let Some(profile) = resolved
+                .provider_key
+                .filter(|profile| cfg.providers.contains_key(profile))
+            {
+                return Some(ConfigProviderSelection::NamedProfile(profile));
+            }
         }
 
         // Accept the dual-auth `--provider` vocabulary (`anthropic-api`,
@@ -771,7 +772,11 @@ mod tests {
     fn config_provider_resolution_handles_all_config_namespaces() {
         let mut cfg = crate::config::Config::default();
         cfg.providers.insert(
-            "my-api".to_string(),
+            "omlx".to_string(),
+            crate::config::NamedProviderConfig::default(),
+        );
+        cfg.providers.insert(
+            "openai-api".to_string(),
             crate::config::NamedProviderConfig::default(),
         );
 
@@ -786,10 +791,50 @@ mod tests {
             Some(ActiveProvider::OpenRouter)
         );
         assert_eq!(
-            MultiProvider::resolve_config_provider_selection("my-api", &cfg)
+            MultiProvider::resolve_config_provider_selection("omlx", &cfg)
                 .map(|selection| selection.active_provider()),
             Some(ActiveProvider::OpenRouter)
         );
+        assert_eq!(
+            MultiProvider::resolve_config_provider_selection("openai-api", &cfg),
+            Some(ConfigProviderSelection::BuiltIn(ActiveProvider::OpenAI))
+        );
+        assert_eq!(
+            MultiProvider::resolve_config_provider_selection("anthropic-api", &cfg),
+            Some(ConfigProviderSelection::OpenAiCompatibleProfile(
+                "anthropic-api"
+            ))
+        );
         assert!(MultiProvider::resolve_config_provider_selection("unknown", &cfg).is_none());
+    }
+
+    #[test]
+    fn session_model_helpers_preserve_native_and_catalog_prefix_identity() {
+        assert_eq!(
+            MultiProvider::explicit_session_provider_key_for_model_request("openai-api:gpt-5.5")
+                .as_deref(),
+            Some("openai-api")
+        );
+        assert_eq!(
+            MultiProvider::explicit_session_provider_key_for_model_request(
+                "anthropic-api:claude-sonnet-4-6"
+            )
+            .as_deref(),
+            Some("anthropic-api")
+        );
+        assert_eq!(
+            MultiProvider::explicit_session_provider_key_for_model_request(
+                "anthropic/claude-sonnet-4@floor"
+            )
+            .as_deref(),
+            Some("openrouter")
+        );
+        assert_eq!(
+            MultiProvider::model_switch_request_for_session_model(
+                "claude-sonnet-4-6",
+                Some("anthropic-api")
+            ),
+            "anthropic-api:claude-sonnet-4-6"
+        );
     }
 }

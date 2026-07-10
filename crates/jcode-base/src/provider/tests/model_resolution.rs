@@ -1,4 +1,157 @@
 #[test]
+fn resolved_model_spec_uses_one_context_aware_precedence_table() {
+    let mut cfg = crate::config::Config::default();
+    cfg.providers.insert(
+        "omlx".to_string(),
+        crate::config::NamedProviderConfig::default(),
+    );
+    // Prove the native reservation wins even when a user profile collides too.
+    cfg.providers.insert(
+        "openai-api".to_string(),
+        crate::config::NamedProviderConfig::default(),
+    );
+
+    struct Case {
+        model: &'static str,
+        provider_key: Option<&'static str>,
+        bare_model: &'static str,
+        explicit_prefix: Option<&'static str>,
+    }
+
+    let cases = [
+        Case {
+            model: "claude-sonnet-4-6",
+            provider_key: Some("claude"),
+            bare_model: "claude-sonnet-4-6",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "gpt-5.5",
+            provider_key: Some("openai"),
+            bare_model: "gpt-5.5",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "gemini-2.5-pro",
+            provider_key: Some("gemini"),
+            bare_model: "gemini-2.5-pro",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "amazon.nova-pro-v1:0",
+            provider_key: Some("bedrock"),
+            bare_model: "amazon.nova-pro-v1:0",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "composer-2-fast",
+            provider_key: Some("cursor"),
+            bare_model: "composer-2-fast",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "gpt-oss-120b-medium",
+            provider_key: Some("antigravity"),
+            bare_model: "gpt-oss-120b-medium",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "anthropic/claude-sonnet-4@floor",
+            provider_key: Some("openrouter"),
+            bare_model: "anthropic/claude-sonnet-4@floor",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "claude-api:claude-sonnet-4-6",
+            provider_key: Some("claude"),
+            bare_model: "claude-sonnet-4-6",
+            explicit_prefix: Some("claude-api"),
+        },
+        Case {
+            model: "claude-oauth:claude-sonnet-4-6",
+            provider_key: Some("claude"),
+            bare_model: "claude-sonnet-4-6",
+            explicit_prefix: Some("claude-oauth"),
+        },
+        Case {
+            model: "openai-api:gpt-5.5",
+            provider_key: Some("openai"),
+            bare_model: "gpt-5.5",
+            explicit_prefix: Some("openai-api"),
+        },
+        Case {
+            model: "openai-oauth:gpt-5.5",
+            provider_key: Some("openai"),
+            bare_model: "gpt-5.5",
+            explicit_prefix: Some("openai-oauth"),
+        },
+        Case {
+            model: "deepseek:deepseek-chat",
+            provider_key: Some("deepseek"),
+            bare_model: "deepseek-chat",
+            explicit_prefix: Some("deepseek"),
+        },
+        Case {
+            model: "anthropic-api:claude-sonnet-4-6",
+            provider_key: Some("anthropic-api"),
+            bare_model: "claude-sonnet-4-6",
+            explicit_prefix: Some("anthropic-api"),
+        },
+        Case {
+            model: "omlx:qwen3-coder",
+            provider_key: Some("omlx"),
+            bare_model: "qwen3-coder",
+            explicit_prefix: Some("omlx"),
+        },
+        Case {
+            model: "unknown:gpt-5.5",
+            provider_key: None,
+            bare_model: "unknown:gpt-5.5",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "unknown:anthropic/claude-sonnet-4",
+            provider_key: None,
+            bare_model: "unknown:anthropic/claude-sonnet-4",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "unknown:anthropic/claude-sonnet-4@floor",
+            provider_key: None,
+            bare_model: "unknown:anthropic/claude-sonnet-4@floor",
+            explicit_prefix: None,
+        },
+        Case {
+            model: "meta-llama/llama-3.3:free@floor",
+            provider_key: Some("openrouter"),
+            bare_model: "meta-llama/llama-3.3:free@floor",
+            explicit_prefix: None,
+        },
+    ];
+
+    for case in cases {
+        let resolved = resolve_model_spec(case.model, &cfg);
+        assert_eq!(
+            resolved.provider_key.as_deref(),
+            case.provider_key,
+            "provider key for {}",
+            case.model
+        );
+        assert_eq!(
+            resolved.bare_model, case.bare_model,
+            "bare model for {}",
+            case.model
+        );
+        assert_eq!(
+            resolved.explicit_prefix.as_deref(),
+            case.explicit_prefix,
+            "explicit prefix for {}",
+            case.model
+        );
+    }
+}
+
+#[test]
 fn test_provider_for_model_claude() {
     assert_eq!(provider_for_model("claude-opus-4-6"), Some("claude"));
     assert_eq!(provider_for_model("claude-opus-4-6[1m]"), Some("claude"));
@@ -1260,14 +1413,12 @@ fn test_anthropic_auth_mode_prefixed_model_switch_changes_credentials() {
 }
 
 #[test]
-fn test_config_default_provider_anthropic_api_pins_api_credential() {
+fn test_config_default_provider_native_anthropic_keys_pin_api_credential() {
     use jcode_provider_core::{Provider, ResolvedCredential};
-    // A config `default_provider = "anthropic-api"` is a routing decision that
-    // also pins the OAuth-vs-API credential. Applying the default at startup
-    // must leave the provider on the API-key route so the header auth tag and
-    // model picker report "API Key", not the Auto/OAuth fallback.
+    // Native config keys retain the OAuth-vs-API decision. `anthropic-api` is
+    // intentionally absent: that id belongs to the OpenAI-compatible catalog
+    // profile and is covered by the resolver/config-selection collision tests.
     for (default_provider, expected, expect_oauth) in [
-        ("anthropic-api", ResolvedCredential::ApiKey, false),
         ("claude-api", ResolvedCredential::ApiKey, false),
         ("claude", ResolvedCredential::Oauth, true),
         ("anthropic", ResolvedCredential::Oauth, true),
