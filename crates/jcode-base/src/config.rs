@@ -179,6 +179,9 @@ struct ConfigCacheFingerprint {
     path: Option<PathBuf>,
     modified: Option<SystemTime>,
     len: Option<u64>,
+    policy_path: Option<PathBuf>,
+    policy_modified: Option<SystemTime>,
+    policy_len: Option<u64>,
     env: Vec<(String, String)>,
 }
 
@@ -186,12 +189,21 @@ impl ConfigCacheFingerprint {
     fn current() -> Self {
         let path = Config::path();
         let metadata = path.as_ref().and_then(|path| std::fs::metadata(path).ok());
+        let policy_path = Config::policy_path();
+        let policy_metadata = policy_path
+            .as_ref()
+            .and_then(|path| std::fs::metadata(path).ok());
         Self {
             path,
             modified: metadata
                 .as_ref()
                 .and_then(|metadata| metadata.modified().ok()),
             len: metadata.as_ref().map(std::fs::Metadata::len),
+            policy_path,
+            policy_modified: policy_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok()),
+            policy_len: policy_metadata.as_ref().map(std::fs::Metadata::len),
             env: config_env_fingerprint(),
         }
     }
@@ -324,6 +336,25 @@ fn describe_config_reload(
     if previous.len != next.len {
         parts.push(format!("len={:?}->{:?}", previous.len, next.len));
     }
+    if previous.policy_path != next.policy_path {
+        parts.push(format!(
+            "policy_path={:?}->{:?}",
+            previous
+                .policy_path
+                .as_ref()
+                .map(|p| p.display().to_string()),
+            next.policy_path.as_ref().map(|p| p.display().to_string())
+        ));
+    }
+    if previous.policy_modified != next.policy_modified {
+        parts.push("policy_modified_changed=true".to_string());
+    }
+    if previous.policy_len != next.policy_len {
+        parts.push(format!(
+            "policy_len={:?}->{:?}",
+            previous.policy_len, next.policy_len
+        ));
+    }
     let env_changes = describe_env_changes(&previous.env, &next.env);
     if !env_changes.is_empty() {
         parts.push(format!("env=[{}]", env_changes.join(", ")));
@@ -373,6 +404,28 @@ fn env_value_fingerprint(value: &str) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     value.hash(&mut hasher);
     format!("len:{} hash:{:016x}", value.len(), hasher.finish())
+}
+
+/// Origin of an effective config key after defaults, policy, and durable config
+/// have been layered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ConfigProvenance {
+    /// Built-in default, with no policy or durable value for this key path.
+    #[default]
+    Default,
+    /// Declarative policy from `$JCODE_HOME/config.nix.toml`.
+    Policy,
+    /// Mutable durable state from `$JCODE_HOME/config.toml`.
+    Durable,
+}
+
+/// Non-serialized config layering metadata populated by [`Config::load`].
+#[derive(Debug, Clone, Default)]
+pub struct ConfigLayerMetadata {
+    pub policy_path: Option<PathBuf>,
+    pub pinned_paths: BTreeSet<String>,
+    pub provenance: BTreeMap<String, ConfigProvenance>,
+    pub policy_values: BTreeMap<String, toml::Value>,
 }
 
 fn config_env_fingerprint() -> Vec<(String, String)> {
@@ -513,6 +566,31 @@ pub struct Config {
     pub launch_hotkeys: LaunchHotkeysConfig,
     /// Named assistant profiles for `jcode assistant <profile>`.
     pub assistant: AssistantProfilesConfig,
+
+    /// Layer/provenance metadata. Runtime-only; never serialized to TOML.
+    #[serde(skip)]
+    pub layer_metadata: ConfigLayerMetadata,
+}
+
+impl Config {
+    /// Provenance map for effective config key paths populated during load.
+    pub fn provenance(&self) -> &BTreeMap<String, ConfigProvenance> {
+        &self.layer_metadata.provenance
+    }
+
+    /// Provenance for a single config key path, defaulting to [`ConfigProvenance::Default`].
+    pub fn provenance_for(&self, key_path: &str) -> ConfigProvenance {
+        self.layer_metadata
+            .provenance
+            .get(key_path)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// Policy-pinned key paths loaded from `$JCODE_HOME/config.nix.toml`.
+    pub fn policy_pinned_paths(&self) -> &BTreeSet<String> {
+        &self.layer_metadata.pinned_paths
+    }
 }
 
 /// Agent Client Protocol adapter configuration.
