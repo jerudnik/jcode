@@ -1,11 +1,26 @@
 use super::*;
 use crate::storage::jcode_dir;
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+
+static WARNED_PINNED_CONFIG_SAVE_KEYS: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+static LOGGED_CONFIG_LAYER_SUMMARY: WarnOnce = WarnOnce::new();
 
 impl Config {
     /// Get the config file path
     pub fn path() -> Option<PathBuf> {
         jcode_dir().ok().map(|d| d.join("config.toml"))
+    }
+
+    /// Get the declarative policy config path.
+    pub fn policy_path() -> Option<PathBuf> {
+        jcode_dir().ok().map(|d| d.join("config.nix.toml"))
+    }
+
+    fn lock_path() -> Option<PathBuf> {
+        jcode_dir().ok().map(|d| d.join("config.toml.lock"))
     }
 
     /// Load config from file, with environment variable overrides
@@ -43,21 +58,75 @@ impl Config {
         let Some(path) = Self::path() else {
             return Ok(None);
         };
-        if !path.exists() {
+        let policy_path = Self::policy_path();
+        let policy_exists = policy_path.as_ref().is_some_and(|path| path.exists());
+        if !path.exists() && !policy_exists {
             return Ok(None);
         }
 
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| anyhow::anyhow!("Failed to read config file {}: {}", path.display(), e))?;
+        if !policy_exists {
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                anyhow::anyhow!("Failed to read config file {}: {}", path.display(), e)
+            })?;
+
+            // Parse permissively (version-skew tolerance by design) while collecting
+            // any unknown/ignored key paths so we can surface them for observability.
+            // Warnings are emitted ONLY after a successful deserialization: a
+            // malformed TOML must return the original parse error with no partial
+            // warning spam.
+            let (mut config, unknown_keys) = Self::parse_toml_collecting_unknown(&content)
+                .map_err(|e| {
+                    anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
+                })?;
+
+            for key in &unknown_keys {
+                crate::logging::warn(&format!("Unknown config key '{}' ignored", key));
+            }
+
+            config.display.apply_legacy_compat();
+            return Ok(Some(config));
+        }
+
+        let policy_path = policy_path.expect("policy_exists implies policy path");
+        let policy_content = std::fs::read_to_string(&policy_path).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to read policy config file {}: {}",
+                policy_path.display(),
+                e
+            )
+        })?;
+        let policy_value = Self::parse_toml_value(&policy_content, &policy_path)?;
+
+        let durable_value = if path.exists() {
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                anyhow::anyhow!("Failed to read config file {}: {}", path.display(), e)
+            })?;
+            Some(Self::parse_toml_value(&content, &path)?)
+        } else {
+            None
+        };
+
+        let mut effective_value = durable_value
+            .clone()
+            .unwrap_or_else(|| toml::Value::Table(toml::map::Map::new()));
+        Self::merge_policy_over_durable(&mut effective_value, &policy_value, &mut Vec::new());
+
+        let effective_content = toml::to_string(&effective_value)
+            .map_err(|e| anyhow::anyhow!("Failed to render merged config: {}", e))?;
 
         // Parse permissively (version-skew tolerance by design) while collecting
         // any unknown/ignored key paths so we can surface them for observability.
         // Warnings are emitted ONLY after a successful deserialization: a
         // malformed TOML must return the original parse error with no partial
         // warning spam.
-        let (mut config, unknown_keys) =
-            Self::parse_toml_collecting_unknown(&content).map_err(|e| {
-                anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
+        let (mut config, unknown_keys) = Self::parse_toml_collecting_unknown(&effective_content)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to parse merged config from {} and {}: {}",
+                    policy_path.display(),
+                    path.display(),
+                    e
+                )
             })?;
 
         for key in &unknown_keys {
@@ -65,7 +134,33 @@ impl Config {
         }
 
         config.display.apply_legacy_compat();
+        config.layer_metadata =
+            Self::build_layer_metadata(&policy_path, &policy_value, durable_value.as_ref());
+        if LOGGED_CONFIG_LAYER_SUMMARY.should_fire() {
+            crate::logging::info(&format!(
+                "CONFIG_LAYER policy={} durable_keys={} policy_keys={}",
+                policy_path.display(),
+                config
+                    .layer_metadata
+                    .provenance
+                    .values()
+                    .filter(|value| **value == ConfigProvenance::Durable)
+                    .count(),
+                config
+                    .layer_metadata
+                    .provenance
+                    .values()
+                    .filter(|value| **value == ConfigProvenance::Policy)
+                    .count()
+            ));
+        }
         Ok(Some(config))
+    }
+
+    fn parse_toml_value(content: &str, path: &std::path::Path) -> anyhow::Result<toml::Value> {
+        content
+            .parse::<toml::Value>()
+            .map_err(|e| anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e))
     }
 
     /// Deserialize a config TOML string permissively, returning the parsed
@@ -115,6 +210,10 @@ impl Config {
 
     /// Save config to file
     pub fn save(&self) -> anyhow::Result<()> {
+        Self::with_config_file_lock(|| self.save_unlocked())
+    }
+
+    fn save_unlocked(&self) -> anyhow::Result<()> {
         let path = Self::path().ok_or_else(|| anyhow::anyhow!("No config path"))?;
 
         // Ensure parent directory exists
@@ -122,10 +221,317 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
 
-        let content = toml::to_string_pretty(self)?;
+        let content = if self.layer_metadata.policy_path.is_some() || Self::policy_file_exists() {
+            self.durable_policy_aware_toml()?
+        } else {
+            // Critical compatibility invariant: without a policy layer, write the
+            // exact same pretty TOML as the historical implementation.
+            toml::to_string_pretty(self)?
+        };
         std::fs::write(&path, content)?;
         Self::invalidate_cache();
         Ok(())
+    }
+
+    fn policy_file_exists() -> bool {
+        Self::policy_path()
+            .as_ref()
+            .is_some_and(|path| path.exists())
+    }
+
+    fn durable_policy_aware_toml(&self) -> anyhow::Result<String> {
+        let mut candidate = toml::Value::try_from(self)?;
+        let defaults = toml::Value::try_from(Config::default())?;
+
+        let policy_values = if self.layer_metadata.policy_values.is_empty() {
+            Self::policy_path()
+                .filter(|path| path.exists())
+                .map(|path| {
+                    let content = std::fs::read_to_string(&path).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to read policy config file {}: {}",
+                            path.display(),
+                            e
+                        )
+                    })?;
+                    Self::parse_toml_value(&content, &path).map(|value| {
+                        let mut values = BTreeMap::new();
+                        Self::collect_policy_values(&value, &mut Vec::new(), &mut values);
+                        values
+                    })
+                })
+                .transpose()?
+                .unwrap_or_default()
+        } else {
+            self.layer_metadata.policy_values.clone()
+        };
+
+        Self::warn_for_pinned_save_attempts(&candidate, &policy_values);
+        Self::remove_pinned_paths(&mut candidate, &policy_values);
+        Self::remove_default_values(&mut candidate, &defaults);
+
+        toml::to_string_pretty(&candidate)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize durable config: {}", e))
+    }
+
+    fn with_config_file_lock<T>(f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+        let lock_path = Self::lock_path().ok_or_else(|| anyhow::anyhow!("No config lock path"))?;
+        if let Some(parent) = lock_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to open config lock {}: {}", lock_path.display(), e)
+            })?;
+        let _guard = ConfigFileLock::lock(lock_file, &lock_path)?;
+        f()
+    }
+
+    fn patch_config_file(mut patch: impl FnMut(&mut Self) -> bool) -> anyhow::Result<Self> {
+        Self::with_config_file_lock(|| {
+            let mut cfg = Self::load();
+            if patch(&mut cfg) {
+                cfg.save_unlocked()?;
+            }
+            Ok(cfg)
+        })
+    }
+
+    fn build_layer_metadata(
+        policy_path: &std::path::Path,
+        policy_value: &toml::Value,
+        durable_value: Option<&toml::Value>,
+    ) -> ConfigLayerMetadata {
+        let mut policy_values = BTreeMap::new();
+        Self::collect_policy_values(policy_value, &mut Vec::new(), &mut policy_values);
+
+        let mut provenance = BTreeMap::new();
+        if let Some(durable_value) = durable_value {
+            let mut durable_paths = BTreeSet::new();
+            Self::collect_durable_paths(durable_value, &mut Vec::new(), &mut durable_paths);
+            for path in durable_paths {
+                if !Self::policy_values_pin_path(&policy_values, &path) {
+                    provenance.insert(path, ConfigProvenance::Durable);
+                }
+            }
+        }
+        for path in policy_values.keys() {
+            provenance.insert(path.clone(), ConfigProvenance::Policy);
+        }
+
+        ConfigLayerMetadata {
+            policy_path: Some(policy_path.to_path_buf()),
+            pinned_paths: policy_values.keys().cloned().collect(),
+            provenance,
+            policy_values,
+        }
+    }
+
+    fn merge_policy_over_durable(
+        durable: &mut toml::Value,
+        policy: &toml::Value,
+        path: &mut Vec<String>,
+    ) {
+        match (durable, policy) {
+            (toml::Value::Table(durable_table), toml::Value::Table(policy_table)) => {
+                for (key, policy_child) in policy_table {
+                    path.push(key.clone());
+                    if let Some(durable_child) = durable_table.get_mut(key) {
+                        Self::merge_policy_over_durable(durable_child, policy_child, path);
+                    } else {
+                        durable_table.insert(key.clone(), policy_child.clone());
+                    }
+                    path.pop();
+                }
+            }
+            (durable, policy) => {
+                *durable = policy.clone();
+            }
+        }
+    }
+
+    fn collect_policy_values(
+        value: &toml::Value,
+        path: &mut Vec<String>,
+        out: &mut BTreeMap<String, toml::Value>,
+    ) {
+        if path.is_empty() {
+            if let toml::Value::Table(table) = value {
+                for (key, child) in table {
+                    path.push(key.clone());
+                    Self::collect_policy_values(child, path, out);
+                    path.pop();
+                }
+            }
+            return;
+        }
+
+        match value {
+            toml::Value::Table(table) => {
+                if table.is_empty() {
+                    out.insert(path.join("."), value.clone());
+                    return;
+                }
+                for (key, child) in table {
+                    path.push(key.clone());
+                    Self::collect_policy_values(child, path, out);
+                    path.pop();
+                }
+            }
+            _ => {
+                out.insert(path.join("."), value.clone());
+            }
+        }
+    }
+
+    fn collect_durable_paths(
+        value: &toml::Value,
+        path: &mut Vec<String>,
+        out: &mut BTreeSet<String>,
+    ) {
+        if path.is_empty() {
+            if let toml::Value::Table(table) = value {
+                for (key, child) in table {
+                    path.push(key.clone());
+                    Self::collect_durable_paths(child, path, out);
+                    path.pop();
+                }
+            }
+            return;
+        }
+
+        match value {
+            toml::Value::Table(table) => {
+                if table.is_empty() {
+                    out.insert(path.join("."));
+                    return;
+                }
+                for (key, child) in table {
+                    path.push(key.clone());
+                    Self::collect_durable_paths(child, path, out);
+                    path.pop();
+                }
+            }
+            _ => {
+                out.insert(path.join("."));
+            }
+        }
+    }
+
+    fn policy_values_pin_path(policy_values: &BTreeMap<String, toml::Value>, path: &str) -> bool {
+        policy_values
+            .keys()
+            .any(|policy_path| path == policy_path || path.starts_with(&format!("{policy_path}.")))
+    }
+
+    fn warn_for_pinned_save_attempts(
+        candidate: &toml::Value,
+        policy_values: &BTreeMap<String, toml::Value>,
+    ) {
+        for (path, policy_value) in policy_values {
+            if let Some(candidate_value) = Self::value_at_path(candidate, path)
+                && candidate_value != policy_value
+            {
+                Self::warn_once_pinned_config_save(path);
+            }
+        }
+    }
+
+    pub(crate) fn warn_once_pinned_config_save(path: &str) -> bool {
+        let warned = WARNED_PINNED_CONFIG_SAVE_KEYS.get_or_init(|| Mutex::new(BTreeSet::new()));
+        if !warned.lock().unwrap().insert(path.to_string()) {
+            return false;
+        }
+        crate::logging::warn(&format!(
+            "config: `{}` is managed by config.nix.toml; runtime change ignored on save",
+            path
+        ));
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_pinned_config_save_warnings_for_tests() {
+        if let Some(warned) = WARNED_PINNED_CONFIG_SAVE_KEYS.get() {
+            warned.lock().unwrap().clear();
+        }
+    }
+
+    fn remove_pinned_paths(
+        candidate: &mut toml::Value,
+        policy_values: &BTreeMap<String, toml::Value>,
+    ) {
+        let mut paths = policy_values.keys().cloned().collect::<Vec<_>>();
+        paths.sort_by_key(|path| std::cmp::Reverse(path.split('.').count()));
+        for path in paths {
+            Self::remove_value_at_path(candidate, &path);
+        }
+        Self::remove_empty_tables(candidate);
+    }
+
+    fn remove_default_values(candidate: &mut toml::Value, defaults: &toml::Value) -> bool {
+        if candidate == defaults {
+            return true;
+        }
+        match (candidate, defaults) {
+            (toml::Value::Table(candidate_table), toml::Value::Table(default_table)) => {
+                let keys = candidate_table.keys().cloned().collect::<Vec<_>>();
+                for key in keys {
+                    let remove = match (candidate_table.get_mut(&key), default_table.get(&key)) {
+                        (Some(candidate_child), Some(default_child)) => {
+                            Self::remove_default_values(candidate_child, default_child)
+                        }
+                        _ => false,
+                    };
+                    if remove {
+                        candidate_table.remove(&key);
+                    }
+                }
+                candidate_table.is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    fn remove_empty_tables(candidate: &mut toml::Value) -> bool {
+        match candidate {
+            toml::Value::Table(table) => {
+                let keys = table.keys().cloned().collect::<Vec<_>>();
+                for key in keys {
+                    if let Some(child) = table.get_mut(&key)
+                        && Self::remove_empty_tables(child)
+                    {
+                        table.remove(&key);
+                    }
+                }
+                table.is_empty()
+            }
+            _ => false,
+        }
+    }
+
+    fn value_at_path<'a>(value: &'a toml::Value, path: &str) -> Option<&'a toml::Value> {
+        let mut current = value;
+        for segment in path.split('.') {
+            current = current.as_table()?.get(segment)?;
+        }
+        Some(current)
+    }
+
+    fn remove_value_at_path(value: &mut toml::Value, path: &str) -> Option<toml::Value> {
+        let mut current = value;
+        let mut segments = path.split('.').peekable();
+        while let Some(segment) = segments.next() {
+            let table = current.as_table_mut()?;
+            if segments.peek().is_none() {
+                return table.remove(segment);
+            }
+            current = table.get_mut(segment)?;
+        }
+        None
     }
 
     /// Mark the process-cached config as stale and notify dependent caches.
@@ -136,9 +542,10 @@ impl Config {
     /// Update the copilot premium mode in the config file.
     /// Reloads, patches, and saves so it doesn't clobber other fields.
     pub fn set_copilot_premium(mode: Option<&str>) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.provider.copilot_premium = mode.map(|s| s.to_string());
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.provider.copilot_premium = mode.map(|s| s.to_string());
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved copilot_premium to config: {}",
             mode.unwrap_or("(none)")
@@ -149,10 +556,11 @@ impl Config {
     /// Update just the default model and provider in the config file.
     /// This reloads, patches, and saves so it doesn't clobber other fields.
     pub fn set_default_model(model: Option<&str>, provider: Option<&str>) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.provider.default_model = model.map(|s| s.to_string());
-        cfg.provider.default_provider = provider.map(|s| s.to_string());
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.provider.default_model = model.map(|s| s.to_string());
+            cfg.provider.default_provider = provider.map(|s| s.to_string());
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved default model: {}, provider: {}",
             model.unwrap_or("(none)"),
@@ -163,21 +571,36 @@ impl Config {
 
     /// Update just the default provider in the config file.
     pub fn set_default_provider(provider: Option<&str>) -> anyhow::Result<()> {
-        let cfg = Self::load();
-        Self::set_default_model(cfg.provider.default_model.as_deref(), provider)
+        Self::patch_config_file(|cfg| {
+            cfg.provider.default_provider = provider.map(|s| s.to_string());
+            true
+        })?;
+        crate::logging::info(&format!(
+            "Saved default provider: {}",
+            provider.unwrap_or("(auto)")
+        ));
+        Ok(())
     }
 
     /// Update just the default model in the config file.
     pub fn set_default_model_only(model: Option<&str>) -> anyhow::Result<()> {
-        let cfg = Self::load();
-        Self::set_default_model(model, cfg.provider.default_provider.as_deref())
+        Self::patch_config_file(|cfg| {
+            cfg.provider.default_model = model.map(|s| s.to_string());
+            true
+        })?;
+        crate::logging::info(&format!(
+            "Saved default model: {}",
+            model.unwrap_or("(none)")
+        ));
+        Ok(())
     }
 
     /// Update the persisted OpenAI reasoning effort preference.
     pub fn set_openai_reasoning_effort(value: Option<&str>) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.provider.openai_reasoning_effort = value.map(|s| s.to_string());
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.provider.openai_reasoning_effort = value.map(|s| s.to_string());
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved openai_reasoning_effort to config: {}",
             value.unwrap_or("(none)")
@@ -187,9 +610,10 @@ impl Config {
 
     /// Update the persisted OpenAI transport preference.
     pub fn set_openai_transport(value: Option<&str>) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.provider.openai_transport = value.map(|s| s.to_string());
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.provider.openai_transport = value.map(|s| s.to_string());
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved openai_transport to config: {}",
             value.unwrap_or("(none)")
@@ -199,9 +623,10 @@ impl Config {
 
     /// Update the persisted OpenAI service tier preference.
     pub fn set_openai_service_tier(value: Option<&str>) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.provider.openai_service_tier = value.map(|s| s.to_string());
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.provider.openai_service_tier = value.map(|s| s.to_string());
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved openai_service_tier to config: {}",
             value.unwrap_or("(none)")
@@ -211,18 +636,20 @@ impl Config {
 
     /// Update the persisted default alignment preference.
     pub fn set_display_centered(centered: bool) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.display.centered = centered;
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.display.centered = centered;
+            true
+        })?;
         crate::logging::info(&format!("Saved display.centered to config: {}", centered));
         Ok(())
     }
 
     /// Update the persisted reasoning display mode preference.
     pub fn set_reasoning_display(mode: ReasoningDisplayMode) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.display.set_reasoning_display(mode);
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.display.set_reasoning_display(mode);
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved display.reasoning_display to config: {}",
             mode.label()
@@ -232,9 +659,10 @@ impl Config {
 
     /// Update the persisted compact-notifications preference.
     pub fn set_compact_notifications(compact: bool) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.display.compact_notifications = compact;
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.display.compact_notifications = compact;
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved display.compact_notifications to config: {}",
             compact
@@ -244,9 +672,10 @@ impl Config {
 
     /// Update the persisted show-agentgrep-output preference.
     pub fn set_show_agentgrep_output(show: bool) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.display.show_agentgrep_output = show;
-        cfg.save()?;
+        Self::patch_config_file(|cfg| {
+            cfg.display.show_agentgrep_output = show;
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved display.show_agentgrep_output to config: {}",
             show
@@ -263,14 +692,17 @@ impl Config {
         entries: Vec<jcode_config_types::LaunchHotkeyEntry>,
         enabled: bool,
     ) -> anyhow::Result<()> {
-        let mut cfg = Self::load();
-        cfg.launch_hotkeys.entries = entries;
-        cfg.launch_hotkeys.enabled = Some(enabled);
-        cfg.launch_hotkeys.imported = true;
-        cfg.save()?;
+        let entry_count = entries.len();
+        let mut entries = Some(entries);
+        Self::patch_config_file(|cfg| {
+            cfg.launch_hotkeys.entries = entries.take().unwrap_or_default();
+            cfg.launch_hotkeys.enabled = Some(enabled);
+            cfg.launch_hotkeys.imported = true;
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved {} launch hotkey(s) to config (enabled={enabled})",
-            cfg.launch_hotkeys.entries.len()
+            entry_count
         ));
         Ok(())
     }
@@ -465,18 +897,20 @@ impl Config {
             anyhow::bail!("External auth source id cannot be empty");
         }
 
-        let mut cfg = Self::load();
-        if !cfg
-            .auth
-            .trusted_external_sources
-            .iter()
-            .any(|value| value.trim().eq_ignore_ascii_case(&source_id))
-        {
+        Self::patch_config_file(|cfg| {
+            if cfg
+                .auth
+                .trusted_external_sources
+                .iter()
+                .any(|value| value.trim().eq_ignore_ascii_case(&source_id))
+            {
+                return false;
+            }
             cfg.auth.trusted_external_sources.push(source_id.clone());
             cfg.auth.trusted_external_sources.sort();
             cfg.auth.trusted_external_sources.dedup();
-            cfg.save()?;
-        }
+            true
+        })?;
 
         crate::logging::info(&format!(
             "Saved trusted external auth source to config: {}",
@@ -490,18 +924,20 @@ impl Config {
         path: &std::path::Path,
     ) -> anyhow::Result<()> {
         let entry = Self::trusted_external_auth_path_entry(source_id, path)?;
-        let mut cfg = Self::load();
-        if !cfg
-            .auth
-            .trusted_external_source_paths
-            .iter()
-            .any(|value| value.trim().eq_ignore_ascii_case(&entry))
-        {
+        Self::patch_config_file(|cfg| {
+            if cfg
+                .auth
+                .trusted_external_source_paths
+                .iter()
+                .any(|value| value.trim().eq_ignore_ascii_case(&entry))
+            {
+                return false;
+            }
             cfg.auth.trusted_external_source_paths.push(entry.clone());
             cfg.auth.trusted_external_source_paths.sort();
             cfg.auth.trusted_external_source_paths.dedup();
-            cfg.save()?;
-        }
+            true
+        })?;
         crate::logging::info(&format!(
             "Saved trusted external auth source path: {}",
             entry
@@ -514,13 +950,16 @@ impl Config {
         path: &std::path::Path,
     ) -> anyhow::Result<()> {
         let entry = Self::trusted_external_auth_path_entry(source_id, path)?;
-        let mut cfg = Self::load();
-        let before = cfg.auth.trusted_external_source_paths.len();
-        cfg.auth
-            .trusted_external_source_paths
-            .retain(|value| !value.trim().eq_ignore_ascii_case(&entry));
-        if cfg.auth.trusted_external_source_paths.len() != before {
-            cfg.save()?;
+        let mut changed = false;
+        Self::patch_config_file(|cfg| {
+            let before = cfg.auth.trusted_external_source_paths.len();
+            cfg.auth
+                .trusted_external_source_paths
+                .retain(|value| !value.trim().eq_ignore_ascii_case(&entry));
+            changed = cfg.auth.trusted_external_source_paths.len() != before;
+            changed
+        })?;
+        if changed {
             crate::logging::info(&format!(
                 "Removed trusted external auth source path: {}",
                 entry
@@ -536,18 +975,45 @@ impl Config {
         if source_id.is_empty() {
             return Ok(());
         }
-        let mut cfg = Self::load();
-        let before = cfg.auth.trusted_external_sources.len();
-        cfg.auth
-            .trusted_external_sources
-            .retain(|value| !value.trim().eq_ignore_ascii_case(&source_id));
-        if cfg.auth.trusted_external_sources.len() != before {
-            cfg.save()?;
+        let mut changed = false;
+        Self::patch_config_file(|cfg| {
+            let before = cfg.auth.trusted_external_sources.len();
+            cfg.auth
+                .trusted_external_sources
+                .retain(|value| !value.trim().eq_ignore_ascii_case(&source_id));
+            changed = cfg.auth.trusted_external_sources.len() != before;
+            changed
+        })?;
+        if changed {
             crate::logging::info(&format!(
                 "Removed trusted external auth source: {}",
                 source_id
             ));
         }
         Ok(())
+    }
+}
+
+struct ConfigFileLock {
+    file: File,
+}
+
+impl ConfigFileLock {
+    fn lock(file: File, path: &std::path::Path) -> anyhow::Result<Self> {
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+        if rc != 0 {
+            return Err(anyhow::anyhow!(
+                "Failed to lock config lock {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(Self { file })
+    }
+}
+
+impl Drop for ConfigFileLock {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
     }
 }

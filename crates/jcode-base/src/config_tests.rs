@@ -1,7 +1,7 @@
 use super::{
-    AcpConfig, AmbientConfig, Config, DiffDisplayMode, DisplayConfig, ProviderConfig,
-    SessionPickerResumeAction, SwarmSpawnMode, ToolConfig, WarnOnce, config_env_fingerprint,
-    populate_context_limits_from_config_ref,
+    AcpConfig, AmbientConfig, Config, ConfigProvenance, DiffDisplayMode, DisplayConfig,
+    ProviderConfig, SessionPickerResumeAction, SwarmSpawnMode, ToolConfig, WarnOnce,
+    config_env_fingerprint, populate_context_limits_from_config_ref,
 };
 use std::ffi::OsString;
 use std::path::Path;
@@ -506,6 +506,263 @@ fn config_save_invalidates_global_config_cache() {
 
     restore_env_var("JCODE_HOME", prev_home);
     Config::invalidate_cache();
+}
+
+fn with_clean_config_env<T>(f: impl FnOnce() -> T) -> T {
+    let keys = [
+        "JCODE_MODEL",
+        "JCODE_PROVIDER",
+        "JCODE_OPENAI_REASONING_EFFORT",
+        "JCODE_OPENAI_SERVICE_TIER",
+        "JCODE_STREAM_IDLE_TIMEOUT_SECS",
+        "JCODE_DISPLAY_CENTERED",
+        "JCODE_WEBSEARCH_ENGINE",
+    ];
+    let previous = keys
+        .iter()
+        .map(|key| (*key, std::env::var_os(key)))
+        .collect::<Vec<_>>();
+    for key in keys {
+        crate::env::remove_var(key);
+    }
+    let result = f();
+    for (key, value) in previous {
+        restore_env_var(key, value);
+    }
+    result
+}
+
+#[test]
+fn config_load_merges_policy_over_durable() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        std::fs::write(
+            dir.path().join("config.toml"),
+            r#"
+[provider]
+default_model = "durable-model"
+default_provider = "openai"
+openai_service_tier = "flex"
+
+[providers.gateway]
+default_model = "durable-gateway-model"
+"#,
+        )
+        .expect("write durable config");
+        std::fs::write(
+            dir.path().join("config.nix.toml"),
+            r#"
+[provider]
+default_model = "policy-model"
+stream_idle_timeout_secs = 600
+
+[providers.gateway]
+base_url = "https://policy.example/v1"
+"#,
+        )
+        .expect("write policy config");
+
+        let cfg = Config::load();
+        assert_eq!(cfg.provider.default_model.as_deref(), Some("policy-model"));
+        assert_eq!(cfg.provider.default_provider.as_deref(), Some("openai"));
+        assert_eq!(cfg.provider.openai_service_tier.as_deref(), Some("flex"));
+        assert_eq!(cfg.provider.stream_idle_timeout_secs, 600);
+        let gateway = cfg
+            .providers
+            .get("gateway")
+            .expect("merged gateway provider");
+        assert_eq!(gateway.base_url, "https://policy.example/v1");
+        assert_eq!(
+            gateway.default_model.as_deref(),
+            Some("durable-gateway-model")
+        );
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn config_layer_provenance_marks_policy_durable_and_default_paths() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[provider]\ndefault_provider = \"openai\"\nopenai_service_tier = \"flex\"\n\n[providers.gateway]\ndefault_model = \"durable-gateway-model\"\n",
+        )
+        .expect("write durable config");
+        std::fs::write(
+            dir.path().join("config.nix.toml"),
+            "[provider]\ndefault_model = \"policy-model\"\n\n[providers.gateway]\nbase_url = \"https://policy.example/v1\"\n",
+        )
+        .expect("write policy config");
+
+        let cfg = Config::load();
+        assert_eq!(
+            cfg.provenance_for("provider.default_model"),
+            ConfigProvenance::Policy
+        );
+        assert_eq!(
+            cfg.provenance_for("provider.default_provider"),
+            ConfigProvenance::Durable
+        );
+        assert_eq!(
+            cfg.provenance_for("provider.openai_service_tier"),
+            ConfigProvenance::Durable
+        );
+        assert_eq!(
+            cfg.provenance_for("providers.gateway.base_url"),
+            ConfigProvenance::Policy
+        );
+        assert_eq!(
+            cfg.provenance_for("providers.gateway.default_model"),
+            ConfigProvenance::Durable
+        );
+        assert_eq!(
+            cfg.provenance_for("display.centered"),
+            ConfigProvenance::Default
+        );
+        assert!(cfg.policy_pinned_paths().contains("provider.default_model"));
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn config_save_skips_policy_pinned_and_default_values() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        std::fs::write(
+            dir.path().join("config.nix.toml"),
+            "[provider]\ndefault_model = \"policy-model\"\nopenai_reasoning_effort = \"high\"\n",
+        )
+        .expect("write policy config");
+
+        let mut cfg = Config::load();
+        cfg.provider.default_model = Some("runtime-model".to_string());
+        cfg.provider.default_provider = Some("copilot".to_string());
+        cfg.provider.openai_reasoning_effort = Some("low".to_string());
+        cfg.save().expect("save policy-aware config");
+
+        let durable =
+            std::fs::read_to_string(dir.path().join("config.toml")).expect("read durable config");
+        assert!(durable.contains("default_provider = \"copilot\""));
+        assert!(!durable.contains("default_model"));
+        assert!(!durable.contains("openai_reasoning_effort"));
+        assert!(!durable.contains("openai_service_tier"));
+
+        let reloaded = Config::load();
+        assert_eq!(
+            reloaded.provider.default_model.as_deref(),
+            Some("policy-model")
+        );
+        assert_eq!(
+            reloaded.provider.default_provider.as_deref(),
+            Some("copilot")
+        );
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn pinned_config_save_warning_is_once_per_key() {
+    Config::reset_pinned_config_save_warnings_for_tests();
+    assert!(Config::warn_once_pinned_config_save(
+        "provider.default_model"
+    ));
+    assert!(!Config::warn_once_pinned_config_save(
+        "provider.default_model"
+    ));
+    assert!(Config::warn_once_pinned_config_save(
+        "provider.default_provider"
+    ));
+}
+
+#[test]
+fn config_save_without_policy_is_bit_for_bit_legacy_pretty_toml() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let mut cfg = Config::default();
+        cfg.provider.default_model = Some("durable-model".to_string());
+        cfg.provider.default_provider = Some("openai".to_string());
+        cfg.display.centered = true;
+        let expected = toml::to_string_pretty(&cfg).expect("legacy pretty toml");
+
+        cfg.save().expect("save config without policy");
+        let durable =
+            std::fs::read_to_string(dir.path().join("config.toml")).expect("read durable config");
+        assert_eq!(durable, expected);
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn locked_config_patch_preserves_two_concurrent_writers() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let first_auth = dir.path().join("first-auth.json");
+        let second_auth = dir.path().join("second-auth.json");
+        std::fs::write(&first_auth, "{}\n").expect("write first auth file");
+        std::fs::write(&second_auth, "{}\n").expect("write second auth file");
+
+        let first = first_auth.clone();
+        let second = second_auth.clone();
+        let first_thread = std::thread::spawn(move || {
+            Config::allow_external_auth_source_for_path("first", &first)
+                .expect("first writer saves trust")
+        });
+        let second_thread = std::thread::spawn(move || {
+            Config::allow_external_auth_source_for_path("second", &second)
+                .expect("second writer saves trust")
+        });
+
+        first_thread.join().expect("first writer joins");
+        second_thread.join().expect("second writer joins");
+
+        let cfg = Config::load();
+        assert!(Config::external_auth_source_allowed_for_path(
+            "first",
+            &first_auth
+        ));
+        assert!(Config::external_auth_source_allowed_for_path(
+            "second",
+            &second_auth
+        ));
+        assert_eq!(cfg.auth.trusted_external_source_paths.len(), 2);
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
 }
 
 #[test]
