@@ -129,24 +129,32 @@ environment.systemPackages = [ inputs.jcode.packages.${pkgs.system}.default ];
 
     # Optional: relocate jcode's state dir (sets JCODE_HOME).
     # Home-relative values such as ~/.local/state/jcode are supported when the
-    # module also manages config.toml.
+    # module also manages config.nix.toml.
     # home = "~/.jcode";
 
-    # Optional: declare $JCODE_HOME/config.toml (or ~/.jcode/config.toml when
-    # `home` is unset) as Nix attrs.
+    # Optional: declare $JCODE_HOME/config.nix.toml (or
+    # ~/.jcode/config.nix.toml when `home` is unset) as pinned policy attrs.
     settings = {
       display.diff_mode = "inline";
       keybindings.scroll_up = "ctrl+k";
     };
 
     # ...or point at a pre-authored file instead of `settings`:
-    # configFile = ./jcode-config.toml;
+    # configFile = ./jcode-policy.toml;
+
+    # Escape hatch: restore the old behavior and manage config.toml directly.
+    # This can break jcode runtime saves because Home Manager files are normally
+    # read-only Nix store symlinks, so prefer the default policy layer.
+    # manageConfigToml = true;
   };
 }
 ```
 
 `settings` and `configFile` are mutually exclusive; omit both to let jcode use
-its own defaults.
+its own defaults. By default, both options write `config.nix.toml`, a read-only
+policy layer. jcode keeps the mutable durable `config.toml` for runtime choices
+such as trust decisions and UI preferences. Keys declared in `config.nix.toml`
+are pinned: runtime save attempts for those keys are ignored with a warning.
 
 ## Contributing (dev shell)
 
