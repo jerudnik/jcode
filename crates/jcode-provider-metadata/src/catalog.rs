@@ -339,7 +339,7 @@ pub const MINIMAX_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_aliases: &[],
     env_file: "minimax.env",
     setup_url: "https://platform.minimax.io/docs/guides/text-generation",
-    default_model: Some("MiniMax-M2.7"),
+    default_model: Some("MiniMax-M3"),
     requires_api_key: true,
 };
 
