@@ -205,6 +205,145 @@ async fn test_force_compact_applies_summary() {
     }
 }
 
+async fn wait_for_compaction_to_apply(manager: &mut CompactionManager, messages: &[Message]) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        manager.check_and_apply_compaction_with(messages);
+        if !manager.is_compacting() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("compaction task did not finish before deadline");
+}
+
+fn push_messages(
+    manager: &mut CompactionManager,
+    messages: &mut Vec<Message>,
+    range: std::ops::Range<usize>,
+) {
+    for i in range {
+        messages.push(make_text_message(
+            Role::User,
+            &format!("turn {i} {}", "z".repeat(120)),
+        ));
+        manager.notify_message_added();
+    }
+}
+
+#[test]
+fn covers_up_to_turn_must_stay_cumulative_across_two_hard_compaction_rounds() {
+    let mut manager = CompactionManager::new().with_budget(500);
+    let mut messages = Vec::new();
+    push_messages(&mut manager, &mut messages, 0..30);
+    manager.update_observed_input_tokens(480);
+
+    manager
+        .hard_compact_with(&messages)
+        .expect("first hard compaction should succeed");
+    let first_compacted_count = manager.compacted_count;
+    assert_eq!(
+        manager
+            .active_summary
+            .as_ref()
+            .expect("summary after first hard compaction")
+            .covers_up_to_turn,
+        first_compacted_count
+    );
+
+    push_messages(&mut manager, &mut messages, 30..70);
+    manager.update_observed_input_tokens(490);
+    manager
+        .hard_compact_with(&messages)
+        .expect("second hard compaction should succeed");
+
+    assert_eq!(
+        manager
+            .active_summary
+            .as_ref()
+            .expect("summary after second hard compaction")
+            .covers_up_to_turn,
+        manager.compacted_count,
+        "covers_up_to_turn must track compacted_count cumulatively across hard compaction rounds"
+    );
+}
+
+#[tokio::test]
+async fn covers_up_to_turn_must_stay_cumulative_across_two_manual_compaction_rounds() {
+    let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
+    let mut manager = CompactionManager::new().with_budget(1_000);
+    let mut messages = Vec::new();
+    push_messages(&mut manager, &mut messages, 0..30);
+    manager.update_observed_input_tokens(900);
+
+    manager
+        .force_compact_with(&messages, provider.clone())
+        .expect("first manual compaction should start");
+    wait_for_compaction_to_apply(&mut manager, &messages).await;
+    assert_eq!(
+        manager
+            .active_summary
+            .as_ref()
+            .expect("summary after first manual compaction")
+            .covers_up_to_turn,
+        manager.compacted_count
+    );
+
+    push_messages(&mut manager, &mut messages, 30..70);
+    manager.update_observed_input_tokens(900);
+    manager
+        .force_compact_with(&messages, provider)
+        .expect("second manual compaction should start");
+    wait_for_compaction_to_apply(&mut manager, &messages).await;
+
+    assert_eq!(
+        manager
+            .active_summary
+            .as_ref()
+            .expect("summary after second manual compaction")
+            .covers_up_to_turn,
+        manager.compacted_count,
+        "covers_up_to_turn must track compacted_count cumulatively across manual compaction rounds"
+    );
+}
+
+#[tokio::test]
+async fn jcode_compaction_after_native_baseline_keeps_camel_watermark_cumulative() {
+    let provider: Arc<dyn Provider> = Arc::new(MockSummaryProvider);
+    let mut manager = CompactionManager::new().with_budget(1_000);
+    let mut messages = Vec::new();
+    push_messages(&mut manager, &mut messages, 0..30);
+
+    manager.restore_persisted_state_with(
+        &crate::session::StoredCompactionState {
+            summary_text: "native summary".to_string(),
+            openai_encrypted_content: Some("enc_native".to_string()),
+            covers_up_to_turn: 20,
+            original_turn_count: 20,
+            compacted_count: 20,
+        },
+        &messages,
+    );
+    assert_eq!(manager.compacted_count, 20);
+
+    push_messages(&mut manager, &mut messages, 30..70);
+    manager.update_observed_input_tokens(900);
+    manager
+        .force_compact_with(&messages, provider)
+        .expect("manual compaction after native baseline should start");
+    wait_for_compaction_to_apply(&mut manager, &messages).await;
+
+    assert_eq!(
+        manager
+            .active_summary
+            .as_ref()
+            .expect("summary after jcode compaction on native baseline")
+            .covers_up_to_turn,
+        manager.compacted_count,
+        "manual jcode compaction after native baseline must preserve cumulative watermark"
+    );
+}
+
 // ── ensure_context_fits tests ──────────────────────────────
 
 #[tokio::test]
