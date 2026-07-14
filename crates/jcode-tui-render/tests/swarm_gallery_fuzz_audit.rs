@@ -3,8 +3,8 @@
 //! member counts, tiny widths/heights, wide glyphs).
 
 use jcode_tui_render::swarm_gallery::{
-    GalleryMember, SwarmStripHint, render_gallery, render_swarm_dock,
-    render_swarm_panel, render_swarm_strip,
+    GalleryMember, SwarmStripHint, render_gallery, render_swarm_dock, render_swarm_panel,
+    render_swarm_strip,
 };
 use ratatui::prelude::Line;
 use unicode_width::UnicodeWidthStr;
