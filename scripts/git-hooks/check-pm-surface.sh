@@ -20,7 +20,11 @@ set -euo pipefail
 [ "${PM_SURFACE_OK:-}" = "1" ] && exit 0
 
 # Newly-added markdown files under docs/, excluding docs/archive/.
-mapfile -t added < <(
+# (portable readarray: macOS ships bash 3.2 without mapfile)
+added=()
+while IFS= read -r line; do
+  [ -n "$line" ] && added+=("$line")
+done < <(
   git diff --cached --name-only --diff-filter=A -- 'docs/' ':(exclude)docs/archive/' 2>/dev/null \
     | grep -E '\.md$' || true
 )
