@@ -337,16 +337,16 @@ fn initial_session_context_preserves_explicitly_bound_cwd_when_inserted() -> Res
     cwd_guard.change_to(second_dir.path())?;
     assert!(session.ensure_initial_session_context_message());
     let first = session.messages[0].content_preview();
+    // Compare against the canonicalized cwd the session actually bound: on
+    // macOS /tmp is a symlink to /private/tmp, so tempdir paths and
+    // current_dir() spellings differ.
     assert!(
-        first.contains(&format!(
-            "Working directory: {}",
-            first_dir.path().display()
-        )),
+        first.contains(&format!("Working directory: {}", first_cwd.display())),
         "session context should preserve the bound cwd, got: {first}"
     );
     assert_eq!(
         session.working_dir.as_deref(),
-        Some(first_dir.path().to_str().unwrap())
+        Some(first_cwd.to_str().unwrap())
     );
 
     Ok(())
@@ -1446,7 +1446,7 @@ fn test_render_messages_shows_auto_poke_continuations_as_system_not_user() {
     assert!(
         system_contents
             .iter()
-            .any(|content| content.contains("before finalizing")),
+            .any(|content| content.contains("ready to finalize")),
         "quality continuation should render as system: {rendered:?}"
     );
 }
