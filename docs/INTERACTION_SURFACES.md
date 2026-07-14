@@ -133,5 +133,5 @@ Networking should use the existing `~/infrastructure/nix-config` Kanidm and mesh
 ## Future session starting prompt
 
 ```text
-Use docs/INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md for the next implementation session. Preserve the zero-build web path, keep TUI primary, use the surface workspace object model, and satisfy the requirement IDs for the selected phase before expanding scope.
+Use ~/notes/projects/jcode/proposals/interaction-surface-implementation-prompt.md for the next implementation session. Preserve the zero-build web path, keep TUI primary, use the surface workspace object model, and satisfy the requirement IDs for the selected phase before expanding scope.
 ```

@@ -11,7 +11,7 @@ Related docs:
 - [`INTERACTION_SURFACES.md`](./INTERACTION_SURFACES.md)
 - [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md)
 - [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md)
-- [`WEB_MOBILE_MVP.md`](./WEB_MOBILE_MVP.md)
+- `~/notes/projects/jcode/proposals/mobile-interface/web-mobile-mvp.md`
 
 ## Non-negotiable stop condition
 
@@ -326,8 +326,8 @@ Your only successful stop condition is: all seven work surfaces in docs/INTERACT
 Start by activating the jcode project and reading:
 - docs/INTERACTION_SURFACES.md
 - docs/INTERACTION_SURFACE_REQUIREMENTS.md
-- docs/SURFACE_WORKSPACE_SUBSTRATE_PLAN.md
-- docs/WEB_MOBILE_MVP.md
+- ~/notes/projects/jcode/proposals/surface-workspace-substrate-plan.md
+- ~/notes/projects/jcode/proposals/mobile-interface/web-mobile-mvp.md
 - docs/INTERACTION_SURFACE_ORCHESTRATOR_LEDGER.md
 
 Create a temporary self-destructive Serena MCP Server memory named temp/interaction_surface_orchestrator_ledger_<YYYYMMDD_HHMMSS> using the ledger scaffold from docs/INTERACTION_SURFACE_ORCHESTRATOR_LEDGER.md. This memory is authoritative for the run. Update it after every pulse, phase boundary, subagent report, test pass/failure, commit, and blocker. Delete that temporary memory only after the final definition of done is met and a permanent repo/commit handoff exists.

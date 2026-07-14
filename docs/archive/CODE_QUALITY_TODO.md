@@ -4,11 +4,11 @@
 > 2026-04-18 audit snapshot) enumerates `src/*.rs` paths and LOC counts that no
 > longer exist after the workspace migrated the monolith into `crates/*`
 > (e.g. `src/server.rs` now lives at `crates/jcode-app-core/src/server.rs`).
-> The evergreen quality standards remain in `docs/CODE_QUALITY_10_10_PLAN.md`;
+> The evergreen quality standards remain in `~/notes/projects/jcode/maintenance/code-quality-10-10-plan.md`;
 > the current audit lives in `docs/CODE_QUALITY_AUDIT_2026-04-18.md`. Kept for
 > history only.
 
-This file tracks the execution backlog for the code-quality uplift program described in `docs/CODE_QUALITY_10_10_PLAN.md`.
+This file tracks the execution backlog for the code-quality uplift program described in `~/notes/projects/jcode/maintenance/code-quality-10-10-plan.md`.
 
 Status values:
 
@@ -73,7 +73,7 @@ Status values:
 - [ ] Add repeated attach/detach and reconnect coverage
 - [ ] Track memory regression expectations in a documented budget
 - [ ] Improve observability around reload, swarm, and tool execution paths
-- [ ] Execute the compile-performance roadmap in `docs/COMPILE_PERFORMANCE_PLAN.md`
+- [ ] Execute the compile-performance roadmap in `~/notes/projects/jcode/maintenance/compile-performance-plan.md`
 - [ ] Add repeatable compile timing checkpoints for warm/cold self-dev loops
 
 ## Immediate Active Work
