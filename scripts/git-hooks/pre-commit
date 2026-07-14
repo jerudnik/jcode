@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# pre-commit dispatcher for the jcode fork. Keep fast; commit-time gates only.
+set -euo pipefail
+# Resolve through the symlink so sibling hook scripts are found in
+# scripts/git-hooks/, not in .git/hooks/ where the symlink lives.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  target="$(readlink "$src")"
+  case "$target" in
+    /*) src="$target" ;;
+    *) src="$(cd "$(dirname "$src")" && pwd)/$target" ;;
+  esac
+done
+hook_dir="$(cd "$(dirname "$src")" && pwd)"
+
+# Surface contract: PM/tracking must land in notes, not repo docs/.
+"$hook_dir/check-pm-surface.sh"
