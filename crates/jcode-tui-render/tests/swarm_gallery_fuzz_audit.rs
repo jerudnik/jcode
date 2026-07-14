@@ -1,6 +1,6 @@
 //! Audit sweep: panic-safety and width-bound checks for the swarm gallery,
-//! panel, and strip renderers across degenerate inputs (empty members, huge
-//! member counts, tiny widths/heights, wide glyphs).
+//! panel, and current compact strip API across degenerate inputs (empty
+//! members, huge member counts, tiny widths/heights, wide glyphs).
 
 use jcode_tui_render::swarm_gallery::{
     GalleryMember, SwarmStripHint, render_gallery, render_swarm_dock, render_swarm_panel,
