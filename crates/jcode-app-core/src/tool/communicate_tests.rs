@@ -32,6 +32,35 @@ fn tool_is_named_swarm() {
 }
 
 #[test]
+fn communicate_input_nodes_accept_array_and_double_encoded_string() {
+    let array_input: super::CommunicateInput = serde_json::from_value(serde_json::json!({
+        "action": "seed_graph",
+        "nodes": [{"id": "a", "content": "task a"}]
+    }))
+    .expect("array form parses");
+    assert_eq!(array_input.nodes.as_ref().map(Vec::len), Some(1));
+
+    let string_input: super::CommunicateInput = serde_json::from_value(serde_json::json!({
+        "action": "seed_graph",
+        "nodes": "[{\"id\": \"a\", \"content\": \"task a\", \"depends_on\": []}, {\"id\": \"b\", \"content\": \"task b\", \"depends_on\": [\"a\"]}]"
+    }))
+    .expect("double-encoded string form parses");
+    let nodes = string_input.nodes.expect("nodes present");
+    assert_eq!(nodes.len(), 2);
+    assert_eq!(nodes[1].depends_on, vec!["a".to_string()]);
+
+    let absent: super::CommunicateInput =
+        serde_json::from_value(serde_json::json!({"action": "list"})).expect("absent nodes ok");
+    assert!(absent.nodes.is_none());
+
+    let bad = serde_json::from_value::<super::CommunicateInput>(serde_json::json!({
+        "action": "seed_graph",
+        "nodes": "not json"
+    }));
+    assert!(bad.is_err(), "invalid string must still be rejected");
+}
+
+#[test]
 fn task_graph_seed_collision_is_detected_from_server_error() {
     let response = ServerEvent::Error {
         id: 1,
