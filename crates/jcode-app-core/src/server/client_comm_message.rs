@@ -142,6 +142,10 @@ pub(super) async fn handle_comm_message(
                 .cloned()
                 .collect()
         };
+        let addressable_session_id_set: HashSet<&str> = addressable_session_ids
+            .iter()
+            .map(String::as_str)
+            .collect();
 
         let resolved_to_session = if let Some(ref target) = to_session {
             match resolve_dm_target_session(target, &addressable_session_ids, swarm_members).await {
@@ -171,7 +175,7 @@ pub(super) async fn handle_comm_message(
         };
 
         if let Some(ref target) = resolved_to_session
-            && !addressable_session_ids.contains(target)
+            && !addressable_session_id_set.contains(target.as_str())
         {
             crate::logging::event_warn(
                 "COMM_LIFECYCLE",
@@ -235,7 +239,7 @@ pub(super) async fn handle_comm_message(
 
         let mut delivered_targets = 0usize;
         for session_id in &target_sessions {
-            if !addressable_session_ids.contains(session_id) {
+            if !addressable_session_id_set.contains(session_id.as_str()) {
                 continue;
             }
             if known_member_ids.contains(session_id) {
