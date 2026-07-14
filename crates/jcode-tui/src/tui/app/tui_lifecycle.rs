@@ -583,6 +583,7 @@ impl App {
             model_picker_cache: None,
             model_picker_catalog_revision: 0,
             recent_authenticated_provider: None,
+            auth_catalog_refresh_pending: false,
             pending_model_picker_load: None,
             model_picker_load_request_id: 0,
             pending_model_switch: None,
@@ -996,6 +997,7 @@ impl App {
             model_picker_cache: None,
             model_picker_catalog_revision: 0,
             recent_authenticated_provider: None,
+            auth_catalog_refresh_pending: false,
             pending_model_picker_load: None,
             model_picker_load_request_id: 0,
             pending_model_switch: None,
@@ -1154,6 +1156,7 @@ impl App {
                 jcode_tui_messages::display_messages_from_rendered_messages(rendered_messages);
             self.replace_display_messages(display_messages);
             self.remote_side_pane_images = rendered_images;
+            self.invalidate_side_pane_images_signature();
         }
         let render_ms = render_start.elapsed().as_millis();
 

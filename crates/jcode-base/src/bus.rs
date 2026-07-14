@@ -36,6 +36,8 @@ pub struct ToolEvent {
     pub tool_call_id: String,
     pub tool_name: String,
     pub status: ToolStatus,
+    /// Agent-provided human-readable intent for this tool call.
+    pub intent: Option<String>,
     pub title: Option<String>,
 }
 
@@ -431,6 +433,9 @@ pub enum BusEvent {
     CompactionFinished,
     /// Provider's available models list may have changed
     ModelsUpdated,
+    /// Synchronous provider activation after a login/import has completed, so
+    /// the model picker can stop hiding the stale pre-auth catalog.
+    AuthCatalogRefreshReady,
     /// A background provider setup task selected a model for this session.
     ProviderModelActivated {
         session_id: String,

@@ -45,6 +45,17 @@ fn grep_input(query: &str, max_regions: Option<usize>) -> AgentGrepInput {
 }
 
 #[test]
+fn agentgrep_rejects_missing_session_cwd_instead_of_using_process_cwd() {
+    let mut ctx = test_ctx(Path::new("/unused"));
+    ctx.working_dir = None;
+
+    let error = run_agentgrep_blocking(&grep_input("needle", None), &ctx)
+        .expect_err("workspace search without a session cwd must fail");
+
+    assert!(error.to_string().contains("session working directory"));
+}
+
+#[test]
 fn render_compacts_huge_grep_match_lines() {
     let args = GrepArgs {
         query: "set_status_notice".to_string(),
@@ -526,6 +537,39 @@ fn build_outline_args_treats_file_valued_path_as_outline_target() {
         temp.path().join("app.rs").display().to_string(),
         "file-valued path should become the outline target instead of joining query onto it"
     );
+    assert_eq!(args.path, None);
+}
+
+#[test]
+fn build_outline_args_does_not_duplicate_file_valued_path_when_file_is_also_set() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let relative_file = "src/tool/todo.rs";
+    let absolute_file = temp.path().join(relative_file);
+    fs::create_dir_all(absolute_file.parent().expect("file parent")).expect("mkdir");
+    fs::write(&absolute_file, "pub fn save_todos() {}\n").expect("write file");
+    let ctx = test_ctx(temp.path());
+
+    let params = AgentGrepInput {
+        mode: "outline".to_string(),
+        query: None,
+        file: Some(relative_file.to_string()),
+        terms: None,
+        regex: None,
+        path: Some(relative_file.to_string()),
+        glob: None,
+        file_type: None,
+        hidden: None,
+        no_ignore: None,
+        max_files: None,
+        max_regions: None,
+        full_region: None,
+        debug_plan: None,
+        debug_score: None,
+        paths_only: None,
+    };
+
+    let args = build_outline_args(&params, &ctx, None).unwrap();
+    assert_eq!(args.file, absolute_file.display().to_string());
     assert_eq!(args.path, None);
 }
 

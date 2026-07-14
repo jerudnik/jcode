@@ -1,5 +1,5 @@
 use super::*;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 struct EnvGuard {
     _lock: std::sync::MutexGuard<'static, ()>,
@@ -94,6 +94,7 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
         output_tail: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
         task_label: None,
         subagent_type: None,
     }];
@@ -143,11 +144,10 @@ fn persisted_swarm_state_round_trips_and_marks_running_stale() {
 }
 
 #[test]
-fn ready_headless_member_with_report_survives_reload_without_crashed_status() {
-    // A headless worker that finished its task (status "ready", completion
-    // report recorded) must not be resurrected as "crashed" after a server
-    // reload: nothing in-flight was lost. Regression test for finished swarm
-    // workers reporting "(crashed)" in await_members summaries after reloads.
+fn ready_headless_member_with_report_stops_without_losing_report() {
+    // A headless worker that finished its task has no process after restart.
+    // Preserve its report, but do not eagerly reconstruct the full Agent just
+    // to keep an idle worker reusable indefinitely.
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
 
@@ -172,6 +172,7 @@ fn ready_headless_member_with_report_survives_reload_without_crashed_status() {
         output_tail: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
         task_label: None,
         subagent_type: None,
     }];
@@ -180,11 +181,194 @@ fn ready_headless_member_with_report_survives_reload_without_crashed_status() {
     let loaded = load_runtime_state();
 
     let recovered = loaded.members.get("session-ready").expect("member");
-    assert_eq!(recovered.status, "ready");
-    assert_eq!(recovered.detail, None);
+    assert_eq!(recovered.status, "stopped");
+    assert_eq!(
+        recovered.detail.as_deref(),
+        Some("idle worker not restored after server restart")
+    );
     assert_eq!(
         recovered.latest_completion_report.as_deref(),
         Some("Done. Built the worker; all tests pass.")
+    );
+}
+
+#[test]
+fn terminal_member_retention_preserves_recent_reports_and_prunes_expired_records() {
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let member = SwarmMember {
+        session_id: "session-terminal".to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: Some(PathBuf::from("/tmp/swarm-terminal")),
+        swarm_id: Some("swarm-terminal".to_string()),
+        swarm_enabled: true,
+        status: "completed".to_string(),
+        detail: Some("done".to_string()),
+        friendly_name: Some("otter".to_string()),
+        report_back_to_session_id: Some("session-coordinator".to_string()),
+        latest_completion_report: Some("All targeted tests passed.".to_string()),
+        role: "agent".to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: true,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: Some("retention test".to_string()),
+        subagent_type: None,
+        initial_prompt_delivered: None,
+    };
+    let loaded_at = 10_000_000;
+    let mut persisted = to_persisted_member(&member, loaded_at);
+    persisted.terminal_since_unix_ms = Some(loaded_at - 30_000);
+
+    let recent = from_persisted_member(
+        persisted.clone(),
+        loaded_at,
+        loaded_at,
+        Duration::from_secs(60),
+    )
+    .expect("recent terminal member remains inspectable");
+    assert_eq!(
+        recent.latest_completion_report.as_deref(),
+        Some("All targeted tests passed.")
+    );
+    assert!(recent.last_status_change.elapsed() >= Duration::from_secs(30));
+
+    assert!(
+        from_persisted_member(persisted, loaded_at, loaded_at, Duration::from_secs(10),).is_none(),
+        "expired terminal member should be pruned"
+    );
+}
+
+#[test]
+fn legacy_terminal_member_uses_snapshot_time_as_retention_fallback() {
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let member = SwarmMember {
+        session_id: "session-legacy-terminal".to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some("swarm-legacy".to_string()),
+        swarm_enabled: true,
+        status: "failed".to_string(),
+        detail: Some("old failure".to_string()),
+        friendly_name: Some("badger".to_string()),
+        report_back_to_session_id: None,
+        latest_completion_report: Some("legacy report".to_string()),
+        role: "agent".to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: true,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: None,
+        subagent_type: None,
+        initial_prompt_delivered: None,
+    };
+    let loaded_at = 20_000_000;
+    let mut persisted = to_persisted_member(&member, loaded_at);
+    persisted.terminal_since_unix_ms = None;
+
+    assert!(
+        from_persisted_member(
+            persisted,
+            loaded_at - 20_000,
+            loaded_at,
+            Duration::from_secs(10),
+        )
+        .is_none(),
+        "legacy records should age from their containing snapshot"
+    );
+}
+
+#[test]
+fn recovery_induced_terminal_status_starts_retention_at_load_time() {
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let member = SwarmMember {
+        session_id: "session-ready-recovery".to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some("swarm-recovery".to_string()),
+        swarm_enabled: true,
+        status: "ready".to_string(),
+        detail: None,
+        friendly_name: Some("hare".to_string()),
+        report_back_to_session_id: None,
+        latest_completion_report: Some("finished just before restart".to_string()),
+        role: "agent".to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: true,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: None,
+        subagent_type: None,
+        initial_prompt_delivered: None,
+    };
+    let loaded_at = 300_000_000;
+    let mut persisted = to_persisted_member(&member, loaded_at);
+    persisted.terminal_since_unix_ms = None;
+
+    let recovered = from_persisted_member(
+        persisted,
+        loaded_at - Duration::from_secs(48 * 60 * 60).as_millis() as u64,
+        loaded_at,
+        Duration::from_secs(24 * 60 * 60),
+    )
+    .expect("recovery-induced terminal status should receive a fresh retention window");
+    assert_eq!(recovered.status, "stopped");
+    assert!(recovered.last_status_change.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn startup_gc_removes_expired_terminal_members_from_durable_snapshot() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+    let members = vec![SwarmMember {
+        session_id: "session-expired".to_string(),
+        event_tx,
+        event_txs: HashMap::new(),
+        working_dir: None,
+        swarm_id: Some("swarm-expired".to_string()),
+        swarm_enabled: true,
+        status: "completed".to_string(),
+        detail: None,
+        friendly_name: Some("fox".to_string()),
+        report_back_to_session_id: None,
+        latest_completion_report: Some("report retained until expiry".to_string()),
+        role: "agent".to_string(),
+        joined_at: Instant::now(),
+        last_status_change: Instant::now(),
+        is_headless: true,
+        output_tail: None,
+        todo_progress: None,
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
+        task_label: None,
+        subagent_type: None,
+        initial_prompt_delivered: None,
+    }];
+    persist_swarm_state("swarm-expired", None, None, &members, 0);
+
+    let path = state_path("swarm-expired");
+    let mut persisted = storage::read_json::<PersistedSwarmState>(&path).expect("snapshot");
+    persisted.members[0].terminal_since_unix_ms =
+        Some(now_unix_ms().saturating_sub(Duration::from_secs(48 * 60 * 60).as_millis() as u64));
+    storage::write_json_fast(&path, &persisted).expect("age terminal member");
+
+    let loaded = load_runtime_state();
+    assert!(!loaded.members.contains_key("session-expired"));
+    assert!(
+        !path.exists(),
+        "empty snapshot should be deleted after startup collection"
     );
 }
 
@@ -548,19 +732,8 @@ fn legacy_snapshot_without_mode_defaults_to_light() {
     assert_eq!(plan.version, 2);
 }
 
-/// Deterministic demonstration of the persist-snapshot version-inversion race
-/// (wiring-audit.persist-snapshot-inversion).
-///
-/// `persist_swarm_state_for` (server.rs) is `load_runtime().await` followed by
-/// a synchronous, unserialized `persist_swarm_state`. `load_runtime`
-/// (server/state.rs) clones the plan under `plans.read()` FIRST, then awaits
-/// three more locks (coordinators, swarms_by_id, members), so the cloned plan
-/// can go stale at any of those suspension points. On the multithreaded
-/// server runtime a second persist call can observe a NEWER plan and land it
-/// on disk while the first call is still suspended; when the first call
-/// resumes, its stale snapshot clobbers the newer one. Neither
-/// `persist_swarm_state` nor `storage::write_json_fast` compares versions:
-/// last rename wins.
+/// A persist that captured an older plan must not overwrite a newer durable
+/// plan when the calls complete out of order.
 ///
 /// This test parks persist A inside `load_runtime` at `members.read()`
 /// (after A has already cloned the v5 plan) behind a held `members.write()`
@@ -578,13 +751,9 @@ fn legacy_snapshot_without_mode_defaults_to_light() {
 /// v6 flips back to queued/running_stale and newer node_meta artifacts are
 /// lost.
 ///
-/// If this test starts failing with version == 6 at the final assert, the
-/// persist path gained ordering/version protection (e.g. a persist mutex per
-/// swarm, or persist_swarm_state refusing to overwrite a newer on-disk
-/// version); update the wiring audit.
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
-async fn persist_snapshot_can_regress_to_older_plan_version_when_calls_interleave() {
+async fn stale_persist_cannot_regress_newer_plan_version() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
 
@@ -647,30 +816,45 @@ async fn persist_snapshot_can_regress_to_older_plan_version_when_calls_interleav
         "v6 must be durably on disk before A resumes"
     );
 
-    // Release A: it resumes with its stale v5 runtime snapshot and
-    // synchronously overwrites the newer v6 snapshot.
+    // Release A: it resumes with its stale v5 runtime snapshot. The durable
+    // version guard must reject that write.
     drop(gate);
     a.await.expect("persist task");
 
-    // Assert on the primary snapshot file directly: load_runtime_state()
-    // cannot be used here because it also reads the `.bak` file (see
-    // `load_runtime_state_reads_bak_files_as_snapshots` below), which after
-    // this sequence holds v6 and shadows the regressed primary in
-    // directory-iteration order.
     let primary = storage::read_json::<PersistedSwarmState>(&state_path("swarm-race"))
         .expect("primary snapshot");
     assert_eq!(
         primary.plan.expect("plan").version,
-        5,
-        "expected the stale persist to regress the durable snapshot to v5; \
-         if this reads 6 the persist path gained ordering/version protection \
-         (update the wiring audit)"
+        6,
+        "a stale persist must not regress the durable plan version"
     );
-    // The newer v6 snapshot survives only as the write_json_fast backup.
-    let backup =
-        storage::read_json::<PersistedSwarmState>(&state_path("swarm-race").with_extension("bak"))
-            .expect("backup snapshot");
-    assert_eq!(backup.plan.expect("plan").version, 6);
+}
+
+#[tokio::test]
+async fn persistence_operations_serialize_per_swarm_but_not_globally() {
+    let alpha = swarm_operation_lock("swarm-lock-alpha");
+    let same_alpha = swarm_operation_lock("swarm-lock-alpha");
+    let beta = swarm_operation_lock("swarm-lock-beta");
+    assert!(
+        Arc::ptr_eq(&alpha, &same_alpha),
+        "the same swarm must share one operation lock"
+    );
+    assert!(
+        !Arc::ptr_eq(&alpha, &beta),
+        "unrelated swarms must not share a global serialization lock"
+    );
+
+    let alpha_guard = alpha.lock().await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), same_alpha.lock())
+            .await
+            .is_err(),
+        "a second operation for the same swarm must wait"
+    );
+    let _beta_guard = tokio::time::timeout(Duration::from_millis(100), beta.lock())
+        .await
+        .expect("an unrelated swarm operation was unnecessarily blocked");
+    drop(alpha_guard);
 }
 
 /// Companion finding discovered while writing the regression test above:
@@ -708,7 +892,7 @@ fn load_runtime_state_reads_bak_files_as_snapshots() {
         "load_runtime_state currently ingests .bak files as snapshots; if \
          this fails the loader gained a .json extension filter (update the \
          wiring audit and the primary-file assertions in \
-         persist_snapshot_can_regress_to_older_plan_version_when_calls_interleave)"
+         stale_persist_cannot_regress_newer_plan_version)"
     );
 }
 
@@ -795,6 +979,7 @@ fn persisted_swarm_state_without_plan_still_restores_coordinator_and_members() {
         output_tail: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
         task_label: None,
         subagent_type: None,
     }];
@@ -820,20 +1005,8 @@ fn persisted_swarm_state_without_plan_still_restores_coordinator_and_members() {
     );
 }
 
-/// Removal-lifecycle half of the `.bak` finding
-/// (wiring-audit.bak-resurrection). `storage::write_json_fast` hard-links
-/// the previous snapshot to `<swarm>.bak` on every overwrite
-/// (jcode-storage/src/lib.rs:310-323), but `remove_swarm_state`
-/// (swarm_persistence.rs:320) deletes only `state_path(swarm_id)` — the
-/// `.json` primary. Because `load_runtime_state` ingests `.bak` files as
-/// snapshots (see `load_runtime_state_reads_bak_files_as_snapshots`), a
-/// dissolved swarm resurrects from its orphaned backup at the next server
-/// startup: a zombie swarm carrying its second-to-last state.
-///
-/// Real-world evidence: `~/.jcode/state/swarm` accumulates `<id>.bak`
-/// files that disagree with (or outlive) their `<id>.json` primaries.
 #[test]
-fn remove_swarm_state_leaves_orphaned_bak_that_resurrects_on_load() {
+fn remove_swarm_state_removes_backup_and_cannot_resurrect() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
 
@@ -847,29 +1020,19 @@ fn remove_swarm_state_leaves_orphaned_bak_that_resurrects_on_load() {
     remove_swarm_state("swarm-zombie");
     assert!(!state_path("swarm-zombie").exists());
     assert!(
-        bak_path.exists(),
-        "remove_swarm_state deletes only the primary; the .bak survives"
+        !bak_path.exists(),
+        "logical deletion must remove the recovery backup too"
     );
 
-    // Next startup: the removed swarm resurrects from the orphaned .bak,
-    // and with STALE (second-to-last) state at that.
     let loaded = load_runtime_state();
-    assert_eq!(
-        loaded.coordinators.get("swarm-zombie"),
-        Some(&"coord-v1".to_string()),
-        "orphaned .bak resurrects the dissolved swarm at the next \
-         load_runtime_state; if this returns None the removal paths \
-         learned to delete the .bak (update the wiring audit)"
+    assert!(
+        !loaded.coordinators.contains_key("swarm-zombie"),
+        "a deleted swarm must not be restored on the next load"
     );
 }
 
-/// Same orphaned-`.bak` lifecycle bug via the OTHER removal path: the
-/// all-empty dissolution branch of `persist_swarm_state`
-/// (swarm_persistence.rs:293) also calls `remove_file(state_path(..))`
-/// only, so dissolving a swarm by persisting its empty runtime leaves the
-/// backup behind and the swarm resurrects on the next load.
 #[test]
-fn empty_persist_dissolution_leaves_orphaned_bak_that_resurrects_on_load() {
+fn empty_persist_dissolution_removes_backup_and_cannot_resurrect() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
 
@@ -883,18 +1046,14 @@ fn empty_persist_dissolution_leaves_orphaned_bak_that_resurrects_on_load() {
     persist_swarm_state("swarm-dissolve", None, None, &[], 0);
     assert!(!state_path("swarm-dissolve").exists());
     assert!(
-        bak_path.exists(),
-        "the empty-state persist branch deletes only the primary; the \
-         .bak survives"
+        !bak_path.exists(),
+        "empty-state persistence must remove the recovery backup too"
     );
 
     let loaded = load_runtime_state();
-    assert_eq!(
-        loaded.coordinators.get("swarm-dissolve"),
-        Some(&"coord-v1".to_string()),
-        "orphaned .bak resurrects the dissolved swarm at the next \
-         load_runtime_state; if this returns None the dissolution branch \
-         learned to delete the .bak (update the wiring audit)"
+    assert!(
+        !loaded.coordinators.contains_key("swarm-dissolve"),
+        "a dissolved swarm must not be restored on the next load"
     );
 }
 
@@ -916,12 +1075,12 @@ fn empty_persist_dissolution_leaves_orphaned_bak_that_resurrects_on_load() {
 ///      stale pre-dissolution state instead.
 ///
 /// Same gate technique as
-/// `persist_snapshot_can_regress_to_older_plan_version_when_calls_interleave`:
+/// `stale_persist_cannot_regress_newer_plan_version`:
 /// park A inside `load_runtime` at the contended `members.read()`, run
 /// mutator B's re-creation and persist while A is parked, release A.
 #[tokio::test]
 #[allow(clippy::await_holding_lock)]
-async fn remove_racing_persist_deletes_fresh_snapshot_and_resurrects_stale_bak() {
+async fn stale_remove_cannot_delete_fresh_snapshot_or_restore_backup() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
 
@@ -971,26 +1130,20 @@ async fn remove_racing_persist_deletes_fresh_snapshot_and_resurrects_stale_bak()
         "fresh snapshot must be durably on disk before A resumes"
     );
 
-    // Release A: its stale all-empty runtime passes has_any_state() and it
-    // deletes the snapshot B just wrote.
+    // Release A: its stale all-empty runtime passes has_any_state(), but the
+    // compare-and-delete guard must notice that the durable snapshot changed.
     drop(gate);
     a.await.expect("remove task");
 
     assert!(
-        !state_path("swarm-del-race").exists(),
-        "expected the racing remove to delete the freshly persisted \
-         snapshot; if the primary survives, the remove path gained \
-         ordering/state re-checks (update the wiring audit)"
+        state_path("swarm-del-race").exists(),
+        "a stale remove must not delete a freshly persisted snapshot"
     );
-    // The live swarm (coord-new is still registered in memory) now has no
-    // primary snapshot, and the only durable trace is the STALE backup, so
-    // the next load_runtime_state resurrects the pre-dissolution state.
     let loaded = load_runtime_state();
     assert_eq!(
         loaded.coordinators.get("swarm-del-race"),
-        Some(&"coord-stale".to_string()),
-        "restart restores the stale .bak snapshot: coord-new's fresh state \
-         was orphaned by the delete-vs-write race"
+        Some(&"coord-new".to_string()),
+        "restart must restore the fresh incarnation, not its stale backup"
     );
 }
 
@@ -1029,6 +1182,7 @@ fn recovery_replays_control_log_tail_past_snapshot_offset() {
         output_tail: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     };
     let members = vec![
         make_member("coord-1", "coordinator", "ready"),
@@ -1182,6 +1336,7 @@ fn recovery_with_legacy_snapshot_replays_whole_log_idempotently() {
         output_tail: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     }];
 
     // Log fully agrees with the snapshot (dual-write in steady state)...

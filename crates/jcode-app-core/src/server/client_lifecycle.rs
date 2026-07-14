@@ -59,6 +59,7 @@ use anyhow::Result;
 use futures::FutureExt;
 use jcode_agent_runtime::{InterruptSignal, SoftInterruptSource, StreamError};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -70,6 +71,28 @@ use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 const RELOAD_STARTING_GUARD_MAX_AGE: Duration = Duration::from_secs(30);
 const REQUEST_HANDLER_STALL_THRESHOLDS_MS: [u64; 3] = [2_000, 10_000, 60_000];
+
+fn required_subscribe_working_dir(working_dir: Option<&str>) -> std::result::Result<&str, String> {
+    let working_dir = working_dir
+        .map(str::trim)
+        .filter(|dir| !dir.is_empty())
+        .ok_or_else(|| "Subscribe requires the client's working directory".to_string())?;
+    if !Path::new(working_dir).is_absolute() {
+        return Err("Subscribe working_dir must be an absolute path".to_string());
+    }
+    Ok(working_dir)
+}
+
+fn initial_subscribe_working_dir(request: &Request) -> std::result::Result<String, String> {
+    match request {
+        Request::Subscribe { working_dir, .. } => {
+            required_subscribe_working_dir(working_dir.as_deref()).map(str::to_string)
+        }
+        _ => Err(
+            "Client must Subscribe with a working_dir before sending stateful requests".to_string(),
+        ),
+    }
+}
 
 struct ProcessingMessage {
     id: u64,
@@ -405,6 +428,22 @@ pub(super) async fn handle_client(
         }
     };
 
+    let initial_working_dir = match initial_subscribe_working_dir(&initial_request) {
+        Ok(working_dir) => working_dir,
+        Err(message) => {
+            write_direct_event(
+                &writer,
+                &ServerEvent::Error {
+                    id: initial_request.id(),
+                    message,
+                    retry_after_secs: None,
+                },
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
     // Per-client state
     let mut client_is_processing = false;
     let (processing_done_tx, mut processing_done_rx) =
@@ -418,7 +457,7 @@ pub(super) async fn handle_client(
 
     let client_start = std::time::Instant::now();
 
-    let provider = provider_template.fork();
+    let provider = provider_template.fork_for_new_session();
     let t0 = std::time::Instant::now();
     let registry = Registry::new(provider.clone()).await;
     let registry_ms = t0.elapsed().as_millis();
@@ -429,7 +468,11 @@ pub(super) async fn handle_client(
 
     // Create a new session for this client
     let t0 = std::time::Instant::now();
-    let mut new_agent = Agent::new(Arc::clone(&provider), registry.clone());
+    let mut new_agent = Agent::new_with_initial_working_dir(
+        Arc::clone(&provider),
+        registry.clone(),
+        Some(&initial_working_dir),
+    );
     let agent_new_ms = t0.elapsed().as_millis();
 
     new_agent.set_memory_enabled(crate::config::config().features.memory);
@@ -685,7 +728,6 @@ pub(super) async fn handle_client(
                                 )
                                 .await;
                             }
-                            let _ = client_event_tx.send(ServerEvent::Done { id: done_id });
                         }
                         Err(e) => {
                             if let Some(session_id) = done_session.as_deref() {
@@ -720,11 +762,6 @@ pub(super) async fn handle_client(
                                     crate::telemetry::record_error(crate::telemetry::ErrorCategory::AuthFailed);
                                 }
                             }
-                            let _ = client_event_tx.send(ServerEvent::Error {
-                                id: done_id,
-                                message: crate::util::format_error_chain(&e),
-                                retry_after_secs,
-                            });
                         }
                     }
                 } else {
@@ -1316,6 +1353,16 @@ pub(super) async fn handle_client(
                 spawn_session_id,
                 client_pid,
             } => {
+                if let Err(message) =
+                    required_subscribe_working_dir(subscribe_working_dir.as_deref())
+                {
+                    let _ = client_event_tx.send(ServerEvent::Error {
+                        id,
+                        message,
+                        retry_after_secs: None,
+                    });
+                    continue;
+                }
                 current_client_instance_id = client_instance_id.clone();
                 // NS1: compare the client's advertised build/protocol identity
                 // against this daemon's and emit a typed verdict so the client
@@ -1346,6 +1393,7 @@ pub(super) async fn handle_client(
                         agent = handle_resume_session(
                             id,
                             target_session_id.clone(),
+                            subscribe_working_dir.as_deref(),
                             client_instance_id.as_deref(),
                             client_has_local_history,
                             allow_session_takeover,
@@ -1646,6 +1694,10 @@ pub(super) async fn handle_client(
                 client_has_local_history,
                 allow_session_takeover,
             } => {
+                let resume_working_dir = {
+                    let agent_guard = agent.lock().await;
+                    agent_guard.working_dir().map(str::to_string)
+                };
                 current_client_instance_id = client_instance_id.clone();
                 {
                     let mut connections = client_connections.write().await;
@@ -1656,6 +1708,7 @@ pub(super) async fn handle_client(
                 agent = handle_resume_session(
                     id,
                     session_id,
+                    resume_working_dir.as_deref(),
                     client_instance_id.as_deref(),
                     client_has_local_history,
                     allow_session_takeover,
@@ -2739,7 +2792,11 @@ async fn start_processing_message(
     };
     let agent = Arc::clone(agent);
     let report_agent = Arc::clone(&agent);
-    let tx = client_event_tx.clone();
+    let tx = super::state::session_event_fanout_sender_with_fallback(
+        client_session_id.to_string(),
+        Arc::clone(swarm.members),
+        client_event_tx.clone(),
+    );
     let done_tx = processing_done_tx.clone();
     crate::logging::info(&format!("Processing message id={} spawning task", id));
     *state.task = Some(tokio::spawn(async move {
@@ -2786,6 +2843,20 @@ async fn start_processing_message(
         } else {
             None
         };
+        // Keep the terminal event on the same ordered fanout channel as the
+        // stream. Sending it later from the owning client's event loop could
+        // race ahead of the final MessageEnd for newly attached clients.
+        let terminal_event = match &result {
+            Ok(()) => ServerEvent::Done { id },
+            Err(error) => ServerEvent::Error {
+                id,
+                message: crate::util::format_error_chain(error),
+                retry_after_secs: error
+                    .downcast_ref::<StreamError>()
+                    .and_then(|stream_error| stream_error.retry_after_secs),
+            },
+        };
+        let _ = tx.send(terminal_event);
         let _ = done_tx.send((id, result, completion_report));
     }));
 }

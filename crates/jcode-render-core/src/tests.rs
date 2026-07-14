@@ -41,6 +41,64 @@ fn parses_inline_code() {
 }
 
 #[test]
+fn parses_inline_math_into_unicode_math_span() {
+    let doc = parse_markdown(r"Euler: $e^{i\pi} + 1 = 0$");
+    let math = doc.blocks[0].lines[0]
+        .spans
+        .iter()
+        .find(|span| span.role == StyleRole::Math)
+        .expect("math span");
+    assert_eq!(math.text, "e^(iπ) + 1 = 0");
+}
+
+#[test]
+fn parses_display_math_into_laid_out_block() {
+    let doc = parse_markdown(r"$$\frac{x+1}{y}$$");
+    assert_eq!(doc.blocks[0].kind, BlockKind::MathDisplay);
+    let lines: Vec<String> = doc.blocks[0]
+        .lines
+        .iter()
+        .map(StyledLine::plain_text)
+        .collect();
+    assert_eq!(lines, vec![" x+1 ", "─────", "  y  "]);
+    assert!(
+        doc.blocks[0]
+            .lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .all(|span| span.role == StyleRole::Math)
+    );
+}
+
+#[test]
+fn parses_all_common_latex_math_containers() {
+    let inline = parse_markdown(r"Euler: \(e^{i\pi} + 1 = 0\)");
+    assert!(
+        inline.blocks[0].lines[0]
+            .spans
+            .iter()
+            .any(|span| span.role == StyleRole::Math && span.text == "e^(iπ) + 1 = 0")
+    );
+
+    for markdown in [
+        r"\[\frac{x+1}{y}\]",
+        "```math\n\\frac{x+1}{y}\n```",
+        r"\begin{equation}\frac{x+1}{y}\end{equation}",
+    ] {
+        let doc = parse_markdown(markdown);
+        assert_eq!(doc.blocks[0].kind, BlockKind::MathDisplay, "{markdown}");
+        assert!(
+            doc.blocks[0]
+                .lines
+                .iter()
+                .any(|line| line.plain_text().contains("─────")),
+            "{markdown}: {:?}",
+            doc.blocks[0].lines
+        );
+    }
+}
+
+#[test]
 fn parses_fenced_code_block() {
     let md = "```rust\nfn main() {}\nlet x = 1;\n```";
     let doc = parse_markdown(md);

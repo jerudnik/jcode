@@ -189,6 +189,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
     ));
     lines.push(help_entry("/agents", "Configure models for agent roles"));
     lines.push(help_entry(
+        "/swarm-prompt",
+        "Open the active swarm routing prompt in your editor",
+    ));
+    lines.push(help_entry(
         "/effort <level>",
         "Set effort (none|low|medium|high|xhigh|max|swarm|swarm-deep)",
     ));
@@ -312,6 +316,10 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
         "Return to the previous Catch Up source session",
     ));
     lines.push(help_entry("/resume", "Browse and resume previous sessions"));
+    lines.push(help_entry(
+        "/active",
+        "Manage live sessions: see which are working vs ready",
+    ));
     lines.push(help_entry(
         "/catchup [next]",
         "Jump into finished sessions with a side-panel brief",
@@ -538,7 +546,7 @@ pub(super) fn draw_help_overlay(frame: &mut Frame, area: Rect, scroll: usize, ap
     lines.push(key_entry("Alt+Y", "Toggle chat selection/copy mode"));
     lines.push(key_entry("Alt+S", "Toggle typing scroll lock"));
     lines.push(key_entry("Ctrl+P", "Toggle auto-poke for incomplete todos"));
-    lines.push(key_entry("Alt+P", "Show/dismiss todo list card in chat"));
+    lines.push(key_entry("Alt+X", "Show/dismiss todo list card in chat"));
     lines.push(key_entry(
         &crate::tui::keybind::effort_switch_keys_label(),
         "Cycle effort (reasoning + swarm)",

@@ -466,6 +466,110 @@ fn load_sessions_prefers_custom_title_over_generated_title() {
 }
 
 #[test]
+fn load_sessions_prefers_todo_group_over_generated_title() {
+    let _env_lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let session_id = "session_todotitle_1770000000000";
+
+    let mut session = Session::create_with_id(
+        session_id.to_string(),
+        None,
+        Some("Generated first prompt".to_string()),
+    );
+    session.append_stored_message(crate::session::StoredMessage {
+        id: "msg1".to_string(),
+        role: crate::message::Role::User,
+        content: vec![crate::message::ContentBlock::Text {
+            text: "please improve the session picker".to_string(),
+            cache_control: None,
+        }],
+        display_role: None,
+        timestamp: None,
+        tool_duration_ms: None,
+        token_usage: None,
+    });
+    session.save().expect("save session");
+    crate::todo::save_todos(
+        session_id,
+        &[crate::todo::TodoItem {
+            content: "Wire todo title into picker".to_string(),
+            status: "in_progress".to_string(),
+            priority: "high".to_string(),
+            id: "wire-title".to_string(),
+            group: Some("Improve resume session names".to_string()),
+            confidence: Some(90),
+            completion_confidence: None,
+            confidence_history: vec![90],
+            blocked_by: Vec::new(),
+            assigned_to: None,
+        }],
+    )
+    .expect("save todos");
+    invalidate_session_list_cache();
+
+    let sessions = load_sessions().expect("load sessions");
+    let loaded = sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("todo-titled session present");
+    assert_eq!(loaded.title, "Improve resume session names");
+    assert!(loaded.search_index.contains("improve resume session names"));
+}
+
+#[test]
+fn load_sessions_keeps_custom_title_over_todo_group() {
+    let _env_lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let session_id = "session_customtodotitle_1770000000000";
+
+    let mut session = Session::create_with_id(
+        session_id.to_string(),
+        None,
+        Some("Generated first prompt".to_string()),
+    );
+    session.rename_title(Some("Manual session title".to_string()));
+    session.append_stored_message(crate::session::StoredMessage {
+        id: "msg1".to_string(),
+        role: crate::message::Role::User,
+        content: vec![crate::message::ContentBlock::Text {
+            text: "please improve the session picker".to_string(),
+            cache_control: None,
+        }],
+        display_role: None,
+        timestamp: None,
+        tool_duration_ms: None,
+        token_usage: None,
+    });
+    session.save().expect("save session");
+    crate::todo::save_todos(
+        session_id,
+        &[crate::todo::TodoItem {
+            content: "Wire todo title into picker".to_string(),
+            status: "in_progress".to_string(),
+            priority: "high".to_string(),
+            id: "wire-title".to_string(),
+            group: Some("Automatic todo title".to_string()),
+            confidence: Some(90),
+            completion_confidence: None,
+            confidence_history: vec![90],
+            blocked_by: Vec::new(),
+            assigned_to: None,
+        }],
+    )
+    .expect("save todos");
+    invalidate_session_list_cache();
+
+    let sessions = load_sessions().expect("load sessions");
+    let loaded = sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("custom todo-titled session present");
+    assert_eq!(loaded.title, "Manual session title");
+}
+
+#[test]
 fn load_sessions_includes_saved_sessions_beyond_scan_limit() {
     let _env_lock = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
@@ -1053,6 +1157,71 @@ fn parallel_fill_skips_many_recent_empty_sessions_to_reach_scan_limit() {
     assert!(
         !sessions.iter().any(|s| s.id.starts_with("session_empty_")),
         "empty sessions must be filtered out of the loaded list"
+    );
+}
+
+#[test]
+fn hidden_debug_sessions_do_not_consume_default_resume_budget() {
+    let _env_lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp dir");
+    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let _scan_limit = EnvVarGuard::set_str("JCODE_SESSION_PICKER_MAX_SESSIONS", "50");
+
+    let push_message = |session: &mut Session, text: &str| {
+        session.append_stored_message(crate::session::StoredMessage {
+            id: format!("msg-{text}"),
+            role: crate::message::Role::User,
+            content: vec![crate::message::ContentBlock::Text {
+                text: text.to_string(),
+                cache_control: None,
+            }],
+            display_role: None,
+            timestamp: None,
+            tool_duration_ms: None,
+            token_usage: None,
+        });
+    };
+
+    // Write ordinary sessions first so their filesystem mtimes are older than
+    // the hidden debug burst below, matching the reported real-world ordering.
+    for idx in 0..60 {
+        let mut session = Session::create_with_id(
+            format!("session_regular_{}", 1_780_000_000_000u64 + idx as u64),
+            Some(format!("/tmp/regular-{idx:03}")),
+            Some(format!("Regular {idx:03}")),
+        );
+        session.is_debug = false;
+        session.is_canary = false;
+        push_message(&mut session, &format!("regular content {idx:03}"));
+        session.save().expect("save regular session");
+    }
+
+    // These newer self-dev/worker sessions are hidden by default. Previously the
+    // loader stopped after the first 50, leaving no ordinary Jcode sessions for
+    // the picker even though older resumable sessions existed.
+    for idx in 0..75 {
+        let mut session = Session::create_with_id(
+            format!("session_debug_{}", 1_790_000_000_000u64 + idx as u64),
+            Some(format!("/tmp/debug-{idx:03}")),
+            Some(format!("Debug {idx:03}")),
+        );
+        session.is_debug = true;
+        push_message(&mut session, &format!("debug content {idx:03}"));
+        session.save().expect("save debug session");
+    }
+
+    invalidate_session_list_cache();
+    let sessions = load_sessions().expect("load sessions");
+    let regular_count = sessions.iter().filter(|session| !session.is_debug).count();
+    let debug_count = sessions.iter().filter(|session| session.is_debug).count();
+
+    assert_eq!(
+        regular_count, 50,
+        "ordinary sessions should fill the visible budget"
+    );
+    assert_eq!(
+        debug_count, 50,
+        "debug sessions should retain their own bounded budget"
     );
 }
 

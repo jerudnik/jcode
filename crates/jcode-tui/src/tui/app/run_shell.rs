@@ -8,6 +8,15 @@ use std::io::Write;
 const STATUS_SPINNER_FPS: f32 = 12.5;
 pub(super) const STATUS_SPINNER_ONLY_INTERVAL: Duration = Duration::from_millis(80);
 
+pub(super) fn redraw_timer(period: Duration) -> tokio::time::Interval {
+    let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    // Redraw ticks represent visual liveness, not elapsed simulation steps. An
+    // immediate first tick or Burst catch-up after a slow frame only schedules
+    // redundant full renders and can lock the UI into a slow-frame loop.
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    interval
+}
+
 pub(super) fn status_spinner_interval() -> tokio::time::Interval {
     status_spinner_interval_after(STATUS_SPINNER_ONLY_INTERVAL)
 }
@@ -169,6 +178,10 @@ pub(super) struct StatusSpinnerRenderer {
 }
 
 impl StatusSpinnerRenderer {
+    pub(super) fn spinner_only_available(&self, app: &App) -> bool {
+        status_spinner_only_symbol(app).is_some()
+    }
+
     pub(super) fn invalidate(&mut self) {
         self.last_frame = None;
     }
@@ -244,23 +257,31 @@ impl StatusSpinnerRenderer {
         app: &App,
         terminal: &mut DefaultTerminal,
     ) -> Result<bool> {
-        let Some(symbol) = status_spinner_only_symbol(app) else {
+        let status_symbol = status_spinner_only_symbol(app);
+        if status_symbol.is_none() {
             return Ok(false);
-        };
-        let Some(area) = crate::tui::ui::last_status_area() else {
-            return Ok(false);
-        };
+        }
         let Some(previous_frame) = self.last_frame.as_ref() else {
             return Ok(false);
         };
-        if !render_status_spinner_into_buffer(previous_frame, area, symbol) {
+        let status_area = crate::tui::ui::last_status_area();
+        let status_patchable = status_symbol
+            .zip(status_area)
+            .is_some_and(|(symbol, area)| {
+                render_status_spinner_into_buffer(previous_frame, area, symbol)
+            });
+        if !status_patchable {
             return Ok(false);
         }
 
         let next_frame = {
             let current_buffer = terminal.current_buffer_mut();
             current_buffer.clone_from(previous_frame);
-            render_status_spinner_into_buffer_mut(current_buffer, area, symbol);
+            if let Some((symbol, area)) = status_symbol.zip(status_area)
+                && status_patchable
+            {
+                render_status_spinner_into_buffer_mut(current_buffer, area, symbol);
+            }
             current_buffer.clone()
         };
 
@@ -299,7 +320,11 @@ fn render_status_spinner_into_buffer_mut(buffer: &mut Buffer, area: Rect, symbol
         area.y,
         symbol,
         1,
-        Style::default().fg(jcode_tui_style::theme::ai_color()),
+        // The spinner cell is patched outside the full-frame draw, so apply
+        // light-theme adaptation here explicitly (no-op on dark themes).
+        Style::default().fg(jcode_tui_style::adapt_color_for_theme(
+            jcode_tui_style::theme::ai_color(),
+        )),
     );
 }
 
@@ -309,7 +334,7 @@ impl App {
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> Result<RunResult> {
         let mut event_stream = EventStream::new();
         let mut redraw_period = crate::tui::redraw_interval(&self);
-        let mut redraw_interval = interval(redraw_period);
+        let mut redraw_interval = redraw_timer(redraw_period);
         let mut status_spinner_interval = status_spinner_interval();
         let mut status_spinner_renderer = StatusSpinnerRenderer::default();
         let mut needs_redraw = true;
@@ -326,7 +351,7 @@ impl App {
             let desired_redraw = crate::tui::redraw_interval(&self);
             if desired_redraw != redraw_period {
                 redraw_period = desired_redraw;
-                redraw_interval = interval(redraw_period);
+                redraw_interval = redraw_timer(redraw_period);
             }
 
             if needs_redraw {
@@ -358,7 +383,7 @@ impl App {
             } else {
                 // Wait for input or redraw tick
                 tokio::select! {
-                    _ = status_spinner_interval.tick(), if status_spinner_only_symbol(&self).is_some() => {
+                    _ = status_spinner_interval.tick(), if status_spinner_renderer.spinner_only_available(&self) => {
                         if !status_spinner_renderer.draw_status_spinner_only(&self, &mut terminal)? {
                             needs_redraw = true;
                         }
@@ -408,10 +433,14 @@ impl App {
     }
 
     /// Run the TUI in remote mode, connecting to a server
-    pub async fn run_remote(mut self, mut terminal: DefaultTerminal) -> Result<RunResult> {
+    pub async fn run_remote(
+        mut self,
+        mut terminal: DefaultTerminal,
+        remote_working_dir: Option<String>,
+    ) -> Result<RunResult> {
         let mut event_stream = EventStream::new();
         let mut redraw_period = crate::tui::redraw_interval(&self);
-        let mut redraw_interval = interval(redraw_period);
+        let mut redraw_interval = redraw_timer(redraw_period);
         let mut status_spinner_interval = status_spinner_interval();
         let mut status_spinner_renderer = StatusSpinnerRenderer::default();
         let mut needs_redraw = true;
@@ -460,6 +489,7 @@ impl App {
                 &mut event_stream,
                 &mut remote_state,
                 session_to_resume.as_deref(),
+                remote_working_dir.as_deref(),
             )
             .await?
             {
@@ -496,7 +526,7 @@ impl App {
                 let desired_redraw = crate::tui::redraw_interval(&self);
                 if desired_redraw != redraw_period {
                     redraw_period = desired_redraw;
-                    redraw_interval = interval(redraw_period);
+                    redraw_interval = redraw_timer(redraw_period);
                 }
 
                 if needs_redraw {
@@ -540,7 +570,7 @@ impl App {
                 }
 
                 tokio::select! {
-                    _ = status_spinner_interval.tick(), if status_spinner_only_symbol(&self).is_some() => {
+                    _ = status_spinner_interval.tick(), if status_spinner_renderer.spinner_only_available(&self) => {
                         if !status_spinner_renderer.draw_status_spinner_only(&self, &mut terminal)? {
                             needs_redraw = true;
                         }
@@ -714,6 +744,21 @@ impl App {
 mod tests {
     use super::*;
     use ratatui::style::Color;
+
+    #[tokio::test]
+    async fn redraw_timer_waits_one_period_and_skips_missed_ticks() {
+        let mut timer = redraw_timer(Duration::from_millis(250));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), timer.tick())
+                .await
+                .is_err(),
+            "the first redraw tick must not fire immediately"
+        );
+        assert_eq!(
+            timer.missed_tick_behavior(),
+            tokio::time::MissedTickBehavior::Skip
+        );
+    }
 
     fn assert_duration_close(actual: Duration, expected: Duration) {
         let actual_ms = actual.as_millis() as i128;

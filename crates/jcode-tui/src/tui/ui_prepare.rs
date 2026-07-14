@@ -505,6 +505,53 @@ pub(super) fn active_batch_progress_hash(app: &dyn TuiState) -> u64 {
     hasher.finish()
 }
 
+fn swarm_members_signature(members: &[crate::protocol::SwarmMemberStatus]) -> u64 {
+    serde_json::to_string(members)
+        .map(|snapshot| super::hash_text_for_cache(&snapshot))
+        .unwrap_or_default()
+}
+
+fn spawned_member_for_tool<'a>(
+    msg: &DisplayMessage,
+    members: &'a [crate::protocol::SwarmMemberStatus],
+) -> Option<&'a crate::protocol::SwarmMemberStatus> {
+    let tool = msg.tool_data.as_ref()?;
+    if tools_ui::canonical_tool_name(&tool.name) != "swarm" {
+        return None;
+    }
+
+    // Live remote tool output is decorated as `[swarm] Spawned new agent: …`.
+    // The completed ToolCall can also lose its parsed input across a reload or
+    // event race, so the server-issued session ID is the authoritative signal.
+    let session_id = msg
+        .content
+        .lines()
+        .find_map(|line| line.split_once("Spawned new agent: ").map(|(_, id)| id))
+        .map(str::trim);
+    if let Some(member) = session_id.and_then(|session_id| {
+        members
+            .iter()
+            .find(|member| member.session_id == session_id)
+    }) {
+        return Some(member);
+    }
+
+    // The server may publish the member snapshot before or after the tool result,
+    // and older/reformatted tool results may not retain the exact session-id line.
+    // The spawn label is copied into `task_label`, so use a unique label match as
+    // a safe fallback. Requiring uniqueness prevents an old spawn row from
+    // adopting a newer worker when labels are reused.
+    if tool.input.get("action").and_then(|value| value.as_str()) != Some("spawn") {
+        return None;
+    }
+    let label = tool.input.get("label").and_then(|value| value.as_str())?;
+    let mut matching = members
+        .iter()
+        .filter(|member| member.task_label.as_deref() == Some(label));
+    let member = matching.next()?;
+    matching.next().is_none().then_some(member)
+}
+
 fn prepare_active_batch_progress(
     app: &dyn TuiState,
     width: u16,
@@ -610,6 +657,7 @@ pub(super) fn prepare_messages(
         inline_images_signature: app.side_pane_images_signature(),
         inline_images_visible: app.inline_images_visible(),
         expanded_images_version: app.expanded_images_version(),
+        swarm_members_signature: swarm_members_signature(&app.swarm_members_for_transcript()),
     };
 
     super::note_full_prep_request();
@@ -857,6 +905,7 @@ fn prepare_body_cached(app: &dyn TuiState, width: u16) -> Arc<PreparedMessages> 
         inline_images_visible: app.inline_images_visible(),
         images_signature: app.side_pane_images_signature(),
         expanded_images_version: app.expanded_images_version(),
+        swarm_members_signature: swarm_members_signature(&app.swarm_members_for_transcript()),
     };
     let msg_count = app.display_messages().len();
     let cache_lookup_start = Instant::now();
@@ -1031,6 +1080,7 @@ struct BodyRenderCtx<'a> {
     anchored_images: Arc<super::inline_image_ui::AnchoredInlineImages>,
     inline_images_visible: bool,
     messages: &'a [DisplayMessage],
+    swarm_members: Vec<crate::protocol::SwarmMemberStatus>,
 }
 
 /// Mutable accumulator for one body build. Both `prepare_body` (full) and
@@ -1239,6 +1289,15 @@ fn render_message_into(
             }
             for line in cached {
                 acc.push_auto(align_if_unset(line, align));
+            }
+            if let Some(member) = spawned_member_for_tool(msg, &ctx.swarm_members) {
+                for line in crate::tui::info_widget::swarm_gallery::render_swarm_chat_tree_lines(
+                    member,
+                    &ctx.swarm_members,
+                    width.saturating_sub(1) as usize,
+                ) {
+                    acc.push_auto(line.alignment(ratatui::layout::Alignment::Left));
+                }
             }
             for line in todo_change_lines(ctx.messages, msg_global_idx, msg, width) {
                 acc.push_auto(align_if_unset(line, align));
@@ -1498,6 +1557,7 @@ pub(super) fn prepare_body_incremental(
         anchored_images,
         inline_images_visible: app.inline_images_visible(),
         messages,
+        swarm_members: app.swarm_members_for_transcript(),
     };
 
     let mut acc = BodyAcc {
@@ -1823,6 +1883,7 @@ pub(super) fn prepare_body_prepended(
         anchored_images: super::inline_image_ui::resolve_anchored_items_cached(app),
         inline_images_visible: app.inline_images_visible(),
         messages,
+        swarm_members: app.swarm_members_for_transcript(),
     };
 
     // The head sits at the very top of the transcript, so it starts with the
@@ -2072,6 +2133,7 @@ pub(super) fn prepare_body(
         anchored_images: super::inline_image_ui::resolve_anchored_items_cached(app),
         inline_images_visible: app.inline_images_visible(),
         messages,
+        swarm_members: app.swarm_members_for_transcript(),
     };
 
     let mut acc = BodyAcc::default();

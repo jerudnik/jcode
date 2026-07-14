@@ -35,9 +35,13 @@ pub(crate) struct Args {
     #[arg(short, long, default_value = "auto", global = true)]
     pub(crate) provider: ProviderChoice,
 
-    /// Working directory
+    /// Working directory for the local client process
     #[arg(short = 'C', long, global = true)]
     pub(crate) cwd: Option<String>,
+
+    /// Working directory to send to a remote server when using --socket
+    #[arg(long, global = true)]
+    pub(crate) remote_working_dir: Option<String>,
 
     /// Skip the automatic update check
     #[arg(long, global = true)]
@@ -88,7 +92,7 @@ pub(crate) struct Args {
     #[arg(long, global = true)]
     pub(crate) tool_profile: Option<String>,
 
-    /// Comma-separated explicit allow-list of tools to expose, e.g. bash,read,write,apply_patch. Use '*' or 'all' to expose all tools, including default-disabled tools.
+    /// Comma-separated explicit allow-list of tools to expose, e.g. bash,read,write,apply_patch. Use '*' or 'all' for the unrestricted full toolset.
     #[arg(long, global = true)]
     pub(crate) tools: Option<String>,
 
@@ -119,6 +123,13 @@ pub(crate) enum Command {
         /// Internal: idle shutdown timeout in seconds for a temporary server.
         #[arg(long, hide = true)]
         temp_idle_timeout_secs: Option<u64>,
+
+        /// Stable display name for this server in connected clients and session pickers.
+        ///
+        /// Useful for long-lived remote runtimes, e.g. `fabian`, `john`, or
+        /// `mount-cloud-fabian`. Unsafe characters are normalized before use.
+        #[arg(long)]
+        server_name: Option<String>,
     },
 
     /// Run as an Agent Client Protocol (ACP) adapter backed by the Jcode daemon

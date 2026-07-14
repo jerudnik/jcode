@@ -68,6 +68,17 @@ fn side_panel_mermaid_preferred_aspect_ratio(
     super::diagram_pane::content_area_preferred_aspect_ratio(inner)
 }
 
+fn side_panel_mermaid_profile_area(inner: Rect, reserve_native_scrollbar: bool) -> Rect {
+    if reserve_native_scrollbar && inner.width > 1 {
+        Rect {
+            width: inner.width - 1,
+            ..inner
+        }
+    } else {
+        inner
+    }
+}
+
 #[path = "ui_pinned_selection.rs"]
 mod selection_support;
 use selection_support::apply_side_selection_highlight;
@@ -126,8 +137,6 @@ fn image_source_badge(source: &crate::session::RenderedImageSource) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PinnedCacheKey {
     messages_version: u64,
-    collect_diffs: bool,
-    collect_images: bool,
 }
 
 #[derive(Default)]
@@ -692,18 +701,16 @@ pub(crate) fn prewarm_focused_side_panel(
     true
 }
 
-pub(super) fn collect_pinned_content_cached(
+/// Collect the pinned file-diff entries used by the right-hand pane.
+///
+/// Inline images render in the transcript now. Keeping image payloads out of
+/// this frame-level probe is important because `TuiState::side_pane_images()`
+/// may materialize and clone multi-megabyte base64 strings.
+pub(super) fn collect_pinned_diffs_cached(
     messages: &[DisplayMessage],
-    images: &[crate::session::RenderedImage],
-    collect_diffs: bool,
-    collect_images: bool,
     messages_version: u64,
 ) -> bool {
-    let key = PinnedCacheKey {
-        messages_version,
-        collect_diffs,
-        collect_images,
-    };
+    let key = PinnedCacheKey { messages_version };
 
     let mut cache = match pinned_cache().lock() {
         Ok(c) => c,
@@ -714,7 +721,7 @@ pub(super) fn collect_pinned_content_cached(
         return !cache.entries.is_empty();
     }
 
-    let entries = collect_pinned_content(messages, images, collect_diffs, collect_images);
+    let entries = collect_pinned_content(messages, &[], true, false);
     let has_entries = !entries.is_empty();
     cache.key = Some(key);
     cache.entries = entries;
@@ -1333,9 +1340,18 @@ pub(super) fn draw_side_panel_markdown(
     };
     let has_protocol = mermaid::protocol_type().is_some();
     let image_zoom_percent = app.side_panel_image_zoom_percent();
-    let rendered_full_width = render_side_panel_markdown_cached_with_zoom(
+    // The first render measures whether a native scrollbar is needed. When one
+    // is enabled, use the eventual one-column-narrower content area for Mermaid's
+    // aspect profile on that measurement pass too. Otherwise each diagram queues
+    // one cold render at full width and another after the scrollbar is reserved.
+    let reserve_native_scrollbar =
+        app.side_panel_native_scrollbar() && content_shell_area.width > 1;
+    let mermaid_profile_area =
+        side_panel_mermaid_profile_area(content_shell_area, reserve_native_scrollbar);
+    let rendered_full_width = render_side_panel_markdown_cached_with_zoom_and_profile_area(
         page,
         content_shell_area,
+        mermaid_profile_area,
         has_protocol,
         centered,
         image_zoom_percent,
@@ -1681,8 +1697,27 @@ fn render_side_panel_markdown_cached_with_zoom(
     centered: bool,
     image_zoom_percent: u8,
 ) -> PinnedRenderedCache {
+    render_side_panel_markdown_cached_with_zoom_and_profile_area(
+        page,
+        inner,
+        inner,
+        has_protocol,
+        centered,
+        image_zoom_percent,
+    )
+}
+
+fn render_side_panel_markdown_cached_with_zoom_and_profile_area(
+    page: &crate::side_panel::SidePanelPage,
+    inner: Rect,
+    mermaid_profile_area: Rect,
+    has_protocol: bool,
+    centered: bool,
+    image_zoom_percent: u8,
+) -> PinnedRenderedCache {
     let content_signature = side_panel_content_signature(page);
-    let mermaid_aspect_ratio = side_panel_mermaid_preferred_aspect_ratio(page, inner, has_protocol);
+    let mermaid_aspect_ratio =
+        side_panel_mermaid_preferred_aspect_ratio(page, mermaid_profile_area, has_protocol);
     let mermaid_aspect_bucket = mermaid::preferred_aspect_ratio_bucket(mermaid_aspect_ratio);
     let key = SidePanelRenderKey {
         page_id: page.id.clone(),

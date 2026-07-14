@@ -552,6 +552,45 @@ impl Provider for CompleteImmediatelyProvider {
     }
 }
 
+#[derive(Clone, Default)]
+struct FanoutStreamProvider;
+
+#[async_trait]
+impl Provider for FanoutStreamProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        Ok(Box::pin(stream::unfold(0_u8, |step| async move {
+            match step {
+                0 => Some((Ok(StreamEvent::TextDelta("before attach".to_string())), 1)),
+                1 => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    Some((Ok(StreamEvent::TextDelta("after attach".to_string())), 2))
+                }
+                2 => Some((
+                    Ok(StreamEvent::MessageEnd {
+                        stop_reason: Some("end_turn".to_string()),
+                    }),
+                    3,
+                )),
+                _ => None,
+            }
+        })))
+    }
+
+    fn name(&self) -> &str {
+        "fanout-stream"
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self)
+    }
+}
+
 #[async_trait]
 impl Provider for PanicOnForkProvider {
     async fn complete(
@@ -577,6 +616,60 @@ impl Provider for PanicOnForkProvider {
 #[test]
 fn ping_request_is_lightweight_control_request() {
     assert!((Request::Ping { id: 1 }).is_lightweight_control_request());
+}
+
+fn subscribe_request(working_dir: Option<&str>) -> Request {
+    Request::Subscribe {
+        id: 1,
+        working_dir: working_dir.map(str::to_string),
+        selfdev: None,
+        target_session_id: None,
+        client_instance_id: None,
+        client_has_local_history: false,
+        allow_session_takeover: false,
+        terminal_env: Vec::new(),
+        protocol_version: None,
+        build_hash: None,
+        spawn_swarm_id: None,
+        spawn_session_id: None,
+        client_pid: None,
+    }
+}
+
+#[test]
+fn initial_subscribe_requires_an_absolute_client_working_dir() {
+    for invalid in [None, Some(""), Some("relative/project")] {
+        let error = initial_subscribe_working_dir(&subscribe_request(invalid))
+            .expect_err("invalid client cwd must be rejected before session creation");
+        assert!(error.contains("working_dir") || error.contains("working directory"));
+    }
+
+    let absolute = std::env::temp_dir().join("jcode-client-project");
+    assert_eq!(
+        initial_subscribe_working_dir(&subscribe_request(absolute.to_str()))
+            .expect("absolute client cwd"),
+        absolute.to_string_lossy()
+    );
+
+    let error = initial_subscribe_working_dir(&Request::GetState { id: 2 })
+        .expect_err("stateful requests must not create an unbound session");
+    assert!(error.contains("must Subscribe"));
+}
+
+#[tokio::test]
+async fn new_client_agent_stamps_client_cwd_into_initial_context() {
+    let provider: Arc<dyn Provider> = Arc::new(CompleteImmediatelyProvider);
+    let registry = Registry::new(Arc::clone(&provider)).await;
+    let client_cwd = std::env::temp_dir().join("jcode-authoritative-client-project");
+    let client_cwd = client_cwd.to_string_lossy();
+    let agent = Agent::new_with_initial_working_dir(provider, registry, Some(&client_cwd));
+
+    assert_eq!(agent.working_dir(), Some(client_cwd.as_ref()));
+    let context = agent.messages()[0].content_preview();
+    assert!(
+        context.contains(&format!("Working directory: {client_cwd}")),
+        "initial context must be created from the client cwd: {context}"
+    );
 }
 
 #[test]
@@ -686,6 +779,138 @@ fn reload_starting_rejects_new_turn_without_spawning_processing_task() {
             "rejecting during reload should not fork or invoke provider work"
         );
     });
+}
+
+#[tokio::test]
+async fn client_initiated_turn_fans_out_stream_and_terminal_events_to_live_attachments() {
+    let _guard = crate::storage::lock_test_env();
+    let _runtime = IsolatedRuntimeDir::new();
+    let session_id = "session_live_attachment_fanout";
+
+    let provider: Arc<dyn Provider> = Arc::new(FanoutStreamProvider);
+    let registry = Registry::new(Arc::clone(&provider)).await;
+    let mut session = crate::session::Session::create_with_id(session_id.to_string(), None, None);
+    session.model = Some("fanout-stream".to_string());
+    let agent = Arc::new(Mutex::new(Agent::new_with_session(
+        provider, registry, session, None,
+    )));
+
+    let (origin_tx, mut origin_rx) = mpsc::unbounded_channel::<ServerEvent>();
+    let (attached_tx, mut attached_rx) = mpsc::unbounded_channel::<ServerEvent>();
+    let swarm_members = Arc::new(RwLock::new(HashMap::from([(
+        session_id.to_string(),
+        SwarmMember {
+            session_id: session_id.to_string(),
+            event_tx: origin_tx.clone(),
+            event_txs: HashMap::from([("origin".to_string(), origin_tx.clone())]),
+            working_dir: None,
+            swarm_id: None,
+            swarm_enabled: false,
+            status: "ready".to_string(),
+            detail: None,
+            task_label: None,
+            friendly_name: None,
+            report_back_to_session_id: None,
+            latest_completion_report: None,
+            role: "agent".to_string(),
+            joined_at: Instant::now(),
+            last_status_change: Instant::now(),
+            is_headless: false,
+            output_tail: None,
+            todo_progress: None,
+            todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
+            subagent_type: None,
+            initial_prompt_delivered: None,
+        },
+    )])));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::new()));
+    let event_history = Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (swarm_event_tx, _) = broadcast::channel(8);
+    let (processing_done_tx, mut processing_done_rx) = mpsc::unbounded_channel();
+    let mut client_is_processing = false;
+    let mut processing_message_id = None;
+    let mut processing_session_id = None;
+    let mut processing_task = None;
+
+    start_processing_message(
+        ProcessingMessage {
+            id: 479,
+            content: "stream to every attachment".to_string(),
+            images: Vec::new(),
+            system_reminder: None,
+        },
+        session_id,
+        &mut ProcessingState {
+            client_is_processing: &mut client_is_processing,
+            message_id: &mut processing_message_id,
+            session_id: &mut processing_session_id,
+            task: &mut processing_task,
+        },
+        &agent,
+        &origin_tx,
+        &processing_done_tx,
+        &SwarmStatusRefs {
+            members: &swarm_members,
+            swarms_by_id: &swarms_by_id,
+            event_history: &event_history,
+            event_counter: &event_counter,
+            event_tx: &swarm_event_tx,
+        },
+    )
+    .await;
+
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(2), origin_rx.recv())
+            .await
+            .expect("origin should receive the initial stream event promptly")
+            .expect("origin event channel should remain open");
+        if matches!(event, ServerEvent::TextDelta { ref text } if text == "before attach") {
+            break;
+        }
+    }
+
+    crate::server::register_session_event_sender(
+        &swarm_members,
+        session_id,
+        "attached",
+        attached_tx,
+    )
+    .await;
+
+    for rx in [&mut origin_rx, &mut attached_rx] {
+        let mut saw_post_attach_delta = false;
+        let mut saw_message_end = false;
+        let mut saw_done = false;
+        while !saw_post_attach_delta || !saw_message_end || !saw_done {
+            let event = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("attachment should receive streamed event promptly")
+                .expect("attachment event channel should remain open");
+            saw_post_attach_delta |= matches!(
+                event,
+                ServerEvent::TextDelta { ref text } if text == "after attach"
+            );
+            if matches!(event, ServerEvent::MessageEnd) {
+                assert!(!saw_done, "MessageEnd must precede the terminal Done event");
+                saw_message_end = true;
+            }
+            saw_done |= matches!(event, ServerEvent::Done { id: 479 });
+        }
+    }
+
+    let (done_id, result, _) =
+        tokio::time::timeout(Duration::from_secs(2), processing_done_rx.recv())
+            .await
+            .expect("processing should complete promptly")
+            .expect("processing completion channel should remain open");
+    assert_eq!(done_id, 479);
+    result.expect("turn should complete successfully");
+
+    if let Some(handle) = processing_task.take() {
+        handle.await.expect("processing task join");
+    }
 }
 
 #[test]

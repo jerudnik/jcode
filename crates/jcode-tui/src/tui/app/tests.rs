@@ -18,6 +18,7 @@ include!("tests/remote_startup_input_02/part_02.rs");
 include!("tests/remote_startup_input_03/part_01.rs");
 include!("tests/remote_startup_input_03/part_02.rs");
 include!("tests/remote_startup_input_04.rs");
+include!("tests/image_placeholder_commands.rs");
 include!("tests/remote_events_reload_01/part_01.rs");
 include!("tests/remote_events_reload_01/part_02.rs");
 include!("tests/remote_events_reload_02/part_01.rs");
@@ -26,7 +27,7 @@ include!("tests/remote_events_reload_03/part_01.rs");
 include!("tests/remote_events_reload_03/part_02.rs");
 include!("tests/remote_events_reload_04.rs");
 include!("tests/remote_events_reload_05.rs");
-include!("tests/swarm_plan_graph_inline.rs");
+include!("tests/swarm_plan_no_inline_graph.rs");
 include!("tests/remote_model_picker_hotkeys.rs");
 include!("tests/scroll_copy_01/part_01.rs");
 include!("tests/scroll_copy_01/part_02.rs");
@@ -823,9 +824,10 @@ fn skills_command_marks_active_skill_in_remote_mode() {
     );
 }
 
-/// Regression for issue #431: skills added on disk after startup (e.g. by the
-/// agent-side `skill_manage reload_all`, which only refreshes the server
-/// process registry) must show up in `/skills` without a session restart.
+/// Regression for issue #431 (and #457): skills added on disk after startup
+/// must show up in `/skills` and the skills snapshot without a session
+/// restart. With the session-scoped project overlay, project-local skills are
+/// visible immediately, without even running `/skills` first.
 #[test]
 fn skills_command_refreshes_registry_from_disk_before_listing() {
     let mut app = create_test_app();
@@ -842,9 +844,11 @@ fn skills_command_refreshes_registry_from_disk_before_listing() {
     .expect("write SKILL.md");
     app.session.working_dir = Some(temp.path().to_string_lossy().to_string());
 
+    // Project-local skills are a session overlay composed at read time, so
+    // the new skill is available immediately (issue #457).
     assert!(
-        app.current_skills_snapshot().get("late-skill").is_none(),
-        "snapshot must start without the new skill for this regression test"
+        app.current_skills_snapshot().get("late-skill").is_some(),
+        "project-local skill must be visible immediately without reload"
     );
 
     assert!(super::state_ui::handle_info_command(&mut app, "/skills"));
@@ -857,6 +861,150 @@ fn skills_command_refreshes_registry_from_disk_before_listing() {
     assert!(
         app.current_skills_snapshot().get("late-skill").is_some(),
         "registry snapshot must be synced so /late-skill invocations resolve"
+    );
+}
+
+#[test]
+fn skill_invocation_with_prompt_activates_and_submits_in_one_turn() {
+    let mut app = create_test_app();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let skill_dir = temp.path().join(".jcode/skills/prompt-skill");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: prompt-skill\ndescription: Prompt regression skill\n---\nUse it.\n",
+    )
+    .expect("write skill");
+    app.session.working_dir = Some(temp.path().to_string_lossy().to_string());
+    app.input = "/prompt-skill \"then type prompt here and all that\"".to_string();
+    app.cursor_pos = app.input.len();
+
+    app.submit_input();
+
+    assert_eq!(app.active_skill.as_deref(), Some("prompt-skill"));
+    assert!(app.is_processing, "the trailing prompt should start a turn");
+    let submitted = app
+        .session
+        .messages
+        .last()
+        .expect("submitted session message");
+    assert!(matches!(
+        submitted.content.as_slice(),
+        [ContentBlock::Text { text, .. }] if text == "then type prompt here and all that"
+    ));
+}
+
+#[test]
+fn skill_invocation_with_prompt_attaches_pending_image_to_user_message() {
+    let mut app = create_test_app();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let skill_dir = temp.path().join(".jcode/skills/image-skill");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: image-skill\ndescription: Image attachment regression skill\n---\nUse it.\n",
+    )
+    .expect("write skill");
+    app.session.working_dir = Some(temp.path().to_string_lossy().to_string());
+    app.pending_images = vec![("image/png".to_string(), "ZmFrZSBwbmcgYnl0ZXM=".to_string())];
+    app.input = "/image-skill describe this screenshot".to_string();
+    app.cursor_pos = app.input.len();
+
+    app.submit_input();
+
+    assert_eq!(app.active_skill.as_deref(), Some("image-skill"));
+    assert!(app.is_processing, "the trailing prompt should start a turn");
+    assert!(
+        app.pending_images.is_empty(),
+        "pending images must be consumed by the submitted turn"
+    );
+    let submitted = app
+        .session
+        .messages
+        .last()
+        .expect("submitted session message");
+    assert_eq!(submitted.role, Role::User);
+    assert!(matches!(
+        submitted.content.as_slice(),
+        [
+            ContentBlock::Image { media_type, data },
+            ContentBlock::Text { text, .. },
+        ] if media_type == "image/png"
+            && data == "ZmFrZSBwbmcgYnl0ZXM="
+            && text == "describe this screenshot"
+    ));
+}
+
+#[test]
+fn unknown_skill_invocation_surfaces_error_and_sends_nothing() {
+    let mut app = create_test_app();
+    let temp = tempfile::tempdir().expect("tempdir");
+    app.session.working_dir = Some(temp.path().to_string_lossy().to_string());
+    app.input = "/definitely-not-a-real-skill".to_string();
+    app.cursor_pos = app.input.len();
+    let session_messages_before = app.session.messages.len();
+
+    app.submit_input();
+
+    assert!(!app.is_processing, "unknown skill must not start a turn");
+    assert_eq!(
+        app.session.messages.len(),
+        session_messages_before,
+        "no message should be sent to the model"
+    );
+    assert!(app.active_skill.is_none());
+    let last = app.display_messages().last().expect("error message");
+    assert_eq!(last.role, "error");
+    assert_eq!(last.content, "Unknown skill: /definitely-not-a-real-skill");
+}
+
+#[test]
+fn endorsed_but_not_installed_skill_invocation_surfaces_install_hint() {
+    let mut app = create_test_app();
+    // Empty working dir so no endorsed skill is actually installed there.
+    let temp = tempfile::tempdir().expect("tempdir");
+    app.session.working_dir = Some(temp.path().to_string_lossy().to_string());
+
+    let endorsed = crate::skill::endorsed_skills()
+        .iter()
+        .find(|endorsed| {
+            endorsed.install.is_some() && app.current_skills_snapshot().get(endorsed.name).is_none()
+        })
+        .expect("an endorsed skill with an install hint that is not installed");
+
+    app.input = format!("/{}", endorsed.name);
+    app.cursor_pos = app.input.len();
+    let session_messages_before = app.session.messages.len();
+
+    app.submit_input();
+
+    assert!(!app.is_processing, "missing skill must not start a turn");
+    assert_eq!(
+        app.session.messages.len(),
+        session_messages_before,
+        "no message should be sent to the model"
+    );
+    assert!(app.active_skill.is_none());
+    let last = app.display_messages().last().expect("error message");
+    assert_eq!(last.role, "error");
+    assert!(
+        last.content.contains(&format!(
+            "Skill /{} is endorsed but not installed",
+            endorsed.name
+        )),
+        "{}",
+        last.content
+    );
+    assert!(
+        last.content
+            .contains(&format!("`{}`", endorsed.install.unwrap())),
+        "install hint missing from: {}",
+        last.content
+    );
+    assert!(
+        !last.content.contains("Unknown skill"),
+        "endorsed skill must not be reported as a typo: {}",
+        last.content
     );
 }
 
@@ -1460,4 +1608,53 @@ fn oversized_pasted_submit_is_rejected_and_preserves_input() {
             .any(|message| message.role == "system"
                 && message.content.contains("Message is too large to send"))
     );
+}
+
+fn seed_stale_clear_usage(app: &mut App) {
+    app.streaming.streaming_input_tokens = 40_000;
+    app.streaming.streaming_output_tokens = 2_000;
+    app.streaming.streaming_cache_read_tokens = Some(30_000);
+    app.streaming.streaming_cache_creation_tokens = Some(5_000);
+    app.streaming.streaming_context_stale = true;
+    app.streaming.streaming_usage_call_reset_pending = true;
+    app.kv_cache.current_api_usage_recorded = true;
+}
+
+fn assert_clear_usage_reset(app: &App) {
+    assert_eq!(app.current_stream_context_tokens(), None);
+    assert_eq!(app.streaming.streaming_input_tokens, 0);
+    assert_eq!(app.streaming.streaming_output_tokens, 0);
+    assert_eq!(app.streaming.streaming_cache_read_tokens, None);
+    assert_eq!(app.streaming.streaming_cache_creation_tokens, None);
+    assert!(!app.streaming.streaming_context_stale);
+    assert!(!app.streaming.streaming_usage_call_reset_pending);
+    assert!(!app.kv_cache.current_api_usage_recorded);
+}
+
+#[test]
+fn local_clear_resets_provider_reported_context_usage() {
+    let mut app = create_test_app();
+    seed_stale_clear_usage(&mut app);
+
+    assert!(super::commands::handle_session_command(&mut app, "/clear"));
+
+    assert_clear_usage_reset(&app);
+}
+
+#[test]
+fn remote_clear_resets_provider_reported_context_usage() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    remote.mark_history_loaded();
+    app.is_remote = true;
+    seed_stale_clear_usage(&mut app);
+    app.input = "/clear".to_string();
+    app.cursor_pos = app.input.len();
+
+    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
+        .expect("remote /clear should succeed");
+
+    assert_clear_usage_reset(&app);
 }

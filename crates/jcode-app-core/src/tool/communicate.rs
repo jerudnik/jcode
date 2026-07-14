@@ -5,7 +5,7 @@ use crate::background::TaskResult;
 use crate::plan::PlanItem;
 use crate::protocol::{
     AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, HistoryMessage,
-    PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, ToolCallSummary,
+    PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, TaskGraphNodeSpec, ToolCallSummary,
     comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
     default_comm_cleanup_target_statuses, default_comm_run_await_statuses,
     format_comm_awaited_members_with_reports, format_comm_context_history, format_comm_members,
@@ -17,7 +17,8 @@ use async_trait::async_trait;
 use jcode_swarm_core::validate_swarm_tldr;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 const REQUEST_ID: u64 = 1;
 
@@ -51,6 +52,95 @@ fn ensure_success(response: &ServerEvent) -> Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn seed_node_id_collision(response: &ServerEvent) -> Option<&str> {
+    let message = check_error(response)?;
+    let (_, tail) = message.split_once("duplicate node id '")?;
+    let (id, _) = tail.split_once('\'')?;
+    (!id.is_empty()).then_some(id)
+}
+
+fn plan_graph_node_ids(summary: &PlanGraphStatus) -> HashSet<String> {
+    summary
+        .ready_ids
+        .iter()
+        .chain(&summary.blocked_ids)
+        .chain(&summary.active_ids)
+        .chain(&summary.completed_ids)
+        .chain(&summary.failed_ids)
+        .chain(&summary.cycle_ids)
+        .chain(&summary.unresolved_dependency_ids)
+        .cloned()
+        .collect()
+}
+
+fn seed_retry_scope(ctx: &ToolContext) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    ctx.session_id.hash(&mut hasher);
+    ctx.message_id.hash(&mut hasher);
+    format!("seed-{:08x}", hasher.finish() as u32)
+}
+
+/// Rename only seed ids that collide with the existing durable plan, then rewrite
+/// intra-batch dependency edges to follow them. The scope is stable for a tool
+/// turn, so retrying the same call produces the same ids and is itself idempotent.
+fn remap_conflicting_seed_nodes(
+    nodes: &[TaskGraphNodeSpec],
+    occupied: &HashSet<String>,
+    conflicting_id: &str,
+    scope: &str,
+) -> (Vec<TaskGraphNodeSpec>, Vec<(String, String)>) {
+    let original_ids: HashSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
+    let mut reserved = occupied.clone();
+    reserved.extend(original_ids.iter().map(|id| (*id).to_string()));
+    let mut mapping = HashMap::<String, String>::new();
+
+    if occupied.contains(conflicting_id) && nodes.iter().any(|node| node.id == conflicting_id) {
+        let node_id = conflicting_id.to_string();
+        let base = format!("{conflicting_id}::{scope}");
+        let mut candidate = base.clone();
+        let mut discriminator = 2usize;
+        while reserved.contains(&candidate) {
+            candidate = format!("{base}-{discriminator}");
+            discriminator += 1;
+        }
+        reserved.insert(candidate.clone());
+        mapping.insert(node_id, candidate);
+    }
+
+    let remapped = nodes
+        .iter()
+        .cloned()
+        .map(|mut node| {
+            if let Some(id) = mapping.get(&node.id) {
+                node.id = id.clone();
+            }
+            for dependency in &mut node.depends_on {
+                if let Some(id) = mapping.get(dependency) {
+                    *dependency = id.clone();
+                }
+            }
+            node
+        })
+        .collect();
+    let changes = nodes
+        .iter()
+        .filter_map(|node| {
+            mapping
+                .get(&node.id)
+                .map(|mapped| (node.id.clone(), mapped.clone()))
+        })
+        .collect();
+    (remapped, changes)
+}
+
+fn format_seed_remaps(changes: &[(String, String)]) -> String {
+    changes
+        .iter()
+        .map(|(from, to)| format!("{from} -> {to}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 async fn fetch_plan_status(session_id: &str) -> Result<PlanGraphStatus> {
@@ -1956,7 +2046,7 @@ struct CommunicateInput {
     #[serde(default)]
     effort: Option<String>,
     /// Short human-readable label for a spawned agent shown in swarm UI.
-    /// Overrides the task label otherwise derived from the spawn prompt.
+    /// Required and nonblank for the explicit `spawn` action.
     #[serde(default)]
     label: Option<String>,
     /// Free-form subagent type/role for a spawned agent (e.g. "explore",
@@ -1970,6 +2060,20 @@ struct CommunicateInput {
 impl CommunicateInput {
     fn spawn_initial_message(&self) -> Option<String> {
         self.initial_message.clone().or_else(|| self.prompt.clone())
+    }
+
+    fn required_spawn_label(&self) -> anyhow::Result<String> {
+        let label = self
+            .label
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("'label' is required for spawn action"))?
+            .trim();
+        if label.is_empty() {
+            return Err(anyhow::anyhow!(
+                "'label' must not be blank for spawn action"
+            ));
+        }
+        Ok(label.to_string())
     }
 }
 
@@ -2016,7 +2120,7 @@ impl Tool for CommunicateTool {
                              "task_graph", "expand_node", "complete_node", "inject_gap",
                              "start", "start_task", "wake", "resume", "retry", "reassign", "replace", "salvage",
                              "await_members", "list_models", "list_swarms"],
-                    "description": "Action. For spawn, prefer including prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection. Use list_swarms for the live fleet dashboard snapshot."
+                    "description": "Action. Spawn requires a nonblank label and should include prompt with the initial task so the new agent starts useful work immediately. Use list_models to see which models/routes are available for per-spawn model selection. Use list_swarms for the live fleet dashboard snapshot."
                 },
                 "message": {
                     "type": "string",
@@ -2054,7 +2158,8 @@ impl Tool for CommunicateTool {
                 },
                 "label": {
                     "type": "string",
-                    "description": "Optional short label for spawn, shown on the spawned agent's chip in swarm UI (e.g. 'api reviewer'). Defaults to a label derived from the first line of the prompt."
+                    "minLength": 1,
+                    "description": "Required for spawn. Short nonblank label shown on the spawned agent's chip in swarm UI (e.g. 'api reviewer')."
                 },
                 "subagent_type": {
                     "type": "string",
@@ -2124,7 +2229,7 @@ impl Tool for CommunicateTool {
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "For await_members and run_plan: run as a detached background task (default true) so you stay responsive and can keep working. The result is delivered later via notify/wake. Set false to block this turn until it resolves."
+                    "description": "For run_plan: run as a detached background task (default true); set false to block until the plan resolves. await_members is always asynchronous and ignores false so the agent stays responsive; its result is delivered later via notify/wake."
                 },
                 "notify": {
                     "type": "boolean",
@@ -2199,6 +2304,36 @@ impl Tool for CommunicateTool {
                 }),
             );
         }
+
+        // `swarm` is a multi-action tool, so putting `label` in the top-level
+        // `required` array would incorrectly require it for read/list/message and
+        // every other action. Use mutually exclusive action branches instead:
+        // the spawn branch requires label, while the non-spawn branch does not.
+        // `anyOf` object branches are supported by our provider schema adapters
+        // and avoid the less-portable JSON Schema `if`/`then` keywords.
+        let non_spawn_actions: Vec<Value> = schema["properties"]["action"]["enum"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|action| action.as_str() != Some("spawn"))
+            .cloned()
+            .collect();
+        schema["anyOf"] = json!([
+            {
+                "type": "object",
+                "required": ["action", "label"],
+                "properties": {
+                    "action": { "type": "string", "enum": ["spawn"] }
+                }
+            },
+            {
+                "type": "object",
+                "required": ["action"],
+                "properties": {
+                    "action": { "type": "string", "enum": non_spawn_actions }
+                }
+            }
+        ]);
 
         schema
     }
@@ -2434,22 +2569,67 @@ impl Tool for CommunicateTool {
                     return Err(anyhow::anyhow!("'nodes' must include at least one node"));
                 }
                 let count = nodes.len();
+                let mut seed_nodes = nodes.clone();
                 let request = Request::CommSeedGraph {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
                     mode: params.mode.clone(),
-                    nodes,
+                    nodes: seed_nodes.clone(),
                 };
-                match send_request(request).await {
-                    Ok(response) => {
+                let mut response = send_request(request)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to seed task graph: {}", e))?;
+                let mut changes = Vec::new();
+                let mut occupied = None;
+                // At most one durable collision can be resolved per request. The
+                // extra iteration consumes the final success response after all
+                // colliding ids have been remapped.
+                for _ in 0..=nodes.len() {
+                    let Some(conflicting_id) = seed_node_id_collision(&response) else {
                         ensure_success(&response)?;
-                        Ok(ToolOutput::new(format!(
-                            "Seeded task graph ({} nodes).",
-                            count
-                        )))
+                        let suffix = if changes.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                " Renamed conflicting ids: {}.",
+                                format_seed_remaps(&changes)
+                            )
+                        };
+                        return Ok(ToolOutput::new(format!(
+                            "Seeded task graph ({} nodes).{}",
+                            count, suffix
+                        )));
+                    };
+                    if occupied.is_none() {
+                        let summary = fetch_plan_status(&ctx.session_id).await?;
+                        occupied = Some(plan_graph_node_ids(&summary));
                     }
-                    Err(e) => Err(anyhow::anyhow!("Failed to seed task graph: {}", e)),
+                    let occupied = occupied
+                        .as_ref()
+                        .expect("occupied ids were initialized above");
+                    let (remapped, mut remaps) = remap_conflicting_seed_nodes(
+                        &seed_nodes,
+                        occupied,
+                        conflicting_id,
+                        &seed_retry_scope(&ctx),
+                    );
+                    if remaps.is_empty() {
+                        ensure_success(&response)?;
+                        unreachable!("a duplicate seed error should have returned above")
+                    }
+                    seed_nodes = remapped;
+                    changes.append(&mut remaps);
+                    response = send_request(Request::CommSeedGraph {
+                        id: REQUEST_ID,
+                        session_id: ctx.session_id.clone(),
+                        mode: params.mode.clone(),
+                        nodes: seed_nodes.clone(),
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to retry task graph seed: {}", e))?;
                 }
+                ensure_success(&response)?;
+                unreachable!("seed retry loop only exhausts while the server returns collisions")
             }
 
             "expand_node" => {
@@ -2544,6 +2724,7 @@ impl Tool for CommunicateTool {
             }
 
             "spawn" => {
+                let label = params.required_spawn_label()?;
                 let request = Request::CommSpawn {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
@@ -2553,7 +2734,7 @@ impl Tool for CommunicateTool {
                     spawn_mode: params.spawn_mode.clone(),
                     model: params.model.clone(),
                     effort: params.effort.clone(),
-                    label: params.label.clone(),
+                    label: Some(label),
                     subagent_type: params.subagent_type.clone(),
                 };
 
@@ -3078,10 +3259,12 @@ impl Tool for CommunicateTool {
                 }
                 let timeout_minutes = params.timeout_minutes.unwrap_or(60);
                 let timeout_secs = timeout_minutes * 60;
-                // Background-by-default: the watch runs server-side and reports
-                // back via notify/wake, so the agent stays responsive instead of
-                // parking the whole turn. Pass background=false to block inline.
-                let background = params.background.unwrap_or(true);
+                // Public member waits are always asynchronous. The blocking
+                // CommAwaitMembers protocol remains available internally for the
+                // run_plan coordination loop, but agents must not park an entire
+                // turn waiting on a worker or a long-lived socket.
+                let blocking_was_requested = params.background == Some(false);
+                let background = true;
                 let notify = params.notify.unwrap_or(true);
                 let wake = params.wake.unwrap_or(true);
 
@@ -3114,9 +3297,14 @@ impl Tool for CommunicateTool {
                         ..
                     }) => {
                         if background_started {
+                            let compatibility_note = if blocking_was_requested {
+                                "\n\n(Blocking member waits are no longer supported; this wait was started asynchronously.)"
+                            } else {
+                                "\n\n(You can keep working; this wait runs in the background.)"
+                            };
                             return Ok(ToolOutput::new(format!(
-                                "{}\n\n(You can keep working; this wait runs in the background.)",
-                                summary
+                                "{}{}",
+                                summary, compatibility_note
                             )));
                         }
                         let reports = fetch_awaited_member_reports(&ctx, &members).await;

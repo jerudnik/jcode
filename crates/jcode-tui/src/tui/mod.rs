@@ -35,8 +35,8 @@ pub mod screenshot;
 pub(crate) mod session_facts;
 pub mod session_picker;
 mod stream_buffer;
-pub(crate) mod swarm_plan_graph;
 pub mod test_harness;
+pub mod theme_detect;
 mod ui;
 mod ui_diff;
 pub mod usage_overlay;
@@ -376,6 +376,14 @@ pub trait TuiState {
     /// Members to render in the inline swarm gallery band.
     fn inline_swarm_members(&self) -> Vec<crate::protocol::SwarmMemberStatus> {
         Vec::new()
+    }
+    /// Members available for cards embedded beneath swarm spawn tool calls.
+    ///
+    /// This may be broader than `inline_swarm_members`: the gallery is scoped by
+    /// the current ownership tree, while a transcript card can be matched safely
+    /// using the exact spawned session ID recorded in the tool result.
+    fn swarm_members_for_transcript(&self) -> Vec<crate::protocol::SwarmMemberStatus> {
+        self.inline_swarm_members()
     }
     /// Selected agent index in the inline swarm panel (display order).
     fn swarm_panel_selected(&self) -> usize {
@@ -1500,11 +1508,11 @@ fn primary_status_spinner_needs_full_redraw_with_policy(
         && !primary_status_spinner_fast_path_available_with_policy(state, policy)
 }
 
-/// Redraw cadence while the inline swarm strip/dock is animating an agent
-/// status spinner. The spinner samples the wall clock at ~8 fps
-/// (`animation_elapsed() * 8.0`), so repaint at the same rate: faster wastes
-/// frames on an unchanged glyph, slower makes the spinner visibly stutter.
-pub(crate) const REDRAW_SWARM_SPINNER: Duration = Duration::from_millis(125);
+/// Redraw cadence while an inline swarm or session-picker spinner is active.
+/// This matches the glyph's wall-clock cadence and the primary status spinner:
+/// faster wastes unchanged frames, while slower makes the motion visibly step.
+pub(crate) const REDRAW_SWARM_SPINNER: Duration =
+    Duration::from_millis(jcode_tui_render::swarm_gallery::STRIP_SPINNER_FRAME_MS);
 
 /// Whether the swarm strip (above the status line) or the SwarmStatus dock
 /// widget is currently animating a status spinner for an active agent.
@@ -1522,6 +1530,19 @@ fn swarm_spinner_redraw_active(state: &dyn TuiState) -> bool {
             .inline_swarm_members()
             .iter()
             .any(|m| jcode_tui_render::swarm_gallery::is_active_status(&m.status))
+}
+
+/// Whether the open `/resume` picker is showing at least one running session.
+/// The picker uses the same 8 fps spinner cells as the swarm strip, so it needs
+/// an explicit wakeup even when the session underneath the overlay is idle.
+fn session_picker_spinner_redraw_active(state: &dyn TuiState) -> bool {
+    state.client_focused()
+        && state.session_picker_overlay().is_some_and(|picker| {
+            picker
+                .try_borrow()
+                .ok()
+                .is_some_and(|picker| picker.has_visible_running_sessions())
+        })
 }
 
 fn fps_to_duration(fps: u32) -> Duration {
@@ -1590,6 +1611,7 @@ pub(crate) fn redraw_interval_with_policy(
         && crate::build::read_build_progress().is_none()
         && !state.onboarding_welcome_active()
         && !swarm_spinner_redraw_active(state)
+        && !session_picker_spinner_redraw_active(state)
     {
         return REDRAW_DEEP_IDLE;
     }
@@ -1615,12 +1637,12 @@ pub(crate) fn redraw_interval_with_policy(
         };
     }
 
-    // Swarm status spinners animate at a fixed ~8 fps off the wall clock.
+    // Swarm status spinners animate at a fixed 12.5 fps off the wall clock.
     // Streaming/scroll branches below already repaint faster than this, but
     // both the quiet-coordinator case and the processing-without-streaming
     // case (which otherwise idles at the 1s passive-liveness cadence) need
     // this to keep agent spinners smooth while the swarm works.
-    if swarm_spinner_redraw_active(state)
+    if (swarm_spinner_redraw_active(state) || session_picker_spinner_redraw_active(state))
         && state.streaming_text().is_empty()
         && !state.has_pending_mouse_scroll_animation()
     {
@@ -1690,6 +1712,7 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
         && crate::build::read_build_progress().is_none()
         && !state.onboarding_welcome_active()
         && !swarm_spinner_redraw_active(state)
+        && !session_picker_spinner_redraw_active(state)
     {
         return false;
     }
@@ -1703,6 +1726,10 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
     }
 
     if swarm_spinner_redraw_active(state) {
+        return true;
+    }
+
+    if session_picker_spinner_redraw_active(state) {
         return true;
     }
 
@@ -1724,13 +1751,29 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
     false
 }
 
-pub(crate) fn subscribe_metadata() -> (Option<String>, Option<bool>) {
+pub(crate) fn subscribe_metadata(
+    remote_working_dir: Option<&str>,
+) -> (Option<String>, Option<bool>) {
     let working_dir = std::env::current_dir().ok();
-    let working_dir_str = working_dir.as_ref().map(|p| p.display().to_string());
+    resolve_subscribe_metadata(
+        working_dir.as_deref(),
+        remote_working_dir,
+        jcode_selfdev_types::client_selfdev_requested(),
+    )
+}
 
-    let mut selfdev = jcode_selfdev_types::client_selfdev_requested();
-    if !selfdev && let Some(ref dir) = working_dir {
-        let mut current = Some(dir.as_path());
+pub(crate) fn resolve_subscribe_metadata(
+    client_working_dir: Option<&std::path::Path>,
+    remote_working_dir: Option<&str>,
+    client_selfdev_requested: bool,
+) -> (Option<String>, Option<bool>) {
+    let working_dir_str = remote_working_dir
+        .map(str::to_string)
+        .or_else(|| client_working_dir.map(|p| p.display().to_string()));
+
+    let mut selfdev = client_selfdev_requested;
+    if !selfdev && let Some(dir) = client_working_dir {
+        let mut current = Some(dir);
         while let Some(path) = current {
             if crate::build::is_jcode_repo(path) {
                 selfdev = true;
@@ -1831,7 +1874,7 @@ pub fn prewarm_focused_side_panel(
 mod tests {
     use super::{
         CacheTtlInfo, KvCacheProblemKind, connection_type_icon, detect_kv_cache_problem,
-        keyboard_enhancement_flags, scheduled_notification_text,
+        keyboard_enhancement_flags, resolve_subscribe_metadata, scheduled_notification_text,
     };
     use crate::ambient::AmbientStatus;
     use crate::tui::info_widget::AmbientWidgetData;
@@ -1855,6 +1898,24 @@ mod tests {
             cold_for_secs: 90,
             cached_tokens: Some(12_000),
         }
+    }
+
+    #[test]
+    fn subscribe_metadata_prefers_remote_working_dir_override() {
+        let local_dir = std::path::Path::new("/client/project");
+        let (working_dir, selfdev) =
+            resolve_subscribe_metadata(Some(local_dir), Some("/server/project"), false);
+
+        assert_eq!(working_dir.as_deref(), Some("/server/project"));
+        assert_eq!(selfdev, None);
+    }
+
+    #[test]
+    fn subscribe_metadata_uses_client_cwd_without_override() {
+        let local_dir = std::path::Path::new("/client/project");
+        let (working_dir, _selfdev) = resolve_subscribe_metadata(Some(local_dir), None, false);
+
+        assert_eq!(working_dir.as_deref(), Some("/client/project"));
     }
 
     #[test]

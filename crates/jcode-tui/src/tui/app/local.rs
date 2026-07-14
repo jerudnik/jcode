@@ -90,6 +90,7 @@ pub(super) fn handle_tick(app: &mut App) -> bool {
     needs_redraw |= app.refresh_side_panel_linked_content_if_due();
     needs_redraw |= app.poll_model_picker_load();
     needs_redraw |= app.poll_session_picker_load();
+    needs_redraw |= app.poll_session_picker_presence();
     needs_redraw |= app.onboarding_tick();
     needs_redraw |= app.poll_compaction_completion();
     needs_redraw |= app.maybe_refresh_overnight_display_card();
@@ -192,6 +193,10 @@ pub(super) fn handle_bus_event(
             app.invalidate_model_picker_cache();
             true
         }
+        Ok(BusEvent::AuthCatalogRefreshReady) => {
+            app.finish_auth_catalog_refresh();
+            true
+        }
         Ok(BusEvent::ProviderModelActivated {
             session_id,
             model,
@@ -265,6 +270,7 @@ pub(super) fn handle_bus_event(
         }
         Ok(BusEvent::TodoUpdated(event)) => {
             if event.session_id == app.session.id {
+                app.update_terminal_title();
                 app.refresh_todos_view_now()
             } else {
                 false
@@ -385,6 +391,9 @@ fn apply_terminal_event(
             Ok(true)
         }
         Some(Ok(Event::Mouse(mouse))) => {
+            if matches!(mouse.kind, crossterm::event::MouseEventKind::Moved) {
+                return Ok(false);
+            }
             app.note_client_interaction();
             app.handle_mouse_event(mouse);
             Ok(true)

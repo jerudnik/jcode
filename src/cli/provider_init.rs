@@ -1179,6 +1179,19 @@ pub fn unlock_model_provider() {
     crate::provider::activation::unlock_runtime_provider();
 }
 
+/// A CLI provider choice for a dual-auth backend is also a credential choice.
+/// Pin it through the provider's credential-mode API
+/// so `--provider anthropic-api` cannot remain in Auto mode and prefer a stored
+/// Claude OAuth credential over `ANTHROPIC_API_KEY` (and likewise for OpenAI).
+fn explicit_credential_mode(choice: &ProviderChoice) -> Option<provider::CredentialMode> {
+    match choice {
+        ProviderChoice::AnthropicApi | ProviderChoice::OpenaiApi => {
+            Some(provider::CredentialMode::ApiKey)
+        }
+        _ => None,
+    }
+}
+
 fn disable_subscription_runtime_mode() {
     crate::subscription_catalog::clear_runtime_env();
 }
@@ -1575,7 +1588,7 @@ async fn init_provider_with_options(
                 "Note: Google/Gmail is not a model provider. Using auto-detect for model provider.",
             );
             init_notice(
-                "Gmail credentials can be configured with `jcode login google`; the gmail tool is disabled by default for privacy.",
+                "Gmail credentials can be configured with `jcode login google`; the gmail tool is enabled by default in the full tool profile.",
             );
             unlock_model_provider();
             Arc::new(provider::MultiProvider::new_fast())
@@ -1752,6 +1765,15 @@ async fn init_provider_with_options(
             }
         }
     };
+
+    if let Some(mode) = explicit_credential_mode(choice) {
+        provider.set_credential_mode(mode).map_err(|err| {
+            anyhow::anyhow!(
+                "Failed to select the credential route for --provider {}: {err}",
+                choice.as_arg_value()
+            )
+        })?;
+    }
 
     if std::env::var_os("JCODE_PROVIDER_PROFILE_ACTIVE").is_none()
         && std::env::var_os("JCODE_NAMED_PROVIDER_PROFILE").is_none()

@@ -335,6 +335,7 @@ fn handle_reload_queues_signal_for_canary_session() -> Result<()> {
                     output_tail: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
+                    runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
             ),
             (
@@ -361,6 +362,7 @@ fn handle_reload_queues_signal_for_canary_session() -> Result<()> {
                     output_tail: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
+                    runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
             ),
         ])));

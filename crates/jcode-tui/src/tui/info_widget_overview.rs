@@ -118,7 +118,7 @@ fn compact_todos_height(data: &InfoWidgetData) -> u16 {
 
 fn compact_memory_height(data: &InfoWidgetData) -> u16 {
     if let Some(info) = &data.memory_info
-        && (info.total_count > 0 || info.activity.is_some())
+        && info.should_render()
     {
         return 1;
     }
@@ -173,12 +173,14 @@ fn compact_usage_height(data: &InfoWidgetData) -> u16 {
             // Single "$cost · tokens" line.
             return 1;
         }
-        // Subscription-style providers render an optional label line plus the
-        // 5-hour and weekly bars, plus an optional Spark bar.
+        // Subscription-style providers render an optional provider label plus
+        // whichever primary, secondary, and Spark windows are actually present.
         let label = info.provider.label();
         let label_line = u16::from(!label.is_empty());
+        let primary_line = u16::from(info.primary_limit_label.is_some());
+        let secondary_line = u16::from(info.secondary_limit_label.is_some());
         let spark_line = u16::from(info.spark.is_some());
-        return 2 + label_line + spark_line;
+        return label_line + primary_line + secondary_line + spark_line;
     }
     0
 }
@@ -223,23 +225,19 @@ fn expanded_todos_height(data: &InfoWidgetData) -> u16 {
 
 fn expanded_memory_height(data: &InfoWidgetData) -> u16 {
     if let Some(info) = &data.memory_info
-        && (info.total_count > 0 || info.activity.is_some())
+        && info.should_render()
     {
         let mut height = 1u16;
-        if info.total_count > 0 {
-            // render_memory_expanded emits a dedicated count line.
-            height += 1;
-        }
-        if info.activity.is_some() {
+        if info.should_show_activity() {
             height += 1 + 4;
-        }
-        if let Some(activity) = &info.activity
-            && activity
-                .recent_events
-                .iter()
-                .any(is_traceworthy_memory_event)
-        {
-            height += 1;
+            if let Some(activity) = &info.activity
+                && activity
+                    .recent_events
+                    .iter()
+                    .any(is_traceworthy_memory_event)
+            {
+                height += 1;
+            }
         }
         return height;
     }

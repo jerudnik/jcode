@@ -26,6 +26,29 @@ function makeBody(overrides = {}) {
   };
 }
 
+function makeDiscoveryBody(overrides = {}) {
+  return makeBody({
+    event: "discovery",
+    event_id: "discovery-event-1",
+    session_id: "session-1",
+    request_id: "11111111-2222-4333-8444-555555555555",
+    phase: "browse",
+    category: "payments",
+    selected_tool: null,
+    outcome: "success",
+    failure_reason: null,
+    http_status: 200,
+    latency_ms: 125,
+    response_bytes: 2048,
+    result_count: 3,
+    query_present: true,
+    reason_present: true,
+    custom_endpoint: false,
+    benchmark_run: true,
+    ...overrides,
+  });
+}
+
 function postRequest(body, url = EVENT_URL) {
   return new Request(url, {
     method: "POST",
@@ -69,7 +92,18 @@ function makeDb(plan = {}) {
             return {
               results: [
                 "event_id", "path", "referrer", "visitor_id", "utm_source",
-                "utm_medium", "utm_campaign", "cta",
+                "utm_medium", "utm_campaign", "cta", "metric_name",
+                "metric_value", "rating", "error_kind",
+              ].map((name) => ({ name })),
+            };
+          }
+          if (/table_info\(discovery_details\)/.test(sql)) {
+            return {
+              results: [
+                "event_id", "request_id", "phase", "category", "selected_tool",
+                "outcome", "failure_reason", "http_status", "latency_ms",
+                "response_bytes", "result_count", "query_present",
+                "reason_present", "custom_endpoint", "benchmark_run",
               ].map((name) => ({ name })),
             };
           }
@@ -137,6 +171,49 @@ test("event is dual-written: firehose point + D1 insert", async () => {
   assert.equal(point.doubles.length, 20);
 
   assert.ok(db.executed.some(({ sql }) => /INSERT OR IGNORE INTO events/.test(sql)));
+});
+
+test("discovery event is validated, firehosed, and persisted to details", async () => {
+  const db = makeDb();
+  const discoveryFirehose = makeFirehose();
+  const response = await worker.fetch(
+    postRequest(makeDiscoveryBody()),
+    { DB: db, FIREHOSE_DISCOVERY: discoveryFirehose },
+    makeCtx(),
+  );
+  const json = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(json.ok, true);
+  assert.equal(json.firehose, true);
+  assert.equal(discoveryFirehose.points.length, 1);
+  const point = discoveryFirehose.points[0];
+  assert.equal(point.blobs[7], "11111111-2222-4333-8444-555555555555");
+  assert.equal(point.blobs[8], "browse");
+  assert.equal(point.blobs[9], "payments");
+  assert.equal(point.blobs[11], "success");
+  assert.equal(point.doubles[3], 200);
+  assert.equal(point.doubles[4], 125);
+  assert.equal(point.doubles[7], 1);
+  assert.equal(point.doubles[10], 1);
+
+  const detailInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO discovery_details/.test(sql));
+  assert.ok(detailInsert);
+  assert.ok(detailInsert.values.includes("11111111-2222-4333-8444-555555555555"));
+  assert.ok(detailInsert.values.includes("payments"));
+  const detailColumns = detailInsert.sql.match(/\(([^)]+)\)/)[1].split(", ");
+  assert.equal(detailInsert.values[detailColumns.indexOf("benchmark_run")], 1);
+  assert.ok(!detailInsert.values.some((value) => String(value).includes("virtual card")));
+});
+
+test("discovery event rejects unknown failure classifications", async () => {
+  const response = await worker.fetch(
+    postRequest(makeDiscoveryBody({ outcome: "failure", failure_reason: "raw secret error" })),
+    { DB: makeDb(), FIREHOSE_DISCOVERY: makeFirehose() },
+    makeCtx(),
+  );
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /failure_reason/);
 });
 
 test("D1 failure with firehose success degrades to durable:false instead of 500", async () => {
@@ -256,6 +333,22 @@ test("web_pageview is normalized and stored in events + web_details", async () =
   assert.ok(detailInsert.values.includes("hn"));
 });
 
+test("web_pageview without event_id mints one so web_details still lands", async () => {
+  // The real beacon (jcode-website public/beacon.js) does not send event_id;
+  // web_details joins on it, so the worker must mint one server-side.
+  const db = makeDb();
+  const ctx = makeCtx();
+
+  const body = makeWebBody();
+  delete body.event_id;
+  const response = await worker.fetch(postRequest(body), { DB: db }, ctx);
+  assert.equal(response.status, 200);
+
+  const detailInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO web_details/.test(sql));
+  assert.ok(detailInsert, "web_details row inserted despite missing event_id");
+  assert.ok(detailInsert.values.includes("/pricing"));
+});
+
 test("web_pageview without visitor_id is rejected", async () => {
   const db = makeDb();
   const response = await worker.fetch(
@@ -331,6 +424,109 @@ test("web events are firehosed to FIREHOSE_WEB with visitor_id as index1", async
   assert.equal(point.blobs[7], "/pricing"); // blob8 = path
   assert.equal(point.blobs[9], "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"); // blob10 = visitor_id
   assert.equal(point.blobs[13], "install"); // blob14 = cta
+});
+
+test("web_vital validates, caps, stores, and appends firehose fields", async () => {
+  const db = makeDb();
+  const webFirehose = makeFirehose();
+  const response = await worker.fetch(
+    postRequest(makeWebBody({
+      event: "web_vital",
+      metric_name: "LCP",
+      metric_value: 999_999,
+      rating: "poor",
+      message: "must not persist",
+      url: "https://jcode.sh/private?token=secret",
+    })),
+    { DB: db, FIREHOSE_WEB: webFirehose },
+    makeCtx(),
+  );
+
+  assert.equal(response.status, 200);
+  const detailInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO web_details/.test(sql));
+  assert.ok(detailInsert.sql.includes("metric_name"));
+  assert.ok(detailInsert.sql.includes("metric_value"));
+  assert.ok(detailInsert.sql.includes("rating"));
+  assert.ok(detailInsert.values.includes("LCP"));
+  assert.ok(detailInsert.values.includes(300_000));
+  assert.ok(detailInsert.values.includes("poor"));
+  assert.ok(!detailInsert.values.some((value) => String(value).includes("must not persist")));
+  assert.ok(!detailInsert.values.some((value) => String(value).includes("token=secret")));
+
+  const point = webFirehose.points[0];
+  assert.equal(point.blobs[17], "LCP"); // blob18 = metric_name
+  assert.equal(point.blobs[18], "poor"); // blob19 = rating
+  assert.equal(point.blobs[19], ""); // blob20 = error_kind
+  assert.equal(point.doubles[1], 300_000); // double2 = metric_value
+});
+
+test("web_vital accepts only standard finite nonnegative metrics and ratings", async () => {
+  const invalidBodies = [
+    { metric_name: "FID", metric_value: 1, rating: "good" },
+    { metric_name: "CLS", metric_value: -1, rating: "poor" },
+    { metric_name: "CLS", metric_value: "0.1", rating: "good" },
+    { metric_name: "CLS", metric_value: null, rating: "good" },
+    { metric_name: "CLS", metric_value: 0.1, rating: "okay" },
+  ];
+  for (const fields of invalidBodies) {
+    const response = await worker.fetch(
+      postRequest(makeWebBody({ event: "web_vital", ...fields })),
+      { DB: makeDb(), FIREHOSE_WEB: makeFirehose() },
+      makeCtx(),
+    );
+    assert.equal(response.status, 400, JSON.stringify(fields));
+  }
+
+  const clsDb = makeDb();
+  const clsResponse = await worker.fetch(
+    postRequest(makeWebBody({ event: "web_vital", metric_name: "CLS", metric_value: 99, rating: "poor" })),
+    { DB: clsDb },
+    makeCtx(),
+  );
+  assert.equal(clsResponse.status, 200);
+  const clsInsert = clsDb.executed.find(({ sql }) => /INSERT OR IGNORE INTO web_details/.test(sql));
+  assert.ok(clsInsert.values.includes(10));
+});
+
+test("web_error stores only an allowed coarse classification", async () => {
+  for (const error_kind of ["script", "promise", "resource"]) {
+    const db = makeDb();
+    const webFirehose = makeFirehose();
+    const response = await worker.fetch(
+      postRequest(makeWebBody({
+        event: "web_error",
+        error_kind,
+        error_message: "private failure detail",
+        stack: "secret stack",
+        filename: "https://cdn.example/private.js",
+      })),
+      { DB: db, FIREHOSE_WEB: webFirehose },
+      makeCtx(),
+    );
+    assert.equal(response.status, 200);
+    const detailInsert = db.executed.find(({ sql }) => /INSERT OR IGNORE INTO web_details/.test(sql));
+    assert.ok(detailInsert.values.includes(error_kind));
+    assert.ok(!detailInsert.values.some((value) => /private|secret|cdn\.example|ycombinator/.test(String(value))));
+    assert.equal(webFirehose.points[0].blobs[19], error_kind); // blob20
+  }
+
+  const rejected = await worker.fetch(
+    postRequest(makeWebBody({ event: "web_error", error_kind: "TypeError: secret" })),
+    { DB: makeDb() },
+    makeCtx(),
+  );
+  assert.equal(rejected.status, 400);
+});
+
+test("scheduled retention uses 30 days for web_vital and 90 days for web_error", async () => {
+  const db = makeDb();
+  const ctx = makeCtx();
+  await worker.scheduled({}, { DB: db }, ctx);
+  await Promise.all(ctx.waited);
+
+  const eventDeletes = db.executed.filter(({ sql }) => /DELETE FROM events WHERE id IN/.test(sql));
+  assert.ok(eventDeletes.some(({ values }) => values[0] === "web_vital" && values[1] === "-30 days"));
+  assert.ok(eventDeletes.some(({ values }) => values[0] === "web_error" && values[1] === "-90 days"));
 });
 
 // ---------------------------------------------------------------------------
@@ -413,18 +609,31 @@ test("account_linked joins telemetry_id and account_id", async () => {
 // CORS for the website beacon
 // ---------------------------------------------------------------------------
 
-test("OPTIONS preflight from solosystems.dev echoes the origin", async () => {
+test("OPTIONS preflight from jcode.sh echoes the origin", async () => {
+  const response = await worker.fetch(
+    new Request(EVENT_URL, {
+      method: "OPTIONS",
+      headers: { Origin: "https://jcode.sh" },
+    }),
+    { DB: makeDb() },
+    makeCtx(),
+  );
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://jcode.sh");
+  assert.equal(response.headers.get("Vary"), "Origin");
+  assert.ok(/POST/.test(response.headers.get("Access-Control-Allow-Methods")));
+});
+
+test("OPTIONS preflight from the production website echoes the origin", async () => {
   const response = await worker.fetch(
     new Request(EVENT_URL, {
       method: "OPTIONS",
       headers: { Origin: "https://solosystems.dev" },
     }),
-    { DB: makeDb() },
+    { DB: makeDb(), ALLOWED_ORIGIN: "https://fallback.example" },
     makeCtx(),
   );
   assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://solosystems.dev");
   assert.equal(response.headers.get("Vary"), "Origin");
-  assert.ok(/POST/.test(response.headers.get("Access-Control-Allow-Methods")));
 });
 
 test("OPTIONS preflight from pages.dev preview echoes the origin", async () => {
@@ -457,11 +666,11 @@ test("POST responses from the beacon origin carry CORS headers", async () => {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Origin: "https://solosystems.dev",
+      Origin: "https://jcode.sh",
     },
     body: JSON.stringify(makeWebBody()),
   });
   const response = await worker.fetch(request, { DB: db }, makeCtx());
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://solosystems.dev");
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://jcode.sh");
 });
