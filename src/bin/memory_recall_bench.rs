@@ -1102,7 +1102,10 @@ fn cmd_metrics(args: &[String]) -> Result<()> {
         let base = opts.get("openai_base").cloned();
         let dim = opts.get("openai_dim").and_then(|s| s.parse().ok());
         eprintln!("Using OpenAI embedding backend model={model}");
-        Some(OpenAiEmbeddingBackend::new(model, key, base, dim))
+        Some(
+            OpenAiEmbeddingBackend::new(model, key, base, dim)
+                .expect("OpenAI embedding backend construction failed"),
+        )
     } else {
         None
     };
