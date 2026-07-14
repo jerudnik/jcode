@@ -65,8 +65,12 @@ pub async fn run() -> Result<()> {
     // Invert the legacy memory -> skill dependency: memory collects synthetic
     // entries from registered providers, and skill (the higher layer that
     // depends on MemoryEntry) registers its registry->memory adapter here.
+    // The shared snapshot holds global skills only; memory retrieval is
+    // process-scoped, so compose the project overlay from the process cwd
+    // (issue #457 keeps session overlays out of the shared registry).
     crate::memory::register_synthetic_entry_provider(|| {
-        crate::skill::SkillRegistry::shared_snapshot()
+        let global = crate::skill::SkillRegistry::shared_snapshot();
+        crate::skill::SkillRegistry::effective_for_working_dir(&global, None)
             .list()
             .into_iter()
             .map(|skill| skill.as_memory_entry())
@@ -216,6 +220,8 @@ fn parse_and_prepare_args() -> Result<Args> {
         logging::info(&format!("Changed working directory to: {}", cwd));
     }
 
+    validate_remote_working_dir(args.remote_working_dir.as_deref())?;
+
     if args.trace {
         crate::env::set_var("JCODE_TRACE", "1");
     }
@@ -237,7 +243,26 @@ fn maybe_warn_nix_version_drift(args: &Args) {
         logging::warn(&message);
     }
 }
+fn validate_remote_working_dir(remote_working_dir: Option<&str>) -> Result<()> {
+    if let Some(remote_working_dir) = remote_working_dir
+        && !remote_working_dir_is_absolute(remote_working_dir)
+    {
+        anyhow::bail!("--remote-working-dir must be an absolute path");
+    }
+    Ok(())
+}
 
+fn remote_working_dir_is_absolute(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with('\\') {
+        return true;
+    }
+
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+        && bytes[0].is_ascii_alphabetic()
+}
 fn spawn_background_update_check(args: &Args) {
     let check_updates = should_spawn_background_update_check(args);
     let auto_update = should_auto_install_update(args);
@@ -369,6 +394,20 @@ mod tests {
         let mut args = parse_args(&["jcode", "login"]);
         args.auto_update = false;
         assert!(!should_auto_install_update(&args));
+    }
+
+    #[test]
+    fn remote_working_dir_validation_requires_absolute_path() {
+        assert!(validate_remote_working_dir(Some("/home/agent/project")).is_ok());
+        assert!(validate_remote_working_dir(Some("C:\\Users\\agent\\project")).is_ok());
+        assert!(validate_remote_working_dir(None).is_ok());
+
+        let error = validate_remote_working_dir(Some("relative/project")).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("--remote-working-dir must be an absolute path")
+        );
     }
 
     #[test]

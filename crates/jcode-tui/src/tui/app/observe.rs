@@ -1,4 +1,4 @@
-use super::App;
+use super::{App, DisplayMessage};
 use crate::message::ToolCall;
 use crate::side_panel::{
     SidePanelPage, SidePanelPageFormat, SidePanelPageSource, SidePanelSnapshot,
@@ -110,12 +110,29 @@ impl App {
             && let Some(session_id) = self.active_client_session_id().map(str::to_string)
         {
             super::helpers::invalidate_todos_cache(&session_id);
+            // Local sessions also receive TodoUpdated, while remote sessions only
+            // observe the completed tool call. Refresh here as well so both paths
+            // adopt the same todo-derived title that /resume displays.
+            self.update_terminal_title();
         }
 
         // The schedule tool queues/cancels ambient tasks, which the ambient panel
         // surfaces (queue count, next wake).
         if name == "schedule" {
             super::helpers::invalidate_ambient_info_cache();
+        }
+    }
+
+    /// Surface private todo quality-gate decisions to the user without exposing
+    /// their numeric thresholds to the model or the transcript.
+    pub(super) fn note_todo_gate_result(
+        &mut self,
+        tool_call: &ToolCall,
+        output: &str,
+        is_error: bool,
+    ) {
+        if let Some(notice) = todo_gate_notice(&tool_call.name, output, is_error) {
+            self.push_display_message(DisplayMessage::system(notice));
         }
     }
 
@@ -171,6 +188,22 @@ impl App {
             },
             updated_at_ms: self.observe_page_updated_at_ms.max(1),
         }
+    }
+}
+
+fn todo_gate_notice(name: &str, output: &str, is_error: bool) -> Option<&'static str> {
+    let name = name.to_ascii_lowercase();
+    if !matches!(name.as_str(), "todo" | "todowrite" | "todo_write") {
+        return None;
+    }
+
+    if output.contains(crate::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE) {
+        Some("🛑 Todo completion gate: end-to-end ownership needs full-outcome follow-through.")
+    } else if !is_error && output.contains(crate::todo::TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE)
+    {
+        Some("👉 Todo quality gate: hill-climbability needs a stronger feedback loop.")
+    } else {
+        None
     }
 }
 
@@ -253,4 +286,31 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|dur| dur.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn todo_gate_notices_are_user_visible_without_private_thresholds() {
+        let ownership = todo_gate_notice(
+            "todo",
+            crate::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE,
+            false,
+        )
+        .expect("ownership gate should produce a notice");
+        let hill = todo_gate_notice(
+            "todo",
+            crate::todo::TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE,
+            false,
+        )
+        .expect("hill-climbability gate should produce a notice");
+
+        assert!(ownership.contains("completion gate"));
+        assert!(hill.contains("quality gate"));
+        assert!(!ownership.contains(&crate::todo::QUALITY_GATE_THRESHOLD.to_string()));
+        assert!(!hill.contains(&crate::todo::QUALITY_GATE_THRESHOLD.to_string()));
+        assert!(todo_gate_notice("bash", ownership, true).is_none());
+    }
 }

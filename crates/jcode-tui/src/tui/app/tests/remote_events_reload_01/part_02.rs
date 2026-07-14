@@ -126,7 +126,7 @@ fn test_remote_auto_poke_followup_preserves_visible_timer_and_stays_hidden() {
 }
 
 #[test]
-fn test_remote_auto_poke_completion_above_threshold_only_updates_ui() {
+fn test_remote_auto_poke_completion_ignores_precompletion_confidence() {
     with_temp_jcode_home(|| {
         let mut app = create_test_app();
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -142,9 +142,9 @@ fn test_remote_auto_poke_completion_above_threshold_only_updates_ui() {
                 priority: "high".to_string(),
                 blocked_by: Vec::new(),
                 assigned_to: None,
-                confidence: Some(95),
-                completion_confidence: Some(95),
-                confidence_history: Vec::new(),
+                confidence: Some(0),
+                completion_confidence: Some(100),
+                confidence_history: vec![0, 100],
             }],
         )
         .expect("save todos");
@@ -159,7 +159,7 @@ fn test_remote_auto_poke_completion_above_threshold_only_updates_ui() {
         assert!(app.hidden_queued_system_messages.is_empty());
         assert!(app.display_messages().iter().any(|msg| {
             msg.content
-                .contains("Todos complete. Auto-poke finished. Cumulative confidence: 95%.")
+                .contains("Todos complete. Completion confidence: 100%.")
         }));
     });
 }
@@ -193,17 +193,16 @@ fn test_remote_auto_poke_completion_below_threshold_tells_model_to_keep_working(
         app.status = ProcessingStatus::Streaming;
         app.current_message_id = Some(42);
         app.handle_server_event(crate::protocol::ServerEvent::Done { id: 42 }, &mut remote);
-        assert!(!app.auto_poke_incomplete_todos);
+        assert!(app.auto_poke_incomplete_todos);
         assert!(app.pending_queued_dispatch);
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
-        // Below-threshold completions queue the needs-validation guidance.
-        // Reference the shared prompt constant so this test cannot drift when
-        // the guidance wording changes.
-        assert!(app.hidden_queued_system_messages[0]
-            .contains(crate::prompt::TODO_CONFIDENCE_NEEDS_VALIDATION_PROMPT.trim()));
+        assert_eq!(
+            app.hidden_queued_system_messages[0],
+            crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE
+        );
         assert!(app.display_messages().iter().any(|msg| {
             msg.content
-                .contains("Todos complete. Auto-poke finished. Cumulative confidence: 80%.")
+                .contains("Todo completion gate: completion confidence needs stronger validation.")
         }));
     });
 }

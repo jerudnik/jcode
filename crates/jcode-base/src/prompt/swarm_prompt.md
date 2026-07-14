@@ -19,8 +19,8 @@ when you need to confirm which models/routes are actually available.
 Structure guidance for spawned swarm agents:
 
 - Always pass `label` when spawning (e.g. `label: "api reviewer"`) so the swarm
-  UI shows what each agent is for. Without it the label is derived from the
-  first line of the prompt.
+  UI shows what each agent is for. The explicit `spawn` action rejects missing or
+  blank labels.
 - Also pass `subagent_type` when spawning to tag the kind of work (e.g.
   `subagent_type: "explore"`, `"implement"`, `"verify"`, `"synthesize"`, or a
   more specific role like `"security-audit"`). It is free-form: pick whatever

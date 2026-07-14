@@ -385,16 +385,13 @@ async fn handle_remote_key_internal(
         return Ok(());
     }
 
-    // Inline swarm panel: Alt+N focuses the managed-agents panel; pressing it
-    // again cycles through agents. While focused, Alt+↑/↓ select, Alt+O pops
-    // the selection out to a terminal, Esc exits. Plain typing is NOT captured
-    // (it keeps flowing to the chat input).
+    // Inline swarm panel: Alt+N focuses/unfocuses the managed-agents panel.
+    // While focused, Alt+↑/↓ select, Alt+O pops the selection out to a terminal,
+    // Alt+Shift+P opens the swarm prompt, and Esc exits. Plain typing is NOT
+    // captured (it keeps flowing to the chat input).
     if app.toggle_keys.swarm_panel_focus.matches(code, modifiers) {
-        use crate::tui::TuiState as _;
-        if app.swarm_panel_focused() {
-            app.cycle_swarm_panel_selection();
-        } else if app.toggle_swarm_panel_focus() {
-            app.set_status_notice("Swarm: alt+n next · alt+↑/↓ select · alt+o open · esc");
+        if app.toggle_swarm_panel_focus() {
+            app.set_status_notice("Swarm: alt+↑/↓ select · alt+o open · alt+shift+p prompt · esc");
         }
         return Ok(());
     }
@@ -840,6 +837,10 @@ async fn handle_remote_key_internal(
         KeyCode::Left => {
             if app.cursor_pos > 0 {
                 app.cursor_pos = core::prev_char_boundary(&app.input, app.cursor_pos);
+            } else {
+                // Opt-in: Left on an empty input opens the active sessions
+                // manager (no-op unless display.active_sessions_manager).
+                app.maybe_open_active_sessions_on_left();
             }
         }
         KeyCode::Right => {
@@ -1621,6 +1622,7 @@ async fn handle_remote_key_internal(
                     app.pasted_contents.clear();
                     app.pending_images.clear();
                     app.clear_streaming_render_state();
+                    app.clear_live_usage_state();
                     // Full transcript discard: every registered diagram is
                     // orphaned, so re-scope the process-global registry too
                     // (same rationale as reset_current_session in
@@ -1769,6 +1771,11 @@ async fn handle_remote_key_internal(
                     app.record_keybinding_slow(
                         crate::tui::app::shortcut_hints::LearnableAction::Resume,
                     );
+                    return Ok(());
+                }
+
+                if trimmed == "/active" {
+                    app.open_active_sessions_picker();
                     return Ok(());
                 }
 

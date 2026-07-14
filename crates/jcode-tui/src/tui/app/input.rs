@@ -11,8 +11,10 @@ use crate::bus::{
 };
 use crate::util::truncate_str;
 use anyhow::Result;
+use base64::Engine;
 use crossterm::event::{EventStream, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::DefaultTerminal;
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -365,11 +367,46 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        ClipboardPasteContent, ClipboardPasteKind, is_clipboard_paste_shortcut,
-        preferred_wayland_text_type, read_clipboard_for_paste_with, shifted_printable_fallback,
-        text_input_for_key,
+        ClipboardPasteContent, ClipboardPasteKind, dropped_image_files,
+        is_clipboard_paste_shortcut, parse_dropped_paths, preferred_wayland_text_type,
+        read_clipboard_for_paste_with, shifted_printable_fallback, text_input_for_key,
     };
     use crossterm::event::{KeyCode, KeyModifiers};
+
+    #[test]
+    fn dropped_paths_accept_quotes_shell_escapes_and_file_urls() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first image.png");
+        let second = dir.path().join("second.jpg");
+        std::fs::write(&first, b"png").unwrap();
+        std::fs::write(&second, b"jpeg").unwrap();
+
+        let quoted = parse_dropped_paths(&format!("'{}'", first.display())).unwrap();
+        assert_eq!(quoted, vec![first.clone()]);
+        let escaped =
+            parse_dropped_paths(&first.display().to_string().replace(' ', "\\ ")).unwrap();
+        assert_eq!(escaped, vec![first.clone()]);
+        let url = url::Url::from_file_path(&second).unwrap();
+        assert_eq!(parse_dropped_paths(url.as_str()).unwrap(), vec![second]);
+    }
+
+    #[test]
+    fn dropped_images_load_all_supported_files_and_reject_mixed_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("a.png");
+        let jpeg = dir.path().join("b.jpeg");
+        std::fs::write(&png, b"png bytes").unwrap();
+        std::fs::write(&jpeg, b"jpeg bytes").unwrap();
+
+        let images =
+            dropped_image_files(&format!("'{}' '{}'", png.display(), jpeg.display())).unwrap();
+        assert_eq!(images[0], ("image/png".to_string(), b"png bytes".to_vec()));
+        assert_eq!(
+            images[1],
+            ("image/jpeg".to_string(), b"jpeg bytes".to_vec())
+        );
+        assert!(dropped_image_files("ordinary pasted text").is_none());
+    }
 
     #[test]
     fn smart_paste_prefers_normal_text_when_clipboard_has_text() {
@@ -571,7 +608,45 @@ pub(super) fn handle_paste(app: &mut App, text: String) {
     // text pastes were misidentified as images when the clipboard also had image data
     // (common on Wayland where apps advertise multiple MIME types). Image pasting is
     // handled by explicit clipboard shortcuts instead (Ctrl+V/Alt+V/Cmd+V smart-paste).
-    if let Some(url) = super::extract_image_url(&text) {
+    if let Some(paths) = parse_dropped_paths(&text) {
+        let item_count = paths.len();
+        let mut image_count = 0;
+        let mut file_count = 0;
+
+        for (index, path) in paths.into_iter().enumerate() {
+            if index > 0 {
+                insert_input_text(app, " ");
+            }
+
+            if let Some(media_type) = image_media_type(&path)
+                && let Ok(data) = std::fs::read(&path)
+            {
+                attach_image(
+                    app,
+                    media_type.to_string(),
+                    base64::engine::general_purpose::STANDARD.encode(data),
+                );
+                image_count += 1;
+            } else {
+                insert_input_text(app, &format_dropped_path(&path, item_count > 1));
+                file_count += 1;
+            }
+        }
+
+        let notice = match (image_count, file_count) {
+            (images, 0) => format!(
+                "Dropped {images} image{}",
+                if images == 1 { "" } else { "s" }
+            ),
+            (0, files) => format!("Dropped {files} file{}", if files == 1 { "" } else { "s" }),
+            (images, files) => format!(
+                "Dropped {images} image{} and {files} file{}",
+                if images == 1 { "" } else { "s" },
+                if files == 1 { "" } else { "s" }
+            ),
+        };
+        app.set_status_notice(notice);
+    } else if let Some(url) = super::extract_image_url(&text) {
         crate::logging::info(&format!("Downloading image from pasted URL: {}", url));
         app.set_status_notice("Downloading image...");
         let session_id = active_clipboard_session_id(app);
@@ -588,9 +663,123 @@ pub(super) fn handle_paste(app: &mut App, text: String) {
             );
         });
         return;
+    } else {
+        handle_text_paste(app, text);
+    }
+}
+
+fn format_dropped_path(path: &std::path::Path, quote_whitespace: bool) -> String {
+    let value = path.to_string_lossy();
+    if quote_whitespace && value.chars().any(char::is_whitespace) {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        value.into_owned()
+    }
+}
+
+fn dropped_image_files(text: &str) -> Option<Vec<(String, Vec<u8>)>> {
+    let paths = parse_dropped_paths(text)?;
+    paths
+        .into_iter()
+        .map(|path| {
+            let media_type = image_media_type(&path)?;
+            let data = std::fs::read(path).ok()?;
+            Some((media_type.to_string(), data))
+        })
+        .collect()
+}
+
+/// Terminal emulators normally send file drops as bracketed paste, but some send
+/// the path as ordinary key events. Promote a complete image-path-only composer
+/// value before command/skill routing so an absolute `/...` path is never treated
+/// as a slash command.
+pub(super) fn promote_dropped_images(app: &mut App) -> bool {
+    let Some(images) = dropped_image_files(&app.input) else {
+        return false;
+    };
+    let count = images.len();
+    app.input.clear();
+    app.cursor_pos = 0;
+    for (media_type, data) in images {
+        attach_image(
+            app,
+            media_type,
+            base64::engine::general_purpose::STANDARD.encode(data),
+        );
+    }
+    app.set_status_notice(format!(
+        "Dropped {count} image{}",
+        if count == 1 { "" } else { "s" }
+    ));
+    true
+}
+
+fn parse_dropped_paths(text: &str) -> Option<Vec<PathBuf>> {
+    let trimmed = text.trim();
+    let literal_path = PathBuf::from(trimmed);
+    if literal_path.is_file() {
+        return Some(vec![literal_path]);
     }
 
-    handle_text_paste(app, text);
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+    for ch in trimmed.chars() {
+        if escaped {
+            token.push(ch);
+            escaped = false;
+        } else if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+        } else if matches!(ch, '\'' | '"') {
+            if quote == Some(ch) {
+                quote = None;
+            } else if quote.is_none() {
+                quote = Some(ch);
+            } else {
+                token.push(ch);
+            }
+        } else if ch.is_whitespace() && quote.is_none() {
+            if !token.is_empty() {
+                tokens.push(std::mem::take(&mut token));
+            }
+        } else {
+            token.push(ch);
+        }
+    }
+    if escaped || quote.is_some() {
+        return None;
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+
+    tokens
+        .into_iter()
+        .map(|token| {
+            let path = if token.starts_with("file://") {
+                url::Url::parse(&token).ok()?.to_file_path().ok()?
+            } else {
+                PathBuf::from(token)
+            };
+            path.is_file().then_some(path)
+        })
+        .collect()
+}
+
+fn image_media_type(path: &std::path::Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "tif" | "tiff" => Some("image/tiff"),
+        _ => None,
+    }
 }
 
 pub(super) fn handle_text_paste(app: &mut App, text: String) {
@@ -676,20 +865,23 @@ pub(super) fn insert_input_text(app: &mut App, text: &str) {
 
     let at_end = app.cursor_pos == app.input.len();
 
-    // A habitual space typed right after `/login ` (auto-inserted below)
-    // would only add noise; swallow it so `/login` + space + filter still
-    // produces a single separator.
-    if text == " " && at_end && app.input.trim_start() == "/login " {
+    // A habitual space typed after an auto-inserted picker separator would
+    // only add noise. Swallow it so command + space + filter still produces
+    // a single separator.
+    if text == " " && at_end && matches!(app.input.trim_start(), "/login " | "/model " | "/models ")
+    {
         return;
     }
 
     app.remember_input_undo_state();
 
-    // After `/login` is fully typed (or tab-completed without a trailing
-    // space), the next printable character starts the provider filter;
-    // insert the separating space so it filters the login picker instead of
-    // producing `/loginzai` and closing the preview.
-    if at_end && app.input.trim_start() == "/login" && !text.starts_with(char::is_whitespace) {
+    // After a picker command is fully typed (or completed without a trailing
+    // space), the next printable character starts its filter. Insert the
+    // separator instead of extending the command token and closing the picker.
+    if at_end
+        && matches!(app.input.trim_start(), "/login" | "/model" | "/models")
+        && !text.starts_with(char::is_whitespace)
+    {
         app.input.push(' ');
         app.cursor_pos = app.input.len();
     }
@@ -697,11 +889,12 @@ pub(super) fn insert_input_text(app: &mut App, text: &str) {
     app.input.insert_str(app.cursor_pos, text);
     app.cursor_pos += text.len();
 
-    // Typing the final char of `/login` immediately arms provider filtering:
-    // insert the separating space so the very next keystrokes filter the
-    // login picker. Without this, users press Enter without realizing they
-    // can filter first.
-    if app.cursor_pos == app.input.len() && app.input.trim_start() == "/login" {
+    // Typing the final command character immediately arms picker filtering.
+    // Without this, users can keep typing the command token or press Enter
+    // without realizing the visible picker is ready to filter.
+    if app.cursor_pos == app.input.len()
+        && matches!(app.input.trim_start(), "/login" | "/model" | "/models")
+    {
         app.input.push(' ');
         app.cursor_pos = app.input.len();
     }
@@ -744,6 +937,7 @@ pub(super) fn handle_text_input(app: &mut App, text: &str) -> bool {
     }
 
     insert_input_text(app, text);
+    promote_dropped_images(app);
     true
 }
 
@@ -1082,24 +1276,28 @@ impl App {
             .cloned()
             .collect();
         if incomplete.is_empty() {
-            self.auto_poke_incomplete_todos = false;
             if todos.is_empty() {
+                self.auto_poke_incomplete_todos = false;
                 return false;
             }
             let confidence_summary = super::commands::todo_confidence_summary(&todos);
             let confidence_label =
                 super::commands::format_todo_completion_confidence(confidence_summary);
-            self.push_display_message(DisplayMessage::system(format!(
-                "✅ Todos complete. Auto-poke finished. Cumulative confidence: {}.",
-                confidence_label
-            )));
             if confidence_summary.needs_more_work {
+                self.push_display_message(DisplayMessage::system(
+                    "🛑 Todo completion gate: completion confidence needs stronger validation.",
+                ));
                 self.hidden_queued_system_messages.push(
                     super::commands::build_todo_confidence_summary_message(&todos),
                 );
                 self.pending_queued_dispatch = true;
                 return true;
             }
+            self.auto_poke_incomplete_todos = false;
+            self.push_display_message(DisplayMessage::system(format!(
+                "✅ Todos complete. Completion confidence: {}.",
+                confidence_label
+            )));
             self.pending_queued_dispatch = false;
             return false;
         }
@@ -1636,16 +1834,13 @@ pub(super) fn handle_pre_control_shortcuts(
         return true;
     }
 
-    // Inline swarm panel: Alt+N focuses the managed-agents panel; pressing it
-    // again cycles through agents. While focused, Alt+↑/↓ select, Alt+O pops
-    // the selection out to a terminal, Esc exits. Plain typing is NOT captured
-    // (it keeps flowing to the chat input).
+    // Inline swarm panel: Alt+N focuses/unfocuses the managed-agents panel.
+    // While focused, Alt+↑/↓ select, Alt+O pops the selection out to a terminal,
+    // Alt+Shift+P opens the swarm prompt, and Esc exits. Plain typing is NOT
+    // captured (it keeps flowing to the chat input).
     if app.toggle_keys.swarm_panel_focus.matches(code, modifiers) {
-        use crate::tui::TuiState as _;
-        if app.swarm_panel_focused() {
-            app.cycle_swarm_panel_selection();
-        } else if app.toggle_swarm_panel_focus() {
-            app.set_status_notice("Swarm: alt+n next · alt+↑/↓ select · alt+o open · esc");
+        if app.toggle_swarm_panel_focus() {
+            app.set_status_notice("Swarm: alt+↑/↓ select · alt+o open · alt+shift+p prompt · esc");
         }
         return true;
     }
@@ -1935,6 +2130,7 @@ pub(super) fn handle_global_control_shortcuts(
 }
 
 pub(super) fn handle_enter(app: &mut App) -> bool {
+    promote_dropped_images(app);
     if app.activate_picker_from_preview() {
         return true;
     }
@@ -1981,6 +2177,10 @@ pub(super) fn handle_basic_key(app: &mut App, code: KeyCode) -> bool {
         KeyCode::Left => {
             if app.cursor_pos > 0 {
                 app.cursor_pos = crate::tui::core::prev_char_boundary(&app.input, app.cursor_pos);
+            } else {
+                // Opt-in: Left on an empty input opens the active sessions
+                // manager (no-op unless display.active_sessions_manager).
+                app.maybe_open_active_sessions_on_left();
             }
             true
         }
@@ -2885,6 +3085,19 @@ impl App {
         crate::tui::mermaid::clear_streaming_preview_diagram();
     }
 
+    /// Reset provider-reported usage that belongs to a transcript being fully
+    /// discarded. Render-only resets intentionally preserve these counters,
+    /// so full session clears must call this separately.
+    pub(super) fn clear_live_usage_state(&mut self) {
+        self.streaming.streaming_input_tokens = 0;
+        self.streaming.streaming_output_tokens = 0;
+        self.streaming.streaming_cache_read_tokens = None;
+        self.streaming.streaming_cache_creation_tokens = None;
+        self.streaming.streaming_context_stale = false;
+        self.streaming.streaming_usage_call_reset_pending = false;
+        self.kv_cache.current_api_usage_recorded = false;
+    }
+
     /// Discard all client-side render state for the current streaming attempt:
     /// the live streaming buffer, in-progress tool calls, thinking-line state,
     /// and any assistant transcript messages that were already committed
@@ -3001,12 +3214,13 @@ impl App {
 
     /// Submit input - just sets up message and flags, processing happens in next loop iteration
     pub(super) fn submit_input(&mut self) {
+        promote_dropped_images(self);
         if self.activate_picker_from_preview() {
             return;
         }
 
         let raw_input = std::mem::take(&mut self.input);
-        let input = self.expand_paste_placeholders(&raw_input);
+        let mut input = self.expand_paste_placeholders(&raw_input);
         if let Some(notice) = input_exceeds_submit_limit(&input) {
             self.input = raw_input;
             self.cursor_pos = self.input.len();
@@ -3097,9 +3311,19 @@ impl App {
             return;
         }
 
-        // Check for skill invocation
-        if let Some(skill_name) = SkillRegistry::parse_invocation(&input) {
-            let mut skill = self.current_skills_snapshot().get(skill_name).cloned();
+        // A terminal file drop is user input even when its absolute path starts
+        // with `/`. Check the filesystem-aware drop parser before slash routing
+        // so a real file can never collide with a skill name.
+        let skill_invocation = parse_dropped_paths(&input)
+            .is_none()
+            .then(|| SkillRegistry::parse_invocation(&input))
+            .flatten();
+
+        // Check for skill invocation.
+        if let Some(invocation) = skill_invocation {
+            let skill_name = invocation.name.to_string();
+            let trailing_prompt = invocation.prompt.map(str::to_string);
+            let mut skill = self.current_skills_snapshot().get(&skill_name).cloned();
 
             // Remote/minimal TUI clients may start with an empty skill snapshot, and
             // daemon-side `skill_manage reload_all` can update a different process.
@@ -3108,11 +3332,11 @@ impl App {
             // as .jcode/skills/optimization work immediately after reload/build.
             if skill.is_none() {
                 self.refresh_skills_snapshot();
-                skill = self.current_skills_snapshot().get(skill_name).cloned();
+                skill = self.current_skills_snapshot().get(&skill_name).cloned();
             }
 
             if let Some(skill) = skill {
-                self.active_skill = Some(skill_name.to_string());
+                self.active_skill = Some(skill_name.clone());
                 self.push_display_message(DisplayMessage {
                     role: "system".to_string(),
                     content: format!("Activated skill: {} - {}", skill.name, skill.description),
@@ -3121,6 +3345,11 @@ impl App {
                     title: None,
                     tool_data: None,
                 });
+                if let Some(prompt) = trailing_prompt {
+                    input = prompt;
+                } else {
+                    return;
+                }
             } else {
                 // Distinguish an endorsed-but-not-installed skill from a
                 // typo: the skill list advertises endorsed skills, so a bare
@@ -3147,8 +3376,8 @@ impl App {
                     title: None,
                     tool_data: None,
                 });
+                return;
             }
-            return;
         }
 
         // Leaving the preview should happen as soon as the user acts on it.

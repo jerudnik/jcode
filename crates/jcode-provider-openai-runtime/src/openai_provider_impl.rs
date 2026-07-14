@@ -3,6 +3,13 @@ use super::openai_stream_runtime::{
 };
 use super::*;
 
+/// Whether a model catalog fetch error is an auth rejection (401/403) that a
+/// token force-refresh may fix, as opposed to a network/server failure.
+fn catalog_error_is_auth_rejection(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<jcode_base::provider::ModelCatalogHttpStatus>()
+        .is_some_and(|status| status.0 == 401 || status.0 == 403)
+}
+
 #[async_trait]
 impl Provider for OpenAIProvider {
     fn reload_credentials(&self) {
@@ -297,6 +304,7 @@ impl Provider for OpenAIProvider {
                 let mut last_error = None;
                 let mut force_https_for_request = false;
                 let mut skip_backoff_once = false;
+                let mut next_retry_delay = None;
 
                 for attempt in 0..MAX_RETRIES {
                     if attempt > 0 {
@@ -310,9 +318,10 @@ impl Provider for OpenAIProvider {
                         .await;
                     }
                     if attempt > 0 && !skip_backoff_once {
-                        let delay = jcode_provider_core::attempt_tracker::retry_backoff_delay(
+                        let delay = jcode_provider_core::retry_after::retry_delay(
                             attempt,
                             RETRY_BASE_DELAY_MS,
+                            next_retry_delay.take(),
                         );
                         tokio::time::sleep(delay).await;
                         jcode_base::logging::info(&format!(
@@ -570,6 +579,10 @@ impl Provider for OpenAIProvider {
                                     "Transient error after {}ms, will retry: {}",
                                     elapsed_ms, error
                                 ));
+                                next_retry_delay =
+                                    jcode_provider_core::retry_after::retry_after_from_error(
+                                        &error,
+                                    );
                                 last_error = Some(error);
                                 continue;
                             }
@@ -720,7 +733,39 @@ impl Provider for OpenAIProvider {
         };
         let catalog = if is_chatgpt_mode {
             let access_token = openai_access_token(&self.credentials).await?;
-            jcode_base::provider::fetch_openai_model_catalog(&access_token).await?
+            match jcode_base::provider::fetch_openai_model_catalog(&access_token).await {
+                Ok(catalog) => catalog,
+                // The server can reject a token that still looks fresh by its
+                // local expiry (revoked/rotated). The chat path recovers by
+                // force-refreshing; without the same recovery here the model
+                // catalog silently stays stale and newly released models never
+                // show up until the user happens to re-login (observed as
+                // days of bootstrap 401s in the logs).
+                Err(err) if catalog_error_is_auth_rejection(&err) => {
+                    let refresh_token = {
+                        let creds = self.credentials.read().await;
+                        creds.refresh_token.clone()
+                    };
+                    if refresh_token.is_empty() {
+                        return Err(err);
+                    }
+                    jcode_base::logging::info(
+                        "OpenAI model catalog fetch rejected the access token; force-refreshing and retrying",
+                    );
+                    let refreshed = super::openai_stream_runtime::force_refresh_openai_token(
+                        &self.credentials,
+                        &refresh_token,
+                    )
+                    .await
+                    .map_err(|refresh_err| {
+                        err.context(format!(
+                            "token force-refresh after catalog 401/403 also failed: {refresh_err:#}"
+                        ))
+                    })?;
+                    jcode_base::provider::fetch_openai_model_catalog(&refreshed).await?
+                }
+                Err(err) => return Err(err),
+            }
         } else {
             jcode_base::provider::fetch_openai_api_key_model_catalog(&access_token).await?
         };

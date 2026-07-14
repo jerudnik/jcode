@@ -73,6 +73,7 @@ fn contended_data() -> InfoWidgetData {
                     initial_prompt_delivered: None,
                     todo_progress: Some((1, 4)),
                     todo_items: Vec::new(),
+                    runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
                 crate::protocol::SwarmMemberStatus {
                     session_id: "worker-2".to_string(),
@@ -90,6 +91,7 @@ fn contended_data() -> InfoWidgetData {
                     initial_prompt_delivered: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
+                    runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
             ],
             plan_progress: Some((3, 1, 7)),
@@ -102,7 +104,9 @@ fn contended_data() -> InfoWidgetData {
         }),
         usage_info: Some(UsageInfo {
             provider: UsageProvider::Anthropic,
+            primary_limit_label: Some("5-hour".to_string()),
             five_hour: 0.4,
+            secondary_limit_label: Some("Weekly".to_string()),
             seven_day: 0.6,
             available: true,
             ..Default::default()

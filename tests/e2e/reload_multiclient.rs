@@ -66,10 +66,16 @@ async fn subscribe_new_session(socket_path: &std::path::Path) -> Result<(server:
     let mut client = server::Client::connect_with_path(socket_path.to_path_buf()).await?;
     let sub = client.subscribe().await?;
     let _ = collect_until_done_unix(&mut client, sub).await?;
-    let history = client.get_history_event().await?;
-    let session_id = match &history {
-        ServerEvent::History { session_id, .. } => session_id.clone(),
-        other => anyhow::bail!("expected history, got {other:?}"),
+    // Peer subscribes fan out SwarmStatus broadcasts that can interleave ahead
+    // of the History reply; skip them.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let session_id = loop {
+        let history = client.get_history_event().await?;
+        match &history {
+            ServerEvent::History { session_id, .. } => break session_id.clone(),
+            _ if std::time::Instant::now() < deadline => continue,
+            other => anyhow::bail!("expected history, got {other:?}"),
+        }
     };
     Ok((client, session_id))
 }
@@ -145,6 +151,8 @@ async fn reload_notifies_successor_after_session_takeover() -> Result<()> {
 
         // Successor reconnects to the same session with takeover semantics.
         let mut client_b = server::Client::connect_with_path(socket_path.clone()).await?;
+        let sub_b = client_b.subscribe().await?;
+        let _ = collect_until_done_unix(&mut client_b, sub_b).await?;
         let resume_b = client_b
             .resume_session_with_options(&session_id, true, true)
             .await?;

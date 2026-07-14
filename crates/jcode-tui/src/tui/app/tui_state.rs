@@ -242,7 +242,22 @@ impl App {
         provider: jcode_provider_core::ActiveProvider,
     ) -> Option<crate::auth::ActiveCredential> {
         if route.is_remote {
-            return self.remote_resolved_credential.map(Into::into);
+            if let Some(resolved) = self.remote_resolved_credential {
+                return Some(resolved.into());
+            }
+
+            // Older history payloads and replay snapshots may not carry the
+            // resolved credential, but an explicitly pinned route still tells
+            // us whether this is subscription OAuth or metered API-key usage.
+            // Never guess from the provider family alone: doing so made an
+            // unresolved OpenAI API session render cached subscription limits.
+            return self
+                .session
+                .route_api_method
+                .as_deref()
+                .and_then(jcode_provider_core::AuthRoute::parse)
+                .filter(|auth_route| auth_route.active_provider() == provider)
+                .map(|auth_route| auth_route.resolved_credential().into());
         }
 
         // Authoritative, cache-free answer from the live provider whenever the
@@ -355,8 +370,10 @@ impl App {
 
         let cost_based_usage = || crate::tui::info_widget::UsageInfo {
             provider: crate::tui::info_widget::UsageProvider::CostBased,
+            primary_limit_label: None,
             five_hour: 0.0,
             five_hour_resets_at: None,
+            secondary_limit_label: None,
             seven_day: 0.0,
             seven_day_resets_at: None,
             spark: None,
@@ -373,8 +390,10 @@ impl App {
         match route.provider {
             WidgetProviderKind::Copilot => Some(crate::tui::info_widget::UsageInfo {
                 provider: crate::tui::info_widget::UsageProvider::Copilot,
+                primary_limit_label: None,
                 five_hour: 0.0,
                 five_hour_resets_at: None,
+                secondary_limit_label: None,
                 seven_day: 0.0,
                 seven_day_resets_at: None,
                 spark: None,
@@ -388,18 +407,21 @@ impl App {
                 available: display_input_tokens > 0 || display_output_tokens > 0,
             }),
             WidgetProviderKind::Anthropic => {
-                if matches!(
-                    auth_method,
-                    crate::tui::info_widget::AuthMethod::AnthropicApiKey
-                ) {
-                    return Some(cost_based_usage());
+                match auth_method {
+                    crate::tui::info_widget::AuthMethod::AnthropicApiKey => {
+                        return Some(cost_based_usage());
+                    }
+                    crate::tui::info_widget::AuthMethod::AnthropicOAuth => {}
+                    _ => return None,
                 }
 
                 let usage = crate::usage::get_sync();
                 Some(crate::tui::info_widget::UsageInfo {
                     provider: crate::tui::info_widget::UsageProvider::Anthropic,
+                    primary_limit_label: Some("5-hour".to_string()),
                     five_hour: usage.five_hour,
                     five_hour_resets_at: usage.five_hour_resets_at.clone(),
+                    secondary_limit_label: Some("Weekly".to_string()),
                     seven_day: usage.seven_day,
                     seven_day_resets_at: usage.seven_day_resets_at.clone(),
                     spark: None,
@@ -414,16 +436,21 @@ impl App {
                 })
             }
             WidgetProviderKind::OpenAI => {
-                if matches!(
-                    auth_method,
-                    crate::tui::info_widget::AuthMethod::OpenAIApiKey
-                ) {
-                    return Some(cost_based_usage());
+                match auth_method {
+                    crate::tui::info_widget::AuthMethod::OpenAIApiKey => {
+                        return Some(cost_based_usage());
+                    }
+                    crate::tui::info_widget::AuthMethod::OpenAIOAuth => {}
+                    _ => return None,
                 }
 
                 let openai_usage = crate::usage::get_openai_usage_sync();
                 Some(crate::tui::info_widget::UsageInfo {
                     provider: crate::tui::info_widget::UsageProvider::OpenAI,
+                    primary_limit_label: openai_usage
+                        .five_hour
+                        .as_ref()
+                        .map(|window| window.name.trim_end_matches(" window").to_string()),
                     five_hour: openai_usage
                         .five_hour
                         .as_ref()
@@ -433,6 +460,10 @@ impl App {
                         .five_hour
                         .as_ref()
                         .and_then(|w| w.resets_at.clone()),
+                    secondary_limit_label: openai_usage
+                        .seven_day
+                        .as_ref()
+                        .map(|window| window.name.trim_end_matches(" window").to_string()),
                     seven_day: openai_usage
                         .seven_day
                         .as_ref()
@@ -502,18 +533,27 @@ impl crate::tui::TuiState for App {
         if self.is_remote {
             self.remote_side_pane_images.clone()
         } else {
-            crate::session::render_images(&self.session)
+            // Native generated images are available before their visual-context
+            // blocks are persisted to the session. Prefer those live, anchored
+            // copies and merge in the remaining persisted images.
+            let mut images = self.remote_side_pane_images.clone();
+            for image in crate::session::render_images(&self.session) {
+                let already_present = images.iter().any(|existing| {
+                    existing.media_type == image.media_type && existing.data == image.data
+                });
+                if !already_present {
+                    images.push(image);
+                }
+            }
+            images
         }
     }
 
     fn side_pane_images_signature(&self) -> (usize, u64) {
         // Recomputing the signature walks (and in local mode re-renders) every
-        // image payload, so cache it per display_messages_version: image sets
-        // only change when the transcript does.
-        let version = self.display_messages_version;
-        if let Some((cached_version, signature)) = self.side_pane_images_signature_cache.get()
-            && cached_version == version
-        {
+        // image payload. Cache it until an image mutation explicitly invalidates
+        // it; ordinary text/tool transcript updates do not change the image set.
+        if let Some(signature) = self.side_pane_images_signature_cache.get() {
             return signature;
         }
         use std::hash::{Hash, Hasher};
@@ -531,8 +571,7 @@ impl crate::tui::TuiState for App {
             crate::tui::hash_rendered_image_anchor(image.anchor.as_ref(), &mut hasher);
         }
         let signature = (images.len(), hasher.finish());
-        self.side_pane_images_signature_cache
-            .set(Some((version, signature)));
+        self.side_pane_images_signature_cache.set(Some(signature));
         signature
     }
 
@@ -1207,10 +1246,13 @@ impl crate::tui::TuiState for App {
         };
 
         let todos_are_swarm_plan = self.swarm_enabled && !self.swarm_plan_items.is_empty();
-        let todos = if todos_are_swarm_plan {
-            crate::tui::info_widget::swarm_plan_todos(&self.swarm_plan_items)
+        let (todos, todo_goals) = if todos_are_swarm_plan {
+            (
+                crate::tui::info_widget::swarm_plan_todos(&self.swarm_plan_items),
+                Vec::new(),
+            )
         } else {
-            gather_todos_for_session(session_id)
+            gather_todos_and_goals_for_session(session_id)
         };
 
         let context_snapshot = self.context_snapshot();
@@ -1265,25 +1307,24 @@ impl crate::tui::TuiState for App {
             let subagent_status = self.subagent_status.clone();
             let mut members: Vec<crate::protocol::SwarmMemberStatus> = Vec::new();
             let (session_count, client_count, session_names, has_activity) = if self.is_remote {
-                members = self.remote_swarm_members.clone();
-                let session_names = if !members.is_empty() {
-                    members
-                        .iter()
-                        .map(|m| {
-                            m.friendly_name
-                                .clone()
-                                .unwrap_or_else(|| m.session_id.chars().take(8).collect())
-                        })
-                        .collect()
+                // The compact swarm widget renders at most three rows. Keep the
+                // complete snapshot in `remote_swarm_members`, but do not clone
+                // every historical member (including large detail/todo payloads)
+                // on every frame just to discard almost all of them below.
+                let has_members = !self.remote_swarm_members.is_empty();
+                let session_names = if has_members {
+                    Vec::new()
                 } else {
-                    self.remote_sessions.clone()
+                    self.remote_sessions.iter().take(3).cloned().collect()
                 };
-                let session_count = if !members.is_empty() {
-                    members.len()
+                members = self.remote_swarm_members.iter().take(3).cloned().collect();
+                let session_count = if has_members {
+                    self.remote_swarm_members.len()
                 } else {
                     self.remote_sessions.len()
                 };
-                let has_activity = members
+                let has_activity = self
+                    .remote_swarm_members
                     .iter()
                     .any(|m| m.status != "ready" || m.detail.is_some());
                 (
@@ -1331,6 +1372,7 @@ impl crate::tui::TuiState for App {
                         initial_prompt_delivered: None,
                         todo_progress: None,
                         todo_items: Vec::new(),
+                        runtime: crate::protocol::SwarmMemberRuntime::default(),
                     });
                 }
                 (
@@ -1383,7 +1425,9 @@ impl crate::tui::TuiState for App {
                     },
                     focused: self.swarm_panel_focused,
                     plan_progress,
-                    spinner_frame: (self.animation_elapsed() * 8.0) as usize,
+                    spinner_frame: (self.animation_elapsed()
+                        * jcode_tui_render::swarm_gallery::STRIP_SPINNER_FPS)
+                        as usize,
                     managed_members,
                 })
             } else {
@@ -1500,6 +1544,7 @@ impl crate::tui::TuiState for App {
 
         crate::tui::info_widget::InfoWidgetData {
             todos,
+            todo_goals,
             todos_are_swarm_plan,
             context_info,
             context_info_stale: !context_snapshot.fresh,
@@ -1625,6 +1670,42 @@ impl crate::tui::TuiState for App {
             // strip until we know who we are.
             None => Vec::new(),
         }
+    }
+
+    fn swarm_members_for_transcript(&self) -> Vec<crate::protocol::SwarmMemberStatus> {
+        if !self.swarm_enabled {
+            return Vec::new();
+        }
+
+        // Start with the ownership-scoped gallery members. Then recover any
+        // exact session IDs recorded by spawn tool results. The latter remains
+        // safe in shared-repository swarms and survives a missing/stale parent
+        // edge in the live member snapshot.
+        let mut members = self.inline_swarm_members();
+        let mut included: std::collections::HashSet<String> = members
+            .iter()
+            .map(|member| member.session_id.clone())
+            .collect();
+        let spawned_ids: std::collections::HashSet<&str> = self
+            .display_messages
+            .iter()
+            .filter_map(|message| message.tool_data.as_ref().map(|tool| (message, tool)))
+            .filter(|(_, tool)| tool.name.eq_ignore_ascii_case("swarm"))
+            .flat_map(|(message, _)| message.content.lines())
+            .filter_map(|line| {
+                line.split_once("Spawned new agent: ")
+                    .map(|(_, id)| id.trim())
+            })
+            .collect();
+
+        for member in &self.remote_swarm_members {
+            if spawned_ids.contains(member.session_id.as_str())
+                && included.insert(member.session_id.clone())
+            {
+                members.push(member.clone());
+            }
+        }
+        members
     }
 
     fn swarm_panel_selected(&self) -> usize {
@@ -1898,16 +1979,6 @@ impl App {
         self.swarm_panel_selected = next as usize;
     }
 
-    /// Advance the swarm panel selection by one, wrapping at the end. Used by
-    /// repeated presses of the focus chord (alt+n, alt+n, ... cycles agents).
-    pub(crate) fn cycle_swarm_panel_selection(&mut self) {
-        let count = self.inline_swarm_members().len();
-        if count == 0 {
-            return;
-        }
-        self.swarm_panel_selected = (self.swarm_panel_selected + 1) % count;
-    }
-
     /// Handle a key while the swarm panel is focused. Returns true if the key was
     /// consumed.
     ///
@@ -1933,6 +2004,10 @@ impl App {
             }
             Some(SwarmPanelAction::PopOut) => {
                 self.pop_out_selected_swarm_agent();
+                true
+            }
+            Some(SwarmPanelAction::OpenPrompt) => {
+                super::commands::handle_swarm_prompt_command(self, "/swarm-prompt");
                 true
             }
             Some(SwarmPanelAction::Exit) => {
@@ -1982,6 +2057,7 @@ pub(crate) enum SwarmPanelAction {
     SelectNext,
     SelectPrev,
     PopOut,
+    OpenPrompt,
     Exit,
 }
 
@@ -1992,10 +2068,8 @@ pub(crate) enum SwarmPanelAction {
 /// only Esc and Alt-chords are claimed:
 /// - Alt+↑ / Alt+↓ (also Alt+k / Alt+j): move the selection
 /// - Alt+o / Alt+Enter: pop the selected agent out to a terminal
+/// - Alt+Shift+p: open the active swarm routing prompt in the editor
 /// - Esc: exit the panel
-///
-/// (Alt+N itself cycles the selection; that is handled at the toggle-key
-/// call sites since the chord is user-configurable.)
 pub(crate) fn swarm_panel_action_for_key(
     code: crossterm::event::KeyCode,
     modifiers: crossterm::event::KeyModifiers,
@@ -2012,6 +2086,10 @@ pub(crate) fn swarm_panel_action_for_key(
         KeyCode::Down | KeyCode::Char('j') if alt => Some(SwarmPanelAction::SelectNext),
         KeyCode::Up | KeyCode::Char('k') if alt => Some(SwarmPanelAction::SelectPrev),
         KeyCode::Char('o') | KeyCode::Enter if alt => Some(SwarmPanelAction::PopOut),
+        KeyCode::Char('P') if alt => Some(SwarmPanelAction::OpenPrompt),
+        KeyCode::Char('p') if alt && modifiers.contains(KeyModifiers::SHIFT) => {
+            Some(SwarmPanelAction::OpenPrompt)
+        }
         _ => match macos_letter {
             Some('j') => Some(SwarmPanelAction::SelectNext),
             Some('k') => Some(SwarmPanelAction::SelectPrev),
@@ -2038,40 +2116,38 @@ pub(crate) fn filter_inline_swarm_subtree(
 ) -> Vec<crate::protocol::SwarmMemberStatus> {
     use std::collections::{HashMap, HashSet};
 
-    let parent_of: HashMap<&str, Option<&str>> = members
-        .iter()
-        .map(|m| {
-            (
-                m.session_id.as_str(),
-                m.report_back_to_session_id.as_deref(),
-            )
-        })
-        .collect();
+    // Build the parent -> children index once, then walk outward from this
+    // session. The previous implementation rebuilt a cycle-detection HashSet
+    // while walking the parent chain for every member, on every frame. Large,
+    // long-lived swarms made that input render path needlessly expensive.
+    let mut children_by_parent: HashMap<&str, Vec<&str>> = HashMap::new();
+    for member in members {
+        if let Some(parent) = member.report_back_to_session_id.as_deref() {
+            children_by_parent
+                .entry(parent)
+                .or_default()
+                .push(member.session_id.as_str());
+        }
+    }
 
-    // A member is a descendant of `self_id` if walking its parent chain reaches
-    // `self_id`. The member itself (start == self_id) is intentionally excluded:
-    // the viewing agent should not appear as one of the agents it manages.
-    let is_descendant = |start: &str| -> bool {
-        if start == self_id {
-            return false;
-        }
-        let mut visited: HashSet<&str> = HashSet::new();
-        let mut current = start;
-        while let Some(Some(parent)) = parent_of.get(current) {
-            if !visited.insert(current) {
-                break; // cycle guard
+    let mut descendants: HashSet<&str> = HashSet::new();
+    let mut pending = vec![self_id];
+    while let Some(parent) = pending.pop() {
+        let Some(children) = children_by_parent.get(parent) else {
+            continue;
+        };
+        for &child in children {
+            // This both excludes cycles and ensures each subtree node is
+            // expanded at most once.
+            if child != self_id && descendants.insert(child) {
+                pending.push(child);
             }
-            if *parent == self_id {
-                return true;
-            }
-            current = parent;
         }
-        false
-    };
+    }
 
     members
         .iter()
-        .filter(|m| is_descendant(m.session_id.as_str()))
+        .filter(|m| descendants.contains(m.session_id.as_str()))
         .cloned()
         .collect()
 }
@@ -2140,6 +2216,14 @@ mod swarm_panel_key_tests {
             Some(SwarmPanelAction::PopOut)
         );
         assert_eq!(
+            swarm_panel_action_for_key(KeyCode::Char('P'), KeyModifiers::ALT | KeyModifiers::SHIFT),
+            Some(SwarmPanelAction::OpenPrompt)
+        );
+        assert_eq!(
+            swarm_panel_action_for_key(KeyCode::Char('p'), KeyModifiers::ALT | KeyModifiers::SHIFT),
+            Some(SwarmPanelAction::OpenPrompt)
+        );
+        assert_eq!(
             swarm_panel_action_for_key(KeyCode::Esc, KeyModifiers::NONE),
             Some(SwarmPanelAction::Exit)
         );
@@ -2179,6 +2263,7 @@ mod inline_swarm_subtree_tests {
             initial_prompt_delivered: None,
             todo_progress: None,
             todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
         }
     }
 

@@ -86,6 +86,7 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
         initial_prompt_delivered: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     };
 
     let mut app = create_test_app();
@@ -94,9 +95,10 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
     let mut remote = crate::tui::backend::RemoteConnection::dummy();
+    let version_before = app.display_messages_version;
 
     // First snapshot: two of our workers running plus an unrelated agent.
-    app.handle_server_event(
+    let redraw = app.handle_server_event(
         crate::protocol::ServerEvent::SwarmStatus {
             members: vec![
                 member("ant", "running", Some(&self_id)),
@@ -105,6 +107,11 @@ fn test_handle_server_event_swarm_status_announces_member_completion() {
             ],
         },
         &mut remote,
+    );
+    assert!(redraw, "swarm cards should redraw as soon as members arrive");
+    assert!(
+        app.display_messages_version > version_before,
+        "swarm card data must invalidate transcript caches"
     );
     assert_eq!(
         app.status_notice(),

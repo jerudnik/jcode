@@ -32,8 +32,9 @@ use std::time::Instant;
 
 pub(super) const REVIEW_PREFERRED_MODEL: &str = "gpt-5.5";
 const POKE_OFF_UI_HINT: &str = "/poke off to stop.";
-const TODO_CONFIDENCE_THRESHOLD: u8 = 90;
-const TODO_CONFIDENCE_SUMMARY_PREFIX: &str = crate::todo::TODO_CONFIDENCE_SUMMARY_PREFIX;
+const TODO_CONFIDENCE_THRESHOLD: u8 = crate::todo::QUALITY_GATE_THRESHOLD;
+const TODO_COMPLETION_CONTINUATION_MESSAGE: &str =
+    crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct TodoConfidenceSummary {
@@ -74,7 +75,8 @@ pub(super) fn is_poke_message(message: &str) -> bool {
 }
 
 pub(super) fn is_todo_confidence_summary_message(message: &str) -> bool {
-    message.starts_with(TODO_CONFIDENCE_SUMMARY_PREFIX)
+    message.starts_with(TODO_COMPLETION_CONTINUATION_MESSAGE)
+        || message.starts_with("All todos are done. Todo confidence summary:")
 }
 
 pub(super) fn queued_messages_are_only_pokes(messages: &[String]) -> bool {
@@ -717,6 +719,7 @@ fn launch_manual_subagent(app: &mut App, spec: ManualSubagentSpec) {
             tool_call_id: tool_call_for_task.id.clone(),
             tool_name: tool_call_for_task.name.clone(),
             status: ToolStatus::Running,
+            intent: tool_call_for_task.intent.clone(),
             title: None,
         }));
 
@@ -757,6 +760,7 @@ fn launch_manual_subagent(app: &mut App, spec: ManualSubagentSpec) {
             tool_call_id: tool_call_for_task.id.clone(),
             tool_name: tool_call_for_task.name.clone(),
             status,
+            intent: tool_call_for_task.intent.clone(),
             title: title.clone(),
         }));
 
@@ -1741,6 +1745,11 @@ pub(super) fn handle_session_command(app: &mut App, trimmed: &str) -> bool {
         return true;
     }
 
+    if trimmed == "/active" {
+        app.open_active_sessions_picker();
+        return true;
+    }
+
     if let Some(command) = parse_plan_command(trimmed) {
         handle_plan_command_local(app, command);
         return true;
@@ -2584,117 +2593,8 @@ fn weighted_confidence_average(scores: impl IntoIterator<Item = (u8, u32)>) -> O
 }
 
 pub(super) fn build_todo_confidence_summary_message(todos: &[crate::todo::TodoItem]) -> String {
-    let summary = todo_confidence_summary(todos);
-    let completed: Vec<&crate::todo::TodoItem> = todos
-        .iter()
-        .filter(|todo| todo.status == "completed")
-        .collect();
-    let cancelled_count = todos
-        .iter()
-        .filter(|todo| todo.status == "cancelled")
-        .count();
-
-    let planning_average = weighted_confidence_average(todos.iter().filter_map(|todo| {
-        todo.confidence
-            .map(|score| (score, todo_confidence_weight(&todo.priority)))
-    }));
-    let completion_scores: Vec<(&crate::todo::TodoItem, u8, u32)> = completed
-        .iter()
-        .filter_map(|todo| {
-            todo.completion_confidence
-                .map(|score| (*todo, score, todo_confidence_weight(&todo.priority)))
-        })
-        .collect();
-    let completion_average = summary.completion_average;
-    let missing_completion_confidence = completed
-        .iter()
-        .filter(|todo| todo.completion_confidence.is_none())
-        .count();
-    let below_threshold_count = completion_scores
-        .iter()
-        .filter(|(_, score, _)| *score < TODO_CONFIDENCE_THRESHOLD)
-        .count();
-    let lowest_completed = completion_scores
-        .iter()
-        .min_by_key(|(_, score, _)| *score)
-        .map(|(_, score, _)| *score);
-
-    let mut lines = vec![TODO_CONFIDENCE_SUMMARY_PREFIX.to_string()];
-    lines.push(format!(
-        "- Completed todos: {}{}.",
-        completed.len(),
-        if cancelled_count == 0 {
-            String::new()
-        } else {
-            format!(
-                " ({} cancelled todo{} skipped)",
-                cancelled_count,
-                if cancelled_count == 1 { "" } else { "s" }
-            )
-        }
-    ));
-
-    match completion_average {
-        Some(avg) => lines.push(format!("- Weighted completion confidence: {}%.", avg)),
-        None if !completed.is_empty() => lines.push(
-            "- Weighted completion confidence: unknown because no completed todo has completion_confidence."
-                .to_string(),
-        ),
-        None => lines.push("- No completed todos recorded completion confidence.".to_string()),
-    }
-    lines.push(format!(
-        "- Confidence threshold: {}%.",
-        TODO_CONFIDENCE_THRESHOLD
-    ));
-
-    match planning_average {
-        Some(avg) => lines.push(format!("- Weighted planning confidence: {}%.", avg)),
-        None => lines.push("- Weighted planning confidence: unknown.".to_string()),
-    }
-
-    match lowest_completed {
-        Some(score) => lines.push(format!("- Lowest completed todo confidence: {}%.", score)),
-        None => lines.push("- Lowest completed todo confidence: unknown.".to_string()),
-    }
-
-    if missing_completion_confidence > 0 {
-        lines.push(format!(
-            "- Missing completion_confidence on {} completed todo{}.",
-            missing_completion_confidence,
-            if missing_completion_confidence == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ));
-    }
-
-    if below_threshold_count > 0 {
-        lines.push(format!(
-            "- {} completed todo{} below the {}% confidence threshold.",
-            below_threshold_count,
-            if below_threshold_count == 1 {
-                " is"
-            } else {
-                "s are"
-            },
-            TODO_CONFIDENCE_THRESHOLD
-        ));
-    }
-
-    if summary.needs_more_work {
-        lines.push(format!(
-            "- {}",
-            crate::prompt::TODO_CONFIDENCE_NEEDS_VALIDATION_PROMPT.trim()
-        ));
-    } else {
-        lines.push(format!(
-            "- {}",
-            crate::prompt::TODO_CONFIDENCE_READY_PROMPT.trim()
-        ));
-    }
-
-    lines.join("\n")
+    let _ = todos;
+    TODO_COMPLETION_CONTINUATION_MESSAGE.to_string()
 }
 
 pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoConfidenceSummary {
@@ -2900,6 +2800,103 @@ fn parse_agents_target(raw: &str) -> Option<crate::tui::AgentModelTarget> {
     }
 }
 
+fn file_has_nonblank_content(path: &std::path::Path) -> bool {
+    std::fs::read_to_string(path)
+        .map(|content| !content.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn ensure_swarm_prompt_edit_path(
+    working_dir: Option<&str>,
+    jcode_dir: &std::path::Path,
+) -> std::io::Result<PathBuf> {
+    let project_dir = match working_dir {
+        Some(path) => PathBuf::from(path),
+        None => std::env::current_dir()?,
+    };
+    let project_path = project_dir.join(".jcode").join("swarm-prompt.md");
+    if file_has_nonblank_content(&project_path) {
+        return Ok(project_path);
+    }
+
+    let global_path = jcode_dir.join("swarm-prompt.md");
+    if file_has_nonblank_content(&global_path) {
+        return Ok(global_path);
+    }
+
+    std::fs::create_dir_all(jcode_dir)?;
+    let contents = format!("{}\n", crate::prompt::DEFAULT_SWARM_PROMPT.trim());
+    std::fs::write(&global_path, contents)?;
+    Ok(global_path)
+}
+
+pub(super) fn handle_swarm_prompt_command(app: &mut App, trimmed: &str) -> bool {
+    if trimmed != "/swarm-prompt"
+        && trimmed != "/swarm-prompt edit"
+        && trimmed != "/swarm-prompt open"
+    {
+        if trimmed.starts_with("/swarm-prompt ") {
+            app.push_display_message(DisplayMessage::error("Usage: /swarm-prompt".to_string()));
+            return true;
+        }
+        return false;
+    }
+
+    let jcode_dir = match crate::storage::jcode_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            app.push_display_message(DisplayMessage::error(format!(
+                "Failed to locate the Jcode config directory: {}",
+                error
+            )));
+            return true;
+        }
+    };
+    let path = match ensure_swarm_prompt_edit_path(app.session.working_dir.as_deref(), &jcode_dir) {
+        Ok(path) => path,
+        Err(error) => {
+            app.push_display_message(DisplayMessage::error(format!(
+                "Failed to prepare the swarm prompt file: {}",
+                error
+            )));
+            return true;
+        }
+    };
+
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "nano".to_string());
+    let mut parts = editor.split_whitespace();
+    let Some(bin) = parts.next() else {
+        app.push_display_message(DisplayMessage::error(
+            "$VISUAL/$EDITOR is empty; cannot open the swarm prompt.".to_string(),
+        ));
+        return true;
+    };
+    let extra: Vec<&str> = parts.collect();
+    match std::process::Command::new(bin)
+        .args(&extra)
+        .arg(&path)
+        .spawn()
+    {
+        Ok(_) => {
+            app.push_display_message(DisplayMessage::system(format!(
+                "Opening the active swarm routing prompt in {}:\n{}\n\nChanges apply after restarting or reloading Jcode because running agent tool registries cache the prompt.",
+                editor,
+                path.display()
+            )));
+            app.set_status_notice("Opened swarm prompt");
+        }
+        Err(error) => app.push_display_message(DisplayMessage::error(format!(
+            "Failed to launch editor '{}' for {}: {}",
+            editor,
+            path.display(),
+            error
+        ))),
+    }
+    true
+}
+
 pub(super) fn handle_agents_command(app: &mut App, trimmed: &str) -> bool {
     if !trimmed.starts_with("/agents") {
         return false;
@@ -3035,6 +3032,10 @@ pub(super) fn handle_config_command(app: &mut App, trimmed: &str) -> bool {
     }
 
     if handle_show_agentgrep_output_command(app, trimmed) {
+        return true;
+    }
+
+    if handle_swarm_prompt_command(app, trimmed) {
         return true;
     }
 

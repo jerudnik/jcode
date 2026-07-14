@@ -1648,6 +1648,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.remote_total_tokens = None;
                 app.remote_token_usage_totals = None;
                 app.remote_side_pane_images.clear();
+                app.invalidate_side_pane_images_signature();
                 app.remote_swarm_members.clear();
                 app.swarm_plan_items.clear();
                 app.swarm_plan_phases_by_id.clear();
@@ -1699,6 +1700,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 drop(images);
             } else {
                 app.remote_side_pane_images = images;
+                app.invalidate_side_pane_images_signature();
             }
             app.persist_remote_model_catalog_cache();
             app.remote_skills = skills;
@@ -2016,7 +2018,10 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.push_display_message(DisplayMessage::system(message.to_string()));
             }
 
-            false
+            // History is the completion signal for a session attach/resume and
+            // can replace the entire visible transcript. Request a frame now so
+            // the new session does not appear stuck until another event arrives.
+            true
         }
         ServerEvent::CompactedHistory {
             session_id,
@@ -2068,27 +2073,17 @@ pub(in crate::tui::app) fn handle_server_event(
             if images.is_empty() {
                 return false;
             }
-            // Append the freshly-read tool images so the inline transcript
-            // images update immediately, without waiting for the next full
-            // History reload. A later History payload replaces this list
-            // wholesale, so duplicates are not a long-term concern.
+            // Append the freshly-produced images so the inline transcript
+            // updates immediately, without waiting for the next full History
+            // reload. A later History payload replaces this list wholesale.
             let added = images.len();
-            app.remote_side_pane_images.extend(images);
-            // The image-set signature is cached per display_messages_version,
-            // which this event does not bump; drop the cached value so the
-            // prepared-frame and body caches see the new image immediately.
-            app.invalidate_side_pane_images_signature();
+            app.append_live_inline_images(images);
             crate::logging::info(&format!(
-                "SidePaneImages: appended {} live image(s) (total={}, user_hidden={}, explicit_hidden={}) session={}",
+                "SidePaneImages: appended {} live inline image(s) (total={}) session={}",
                 added,
                 app.remote_side_pane_images.len(),
-                app.side_panel_user_hidden,
-                app.side_panel_explicit_hidden,
                 session_id
             ));
-            // Re-run the auto-hide bookkeeping so the pane reveals (unless the
-            // user explicitly hid it with Alt+M) and re-arms its auto-hide timer.
-            app.update_pinned_images_auto_hide();
             true
         }
         ServerEvent::SidePanelState { snapshot } => {
@@ -2096,6 +2091,7 @@ pub(in crate::tui::app) fn handle_server_event(
             false
         }
         ServerEvent::SwarmStatus { members } => {
+            let members_changed = app.remote_swarm_members != members;
             if app.swarm_enabled {
                 // Surface member lifecycle transitions (done/failed/blocked/
                 // stopped) as a status notice, the same way plan syncs are
@@ -2122,7 +2118,16 @@ pub(in crate::tui::app) fn handle_server_event(
             } else {
                 app.remote_swarm_members.clear();
             }
-            false
+            if members_changed {
+                // The transcript body embeds live cards beneath spawn tool rows.
+                // Treat member data like a visible message mutation so both the
+                // full-frame and body caches rebuild immediately.
+                app.bump_display_messages_version();
+            }
+            // Swarm cards are embedded in the transcript. A member snapshot can
+            // arrive after the spawn tool result, so request a frame immediately
+            // rather than waiting for unrelated model or input activity.
+            true
         }
         ServerEvent::SwarmPlan {
             swarm_id,
@@ -2163,23 +2168,6 @@ pub(in crate::tui::app) fn handle_server_event(
                     .map(|summary| summary.phases_by_id.clone())
                     .unwrap_or_default();
                 app.swarm_plan_items = snapshot.items.clone();
-                // Render the plan's task DAG as an inline chat diagram: the graph
-                // is pushed as a normal swarm message containing a mermaid fence,
-                // so it renders through the standard markdown/mermaid pipeline and
-                // scrolls by like any other transcript image. Plan updates
-                // coalesce onto a single transcript message (see
-                // upsert_trailing_swarm_plan_graph_message) instead of stacking
-                // one diagram per assignment churn. Skipped only when mermaid
-                // rendering is opted out (JCODE_ENABLE_MERMAID=0), since a raw
-                // mermaid source block would just be noise.
-                if crate::tui::markdown::mermaid_rendering_enabled()
-                    && let Some(graph) =
-                        crate::tui::swarm_plan_graph::swarm_plan_mermaid(&app.swarm_plan_items)
-                {
-                    let title = format!("Plan graph · v{}", snapshot.version);
-                    let content = format!("```mermaid\n{}\n```", graph.trim_end());
-                    app.upsert_trailing_swarm_plan_graph_message(title, content);
-                }
                 persist_swarm_plan_snapshot(
                     app,
                     snapshot.swarm_id,
@@ -2299,11 +2287,16 @@ pub(in crate::tui::app) fn handle_server_event(
                 app.replace_remote_model_catalog_snapshot(model_catalog_snapshot);
             app.remote_model_catalog_generation =
                 app.remote_model_catalog_generation.saturating_add(1);
+            app.finish_auth_catalog_refresh();
             app.persist_remote_model_catalog_cache();
             if provider_meta_changed {
                 app.update_terminal_title();
             }
-            false
+            // The catalog event can arrive while the client is otherwise idle.
+            // Returning false here leaves the updated picker, refresh summary,
+            // and status notice invisible until an unrelated input or periodic
+            // redraw happens.
+            true
         }
         ServerEvent::ReasoningEffortChanged { effort, error, .. } => {
             if let Some(err) = error {
@@ -2570,6 +2563,46 @@ pub(in crate::tui::app) fn handle_server_event(
             );
             if plan_scope {
                 app.set_status_notice(format!("{} · {}", presentation.title, presentation.message));
+                return false;
+            }
+            let swarm_report_scope = matches!(
+                &notification_type,
+                crate::protocol::NotificationType::Message {
+                    scope: Some(scope),
+                    ..
+                } if scope == "swarm"
+            );
+            if swarm_report_scope {
+                // A report is the terminal snapshot of an agent, not another
+                // prose message to read. Keep the live card under the spawn call
+                // and insert a duplicate snapshot where the report arrived.
+                if let Some(mut member) = app
+                    .remote_swarm_members
+                    .iter()
+                    .find(|member| member.session_id == from_session)
+                    .cloned()
+                {
+                    if matches!(member.status.as_str(), "running" | "streaming" | "thinking") {
+                        member.status = "completed".to_string();
+                    }
+                    if let Some(snapshot) = crate::tui::ui::encode_swarm_agent_snapshot(&member) {
+                        app.push_display_message(DisplayMessage::swarm(
+                            crate::tui::ui::SWARM_AGENT_SNAPSHOT_TITLE,
+                            snapshot.clone(),
+                        ));
+                        persist_replay_display_message(
+                            app,
+                            "swarm",
+                            Some(crate::tui::ui::SWARM_AGENT_SNAPSHOT_TITLE.to_string()),
+                            &snapshot,
+                        );
+                    }
+                }
+                app.set_status_notice(format!(
+                    "{} {} finished",
+                    crate::id::session_icon(&sender),
+                    sender
+                ));
                 return false;
             }
             app.push_display_message(DisplayMessage::swarm(

@@ -1,6 +1,6 @@
 [package]
 name = "jcode"
-version = "0.36.0"
+version = "0.46.0"
 description = "Possibly the greatest coding agent ever built — blazing-fast TUI, multi-model, swarm coordination, 30+ tools"
 edition = "2024"
 autobins = false
@@ -26,6 +26,7 @@ members = [
     "crates/jcode-compaction-core",
     "crates/jcode-config-types",
     "crates/jcode-core",
+    "crates/jcode-fuzzy",
     "crates/jcode-memory-types",
     "crates/jcode-message-types",
     "crates/jcode-overnight-core",

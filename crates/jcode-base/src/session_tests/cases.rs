@@ -311,7 +311,7 @@ fn initial_session_context_is_persisted_once_and_not_overwritten() {
 
 #[test]
 #[allow(clippy::redundant_closure_call)]
-fn initial_session_context_uses_current_cwd_when_inserted() -> Result<()> {
+fn initial_session_context_preserves_explicitly_bound_cwd_when_inserted() -> Result<()> {
     let _env_lock = lock_env();
     let first_dir = tempfile::Builder::new()
         .prefix("jcode-session-context-first-")
@@ -335,16 +335,18 @@ fn initial_session_context_uses_current_cwd_when_inserted() -> Result<()> {
     );
 
     cwd_guard.change_to(second_dir.path())?;
-    let second_cwd = std::env::current_dir().map_err(|e| anyhow!(e))?;
     assert!(session.ensure_initial_session_context_message());
     let first = session.messages[0].content_preview();
     assert!(
-        first.contains(&format!("Working directory: {}", second_cwd.display())),
-        "session context should use cwd at insertion time, got: {first}"
+        first.contains(&format!(
+            "Working directory: {}",
+            first_dir.path().display()
+        )),
+        "session context should preserve the bound cwd, got: {first}"
     );
     assert_eq!(
         session.working_dir.as_deref(),
-        Some(second_cwd.to_str().unwrap())
+        Some(first_dir.path().to_str().unwrap())
     );
 
     Ok(())
@@ -1272,6 +1274,7 @@ fn test_redacted_for_export_redacts_replay_events() -> Result<()> {
         todo_items: Vec::new(),
         task_label: None,
         subagent_type: None,
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     }]);
     session.record_swarm_plan_event(
         "swarm_test".to_string(),
@@ -1378,8 +1381,7 @@ fn test_render_messages_honors_system_display_role_override() {
 
 #[test]
 fn test_render_messages_shows_auto_poke_continuations_as_system_not_user() {
-    // Regression: auto-poke continuations ("You have N incomplete todos...",
-    // "All todos are done. Todo confidence summary:...") are persisted as
+    // Regression: incomplete-todo and private-quality continuations are persisted as
     // Role::User so the model continues the turn, but the live UI hides them.
     // On reload/resume/remote attach the renderer must not resurrect them as
     // the user's last prompt.
@@ -1413,10 +1415,7 @@ fn test_render_messages_shows_auto_poke_continuations_as_system_not_user() {
     session.add_message(
         Role::User,
         vec![ContentBlock::Text {
-            text: format!(
-                "{} core work 95%",
-                crate::todo::TODO_CONFIDENCE_SUMMARY_PREFIX
-            ),
+            text: crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE.to_string(),
             cache_control: None,
         }],
     );
@@ -1447,8 +1446,8 @@ fn test_render_messages_shows_auto_poke_continuations_as_system_not_user() {
     assert!(
         system_contents
             .iter()
-            .any(|content| content.contains("Todo confidence summary")),
-        "confidence summary should render as system: {rendered:?}"
+            .any(|content| content.contains("before finalizing")),
+        "quality continuation should render as system: {rendered:?}"
     );
 }
 

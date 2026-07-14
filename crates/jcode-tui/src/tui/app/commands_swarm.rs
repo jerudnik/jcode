@@ -500,6 +500,7 @@ mod tests {
             todo_progress: None,
             todo_items: Vec::new(),
             initial_prompt_delivered: None,
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
         }
     }
 

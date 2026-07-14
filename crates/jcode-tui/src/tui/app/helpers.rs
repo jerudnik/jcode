@@ -18,10 +18,17 @@ static AMBIENT_INFO_CACHE: Mutex<Option<AmbientInfoCacheEntry>> = Mutex::new(Non
 type GitInfoCacheEntry = (std::time::Instant, Option<GitInfo>, bool);
 static GIT_INFO_CACHE: Mutex<Option<GitInfoCacheEntry>> = Mutex::new(None);
 
-/// Stale-while-revalidate cache for per-session todos. Module-level so the app
-/// can force a refresh the moment it persists a todo write locally, instead of
-/// showing the previous list until the TTL lapses.
-type TodosCache = std::collections::HashMap<String, (std::time::Instant, Vec<TodoItem>, bool)>;
+/// Stale-while-revalidate cache for per-session todos plus their goal-level
+/// assessments (hill-climbability etc.). Module-level so the app can force a
+/// refresh the moment it persists a todo write locally, instead of showing
+/// the previous list until the TTL lapses.
+type TodosCacheEntry = (
+    std::time::Instant,
+    Vec<TodoItem>,
+    Vec<crate::todo::TodoGoal>,
+    bool,
+);
+type TodosCache = std::collections::HashMap<String, TodosCacheEntry>;
 static TODOS_CACHE: std::sync::LazyLock<Mutex<TodosCache>> =
     std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
@@ -71,7 +78,7 @@ pub(crate) fn invalidate_git_info_cache() {
 /// reflects the new list immediately rather than after the 1s TTL.
 pub(crate) fn invalidate_todos_cache(session_id: &str) {
     if let Ok(mut cache) = TODOS_CACHE.lock()
-        && let Some((ts, _todos, refreshing)) = cache.get_mut(session_id)
+        && let Some((ts, _todos, _goals, refreshing)) = cache.get_mut(session_id)
     {
         *ts = backdated_now(Duration::from_secs(3600));
         *refreshing = false;
@@ -118,7 +125,7 @@ pub(crate) fn todos_cache_entry_age_for_tests(session_id: &str) -> Option<(u64, 
     let cache = TODOS_CACHE.lock().ok()?;
     cache
         .get(session_id)
-        .map(|(ts, _todos, refreshing)| (ts.elapsed().as_secs(), *refreshing))
+        .map(|(ts, _todos, _goals, refreshing)| (ts.elapsed().as_secs(), *refreshing))
 }
 
 /// Test-only: clear the entire todos cache so tests start from a known state.
@@ -420,8 +427,8 @@ fn copy_to_clipboard_osc52(text: &str) -> bool {
 
 pub(super) fn effort_display_label(effort: &str) -> &str {
     match effort {
-        "swarm" => "Swarm (light fan-out)",
-        "swarm-deep" => "Swarm Deep (Max + task graph)",
+        "swarm" => "Swarm (light fan-out) [Beta]",
+        "swarm-deep" => "Swarm Deep (Max + task graph) [Beta]",
         "max" => "Max",
         "xhigh" => "xHigh",
         "high" => "High",
@@ -539,56 +546,22 @@ pub(super) fn inferred_reasoning_efforts(
         || provider.contains("claude")
         || model.starts_with("claude-");
     if is_anthropic {
-        // `claude-fable-5` rejected reasoning fields during its preview, but
-        // the released model accepts effort low..xhigh (verified live
-        // 2026-07-01).
-        let supports_effort = model.contains("claude-fable-5")
-            || model.contains("claude-sonnet-5")
-            || model.contains("claude-mythos")
-            || model.contains("claude-opus-4-8")
-            || model.contains("claude-opus-4-7")
-            || model.contains("claude-opus-4-6")
-            || model.contains("claude-sonnet-4-6")
-            || model.contains("claude-opus-4-5")
-            || model.contains("claude-3-7-sonnet")
-            || model.contains("claude-sonnet-3-7");
-        if !supports_effort {
+        // Shared capability table (optimistic for unknown 5.x+ generations);
+        // see `jcode_provider_core::anthropic_reasoning_caps`. Keeps the effort
+        // cycler in lockstep with what the Anthropic runtime actually sends.
+        let caps = jcode_provider_core::anthropic_reasoning_caps(&model);
+        if !caps.supports_reasoning_effort() {
             return Vec::new();
         }
-        if model.contains("claude-fable-5")
-            || model.contains("claude-sonnet-5")
-            || model.contains("claude-opus-4-8")
-            || model.contains("claude-opus-4-7")
-        {
-            return vec![
-                "none",
-                "low",
-                "medium",
-                "high",
-                "xhigh",
-                "max",
-                "swarm",
-                "swarm-deep",
-            ];
+        let mut efforts = vec!["none", "low", "medium", "high"];
+        if caps.xhigh_effort {
+            efforts.push("xhigh");
         }
-        // `output_config` effort models without xhigh (Opus/Sonnet 4.6, Mythos)
-        // still support the real `max` API level. Manual-thinking models
-        // (Opus 4.5, Claude 3.7 Sonnet) top out at high.
-        if model.contains("claude-mythos")
-            || model.contains("claude-opus-4-6")
-            || model.contains("claude-sonnet-4-6")
-        {
-            return vec![
-                "none",
-                "low",
-                "medium",
-                "high",
-                "max",
-                "swarm",
-                "swarm-deep",
-            ];
+        if caps.max_effort {
+            efforts.push("max");
         }
-        return vec!["none", "low", "medium", "high", "swarm", "swarm-deep"];
+        efforts.extend(["swarm", "swarm-deep"]);
+        return efforts;
     }
 
     let is_deepseek = provider.contains("deepseek") || model.contains("deepseek");
@@ -863,14 +836,21 @@ pub(super) fn spawn_fresh_session_in_new_terminal(cwd: &Path) -> anyhow::Result<
 fn resumed_window_title(session_id: &str) -> String {
     let session_name = crate::process_title::session_name(session_id);
     let icon = crate::id::session_icon(&session_name);
-    let session_label = crate::process_title::terminal_session_label_for_id(session_id);
-    if let Some(server_info) =
+    let display_title = crate::process_title::terminal_display_title_for_id(session_id);
+    let session_label = crate::process_title::terminal_session_label(&session_name, None);
+    let fallback_label = if let Some(server_info) =
         crate::registry::find_server_by_socket_sync(&crate::server::socket_path())
     {
-        format!("{} jcode/{} {}", icon, server_info.name, session_label)
+        format!("jcode/{} {}", server_info.name, session_label)
     } else {
-        format!("{} jcode {}", icon, session_label)
-    }
+        format!("jcode {}", session_label)
+    };
+    crate::process_title::terminal_window_title(
+        &icon,
+        display_title.as_deref(),
+        Some(&fallback_label),
+        false,
+    )
 }
 
 #[cfg(unix)]
@@ -1136,30 +1116,42 @@ pub(super) fn gather_git_info() -> Option<GitInfo> {
     None
 }
 
-pub(super) fn gather_todos_for_session(session_id: Option<&str>) -> Vec<TodoItem> {
+/// Fetch a session's todos plus its goal-level assessments through the same
+/// stale-while-revalidate cache, so the info widget can render goal metadata
+/// (hill-climbability and objectives) without extra disk reads per frame.
+pub(super) fn gather_todos_and_goals_for_session(
+    session_id: Option<&str>,
+) -> (Vec<TodoItem>, Vec<crate::todo::TodoGoal>) {
     use std::time::Instant;
 
     const TTL: Duration = Duration::from_secs(1);
 
     let Some(session_id) = session_id else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
 
+    fn fetch(session_id: &str) -> (Vec<TodoItem>, Vec<crate::todo::TodoGoal>) {
+        (
+            crate::todo::load_todos(session_id).unwrap_or_default(),
+            crate::todo::load_goals(session_id).unwrap_or_default(),
+        )
+    }
+
     if let Ok(mut cache) = TODOS_CACHE.lock() {
-        if let Some((ts, todos, refreshing)) = cache.get_mut(session_id) {
+        if let Some((ts, todos, goals, refreshing)) = cache.get_mut(session_id) {
             if ts.elapsed() < TTL {
-                return todos.clone();
+                return (todos.clone(), goals.clone());
             }
             if *refreshing {
-                return todos.clone();
+                return (todos.clone(), goals.clone());
             }
-            let stale = todos.clone();
+            let stale = (todos.clone(), goals.clone());
             *refreshing = true;
             let session_id = session_id.to_string();
             std::thread::spawn(move || {
-                let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
+                let (todos, goals) = fetch(&session_id);
                 if let Ok(mut cache) = TODOS_CACHE.lock() {
-                    cache.insert(session_id, (Instant::now(), todos, false));
+                    cache.insert(session_id, (Instant::now(), todos, goals, false));
                 }
             });
             return stale;
@@ -1171,17 +1163,18 @@ pub(super) fn gather_todos_for_session(session_id: Option<&str>) -> Vec<TodoItem
             (
                 backdated_now(TTL + Duration::from_secs(1)),
                 Vec::new(),
+                Vec::new(),
                 true,
             ),
         );
         std::thread::spawn(move || {
-            let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
+            let (todos, goals) = fetch(&session_id);
             if let Ok(mut cache) = TODOS_CACHE.lock() {
-                cache.insert(session_id, (Instant::now(), todos, false));
+                cache.insert(session_id, (Instant::now(), todos, goals, false));
             }
         });
     }
-    Vec::new()
+    (Vec::new(), Vec::new())
 }
 
 pub(super) fn gather_memory_info(memory_enabled: bool) -> Option<MemoryInfo> {

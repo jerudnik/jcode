@@ -150,6 +150,8 @@ const DEFAULT_SWARM_TASK_STALE_AFTER_SECS: u64 = 45;
 const DEFAULT_SWARM_TASK_SWEEP_INTERVAL_SECS: u64 = 5;
 const DEFAULT_SWARM_TASK_REAP_AFTER_SECS: u64 = 180;
 const DEFAULT_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS: u64 = 5;
+const DEFAULT_SWARM_TERMINAL_MEMBER_RETENTION_SECS: u64 = 24 * 60 * 60;
+const DEFAULT_SWARM_TERMINAL_MEMBER_GC_INTERVAL_SECS: u64 = 60;
 #[derive(Default, Clone, Copy)]
 struct PendingSwarmStatusBroadcast {
     scheduled: bool,
@@ -317,6 +319,51 @@ pub(super) async fn sweep_dead_pid_swarm_members(
     }
 
     changed_swarms.into_iter().collect()
+}
+
+/// How long terminal members remain visible in the active swarm listing. This
+/// keeps completion reports available for inspection without allowing durable
+/// history to grow forever.
+pub(super) fn swarm_terminal_member_retention() -> Duration {
+    Duration::from_secs(configured_positive_u64(
+        "JCODE_SWARM_TERMINAL_MEMBER_RETENTION_SECS",
+        DEFAULT_SWARM_TERMINAL_MEMBER_RETENTION_SECS,
+    ))
+}
+
+/// How often the live server removes terminal members whose retention window
+/// has elapsed. Startup loading performs the same pruning synchronously.
+pub(super) fn swarm_terminal_member_gc_interval() -> Duration {
+    Duration::from_secs(configured_positive_u64(
+        "JCODE_SWARM_TERMINAL_MEMBER_GC_INTERVAL_SECS",
+        DEFAULT_SWARM_TERMINAL_MEMBER_GC_INTERVAL_SECS,
+    ))
+}
+
+/// Terminal members are historical records, not live agents. They remain
+/// visible temporarily for reports and diagnostics but must not consume the
+/// runaway-prevention spawn budget.
+pub(super) fn member_status_is_terminal(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "done" | "failed" | "stopped" | "crashed" | "closed" | "disconnected"
+    )
+}
+
+pub(super) fn member_consumes_swarm_capacity(member: &SwarmMember) -> bool {
+    !member_status_is_terminal(&member.status)
+}
+
+pub(super) fn expired_terminal_member_ids(
+    members: &HashMap<String, SwarmMember>,
+    retention: Duration,
+) -> Vec<String> {
+    members
+        .values()
+        .filter(|member| member_status_is_terminal(&member.status))
+        .filter(|member| member.last_status_change.elapsed() >= retention)
+        .map(|member| member.session_id.clone())
+        .collect()
 }
 
 /// Lifecycle statuses that mean a member can no longer drive an assignment:
@@ -800,6 +847,20 @@ async fn broadcast_swarm_status_now(
                     initial_prompt_delivered: m.initial_prompt_delivered,
                     todo_progress: m.todo_progress,
                     todo_items: m.todo_items.clone(),
+                    runtime: crate::protocol::SwarmMemberRuntime {
+                        model: m.runtime.model.clone(),
+                        provider: m.runtime.provider.clone(),
+                        auth_method: m.runtime.auth_method.clone(),
+                        effort: m.runtime.effort.clone(),
+                        elapsed_secs: if matches!(
+                            m.status.as_str(),
+                            "running" | "streaming" | "thinking"
+                        ) {
+                            Some(m.joined_at.elapsed().as_secs())
+                        } else {
+                            Some(m.runtime.elapsed_secs.unwrap_or(0))
+                        },
+                    },
                 })
         })
         .collect();
@@ -1503,6 +1564,14 @@ pub(super) async fn update_member_status_with_report_tldr(
             let member_changed = status_changed || detail_changed || report_changed;
             if status_changed {
                 member.last_status_change = Instant::now();
+                if matches!(status, "running" | "streaming" | "thinking") {
+                    member.runtime.elapsed_secs = None;
+                } else if matches!(
+                    previous_status.as_str(),
+                    "running" | "streaming" | "thinking"
+                ) {
+                    member.runtime.elapsed_secs = Some(member.joined_at.elapsed().as_secs());
+                }
             }
             let name = member.friendly_name.clone();
             let is_headless = member.is_headless;
@@ -1855,7 +1924,7 @@ mod tests {
     };
     use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
     use tokio::sync::{RwLock, mpsc};
 
     fn plan_item(id: &str, content: &str) -> PlanItem {
@@ -1945,6 +2014,7 @@ mod tests {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
             },
             event_rx,
         )
@@ -2622,6 +2692,75 @@ mod tests {
                 } if message.contains("finished their work and is ready for more")
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn member_elapsed_time_runs_only_while_active_and_freezes_afterward() {
+        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-1".to_string(),
+            HashSet::from(["worker".to_string()]),
+        )])));
+        let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
+        worker.runtime.elapsed_secs = Some(12);
+        swarm_members
+            .write()
+            .await
+            .insert("worker".to_string(), worker);
+
+        update_member_status(
+            "worker",
+            "running",
+            None,
+            &swarm_members,
+            &swarms_by_id,
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(
+            swarm_members
+                .read()
+                .await
+                .get("worker")
+                .and_then(|member| member.runtime.elapsed_secs),
+            None,
+            "active members should derive elapsed time from joined_at"
+        );
+
+        {
+            let mut members = swarm_members.write().await;
+            members.get_mut("worker").unwrap().joined_at = Instant::now() - Duration::from_secs(37);
+        }
+        update_member_status(
+            "worker",
+            "completed",
+            None,
+            &swarm_members,
+            &swarms_by_id,
+            None,
+            None,
+            None,
+        )
+        .await;
+
+        let frozen = swarm_members
+            .read()
+            .await
+            .get("worker")
+            .and_then(|member| member.runtime.elapsed_secs)
+            .expect("terminal member should retain frozen elapsed time");
+        assert!((37..=38).contains(&frozen), "frozen={frozen}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            swarm_members
+                .read()
+                .await
+                .get("worker")
+                .and_then(|member| member.runtime.elapsed_secs),
+            Some(frozen)
+        );
     }
 
     #[tokio::test]
