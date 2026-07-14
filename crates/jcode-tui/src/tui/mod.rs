@@ -144,7 +144,7 @@ pub(crate) fn hash_rendered_image_anchor(
 /// renderer needs from `App`. The methods are grouped into the domain sections
 /// below (transcript, input, scroll, stream/status, provider, session/server,
 /// workspace, diagram pane, diff pane, side panel, inline, overlay, copy
-/// selection, onboarding, misc). See `docs/TUISTATE_TRAIT_DECOMPOSITION.md` for
+/// selection, onboarding, misc). See `~/notes/projects/jcode/maintenance/tuistate-trait-decomposition.md` for
 /// the incremental plan to split these into composable sub-traits.
 pub trait TuiState {
     // ---- Transcript ----
