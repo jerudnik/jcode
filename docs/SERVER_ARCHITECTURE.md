@@ -2,7 +2,7 @@
 
 See also:
 
-- [`SERVER_SERVICE_SPLIT_PLAN.md`](./SERVER_SERVICE_SPLIT_PLAN.md)
+- [`SERVER_SERVICE_SPLIT_PLAN.md`](~/notes/projects/jcode/proposals/server-service-split-plan.md)
 - [`SWARM_ARCHITECTURE.md`](./SWARM_ARCHITECTURE.md)
 - [`MULTI_SESSION_CLIENT_ARCHITECTURE.md`](./MULTI_SESSION_CLIENT_ARCHITECTURE.md)
 

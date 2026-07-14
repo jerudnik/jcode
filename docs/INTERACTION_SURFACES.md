@@ -10,8 +10,8 @@ This is the starting point for the jcode surface project. It links the design la
 | --- | --- | --- |
 | [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md) | Visual language, device feel, mockups, density, typography | UI decisions and design checklist |
 | [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) | Requirements, phases, command verbs, protocol hooks, tests | Work items with acceptance criteria |
-| [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md) | Cards/docs/annotations/intents/artifacts object graph | Data model, storage plan, operation log |
-| [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](./INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md) | Next-session execution prompt | Research, implementation, tests, troubleshooting, cleanup, commit |
+| [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](~/notes/projects/jcode/proposals/surface-workspace-substrate-plan.md) | Cards/docs/annotations/intents/artifacts object graph | Data model, storage plan, operation log |
+| [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](~/notes/projects/jcode/proposals/interaction-surface-implementation-prompt.md) | Next-session execution prompt | Research, implementation, tests, troubleshooting, cleanup, commit |
 
 ## Product thesis
 

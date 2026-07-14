@@ -1,4 +1,4 @@
-# Fork Sustainability — Hardening Findings & Backlog (Swarm Synthesis)
+# Fork Sustainability — Hardening Findings (Swarm Synthesis)
 
 Date: 2026-07-08. HEAD `75b20b215`. Vendor `github/vendor/upstream` = `631935dd1`.
 Method: adversarial three-group analysis (RED attack / BLUE defense / GREEN

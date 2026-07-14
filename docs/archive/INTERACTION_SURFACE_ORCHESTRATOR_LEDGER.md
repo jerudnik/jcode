@@ -8,9 +8,9 @@ This document governs the next full interaction-surface implementation session. 
 
 Related docs:
 
-- [`INTERACTION_SURFACES.md`](./INTERACTION_SURFACES.md)
-- [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md)
-- [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md)
+- [`INTERACTION_SURFACES.md`](../INTERACTION_SURFACES.md)
+- [`INTERACTION_SURFACE_REQUIREMENTS.md`](../INTERACTION_SURFACE_REQUIREMENTS.md)
+- [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](~/notes/projects/jcode/proposals/surface-workspace-substrate-plan.md)
 - `~/notes/projects/jcode/proposals/mobile-interface/web-mobile-mvp.md`
 
 ## Non-negotiable stop condition
