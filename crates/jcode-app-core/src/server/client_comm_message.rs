@@ -1,15 +1,16 @@
 use super::live_turn::{LiveTurnSwarmContext, run_live_turn_if_idle};
 use super::swarm::{SwarmTargetResolution, format_ambiguous_target_matches, resolve_swarm_target};
 use super::{
-    ClientConnectionInfo, SessionInterruptQueues, SwarmEvent, SwarmEventType, SwarmMember,
-    fanout_session_event, queue_soft_interrupt_for_session, record_swarm_event, truncate_detail,
+    ClientConnectionInfo, SessionInterruptQueues, SwarmEventState, SwarmEventType, SwarmMember,
+    SwarmState, fanout_session_event, queue_soft_interrupt_for_session, record_swarm_event,
+    truncate_detail,
 };
 use crate::agent::Agent;
 use crate::protocol::{CommDeliveryMode, NotificationType, ServerEvent};
 use jcode_agent_runtime::SoftInterruptSource;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 
@@ -83,11 +84,8 @@ pub(super) async fn handle_comm_message(
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     sessions: &SessionAgents,
     soft_interrupt_queues: &SessionInterruptQueues,
-    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
-    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
-    event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
-    event_counter: &Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    swarm_state: &SwarmState,
+    swarm_events: &SwarmEventState,
     _client_connections: &Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
 ) {
     let started = std::time::Instant::now();
@@ -118,6 +116,8 @@ pub(super) async fn handle_comm_message(
             ),
         ],
     );
+    let swarm_members = &swarm_state.members;
+    let swarms_by_id = &swarm_state.swarms_by_id;
     let swarm_id = swarm_id_for_session(&from_session, swarm_members).await;
 
     if let Some(swarm_id) = swarm_id {
@@ -142,10 +142,8 @@ pub(super) async fn handle_comm_message(
                 .cloned()
                 .collect()
         };
-        let addressable_session_id_set: HashSet<&str> = addressable_session_ids
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let addressable_session_id_set: HashSet<&str> =
+            addressable_session_ids.iter().map(String::as_str).collect();
 
         let resolved_to_session = if let Some(ref target) = to_session {
             match resolve_dm_target_session(target, &addressable_session_ids, swarm_members).await {
@@ -303,9 +301,9 @@ pub(super) async fn handle_comm_message(
                             LiveTurnSwarmContext::new(
                                 swarm_members,
                                 swarms_by_id,
-                                event_history,
-                                event_counter,
-                                swarm_event_tx,
+                                &swarm_events.history,
+                                &swarm_events.counter,
+                                &swarm_events.tx,
                             ),
                         )
                         .await;
@@ -336,9 +334,9 @@ pub(super) async fn handle_comm_message(
                                     LiveTurnSwarmContext::new(
                                         swarm_members,
                                         swarms_by_id,
-                                        event_history,
-                                        event_counter,
-                                        swarm_event_tx,
+                                        &swarm_events.history,
+                                        &swarm_events.counter,
+                                        &swarm_events.tx,
                                     ),
                                 );
                             }
@@ -350,9 +348,9 @@ pub(super) async fn handle_comm_message(
         }
 
         record_swarm_event(
-            event_history,
-            event_counter,
-            swarm_event_tx,
+            &swarm_events.history,
+            &swarm_events.counter,
+            &swarm_events.tx,
             from_session.clone(),
             friendly_name.clone(),
             Some(swarm_id.clone()),

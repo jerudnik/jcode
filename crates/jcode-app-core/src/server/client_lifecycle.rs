@@ -42,8 +42,8 @@ use super::provider_control::{
 };
 use super::{
     AwaitMembersRuntime, ClientConnectionInfo, ClientDebugState, FileTouchService,
-    PlanProposalCache, SessionControlHandle, SessionInterruptQueues, SwarmEvent, SwarmMember,
-    SwarmMutationRuntime, VersionedPlan, format_structured_completion_report,
+    PlanProposalCache, SessionControlHandle, SessionInterruptQueues, SwarmEvent, SwarmEventState,
+    SwarmMember, SwarmMutationRuntime, SwarmState, format_structured_completion_report,
     register_session_interrupt_queue, send_swarm_plan_to_session, truncate_detail,
     update_member_status, update_member_status_with_report, update_member_status_with_report_tldr,
 };
@@ -340,17 +340,12 @@ pub(super) async fn handle_client(
     global_session_id: Arc<RwLock<String>>,
     client_count: Arc<RwLock<usize>>,
     client_connections: Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
-    swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
-    swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_state: SwarmState,
     plan_proposals: PlanProposalCache,
-    swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
-    swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
     file_touch: FileTouchService,
     client_debug_state: Arc<RwLock<ClientDebugState>>,
     client_debug_response_tx: broadcast::Sender<(u64, String)>,
-    event_history: Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
-    event_counter: Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: broadcast::Sender<SwarmEvent>,
+    swarm_events: SwarmEventState,
     server_name: String,
     server_icon: String,
     mcp_pool: Arc<crate::mcp::SharedMcpPool>,
@@ -359,6 +354,13 @@ pub(super) async fn handle_client(
     await_members_runtime: AwaitMembersRuntime,
     swarm_mutation_runtime: SwarmMutationRuntime,
 ) -> Result<()> {
+    let swarm_members = Arc::clone(&swarm_state.members);
+    let swarms_by_id = Arc::clone(&swarm_state.swarms_by_id);
+    let swarm_plans = Arc::clone(&swarm_state.plans);
+    let swarm_coordinators = Arc::clone(&swarm_state.coordinators);
+    let event_history = Arc::clone(&swarm_events.history);
+    let event_counter = Arc::clone(&swarm_events.counter);
+    let swarm_event_tx = swarm_events.tx.clone();
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let writer = Arc::new(Mutex::new(writer));
@@ -393,16 +395,11 @@ pub(super) async fn handle_client(
                             sessions: &sessions,
                             global_session_id: &global_session_id,
                             provider_template: &provider_template,
-                            swarm_members: &swarm_members,
-                            swarms_by_id: &swarms_by_id,
+                            swarm_state: &swarm_state,
                             plan_proposals: &plan_proposals,
-                            swarm_plans: &swarm_plans,
-                            swarm_coordinators: &swarm_coordinators,
                             file_touch: &file_touch,
                             client_connections: &client_connections,
-                            event_history: &event_history,
-                            event_counter: &event_counter,
-                            swarm_event_tx: &swarm_event_tx,
+                            swarm_events: &swarm_events,
                             mcp_pool: &mcp_pool,
                             soft_interrupt_queues: &soft_interrupt_queues,
                             await_members_runtime: &await_members_runtime,
@@ -2087,11 +2084,8 @@ pub(super) async fn handle_client(
                     &client_event_tx,
                     &sessions,
                     &soft_interrupt_queues,
-                    &swarm_members,
-                    &swarms_by_id,
-                    &event_history,
-                    &event_counter,
-                    &swarm_event_tx,
+                    &swarm_state,
+                    &swarm_events,
                     &client_connections,
                 )
                 .await;
@@ -2124,16 +2118,11 @@ pub(super) async fn handle_client(
                     req_session_id,
                     items,
                     &client_event_tx,
-                    &swarm_members,
-                    &swarms_by_id,
+                    &swarm_state,
                     &plan_proposals,
-                    &swarm_plans,
-                    &swarm_coordinators,
                     &sessions,
                     &soft_interrupt_queues,
-                    &event_history,
-                    &event_counter,
-                    &swarm_event_tx,
+                    &swarm_events,
                     &swarm_mutation_runtime,
                 )
                 .await;
@@ -2149,16 +2138,11 @@ pub(super) async fn handle_client(
                     req_session_id,
                     proposer_session,
                     &client_event_tx,
-                    &swarm_members,
-                    &swarms_by_id,
+                    &swarm_state,
                     &plan_proposals,
-                    &swarm_plans,
-                    &swarm_coordinators,
                     &sessions,
                     &soft_interrupt_queues,
-                    &event_history,
-                    &event_counter,
-                    &swarm_event_tx,
+                    &swarm_events,
                     &swarm_mutation_runtime,
                 )
                 .await;
@@ -2176,14 +2160,11 @@ pub(super) async fn handle_client(
                     proposer_session,
                     reason,
                     &client_event_tx,
-                    &swarm_members,
+                    &swarm_state,
                     &plan_proposals,
-                    &swarm_coordinators,
                     &sessions,
                     &soft_interrupt_queues,
-                    &event_history,
-                    &event_counter,
-                    &swarm_event_tx,
+                    &swarm_events,
                     &swarm_mutation_runtime,
                 )
                 .await;
