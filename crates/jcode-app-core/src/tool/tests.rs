@@ -262,7 +262,7 @@ async fn test_batch_resolves_oauth_names() {
     // Use an isolated temp dir, not the shared system temp dir.
     let temp = tempfile::TempDir::new().expect("temp dir");
     let temp_dir = temp.path().to_path_buf();
-    let temp_dir_str = temp_dir.to_string_lossy().to_string();
+    let _temp_dir_str = temp_dir.to_string_lossy().to_string();
 
     let ctx = ToolContext {
         session_id: "test".to_string(),
