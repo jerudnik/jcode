@@ -251,11 +251,25 @@ fn apply_profile_key_based_endpoint_overrides(
         .map(ToString::to_string)
         .or_else(|| load_api_key(&ApiKeyCredentialSource::from_catalog_profile(profile)));
 
-    if key
-        .as_deref()
-        .map(|key| key.trim_start().starts_with("sk-cp-"))
-        .unwrap_or(false)
-    {
+    // The `sk-cp-` prefix is a coarse region signal, not a guarantee: MiniMax
+    // issues `sk-cp-` keys for the international (`api.minimax.io`) platform too.
+    // Let an explicit region override win so a config that pins the global
+    // endpoint is not silently rewritten to the China host (which 401s an
+    // international key). `JCODE_MINIMAX_REGION=international|global` opts out;
+    // `=china` forces the China host regardless of prefix.
+    let region_override = std::env::var("JCODE_MINIMAX_REGION")
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase());
+    let force_china = match region_override.as_deref() {
+        Some("international") | Some("global") | Some("io") => false,
+        Some("china") | Some("cn") => true,
+        _ => key
+            .as_deref()
+            .map(|key| key.trim_start().starts_with("sk-cp-"))
+            .unwrap_or(false),
+    };
+
+    if force_china {
         resolved.api_base = MINIMAX_CHINA_API_BASE.to_string();
         resolved.setup_url = MINIMAX_CHINA_SETUP_URL.to_string();
     }

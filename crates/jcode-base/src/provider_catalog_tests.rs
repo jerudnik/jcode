@@ -196,8 +196,9 @@ fn resolved_named_profile_skips_non_chat_models_when_picking_newest_default() {
 #[test]
 fn minimax_token_plan_keys_resolve_to_china_endpoint_without_changing_international_default() {
     let _lock = crate::storage::lock_test_env();
-    let _guard = EnvGuard::save(&["OPENAI_API_KEY"]);
+    let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION"]);
     crate::env::remove_var("OPENAI_API_KEY");
+    crate::env::remove_var("JCODE_MINIMAX_REGION");
 
     let international = resolve_openai_compatible_profile(MINIMAX_PROFILE);
     assert_eq!(international.api_base, "https://api.minimax.io/v1");
@@ -212,6 +213,28 @@ fn minimax_token_plan_keys_resolve_to_china_endpoint_without_changing_internatio
     );
     assert_eq!(china.api_base, MINIMAX_CHINA_API_BASE);
     assert_eq!(china.setup_url, MINIMAX_CHINA_SETUP_URL);
+}
+
+#[test]
+fn minimax_region_override_wins_over_key_prefix() {
+    let _lock = crate::storage::lock_test_env();
+    let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION"]);
+    crate::env::remove_var("OPENAI_API_KEY");
+
+    // `sk-cp-` keys are also issued for the international platform; an explicit
+    // region override must keep the global endpoint instead of the China host.
+    crate::env::set_var("JCODE_MINIMAX_REGION", "international");
+    let intl = resolve_openai_compatible_profile_with_api_key_hint(
+        MINIMAX_PROFILE,
+        Some("sk-cp-test-token"),
+    );
+    assert_eq!(intl.api_base, "https://api.minimax.io/v1");
+
+    // And the override can force the China host for a non-prefixed key too.
+    crate::env::set_var("JCODE_MINIMAX_REGION", "china");
+    let china =
+        resolve_openai_compatible_profile_with_api_key_hint(MINIMAX_PROFILE, Some("plain-token"));
+    assert_eq!(china.api_base, MINIMAX_CHINA_API_BASE);
 }
 
 #[test]
