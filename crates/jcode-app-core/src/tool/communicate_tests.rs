@@ -61,6 +61,38 @@ fn communicate_input_nodes_accept_array_and_double_encoded_string() {
 }
 
 #[test]
+fn coerce_double_encoded_fields_fixes_bools_numbers_and_arrays_only() {
+    let coerced = super::coerce_double_encoded_fields(serde_json::json!({
+        "action": "run_plan",
+        "background": "false",
+        "concurrency_limit": "4",
+        "session_ids": "[\"a\",\"b\"]",
+        "message": "true story about 4 things",
+        "label": "survey-docs"
+    }));
+    assert_eq!(coerced["background"], serde_json::json!(false));
+    assert_eq!(coerced["concurrency_limit"], serde_json::json!(4));
+    assert_eq!(coerced["session_ids"], serde_json::json!(["a", "b"]));
+    // Genuine strings stay strings.
+    assert_eq!(
+        coerced["message"],
+        serde_json::json!("true story about 4 things")
+    );
+    assert_eq!(coerced["label"], serde_json::json!("survey-docs"));
+    assert_eq!(coerced["action"], serde_json::json!("run_plan"));
+
+    let input: super::CommunicateInput =
+        serde_json::from_value(super::coerce_double_encoded_fields(serde_json::json!({
+            "action": "run_plan",
+            "background": "false",
+            "concurrency_limit": "4"
+        })))
+        .expect("coerced input parses");
+    assert_eq!(input.background, Some(false));
+    assert_eq!(input.concurrency_limit, Some(4));
+}
+
+#[test]
 fn task_graph_seed_collision_is_detected_from_server_error() {
     let response = ServerEvent::Error {
         id: 1,
@@ -814,6 +846,13 @@ fn canonical_swarm_action_maps_common_synonyms() {
     assert_eq!(canonical_swarm_action("plan"), "plan_status");
     assert_eq!(canonical_swarm_action("assign"), "assign_task");
     assert_eq!(canonical_swarm_action("kill"), "stop");
+    // seed/graph vocabulary from coordinator prompts maps to task_graph.
+    assert_eq!(canonical_swarm_action("seed_graph"), "task_graph");
+    assert_eq!(canonical_swarm_action("seed"), "task_graph");
+    assert_eq!(canonical_swarm_action("seed_plan"), "task_graph");
+    assert_eq!(canonical_swarm_action("execute_plan"), "run_plan");
+    assert_eq!(canonical_swarm_action("await"), "await_members");
+    assert_eq!(canonical_swarm_action("wait"), "await_members");
 }
 
 #[test]
