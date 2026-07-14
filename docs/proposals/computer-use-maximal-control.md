@@ -1,4 +1,4 @@
-# Roadmap: maximal macOS control for the `computer` tool
+# Maximal macOS control for the `computer` tool
 
 Goal: give the agent as much reliable control over macOS as the platform allows,
 including **background control that does not disturb what the user is looking at**.

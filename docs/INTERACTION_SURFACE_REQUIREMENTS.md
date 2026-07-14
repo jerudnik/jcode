@@ -7,7 +7,7 @@ Entry point: [`INTERACTION_SURFACES.md`](./INTERACTION_SURFACES.md)
 Companions:
 
 - Design language: [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md)
-- Surface workspace substrate: [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md)
+- Surface workspace substrate: [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](~/notes/projects/jcode/proposals/surface-workspace-substrate-plan.md)
 
 ## Scope
 
@@ -319,7 +319,7 @@ Rules:
 
 ## Future implementation prompts
 
-Use [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](./INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md) for the next full implementation session. The smaller prompts below are slice-specific shortcuts.
+Use [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](~/notes/projects/jcode/proposals/interaction-surface-implementation-prompt.md) for the next full implementation session. The smaller prompts below are slice-specific shortcuts.
 
 ### Key2 slice
 

@@ -2,7 +2,7 @@
 
 Status: Implementation guide, 2026-06-30
 
-Start here for visual and interaction decisions. Use [`INTERACTION_SURFACES.md`](./INTERACTION_SURFACES.md) as the project map, [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) for implementation work, and [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](./SURFACE_WORKSPACE_SUBSTRATE_PLAN.md) for cards/docs/annotations storage.
+Start here for visual and interaction decisions. Use [`INTERACTION_SURFACES.md`](./INTERACTION_SURFACES.md) as the project map, [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) for implementation work, and [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](~/notes/projects/jcode/proposals/surface-workspace-substrate-plan.md) for cards/docs/annotations storage.
 
 ## Design target
 

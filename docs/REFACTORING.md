@@ -1,4 +1,4 @@
-# Refactoring Roadmap
+# Refactoring Architecture Notes
 
 This document defines the safe, incremental path for refactoring jcode while preserving behavior.
 
