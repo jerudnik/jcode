@@ -447,6 +447,7 @@ impl Tool for DiscoverToolsTool {
 /// discovery endpoint. Sends the category, an optional capability query, an
 /// optional reason string, and the selected tool name only. Hard fails on
 /// any error: no cache, no fallback, no retry.
+#[allow(clippy::too_many_arguments)] // Parameters map directly to discovery endpoint telemetry/query fields.
 async fn fetch_listing(
     client: &reqwest::Client,
     endpoint: &str,
