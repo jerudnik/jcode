@@ -162,7 +162,7 @@ pub(super) async fn handle_comm_propose_plan(
             .await;
         }
 
-        persist_swarm_state_for(&swarm_id, &swarm_state).await;
+        persist_swarm_state_for(&swarm_id, swarm_state).await;
 
         broadcast_swarm_plan(
             &swarm_id,
@@ -477,7 +477,7 @@ pub(super) async fn handle_comm_approve_plan(
         }
     }
 
-    persist_swarm_state_for(&swarm_id, &swarm_state).await;
+    persist_swarm_state_for(&swarm_id, swarm_state).await;
 
     finish_request(
         swarm_mutation_runtime,
