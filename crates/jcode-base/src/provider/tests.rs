@@ -1080,6 +1080,9 @@ fn test_multi_provider_with_cursor() -> MultiProvider {
 }
 
 #[test]
+#[ignore = "upstream-new test assumes upstream's provider_for_model selection; the fork's \
+resolve_current_model_spec routing picks the registered OpenRouter stub here. \
+fork_for_new_session itself is exercised by e2e. See docs/fork-sync-policy.md"]
 fn new_session_fork_reloads_changed_config_provider_and_model() {
     with_clean_provider_test_env(|| {
         let runtime = enter_test_runtime();
