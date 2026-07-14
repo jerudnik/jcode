@@ -454,7 +454,7 @@ mod state;
 use self::state::latest_peer_touches;
 pub use self::state::{
     FileAccess, PendingPlanProposal, PlanProposalCache, SessionControlHandle, SwarmEvent,
-    SwarmEventType, SwarmMember, SwarmState,
+    SwarmEventState, SwarmEventType, SwarmMember, SwarmState,
 };
 use self::state::{
     SessionInterruptQueues, fanout_live_client_event, fanout_session_event,

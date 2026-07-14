@@ -3,18 +3,19 @@ use super::swarm_mutation_state::{
     request_key,
 };
 use super::{
-    PendingPlanProposal, PlanProposalCache, SessionInterruptQueues, SwarmEvent, SwarmEventType,
-    SwarmMember, SwarmState, VersionedPlan, broadcast_swarm_plan, persist_swarm_state_for,
-    queue_soft_interrupt_for_session, record_swarm_event, summarize_plan_items,
+    PendingPlanProposal, PlanProposalCache, SessionInterruptQueues, SwarmEventState,
+    SwarmEventType, SwarmMember, SwarmState, VersionedPlan, broadcast_swarm_plan,
+    persist_swarm_state_for, queue_soft_interrupt_for_session, record_swarm_event,
+    summarize_plan_items,
 };
 use crate::agent::Agent;
 use crate::plan::PlanItem;
 use crate::protocol::{NotificationType, ServerEvent};
 use jcode_agent_runtime::SoftInterruptSource;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 
@@ -45,18 +46,17 @@ pub(super) async fn handle_comm_propose_plan(
     req_session_id: String,
     items: Vec<PlanItem>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
-    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
-    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_state: &SwarmState,
     plan_proposals: &PlanProposalCache,
-    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
-    swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     sessions: &SessionAgents,
     soft_interrupt_queues: &SessionInterruptQueues,
-    event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
-    event_counter: &Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    swarm_events: &SwarmEventState,
     _swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
+    let swarm_members = &swarm_state.members;
+    let swarms_by_id = &swarm_state.swarms_by_id;
+    let swarm_plans = &swarm_state.plans;
+    let swarm_coordinators = &swarm_state.coordinators;
     let swarm_id = {
         let members = swarm_members.read().await;
         members
@@ -162,12 +162,6 @@ pub(super) async fn handle_comm_propose_plan(
             .await;
         }
 
-        let swarm_state = SwarmState {
-            members: Arc::clone(swarm_members),
-            swarms_by_id: Arc::clone(swarms_by_id),
-            plans: Arc::clone(swarm_plans),
-            coordinators: Arc::clone(swarm_coordinators),
-        };
         persist_swarm_state_for(&swarm_id, &swarm_state).await;
 
         broadcast_swarm_plan(
@@ -179,9 +173,9 @@ pub(super) async fn handle_comm_propose_plan(
         )
         .await;
         record_swarm_event(
-            event_history,
-            event_counter,
-            swarm_event_tx,
+            &swarm_events.history,
+            &swarm_events.counter,
+            &swarm_events.tx,
             req_session_id.clone(),
             from_name.clone(),
             Some(swarm_id.clone()),
@@ -221,9 +215,9 @@ pub(super) async fn handle_comm_propose_plan(
         );
     }
     record_swarm_event(
-        event_history,
-        event_counter,
-        swarm_event_tx,
+        &swarm_events.history,
+        &swarm_events.counter,
+        &swarm_events.tx,
         req_session_id.clone(),
         from_name.clone(),
         Some(swarm_id.clone()),
@@ -307,18 +301,17 @@ pub(super) async fn handle_comm_approve_plan(
     req_session_id: String,
     proposer_session: String,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
-    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
-    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+    swarm_state: &SwarmState,
     plan_proposals: &PlanProposalCache,
-    swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
-    swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     sessions: &SessionAgents,
     soft_interrupt_queues: &SessionInterruptQueues,
-    event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
-    event_counter: &Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    swarm_events: &SwarmEventState,
     swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
+    let swarm_members = &swarm_state.members;
+    let swarms_by_id = &swarm_state.swarms_by_id;
+    let swarm_plans = &swarm_state.plans;
+    let swarm_coordinators = &swarm_state.coordinators;
     let swarm_id = match require_coordinator_swarm(
         id,
         &req_session_id,
@@ -434,9 +427,9 @@ pub(super) async fn handle_comm_approve_plan(
     )
     .await;
     record_swarm_event(
-        event_history,
-        event_counter,
-        swarm_event_tx,
+        &swarm_events.history,
+        &swarm_events.counter,
+        &swarm_events.tx,
         req_session_id.clone(),
         None,
         Some(swarm_id.clone()),
@@ -484,12 +477,6 @@ pub(super) async fn handle_comm_approve_plan(
         }
     }
 
-    let swarm_state = SwarmState {
-        members: Arc::clone(swarm_members),
-        swarms_by_id: Arc::clone(swarms_by_id),
-        plans: Arc::clone(swarm_plans),
-        coordinators: Arc::clone(swarm_coordinators),
-    };
     persist_swarm_state_for(&swarm_id, &swarm_state).await;
 
     finish_request(
@@ -510,16 +497,15 @@ pub(super) async fn handle_comm_reject_plan(
     proposer_session: String,
     reason: Option<String>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
-    swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    swarm_state: &SwarmState,
     plan_proposals: &PlanProposalCache,
-    swarm_coordinators: &Arc<RwLock<HashMap<String, String>>>,
     sessions: &SessionAgents,
     soft_interrupt_queues: &SessionInterruptQueues,
-    event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
-    event_counter: &Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    swarm_events: &SwarmEventState,
     swarm_mutation_runtime: &SwarmMutationRuntime,
 ) {
+    let swarm_members = &swarm_state.members;
+    let swarm_coordinators = &swarm_state.coordinators;
     let swarm_id = match require_coordinator_swarm(
         id,
         &req_session_id,
@@ -619,9 +605,9 @@ pub(super) async fn handle_comm_reject_plan(
         .await;
     }
     record_swarm_event(
-        event_history,
-        event_counter,
-        swarm_event_tx,
+        &swarm_events.history,
+        &swarm_events.counter,
+        &swarm_events.tx,
         req_session_id.clone(),
         coordinator_name,
         Some(swarm_id.clone()),

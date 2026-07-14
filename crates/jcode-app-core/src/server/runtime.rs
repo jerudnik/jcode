@@ -4,7 +4,7 @@ use super::debug_jobs::DebugJob;
 use super::util::get_shared_mcp_pool;
 use super::{
     AwaitMembersRuntime, FileTouchService, PlanProposalCache, ServerIdentity,
-    SessionInterruptQueues, SwarmEvent, SwarmMutationRuntime, SwarmState,
+    SessionInterruptQueues, SwarmEvent, SwarmEventState, SwarmMutationRuntime, SwarmState,
 };
 use crate::agent::Agent;
 use crate::ambient_runner::AmbientRunnerHandle;
@@ -343,17 +343,16 @@ impl ServerRuntime {
                     Arc::clone(&self.session_id),
                     Arc::clone(&self.client_count),
                     Arc::clone(&self.client_connections),
-                    Arc::clone(&self.swarm_state.members),
-                    Arc::clone(&self.swarm_state.swarms_by_id),
+                    self.swarm_state.clone(),
                     Arc::clone(&self.plan_proposals),
-                    Arc::clone(&self.swarm_state.plans),
-                    Arc::clone(&self.swarm_state.coordinators),
                     self.file_touch.clone(),
                     Arc::clone(&self.client_debug_state),
                     self.client_debug_response_tx.clone(),
-                    Arc::clone(&self.event_history),
-                    Arc::clone(&self.event_counter),
-                    self.swarm_event_tx.clone(),
+                    SwarmEventState {
+                        history: Arc::clone(&self.event_history),
+                        counter: Arc::clone(&self.event_counter),
+                        tx: self.swarm_event_tx.clone(),
+                    },
                     self.server_name.clone(),
                     self.server_icon.clone(),
                     mcp_pool,
