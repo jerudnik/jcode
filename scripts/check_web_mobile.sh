@@ -12,7 +12,7 @@ WORKSPACE_STORE_TEST="$ROOT/web/jcode-mobile/surface_workspace_store.test.mjs"
 RENDERED_SMOKE="$ROOT/scripts/check_web_mobile_rendered.mjs"
 INDEX="$ROOT/web/jcode-mobile/index.html"
 STYLE="$ROOT/web/jcode-mobile/style.css"
-DOC="$ROOT/docs/WEB_MOBILE_MVP.md"
+DOC="$HOME/notes/projects/jcode/proposals/mobile-interface/web-mobile-mvp.md"
 
 for file in "$APP" "$STATE" "$STATE_TEST" "$COMMANDS" "$COMMANDS_TEST" "$WORKSPACE_STORE" "$WORKSPACE_STORE_TEST" "$RENDERED_SMOKE" "$INDEX" "$STYLE" "$DOC"; do
   [[ -s "$file" ]] || { echo "missing or empty: $file" >&2; exit 1; }
