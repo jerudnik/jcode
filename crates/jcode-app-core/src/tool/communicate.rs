@@ -1962,6 +1962,43 @@ impl CommunicateTool {
     }
 }
 
+/// Coerce top-level string fields that should be non-string JSON values
+/// ("true", "4", "[..]", "{..}") back to their parsed forms. Only fields whose
+/// string content parses as a JSON bool/number/array/object are rewritten;
+/// genuine string fields (messages, ids, labels) are left untouched because
+/// bare words are not valid JSON. Used as a one-shot retry when strict
+/// deserialization of a swarm tool call fails.
+fn coerce_double_encoded_fields(input: Value) -> Value {
+    let Value::Object(map) = input else {
+        return input;
+    };
+    let coerced = map
+        .into_iter()
+        .map(|(key, value)| {
+            let new_value = match &value {
+                Value::String(s) => {
+                    let trimmed = s.trim();
+                    let looks_structured = matches!(
+                        trimmed.chars().next(),
+                        Some('[' | '{' | 't' | 'f' | 'n' | '-' | '0'..='9')
+                    );
+                    if looks_structured {
+                        match serde_json::from_str::<Value>(trimmed) {
+                            Ok(parsed) if !parsed.is_string() => parsed,
+                            _ => value,
+                        }
+                    } else {
+                        value
+                    }
+                }
+                _ => value,
+            };
+            (key, new_value)
+        })
+        .collect();
+    Value::Object(coerced)
+}
+
 /// Lenient deserializer for `CommunicateInput::nodes`: accepts a JSON array of
 /// node specs, a JSON-encoded string containing that array, or null/absent.
 /// Harnesses and models frequently double-encode structured tool params as
@@ -2127,6 +2164,11 @@ fn canonical_swarm_action(action: &str) -> &str {
         "swarms" | "fleet" | "fleet_status" | "list_fleet" => "list_swarms",
         "models" | "model_list" | "list_model" | "list_providers" | "list_routes" => "list_models",
         "plan" | "status_plan" => "plan_status",
+        "seed_graph" | "seed" | "graph" | "seed_plan" | "seed_tasks" | "create_graph" => {
+            "task_graph"
+        }
+        "execute_plan" | "start_plan" | "drive_plan" => "run_plan",
+        "await" | "wait" | "wait_members" | "await_all" => "await_members",
         "assign" => "assign_task",
         "kill" | "terminate" => "stop",
         _ => action,
@@ -2376,7 +2418,14 @@ impl Tool for CommunicateTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        let mut params: CommunicateInput = serde_json::from_value(input)?;
+        let mut params: CommunicateInput = match serde_json::from_value(input.clone()) {
+            Ok(params) => params,
+            // Harnesses/models frequently double-encode non-string params as
+            // JSON strings ("true", "4", "[...]"). Retry once with those
+            // coerced back to their JSON values before failing.
+            Err(first_err) => serde_json::from_value(coerce_double_encoded_fields(input))
+                .map_err(|_| first_err)?,
+        };
 
         // `to_session` and `target_session` both name a single session id. Historically
         // different actions required different field names (e.g. `dm` wanted `to_session`
@@ -3360,7 +3409,8 @@ impl Tool for CommunicateTool {
             _ => Err(anyhow::anyhow!(
                 "Unknown action '{}'. Valid actions: message, broadcast, dm, list, \
                  propose_plan, approve_plan, reject_plan, spawn, stop, assign_role, status, report, plan_status, summary, read_context, \
-                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, await_members.",
+                 resync_plan, assign_task, assign_next, fill_slots, run_plan, cleanup, start, start_task, wake, resume, retry, reassign, replace, salvage, await_members, \
+                 task_graph (seed the task DAG), expand_node, complete_node, inject_gap, list_models, list_swarms.",
                 params.action
             )),
         }
