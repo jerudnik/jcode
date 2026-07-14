@@ -1,4 +1,4 @@
-use crate::id::{extract_session_name, new_id, new_memorable_session_id};
+use crate::id::{extract_session_name, new_id, new_memorable_session_id_avoiding};
 use crate::message::{ContentBlock, Message, Role};
 pub use crate::storage::{
     SessionCounts, SessionPresence, active_session_ids, find_active_session_id_by_pid,
@@ -781,7 +781,14 @@ impl Session {
 
     pub fn create(parent_id: Option<String>, title: Option<String>) -> Self {
         let now = Utc::now();
-        let (id, short_name) = new_memorable_session_id();
+        // Keep memorable identities distinct across all currently active
+        // sessions. This naturally covers swarm members and survives a server
+        // reload because active PID markers retain their encoded short names.
+        let used_names = active_session_ids()
+            .into_iter()
+            .filter_map(|session_id| extract_session_name(&session_id).map(str::to_string))
+            .collect::<HashSet<_>>();
+        let (id, short_name) = new_memorable_session_id_avoiding(&used_names);
         let is_debug = default_is_test_session();
         let mut session = Self {
             id,
@@ -907,13 +914,11 @@ impl Session {
             return false;
         }
 
-        // Capture the cwd at the moment the immutable session-context message is
-        // first inserted. A Session may be constructed before CLI startup, TUI
-        // launch, or tests finish changing the process cwd; using the older
-        // constructor snapshot here can produce a stale "Working directory" and
-        // git status in the model-visible context.
-        if let Some(current_dir) = current_working_dir_string() {
-            self.working_dir = Some(current_dir);
+        // Preserve an explicitly bound session directory. Shared-server clients
+        // provide their cwd before this message is created, and replacing it with
+        // the daemon process cwd would leak the directory that launched the server.
+        if self.working_dir.is_none() {
+            self.working_dir = current_working_dir_string();
         }
 
         let context =

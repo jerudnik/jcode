@@ -511,7 +511,9 @@ fn test_observe_marks_large_tool_results() {
         id: "tool_big".to_string(),
         name: "read".to_string(),
         input: serde_json::json!({"file_path": "large.txt"}),
-        intent: None, thought_signature: None, };
+        intent: None,
+        thought_signature: None,
+    };
     let output = "x".repeat(48_000);
     app.observe_tool_result(&tool_call, &output, false, Some("read"));
 
@@ -537,7 +539,9 @@ fn test_observe_repaint_does_not_leave_severity_badge_artifact() {
         id: "tool_big".to_string(),
         name: "read".to_string(),
         input: serde_json::json!({"file_path": "large.txt"}),
-        intent: None, thought_signature: None, };
+        intent: None,
+        thought_signature: None,
+    };
 
     let large_output = "x".repeat(48_000);
     app.observe_tool_result(&tool_call, &large_output, false, Some("read"));
@@ -766,6 +770,111 @@ fn test_handle_server_event_notification_background_task_scope_uses_card_renderi
         "background-task notifications should not render as generic swarm items:\n{}",
         text
     );
+}
+
+#[test]
+fn test_swarm_completion_notification_inserts_agent_snapshot_without_report_prose() {
+    let _render_lock = scroll_render_test_lock();
+    let mut app = create_test_app();
+    let session_id = "session_cow_snapshot";
+    app.remote_swarm_members = vec![crate::protocol::SwarmMemberStatus {
+        session_id: session_id.to_string(),
+        friendly_name: Some("cow".to_string()),
+        status: "completed".to_string(),
+        detail: None,
+        task_label: Some("card demo".to_string()),
+        role: Some("agent".to_string()),
+        is_headless: Some(true),
+        live_attachments: Some(0),
+        status_age_secs: Some(0),
+        output_tail: None,
+        report_back_to_session_id: Some("coordinator".to_string()),
+        todo_progress: Some((3, 3)),
+        todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime {
+            model: Some("openai:gpt-5.6-sol".to_string()),
+            provider: Some("OpenAI".to_string()),
+            auth_method: Some("OAuth".to_string()),
+            effort: Some("high".to_string()),
+            elapsed_secs: Some(35),
+        },
+        subagent_type: None,
+        initial_prompt_delivered: None,
+    }];
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.handle_server_event(
+        crate::protocol::ServerEvent::Notification {
+            from_session: session_id.to_string(),
+            from_name: Some("cow".to_string()),
+            notification_type: crate::protocol::NotificationType::Message {
+                scope: Some("swarm".to_string()),
+                tldr: Some("Demo completed".to_string()),
+            },
+            message: "Demo completed; README first heading is jcode.".to_string(),
+        },
+        &mut remote,
+    );
+
+    let last = app
+        .display_messages()
+        .last()
+        .expect("missing completed agent snapshot");
+    assert_eq!(
+        last.title.as_deref(),
+        Some(crate::tui::ui::SWARM_AGENT_SNAPSHOT_TITLE)
+    );
+    assert!(!last.content.contains("Demo completed"));
+
+    let rendered =
+        crate::tui::ui::render_swarm_message(last, 100, crate::config::DiffDisplayMode::Off)
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+    assert!(
+        rendered.contains("🐄 ✓ card demo · 00:35 · GPT-5.6 · OpenAI OAuth · high"),
+        "rendered={rendered}"
+    );
+    assert!(!rendered.contains("README first heading"));
+}
+
+#[test]
+fn test_swarm_await_notification_inserts_only_compact_summary() {
+    let mut app = create_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
+    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+    app.handle_server_event(
+        crate::protocol::ServerEvent::Notification {
+            from_session: "swarm".to_string(),
+            from_name: Some("swarm await".to_string()),
+            notification_type: crate::protocol::NotificationType::Message {
+                scope: Some("swarm_await".to_string()),
+                tldr: None,
+            },
+            message: "🐝 **Swarm await finished**\n\nAll members done. All 1 members are done: elephant\n\nMember statuses:\n  ✓ elephant (completed)\n\nCompletion reports:\n\n--- elephant (completed) ---\nCompact card demo finished.\n\nValidation:\nParser tests pass."
+                .to_string(),
+        },
+        &mut remote,
+    );
+
+    let last = app
+        .display_messages()
+        .last()
+        .expect("missing compact swarm await summary");
+    assert_eq!(last.title.as_deref(), Some("🐝 Swarm await"));
+    assert_eq!(last.content, "✓ 1/1");
+    assert!(!last.content.contains("elephant"));
+    assert!(!last.content.contains("Validation"));
 }
 
 #[test]

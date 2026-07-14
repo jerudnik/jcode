@@ -122,6 +122,8 @@ async fn test_socket_model_cycle_supported_models() -> Result<()> {
     let server_handle = tokio::spawn(async move { server_instance.run().await });
 
     let mut client = wait_for_server_client(&socket_path).await?;
+    let sub_hs = client.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client, sub_hs).await?;
     let request_id = client.cycle_model(1).await?;
 
     let mut saw_model_changed = false;
@@ -206,6 +208,8 @@ async fn test_resume_restores_model_and_tool_history() -> Result<()> {
     let server_handle = tokio::spawn(async move { server_instance.run().await });
 
     let mut client = wait_for_server_client(&socket_path).await?;
+    let sub_hs = client.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client, sub_hs).await?;
     let resume_id = client.resume_session(&session.id).await?;
 
     let mut history_event = None;
@@ -713,6 +717,8 @@ async fn test_model_switch_resets_provider_session() -> Result<()> {
     let server_handle = tokio::spawn(async move { server_instance.run().await });
 
     let mut client = wait_for_server_client(&socket_path).await?;
+    let sub_hs = client.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client, sub_hs).await?;
 
     let msg_id = client.send_message("hello").await?;
     let mut saw_done1 = false;
@@ -819,7 +825,11 @@ async fn test_model_switch_is_per_session() -> Result<()> {
     let server_handle = tokio::spawn(async move { server_instance.run().await });
 
     let mut client1 = wait_for_server_client(&socket_path).await?;
+    let sub1 = client1.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client1, sub1).await?;
     let mut client2 = server::Client::connect_with_path(socket_path.clone()).await?;
+    let sub2 = client2.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client2, sub2).await?;
 
     // Give server time to set up both client sessions
     tokio::time::sleep(Duration::from_millis(100)).await;

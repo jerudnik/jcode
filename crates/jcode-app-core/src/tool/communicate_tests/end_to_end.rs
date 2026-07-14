@@ -65,8 +65,10 @@ async fn communicate_list_and_await_members_work_end_to_end() {
         .expect("peer should be listed while running");
     assert_eq!(running_peer.status.as_deref(), Some("running"));
 
-    let await_output = tool
-        .execute(
+    // Legacy background=false input is upgraded to a durable asynchronous wait.
+    let await_output = tokio::time::timeout(
+        Duration::from_secs(5),
+        tool.execute(
             json!({
                 "action": "await_members",
                 "session_ids": [peer_session.clone()],
@@ -74,23 +76,42 @@ async fn communicate_list_and_await_members_work_end_to_end() {
                 "background": false
             }),
             ctx.clone(),
-        )
-        .await
-        .expect("await_members should complete");
+        ),
+    )
+    .await
+    .expect("legacy blocking request should return promptly")
+    .expect("await_members should start");
     assert!(
-        await_output.output.contains("All members done."),
-        "expected completion output, got: {}",
-        await_output.output
-    );
-    assert!(
-        await_output.output.contains("(ready)"),
-        "expected await_members to treat ready as done, got: {}",
+        await_output.output.contains("no longer supported")
+            && await_output.output.contains("asynchronously"),
+        "expected compatibility hand-off output, got: {}",
         await_output.output
     );
 
     peer.wait_for_done(peer_message_id)
         .await
         .expect("peer message should finish");
+
+    let event = watcher
+        .read_until(Duration::from_secs(5), |event| {
+            matches!(
+                event,
+                ServerEvent::Notification {
+                    notification_type: NotificationType::Message { scope: Some(scope), .. },
+                    ..
+                } if scope == "swarm_await"
+            )
+        })
+        .await
+        .expect("upgraded asynchronous wait should notify on completion");
+    let ServerEvent::Notification { message, .. } = event else {
+        panic!("expected swarm_await notification, got: {event:?}");
+    };
+    assert!(
+        message.contains("(ready)"),
+        "expected await_members to treat ready as done, got: {}",
+        message
+    );
 
     let ready_members =
         wait_for_member_status(&mut watcher, &watcher_session, &peer_session, "ready")
@@ -392,6 +413,7 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
         .execute(
             json!({
                 "action": "spawn",
+                "label": "report-back worker",
                 "prompt": "Reply with exactly AUTH_TEST_OK and nothing else."
             }),
             ctx,
@@ -473,6 +495,7 @@ async fn communicate_spawn_with_prompt_and_summary_work_end_to_end() {
         .execute(
             json!({
                 "action": "spawn",
+                "label": "summary worker",
                 "prompt": "Reply with a short acknowledgement."
             }),
             ctx.clone(),
@@ -563,10 +586,7 @@ async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
     let mut peer = RawClient::connect(&socket_path)
         .await
         .expect("peer should connect");
-    sender
-        .subscribe(&repo_dir)
-        .await
-        .expect("sender subscribe");
+    sender.subscribe(&repo_dir).await.expect("sender subscribe");
     peer.subscribe(&repo_dir).await.expect("peer subscribe");
 
     let sender_session = sender.session_id().await.expect("sender session id");

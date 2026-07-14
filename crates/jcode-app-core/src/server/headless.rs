@@ -93,7 +93,14 @@ pub(super) async fn create_headless_session(
         )
         .await;
 
-    let mut new_agent = Agent::new(Arc::clone(&provider), registry);
+    let working_dir_string = working_dir
+        .as_ref()
+        .map(|dir| dir.to_string_lossy().into_owned());
+    let mut new_agent = Agent::new_with_initial_working_dir(
+        Arc::clone(&provider),
+        registry,
+        working_dir_string.as_deref(),
+    );
     new_agent.set_memory_enabled(memory_enabled);
     // Inline swarm mode renders a live gallery of worker viewports in the
     // coordinator TUI; enable the per-agent output tap so this worker streams a
@@ -139,21 +146,7 @@ pub(super) async fn create_headless_session(
         ));
     }
 
-    if let Some(ref dir) = working_dir
-        && let Some(path) = dir.to_str()
-    {
-        new_agent.set_working_dir(path);
-    }
-
     new_agent.set_debug(true);
-
-    if let Some(ref dir) = working_dir {
-        if let Some(dir_str) = dir.to_str() {
-            new_agent.set_working_dir(dir_str);
-        } else {
-            new_agent.set_working_dir(&dir.display().to_string());
-        }
-    }
 
     if selfdev_requested {
         new_agent.set_canary("self-dev");
@@ -171,7 +164,7 @@ pub(super) async fn create_headless_session(
         let mut sessions_guard = sessions.write().await;
         sessions_guard.insert(client_session_id.clone(), Arc::clone(&agent));
     }
-    {
+    let (provider_model, provider_name, auth_method, effort) = {
         let agent_guard = agent.lock().await;
         register_session_interrupt_queue(
             soft_interrupt_queues,
@@ -180,7 +173,29 @@ pub(super) async fn create_headless_session(
         )
         .await;
         register_background_tool_signal(&client_session_id, agent_guard.background_tool_signal());
-    }
+        let route_api_method = agent_guard.session_route_api_method();
+        let auth_method = agent_guard
+            .active_resolved_credential()
+            .map(|credential| credential.auth_method_label().to_string())
+            .or_else(|| {
+                route_api_method.as_deref().and_then(|route| {
+                    let route = route.to_ascii_lowercase();
+                    if route.contains("oauth") {
+                        Some("OAuth".to_string())
+                    } else if route.contains("api") || route.contains("compatible") {
+                        Some("API key".to_string())
+                    } else {
+                        None
+                    }
+                })
+            });
+        (
+            agent_guard.provider_model(),
+            agent_guard.provider_name(),
+            auth_method,
+            crate::session_effort::session_effort(&client_session_id),
+        )
+    };
 
     let swarm_id = if swarm_enabled {
         swarm_id_for_dir(working_dir.clone())
@@ -225,6 +240,13 @@ pub(super) async fn create_headless_session(
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime {
+                    model: Some(provider_model),
+                    provider: Some(provider_name),
+                    auth_method,
+                    effort,
+                    elapsed_secs: Some(0),
+                },
             },
         );
     }

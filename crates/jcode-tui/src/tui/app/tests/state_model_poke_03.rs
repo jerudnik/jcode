@@ -37,8 +37,8 @@ fn test_model_picker_preview_arrow_keys_navigate() {
     assert!(picker.preview, "should remain in preview mode");
     assert_eq!(picker.selected, initial_selected);
 
-    // Input should be preserved
-    assert_eq!(app.input(), "/model");
+    // Opening the preview should place the cursor in the model filter argument.
+    assert_eq!(app.input(), "/model ");
 }
 
 #[test]
@@ -1107,12 +1107,14 @@ fn test_model_picker_state_space_preserves_provider_labels_after_route_hydration
         );
     }
 
+    // Models with reasoning-effort support expand into effort rows (issue
+    // #458); the hydrated route must be preserved on each variant.
     assert_eq!(
-        routes_by_model.get("gpt-5.5"),
+        routes_by_model.get("gpt-5.5 (high)"),
         Some(&("OpenAI".to_string(), "openai-oauth".to_string()))
     );
     assert_eq!(
-        routes_by_model.get("claude-opus-4-6"),
+        routes_by_model.get("claude-opus-4-6 (high)"),
         Some(&("Anthropic".to_string(), "claude-oauth".to_string()))
     );
     assert_eq!(
@@ -1120,7 +1122,7 @@ fn test_model_picker_state_space_preserves_provider_labels_after_route_hydration
         Some(&("Chutes".to_string(), "openai-compatible:chutes".to_string()))
     );
     assert_eq!(
-        routes_by_model.get("deepseek/deepseek-v4-pro"),
+        routes_by_model.get("deepseek/deepseek-v4-pro (high)"),
         Some(&("auto".to_string(), "openrouter".to_string()))
     );
 
@@ -1243,6 +1245,83 @@ fn test_login_completed_spawns_auth_refresh_when_runtime_is_available() {
         );
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[test]
+fn test_model_picker_waits_for_async_post_login_catalog_activation() {
+    ensure_test_jcode_home_if_unset();
+    clear_persisted_test_ui_state();
+    crate::tui::ui::clear_test_render_state_for_tests();
+
+    let logged_in = StdArc::new(StdMutex::new(false));
+    let provider: Arc<dyn Provider> = Arc::new(AuthRefreshingMockProvider {
+        logged_in: StdArc::clone(&logged_in),
+    });
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
+    let mut app = App::new_for_test_harness(provider, registry);
+    let mut bus_rx = crate::bus::Bus::global().subscribe();
+
+    {
+        let _guard = rt.enter();
+        app.handle_login_completed(crate::bus::LoginCompleted {
+            provider: "auto-import".to_string(),
+            success: true,
+            message: "Imported existing logins".to_string(),
+        });
+        app.open_model_picker();
+    }
+
+    let picker = app
+        .inline_interactive_state
+        .as_ref()
+        .expect("loading model picker should be open");
+    assert_eq!(picker.entries.len(), 1);
+    assert!(
+        picker.entries[0].options[0]
+            .detail
+            .contains("updating model list")
+    );
+    assert!(
+        !picker.entries.iter().any(|entry| entry.name == "gpt-5.4"),
+        "the stale pre-import catalog must not be presented as ready"
+    );
+
+    let ready = rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = bus_rx.recv().await.expect("auth catalog event");
+                if matches!(event, crate::bus::BusEvent::AuthCatalogRefreshReady) {
+                    break event;
+                }
+            }
+        })
+        .await
+        .expect("post-login activation should finish")
+    });
+    assert!(crate::tui::app::local::handle_bus_event(
+        &mut app,
+        Ok(ready)
+    ));
+    assert!(*logged_in.lock().unwrap());
+    wait_for_model_picker_load(&mut app);
+
+    let picker = app
+        .inline_interactive_state
+        .as_ref()
+        .expect("model picker should refresh in place");
+    assert!(
+        picker
+            .entries
+            .iter()
+            .any(|entry| entry.name == "claude-opus-4.6")
+    );
+    assert!(
+        picker
+            .entries
+            .iter()
+            .any(|entry| entry.name == "grok-code-fast-1")
+    );
 }
 
 #[test]
@@ -2244,36 +2323,75 @@ fn test_finish_turn_auto_poke_queues_confidence_summary_when_todos_done() {
         app.is_processing = true;
         super::local::finish_turn(&mut app);
 
-        assert!(!app.auto_poke_incomplete_todos);
+        assert!(app.auto_poke_incomplete_todos);
         assert!(app.pending_queued_dispatch);
         assert!(app.queued_messages().is_empty());
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
         let summary = &app.hidden_queued_system_messages[0];
         assert!(super::commands::is_poke_message(summary));
         assert!(super::commands::is_todo_confidence_summary_message(summary));
-        assert!(summary.starts_with("All todos are done. Todo confidence summary:"));
-        assert!(summary.contains("\n- Completed todos: 2."));
-        assert!(summary.contains("\n- Weighted completion confidence: 86%."));
-        assert!(summary.contains("\n- Confidence threshold: 90%."));
-        assert!(summary.contains("\n- Weighted planning confidence: 78%."));
-        assert!(summary.contains("\n- Lowest completed todo confidence: 80%."));
+        assert_eq!(
+            summary,
+            crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE
+        );
+        assert!(!summary.chars().any(|ch| ch.is_ascii_digit()));
+        assert!(summary.contains("completion confidence"));
+        assert!(!summary.to_ascii_lowercase().contains("gate"));
+        assert!(!summary.to_ascii_lowercase().contains("threshold"));
         assert!(!summary.contains("Finish risky provider path"));
-        assert!(!summary.contains("Confidence meets the threshold"));
-        assert!(summary.contains("1 completed todo is below the 90% confidence threshold"));
-        // Reference the shared prompt constant so this test cannot drift when
-        // the guidance wording changes.
-        assert!(summary.contains(&format!(
-            "\n- {}",
-            crate::prompt::TODO_CONFIDENCE_NEEDS_VALIDATION_PROMPT.trim()
-        )));
         assert!(
             app.display_messages()
                 .iter()
-                .any(|msg| msg
-                    .content
-                    .contains("Todos complete. Auto-poke finished. Cumulative confidence: 86%."))
+                .any(|msg| msg.content.contains(
+                    "Todo completion gate: completion confidence needs stronger validation."
+                ))
         );
+
+        // Dispatching the follow-up does not disarm the gate. If the model
+        // finishes another turn without improving completion confidence, the
+        // same validation follow-up is queued again.
+        app.hidden_queued_system_messages.clear();
+        app.pending_queued_dispatch = false;
+        app.is_processing = true;
+        super::local::finish_turn(&mut app);
+        assert!(app.auto_poke_incomplete_todos);
+        assert!(app.pending_queued_dispatch);
+        assert_eq!(app.hidden_queued_system_messages.len(), 1);
+
+        // Once the model records sufficient completion confidence through the
+        // todo tool, the next completion check passes and disarms auto-poke.
+        let mut validated = crate::todo::load_todos(&app.session.id).expect("load todos");
+        for todo in &mut validated {
+            todo.completion_confidence = Some(100);
+        }
+        crate::todo::save_todos(&app.session.id, &validated).expect("save validated todos");
+        app.hidden_queued_system_messages.clear();
+        app.pending_queued_dispatch = false;
+        app.is_processing = true;
+        super::local::finish_turn(&mut app);
+        assert!(!app.auto_poke_incomplete_todos);
+        assert!(!app.pending_queued_dispatch);
+        assert!(app.hidden_queued_system_messages.is_empty());
+        assert!(app.display_messages().iter().any(|msg| {
+            msg.content
+                .contains("Todos complete. Completion confidence: 100%.")
+        }));
     });
+}
+
+#[test]
+fn test_todo_completion_gate_ignores_precompletion_confidence() {
+    let summary = super::commands::todo_confidence_summary(&[crate::todo::TodoItem {
+        status: "completed".to_string(),
+        priority: "high".to_string(),
+        confidence: Some(0),
+        completion_confidence: Some(100),
+        confidence_history: vec![0, 100],
+        ..Default::default()
+    }]);
+
+    assert_eq!(summary.completion_average, Some(100));
+    assert!(!summary.needs_more_work);
 }
 
 #[test]

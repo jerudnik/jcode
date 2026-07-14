@@ -553,6 +553,34 @@ pub struct SwarmMemberStatus {
     /// coordinator can see what each agent is working through.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub todo_items: Vec<SwarmTodoItem>,
+    /// Ephemeral runtime metadata used by the live swarm card.
+    #[serde(default, skip_serializing_if = "SwarmMemberRuntime::is_empty")]
+    pub runtime: SwarmMemberRuntime,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SwarmMemberRuntime {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Human-facing credential route, such as "OAuth" or "API key".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_secs: Option<u64>,
+}
+
+impl SwarmMemberRuntime {
+    fn is_empty(&self) -> bool {
+        self.model.is_none()
+            && self.provider.is_none()
+            && self.auth_method.is_none()
+            && self.effort.is_none()
+            && self.elapsed_secs.is_none()
+    }
 }
 
 /// One compact todo entry crossing the swarm status boundary. Only the
@@ -562,6 +590,32 @@ pub struct SwarmTodoItem {
     pub content: String,
     /// "pending", "in_progress", or "completed".
     pub status: String,
+    /// The three most recent tool calls made while this todo was active.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_intents: Vec<SwarmToolIntent>,
+}
+
+/// Display-only tool activity nested beneath an active swarm todo.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SwarmToolIntent {
+    /// Internal correlation key used by the server to update a running call.
+    /// It is intentionally omitted from the wire payload.
+    #[serde(default, skip_serializing)]
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub intent: String,
+    /// "running", "completed", or "error".
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<SwarmToolProgress>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SwarmToolProgress {
+    pub current: u64,
+    pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
 }
 
 /// Status of a member being awaited by comm_await_members

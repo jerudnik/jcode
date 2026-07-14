@@ -257,6 +257,8 @@ async fn test_clear_preserves_debug_for_resumed_debug_session() -> Result<()> {
 
     let debug_session_id = debug_create_headless_session(debug_socket_path.clone()).await?;
     let mut client = server::Client::connect_with_path(socket_path.clone()).await?;
+    let sub_hs = client.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client, sub_hs).await?;
     let resume_id = client.resume_session(&debug_session_id).await?;
 
     // Drain resume completion so clear() events are unambiguous.

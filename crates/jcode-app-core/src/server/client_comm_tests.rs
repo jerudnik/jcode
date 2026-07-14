@@ -44,6 +44,7 @@ async fn test_agent() -> Arc<Mutex<Agent>> {
 }
 
 #[tokio::test]
+
 async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session() {
     let sender = test_agent().await;
     let target = test_agent().await;
@@ -92,6 +93,7 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -118,6 +120,7 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -243,6 +246,7 @@ async fn comm_list_includes_member_status_and_detail() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -269,6 +273,7 @@ async fn comm_list_includes_member_status_and_detail() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -353,6 +358,7 @@ async fn comm_message_accepts_friendly_name_dm_target() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -379,6 +385,7 @@ async fn comm_message_accepts_friendly_name_dm_target() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -486,6 +493,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -512,6 +520,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -538,6 +547,7 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -623,6 +633,7 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
                 task_label: None,
                 subagent_type: None,
             },
@@ -843,6 +854,7 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
             },
         ),
         (
@@ -869,6 +881,7 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
                 output_tail: None,
                 todo_progress: None,
                 todo_items: Vec::new(),
+                runtime: crate::protocol::SwarmMemberRuntime::default(),
             },
         ),
     ])));

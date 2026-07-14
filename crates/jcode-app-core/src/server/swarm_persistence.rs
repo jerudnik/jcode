@@ -5,12 +5,54 @@ use jcode_swarm_core::control_log::{SwarmControlEvent, read_from as read_control
 use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 /// Directory name under the durable state dir (`~/.jcode/state`).
 const SWARM_STATE_DIR: &str = "swarm";
 /// Pre-0.36 location under the runtime dir (tmpfs on Linux, wiped on reboot).
 const LEGACY_SWARM_STATE_DIR: &str = "jcode-swarm-state";
+
+/// Serialize each swarm's complete snapshot/read/write operation. Callers must
+/// acquire this before reading the independently locked in-memory maps so an
+/// older snapshot cannot finish after a newer one.
+static SWARM_OPERATION_LOCKS: LazyLock<StdMutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+/// Protect primary/backup comparisons and filesystem updates, including tests
+/// and recovery paths that invoke the synchronous persistence helpers directly.
+static SWARM_FILE_LOCKS: LazyLock<StdMutex<HashMap<String, Weak<StdMutex<()>>>>> =
+    LazyLock::new(|| StdMutex::new(HashMap::new()));
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SwarmStateFileVersion(Option<Vec<u8>>);
+
+pub(super) fn swarm_operation_lock(swarm_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut locks = SWARM_OPERATION_LOCKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(swarm_id).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(swarm_id.to_string(), Arc::downgrade(&lock));
+    lock
+}
+
+fn swarm_file_lock(swarm_id: &str) -> Arc<StdMutex<()>> {
+    let mut locks = SWARM_FILE_LOCKS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(swarm_id).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(StdMutex::new(()));
+    locks.insert(swarm_id.to_string(), Arc::downgrade(&lock));
+    lock
+}
 
 pub(super) struct LoadedSwarmRuntimeState {
     pub plans: HashMap<String, VersionedPlan>,
@@ -65,6 +107,11 @@ fn is_light_mode(mode: &str) -> bool {
 struct PersistedSwarmMember {
     #[serde(flatten)]
     record: SwarmMemberRecord,
+    /// Wall-clock time when the member entered its current terminal status.
+    /// Legacy snapshots omit this; their snapshot timestamp becomes the
+    /// conservative migration fallback so reports are not discarded eagerly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    terminal_since_unix_ms: Option<u64>,
 }
 
 fn now_unix_ms() -> u64 {
@@ -151,6 +198,69 @@ pub(super) fn control_log_path(swarm_id: &str) -> PathBuf {
     state_dir().join(format!("{}.control.jsonl", sanitize_swarm_id(swarm_id)))
 }
 
+/// Current byte length of the per-swarm control log (0 when absent). Used as
+/// the covered offset for snapshots whose in-memory state already reflects
+/// the full log, so tail replay is a no-op.
+fn current_control_log_len(swarm_id: &str) -> u64 {
+    std::fs::metadata(control_log_path(swarm_id))
+        .map(|meta| meta.len())
+        .unwrap_or(0)
+}
+
+fn read_primary_version(swarm_id: &str) -> SwarmStateFileVersion {
+    SwarmStateFileVersion(std::fs::read(state_path(swarm_id)).ok())
+}
+
+pub(super) fn capture_swarm_state_version(swarm_id: &str) -> SwarmStateFileVersion {
+    let file_lock = swarm_file_lock(swarm_id);
+    let _guard = file_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    read_primary_version(swarm_id)
+}
+
+fn remove_snapshot_files(swarm_id: &str) -> bool {
+    let path = state_path(swarm_id);
+    // First atomically replace the primary with an empty tombstone. The write
+    // may rotate the old primary to `.bak`, but load_runtime_state ignores that
+    // backup while the tombstone exists. Thus every crash point is safe: before
+    // rename the deletion did not happen, and after rename the old state is
+    // already logically invalid even if physical cleanup is interrupted.
+    let tombstone = PersistedSwarmState {
+        swarm_id: swarm_id.to_string(),
+        plan: None,
+        coordinator_session_id: None,
+        members: Vec::new(),
+        updated_at_unix_ms: now_unix_ms(),
+        // Cover the whole current log so the tombstone is never resurrected
+        // by control-log tail replay.
+        control_log_covered_offset: current_control_log_len(swarm_id),
+    };
+    if let Err(err) = storage::write_json_fast(&path, &tombstone) {
+        crate::logging::warn(&format!(
+            "Failed to tombstone swarm state {}: {}",
+            path.display(),
+            err
+        ));
+        return false;
+    }
+
+    let mut removed = true;
+    for candidate in [path.with_extension("bak"), path] {
+        if let Err(err) = std::fs::remove_file(&candidate)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            removed = false;
+            crate::logging::warn(&format!(
+                "Failed to remove swarm state {}: {}",
+                candidate.display(),
+                err
+            ));
+        }
+    }
+    removed
+}
+
 fn from_persisted_plan(mut plan: PersistedVersionedPlan, updated_at_unix_ms: u64) -> VersionedPlan {
     let mut plan = VersionedPlan {
         items: std::mem::take(&mut plan.items),
@@ -192,9 +302,14 @@ fn to_persisted_plan(plan: &VersionedPlan) -> PersistedVersionedPlan {
     }
 }
 
-fn to_persisted_member(member: &SwarmMember) -> PersistedSwarmMember {
+fn to_persisted_member(member: &SwarmMember, snapshot_unix_ms: u64) -> PersistedSwarmMember {
+    let terminal_since_unix_ms =
+        super::swarm::member_status_is_terminal(&member.status).then(|| {
+            snapshot_unix_ms.saturating_sub(member.last_status_change.elapsed().as_millis() as u64)
+        });
     PersistedSwarmMember {
         record: member.durable_record(),
+        terminal_since_unix_ms,
     }
 }
 
@@ -217,17 +332,23 @@ fn recover_member_status(
         );
     }
 
-    // Ready/Done headless members finished their work before the reload:
-    // nothing in-flight was lost, their completion report is preserved, and
-    // startup recovery re-registers the agent, so the reload is invisible to
-    // them. Marking them crashed here is wrong and races ahead of recovery,
-    // making cleanly-finished workers report as "(crashed)" to await_members
-    // watchers that resume before recovery rewrites the status (#swarm).
+    // An idle headless worker has no process to drive it after a server restart.
+    // Keep its completion report, but mark it stopped instead of eagerly loading
+    // its full session history and tool registry forever. Coordinators can spawn
+    // a fresh worker when more work arrives.
+    if is_headless && status == SwarmLifecycleStatus::Ready {
+        return (
+            SwarmLifecycleStatus::Stopped,
+            append_recovery_detail(detail, "idle worker not restored after server restart"),
+        );
+    }
+
+    // Done headless members finished their work before the reload. Nothing
+    // in-flight was lost and their completion report remains available.
     if is_headless
         && !matches!(
             status,
-            SwarmLifecycleStatus::Ready
-                | SwarmLifecycleStatus::Completed
+            SwarmLifecycleStatus::Completed
                 | SwarmLifecycleStatus::Done
                 | SwarmLifecycleStatus::Failed
                 | SwarmLifecycleStatus::Stopped
@@ -248,17 +369,49 @@ fn recovered_member_event_tx() -> mpsc::UnboundedSender<ServerEvent> {
     tx
 }
 
-fn from_persisted_member(member: PersistedSwarmMember) -> SwarmMember {
+fn from_persisted_member(
+    member: PersistedSwarmMember,
+    snapshot_updated_at_unix_ms: u64,
+    loaded_at_unix_ms: u64,
+    terminal_retention: Duration,
+) -> Option<SwarmMember> {
     let record = member.record;
+    let original_status = record.status.as_str();
+    let was_terminal_before_recovery =
+        super::swarm::member_status_is_terminal(original_status.as_ref());
     let (status, detail) = recover_member_status(record.status, record.detail, record.is_headless);
-    SwarmMember::from_record(
+    let status_text = status.as_str();
+    let terminal_since_unix_ms = super::swarm::member_status_is_terminal(status_text.as_ref())
+        .then(|| {
+            member
+                .terminal_since_unix_ms
+                .unwrap_or(if was_terminal_before_recovery {
+                    snapshot_updated_at_unix_ms
+                } else {
+                    loaded_at_unix_ms
+                })
+        });
+    if terminal_since_unix_ms.is_some_and(|terminal_since| {
+        loaded_at_unix_ms.saturating_sub(terminal_since) >= terminal_retention.as_millis() as u64
+    }) {
+        return None;
+    }
+
+    let mut recovered = SwarmMember::from_record(
         SwarmMemberRecord {
             status,
             detail,
             ..record
         },
         recovered_member_event_tx(),
-    )
+    );
+    if let Some(terminal_since) = terminal_since_unix_ms {
+        let terminal_age = Duration::from_millis(loaded_at_unix_ms.saturating_sub(terminal_since));
+        recovered.last_status_change = Instant::now()
+            .checked_sub(terminal_age)
+            .unwrap_or_else(Instant::now);
+    }
+    Some(recovered)
 }
 
 pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
@@ -277,6 +430,10 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
     let mut coordinators = HashMap::new();
     let mut members = HashMap::new();
     let mut swarms_by_id = HashMap::new();
+    let loaded_at_unix_ms = now_unix_ms();
+    let terminal_retention = super::swarm::swarm_terminal_member_retention();
+    let mut pruned_terminal_members = 0usize;
+    let mut pruned_members_by_swarm: HashMap<String, HashSet<String>> = HashMap::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if !path.is_file() {
@@ -319,15 +476,62 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
             let Some(member_swarm_id) = member.record.swarm_id.clone() else {
                 continue;
             };
+            let member_session_id = member.record.session_id.clone();
+            let Some(member) = from_persisted_member(
+                member,
+                state.updated_at_unix_ms,
+                loaded_at_unix_ms,
+                terminal_retention,
+            ) else {
+                pruned_terminal_members += 1;
+                pruned_members_by_swarm
+                    .entry(member_swarm_id)
+                    .or_default()
+                    .insert(member_session_id);
+                continue;
+            };
             swarms_by_id
                 .entry(member_swarm_id.clone())
                 .or_insert_with(HashSet::new)
-                .insert(member.record.session_id.clone());
-            members.insert(
-                member.record.session_id.clone(),
-                from_persisted_member(member),
-            );
+                .insert(member_session_id.clone());
+            members.insert(member_session_id, member);
         }
+    }
+    coordinators.retain(|swarm_id, session_id| {
+        !pruned_members_by_swarm
+            .get(swarm_id)
+            .is_some_and(|pruned| pruned.contains(session_id))
+    });
+    for (swarm_id, pruned_session_ids) in &pruned_members_by_swarm {
+        if let Some(plan) = plans.get_mut(swarm_id) {
+            plan.participants
+                .retain(|session_id| !pruned_session_ids.contains(session_id));
+        }
+    }
+    // Rewrite every affected snapshot once so startup collection shrinks the
+    // durable state too. Without this, the same expired records would be parsed
+    // and discarded on every restart forever.
+    for swarm_id in pruned_members_by_swarm.keys() {
+        let retained_members = swarms_by_id
+            .get(swarm_id)
+            .into_iter()
+            .flat_map(|session_ids| session_ids.iter())
+            .filter_map(|session_id| members.get(session_id).cloned())
+            .collect::<Vec<_>>();
+        persist_swarm_state(
+            swarm_id,
+            plans.get(swarm_id),
+            coordinators.get(swarm_id).map(String::as_str),
+            &retained_members,
+            // The in-memory state was already replayed past the log tail
+            // above, so the rewritten snapshot covers the whole current log.
+            current_control_log_len(swarm_id),
+        );
+    }
+    if pruned_terminal_members > 0 {
+        crate::logging::info(&format!(
+            "Pruned {pruned_terminal_members} expired terminal swarm member(s) while loading durable state"
+        ));
     }
     LoadedSwarmRuntimeState {
         plans,
@@ -408,6 +612,7 @@ fn apply_control_event_to_snapshot(state: &mut PersistedSwarmState, event: Swarm
                         role: SwarmRole::from(role),
                         is_headless: true,
                     },
+                    terminal_since_unix_ms: None,
                 });
             }
         }
@@ -483,14 +688,34 @@ pub(super) fn persist_swarm_state(
     swarm_members: &[SwarmMember],
     control_log_covered_offset: u64,
 ) {
+    let file_lock = swarm_file_lock(swarm_id);
+    let _guard = file_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     if swarm_plan.is_none() && coordinator_session_id.is_none() && swarm_members.is_empty() {
-        let _ = std::fs::remove_file(state_path(swarm_id));
+        let _ = remove_snapshot_files(swarm_id);
         return;
     }
 
+    // A snapshot can be captured before another task advances the plan and
+    // reach disk afterwards. Never let that stale completion regress the
+    // durable plan. Full member/coordinator ordering is provided by the
+    // per-swarm operation lock around load_runtime + this write.
+    if let Some(candidate_plan) = swarm_plan
+        && let Ok(current) = storage::read_json::<PersistedSwarmState>(&state_path(swarm_id))
+        && current
+            .plan
+            .as_ref()
+            .is_some_and(|plan| plan.version > candidate_plan.version)
+    {
+        return;
+    }
+
+    let snapshot_unix_ms = now_unix_ms();
     let mut members = swarm_members
         .iter()
-        .map(to_persisted_member)
+        .map(|member| to_persisted_member(member, snapshot_unix_ms))
         .collect::<Vec<_>>();
     members.sort_by(|left, right| left.record.session_id.cmp(&right.record.session_id));
 
@@ -499,7 +724,7 @@ pub(super) fn persist_swarm_state(
         plan: swarm_plan.map(to_persisted_plan),
         coordinator_session_id: coordinator_session_id.map(str::to_string),
         members,
-        updated_at_unix_ms: now_unix_ms(),
+        updated_at_unix_ms: snapshot_unix_ms,
         control_log_covered_offset,
     };
 
@@ -511,8 +736,27 @@ pub(super) fn persist_swarm_state(
     }
 }
 
+#[cfg(test)]
 pub(super) fn remove_swarm_state(swarm_id: &str) {
-    let _ = std::fs::remove_file(state_path(swarm_id));
+    let file_lock = swarm_file_lock(swarm_id);
+    let _guard = file_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _ = remove_snapshot_files(swarm_id);
+}
+
+pub(super) fn remove_swarm_state_if_version(
+    swarm_id: &str,
+    expected: &SwarmStateFileVersion,
+) -> bool {
+    let file_lock = swarm_file_lock(swarm_id);
+    let _guard = file_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if &read_primary_version(swarm_id) != expected {
+        return false;
+    }
+    remove_snapshot_files(swarm_id)
 }
 
 #[cfg(test)]

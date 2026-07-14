@@ -1,7 +1,8 @@
 use super::{
-    build_resume_command, clear_ambient_info_cache_for_tests, extract_bracketed_system_message,
-    format_countdown_until, gather_ambient_info, inferred_reasoning_efforts,
-    partition_queued_messages, pretty_model_display_name, resume_invocation_args,
+    build_resume_command, clear_ambient_info_cache_for_tests, effort_display_label,
+    extract_bracketed_system_message, format_countdown_until, gather_ambient_info,
+    inferred_reasoning_efforts, partition_queued_messages, pretty_model_display_name,
+    resume_invocation_args,
 };
 use crate::ambient::{AmbientManager, Priority, ScheduleRequest, ScheduleTarget};
 use crate::terminal_launch::{detected_resume_terminal, shell_command};
@@ -135,6 +136,19 @@ fn inferred_reasoning_efforts_use_provider_specific_order_and_max_semantics() {
         "DeepSeek direct keeps max as a real provider level"
     );
     assert!(inferred_reasoning_efforts(Some("ollama"), Some("llama3")).is_empty());
+}
+
+#[test]
+fn swarm_effort_display_labels_are_marked_beta() {
+    assert_eq!(
+        effort_display_label("swarm"),
+        "Swarm (light fan-out) [Beta]"
+    );
+    assert_eq!(
+        effort_display_label("swarm-deep"),
+        "Swarm Deep (Max + task graph) [Beta]"
+    );
+    assert_eq!(effort_display_label("high"), "High");
 }
 
 #[cfg(unix)]
@@ -392,7 +406,7 @@ fn pretty_model_display_name_handles_empty_and_unknown() {
 #[test]
 fn invalidate_todos_cache_backdates_entry_so_next_gather_refetches() {
     use super::{
-        clear_todos_cache_for_tests, gather_todos_for_session, invalidate_todos_cache,
+        clear_todos_cache_for_tests, gather_todos_and_goals_for_session, invalidate_todos_cache,
         todos_cache_entry_age_for_tests,
     };
 
@@ -408,13 +422,13 @@ fn invalidate_todos_cache_backdates_entry_so_next_gather_refetches() {
 
     // First gather seeds the cache entry (and spawns the initial fetch). The
     // entry exists immediately, marked as actively refreshing / freshly stamped.
-    let _ = gather_todos_for_session(Some(session_id));
+    let _ = gather_todos_and_goals_for_session(Some(session_id));
     let before = todos_cache_entry_age_for_tests(session_id);
     assert!(before.is_some(), "first gather must seed a cache entry");
 
     // Let the background fetch settle so we have a non-refreshing, fresh entry.
     std::thread::sleep(std::time::Duration::from_millis(50));
-    let _ = gather_todos_for_session(Some(session_id));
+    let _ = gather_todos_and_goals_for_session(Some(session_id));
     std::thread::sleep(std::time::Duration::from_millis(50));
     let settled = todos_cache_entry_age_for_tests(session_id)
         .expect("entry should exist after gather settles");

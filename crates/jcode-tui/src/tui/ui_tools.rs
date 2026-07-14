@@ -1083,6 +1083,52 @@ pub(super) fn get_tool_summary_with_budget(
             })
             .unwrap_or_default(),
         "browser" => browser_summary(tool, max_width),
+        "gmail" => {
+            let action = tool
+                .input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("gmail");
+            let detail = match action {
+                "search" | "threads" => tool.input.get("query").and_then(|v| v.as_str()).map(|q| {
+                    format!(
+                        "'{}'",
+                        truncate_query_display(q, bounded(40).saturating_sub(2))
+                    )
+                }),
+                "read" | "trash" | "modify_labels" => tool
+                    .input
+                    .get("message_id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| truncate_identifier_display(id, bounded(20))),
+                "thread" => tool
+                    .input
+                    .get("thread_id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| truncate_identifier_display(id, bounded(20))),
+                "draft" | "send" => tool
+                    .input
+                    .get("to")
+                    .and_then(|v| v.as_str())
+                    .map(|to| format!("→ {}", truncate_end_display(to, bounded(30))))
+                    .or_else(|| {
+                        tool.input
+                            .get("subject")
+                            .and_then(|v| v.as_str())
+                            .map(|s| format!("'{}'", truncate_end_display(s, bounded(30))))
+                    }),
+                "send_draft" => tool
+                    .input
+                    .get("draft_id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| truncate_identifier_display(id, bounded(20))),
+                _ => None,
+            };
+            match detail {
+                Some(detail) => format!("{} {}", action, detail),
+                None => action.to_string(),
+            }
+        }
         "open" | "launch" => {
             let action = tool
                 .input
@@ -1110,7 +1156,11 @@ pub(super) fn get_tool_summary_with_budget(
                 .get("action")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let server = tool.input.get("server_name").and_then(|v| v.as_str());
+            let server = tool
+                .input
+                .get("server")
+                .or_else(|| tool.input.get("server_name"))
+                .and_then(|v| v.as_str());
             if let Some(s) = server {
                 format!("{} {}", action, s)
             } else {
@@ -1129,12 +1179,80 @@ pub(super) fn get_tool_summary_with_budget(
                 "todos".to_string()
             }
         }
-        "skill" => tool
-            .input
-            .get("skill")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("/{}", s))
-            .unwrap_or_default(),
+        "skill" | "skill_manage" => {
+            let action = tool
+                .input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("list");
+            let name = tool
+                .input
+                .get("name")
+                .or_else(|| tool.input.get("skill"))
+                .and_then(|v| v.as_str());
+            match name {
+                Some(name) => format!("{} /{}", action, name),
+                None => action.to_string(),
+            }
+        }
+        "schedule" => {
+            let action = tool
+                .input
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("create");
+            let detail = match action {
+                "create" => tool.input.get("task").and_then(|v| v.as_str()).map(|t| {
+                    format!(
+                        "'{}'",
+                        truncate_end_display(t, bounded(40).saturating_sub(2))
+                    )
+                }),
+                "cancel" => tool
+                    .input
+                    .get("schedule_id")
+                    .and_then(|v| v.as_str())
+                    .map(|id| truncate_identifier_display(id, bounded(20))),
+                _ => None,
+            };
+            match detail {
+                Some(detail) => format!("{} {}", action, detail),
+                None => action.to_string(),
+            }
+        }
+        "invalid" => {
+            let target = tool
+                .input
+                .get("tool")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let error = tool
+                .input
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match (target.is_empty(), error.is_empty()) {
+                (false, false) => format!(
+                    "{}: {}",
+                    target,
+                    truncate_end_display(error, bounded(40).saturating_sub(target.len() + 2))
+                ),
+                (false, true) => target.to_string(),
+                _ => truncate_end_display(error, bounded(40)),
+            }
+        }
+        "discover_tools" => {
+            let category = tool
+                .input
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            match tool.input.get("tool").and_then(|v| v.as_str()) {
+                Some(name) => format!("select {}", truncate_end_display(name, bounded(30))),
+                None if !category.is_empty() => format!("browse {}", category),
+                None => "browse".to_string(),
+            }
+        }
         "codesearch" => tool
             .input
             .get("query")
@@ -1366,7 +1484,15 @@ pub(super) fn get_tool_summary_with_budget(
             .and_then(|(_, v)| v.as_str())
             .map(|s| truncate_middle_display(s, bounded(40)))
             .unwrap_or_default(),
-        _ => String::new(),
+        // Generic fallback: most action-shaped tools (ambient tools, future
+        // additions) at least carry an "action" field. Showing it beats an
+        // empty summary, which reads like the row failed to render.
+        _ => tool
+            .input
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(|action| action.to_string())
+            .unwrap_or_default(),
     }
 }
 

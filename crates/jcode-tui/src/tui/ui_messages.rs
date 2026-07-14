@@ -2,8 +2,9 @@ use super::*;
 #[path = "ui_messages_cache.rs"]
 mod cache_support;
 use crate::message::{
-    ParsedBackgroundTaskProgressNotification, parse_background_task_notification_markdown,
-    parse_background_task_progress_notification_markdown,
+    ParsedBackgroundTaskNotification, ParsedBackgroundTaskProgressNotification,
+    parse_background_task_notification_markdown,
+    parse_background_task_progress_notification_markdown, strip_ansi_escape_sequences,
 };
 pub(super) use cache_support::get_cached_message_lines;
 use cache_support::{centered_wrap_width, left_pad_lines_for_centered_mode};
@@ -32,11 +33,12 @@ fn width_stable_system_title<'a>(normal: &'a str, stable: &'a str) -> &'a str {
 }
 
 fn normalize_system_content_for_display(content: &str) -> Cow<'_, str> {
+    let sanitized = strip_ansi_escape_sequences(content);
     if !prefer_width_stable_system_glyphs() {
-        return Cow::Borrowed(content);
+        return Cow::Owned(sanitized);
     }
 
-    let normalized = content
+    let normalized = sanitized
         .replace("⚡ ", "! ")
         .replace("⏳ ", "... ")
         .replace("⏰ ", "* ");
@@ -868,44 +870,151 @@ pub(crate) fn render_overnight_message(
     lines
 }
 
-/// Render the inline todo-list card (`role == "todos"`). The message content
-/// is the JSON serialization of the session's todo items; falls back to the
-/// system renderer when it cannot be parsed.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum TodoCardPayload {
+    Current {
+        #[serde(default)]
+        todos: Vec<crate::todo::TodoItem>,
+        #[serde(default)]
+        goals: Vec<crate::todo::TodoGoal>,
+    },
+    Legacy(Vec<crate::todo::TodoItem>),
+}
+
+// Todo cards sit directly on the terminal background, so the global
+// `dim_color()` (RGB 80) is too faint for meaningful metadata. Keep a compact
+// semantic palette here: cool colors describe structure/state, while amber is
+// reserved for priority and blocked work.
+fn todo_group_color() -> Color {
+    rgb(190, 165, 235)
+}
+
+fn todo_label_color() -> Color {
+    rgb(145, 155, 175)
+}
+
+fn todo_meta_color() -> Color {
+    rgb(155, 165, 180)
+}
+
+fn todo_score_color() -> Color {
+    rgb(105, 205, 165)
+}
+
+fn todo_confidence_color() -> Color {
+    rgb(135, 155, 180)
+}
+
+impl TodoCardPayload {
+    fn into_parts(self) -> (Vec<crate::todo::TodoItem>, Vec<crate::todo::TodoGoal>) {
+        match self {
+            Self::Current { todos, goals } => (todos, goals),
+            Self::Legacy(todos) => (todos, Vec::new()),
+        }
+    }
+}
+
+fn parse_todo_tool_output(
+    content: &str,
+) -> Option<(Vec<crate::todo::TodoItem>, Vec<crate::todo::TodoGoal>)> {
+    // Remote display and timestamp injection can decorate tool results before
+    // they reach this renderer. Keep that transport metadata outside the
+    // structured payload parser so a valid todo result still renders as a card.
+    let content = strip_todo_tool_output_headers(content);
+    let mut todo_stream =
+        serde_json::Deserializer::from_str(content).into_iter::<Vec<crate::todo::TodoItem>>();
+    let todos = todo_stream.next()?.ok()?;
+    let remainder = content.get(todo_stream.byte_offset()..)?.trim_start();
+    let goals = if let Some(goal_json) = remainder.strip_prefix("Goals:") {
+        let mut goal_stream = serde_json::Deserializer::from_str(goal_json.trim_start())
+            .into_iter::<Vec<crate::todo::TodoGoal>>();
+        goal_stream.next().and_then(Result::ok).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    Some((todos, goals))
+}
+
+fn strip_todo_tool_output_headers(content: &str) -> &str {
+    let mut content = content.trim_start();
+    // Remote clients prefix outputs with the tool name, while restored history
+    // may independently prefix timing metadata. Accept either order without
+    // weakening the JSON shape that follows.
+    for _ in 0..3 {
+        if let Some(rest) = strip_todo_tool_name_header(content) {
+            content = rest;
+            continue;
+        }
+        let rest = strip_tool_result_timestamp_header(content);
+        if rest.len() < content.len() {
+            content = rest;
+            continue;
+        }
+        break;
+    }
+    content
+}
+
+fn strip_todo_tool_name_header(content: &str) -> Option<&str> {
+    let after_open = content.strip_prefix('[')?;
+    let header_end = after_open.find(']')?;
+    let name = after_open[..header_end].trim();
+    (tools_ui::canonical_tool_name(name) == "todo")
+        .then(|| after_open[header_end + 1..].trim_start())
+}
+
+fn strip_tool_result_timestamp_header(content: &str) -> &str {
+    let trimmed = content.trim_start();
+    let Some(after_open) = trimmed.strip_prefix('[') else {
+        return content;
+    };
+    let Some(header_end) = after_open.find(']') else {
+        return content;
+    };
+    let header = &after_open[..header_end];
+    let is_timing_header = header.starts_with("tool timing:");
+    let is_timestamp_header = chrono::DateTime::parse_from_rfc3339(header).is_ok();
+    if !is_timing_header && !is_timestamp_header {
+        return content;
+    }
+    after_open[header_end + 1..].trim_start()
+}
+
+/// Render the inline todo-list card (`role == "todos"`). New payloads contain
+/// both todo items and goal assessments; the legacy item-array shape remains
+/// supported so older transcript entries keep rendering.
 pub(crate) fn render_todos_message(
     msg: &DisplayMessage,
     width: u16,
     diff_mode: crate::config::DiffDisplayMode,
 ) -> Vec<Line<'static>> {
-    let Ok(todos) = serde_json::from_str::<Vec<crate::todo::TodoItem>>(&msg.content) else {
+    let Ok(payload) = serde_json::from_str::<TodoCardPayload>(&msg.content) else {
         return render_system_message(msg, width, diff_mode);
     };
+    let (todos, goals) = payload.into_parts();
 
     let centered = markdown::center_code_blocks();
-    let border_style = Style::default().fg(rgb(120, 190, 160));
-    let dim_style = Style::default().fg(dim_color());
-
-    let max_box_width = if centered {
+    let meta_style = Style::default().fg(todo_meta_color());
+    let card_width = if centered {
         (width.saturating_sub(4) as usize).min(120)
     } else {
         (width.saturating_sub(2) as usize).min(100)
     }
-    .max(28);
-    let inner_width = max_box_width.saturating_sub(4).max(1);
+    .max(1);
+    let base_indent = if centered { "" } else { "  " };
+    let inner_width = card_width.saturating_sub(base_indent.width()).max(1);
 
-    let total = todos.len();
-    let completed = todos.iter().filter(|t| t.status == "completed").count();
-    let title = if total == 0 {
-        "☰ todos".to_string()
-    } else {
-        format!("☰ todos · {}/{} done", completed, total)
-    };
-
-    let mut content: Vec<Line<'static>> = Vec::new();
+    let mut lines = Vec::new();
     if todos.is_empty() {
-        content.push(Line::from(Span::styled(
-            "No todos yet. The model populates them with the todo tool.",
-            dim_style,
-        )));
+        lines.push(todo_card_line(
+            vec![Span::styled(
+                "No tasks yet. The model populates them as work is planned.",
+                meta_style,
+            )],
+            base_indent,
+            inner_width,
+        ));
     } else {
         // Partition into first-seen-order groups (ungrouped bucket last). When
         // no todo declares a group, keep a flat list without headers.
@@ -928,75 +1037,342 @@ pub(crate) fn render_todos_message(
                 }
             }
             groups.sort_by_key(|(key, _)| key.is_none());
-            for (idx, (group, items)) in groups.iter().enumerate() {
-                if idx > 0 {
-                    content.push(Line::from(""));
-                }
+            for (group, items) in &groups {
                 let label = group.as_deref().unwrap_or("other");
-                content.push(super::truncate_line_with_ellipsis_to_width(
-                    &Line::from(Span::styled(
-                        label.to_string(),
-                        Style::default().fg(rgb(150, 160, 185)).bold(),
-                    )),
+                let goal = todo_card_goal_for_group(&goals, group.as_deref());
+                lines.push(render_todo_goal_header(
+                    label,
+                    items,
+                    base_indent,
                     inner_width,
                 ));
+                push_todo_goal_details(&mut lines, goal, base_indent, inner_width);
                 for todo in items {
-                    content.push(render_todo_card_item_line(todo, inner_width));
+                    lines.push(render_todo_card_item_line(todo, base_indent, inner_width));
                 }
             }
         } else {
+            let goal = todo_card_goal_for_group(&goals, None);
+            lines.push(render_todo_status_header(
+                todos.iter(),
+                base_indent,
+                inner_width,
+            ));
+            if goal.is_some() {
+                push_todo_goal_details(&mut lines, goal, base_indent, inner_width);
+            }
             for todo in &todos {
-                content.push(render_todo_card_item_line(todo, inner_width));
+                lines.push(render_todo_card_item_line(todo, base_indent, inner_width));
             }
         }
     }
 
-    let mut lines = render_rounded_box(&title, content, max_box_width, border_style);
     if centered {
         left_pad_lines_for_centered_mode(&mut lines, width);
     }
     lines
 }
 
-fn render_todo_card_item_line(todo: &crate::todo::TodoItem, inner_width: usize) -> Line<'static> {
+fn todo_card_line(
+    spans: Vec<Span<'static>>,
+    base_indent: &str,
+    inner_width: usize,
+) -> Line<'static> {
+    let mut prefixed = vec![Span::raw(base_indent.to_string())];
+    prefixed.extend(spans);
+    super::truncate_line_with_ellipsis_to_width(
+        &Line::from(prefixed),
+        inner_width.saturating_add(base_indent.width()),
+    )
+}
+
+fn todo_card_goal_for_group<'a>(
+    goals: &'a [crate::todo::TodoGoal],
+    group: Option<&str>,
+) -> Option<&'a crate::todo::TodoGoal> {
+    let key = group.map(str::trim).filter(|value| !value.is_empty());
+    goals.iter().find(|goal| {
+        goal.group
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            == key
+    })
+}
+
+fn todo_goal_score_spans(goal: Option<&crate::todo::TodoGoal>) -> Vec<Span<'static>> {
+    let Some(goal) = goal else {
+        return Vec::new();
+    };
+    let mut spans = Vec::new();
+    if let Some(score) = goal.hill_climbability {
+        spans.push(Span::styled(
+            "Hill climbability ",
+            Style::default().fg(todo_label_color()),
+        ));
+        spans.push(Span::styled(
+            format!("{}%", score),
+            Style::default().fg(todo_score_color()),
+        ));
+    }
+    if let Some(score) = goal.end_to_end_ownership {
+        if !spans.is_empty() {
+            spans.push(Span::styled(" · ", Style::default().fg(dim_color())));
+        }
+        spans.push(Span::styled(
+            "Ownership ",
+            Style::default().fg(todo_label_color()),
+        ));
+        spans.push(Span::styled(
+            format!("{}%", score),
+            Style::default().fg(todo_score_color()),
+        ));
+    }
+    spans
+}
+
+fn push_todo_status_pips<'a>(
+    spans: &mut Vec<Span<'static>>,
+    todos: impl IntoIterator<Item = &'a crate::todo::TodoItem>,
+    max_pips: usize,
+) {
+    let (completed, in_progress, total) =
+        todos
+            .into_iter()
+            .fold((0usize, 0usize, 0usize), |counts, todo| {
+                (
+                    counts.0 + usize::from(todo.status == "completed"),
+                    counts.1 + usize::from(todo.status == "in_progress"),
+                    counts.2 + 1,
+                )
+            });
+    if total == 0 || max_pips == 0 {
+        return;
+    }
+
+    let (done_pips, active_pips, open_pips) = if total <= max_pips.max(12) {
+        (
+            completed,
+            in_progress,
+            total.saturating_sub(completed + in_progress),
+        )
+    } else {
+        let scale =
+            |count: usize| ((count as f64 / total as f64) * max_pips as f64).round() as usize;
+        let mut done = scale(completed);
+        let mut active = scale(in_progress);
+        if completed > 0 && done == 0 {
+            done = 1;
+        }
+        if in_progress > 0 && active == 0 {
+            active = 1;
+        }
+        done = done.min(max_pips);
+        active = active.min(max_pips.saturating_sub(done));
+        (done, active, max_pips.saturating_sub(done + active))
+    };
+
+    for _ in 0..done_pips {
+        spans.push(Span::styled("●", Style::default().fg(rgb(100, 180, 100))));
+    }
+    for _ in 0..active_pips {
+        spans.push(Span::styled("●", Style::default().fg(asap_color())));
+    }
+    for _ in 0..open_pips {
+        spans.push(Span::styled("○", Style::default().fg(rgb(90, 90, 105))));
+    }
+}
+
+fn render_todo_status_header<'a>(
+    todos: impl IntoIterator<Item = &'a crate::todo::TodoItem>,
+    base_indent: &str,
+    inner_width: usize,
+) -> Line<'static> {
+    let mut spans = Vec::new();
+    push_todo_status_pips(&mut spans, todos, inner_width);
+    todo_card_line(spans, base_indent, inner_width)
+}
+
+fn render_todo_goal_header(
+    label: &str,
+    todos: &[&crate::todo::TodoItem],
+    base_indent: &str,
+    inner_width: usize,
+) -> Line<'static> {
+    let label_width = label.width();
+    let mut spans = vec![Span::styled(
+        label.to_string(),
+        Style::default().fg(todo_group_color()).bold(),
+    )];
+    spans.push(Span::raw("  "));
+    push_todo_status_pips(
+        &mut spans,
+        todos.iter().copied(),
+        inner_width.saturating_sub(label_width + 2),
+    );
+    todo_card_line(spans, base_indent, inner_width)
+}
+
+fn wrap_todo_detail(value: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for word in value.split_whitespace() {
+        let word_width = word.width();
+        if !current.is_empty() && current.width() + 1 + word_width <= width {
+            current.push(' ');
+            current.push_str(word);
+            continue;
+        }
+        if current.is_empty() && word_width <= width {
+            current.push_str(word);
+            continue;
+        }
+        if !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+        }
+        if word_width <= width {
+            current.push_str(word);
+            continue;
+        }
+        let mut word_chunks = split_by_display_width(word, width).into_iter().peekable();
+        while let Some(chunk) = word_chunks.next() {
+            if word_chunks.peek().is_some() {
+                chunks.push(chunk);
+            } else {
+                current = chunk;
+            }
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+fn push_todo_goal_details(
+    lines: &mut Vec<Line<'static>>,
+    goal: Option<&crate::todo::TodoGoal>,
+    base_indent: &str,
+    inner_width: usize,
+) {
+    let Some(goal) = goal else {
+        return;
+    };
+    let scores = todo_goal_score_spans(Some(goal));
+    if !scores.is_empty() {
+        let score_width = Line::from(scores.clone()).width();
+        if score_width > inner_width.saturating_sub(2)
+            && goal.hill_climbability.is_some()
+            && goal.end_to_end_ownership.is_some()
+        {
+            for (label, score) in [
+                ("Hill climbability", goal.hill_climbability),
+                ("Ownership", goal.end_to_end_ownership),
+            ] {
+                let mut spans = vec![Span::raw("  ")];
+                spans.push(Span::styled(
+                    format!("{} ", label),
+                    Style::default().fg(todo_label_color()),
+                ));
+                spans.push(Span::styled(
+                    format!("{}%", score.expect("score checked above")),
+                    Style::default().fg(todo_score_color()),
+                ));
+                lines.push(todo_card_line(spans, base_indent, inner_width));
+            }
+        } else {
+            let mut spans = vec![Span::raw("  ")];
+            spans.extend(scores);
+            lines.push(todo_card_line(spans, base_indent, inner_width));
+        }
+    }
+    for (label, value) in [
+        ("Objective", goal.objective.as_deref()),
+        ("Feedback", goal.feedback_loop.as_deref()),
+    ] {
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        let prefix = format!("  {} · ", label);
+        let prefix_width = prefix.width();
+        let available = inner_width.saturating_sub(prefix_width).max(1);
+        for (index, chunk) in wrap_todo_detail(value, available).into_iter().enumerate() {
+            lines.push(todo_card_line(
+                vec![
+                    Span::styled(
+                        if index == 0 {
+                            prefix.clone()
+                        } else {
+                            " ".repeat(prefix_width)
+                        },
+                        Style::default().fg(todo_label_color()),
+                    ),
+                    Span::styled(chunk, Style::default().fg(todo_meta_color())),
+                ],
+                base_indent,
+                inner_width,
+            ));
+        }
+    }
+}
+
+fn todo_card_confidence_label(todo: &crate::todo::TodoItem) -> Option<String> {
+    if todo.status == "completed"
+        && let (Some(planning), Some(completed)) = (todo.confidence, todo.completion_confidence)
+        && planning != completed
+    {
+        return Some(format!("{}→{}%", planning, completed));
+    }
+    let score = if todo.status == "completed" {
+        todo.completion_confidence.or(todo.confidence)
+    } else {
+        todo.confidence
+    };
+    score.map(|score| format!("{}%", score))
+}
+
+fn render_todo_card_item_line(
+    todo: &crate::todo::TodoItem,
+    base_indent: &str,
+    inner_width: usize,
+) -> Line<'static> {
     let blocked = !todo.blocked_by.is_empty() && todo.status != "completed";
     let (glyph, glyph_color) = if blocked {
-        ("⊳", rgb(180, 140, 100))
+        ("⊳", rgb(225, 165, 90))
     } else {
         match todo.status.as_str() {
-            "completed" => ("✓", rgb(100, 180, 100)),
-            "in_progress" => ("▶", rgb(255, 200, 100)),
-            "cancelled" => ("✗", rgb(150, 90, 90)),
-            _ => ("○", rgb(120, 120, 130)),
+            "completed" => ("✓", rgb(105, 190, 125)),
+            "in_progress" => ("●", asap_color()),
+            "cancelled" => ("✗", rgb(190, 105, 115)),
+            _ => ("○", rgb(135, 145, 160)),
         }
     };
     let text_color = match todo.status.as_str() {
-        "completed" | "cancelled" => rgb(120, 120, 130),
-        "in_progress" => rgb(230, 232, 240),
-        _ => rgb(185, 190, 200),
+        "completed" => rgb(135, 150, 145),
+        "cancelled" => rgb(145, 130, 135),
+        "in_progress" => rgb(225, 232, 240),
+        _ => rgb(195, 202, 212),
     };
     let mut spans = vec![
+        Span::raw("  "),
         Span::styled(format!("{} ", glyph), Style::default().fg(glyph_color)),
         Span::styled(todo.content.clone(), Style::default().fg(text_color)),
     ];
     if todo.priority == "high" && todo.status != "completed" && todo.status != "cancelled" {
         spans.push(Span::styled(
             " (high)",
-            Style::default().fg(rgb(230, 150, 130)),
+            Style::default().fg(rgb(235, 175, 95)),
         ));
     }
-    let confidence = if todo.status == "completed" {
-        todo.completion_confidence.or(todo.confidence)
-    } else {
-        todo.confidence
-    };
-    if let Some(score) = confidence {
+    if let Some(label) = todo_card_confidence_label(todo) {
         spans.push(Span::styled(
-            format!(" {}%", score),
-            Style::default().fg(dim_color()),
+            format!(" · {}", label),
+            Style::default().fg(todo_confidence_color()),
         ));
     }
-    super::truncate_line_with_ellipsis_to_width(&Line::from(spans), inner_width)
+    todo_card_line(spans, base_indent, inner_width)
 }
 
 fn compact_run_id(run_id: &str) -> String {
@@ -1598,7 +1974,22 @@ pub(crate) fn render_background_task_message(
     width: u16,
     diff_mode: crate::config::DiffDisplayMode,
 ) -> Vec<Line<'static>> {
+    if msg
+        .content
+        .trim_start()
+        .starts_with("🐝 **Swarm await finished**")
+    {
+        return render_compact_swarm_await(
+            "🐝 Swarm await",
+            &compact_swarm_await_summary(&msg.content),
+            width,
+        )
+        .unwrap_or_default();
+    }
     if let Some(progress) = parse_background_task_progress_notification_markdown(&msg.content) {
+        if progress.tool_name == "swarm" {
+            return render_compact_swarm_background_progress(&progress, width);
+        }
         return render_background_task_progress_message(&progress, width);
     }
 
@@ -1612,6 +2003,9 @@ pub(crate) fn render_background_task_message(
         parsed.display_name.as_deref(),
     );
     let is_swarm = parsed.tool_name == "swarm";
+    if is_swarm {
+        return render_compact_swarm_background_completion(&parsed, width);
+    }
     let (title, border_color, status_color, preview_color) = if parsed.status.starts_with('✓') {
         (
             if is_swarm {
@@ -1671,9 +2065,10 @@ pub(crate) fn render_background_task_message(
         .as_deref()
         .filter(|summary| !summary.is_empty())
     {
+        let failure_summary = strip_ansi_escape_sequences(failure_summary);
         box_content.push(Line::from(""));
         box_content.push(Line::from(Span::styled("Failure", label_style)));
-        for chunk in split_by_display_width(failure_summary, inner_width) {
+        for chunk in split_by_display_width(&failure_summary, inner_width) {
             box_content.push(Line::from(Span::styled(chunk, status_style)));
         }
     }
@@ -1682,6 +2077,7 @@ pub(crate) fn render_background_task_message(
 
     match parsed.preview.as_deref() {
         Some(preview) => {
+            let preview = strip_ansi_escape_sequences(preview);
             let preview_lines: Vec<&str> = preview.lines().collect();
             let shown_lines = preview_lines.len().min(4);
             for line in preview_lines.iter().take(shown_lines) {
@@ -1712,6 +2108,84 @@ pub(crate) fn render_background_task_message(
 
     let mut lines = render_rounded_box(&title, box_content, max_box_width, border_style);
     if centered {
+        left_pad_lines_for_centered_mode(&mut lines, width);
+    }
+    lines
+}
+
+fn compact_swarm_operation_label(label: &str) -> String {
+    label
+        .split_once(" (")
+        .map(|(label, _)| label)
+        .unwrap_or(label)
+        .replace('_', " ")
+}
+
+fn compact_swarm_progress_fraction(summary: &str) -> Option<&str> {
+    summary.split_whitespace().find(|part| {
+        let part = part.trim_matches(|ch: char| !ch.is_ascii_digit() && ch != '/');
+        let Some((done, total)) = part.split_once('/') else {
+            return false;
+        };
+        !done.is_empty()
+            && !total.is_empty()
+            && done.chars().all(|ch| ch.is_ascii_digit())
+            && total.chars().all(|ch| ch.is_ascii_digit())
+    })
+}
+
+fn render_compact_swarm_background_progress(
+    progress: &ParsedBackgroundTaskProgressNotification,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let label = compact_swarm_operation_label(&crate::message::background_task_display_label(
+        &progress.tool_name,
+        progress.display_name.as_deref(),
+    ));
+    let fraction = compact_swarm_progress_fraction(&progress.summary)
+        .map(|value| value.trim_matches(|ch: char| !ch.is_ascii_digit() && ch != '/'));
+    let text = fraction
+        .map(|fraction| format!("● {label} · {fraction}"))
+        .unwrap_or_else(|| format!("● {label}"));
+    render_compact_swarm_operation_line(&text, width, rgb(255, 214, 120))
+}
+
+fn render_compact_swarm_background_completion(
+    parsed: &ParsedBackgroundTaskNotification,
+    width: u16,
+) -> Vec<Line<'static>> {
+    let label = compact_swarm_operation_label(&crate::message::background_task_display_label(
+        &parsed.tool_name,
+        parsed.display_name.as_deref(),
+    ));
+    let (text, color) = if parsed.status.starts_with('✓') {
+        (
+            format!("✓ {label} · {}", parsed.duration),
+            rgb(120, 210, 140),
+        )
+    } else if parsed.status.starts_with('✗') {
+        (
+            format!("✗ {label} · failed after {}", parsed.duration),
+            rgb(255, 150, 150),
+        )
+    } else {
+        (
+            format!("● {label} · {}", parsed.duration),
+            rgb(255, 214, 120),
+        )
+    };
+    render_compact_swarm_operation_line(&text, width, color)
+}
+
+fn render_compact_swarm_operation_line(text: &str, width: u16, color: Color) -> Vec<Line<'static>> {
+    let mut lines = vec![super::truncate_line_with_ellipsis_to_width(
+        &Line::from(vec![
+            Span::styled("🐝 ", Style::default().fg(rgb(255, 200, 100))),
+            Span::styled(text.to_string(), Style::default().fg(color)),
+        ]),
+        width.max(1) as usize,
+    )];
+    if markdown::center_code_blocks() {
         left_pad_lines_for_centered_mode(&mut lines, width);
     }
     lines
@@ -1859,14 +2333,292 @@ fn swarm_notification_style(title: Option<&str>) -> (&'static str, Color, Color)
 /// constants so click hit-testing and rendering stay in sync.
 pub(crate) const SWARM_EXPAND_BADGE: &str = "▸ expand";
 pub(crate) const SWARM_COLLAPSE_BADGE: &str = "▾ collapse";
+pub(crate) const SWARM_DIFF_EXPAND_BADGE: &str = "▸ diff";
+pub(crate) const SWARM_DIFF_COLLAPSE_BADGE: &str = "▾ hide";
+pub(crate) const SWARM_AGENT_SNAPSHOT_TITLE: &str = "swarm-agent-snapshot";
+
+pub(crate) fn compact_swarm_await_summary(message: &str) -> String {
+    let body = message
+        .trim()
+        .strip_prefix("🐝 **Swarm await finished**")
+        .map(str::trim)
+        .unwrap_or_else(|| message.trim());
+    let mut done = 0usize;
+    let mut total = 0usize;
+    let mut in_statuses = false;
+
+    for line in body.lines() {
+        let line = line.trim();
+        if line == "Member statuses:" {
+            in_statuses = true;
+            continue;
+        }
+        if in_statuses && (line == "Completion reports:" || line.ends_with("reports:")) {
+            break;
+        }
+        if !in_statuses || line.is_empty() {
+            continue;
+        }
+        if line.starts_with('✓') {
+            done += 1;
+            total += 1;
+        } else if line.starts_with('✗') {
+            total += 1;
+        }
+    }
+
+    if total > 0 {
+        if done == total {
+            format!("✓ {done}/{total}")
+        } else {
+            format!("{done}/{total} finished")
+        }
+    } else {
+        "finished".to_string()
+    }
+}
+
+pub(crate) fn encode_swarm_agent_snapshot(
+    member: &crate::protocol::SwarmMemberStatus,
+) -> Option<String> {
+    serde_json::to_string(member).ok()
+}
+
+struct CompactSwarmNotification<'a> {
+    sender: &'a str,
+    marker: String,
+    marker_before_icon: bool,
+    text_color: Color,
+    file_activity: bool,
+}
+
+fn compact_swarm_notification(title: &str) -> Option<CompactSwarmNotification<'_>> {
+    let (sender, marker, marker_before_icon, text_color, file_activity) =
+        if let Some(sender) = title.strip_prefix("DM from ") {
+            (sender, String::new(), false, rgb(214, 232, 255), false)
+        } else if let Some(sender) = title.strip_prefix("Task · ") {
+            (sender, String::new(), false, rgb(220, 236, 255), false)
+        } else if let Some((channel, sender)) = title
+            .strip_prefix('#')
+            .and_then(|rest| rest.rsplit_once(" · "))
+        {
+            (
+                sender,
+                format!("#{channel} · "),
+                false,
+                rgb(214, 247, 244),
+                false,
+            )
+        } else if let Some(sender) = title.strip_prefix("Broadcast · ") {
+            (sender, "📣 ".to_string(), false, rgb(255, 240, 214), false)
+        } else if let Some(sender) = title.strip_prefix("Shared context · ") {
+            (sender, "🧠 ".to_string(), false, rgb(221, 247, 232), false)
+        } else if let Some(sender) = title.strip_prefix("File activity · ") {
+            (sender, "✎ ".to_string(), false, rgb(255, 228, 214), true)
+        } else if let Some(sender) = title.strip_prefix("File conflict · ") {
+            (sender, "⚠ ".to_string(), true, rgb(255, 190, 150), true)
+        } else if let Some(sender) = title.strip_prefix("Swarm · ") {
+            (sender, String::new(), false, rgb(225, 225, 235), false)
+        } else {
+            return None;
+        };
+    let sender = sender.trim();
+    (!sender.is_empty()).then_some(CompactSwarmNotification {
+        sender,
+        marker,
+        marker_before_icon,
+        text_color,
+        file_activity,
+    })
+}
+
+fn render_compact_agent_notification(
+    title: &str,
+    content: &str,
+    width: u16,
+) -> Option<Vec<Line<'static>>> {
+    let notification = compact_swarm_notification(title)?;
+    let icon = crate::id::session_icon(notification.sender);
+    let collapsible = jcode_tui_messages::parse_collapsible_swarm_content(content);
+    let (body, badge) = match collapsible {
+        Some(parsed) if parsed.expanded => (
+            format!("{}\n{}", parsed.tldr, parsed.body.trim()),
+            Some(if notification.file_activity {
+                SWARM_DIFF_COLLAPSE_BADGE
+            } else {
+                SWARM_COLLAPSE_BADGE
+            }),
+        ),
+        Some(parsed) => (
+            parsed.tldr.to_string(),
+            Some(if notification.file_activity {
+                SWARM_DIFF_EXPAND_BADGE
+            } else {
+                SWARM_EXPAND_BADGE
+            }),
+        ),
+        None => (content.trim().to_string(), None),
+    };
+    let body = if title.starts_with("Shared context · ") {
+        body.replace(" = ", " · ")
+    } else {
+        body
+    };
+    let text_color = notification.text_color;
+    let icon_style = Style::default().fg(rgb(255, 200, 100));
+    let body_style = Style::default().fg(text_color);
+    let max_width = width.max(1) as usize;
+    let body_width = max_width.saturating_sub(3).max(1);
+    let mut rendered_body = if body.is_empty() {
+        vec![Line::from(Span::styled(String::new(), body_style))]
+    } else {
+        markdown::render_markdown_with_width(&body, Some(body_width))
+    };
+    if rendered_body.is_empty() {
+        rendered_body.push(Line::from(Span::styled(body, body_style)));
+    }
+
+    let mut lines = Vec::new();
+    for (index, mut line) in rendered_body.into_iter().enumerate() {
+        for span in &mut line.spans {
+            if span.style.fg.is_none() {
+                span.style.fg = Some(text_color);
+            }
+        }
+        let mut spans = vec![if index == 0 && notification.marker_before_icon {
+            Span::styled(format!("{}{} ", notification.marker, icon), body_style)
+        } else if index == 0 {
+            Span::styled(format!("{} ", icon), icon_style)
+        } else {
+            Span::raw("   ")
+        }];
+        if index == 0 && !notification.marker.is_empty() && !notification.marker_before_icon {
+            spans.push(Span::styled(notification.marker.clone(), body_style));
+        }
+        spans.extend(line.spans);
+        if index == 0
+            && let Some(badge) = badge
+        {
+            spans.push(Span::styled(
+                format!("  {badge}"),
+                Style::default().fg(text_color).dim(),
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    if markdown::center_code_blocks() {
+        left_pad_lines_for_centered_mode(&mut lines, width);
+    }
+    Some(lines)
+}
+
+fn render_compact_swarm_await(
+    title: &str,
+    content: &str,
+    width: u16,
+) -> Option<Vec<Line<'static>>> {
+    if title != "🐝 Swarm await" {
+        return None;
+    }
+    let mut lines = vec![Line::from(vec![
+        Span::styled("🐝 ", Style::default().fg(rgb(255, 200, 100))),
+        Span::styled(
+            content.trim().to_string(),
+            Style::default().fg(rgb(225, 225, 235)),
+        ),
+    ])];
+    if markdown::center_code_blocks() {
+        left_pad_lines_for_centered_mode(&mut lines, width);
+    }
+    Some(lines)
+}
+
+fn render_compact_plan_graph(title: &str, content: &str, width: u16) -> Option<Vec<Line<'static>>> {
+    let version = title.strip_prefix("Plan graph · ")?.trim();
+    let centered = markdown::center_code_blocks();
+    let body_width = width.saturating_sub(3).max(1) as usize;
+    let mut lines = vec![Line::from(vec![
+        Span::styled("🐝 ", Style::default().fg(rgb(255, 200, 100))),
+        Span::styled("Plan", Style::default().fg(rgb(186, 139, 255)).bold()),
+        Span::styled(
+            format!(" · {version}"),
+            Style::default().fg(rgb(150, 150, 160)),
+        ),
+    ])];
+    let mut fill_rows = 0usize;
+    for mut line in markdown::render_markdown_with_width(content.trim(), Some(body_width)) {
+        if let Some((_, rows, _)) = mermaid::parse_inline_image_placeholder(&line) {
+            fill_rows = rows.saturating_sub(1) as usize;
+            lines.push(line);
+            continue;
+        }
+        if fill_rows > 0 {
+            fill_rows -= 1;
+            lines.push(line);
+            continue;
+        }
+        let mut spans = vec![Span::raw("   ")];
+        spans.append(&mut line.spans);
+        lines.push(Line::from(spans));
+    }
+    if centered {
+        left_pad_lines_for_centered_mode(&mut lines, width);
+    }
+    Some(lines)
+}
+
+fn render_compact_plan_update(
+    title: &str,
+    content: &str,
+    width: u16,
+) -> Option<Vec<Line<'static>>> {
+    title.strip_prefix("Plan · ")?;
+    let mut lines = vec![super::truncate_line_with_ellipsis_to_width(
+        &Line::from(vec![
+            Span::styled("🐝 ", Style::default().fg(rgb(255, 200, 100))),
+            Span::styled("Plan", Style::default().fg(rgb(186, 139, 255)).bold()),
+            Span::styled(
+                format!(" · {}", content.trim()),
+                Style::default().fg(rgb(225, 225, 235)),
+            ),
+        ]),
+        width.max(1) as usize,
+    )];
+    if markdown::center_code_blocks() {
+        left_pad_lines_for_centered_mode(&mut lines, width);
+    }
+    Some(lines)
+}
 
 pub(crate) fn render_swarm_message(
     msg: &DisplayMessage,
     width: u16,
     _diff_mode: crate::config::DiffDisplayMode,
 ) -> Vec<Line<'static>> {
+    if msg.title.as_deref() == Some(SWARM_AGENT_SNAPSHOT_TITLE)
+        && let Ok(member) = serde_json::from_str::<crate::protocol::SwarmMemberStatus>(&msg.content)
+    {
+        return crate::tui::info_widget::swarm_gallery::render_swarm_chat_card_lines(
+            &[member],
+            width as usize,
+        );
+    }
+
     let centered = markdown::center_code_blocks();
     let title = msg.title.as_deref().unwrap_or("Swarm").trim();
+    if let Some(lines) = render_compact_agent_notification(title, &msg.content, width) {
+        return lines;
+    }
+    if let Some(lines) = render_compact_swarm_await(title, &msg.content, width) {
+        return lines;
+    }
+    if let Some(lines) = render_compact_plan_graph(title, &msg.content, width) {
+        return lines;
+    }
+    if let Some(lines) = render_compact_plan_update(title, &msg.content, width) {
+        return lines;
+    }
     let collapsible = jcode_tui_messages::parse_collapsible_swarm_content(&msg.content);
     let (content, tldr_line): (String, Option<(String, bool)>) = match collapsible {
         Some(parsed) if !parsed.expanded => (String::new(), Some((parsed.tldr.to_string(), false))),
@@ -1878,7 +2630,6 @@ pub(crate) fn render_swarm_message(
     };
     let content = content.as_str();
     let (icon, rail_color, text_color) = swarm_notification_style(msg.title.as_deref());
-    let rail_style = Style::default().fg(rail_color);
     let header_style = Style::default().fg(rail_color).bold();
     let body_style = Style::default().fg(text_color);
 
@@ -1896,10 +2647,10 @@ pub(crate) fn render_swarm_message(
     .max(1);
 
     let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("│ ", rail_style),
-        Span::styled(format!("{} {}", icon, title), header_style),
-    ]));
+    lines.push(Line::from(Span::styled(
+        format!("{} {}", icon, title),
+        header_style,
+    )));
 
     // Collapsed/expanded tldr line with its toggle badge. The badge is a
     // click target (see `swarm_expand_target_from_screen`) and must stay the
@@ -1911,7 +2662,7 @@ pub(crate) fn render_swarm_message(
             SWARM_EXPAND_BADGE
         };
         lines.push(Line::from(vec![
-            Span::styled("│ ", rail_style),
+            Span::raw("  "),
             Span::styled(tldr.clone(), body_style),
             Span::styled(
                 format!("  {}", badge),
@@ -1985,7 +2736,7 @@ pub(crate) fn render_swarm_message(
                 span.style.fg = Some(text_color);
             }
         }
-        let mut spans = vec![Span::styled("│ ", rail_style)];
+        let mut spans = vec![Span::raw("  ")];
         spans.extend(line.spans);
         lines.push(Line::from(spans));
     }
@@ -2048,13 +2799,33 @@ pub(crate) fn render_tool_message(
         return lines;
     }
 
+    let centered = markdown::center_code_blocks();
+    let token_badge = tool_output_token_badge(&msg.content);
+
+    // A restored or remotely mirrored transcript can occasionally retain the
+    // todo result while losing its paired ToolCall metadata. Recognize the
+    // structured todo payload itself so the full card never disappears merely
+    // because that display-only association was unavailable.
+    let is_todo_tool = msg
+        .tool_data
+        .as_ref()
+        .is_none_or(|tc| tools_ui::canonical_tool_name(&tc.name) == "todo");
+    if is_todo_tool
+        && !tools_ui::tool_output_looks_failed(&msg.content)
+        && let Some((todos, goals)) = parse_todo_tool_output(&msg.content)
+    {
+        let payload = serde_json::json!({ "todos": todos, "goals": goals }).to_string();
+        return render_todos_message(
+            &DisplayMessage::todos(payload),
+            width,
+            crate::config::DiffDisplayMode::Off,
+        );
+    }
+
     let mut lines: Vec<Line<'static>> = Vec::new();
     let Some(ref tc) = msg.tool_data else {
         return lines;
     };
-
-    let centered = markdown::center_code_blocks();
-    let token_badge = tool_output_token_badge(&msg.content);
 
     if tools_ui::is_memory_store_tool(tc) && !msg.content.starts_with("Error:") {
         let content = tc
@@ -2360,6 +3131,24 @@ pub(crate) fn render_tool_message(
                 Some(row_width),
                 sub_result.map(|result| result.content.as_str()),
             ));
+
+            if tools_ui::canonical_tool_name(&sub_tc.name) == "todo"
+                && !sub_errored
+                && let Some(result) = sub_result
+                && let Some((todos, goals)) = parse_todo_tool_output(&result.content)
+            {
+                let payload = serde_json::json!({ "todos": todos, "goals": goals }).to_string();
+                let nested_width = row_width.saturating_sub(4).max(1).min(u16::MAX as usize) as u16;
+                let mut todo_lines = render_todos_message(
+                    &DisplayMessage::todos(payload),
+                    nested_width,
+                    crate::config::DiffDisplayMode::Off,
+                );
+                for line in &mut todo_lines {
+                    line.spans.insert(0, Span::raw("    "));
+                }
+                lines.extend(todo_lines);
+            }
         }
     }
 

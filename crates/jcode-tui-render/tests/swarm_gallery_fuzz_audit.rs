@@ -3,7 +3,7 @@
 //! member counts, tiny widths/heights, wide glyphs).
 
 use jcode_tui_render::swarm_gallery::{
-    GalleryMember, SwarmStripHint, SwarmStripOptions, render_gallery, render_swarm_dock,
+    GalleryMember, SwarmStripHint, render_gallery, render_swarm_dock,
     render_swarm_panel, render_swarm_strip,
 };
 use ratatui::prelude::Line;
@@ -20,6 +20,11 @@ fn member(id: &str, status: &str, role: Option<&str>, body: &[&str]) -> GalleryM
         sort_key: id.to_string(),
         todo: None,
         todo_items: Vec::new(),
+        model: None,
+        provider: None,
+        auth_method: None,
+        effort: None,
+        elapsed_secs: None,
     }
 }
 
@@ -167,15 +172,13 @@ fn strip_never_panics_and_stays_width_bounded() {
                     for spinner in [0usize, 7, usize::MAX] {
                         let lines = render_swarm_strip(
                             &members,
-                            SwarmStripOptions {
-                                selected,
-                                focused,
-                                hints: &hints(),
-                                enter_hint: Some("ctrl+t controls"),
-                                spinner_frame: spinner,
-                                width,
-                                max_height: 12,
-                            },
+                            selected,
+                            focused,
+                            &hints(),
+                            Some("ctrl+t controls"),
+                            spinner,
+                            width,
+                            12,
                         );
                         for line in &lines {
                             let text = plain(line);

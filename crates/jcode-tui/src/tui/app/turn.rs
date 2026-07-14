@@ -31,7 +31,7 @@ impl App {
     ) -> Result<()> {
         let eager_stream_redraw = !crate::perf::tui_policy().enable_decorative_animations;
         let mut redraw_period = crate::tui::redraw_interval(self);
-        let mut redraw_interval = interval(redraw_period);
+        let mut redraw_interval = super::run_shell::redraw_timer(redraw_period);
         let mut status_spinner_interval = super::run_shell::status_spinner_interval();
         let mut status_spinner_renderer = super::run_shell::StatusSpinnerRenderer::default();
 
@@ -39,7 +39,7 @@ impl App {
             let desired_redraw = crate::tui::redraw_interval(self);
             if desired_redraw != redraw_period {
                 redraw_period = desired_redraw;
-                redraw_interval = interval(redraw_period);
+                redraw_interval = super::run_shell::redraw_timer(redraw_period);
             }
 
             self.status = ProcessingStatus::Sending;
@@ -153,10 +153,12 @@ impl App {
                                 super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
                             }
                             Some(Ok(Event::Mouse(mouse))) => {
-                                let scroll_only = self.handle_mouse_event(mouse);
-                                if !scroll_only {
-                                    status_spinner_renderer.draw_full(self, terminal)?;
-                                    super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
+                                if !matches!(mouse.kind, MouseEventKind::Moved) {
+                                    let scroll_only = self.handle_mouse_event(mouse);
+                                    if !scroll_only {
+                                        status_spinner_renderer.draw_full(self, terminal)?;
+                                        super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
+                                    }
                                 }
                             }
                             Some(Ok(Event::Resize(_, _))) => {
@@ -169,7 +171,7 @@ impl App {
                         }
                     }
                     // Redraw periodically
-                    _ = status_spinner_interval.tick(), if super::run_shell::status_spinner_only_symbol(self).is_some() => {
+                    _ = status_spinner_interval.tick(), if status_spinner_renderer.spinner_only_available(self) => {
                         if !status_spinner_renderer.draw_status_spinner_only(self, terminal)? {
                             status_spinner_renderer.draw_full(self, terminal)?;
                             super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
@@ -249,7 +251,7 @@ impl App {
                 let desired_redraw = crate::tui::redraw_interval(self);
                 if desired_redraw != redraw_period {
                     redraw_period = desired_redraw;
-                    redraw_interval = interval(redraw_period);
+                    redraw_interval = super::run_shell::redraw_timer(redraw_period);
                 }
                 tokio::select! {
                     // Cheap single-cell spinner refresh between full redraws. This
@@ -257,7 +259,7 @@ impl App {
                     // (especially in low-resource tiers where full redraws run at
                     // the ~1 Hz passive-liveness rate) by patching just the status
                     // cell. Only active while there is no streaming text to reveal.
-                    _ = status_spinner_interval.tick(), if super::run_shell::status_spinner_only_symbol(self).is_some() => {
+                    _ = status_spinner_interval.tick(), if status_spinner_renderer.spinner_only_available(self) => {
                         if !status_spinner_renderer.draw_status_spinner_only(self, terminal)? {
                             status_spinner_renderer.draw_full(self, terminal)?;
                             super::run_shell::reset_status_spinner_interval(&mut status_spinner_interval, self);
@@ -447,9 +449,11 @@ impl App {
                                 status_spinner_renderer.draw_full(self, terminal)?;
                             }
                             Some(Ok(Event::Mouse(mouse))) => {
-                                let scroll_only = self.handle_mouse_event(mouse);
-                                if !scroll_only {
-                                    status_spinner_renderer.draw_full(self, terminal)?;
+                                if !matches!(mouse.kind, MouseEventKind::Moved) {
+                                    let scroll_only = self.handle_mouse_event(mouse);
+                                    if !scroll_only {
+                                        status_spinner_renderer.draw_full(self, terminal)?;
+                                    }
                                 }
                             }
                             Some(Ok(Event::Resize(_, _))) => {
@@ -927,19 +931,12 @@ impl App {
                                             title: Some("Generated image".to_string()),
                                             tool_data: Some(tool_call),
                                         });
-                                        match crate::tui::write_generated_image_side_panel_page(
-                                            &self.session.id,
+                                        if let Some(image) = crate::message::generated_image_rendered_image(
                                             &id,
                                             &path,
-                                            metadata_path.as_deref(),
                                             &output_format,
-                                            revised_prompt.as_deref(),
                                         ) {
-                                            Ok(snapshot) => self.set_side_panel_snapshot(snapshot),
-                                            Err(err) => crate::logging::warn(&format!(
-                                                "Failed to write generated image side panel page: {}",
-                                                err
-                                            )),
+                                            self.append_live_inline_images(vec![image]);
                                         }
                                         if provider.supports_image_input() {
                                             if let Some(blocks) = crate::message::generated_image_visual_context_blocks(
@@ -1209,6 +1206,7 @@ impl App {
                         } else {
                             ToolStatus::Completed
                         },
+                        intent: tc.intent.clone(),
                         title: None,
                     }));
 
@@ -1226,6 +1224,7 @@ impl App {
 
                     self.observe_tool_result(&tc, &sdk_content, sdk_is_error, None);
                     self.note_tool_completed(&tc, sdk_is_error);
+                    self.note_todo_gate_result(&tc, &sdk_content, sdk_is_error);
 
                     self.add_provider_message(Message {
                         role: Role::User,
@@ -1266,6 +1265,7 @@ impl App {
                     tool_call_id: tc.id.clone(),
                     tool_name: tc.name.clone(),
                     status: ToolStatus::Running,
+                    intent: tc.intent.clone(),
                     title: None,
                 }));
 
@@ -1336,9 +1336,11 @@ impl App {
                                     status_spinner_renderer.draw_full(self, terminal)?;
                                 }
                                 Some(Ok(Event::Mouse(mouse))) => {
-                                    let scroll_only = self.handle_mouse_event(mouse);
-                                    if !scroll_only {
-                                        status_spinner_renderer.draw_full(self, terminal)?;
+                                    if !matches!(mouse.kind, MouseEventKind::Moved) {
+                                        let scroll_only = self.handle_mouse_event(mouse);
+                                        if !scroll_only {
+                                            status_spinner_renderer.draw_full(self, terminal)?;
+                                        }
                                     }
                                 }
                                 Some(Ok(Event::Resize(_, _))) => {
@@ -1406,6 +1408,7 @@ impl App {
                             tool_call_id: tc.id.clone(),
                             tool_name: tc.name.clone(),
                             status: ToolStatus::Completed,
+                            intent: tc.intent.clone(),
                             title: o.title.clone(),
                         }));
                         (o.output, false, o.title)
@@ -1417,6 +1420,7 @@ impl App {
                             tool_call_id: tc.id.clone(),
                             tool_name: tc.name.clone(),
                             status: ToolStatus::Error,
+                            intent: tc.intent.clone(),
                             title: None,
                         }));
                         (format!("Error: {}", e), true, None)
@@ -1447,6 +1451,7 @@ impl App {
                 );
                 self.observe_tool_result(&tc, &output, is_error, tool_title.as_deref());
                 self.note_tool_completed(&tc, is_error);
+                self.note_todo_gate_result(&tc, &output, is_error);
                 let _ = self.session.save();
             }
 

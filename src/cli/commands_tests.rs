@@ -279,7 +279,7 @@ fn run_auto_poke_followup_targets_below_threshold_todos() {
         test_todo("b", "completed", "low", Some(80), Some(80)),
     ];
 
-    let followup = build_run_auto_poke_follow_up_from_todos(&todos, false);
+    let followup = build_run_auto_poke_follow_up_from_todos(&todos);
 
     match followup {
         Some(RunAutoPokeFollowUp::ConfidenceSummary {
@@ -287,50 +287,21 @@ fn run_auto_poke_followup_targets_below_threshold_todos() {
             message,
         }) => {
             assert_eq!(total_todos, 2);
-            assert!(message.contains("All todos are done. Todo confidence summary:"));
-            assert!(message.contains("\"todo b\" was completed at 80% confidence"));
-            assert!(!message.contains("todo a\" was completed at"));
+            assert_eq!(message, crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE);
+            assert!(!message.chars().any(|ch| ch.is_ascii_digit()));
+            assert!(message.contains("completion confidence"));
+            assert!(!message.to_ascii_lowercase().contains("threshold"));
         }
         _ => panic!("expected confidence-summary follow-up"),
     }
 }
 
 #[test]
-fn run_auto_poke_followup_flags_confidence_spikes() {
-    // Stepped, evidence-backed rise: no spike, no follow-up.
-    let mut steady = test_todo("a", "completed", "high", Some(100), Some(100));
-    steady.confidence_history = vec![75, 85, 95, 100];
-    // Bulk end-of-task stamp: 75 -> 100 in one step.
-    let mut spiked = test_todo("b", "completed", "high", Some(100), Some(100));
-    spiked.confidence_history = vec![75, 100];
+fn run_auto_poke_followup_ignores_precompletion_confidence() {
+    let mut todo = test_todo("a", "completed", "high", Some(0), Some(100));
+    todo.confidence_history = vec![0, 100];
 
-    let followup = build_run_auto_poke_follow_up_from_todos(&[steady.clone()], false);
-    assert!(
-        followup.is_none(),
-        "stepped rise above threshold should not trigger a follow-up"
-    );
-
-    match build_run_auto_poke_follow_up_from_todos(&[steady, spiked], false) {
-        Some(RunAutoPokeFollowUp::ConfidenceSummary { message, .. }) => {
-            assert!(message.contains("\"todo b\" jumped to its final confidence in one step"));
-            assert!(message.contains("75 -> 100"));
-            assert!(!message.contains("todo a\" jumped"));
-        }
-        _ => panic!("expected spike follow-up"),
-    }
-}
-
-#[test]
-fn run_auto_poke_followup_flags_spike_without_history() {
-    // No tool-maintained history (legacy todos): fall back to the
-    // planning-vs-completion gap on the scalar fields.
-    let todos = vec![test_todo("a", "completed", "high", Some(70), Some(100))];
-    match build_run_auto_poke_follow_up_from_todos(&todos, false) {
-        Some(RunAutoPokeFollowUp::ConfidenceSummary { message, .. }) => {
-            assert!(message.contains("jumped to its final confidence"));
-        }
-        _ => panic!("expected spike follow-up from scalar fields"),
-    }
+    assert!(build_run_auto_poke_follow_up_from_todos(&[todo]).is_none());
 }
 
 #[test]
@@ -341,7 +312,7 @@ fn run_auto_poke_followup_silent_when_confident_and_earned() {
         test_todo("a", "completed", "high", Some(95), Some(95)),
         test_todo("b", "completed", "low", Some(92), Some(98)),
     ];
-    assert!(build_run_auto_poke_follow_up_from_todos(&todos, false).is_none());
+    assert!(build_run_auto_poke_follow_up_from_todos(&todos).is_none());
 }
 
 #[test]
@@ -351,7 +322,7 @@ fn run_auto_poke_followup_prioritizes_incomplete_todos() {
         test_todo("b", "in_progress", "medium", Some(80), None),
     ];
 
-    let followup = build_run_auto_poke_follow_up_from_todos(&todos, false);
+    let followup = build_run_auto_poke_follow_up_from_todos(&todos);
 
     match followup {
         Some(RunAutoPokeFollowUp::Incomplete { count, message }) => {
@@ -366,10 +337,19 @@ fn run_auto_poke_followup_prioritizes_incomplete_todos() {
 }
 
 #[test]
-fn run_auto_poke_followup_sends_confidence_summary_once() {
-    let todos = vec![test_todo("a", "completed", "high", Some(95), Some(95))];
+fn run_auto_poke_followup_rechecks_completion_confidence_until_it_passes() {
+    let needs_validation = vec![test_todo("a", "completed", "high", Some(80), Some(80))];
+    assert!(matches!(
+        build_run_auto_poke_follow_up_from_todos(&needs_validation),
+        Some(RunAutoPokeFollowUp::ConfidenceSummary { .. })
+    ));
+    assert!(matches!(
+        build_run_auto_poke_follow_up_from_todos(&needs_validation),
+        Some(RunAutoPokeFollowUp::ConfidenceSummary { .. })
+    ));
 
-    assert!(build_run_auto_poke_follow_up_from_todos(&todos, true).is_none());
+    let validated = vec![test_todo("a", "completed", "high", Some(80), Some(100))];
+    assert!(build_run_auto_poke_follow_up_from_todos(&validated).is_none());
 }
 
 #[test]

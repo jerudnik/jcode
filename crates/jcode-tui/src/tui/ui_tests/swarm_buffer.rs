@@ -31,6 +31,7 @@ fn strip_member(id: &str, name: &str, status: &str) -> SwarmMemberStatus {
         initial_prompt_delivered: None,
         todo_progress: Some((2, 5)),
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     }
 }
 

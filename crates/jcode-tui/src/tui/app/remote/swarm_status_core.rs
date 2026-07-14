@@ -148,6 +148,7 @@ mod tests {
             initial_prompt_delivered: None,
             todo_progress: None,
             todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
         }
     }
 

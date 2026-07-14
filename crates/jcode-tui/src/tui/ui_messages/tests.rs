@@ -7,6 +7,10 @@ fn extract_line_text(line: &Line<'_>) -> String {
         .collect::<String>()
 }
 
+fn without_whitespace(text: &str) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
 fn leading_spaces(text: &str) -> usize {
     text.chars().take_while(|c| *c == ' ').count()
 }
@@ -213,7 +217,50 @@ fn render_background_task_message_uses_box_and_truncates_preview_lines() {
 }
 
 #[test]
+fn render_background_task_message_strips_ansi_from_existing_preview() {
+    let msg = DisplayMessage::background_task(
+        "**Background task** `bg123` · `bash` · ✓ completed · 0.1s · exit 0\n\n```text\n\u{1b}[32m✓\u{1b}[39m passes \u{1b}[2m12ms\u{1b}[22m\n```\n\n_Full output:_ `bg action=\"output\" task_id=\"bg123\"`",
+    );
+
+    let plain = render_background_task_message(&msg, 80, crate::config::DiffDisplayMode::Off)
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        plain.contains("✓ passes 12ms"),
+        "rendered preview:\n{plain}"
+    );
+    assert!(!plain.contains('\u{1b}'));
+    assert!(!plain.contains("[32m"));
+    assert!(!plain.contains("[2m"));
+}
+
+#[test]
+fn render_system_message_strips_ansi_from_existing_inline_command_preview() {
+    let msg = DisplayMessage::system(
+        "Shell command · ✓ exit 0 · 12ms\n\n  cargo test\n\n  \u{1b}[32m✓\u{1b}[39m passes \u{1b}[2m12ms\u{1b}[22m",
+    );
+
+    let plain = render_system_message(&msg, 80, crate::config::DiffDisplayMode::Off)
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        plain.contains("✓ passes 12ms"),
+        "rendered preview:\n{plain}"
+    );
+    assert!(!plain.contains('\u{1b}'));
+    assert!(!plain.contains("[32m"));
+    assert!(!plain.contains("[2m"));
+}
+
+#[test]
 fn render_background_task_message_uses_swarm_flavor_for_swarm_tool() {
+    crate::tui::markdown::set_center_code_blocks(false);
     let msg = DisplayMessage::background_task(
         "**Background task** `bg777` · `run_plan (6 nodes, deep mode)` (`swarm`) · ✓ completed · 92.4s · exit 0\n\n```text\nSwarm plan reached terminal/blocked state after 9 loop(s). completed=6 blocked=0 cycles=0 active=0 assignments=8\n```\n\n_Full output:_ `bg action=\"output\" task_id=\"bg777\"`",
     );
@@ -225,17 +272,14 @@ fn render_background_task_message_uses_swarm_flavor_for_swarm_tool() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(
-        plain.contains("🐝 run_plan (6 nodes, deep mode) completed · bg777"),
-        "expected swarm-flavored completion title, got:\n{plain}"
-    );
-    assert!(!plain.contains("✓ bg "));
-    assert!(plain.contains("exit 0 · 92.4s"));
-    assert!(plain.contains("Swarm plan reached terminal/blocked state"));
+    assert_eq!(plain, "🐝 ✓ run plan · 92.4s");
+    assert!(!plain.contains("bg777"));
+    assert!(!plain.contains("Swarm plan reached terminal/blocked state"));
 }
 
 #[test]
 fn render_background_task_progress_message_uses_swarm_flavor_for_swarm_tool() {
+    crate::tui::markdown::set_center_code_blocks(false);
     let msg = DisplayMessage::background_task(
         "**Background task progress** `bg777` · `run_plan (6 nodes, deep mode)` (`swarm`)\n\n[####--------] 33% · 2/6 nodes · completed 2 · blocked 0 · active 3 · assignments 5 (reported)",
     );
@@ -247,12 +291,8 @@ fn render_background_task_progress_message_uses_swarm_flavor_for_swarm_tool() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(
-        plain.contains("🐝 run_plan (6 nodes, deep mode) · bg777"),
-        "expected swarm-flavored progress title, got:\n{plain}"
-    );
-    assert!(!plain.contains("◌ bg "));
-    assert!(plain.contains("33%"));
+    assert_eq!(plain, "🐝 ● run plan · 2/6");
+    assert!(!plain.contains("bg777"));
 }
 
 #[test]
@@ -378,18 +418,164 @@ fn render_todos_message_shows_grouped_card_with_status_glyphs() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(plain.contains("todos · 1/3 done"), "{plain}");
+    assert!(!plain.contains("Todos"), "{plain}");
     assert!(plain.contains("todo card"), "{plain}");
     assert!(plain.contains("other"), "{plain}");
+    let todo_card_header = lines
+        .iter()
+        .map(extract_line_text)
+        .find(|line| line.contains("todo card"))
+        .unwrap();
+    assert_eq!(todo_card_header.matches('●').count(), 2, "{plain}");
+    assert_eq!(todo_card_header.matches('○').count(), 0, "{plain}");
+    let other_header = lines
+        .iter()
+        .map(extract_line_text)
+        .find(|line| line.contains("other"))
+        .unwrap();
+    assert_eq!(other_header.matches('○').count(), 1, "{plain}");
     assert!(plain.contains("✓ Wire the hotkey"), "{plain}");
-    assert!(plain.contains("▶ Render the card"), "{plain}");
+    assert!(plain.contains("● Render the card"), "{plain}");
     assert!(plain.contains("○ Unrelated cleanup"), "{plain}");
     // Completed items show completion confidence; open ones planning confidence.
-    assert!(plain.contains("95%"), "{plain}");
+    assert!(plain.contains("80→95%"), "{plain}");
     assert!(plain.contains("80%"), "{plain}");
     // Only open items carry the high-priority marker.
     assert!(!plain.contains("Wire the hotkey (high)"), "{plain}");
     assert!(plain.contains("Render the card (high)"), "{plain}");
+    assert!(
+        !plain.contains('╭'),
+        "todo card should be borderless:\n{plain}"
+    );
+    assert!(
+        !plain.contains('╰'),
+        "todo card should be borderless:\n{plain}"
+    );
+}
+
+#[test]
+fn render_todos_message_shows_goal_scores_and_feedback() {
+    let todos = vec![crate::todo::TodoItem {
+        id: "1".to_string(),
+        content: "Render the card".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("todo rendering".to_string()),
+        confidence: Some(85),
+        completion_confidence: None,
+        confidence_history: vec![80, 85],
+        blocked_by: Vec::new(),
+        assigned_to: None,
+    }];
+    let goals = vec![crate::todo::TodoGoal {
+        group: Some("todo rendering".to_string()),
+        hill_climbability: Some(95),
+        objective: Some("Readable at 80 columns".to_string()),
+        feedback_loop: Some("Inspect a debug frame".to_string()),
+        end_to_end_ownership: Some(90),
+    }];
+    let msg =
+        DisplayMessage::todos(serde_json::json!({ "todos": todos, "goals": goals }).to_string());
+
+    let plain = render_todos_message(&msg, 100, crate::config::DiffDisplayMode::Off)
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        plain.contains("Hill climbability 95% · Ownership 90%"),
+        "{plain}"
+    );
+    assert!(
+        plain.contains("Objective · Readable at 80 columns"),
+        "{plain}"
+    );
+    assert!(
+        plain.contains("Feedback · Inspect a debug frame"),
+        "{plain}"
+    );
+    assert!(plain.contains("● Render the card (high) · 85%"), "{plain}");
+}
+
+#[test]
+fn render_todos_message_uses_readable_semantic_colors() {
+    let todos = vec![crate::todo::TodoItem {
+        id: "1".to_string(),
+        content: "Tune the palette".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("todo rendering".to_string()),
+        confidence: Some(85),
+        completion_confidence: None,
+        confidence_history: Vec::new(),
+        blocked_by: Vec::new(),
+        assigned_to: None,
+    }];
+    let goals = vec![crate::todo::TodoGoal {
+        group: Some("todo rendering".to_string()),
+        hill_climbability: Some(95),
+        objective: Some("Readable metadata".to_string()),
+        feedback_loop: None,
+        end_to_end_ownership: None,
+    }];
+    let msg =
+        DisplayMessage::todos(serde_json::json!({ "todos": todos, "goals": goals }).to_string());
+    let lines = render_todos_message(&msg, 100, crate::config::DiffDisplayMode::Off);
+    let color_for = |text: &str| {
+        lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .find(|span| span.content.as_ref() == text)
+            .and_then(|span| span.style.fg)
+    };
+
+    assert_eq!(color_for("todo rendering"), Some(todo_group_color()));
+    assert_eq!(color_for("Readable metadata"), Some(todo_meta_color()));
+    assert_eq!(color_for("● "), Some(asap_color()));
+    assert_eq!(color_for(" (high)"), Some(rgb(235, 175, 95)));
+    assert_eq!(color_for(" · 85%"), Some(todo_confidence_color()));
+    assert_ne!(todo_meta_color(), dim_color());
+    assert_ne!(asap_color(), rgb(235, 175, 95));
+}
+
+#[test]
+fn render_todos_message_wraps_goal_scores_at_narrow_widths() {
+    let todos = vec![crate::todo::TodoItem {
+        id: "1".to_string(),
+        content: "Render the card".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("todo rendering".to_string()),
+        confidence: Some(85),
+        completion_confidence: None,
+        confidence_history: Vec::new(),
+        blocked_by: Vec::new(),
+        assigned_to: None,
+    }];
+    let goals = vec![crate::todo::TodoGoal {
+        group: Some("todo rendering".to_string()),
+        hill_climbability: Some(95),
+        objective: None,
+        feedback_loop: None,
+        end_to_end_ownership: Some(90),
+    }];
+    let msg =
+        DisplayMessage::todos(serde_json::json!({ "todos": todos, "goals": goals }).to_string());
+
+    let lines = render_todos_message(&msg, 40, crate::config::DiffDisplayMode::Off);
+    let plain = lines
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(plain.contains("Hill climbability 95%"), "{plain}");
+    assert!(plain.contains("Ownership 90%"), "{plain}");
+    assert!(
+        lines.iter().all(|line| line.width() <= 38),
+        "card exceeded its 38-column content budget: {plain}"
+    );
 }
 
 #[test]
@@ -400,8 +586,8 @@ fn render_todos_message_empty_list_shows_placeholder() {
         .map(extract_line_text)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(plain.contains("☰ todos"), "{plain}");
-    assert!(plain.contains("No todos yet"), "{plain}");
+    assert!(!plain.contains("Todos"), "{plain}");
+    assert!(plain.contains("No tasks yet"), "{plain}");
 }
 
 #[test]
@@ -409,6 +595,357 @@ fn render_todos_message_bad_payload_falls_back_to_system() {
     let msg = DisplayMessage::todos("not json");
     let lines = render_todos_message(&msg, 100, crate::config::DiffDisplayMode::Off);
     assert!(!lines.is_empty());
+}
+
+#[test]
+fn render_todo_tool_result_uses_borderless_card_with_goal_scores() {
+    let todos = vec![crate::todo::TodoItem {
+        id: "render".to_string(),
+        content: "Render the todo result".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("todo rendering".to_string()),
+        confidence: Some(92),
+        completion_confidence: None,
+        confidence_history: vec![85, 92],
+        blocked_by: Vec::new(),
+        assigned_to: None,
+    }];
+    let goals = vec![crate::todo::TodoGoal {
+        group: Some("todo rendering".to_string()),
+        hill_climbability: Some(95),
+        objective: Some("Readable card".to_string()),
+        feedback_loop: Some("Inspect the rendered frame".to_string()),
+        end_to_end_ownership: Some(92),
+    }];
+    let content = format!(
+        "[todo] [tool timing: start=2026-07-13T19:51:50.261Z finish=2026-07-13T19:51:50.265Z duration=4ms] {}\n\nGoals:\n{}\n\n{}",
+        serde_json::to_string_pretty(&todos).unwrap(),
+        serde_json::to_string_pretty(&goals).unwrap(),
+        crate::todo::TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE
+    );
+    let msg = DisplayMessage {
+        role: "tool".to_string(),
+        content,
+        tool_calls: Vec::new(),
+        duration_secs: None,
+        title: Some("1 todos".to_string()),
+        tool_data: Some(crate::message::ToolCall {
+            id: "call_todo".to_string(),
+            name: "todo".to_string(),
+            input: serde_json::json!({ "todos": todos, "goals": goals }),
+            intent: Some("Track todo card work".to_string()),
+            thought_signature: None,
+        }),
+    };
+
+    let plain = render_tool_message(&msg, 100, crate::config::DiffDisplayMode::Off)
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(!plain.contains("Todos"), "{plain}");
+    assert!(plain.contains("todo rendering  ●"), "{plain}");
+    assert!(
+        plain.contains("Hill climbability 95% · Ownership 92%"),
+        "{plain}"
+    );
+    assert!(
+        plain.contains("● Render the todo result (high) · 92%"),
+        "{plain}"
+    );
+    assert!(
+        !plain.contains('╭'),
+        "todo tool result should be borderless:\n{plain}"
+    );
+    assert!(
+        !plain.contains("todo 1 items"),
+        "generic tool row leaked:\n{plain}"
+    );
+}
+
+#[test]
+fn parse_todo_tool_output_accepts_timestamp_only_header() {
+    let todos = vec![crate::todo::TodoItem {
+        id: "timed".to_string(),
+        content: "Render the restored todo".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        ..Default::default()
+    }];
+    let content = format!(
+        "[2026-07-13T19:51:50.261Z] [todo] {}",
+        serde_json::to_string(&todos).unwrap()
+    );
+
+    let (parsed, goals) = parse_todo_tool_output(&content).expect("timestamped todo payload");
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].id, todos[0].id);
+    assert_eq!(parsed[0].content, todos[0].content);
+    assert!(goals.is_empty());
+}
+
+#[test]
+fn unbiased_visual_prompt_retry_renders_complete_feedback_change() {
+    const PROMPT: &str = "can you make a pelican riding a bike animation in html and vanillia js ";
+    const INITIAL_FEEDBACK: &str = "Open the page in a browser, inspect runtime errors, and verify animation state changes over time.";
+    const REVISED_FEEDBACK: &str = "Serve the files locally, load them in a real browser at desktop and mobile viewport sizes, assert zero console/page errors, sample wheel and scenery transforms at two timestamps to prove motion, and exercise pause plus speed controls to confirm state changes.";
+    const REVISED_OBJECTIVE: &str = "Deliver a responsive standalone animation whose pelican visibly pedals a moving bicycle through a layered seaside scene at 60fps where supported, with working pause/resume and three-speed controls, accessible labels, no external runtime dependencies, and zero browser console errors.";
+
+    // Keep the eval input neutral. The visual verification strategy must come
+    // from the model's todo refinement, not from criteria planted in the prompt.
+    for biased_term in [
+        "feedback loop",
+        "browser",
+        "console",
+        "viewport",
+        "screenshot",
+        "visual quality",
+    ] {
+        assert!(!PROMPT.to_ascii_lowercase().contains(biased_term));
+    }
+
+    let todos = vec![crate::todo::TodoItem {
+        id: "implement".to_string(),
+        content: "Implement the illustrated pelican bicycle scene and responsive styling"
+            .to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("pelican-bike-animation".to_string()),
+        confidence: Some(90),
+        ..Default::default()
+    }];
+    let render = |goal: crate::todo::TodoGoal,
+                  continuation: Option<&str>,
+                  tool_data: Option<crate::message::ToolCall>| {
+        let mut content = format!(
+            "[todo] [tool timing: start=2026-07-13T19:51:50.261Z finish=2026-07-13T19:51:50.265Z duration=4ms] {}\n\nGoals:\n{}",
+            serde_json::to_string_pretty(&todos).unwrap(),
+            serde_json::to_string_pretty(&vec![goal]).unwrap()
+        );
+        if let Some(continuation) = continuation {
+            content.push_str("\n\n");
+            content.push_str(continuation);
+        }
+        let msg = DisplayMessage {
+            role: "tool".to_string(),
+            content,
+            tool_calls: Vec::new(),
+            duration_secs: None,
+            title: Some("1 todos".to_string()),
+            tool_data,
+        };
+        render_tool_message(&msg, 72, crate::config::DiffDisplayMode::Off)
+            .iter()
+            .map(extract_line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let initial = render(
+        crate::todo::TodoGoal {
+            group: Some("pelican-bike-animation".to_string()),
+            hill_climbability: Some(90),
+            objective: Some(
+                "Create a polished, working pelican-riding-a-bike animation using only HTML, CSS, and vanilla JavaScript."
+                    .to_string(),
+            ),
+            feedback_loop: Some(INITIAL_FEEDBACK.to_string()),
+            end_to_end_ownership: None,
+        },
+        Some(crate::todo::TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE),
+        Some(crate::message::ToolCall {
+            id: "call_initial_todo".to_string(),
+            name: "todo".to_string(),
+            input: serde_json::Value::Null,
+            intent: Some("Track implementation and browser verification".to_string()),
+            thought_signature: None,
+        }),
+    );
+    assert!(initial.contains("pelican-bike-animation"), "{initial}");
+    assert!(
+        without_whitespace(&initial).contains(&without_whitespace(INITIAL_FEEDBACK)),
+        "initial feedback loop was truncated:\n{initial}"
+    );
+
+    // Simulate a restored/mirrored result whose ToolCall association was lost.
+    // The structured result must still render as the same complete todo card.
+    let revised = render(
+        crate::todo::TodoGoal {
+            group: Some("pelican-bike-animation".to_string()),
+            hill_climbability: Some(98),
+            objective: Some(REVISED_OBJECTIVE.to_string()),
+            feedback_loop: Some(REVISED_FEEDBACK.to_string()),
+            end_to_end_ownership: None,
+        },
+        None,
+        None,
+    );
+    let compact_revised = without_whitespace(&revised);
+    assert!(revised.contains("pelican-bike-animation"), "{revised}");
+    assert!(
+        compact_revised.contains(&without_whitespace(REVISED_OBJECTIVE)),
+        "revised objective was truncated:\n{revised}"
+    );
+    assert!(
+        compact_revised.contains(&without_whitespace(REVISED_FEEDBACK)),
+        "revised feedback loop was truncated:\n{revised}"
+    );
+    let goal_details = revised
+        .split("● Implement")
+        .next()
+        .expect("todo item should follow the goal details");
+    assert!(
+        !goal_details.contains('…'),
+        "todo goal details must not truncate:\n{revised}"
+    );
+}
+
+#[test]
+fn visually_appealing_prompt_batched_retry_renders_complete_todo_card() {
+    // This fixture is only the first todo retry emitted after the
+    // hill-climbability continuation. The eval stops here and deliberately does
+    // not depend on the model implementing or completing the visual task.
+    const PROMPT: &str =
+        "make the most visually appealing pelican on a bike animation with html and vanillia js";
+    const FEEDBACK: &str = "At each iteration, render at 1440x900 and 390x844, capture screenshots, and score five checks: scene fills viewport without clipping, focal subject is centered, at least six distinct motion layers run smoothly, controls respond, and no console errors occur. Refine until all checks pass.";
+    const OBJECTIVE: &str = "Deliver a single-page vanilla HTML/CSS/JS animation whose pelican cyclist remains legible and visually balanced at desktop and mobile sizes, includes six or more coordinated motion layers, supports interactive speed controls, and runs with zero console errors.";
+
+    assert!(!PROMPT.contains("1440x900"));
+    assert!(!PROMPT.contains("screenshot"));
+    assert!(!PROMPT.contains("console"));
+    assert!(!PROMPT.contains("feedback"));
+
+    let todos = vec![crate::todo::TodoItem {
+        id: "inspect".to_string(),
+        content: "Inspect the starter project and determine the page structure".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("pelican-bike".to_string()),
+        confidence: Some(95),
+        ..Default::default()
+    }];
+    let goals = vec![crate::todo::TodoGoal {
+        group: Some("pelican-bike".to_string()),
+        hill_climbability: Some(98),
+        objective: Some(OBJECTIVE.to_string()),
+        feedback_loop: Some(FEEDBACK.to_string()),
+        end_to_end_ownership: None,
+    }];
+    let todo_output = format!(
+        "{}\n\nGoals:\n{}",
+        serde_json::to_string_pretty(&todos).unwrap(),
+        serde_json::to_string_pretty(&goals).unwrap()
+    );
+    let content = format!(
+        "--- [1] todo ---\n{todo_output}\n\n--- [2] ls ---\n./\n\n0 files, 0 directories\n\nCompleted: 2 succeeded, 0 failed"
+    );
+    let msg = DisplayMessage {
+        role: "tool".to_string(),
+        content,
+        tool_calls: Vec::new(),
+        duration_secs: None,
+        title: None,
+        tool_data: Some(crate::message::ToolCall {
+            id: "call_batch".to_string(),
+            name: "batch".to_string(),
+            input: serde_json::json!({
+                "intent": "Inspect starter files and strengthen measurable visual goals",
+                "tool_calls": [
+                    {
+                        "tool": "todo",
+                        "intent": "Make the visual outcome objectively verifiable",
+                        "todos": todos,
+                        "goals": goals
+                    },
+                    { "tool": "ls", "path": "." }
+                ]
+            }),
+            intent: Some(
+                "Inspect starter files and strengthen measurable visual goals".to_string(),
+            ),
+            thought_signature: None,
+        }),
+    };
+
+    let rendered = render_tool_message(&msg, 84, crate::config::DiffDisplayMode::Off)
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let compact = without_whitespace(&rendered);
+
+    assert!(rendered.contains("✓ todo"), "{rendered}");
+    assert!(rendered.contains("pelican-bike"), "{rendered}");
+    assert!(
+        compact.contains(&without_whitespace(OBJECTIVE)),
+        "batched todo objective was truncated:\n{rendered}"
+    );
+    assert!(
+        compact.contains(&without_whitespace(FEEDBACK)),
+        "batched todo feedback loop was truncated:\n{rendered}"
+    );
+    let goal_details = rendered
+        .split_once("pelican-bike")
+        .map(|(_, details)| details)
+        .and_then(|details| details.split("● Inspect").next())
+        .expect("todo item should follow the batched goal details");
+    assert!(
+        !goal_details.contains('…'),
+        "batched todo goal details must not truncate:\n{rendered}"
+    );
+}
+
+#[test]
+fn render_ownership_gated_todo_result_keeps_the_full_card() {
+    let todos = vec![crate::todo::TodoItem {
+        id: "ship".to_string(),
+        content: "Deliver the complete workflow".to_string(),
+        status: "in_progress".to_string(),
+        priority: "high".to_string(),
+        group: Some("ship outcome".to_string()),
+        confidence: Some(95),
+        ..Default::default()
+    }];
+    let goals = vec![crate::todo::TodoGoal {
+        group: Some("ship outcome".to_string()),
+        hill_climbability: Some(100),
+        feedback_loop: Some("Run the complete workflow".to_string()),
+        end_to_end_ownership: Some(80),
+        ..Default::default()
+    }];
+    let content = format!(
+        "{}\n\nGoals:\n{}\n\n{}",
+        serde_json::to_string_pretty(&todos).unwrap(),
+        serde_json::to_string_pretty(&goals).unwrap(),
+        crate::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE
+    );
+    let msg = DisplayMessage {
+        role: "tool".to_string(),
+        content,
+        tool_calls: Vec::new(),
+        duration_secs: None,
+        title: Some("1 todos".to_string()),
+        tool_data: Some(crate::message::ToolCall {
+            id: "call_todo_ownership".to_string(),
+            name: "todo".to_string(),
+            input: serde_json::json!({ "todos": todos, "goals": goals }),
+            intent: Some("Complete the full user outcome".to_string()),
+            thought_signature: None,
+        }),
+    };
+
+    let plain = render_tool_message(&msg, 100, crate::config::DiffDisplayMode::Off)
+        .iter()
+        .map(extract_line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(plain.contains("ship outcome  ●"), "{plain}");
+    assert!(plain.contains("Deliver the complete workflow"), "{plain}");
+    assert!(plain.contains("Ownership 80%"), "{plain}");
+    assert!(!plain.contains("todo 1 items"), "{plain}");
 }
 
 #[test]

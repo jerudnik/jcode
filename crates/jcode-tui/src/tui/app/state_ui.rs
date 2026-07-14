@@ -25,6 +25,19 @@ pub(super) struct RestoredReloadInput {
 }
 
 impl App {
+    pub(super) fn append_live_inline_images(
+        &mut self,
+        images: Vec<crate::session::RenderedImage>,
+    ) -> bool {
+        if images.is_empty() {
+            return false;
+        }
+        self.remote_side_pane_images.extend(images);
+        self.invalidate_side_pane_images_signature();
+        self.update_pinned_images_auto_hide();
+        true
+    }
+
     fn recompute_display_message_stats(&mut self) {
         self.display_user_message_count = self
             .display_messages
@@ -2102,7 +2115,7 @@ pub(super) fn handle_info_command(app: &mut App, trimmed: &str) -> bool {
             context.tool_definition_tokens(),
         ));
         context_report.push_str(&format!(
-            "- system prompt: {} chars\n- session context: {} chars\n- project AGENTS.md: {} ({})\n- global ~/.AGENTS.md: {} ({})\n- prompt overlays: {} chars\n- preferred tools: {} chars\n- skills section: {} chars\n- self-dev section: {} chars\n- memory section: {} chars\n- tool definitions: {} chars across {} tools\n- user messages: {} chars across {} messages\n- assistant messages: {} chars across {} messages\n- tool calls: {} chars across {} calls\n- tool results: {} chars across {} results\n",
+            "- system prompt: {} chars\n- session context: {} chars\n- project AGENTS.md: {} ({})\n- global ~/AGENTS.md: {} ({})\n- prompt overlays: {} chars\n- preferred tools: {} chars\n- skills section: {} chars\n- self-dev section: {} chars\n- memory section: {} chars\n- tool definitions: {} chars across {} tools\n- user messages: {} chars across {} messages\n- assistant messages: {} chars across {} messages\n- tool calls: {} chars across {} calls\n- tool results: {} chars across {} results\n",
             context.system_prompt_chars,
             context.session_context_chars,
             if context.has_project_agents_md { "loaded" } else { "not loaded" },

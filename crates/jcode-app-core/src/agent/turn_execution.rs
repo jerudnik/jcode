@@ -568,9 +568,21 @@ impl Agent {
 
     /// Restore a session by ID (loads from disk)
     pub fn restore_session(&mut self, session_id: &str) -> Result<SessionStatus> {
+        self.restore_session_with_working_dir(session_id, None)
+    }
+
+    pub(crate) fn restore_session_with_working_dir(
+        &mut self,
+        session_id: &str,
+        working_dir: Option<&str>,
+    ) -> Result<SessionStatus> {
         let restore_start = Instant::now();
         let load_start = Instant::now();
-        let session = Session::load(session_id)?;
+        let mut session = Session::load(session_id)?;
+        if let Some(working_dir) = working_dir {
+            session.working_dir = Some(working_dir.to_string());
+            session.refresh_initial_session_context_message();
+        }
         let load_ms = load_start.elapsed().as_millis();
         logging::info(&format!(
             "Restoring session '{}' with {} messages, provider_session_id: {:?}, status: {}",
@@ -785,14 +797,20 @@ impl Agent {
             }
 
             // Check for skill invocation
-            if let Some(skill_name) = SkillRegistry::parse_invocation(input) {
-                if let Some(skill) = skills.get(skill_name) {
+            if let Some(invocation) = SkillRegistry::parse_invocation(input) {
+                if let Some(skill) = skills.get(invocation.name) {
                     println!("Activating skill: {}", skill.name);
                     println!("{}\n", skill.description);
-                    self.active_skill = Some(skill_name.to_string());
+                    self.active_skill = Some(invocation.name.to_string());
+                    if let Some(prompt) = invocation.prompt {
+                        if let Err(e) = self.run_once(prompt).await {
+                            eprintln!("\nError: {}\n", e);
+                        }
+                        println!();
+                    }
                     continue;
                 } else {
-                    println!("Unknown skill: /{}", skill_name);
+                    println!("Unknown skill: /{}", invocation.name);
                     println!(
                         "Available: {}",
                         skills

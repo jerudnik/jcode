@@ -136,6 +136,11 @@ fn main() {
         sort_key: name.to_string(),
         todo: None,
         todo_items: Vec::new(),
+        model: None,
+        provider: None,
+        auth_method: None,
+        effort: None,
+        elapsed_secs: None,
     };
     let panel_members = vec![
         gm(
@@ -178,16 +183,16 @@ fn main() {
     // ---- New compact strip (above status line) ----
     let hints = vec![
         SwarmStripHint {
-            key: "alt+n".into(),
-            label: "next".into(),
-        },
-        SwarmStripHint {
             key: "alt+↑/↓".into(),
             label: "select".into(),
         },
         SwarmStripHint {
             key: "alt+o".into(),
             label: "open".into(),
+        },
+        SwarmStripHint {
+            key: "alt+shift+p".into(),
+            label: "prompt".into(),
         },
         SwarmStripHint {
             key: "esc".into(),

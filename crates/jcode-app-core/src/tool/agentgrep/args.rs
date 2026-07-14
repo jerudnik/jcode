@@ -89,12 +89,11 @@ pub(super) fn build_outline_args(
     ctx: &ToolContext,
     context_json_path: Option<&Path>,
 ) -> Result<OutlineArgs> {
-    // Agents sometimes point `path` at the file itself instead of using
-    // `file`. Treat a file-valued `path` as the outline target so the legacy
-    // query fallback does not get joined onto it (e.g. ".../background.rs/fn").
-    if params.file.is_none()
-        && let Some(path) = params.path.as_deref()
-    {
+    // Agents sometimes point `path` at the file itself, either instead of or
+    // in addition to `file`. Treat a file-valued `path` as the outline target
+    // so the file argument is not joined onto it (for example,
+    // ".../todo.rs/.../todo.rs").
+    if let Some(path) = params.path.as_deref() {
         let resolved = resolve_path_arg(ctx, path);
         if resolved.is_file() {
             return Ok(OutlineArgs {
@@ -213,10 +212,10 @@ fn resolved_root_string(ctx: &ToolContext, path: Option<&str>) -> Option<String>
     path.map(|path| resolve_path_arg(ctx, path).display().to_string())
 }
 
-pub(super) fn resolve_search_root(ctx: &ToolContext, path: Option<&str>) -> PathBuf {
+pub(super) fn resolve_search_root(ctx: &ToolContext, path: Option<&str>) -> Result<PathBuf> {
     path.map(PathBuf::from)
         .or_else(|| ctx.working_dir.clone())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .ok_or_else(|| anyhow::anyhow!("agentgrep requires a session working directory"))
 }
 
 pub(super) fn summarize_agentgrep_request(

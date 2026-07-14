@@ -149,11 +149,7 @@ pub(super) async fn stream_response(
 
     if !response.status().is_success() {
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok());
+        let retry_after = jcode_provider_core::retry_after::retry_after(response.headers());
 
         let body = jcode_base::util::http_error_body(response, "HTTP error").await;
         log_openai_stream_lifecycle(
@@ -165,7 +161,7 @@ pub(super) async fn stream_response(
                 (
                     "retry_after_secs",
                     retry_after
-                        .map(|seconds| seconds.to_string())
+                        .map(|hint| hint.remaining().as_secs().to_string())
                         .unwrap_or_else(|| "none".to_string()),
                 ),
                 ("body", body.clone()),
@@ -226,13 +222,15 @@ pub(super) async fn stream_response(
         // For rate limits, include retry info in the error
         let msg = if status == StatusCode::TOO_MANY_REQUESTS {
             let wait_info = retry_after
-                .map(|s| format!(" (retry after {}s)", s))
+                .map(|hint| format!(" (retry after {}s)", hint.remaining().as_secs()))
                 .unwrap_or_default();
             format!("Rate limited{}: {}", wait_info, body)
         } else {
             format!("OpenAI API error {}: {}", status, body)
         };
-        return Err(OpenAIStreamFailure::Other(anyhow::anyhow!("{}", msg)));
+        return Err(OpenAIStreamFailure::Other(
+            jcode_provider_core::retry_after::error_with_retry_after(msg, retry_after),
+        ));
     }
 
     emit_connection_phase(&tx, ConnectionPhase::WaitingForResponse).await;
@@ -758,6 +756,7 @@ pub(super) async fn try_persistent_ws_continuation(
     let mut streaming_tool_calls = HashMap::new();
     let mut completed_tool_items = HashSet::new();
     let mut saw_response_completed = false;
+    let mut consumer_dropped = false;
     let mut pending: VecDeque<StreamEvent> = VecDeque::new();
     let mut new_response_id: Option<String> = None;
     let stream_started = Instant::now();
@@ -881,7 +880,8 @@ pub(super) async fn try_persistent_ws_continuation(
                         return PersistentWsResult::Failed(format!("stream error: {}", message));
                     }
                     if tx.send(Ok(event)).await.is_err() {
-                        break; // Receiver dropped
+                        consumer_dropped = true;
+                        break;
                     }
                 }
                 while let Some(event) = pending.pop_front() {
@@ -892,8 +892,12 @@ pub(super) async fn try_persistent_ws_continuation(
                         saw_response_completed = true;
                     }
                     if tx.send(Ok(event)).await.is_err() {
+                        consumer_dropped = true;
                         break;
                     }
+                }
+                if consumer_dropped {
+                    break;
                 }
                 if made_api_activity {
                     saw_api_activity = true;
@@ -920,6 +924,31 @@ pub(super) async fn try_persistent_ws_continuation(
                 return PersistentWsResult::Failed(format!("ws error: {}", e));
             }
         }
+    }
+
+    // A soft interrupt drops the stream consumer while OpenAI may already have
+    // created a response containing tool calls. That response cannot safely be
+    // used as `previous_response_id`: any unseen tool call would remain open on
+    // the server, and the next continuation would fail with "No tool output
+    // found for function call ...". Only completed responses are reusable.
+    if !saw_response_completed {
+        jcode_base::logging::info(
+            "Persistent WS consumer dropped before response.completed; clearing response chain",
+        );
+        log_openai_stream_lifecycle(
+            jcode_base::logging::LogLevel::Info,
+            "persistent_state_reset",
+            vec![
+                ("model", request_model),
+                (
+                    "reason",
+                    "consumer_dropped_before_response_completed".to_string(),
+                ),
+                ("consumer_dropped", consumer_dropped.to_string()),
+            ],
+        );
+        *guard = None;
+        return PersistentWsResult::Success;
     }
 
     // Update persistent state for next turn

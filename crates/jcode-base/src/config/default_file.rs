@@ -74,7 +74,9 @@ swarm_panel_focus = "alt+n"
 
 # Spawn a fresh jcode session in a new terminal window, reusing the current
 # session's working directory. Companion to the system-wide launch hotkeys.
-# On macOS, `jcode setup-hotkey` installs three global launch hotkeys:
+# `jcode setup-hotkey` installs three global launch hotkeys (macOS, Linux
+# niri/Hyprland/sway/i3, and Windows; the Cmd modifier maps to Super on Linux
+# and Alt on Windows):
 #   Cmd+;        new jcode in your home directory
 #   Cmd+'        new jcode in your last project directory
 #   Cmd+Shift+'  new jcode self-dev session (last jcode repo)
@@ -149,6 +151,11 @@ reasoning_display = "current"
 # Markdown spacing style: "compact" (chat/TUI) or "document" (docs-like)
 # markdown_spacing = "compact"
 
+# LaTeX rendering: "none" (show source), "unicode" (terminal text), or "image" (typeset PNG, default).
+# Image mode uses `latex` + `dvipng`, or `pdflatex` + `pdftocairo` as a fallback.
+# When neither toolchain is available, formulas fall back to Unicode.
+latex_rendering = "image"
+
 # Show idle animation before first prompt (default: true)
 idle_animation = true
 
@@ -168,6 +175,12 @@ prompt_entry_animation = true
 # when you keep doing something the slow way (e.g. /resume) instead of using
 # its configured shortcut. Set false to disable all such hints (default: true).
 # keybinding_hints = true
+
+# Active sessions manager: pressing Left arrow on an empty input opens a
+# picker scoped to live (open) sessions, showing which are still working on a
+# response and which are ready for input (default: false). The /active
+# command is always available regardless of this setting.
+# active_sessions_manager = false
 
 # Disable specific animation variants by name.
 # Examples: ["donut"] or ["donut", "orbit_rings"]
@@ -198,6 +211,8 @@ prompt_entry_animation = true
 memory = true
 # Swarm: multi-session coordination features
 swarm = true
+# Mermaid: render Mermaid code blocks and tell the model that diagrams are supported
+mermaid = true
 # Inject timestamps into user messages and tool results sent to the model
 message_timestamps = true
 # Persist memory injections into session history instead of sending them as request-only ephemeral context
@@ -238,8 +253,8 @@ bing_market = "en-US"
 profile = "full"
 # Explicit allow-list. When non-empty, only these tools are exposed.
 # enabled = ["bash", "read", "write", "apply_patch", "agentgrep", "ls"]
-# Privacy-sensitive tools such as gmail are disabled by default.
-# To expose every tool including default-disabled tools, use: enabled = ["*"]
+# All built-in tools, including gmail, are exposed by the full profile.
+# Use enabled = ["*"] to explicitly select the unrestricted full toolset.
 # Hide selected tools after applying the profile/allow-list.
 # disabled = ["browser", "gmail", "swarm"]
 # Disable all built-in tools unless enabled is set.
@@ -298,6 +313,12 @@ cross_provider_failover = "countdown"
 # Copilot premium mode: "normal" (default), "one" (first msg only), "zero" (all free)
 # Set to "zero" if you have premium Copilot and want free requests
 # copilot_premium = "zero"
+# Only list these providers in the /model picker (issue #460). Entries match
+# provider labels ("openai", "anthropic", "copilot", "openrouter", ...), route
+# api methods ("claude-oauth", "openai-compatible:myprofile"), or bare
+# openai-compatible profile ids ("myprofile"). The active model's routes always
+# stay visible. Unset or empty = show everything.
+# model_picker_providers = ["myprofile", "openrouter"]
 # Max seconds to wait for streaming data before timing out a request with no
 # data received. Raise this for slow reasoning models (e.g. DeepSeek) that think
 # silently for minutes before emitting tokens. Default: 180.
@@ -345,9 +366,10 @@ swarm_max_concurrent_agents = 32
 # Env override: JCODE_SWARM_STRIP_LAYOUT
 # swarm_strip_layout = "vertical"
 #
-# Model for the memory sidecar (relevance/extraction). Unset = sidecar auto-select.
+# Model for the memory sidecar (relevance/extraction). Unset = sidecar auto-select
+# (OpenAI defaults to gpt-5.6-luna with reasoning effort "none").
 # Env override: JCODE_MEMORY_MODEL
-# memory_model = "claude-haiku-4"
+# memory_model = "gpt-5.6-luna"
 #
 # Whether the memory sidecar (LLM precision judge) handles relevance/extraction.
 # Default true: the LLM precision-judge path is the only reliably productive
@@ -603,9 +625,9 @@ desktop_notifications = true
 # placement (discoverability), never recommendations; each session's first
 # use of discover_tools is disclosed in the UI with a (sponsored discovery)
 # tag.
-# See https://solosystems.dev/sponsored-discovery
+# See https://jcode.sh/sponsored-discovery
 # enabled = true
-# endpoint = "https://api.solosystems.dev/v1/discovery"
+# endpoint = "https://api.jcode.sh/v1/discovery"
 	"#;
 
         // Substitute platform-specific defaults from the keybinding registry.

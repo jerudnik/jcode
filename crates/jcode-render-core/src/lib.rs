@@ -20,16 +20,18 @@
 //! reaches parity, after which front-ends migrate onto it.
 
 pub mod markdown;
+pub mod math;
 pub mod model;
 pub mod preprocess;
 pub mod reasoning;
 pub mod wrap;
 
 pub use markdown::parse_markdown;
+pub use math::{render_display_latex, render_inline_latex};
 pub use model::{
     Alignment, Block, BlockKind, Document, FillRole, StyleRole, StyledLine, StyledSpan, TextAttrs,
 };
-pub use preprocess::escape_currency_dollars;
+pub use preprocess::{escape_currency_dollars, normalize_latex_math};
 pub use reasoning::{
     REASONING_SENTINEL, reasoning_line_markup, reasoning_partial_markup,
     reasoning_summary_line_markup,

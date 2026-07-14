@@ -9,6 +9,7 @@ pub mod model_id;
 pub mod models;
 pub mod openai_schema;
 pub mod pricing;
+pub mod retry_after;
 pub mod selection;
 pub mod transport;
 
@@ -16,10 +17,10 @@ pub use transport::is_transient_transport_error;
 
 pub use anthropic::{
     ANTHROPIC_OAUTH_BETA_HEADERS, ANTHROPIC_OAUTH_BETA_HEADERS_1M, AnthropicContextMode,
-    anthropic_context_mode, anthropic_effectively_1m, anthropic_is_1m_model,
-    anthropic_map_tool_name_for_oauth, anthropic_map_tool_name_from_oauth,
-    anthropic_oauth_beta_headers, anthropic_stainless_arch, anthropic_stainless_os,
-    anthropic_strip_1m_suffix,
+    AnthropicReasoningCaps, anthropic_context_mode, anthropic_effectively_1m,
+    anthropic_is_1m_model, anthropic_map_tool_name_for_oauth, anthropic_map_tool_name_from_oauth,
+    anthropic_oauth_beta_headers, anthropic_reasoning_caps, anthropic_stainless_arch,
+    anthropic_stainless_os, anthropic_strip_1m_suffix,
 };
 pub use auth_mode::{
     AuthMode, AuthRoute, DualAuthProvider, pinned_mode_for, runtime_env_auth_route,
@@ -426,7 +427,15 @@ pub trait Provider: Send + Sync {
         fork.set_model(model_spec)?;
         Ok(fork)
     }
-
+    /// Create an independent provider for a brand-new user session.
+    ///
+    /// The default preserves the current runtime selection, matching [`Self::fork`].
+    /// Provider orchestrators backed by reloadable configuration may override this
+    /// to reapply the latest persisted defaults without changing ordinary forks
+    /// used by compaction, resumed sessions, and other in-flight work.
+    fn fork_for_new_session(&self) -> Arc<dyn Provider> {
+        self.fork()
+    }
     /// Get a sender for native tool results (if the provider supports it).
     fn native_result_sender(&self) -> Option<NativeToolResultSender> {
         None

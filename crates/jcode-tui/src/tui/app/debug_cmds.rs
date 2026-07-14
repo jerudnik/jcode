@@ -396,17 +396,59 @@ impl App {
                         initial_prompt_delivered: None,
                         todo_progress: Some(((i as u32 * 3) % 9, 9)),
                         todo_items: (0..5)
-                            .map(|t| crate::protocol::SwarmTodoItem {
-                                content: format!("step {} of synthetic plan", t + 1),
-                                status: if (t as u32) < (i as u32 * 3) % 9 {
+                            .map(|t| {
+                                let status = if (t as u32) < (i as u32 * 3) % 9 {
                                     "completed".to_string()
                                 } else if t as u32 == (i as u32 * 3) % 9 {
                                     "in_progress".to_string()
                                 } else {
                                     "pending".to_string()
-                                },
+                                };
+                                let tool_intents = if status == "in_progress" {
+                                    vec![
+                                        crate::protocol::SwarmToolIntent {
+                                            tool_call_id: String::new(),
+                                            tool_name: "agentgrep".into(),
+                                            intent: "Locate the affected rendering path".into(),
+                                            status: "completed".into(),
+                                            progress: None,
+                                        },
+                                        crate::protocol::SwarmToolIntent {
+                                            tool_call_id: String::new(),
+                                            tool_name: "read".into(),
+                                            intent: "Inspect the active todo state".into(),
+                                            status: "completed".into(),
+                                            progress: None,
+                                        },
+                                        crate::protocol::SwarmToolIntent {
+                                            tool_call_id: String::new(),
+                                            tool_name: "bash".into(),
+                                            intent: "Run targeted swarm card tests".into(),
+                                            status: "running".into(),
+                                            progress: Some(crate::protocol::SwarmToolProgress {
+                                                current: 27,
+                                                total: 43,
+                                                unit: Some("tests".into()),
+                                            }),
+                                        },
+                                    ]
+                                } else {
+                                    Vec::new()
+                                };
+                                crate::protocol::SwarmTodoItem {
+                                    content: format!("step {} of synthetic plan", t + 1),
+                                    status,
+                                    tool_intents,
+                                }
                             })
                             .collect(),
+                        runtime: crate::protocol::SwarmMemberRuntime {
+                            model: Some("gpt-5.6".into()),
+                            provider: Some("OpenAI".into()),
+                            auth_method: Some("OAuth".into()),
+                            effort: Some("high".into()),
+                            elapsed_secs: Some(18),
+                        },
                     })
                     .collect();
                 self.debug_force_inline_gallery = true;
@@ -447,6 +489,7 @@ impl App {
                         initial_prompt_delivered: None,
                         todo_progress: None,
                         todo_items: Vec::new(),
+                        runtime: crate::protocol::SwarmMemberRuntime::default(),
                     }],
                 })
                 .to_string()
@@ -605,6 +648,23 @@ impl App {
         } else if cmd == "memory-history" {
             let payload = crate::process_memory::history(128);
             serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "[]".to_string())
+        } else if cmd == "allocator" {
+            serde_json::to_string_pretty(&crate::process_memory::allocator_info())
+                .unwrap_or_else(|_| "{}".to_string())
+        } else if cmd == "allocator:purge" {
+            let before = crate::process_memory::snapshot();
+            crate::process_memory::release_retained_heap("client_debug_allocator_purge");
+            let after = crate::process_memory::snapshot();
+            let rss_recovered_bytes = before
+                .rss_bytes
+                .unwrap_or(0)
+                .saturating_sub(after.rss_bytes.unwrap_or(0));
+            serde_json::to_string_pretty(&serde_json::json!({
+                "before": before,
+                "after": after,
+                "rss_recovered_bytes": rss_recovered_bytes,
+            }))
+            .unwrap_or_else(|_| "{}".to_string())
         } else if cmd == "slow-frames" {
             let payload = crate::tui::ui::debug_slow_frame_history(32);
             serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string())

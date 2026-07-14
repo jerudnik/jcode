@@ -63,7 +63,7 @@ async fn communicate_run_plan_stall_still_collects_finished_workers() {
     // Headless mode so the worker registers "ready" without a terminal app.
     let spawn_output = tool
         .execute(
-            json!({"action": "spawn", "spawn_mode": "headless"}),
+            json!({"action": "spawn", "spawn_mode": "headless", "label": "finished worker"}),
             ctx.clone(),
         )
         .await

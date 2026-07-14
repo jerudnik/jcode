@@ -4,7 +4,7 @@ mod lifecycle;
 mod state_support;
 use chrono::{DateTime, NaiveDate, Utc};
 use jcode_usage_types::{
-    AuthEvent, ErrorCounts, FeedbackEvent, InstallEvent, OnboardingStepEvent,
+    AuthEvent, DiscoveryEvent, ErrorCounts, FeedbackEvent, InstallEvent, OnboardingStepEvent,
     SessionLifecycleEvent, SessionStartEvent, TelemetryProjectProfile as ProjectProfile,
     TelemetryToolCategory as ToolCategory, TelemetryWorkflowCounts, TurnEndEvent, UpgradeEvent,
     classify_telemetry_tool_category as classify_tool_category,
@@ -17,14 +17,36 @@ use lifecycle::emit_lifecycle_event;
 use serde_json::Value;
 use state_support::*;
 use std::collections::HashSet;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const TELEMETRY_ENDPOINT: &str = "https://jcode-telemetry.jeremyhuang55555.workers.dev/v1/event";
 const ASYNC_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 const BLOCKING_INSTALL_TIMEOUT: Duration = Duration::from_millis(1200);
 const BLOCKING_LIFECYCLE_TIMEOUT: Duration = Duration::from_millis(800);
-const TELEMETRY_SCHEMA_VERSION: u32 = 5;
+const TELEMETRY_SCHEMA_VERSION: u32 = 6;
+const DEFAULT_DISCOVERY_ENDPOINT: &str = "https://api.jcode.sh/v1/discovery";
+static TELEMETRY_PERMANENTLY_REJECTED: AtomicBool = AtomicBool::new(false);
+static TELEMETRY_HTTP_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+pub struct DiscoveryTelemetry<'a> {
+    pub request_id: &'a str,
+    pub phase: &'a str,
+    pub category: Option<&'a str>,
+    pub selected_tool: Option<&'a str>,
+    pub outcome: &'a str,
+    pub failure_reason: Option<&'a str>,
+    pub http_status: Option<u16>,
+    pub latency_ms: u64,
+    pub response_bytes: Option<u64>,
+    pub result_count: Option<u32>,
+    pub query_present: bool,
+    pub reason_present: bool,
+    pub benchmark_run: bool,
+    pub endpoint: &'a str,
+}
 
 // Error/switch counters live inside `SessionTelemetry` (guarded by
 // `SESSION_STATE`) so increments, snapshots, and resets all happen under a
@@ -452,6 +474,60 @@ pub fn record_feedback(text: &str) {
     }
 }
 
+/// Emit one completed discovery attempt. This intentionally excludes query and
+/// reason text, endpoint URLs, and all transcript content.
+pub fn record_discovery_event(data: DiscoveryTelemetry<'_>) {
+    if !is_enabled() {
+        return;
+    }
+    let Some(id) = get_or_create_id() else {
+        return;
+    };
+    let session_id = SESSION_STATE
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|state| state.session_id.clone()));
+    let (schema_version, build_channel, git_checkout, ci, from_cargo) = telemetry_envelope();
+    let event = DiscoveryEvent {
+        event_id: new_event_id(),
+        id,
+        session_id,
+        event: "discovery",
+        version: version(),
+        os: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        request_id: sanitize_telemetry_label(data.request_id),
+        phase: sanitize_telemetry_label(data.phase),
+        category: data.category.map(sanitize_telemetry_label),
+        selected_tool: data.selected_tool.map(sanitize_telemetry_label),
+        outcome: sanitize_telemetry_label(data.outcome),
+        failure_reason: data.failure_reason.map(sanitize_telemetry_label),
+        http_status: data.http_status,
+        latency_ms: data.latency_ms,
+        response_bytes: data.response_bytes,
+        result_count: data.result_count,
+        query_present: data.query_present,
+        reason_present: data.reason_present,
+        benchmark_run: data.benchmark_run,
+        custom_endpoint: data.endpoint.trim_end_matches('/') != DEFAULT_DISCOVERY_ENDPOINT,
+        schema_version,
+        build_channel,
+        is_git_checkout: git_checkout,
+        is_ci: ci,
+        ran_from_cargo: from_cargo,
+    };
+    logging::debug(&format!(
+        "emitting telemetry discovery phase={} outcome={} request_id={}",
+        event.phase, event.outcome, event.request_id
+    ));
+    match serde_json::to_value(&event) {
+        Ok(payload) => {
+            send_payload(payload, DeliveryMode::Background);
+        }
+        Err(err) => logging::error(&format!("failed to serialize discovery telemetry: {err}")),
+    }
+}
+
 fn update_active_days(id: &str) -> (u32, u32) {
     let Some(path) = active_days_path(id) else {
         return (0, 0);
@@ -855,25 +931,36 @@ pub fn record_command_family(command: &str) {
 }
 
 fn post_payload(payload: serde_json::Value, timeout: Duration) -> bool {
-    let client = match reqwest::blocking::Client::builder()
-        .user_agent(jcode_provider_core::JCODE_USER_AGENT)
+    if TELEMETRY_PERMANENTLY_REJECTED.load(Ordering::Relaxed) {
+        return false;
+    }
+    let client = TELEMETRY_HTTP_CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .user_agent(jcode_provider_core::JCODE_USER_AGENT)
+            .build()
+            .expect("telemetry HTTP client should build")
+    });
+    match client
+        .post(TELEMETRY_ENDPOINT)
         .timeout(timeout)
-        .build()
+        .json(&payload)
+        .send()
     {
-        Ok(client) => client,
-        Err(err) => {
-            logging::error(&format!("failed to build telemetry HTTP client: {err}"));
-            return false;
-        }
-    };
-    match client.post(TELEMETRY_ENDPOINT).json(&payload).send() {
-        Ok(response) => match response.error_for_status() {
-            Ok(_) => true,
-            Err(err) => {
-                logging::warn(&format!("telemetry endpoint rejected payload: {err}"));
-                false
+        Ok(response) if response.status().is_success() => true,
+        Ok(response) => {
+            let status = response.status();
+            if telemetry_status_is_permanent(status.as_u16()) {
+                TELEMETRY_PERMANENTLY_REJECTED.store(true, Ordering::Relaxed);
+                logging::warn(&format!(
+                    "telemetry endpoint permanently rejected payload with HTTP {status}; suppressing telemetry delivery for this process"
+                ));
+            } else {
+                logging::warn(&format!(
+                    "telemetry endpoint temporarily rejected payload with HTTP {status}"
+                ));
             }
-        },
+            false
+        }
         Err(err) => {
             logging::warn(&format!("telemetry payload send failed: {err}"));
             false
@@ -881,9 +968,16 @@ fn post_payload(payload: serde_json::Value, timeout: Duration) -> bool {
     }
 }
 
+fn telemetry_status_is_permanent(status: u16) -> bool {
+    (400..500).contains(&status) && !matches!(status, 408 | 425 | 429)
+}
+
 fn send_payload(payload: serde_json::Value, mode: DeliveryMode) -> bool {
     match mode {
         DeliveryMode::Background => {
+            if TELEMETRY_PERMANENTLY_REJECTED.load(Ordering::Relaxed) {
+                return false;
+            }
             logging::debug("queueing telemetry payload for background delivery");
             std::thread::spawn(move || {
                 let _ = post_payload(payload, ASYNC_SEND_TIMEOUT);

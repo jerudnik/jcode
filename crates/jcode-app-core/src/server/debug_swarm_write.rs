@@ -23,15 +23,23 @@ pub(super) async fn maybe_handle_swarm_write_command(
             .strip_prefix("swarm:clear_coordinator:")
             .unwrap_or("")
             .trim();
-        let mut coordinators = ctx.swarm_coordinators.write().await;
-        if coordinators.remove(swarm_id).is_some() {
-            let mut members = ctx.swarm_members.write().await;
-            for member in members.values_mut() {
-                if member.swarm_id.as_deref() == Some(swarm_id) && member.role == "coordinator" {
-                    member.role = "agent".to_string();
+        // Swarm member/coordinator mutations never nest these independent
+        // locks. In particular, persistence reads coordinators again, so a
+        // retained write guard here self-deadlocks the command.
+        let removed = {
+            let mut coordinators = ctx.swarm_coordinators.write().await;
+            coordinators.remove(swarm_id).is_some()
+        };
+        if removed {
+            {
+                let mut members = ctx.swarm_members.write().await;
+                for member in members.values_mut() {
+                    if member.swarm_id.as_deref() == Some(swarm_id) && member.role == "coordinator"
+                    {
+                        member.role = "agent".to_string();
+                    }
                 }
             }
-            drop(members);
             let swarm_state = SwarmState {
                 members: Arc::clone(ctx.swarm_members),
                 swarms_by_id: Arc::clone(ctx.swarms_by_id),
@@ -454,10 +462,13 @@ async fn handle_debug_graph_op(arg: &str, ctx: &DebugSwarmWriteContext<'_>) -> S
                 }
                 let count = parsed.nodes.len();
                 let mut graph = to_task_graph(plan);
+                let before = graph.clone();
                 match dag::seed(&mut graph, debug_specs(parsed.nodes)) {
                     Ok(()) => {
-                        apply_task_graph(plan, &graph);
-                        plan.version += 1;
+                        if graph != before {
+                            apply_task_graph(plan, &graph);
+                            plan.version += 1;
+                        }
                         Ok((count, "seed"))
                     }
                     Err(e) => Err(e.to_string()),
@@ -553,5 +564,86 @@ async fn handle_debug_graph_op(arg: &str, ctx: &DebugSwarmWriteContext<'_>) -> S
                 .to_string()
         }
         Err(e) => fail(format!("graph op rejected: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    struct EnvGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        runtime: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(value) = self.runtime.take() {
+                crate::env::set_var("JCODE_RUNTIME_DIR", value);
+            } else {
+                crate::env::remove_var("JCODE_RUNTIME_DIR");
+            }
+        }
+    }
+
+    fn isolated_runtime(dir: &tempfile::TempDir) -> EnvGuard {
+        let lock = crate::storage::lock_test_env();
+        let runtime = std::env::var_os("JCODE_RUNTIME_DIR");
+        crate::env::set_var("JCODE_RUNTIME_DIR", dir.path());
+        EnvGuard {
+            _lock: lock,
+            runtime,
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn clear_coordinator_releases_coordinator_lock_before_waiting_for_members() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let _env = isolated_runtime(&dir);
+        let session_id = Arc::new(RwLock::new("session-1".to_string()));
+        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+        let swarms_by_id = Arc::new(RwLock::new(HashMap::new()));
+        let plan_proposals: PlanProposalCache = Arc::new(RwLock::new(HashMap::new()));
+        let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
+        let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
+            "swarm-lock-order".to_string(),
+            "session-1".to_string(),
+        )])));
+        let ctx = DebugSwarmWriteContext {
+            session_id: &session_id,
+            swarm_members: &swarm_members,
+            swarms_by_id: &swarms_by_id,
+            plan_proposals: &plan_proposals,
+            swarm_plans: &swarm_plans,
+            swarm_coordinators: &swarm_coordinators,
+        };
+
+        // Force the command to wait at members.write(). A safe path must not
+        // retain coordinators.write() while it waits for that independent lock.
+        let members_gate = swarm_members.write().await;
+        let command =
+            maybe_handle_swarm_write_command("swarm:clear_coordinator:swarm-lock-order", &ctx);
+        tokio::pin!(command);
+        tokio::select! {
+            result = &mut command => panic!("command unexpectedly completed: {result:?}"),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
+
+        let coordinators =
+            tokio::time::timeout(Duration::from_millis(100), swarm_coordinators.read())
+                .await
+                .expect("coordinator lock was retained while waiting for members");
+        assert!(!coordinators.contains_key("swarm-lock-order"));
+        drop(coordinators);
+
+        drop(members_gate);
+        let response = tokio::time::timeout(Duration::from_secs(1), &mut command)
+            .await
+            .expect("clear coordinator self-deadlocked")
+            .expect("command failed")
+            .expect("command was not handled");
+        assert!(response.contains("Coordinator cleared"));
     }
 }

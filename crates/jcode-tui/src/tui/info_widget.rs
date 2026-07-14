@@ -85,7 +85,7 @@ pub enum WidgetKind {
     BackgroundTasks,
     /// Conversation context compaction status
     Compaction,
-    /// 5-hour/weekly subscription bars
+    /// Subscription quota bars
     UsageLimits,
     /// Session-level KV cache hit ratio
     KvCache,
@@ -349,13 +349,17 @@ pub enum AuthMethod {
 pub struct UsageInfo {
     /// Which provider this usage is for
     pub provider: UsageProvider,
-    /// Five-hour window utilization (0.0-1.0) - for OAuth providers
+    /// Primary subscription window label. OpenAI reports this dynamically.
+    pub primary_limit_label: Option<String>,
+    /// Primary window utilization (0.0-1.0) - for OAuth providers
     pub five_hour: f32,
-    /// Five-hour reset timestamp (RFC3339), if known
+    /// Primary reset timestamp (RFC3339), if known
     pub five_hour_resets_at: Option<String>,
-    /// Seven-day window utilization (0.0-1.0) - for OAuth providers
+    /// Secondary subscription window label, when one exists.
+    pub secondary_limit_label: Option<String>,
+    /// Secondary window utilization (0.0-1.0) - for OAuth providers
     pub seven_day: f32,
-    /// Seven-day reset timestamp (RFC3339), if known
+    /// Secondary reset timestamp (RFC3339), if known
     pub seven_day_resets_at: Option<String>,
     /// Codex Spark window utilization (0.0-1.0), if available
     pub spark: Option<f32>,
@@ -521,6 +525,25 @@ pub struct MemoryInfo {
     pub graph_edges: Vec<GraphEdge>,
 }
 
+impl MemoryInfo {
+    pub(crate) fn should_render(&self) -> bool {
+        !self.disabled && (self.total_count > 0 || self.activity.is_some())
+    }
+
+    pub(crate) fn should_show_activity(&self) -> bool {
+        self.activity.as_ref().is_some_and(|activity| {
+            activity.is_processing()
+                || (matches!(activity.state, MemoryState::Idle)
+                    && activity
+                        .pipeline
+                        .as_ref()
+                        .map(PipelineState::is_complete)
+                        .unwrap_or(false)
+                    && activity.state_since.elapsed() <= Duration::from_secs(5))
+        })
+    }
+}
+
 pub use jcode_tui_mermaid::DiagramInfo;
 
 /// Git repository status for the info widget
@@ -567,6 +590,11 @@ const PAGE_SWITCH_SECONDS: u64 = 30;
 #[derive(Debug, Default, Clone)]
 pub struct InfoWidgetData {
     pub todos: Vec<TodoItem>,
+    /// Goal-level assessments (hill-climbability and objective)
+    /// keyed by todo group (`group: None` covers the ungrouped list). Empty
+    /// when the session has no recorded goals or `todos` is a swarm-plan
+    /// projection.
+    pub todo_goals: Vec<crate::todo::TodoGoal>,
     /// True when `todos` is actually a projection of the shared swarm plan
     /// (task DAG) rather than this session's private todo list. The widget
     /// renders a "Plan" header instead of "Todos" so the two are not
@@ -725,7 +753,7 @@ impl InfoWidgetData {
             WidgetKind::MemoryActivity => self
                 .memory_info
                 .as_ref()
-                .map(|m| m.total_count > 0 || m.activity.is_some())
+                .map(MemoryInfo::should_render)
                 .unwrap_or(false),
             WidgetKind::SwarmStatus => self
                 .swarm_info

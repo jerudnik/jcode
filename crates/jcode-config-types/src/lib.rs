@@ -158,6 +158,38 @@ pub enum MarkdownSpacingMode {
     Document,
 }
 
+/// How LaTeX math is rendered in terminal markdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LatexRenderingMode {
+    /// Preserve the original LaTeX source and delimiters.
+    None,
+    /// Convert supported notation to terminal-friendly Unicode text.
+    Unicode,
+    /// Typeset formulas to PNG and display them with the terminal image protocol.
+    #[default]
+    Image,
+}
+
+impl LatexRenderingMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Unicode => "unicode",
+            Self::Image => "image",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "none" | "raw" | "off" => Some(Self::None),
+            "unicode" | "terminal" | "text" => Some(Self::Unicode),
+            "image" | "images" | "png" => Some(Self::Image),
+            _ => None,
+        }
+    }
+}
+
 impl MarkdownSpacingMode {
     pub fn label(self) -> &'static str {
         match self {
@@ -536,12 +568,6 @@ pub struct AgentsConfig {
     /// public API docs, not live-verified.
     #[serde(default)]
     pub memory_embedding_dim: Option<usize>,
-    /// Maximum seconds a direct (blocking) `subagent` tool call will wait for the
-    /// child session to produce its final answer before failing with a timeout
-    /// error. Prevents a stuck/hung child turn from blocking the caller forever.
-    /// `0` disables the bound (wait indefinitely). Default 600 (10 min).
-    #[serde(default = "default_subagent_timeout_secs")]
-    pub subagent_timeout_secs: u64,
     /// Maximum number of swarm worker agents `run_plan` keeps running *at once*
     /// in a **deep**-mode task graph. This bounds parallelism, not the total
     /// number of agents spawned over the run (that is `MAX_SWARM_MEMBERS`). Deep
@@ -556,10 +582,6 @@ pub struct AgentsConfig {
 
 fn default_swarm_max_concurrent_agents() -> usize {
     32
-}
-
-fn default_subagent_timeout_secs() -> u64 {
-    600
 }
 
 fn default_memory_embedding_backend() -> String {
@@ -599,7 +621,6 @@ impl Default for AgentsConfig {
             memory_embedding_api_key_env: None,
             memory_embedding_base_url: None,
             memory_embedding_dim: None,
-            subagent_timeout_secs: default_subagent_timeout_secs(),
             swarm_max_concurrent_agents: default_swarm_max_concurrent_agents(),
         }
     }
@@ -792,7 +813,7 @@ pub struct AutoReviewConfig {
 /// placement (discoverability), never recommendations. Each session's first
 /// use of `discover_tools` is disclosed in the UI with a
 /// `(sponsored discovery)` tag; using a discovered tool afterwards carries no
-/// extra tag. See <https://solosystems.dev/sponsored-discovery>.
+/// extra tag. See <https://jcode.sh/sponsored-discovery>.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SponsorsConfig {
@@ -809,7 +830,7 @@ impl Default for SponsorsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            endpoint: "https://api.solosystems.dev/v1/discovery".to_string(),
+            endpoint: "https://api.jcode.sh/v1/discovery".to_string(),
         }
     }
 }
@@ -880,12 +901,12 @@ pub struct KeybindingsConfig {
     /// Toggle the info widget (default: "alt+i")
     pub info_widget_toggle: String,
     /// Show/dismiss the session todo list as an inline card in the chat
-    /// transcript (default: "alt+p")
+    /// transcript (default: "alt+x")
     pub todo_card_toggle: String,
     /// Focus/unfocus the inline swarm panel for keyboard navigation (default:
-    /// "alt+n"; press again to cycle agents, alt+↑/↓ select, alt+o pop out,
-    /// esc exits). Active only when `agents.swarm_spawn_mode = "inline"` and
-    /// the session manages swarm agents.
+    /// "alt+n"; alt+↑/↓ select, alt+o pops out, alt+shift+p opens the swarm
+    /// prompt, esc exits). Active only when `agents.swarm_spawn_mode = "inline"`
+    /// and the session manages swarm agents.
     pub swarm_panel_focus: String,
     /// Spawn a fresh jcode session in a new terminal window (default: unbound).
     /// Example: "alt+enter".
@@ -933,7 +954,7 @@ impl Default for KeybindingsConfig {
             typing_scroll_lock_toggle: get("typing_scroll_lock_toggle", "alt+s"),
             diff_mode_cycle: get("diff_mode_cycle", "alt+g"),
             info_widget_toggle: get("info_widget_toggle", "alt+i"),
-            todo_card_toggle: get("todo_card_toggle", "alt+p"),
+            todo_card_toggle: get("todo_card_toggle", "alt+x"),
             swarm_panel_focus: get("swarm_panel_focus", "alt+n"),
             new_terminal: get("new_terminal", ""),
             open_resume: get(
@@ -1004,6 +1025,8 @@ pub struct DisplayConfig {
     pub diagram_mode: DiagramDisplayMode,
     /// Markdown block spacing style (compact/document, default: compact)
     pub markdown_spacing: MarkdownSpacingMode,
+    /// LaTeX rendering style (none/unicode/image, default: image)
+    pub latex_rendering: LatexRenderingMode,
     /// Pin read images to side pane (default: true)
     pub pin_images: bool,
     /// Show idle animation before first prompt (default: true)
@@ -1038,6 +1061,17 @@ pub struct DisplayConfig {
     /// configured shortcut (default: true). Set false to disable all such hints.
     #[serde(default = "default_true")]
     pub keybinding_hints: bool,
+    /// Color theme: "auto" (detect terminal background), "dark", or "light".
+    /// Auto queries the terminal's background color (OSC 11) at startup and
+    /// adapts jcode's palette for light backgrounds. Default: auto.
+    #[serde(default)]
+    pub theme: String,
+    /// Opt-in active sessions manager: pressing Left arrow on an empty input
+    /// opens a picker scoped to live (open) sessions, showing which are still
+    /// working and which are ready for input (default: false). The `/active`
+    /// command works regardless of this setting.
+    #[serde(default)]
+    pub active_sessions_manager: bool,
 }
 
 impl Default for DisplayConfig {
@@ -1055,6 +1089,7 @@ impl Default for DisplayConfig {
             reasoning_display: Some(ReasoningDisplayMode::Current),
             diagram_mode: DiagramDisplayMode::default(),
             markdown_spacing: MarkdownSpacingMode::default(),
+            latex_rendering: LatexRenderingMode::default(),
             idle_animation: true,
             prompt_entry_animation: true,
             disabled_animations: Vec::new(),
@@ -1068,6 +1103,8 @@ impl Default for DisplayConfig {
             show_agentgrep_output: false,
             native_scrollbars: NativeScrollbarConfig::default(),
             keybinding_hints: true,
+            theme: String::new(),
+            active_sessions_manager: false,
         }
     }
 }
@@ -1116,6 +1153,8 @@ pub struct FeatureConfig {
     pub memory: bool,
     /// Enable swarm coordination features (default: true)
     pub swarm: bool,
+    /// Enable Mermaid rendering and Mermaid-specific model guidance (default: true)
+    pub mermaid: bool,
     /// Inject timestamps into user messages and tool results sent to the model (default: true)
     pub message_timestamps: bool,
     /// Persist auto-recalled memory injections into normal session history instead of sending
@@ -1137,6 +1176,7 @@ impl Default for FeatureConfig {
         Self {
             memory: true,
             swarm: true,
+            mermaid: true,
             message_timestamps: true,
             persist_memory_injections: false,
             kv_cache_miss_notices: true,
@@ -1244,6 +1284,12 @@ pub struct ProviderConfig {
     /// Copilot premium request mode: "normal", "one", or "zero"
     /// "zero" means all requests are free (no premium requests consumed)
     pub copilot_premium: Option<String>,
+    /// When set (non-empty), /model only lists routes from these providers.
+    /// Entries match provider labels ("openai", "anthropic", "copilot",
+    /// "openrouter", ...), api methods ("claude-oauth",
+    /// "openai-compatible:myprofile", ...), or openai-compatible profile ids
+    /// ("myprofile"). The active model's routes always stay visible.
+    pub model_picker_providers: Option<Vec<String>>,
     /// Max seconds to wait for streaming data before timing out a request with
     /// no data received. Raise this for slow reasoning models (e.g. DeepSeek)
     /// that think silently for minutes before emitting tokens. Default: 180.
@@ -1266,6 +1312,7 @@ impl Default for ProviderConfig {
             cross_provider_failover: CrossProviderFailoverMode::Countdown,
             same_provider_account_failover: true,
             copilot_premium: None,
+            model_picker_providers: None,
             stream_idle_timeout_secs: 180,
         }
     }

@@ -178,7 +178,7 @@ impl Tool for BatchTool {
 
         // Check for disallowed tools
         for tc in &params.tool_calls {
-            if tc.tool == "batch" {
+            if Registry::resolve_tool_name(&tc.tool) == "batch" {
                 return Err(anyhow::anyhow!("Cannot batch the 'batch' tool"));
             }
         }
@@ -192,6 +192,7 @@ impl Tool for BatchTool {
             .enumerate()
             .map(|(i, tc)| {
                 let (tool_name, parameters) = tc.resolved_parameters();
+                let tool_name = Registry::resolve_tool_name(&tool_name).to_string();
                 (i, tool_name, parameters)
             })
             .collect();

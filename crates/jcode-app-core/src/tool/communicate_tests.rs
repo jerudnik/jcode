@@ -20,7 +20,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde_json::json;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +29,79 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 #[test]
 fn tool_is_named_swarm() {
     assert_eq!(CommunicateTool::new().name(), "swarm");
+}
+
+#[test]
+fn task_graph_seed_collision_is_detected_from_server_error() {
+    let response = ServerEvent::Error {
+        id: 1,
+        message: "Seed rejected: duplicate node id 'final-synthesis'".to_string(),
+        retry_after_secs: None,
+    };
+    assert_eq!(
+        super::seed_node_id_collision(&response),
+        Some("final-synthesis")
+    );
+    assert_eq!(
+        super::seed_node_id_collision(&ServerEvent::Done { id: 1 }),
+        None
+    );
+}
+
+#[test]
+fn conflicting_seed_ids_are_scoped_and_dependencies_follow_the_remap() {
+    let nodes = vec![
+        crate::protocol::TaskGraphNodeSpec {
+            id: "explore".to_string(),
+            content: "explore".to_string(),
+            kind: Some("explore".to_string()),
+            depends_on: Vec::new(),
+            priority: 10,
+        },
+        crate::protocol::TaskGraphNodeSpec {
+            id: "final-synthesis".to_string(),
+            content: "synthesize".to_string(),
+            kind: Some("synthesize".to_string()),
+            depends_on: vec!["explore".to_string()],
+            priority: 20,
+        },
+        crate::protocol::TaskGraphNodeSpec {
+            id: "verify".to_string(),
+            content: "verify".to_string(),
+            kind: Some("verify".to_string()),
+            depends_on: vec!["final-synthesis".to_string()],
+            priority: 30,
+        },
+    ];
+    let occupied = HashSet::from([
+        // This node represents an exact replay. The server would have accepted it
+        // after the conflicting id was fixed, so the client must not rename every
+        // occupied id preemptively.
+        "explore".to_string(),
+        "final-synthesis".to_string(),
+        "final-synthesis::seed-deadbeef".to_string(),
+    ]);
+
+    let (remapped, changes) =
+        super::remap_conflicting_seed_nodes(&nodes, &occupied, "final-synthesis", "seed-deadbeef");
+
+    assert_eq!(
+        changes,
+        vec![(
+            "final-synthesis".to_string(),
+            "final-synthesis::seed-deadbeef-2".to_string()
+        )]
+    );
+    assert_eq!(remapped[0], nodes[0], "non-conflicting nodes stay stable");
+    assert_eq!(remapped[1].id, "final-synthesis::seed-deadbeef-2");
+    assert_eq!(
+        remapped[2].depends_on,
+        vec!["final-synthesis::seed-deadbeef-2".to_string()]
+    );
+    assert_eq!(
+        super::format_seed_remaps(&changes),
+        "final-synthesis -> final-synthesis::seed-deadbeef-2"
+    );
 }
 
 #[test]
@@ -1067,6 +1140,96 @@ fn format_swarm_fleet_renders_live_rollup() {
     assert!(output.contains("plan: 5 item(s), 2 active, 1 ready, 1 failed, mode deep"));
     assert!(output.contains("tokens: in 100, out 40, messages 2"));
     assert!(output.contains("control log offset: 12"));
+}
+
+#[test]
+fn schema_requires_a_nonblank_label_for_spawn() {
+    let schema = CommunicateTool::new().parameters_schema();
+    assert_eq!(schema["properties"]["label"]["minLength"], json!(1));
+    assert!(
+        schema["properties"]["label"]["description"]
+            .as_str()
+            .expect("label description")
+            .contains("Required for spawn")
+    );
+    assert!(
+        schema["properties"]["action"]["description"]
+            .as_str()
+            .expect("action description")
+            .contains("Spawn requires a nonblank label")
+    );
+
+    let branches = schema["anyOf"]
+        .as_array()
+        .expect("swarm schema should declare action-specific branches");
+    let spawn_branch = branches
+        .iter()
+        .find(|branch| branch["properties"]["action"]["enum"] == json!(["spawn"]))
+        .expect("spawn schema branch");
+    assert_eq!(spawn_branch["required"], json!(["action", "label"]));
+
+    let non_spawn_branch = branches
+        .iter()
+        .find(|branch| {
+            branch["properties"]["action"]["enum"]
+                .as_array()
+                .is_some_and(|actions| !actions.contains(&json!("spawn")))
+        })
+        .expect("non-spawn schema branch");
+    assert_eq!(non_spawn_branch["required"], json!(["action"]));
+}
+
+#[test]
+fn spawn_label_validation_rejects_missing_or_blank_labels() {
+    let missing: CommunicateInput =
+        serde_json::from_value(json!({"action": "spawn"})).expect("spawn input");
+    assert_eq!(
+        missing
+            .required_spawn_label()
+            .expect_err("missing label must fail")
+            .to_string(),
+        "'label' is required for spawn action"
+    );
+
+    let blank: CommunicateInput = serde_json::from_value(json!({
+        "action": "spawn",
+        "label": "  \n\t "
+    }))
+    .expect("spawn input");
+    assert_eq!(
+        blank
+            .required_spawn_label()
+            .expect_err("blank label must fail")
+            .to_string(),
+        "'label' must not be blank for spawn action"
+    );
+}
+
+#[test]
+fn spawn_label_validation_trims_valid_labels() {
+    let params: CommunicateInput = serde_json::from_value(json!({
+        "action": "spawn",
+        "label": "  api reviewer  "
+    }))
+    .expect("spawn input");
+    assert_eq!(
+        params.required_spawn_label().expect("valid label"),
+        "api reviewer"
+    );
+}
+
+#[tokio::test]
+async fn spawn_execute_rejects_missing_label_before_sending_request() {
+    let working_dir = tempfile::tempdir().expect("working dir");
+    let error = CommunicateTool::new()
+        .execute(
+            json!({"action": "spawn", "prompt": "review the API"}),
+            test_ctx("session-parent", working_dir.path()),
+        )
+        .await
+        .expect_err("missing spawn label must fail locally");
+
+    assert_eq!(error.to_string(), "'label' is required for spawn action");
 }
 
 #[test]

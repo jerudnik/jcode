@@ -68,6 +68,89 @@ fn model_picker_favorites_path() -> Option<std::path::PathBuf> {
         .map(|dir| dir.join(MODEL_PICKER_FAVORITES_FILE))
 }
 
+/// Whether a picker route's runtime can apply a per-request reasoning effort.
+/// Effort rows are only rendered for these routes; other routes (Copilot,
+/// Bedrock, Antigravity CLI, remote-catalog placeholders, ...) get one plain
+/// row per model because a picked effort could not actually be applied.
+fn route_supports_reasoning_effort(api_method: &str) -> bool {
+    use crate::provider::ModelRouteApiMethod as Method;
+    match Method::parse(api_method) {
+        Method::ClaudeOAuth
+        | Method::AnthropicApiKey
+        | Method::OpenAIOAuth
+        | Method::OpenAIApiKey
+        | Method::OpenRouter => true,
+        Method::OpenAiCompatible { .. }
+        | Method::Copilot
+        | Method::Cursor
+        | Method::Bedrock
+        | Method::CodeAssistOAuth
+        | Method::AntigravityHttps
+        | Method::RemoteCatalog
+        | Method::Current
+        | Method::Other(_) => false,
+    }
+}
+
+/// Apply the `provider.model_picker_providers` allowlist (issue #460).
+///
+/// Each allowlist entry can name a provider label ("openai", "llama.cpp",
+/// "anthropic"), a route api method ("claude-oauth", "openrouter",
+/// "openai-compatible:myprofile"), or a bare openai-compatible profile id
+/// ("myprofile"). Matching is case/format-insensitive via the shared provider
+/// label normalizer. Routes for the active model are always kept so the
+/// current selection never disappears from the picker, and a filter that
+/// matches nothing falls back to the unfiltered list instead of an empty
+/// picker.
+fn filter_routes_by_provider_allowlist(
+    routes: Vec<crate::provider::ModelRoute>,
+    allowlist: Option<&[String]>,
+    current_model: &str,
+) -> Vec<crate::provider::ModelRoute> {
+    use crate::provider::normalize_model_route_provider_label as normalize;
+
+    let Some(allowlist) = allowlist else {
+        return routes;
+    };
+    let allowed: Vec<String> = allowlist
+        .iter()
+        .map(|entry| normalize(entry))
+        .filter(|entry| !entry.is_empty())
+        .collect();
+    if allowed.is_empty() {
+        return routes;
+    }
+
+    let route_matches = |route: &crate::provider::ModelRoute| -> bool {
+        let provider = normalize(&route.provider);
+        let api_method = normalize(&route.api_method);
+        // "openai-compatible:myprofile" normalizes to "openaicompatible:myprofile";
+        // also expose the bare profile id for convenience.
+        let profile_id = route
+            .api_method
+            .split_once(':')
+            .map(|(_, profile)| normalize(profile))
+            .unwrap_or_default();
+        allowed.iter().any(|entry| {
+            *entry == provider
+                || *entry == api_method
+                || (!profile_id.is_empty() && *entry == profile_id)
+                || crate::provider::model_route_provider_labels_match(&route.provider, entry)
+        })
+    };
+
+    let filtered: Vec<crate::provider::ModelRoute> = routes
+        .iter()
+        .filter(|route| route.model == current_model || route_matches(route))
+        .cloned()
+        .collect();
+    if filtered.is_empty() {
+        routes
+    } else {
+        filtered
+    }
+}
+
 fn model_picker_usage_key(model_name: &str, route: &PickerOption, effort: Option<&str>) -> String {
     format!(
         "{}\u{1f}{}\u{1f}{}\u{1f}{}",
@@ -629,6 +712,23 @@ impl App {
         self.open_model_picker_inner(true);
     }
 
+    /// Apply a completed auth-driven catalog refresh to an already-open picker.
+    /// Login/import can finish while `/model` is visible, so merely invalidating
+    /// its cache would leave the stale pre-login entries on screen until the user
+    /// closed and reopened it.
+    pub(super) fn finish_auth_catalog_refresh(&mut self) {
+        let was_pending = self.auth_catalog_refresh_pending;
+        self.auth_catalog_refresh_pending = false;
+        self.invalidate_model_picker_cache();
+        let picker_open = self
+            .inline_interactive_state
+            .as_ref()
+            .is_some_and(picker_is_runtime_model_picker);
+        if was_pending && picker_open {
+            self.open_model_picker_preserving_input();
+        }
+    }
+
     fn open_model_picker_inner(&mut self, preserve_input: bool) {
         let picker_started = std::time::Instant::now();
         const RECENT_AUTH_BOOST_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
@@ -653,6 +753,15 @@ impl App {
         } else {
             self.provider.model().to_string()
         };
+
+        // Never present the old catalog as authoritative immediately after a
+        // login/import. Local mode clears this when the provider's synchronous
+        // auth activation finishes; remote mode clears it when the server pushes
+        // AvailableModelsUpdated.
+        if self.auth_catalog_refresh_pending {
+            self.open_loading_model_picker(&current_model);
+            return;
+        }
 
         let config = crate::config::config();
         let config_default_model = config.provider.default_model.clone();
@@ -916,14 +1025,6 @@ impl App {
         } else {
             self.provider.reasoning_effort()
         };
-        let available_efforts = if self.is_remote {
-            inferred_reasoning_efforts(
-                self.remote_provider_name.as_deref(),
-                self.remote_provider_model.as_deref(),
-            )
-        } else {
-            self.provider.available_efforts()
-        };
 
         let is_config_default = |name: &str, route: &PickerOption| -> bool {
             model_picker_route_is_default(
@@ -950,6 +1051,11 @@ impl App {
             routes
         };
         let routes = crate::provider::dedupe_model_routes(routes);
+        let routes = filter_routes_by_provider_allowlist(
+            routes,
+            config.provider.model_picker_providers.as_deref(),
+            &current_model,
+        );
 
         if routes.is_empty() {
             self.inline_interactive_state = None;
@@ -1029,7 +1135,6 @@ impl App {
             }
         }
 
-        let is_openai = !available_efforts.is_empty();
         let current_provider = if self.is_remote {
             self.remote_provider_name
                 .clone()
@@ -1072,10 +1177,22 @@ impl App {
                 }
             }
 
-            let is_openai_model = crate::provider::ALL_OPENAI_MODELS.contains(&name.as_str());
+            // One consistent policy across providers (issue #458): expand a
+            // model into effort rows exactly when that model's own ladder
+            // (inferred from the model id, same table the effort cycler uses)
+            // is non-empty AND the route's runtime can actually apply a
+            // reasoning effort. No provider-specific special cases.
+            let model_efforts: Vec<&'static str> = inferred_reasoning_efforts(None, Some(name));
+            let (effort_routes, plain_routes): (Vec<_>, Vec<_>) = if model_efforts.is_empty() {
+                (Vec::new(), entry_routes)
+            } else {
+                entry_routes
+                    .into_iter()
+                    .partition(|route| route_supports_reasoning_effort(&route.api_method))
+            };
 
-            if is_openai_model && is_openai && !available_efforts.is_empty() {
-                for effort in &available_efforts {
+            if !effort_routes.is_empty() {
+                for effort in &model_efforts {
                     // Swarm modes (swarm / swarm-deep) are orchestration rungs on
                     // the effort ladder, not per-model reasoning variants. They
                     // must not generate `model (swarm)` picker rows.
@@ -1095,7 +1212,7 @@ impl App {
                     let effort_matches_current =
                         *name == current_model && current_effort.as_deref() == Some(*effort);
                     let or_created = openrouter_created_timestamp(name);
-                    for route in &entry_routes {
+                    for route in &effort_routes {
                         let is_this_current = effort_matches_current
                             && model_picker_route_is_current(
                                 name,
@@ -1132,11 +1249,12 @@ impl App {
                         });
                     }
                 }
-            } else {
+            }
+            {
                 let or_created = openrouter_created_timestamp(name);
                 let is_old = old_threshold_secs > 0
                     && or_created.map(|t| t < old_threshold_secs).unwrap_or(false);
-                for route in entry_routes {
+                for route in plain_routes {
                     let is_recommended = model_picker_route_is_recommended(name, &route);
                     let is_current = model_picker_route_is_current(
                         name,
@@ -1732,10 +1850,61 @@ impl App {
             (SessionPicker::loading(), "Loading sessions...")
         };
         picker.set_current_dir(current_dir);
+        picker.set_current_session_id(Some(super::commands::active_session_id(self)));
         self.session_picker_overlay = Some(RefCell::new(picker));
         self.session_picker_mode = SessionPickerMode::Resume;
         self.set_status_notice(status);
         self.start_session_picker_load();
+    }
+
+    /// Open the active sessions manager: the session picker scoped to live
+    /// (open) sessions, showing which are still working on a response and
+    /// which are ready for input. Reached via Left arrow on an empty input
+    /// (when `display.active_sessions_manager` is enabled) or `/active`.
+    pub(super) fn open_active_sessions_picker(&mut self) {
+        let current_dir = self.session.working_dir.clone();
+        let (mut picker, status) = if let Some((server_groups, orphan_sessions)) =
+            session_picker::load_cached_sessions_grouped()
+        {
+            (
+                SessionPicker::new_grouped(server_groups, orphan_sessions),
+                "Refreshing active sessions...",
+            )
+        } else {
+            (SessionPicker::loading(), "Loading active sessions...")
+        };
+        picker.set_current_dir(current_dir);
+        picker.set_current_session_id(Some(super::commands::active_session_id(self)));
+        picker.activate_active_filter();
+        self.session_picker_overlay = Some(RefCell::new(picker));
+        self.session_picker_mode = SessionPickerMode::ActiveSessions;
+        self.set_status_notice(status);
+        self.start_session_picker_load();
+    }
+
+    /// Opt-in Left-arrow gesture: pressing Left on an empty input opens the
+    /// active sessions manager. Gated behind `display.active_sessions_manager`
+    /// so the default input behavior is unchanged. Returns true when the
+    /// gesture fired.
+    pub(super) fn maybe_open_active_sessions_on_left(&mut self) -> bool {
+        if !self.input.is_empty() || self.cursor_pos != 0 {
+            return false;
+        }
+        if !crate::config::config().display.active_sessions_manager {
+            return false;
+        }
+        self.open_active_sessions_picker();
+        true
+    }
+
+    /// Tick hook: while the session picker overlay is up, periodically refresh
+    /// the live presence snapshot so working/ready badges (and the Active view
+    /// membership) track reality. Returns true when a redraw is needed.
+    pub(super) fn poll_session_picker_presence(&mut self) -> bool {
+        let Some(picker_cell) = self.session_picker_overlay.as_ref() else {
+            return false;
+        };
+        picker_cell.borrow_mut().maybe_refresh_live_presence()
     }
 
     fn start_session_picker_load(&mut self) {
@@ -1782,6 +1951,16 @@ impl App {
                     }
                     "Catch Up sessions loaded"
                 }
+                SessionPickerMode::ActiveSessions => {
+                    if let Some(existing) = self.session_picker_overlay.as_ref() {
+                        let mut picker = existing.borrow_mut();
+                        // Keep the active filter; reseed preserves it and
+                        // refreshes the live presence snapshot.
+                        picker.activate_active_filter();
+                        picker.reseed_grouped(server_groups, orphan_sessions);
+                    }
+                    "Active sessions loaded"
+                }
                 SessionPickerMode::Onboarding { .. } => return false,
             };
             self.set_status_notice(notice);
@@ -1792,6 +1971,7 @@ impl App {
             SessionPickerMode::Resume => {
                 let mut picker = SessionPicker::new_grouped(server_groups, orphan_sessions);
                 picker.set_current_dir(self.session.working_dir.clone());
+                picker.set_current_session_id(Some(super::commands::active_session_id(self)));
                 self.session_picker_overlay = Some(RefCell::new(picker));
                 self.set_status_notice("Sessions loaded");
                 true
@@ -1802,6 +1982,15 @@ impl App {
                 picker.set_current_dir(self.session.working_dir.clone());
                 self.session_picker_overlay = Some(RefCell::new(picker));
                 self.set_status_notice("Catch Up sessions loaded");
+                true
+            }
+            SessionPickerMode::ActiveSessions => {
+                let mut picker = SessionPicker::new_grouped(server_groups, orphan_sessions);
+                picker.set_current_dir(self.session.working_dir.clone());
+                picker.set_current_session_id(Some(super::commands::active_session_id(self)));
+                picker.activate_active_filter();
+                self.session_picker_overlay = Some(RefCell::new(picker));
+                self.set_status_notice("Active sessions loaded");
                 true
             }
             // Onboarding loads its scoped transcript list synchronously, so it
@@ -1821,7 +2010,9 @@ impl App {
         let picker_active = self.session_picker_overlay.is_some()
             && matches!(
                 self.session_picker_mode,
-                SessionPickerMode::Resume | SessionPickerMode::CatchUp
+                SessionPickerMode::Resume
+                    | SessionPickerMode::CatchUp
+                    | SessionPickerMode::ActiveSessions
             );
 
         match recv_result {
@@ -2106,6 +2297,15 @@ impl App {
             )));
             return;
         };
+
+        // Selecting the session we are already in (visible in the Active view,
+        // labeled "current") should simply close the picker, not re-resume.
+        if session_id == super::commands::active_session_id(self) {
+            self.session_picker_overlay = None;
+            self.session_picker_mode = SessionPickerMode::Resume;
+            self.set_status_notice("Already in this session");
+            return;
+        }
 
         if targets.len() > 1 {
             self.push_display_message(DisplayMessage::system(format!(
@@ -2863,85 +3063,34 @@ impl App {
     }
 
     pub(super) fn picker_fuzzy_score(pattern: &str, text: &str) -> Option<i32> {
-        let pat = Self::picker_fuzzy_pattern(pattern);
-        Self::picker_fuzzy_score_with_pattern(&pat, text)
-    }
-
-    /// Normalize a fuzzy-match pattern (lowercase, drop whitespace) into chars.
-    /// Hoist this out of per-entry scoring so a filter pass over N entries
-    /// normalizes the pattern once instead of N times per keystroke.
-    pub(super) fn picker_fuzzy_pattern(pattern: &str) -> Vec<char> {
-        pattern
-            .to_lowercase()
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect()
-    }
-
-    pub(super) fn picker_fuzzy_score_with_pattern(pat: &[char], text: &str) -> Option<i32> {
-        let txt: Vec<char> = text.to_lowercase().chars().collect();
-        if pat.is_empty() {
-            return Some(0);
-        }
-
-        let mut pi = 0;
-        let mut score = 0i32;
-        let mut last_match: Option<usize> = None;
-
-        for (ti, &tc) in txt.iter().enumerate() {
-            if pi < pat.len() && tc == pat[pi] {
-                score += 1;
-                if let Some(last) = last_match
-                    && last + 1 == ti
-                {
-                    score += 3;
-                }
-                if ti == 0
-                    || matches!(
-                        txt.get(ti.wrapping_sub(1)),
-                        Some('/' | '-' | '_' | ' ' | '.')
-                    )
-                {
-                    score += 5;
-                }
-                if pi == 0 && ti == 0 {
-                    score += 10;
-                }
-                last_match = Some(ti);
-                pi += 1;
-            }
-        }
-
-        if pi == pat.len() {
-            score -= (txt.len() as i32) / 10;
-            Some(score)
-        } else {
-            None
-        }
+        jcode_fuzzy::fuzzy_score_tokens(pattern, text)
     }
 
     pub(super) fn apply_inline_interactive_filter(picker: &mut InlineInteractiveState) {
         if picker.filter.is_empty() {
             picker.filtered = (0..picker.entries.len()).collect();
         } else {
-            // Normalize the filter pattern once per keystroke instead of once per
-            // entry inside picker_fuzzy_score.
-            let pat = Self::picker_fuzzy_pattern(&picker.filter);
-            let mut scored: Vec<(usize, i32)> = picker
+            let query = picker.filter.trim();
+            let mut scored: Vec<(usize, bool, i32)> = picker
                 .entries
                 .iter()
                 .enumerate()
                 .filter_map(|(i, m)| {
                     let filter_text = picker.filter_text(m);
-                    Self::picker_fuzzy_score_with_pattern(&pat, &filter_text).map(|s| {
+                    Self::picker_fuzzy_score(&picker.filter, &filter_text).map(|s| {
                         let usage_bonus = m.usage_score.min(i32::MAX as u32) as i32;
                         let bonus = usage_bonus + if m.recommended { 5 } else { 0 };
-                        (i, s + bonus)
+                        (
+                            i,
+                            m.name.eq_ignore_ascii_case(query),
+                            s.saturating_add(bonus),
+                        )
                     })
                 })
                 .collect();
             scored.sort_by(|a, b| {
                 b.1.cmp(&a.1)
+                    .then(b.2.cmp(&a.2))
                     .then(
                         picker.entries[a.0]
                             .recommendation_rank
@@ -2949,7 +3098,7 @@ impl App {
                     )
                     .then(picker.entries[a.0].name.cmp(&picker.entries[b.0].name))
             });
-            picker.filtered = scored.into_iter().map(|(i, _)| i).collect();
+            picker.filtered = scored.into_iter().map(|(i, _, _)| i).collect();
         }
         if picker.filtered.is_empty() {
             picker.selected = 0;
@@ -3000,9 +3149,10 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{
-        RemoteModelCatalogCache, key_char_eq_ignore_ascii_case, model_picker_route_is_current,
+        RemoteModelCatalogCache, filter_routes_by_provider_allowlist,
+        key_char_eq_ignore_ascii_case, model_picker_route_is_current,
         model_picker_route_is_default, model_picker_route_is_recommended,
-        picker_is_runtime_model_picker,
+        picker_is_runtime_model_picker, route_supports_reasoning_effort,
     };
     use crate::tui::{
         AgentModelTarget, App, InlineInteractiveState, PickerAction, PickerEntry, PickerKind,
@@ -3089,6 +3239,46 @@ mod tests {
             selected: 0,
             column: 0,
             filter: "opus".to_string(),
+            preview: false,
+        };
+
+        App::apply_inline_interactive_filter(&mut picker);
+
+        assert_eq!(picker.filtered, vec![1, 0]);
+    }
+
+    #[test]
+    fn model_picker_fuzzy_filter_tolerates_common_typos() {
+        let mut picker = InlineInteractiveState {
+            kind: PickerKind::Model,
+            filtered: vec![0, 1],
+            entries: vec![
+                picker_entry("gpt-5-codex", "OpenAI", 0),
+                picker_entry("claude-opus-4.6", "Anthropic", 0),
+            ],
+            selected: 0,
+            column: 0,
+            filter: "codxe".to_string(),
+            preview: false,
+        };
+
+        App::apply_inline_interactive_filter(&mut picker);
+
+        assert_eq!(picker.filtered, vec![0]);
+    }
+
+    #[test]
+    fn model_picker_exact_name_outranks_longer_frequently_used_prefix() {
+        let mut picker = InlineInteractiveState {
+            kind: PickerKind::Model,
+            filtered: vec![0, 1],
+            entries: vec![
+                picker_entry("gpt-5.5", "OpenAI", 150),
+                picker_entry("gpt-5", "OpenAI", 0),
+            ],
+            selected: 0,
+            column: 0,
+            filter: "gpt-5".to_string(),
             preview: false,
         };
 
@@ -3334,5 +3524,110 @@ mod tests {
         let serialized = serde_json::to_value(&cache).expect("cache should serialize");
         assert_eq!(serialized["provider_name"], "OpenAI");
         assert!(serialized.get("snapshot").is_none());
+    }
+
+    fn model_route(model: &str, provider: &str, api_method: &str) -> crate::provider::ModelRoute {
+        crate::provider::ModelRoute {
+            model: model.to_string(),
+            provider: provider.to_string(),
+            api_method: api_method.to_string(),
+            available: true,
+            detail: String::new(),
+            cheapness: None,
+        }
+    }
+
+    #[test]
+    fn route_effort_support_covers_effort_capable_runtimes_only() {
+        assert!(route_supports_reasoning_effort("claude-oauth"));
+        assert!(route_supports_reasoning_effort("claude-api"));
+        assert!(route_supports_reasoning_effort("openai-oauth"));
+        assert!(route_supports_reasoning_effort("openai-api-key"));
+        assert!(route_supports_reasoning_effort("openrouter"));
+
+        assert!(!route_supports_reasoning_effort("copilot"));
+        assert!(!route_supports_reasoning_effort("bedrock"));
+        assert!(!route_supports_reasoning_effort("https"));
+        assert!(!route_supports_reasoning_effort(
+            "openai-compatible:llamacpp"
+        ));
+        assert!(!route_supports_reasoning_effort("remote-catalog"));
+        assert!(!route_supports_reasoning_effort("current"));
+    }
+
+    #[test]
+    fn provider_allowlist_filters_routes_by_label_method_and_profile() {
+        let routes = vec![
+            model_route("gpt-5.5", "OpenAI", "openai-oauth"),
+            model_route("claude-fable-5", "Anthropic", "claude-oauth"),
+            model_route("qwen3-coder", "llama.cpp", "openai-compatible:llamacpp"),
+            model_route("deepseek/deepseek-v4-pro", "auto", "openrouter"),
+        ];
+
+        // Provider label match (normalized: case/dots/spaces insensitive).
+        let filtered = filter_routes_by_provider_allowlist(
+            routes.clone(),
+            Some(&["Llama.CPP".to_string()]),
+            "unrelated-current",
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].model, "qwen3-coder");
+
+        // Bare openai-compatible profile id match.
+        let filtered = filter_routes_by_provider_allowlist(
+            routes.clone(),
+            Some(&["llamacpp".to_string()]),
+            "unrelated-current",
+        );
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].provider, "llama.cpp");
+
+        // Api-method match plus alias-aware provider label match.
+        let filtered = filter_routes_by_provider_allowlist(
+            routes.clone(),
+            Some(&["claude-oauth".to_string(), "openrouter".to_string()]),
+            "unrelated-current",
+        );
+        let models: Vec<&str> = filtered.iter().map(|r| r.model.as_str()).collect();
+        assert_eq!(models, ["claude-fable-5", "deepseek/deepseek-v4-pro"]);
+    }
+
+    #[test]
+    fn provider_allowlist_keeps_current_model_and_never_empties_picker() {
+        let routes = vec![
+            model_route("gpt-5.5", "OpenAI", "openai-oauth"),
+            model_route("qwen3-coder", "llama.cpp", "openai-compatible:llamacpp"),
+        ];
+
+        // Current model's route survives even when its provider is filtered out.
+        let filtered = filter_routes_by_provider_allowlist(
+            routes.clone(),
+            Some(&["llamacpp".to_string()]),
+            "gpt-5.5",
+        );
+        let models: Vec<&str> = filtered.iter().map(|r| r.model.as_str()).collect();
+        assert_eq!(models, ["gpt-5.5", "qwen3-coder"]);
+
+        // A filter matching nothing falls back to the full list.
+        let filtered = filter_routes_by_provider_allowlist(
+            routes.clone(),
+            Some(&["nonexistent".to_string()]),
+            "unrelated-current",
+        );
+        assert_eq!(filtered.len(), routes.len());
+
+        // None / empty / blank-entry allowlists are no-ops.
+        assert_eq!(
+            filter_routes_by_provider_allowlist(routes.clone(), None, "x").len(),
+            2
+        );
+        assert_eq!(
+            filter_routes_by_provider_allowlist(routes.clone(), Some(&[]), "x").len(),
+            2
+        );
+        assert_eq!(
+            filter_routes_by_provider_allowlist(routes, Some(&["  ".to_string()]), "x").len(),
+            2
+        );
     }
 }

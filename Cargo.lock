@@ -3248,7 +3248,7 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jcode"
-version = "0.36.0"
+version = "0.46.0"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3366,6 +3366,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "unicode-width 0.2.2",
  "url",
  "urlencoding",
@@ -3535,6 +3536,7 @@ dependencies = [
  "bytemuck",
  "glyphon",
  "image",
+ "jcode-fuzzy",
  "jcode-tui-messages",
  "libc",
  "pollster",
@@ -3556,6 +3558,10 @@ dependencies = [
  "tract-hir",
  "tract-onnx",
 ]
+
+[[package]]
+name = "jcode-fuzzy"
+version = "0.1.0"
 
 [[package]]
 name = "jcode-gateway-types"
@@ -3821,6 +3827,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures",
+ "httpdate",
  "jcode-logging",
  "jcode-message-types",
  "rand 0.9.3",
@@ -3837,8 +3844,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "chrono",
  "flate2",
+ "h2 0.4.13",
+ "http 1.4.0",
  "jcode-base",
  "jcode-message-types",
  "jcode-provider-core",
@@ -3847,8 +3857,10 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-rustls 0.26.4",
  "tokio-stream",
  "uuid",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -4159,6 +4171,7 @@ dependencies = [
  "jcode-build-meta",
  "jcode-config-types",
  "jcode-core",
+ "jcode-fuzzy",
  "jcode-logging",
  "jcode-productivity-core",
  "jcode-protocol",
@@ -4190,6 +4203,7 @@ dependencies = [
  "sha2 0.10.9",
  "similar",
  "tempfile",
+ "terminal-colorsaurus",
  "tokio",
  "unicode-width 0.2.2",
  "url",
@@ -4224,6 +4238,8 @@ dependencies = [
 name = "jcode-tui-markdown"
 version = "0.1.0"
 dependencies = [
+ "dirs",
+ "image",
  "jcode-render-core",
  "jcode-tui-mermaid",
  "jcode-tui-workspace",
@@ -4232,7 +4248,9 @@ dependencies = [
  "serde",
  "serde_json",
  "syntect",
+ "tempfile",
  "unicode-width 0.2.2",
+ "wait-timeout",
 ]
 
 [[package]]
@@ -7603,6 +7621,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "terminal-colorsaurus"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a46bb5364467da040298c573c8a95dbf9a512efc039630409a03126e3703e90"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "memchr",
+ "mio",
+ "terminal-trx",
+ "windows-sys 0.61.2",
+ "xterm-color",
+]
+
+[[package]]
+name = "terminal-trx"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b3f27d9a8a177e57545481faec87acb45c6e854ed1e5a3658ad186c106f38ed"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "terminfo"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7976,6 +8020,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -8662,6 +8707,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d9b2acfb050df409c972a37d3b8e08cdea3bddb0c09db9d53137e504cfabed0"
 dependencies = [
  "utf8parse",
+]
+
+[[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
@@ -9980,6 +10034,12 @@ name = "xmlwriter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
+
+[[package]]
+name = "xterm-color"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7008a9d8ba97a7e47d9b2df63fcdb8dade303010c5a7cd5bf2469d4da6eba673"
 
 [[package]]
 name = "yansi"

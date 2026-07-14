@@ -912,6 +912,7 @@ impl Agent {
                         tool_call_id: tc.id.clone(),
                         tool_name: tc.name.clone(),
                         status: ToolStatus::Error,
+                        intent: tc.intent.clone(),
                         title: None,
                     }));
                     if print_output {
@@ -971,6 +972,7 @@ impl Agent {
                             } else {
                                 ToolStatus::Completed
                             },
+                            intent: tc.intent.clone(),
                             title: None,
                         }));
 
@@ -1012,6 +1014,7 @@ impl Agent {
                     tool_call_id: tc.id.clone(),
                     tool_name: tc.name.clone(),
                     status: ToolStatus::Running,
+                    intent: tc.intent.clone(),
                     title: None,
                 }));
 
@@ -1053,6 +1056,7 @@ impl Agent {
                             tool_call_id: tc.id.clone(),
                             tool_name: tc.name.clone(),
                             status: ToolStatus::Completed,
+                            intent: tc.intent.clone(),
                             title: output.title.clone(),
                         }));
 
@@ -1101,6 +1105,7 @@ impl Agent {
                             tool_call_id: tc.id.clone(),
                             tool_name: tc.name.clone(),
                             status: ToolStatus::Error,
+                            intent: tc.intent.clone(),
                             title: None,
                         }));
 

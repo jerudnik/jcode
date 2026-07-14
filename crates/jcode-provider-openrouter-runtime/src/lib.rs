@@ -989,6 +989,9 @@ pub struct OpenRouterProvider {
     extra_body: Option<serde_json::Map<String, Value>>,
     static_models: Vec<String>,
     static_context_limits: HashMap<String, usize>,
+    /// Explicit per-model image-input capability from named-provider `models[].input`.
+    /// Missing entries mean unspecified and preserve the provider-level fallback.
+    static_image_input_support: HashMap<String, bool>,
     send_openrouter_headers: bool,
     models_cache: Arc<RwLock<ModelsCache>>,
     model_catalog_refresh: Arc<Mutex<ModelCatalogRefreshState>>,
@@ -1032,6 +1035,32 @@ impl OpenRouterProvider {
         ) && Self::model_is_deepseek_family(&self.model_snapshot())
     }
 
+    /// GPT-family reasoning models (gpt-5.x, codex variants, o-series) accept
+    /// the standard OpenAI `reasoning_effort` request field on any
+    /// OpenAI-compatible gateway that proxies them (e.g. OpenCode Zen serving
+    /// `gpt-5.3-codex-spark`). Real OpenRouter uses unified reasoning instead.
+    fn model_is_openai_reasoning_family(model: &str) -> bool {
+        let model = model.trim().to_ascii_lowercase();
+        model.starts_with("gpt-5")
+            || model.contains("codex")
+            || model.starts_with("o3")
+            || model.starts_with("o4")
+    }
+
+    /// Does this runtime accept the OpenAI-style `reasoning_effort` field for
+    /// the active model? Only for direct compat endpoints serving GPT-family
+    /// reasoning models, and only when no explicit config override or
+    /// DeepSeek-style support already applies.
+    pub(crate) fn supports_openai_reasoning_effort(&self) -> bool {
+        if self.reasoning_effort_support == Some(false) {
+            return false;
+        }
+        !Self::profile_supports_unified_reasoning(
+            self.profile_id.as_deref(),
+            self.send_openrouter_headers,
+        ) && Self::model_is_openai_reasoning_family(&self.model_snapshot())
+    }
+
     fn model_snapshot(&self) -> String {
         self.model
             .try_read()
@@ -1041,6 +1070,7 @@ impl OpenRouterProvider {
 
     pub(crate) fn supports_any_reasoning_effort(&self) -> bool {
         self.supports_deepseek_reasoning_effort()
+            || self.supports_openai_reasoning_effort()
             || Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
                 self.send_openrouter_headers,
@@ -1339,6 +1369,21 @@ impl OpenRouterProvider {
                     .map(|limit| (id.to_ascii_lowercase(), limit))
             })
             .collect::<HashMap<_, _>>();
+        let static_image_input_support = profile
+            .models
+            .iter()
+            .filter_map(|model| {
+                let id = model.id.trim();
+                if id.is_empty() || model.input.is_empty() {
+                    return None;
+                }
+                let supports_images = model
+                    .input
+                    .iter()
+                    .any(|input| input.eq_ignore_ascii_case("image"));
+                Some((id.to_ascii_lowercase(), supports_images))
+            })
+            .collect::<HashMap<_, _>>();
         Ok(Self {
             client: jcode_provider_core::shared_http_client(),
             model: Arc::new(RwLock::new(model)),
@@ -1371,6 +1416,7 @@ impl OpenRouterProvider {
             ),
             static_models,
             static_context_limits,
+            static_image_input_support,
             send_openrouter_headers: false,
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
@@ -1582,6 +1628,7 @@ impl OpenRouterProvider {
             extra_body,
             static_models,
             static_context_limits,
+            static_image_input_support: HashMap::new(),
             send_openrouter_headers,
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
@@ -1622,6 +1669,7 @@ impl OpenRouterProvider {
             extra_body: Self::resolve_extra_body(None, DEFAULT_ENV_FILE),
             static_models: Vec::new(),
             static_context_limits: HashMap::new(),
+            static_image_input_support: HashMap::new(),
             send_openrouter_headers: true,
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
@@ -1690,6 +1738,7 @@ impl OpenRouterProvider {
             extra_body: Self::resolve_extra_body(None, &resolved.env_file),
             static_models,
             static_context_limits,
+            static_image_input_support: HashMap::new(),
             send_openrouter_headers: false,
             models_cache: Arc::new(RwLock::new(ModelsCache::default())),
             model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),
@@ -1913,6 +1962,7 @@ impl OpenRouterProvider {
                 extra_body: None,
                 static_models: Vec::new(),
                 static_context_limits: HashMap::new(),
+                static_image_input_support: HashMap::new(),
                 send_openrouter_headers: true,
                 models_cache: Arc::new(RwLock::new(ModelsCache::default())),
                 model_catalog_refresh: Arc::new(Mutex::new(ModelCatalogRefreshState::default())),

@@ -5,9 +5,69 @@ fn test_simple_markdown() {
 }
 
 #[test]
+fn test_latex_none_mode_helpers_preserve_source_and_delimiters() {
+    assert_eq!(
+        line_to_string(&Line::from(raw_math_inline_span(r"x^2 + \alpha"))),
+        "$x^2 + \\alpha$"
+    );
+    let display: Vec<String> = raw_math_display_lines(r"\frac{x}{y}")
+        .iter()
+        .map(line_to_string)
+        .collect();
+    assert_eq!(display[1], "│ $$");
+    assert_eq!(display[2], "│ \\frac{x}{y}");
+    assert_eq!(display[3], "│ $$");
+}
+
+#[test]
+fn test_latex_unicode_mode_helpers_convert_supported_notation() {
+    assert_eq!(
+        line_to_string(&Line::from(math_inline_span(r"x^2 + \alpha"))),
+        "x² + α"
+    );
+    let display: Vec<String> = math_display_lines(r"\frac{x+1}{y}")
+        .iter()
+        .map(line_to_string)
+        .collect();
+    assert!(display.iter().any(|line| line.contains("x+1")));
+    assert!(display.iter().any(|line| line.contains('─')));
+}
+
+#[test]
 fn test_code_block() {
     let lines = render_markdown("```rust\nfn main() {}\n```");
     assert!(!lines.is_empty());
+}
+
+#[test]
+fn test_common_latex_containers_render_as_terminal_math() {
+    let cases = [
+        r"Inline \(\alpha_2 + x^2\).",
+        r"\[\frac{x+1}{y}\]",
+        "```math\n\\frac{x+1}{y}\n```",
+        "```latex\n\\begin{bmatrix}a & b \\\\ c & d\\end{bmatrix}\n```",
+        r"\begin{align*}x &= 1 \\ y &= 2\end{align*}",
+    ];
+
+    for markdown in cases {
+        let full = lines_to_string(&render_markdown_with_width(markdown, Some(80)));
+        let lazy = lines_to_string(&render_markdown_lazy(markdown, Some(80), 0..100));
+        assert_eq!(lazy, full, "{markdown}");
+        assert!(!full.contains("\\frac"), "{markdown}: {full}");
+        assert!(!full.contains("\\begin"), "{markdown}: {full}");
+        if !markdown.starts_with("Inline") {
+            assert!(full.contains("┌─ math"), "{markdown}: {full}");
+        }
+    }
+}
+
+#[test]
+fn test_latex_syntax_inside_generic_code_remains_literal() {
+    let markdown = "Inline `\\(x^2\\)`\n\n```rust\nlet formula = r\"\\[x^2\\]\";\n```";
+    let rendered = lines_to_string(&render_markdown(markdown));
+    assert!(rendered.contains("\\(x^2\\)"), "{rendered}");
+    assert!(rendered.contains("\\[x^2\\]"), "{rendered}");
+    assert!(!rendered.contains("┌─ math"), "{rendered}");
 }
 
 #[test]
@@ -73,9 +133,7 @@ fn test_extract_copy_targets_table_rows_are_not_blockquotes() {
     let targets = extract_copy_targets_from_rendered_lines(&lines);
 
     assert!(
-        targets
-            .iter()
-            .all(|t| t.kind != CopyTargetKind::Blockquote),
+        targets.iter().all(|t| t.kind != CopyTargetKind::Blockquote),
         "table separators must not be detected as blockquotes: {targets:?}"
     );
 }
@@ -143,6 +201,43 @@ fn test_table_width_wrapping_with_three_columns_stays_within_limit() {
         "expected all rendered table lines to fit width 24, got {} in {:?}",
         max_width,
         rendered
+    );
+}
+
+#[test]
+fn test_math_in_table_stays_within_constrained_width() {
+    let md = "| Formula | Result |\n| - | - |\n| $\\frac{x+1}{y}$ | $\\alpha_2 + x^2$ |";
+    let rendered: Vec<String> = render_markdown_with_width(md, Some(24))
+        .iter()
+        .map(line_to_string)
+        .collect();
+
+    assert!(rendered.iter().any(|line| line.contains("x+1")), "{rendered:?}");
+    assert!(rendered.iter().any(|line| line.contains("α₂")), "{rendered:?}");
+    assert!(
+        rendered.iter().map(|line| line.width()).max().unwrap_or(0) <= 24,
+        "table math exceeded width: {rendered:?}"
+    );
+}
+
+#[test]
+fn test_math_in_list_and_blockquote_wraps_without_losing_gutter() {
+    let md = "- Compute $\\frac{x+1}{y}$ for the long explanatory value\n\n> Result is $\\alpha_2 + x^2$ with a quoted explanation";
+    let rendered: Vec<String> = render_markdown_with_width(md, Some(24))
+        .iter()
+        .map(line_to_string)
+        .filter(|line| !line.is_empty())
+        .collect();
+
+    assert!(rendered.iter().any(|line| line.contains("x+1")), "{rendered:?}");
+    assert!(rendered.iter().any(|line| line.contains("α₂")), "{rendered:?}");
+    assert!(
+        rendered.iter().any(|line| line.starts_with("│ ")),
+        "blockquote gutter was not preserved: {rendered:?}"
+    );
+    assert!(
+        rendered.iter().map(|line| line.width()).max().unwrap_or(0) <= 48,
+        "structured math grew unexpectedly wide: {rendered:?}"
     );
 }
 
@@ -251,9 +346,10 @@ fn test_mermaid_renders_inline_even_in_pinned_diagram_mode() {
 
 #[test]
 fn test_inline_math_render() {
-    let lines = render_markdown("Area is $a^2$.");
+    let lines = render_markdown(r"Area is $\pi a^2$.");
     let rendered = lines_to_string(&lines);
-    assert!(rendered.contains("$a^2$"));
+    assert!(rendered.contains("πa²"), "{rendered}");
+    assert!(!rendered.contains(r"\pi"), "{rendered}");
 }
 
 #[test]
@@ -261,8 +357,40 @@ fn test_display_math_render() {
     let lines = render_markdown("$$\nE = mc^2\n$$");
     let rendered = lines_to_string(&lines);
     assert!(rendered.contains("┌─ math"));
-    assert!(rendered.contains("E = mc^2"));
+    assert!(rendered.contains("E = mc²"), "{rendered}");
     assert!(rendered.contains("└─"));
+}
+
+#[test]
+fn test_display_math_renders_fraction_and_matrix_layouts() {
+    let fraction = lines_to_string(&render_markdown(r"$$\frac{x+1}{y}$$"));
+    assert!(fraction.contains("x+1"), "{fraction}");
+    assert!(fraction.contains("─────"), "{fraction}");
+    assert!(fraction.contains(" y "), "{fraction}");
+
+    let matrix = lines_to_string(&render_markdown(
+        r"$$\begin{bmatrix}a & b \\ c & d\end{bmatrix}$$",
+    ));
+    assert!(matrix.contains("⎡ a  b ⎤"), "{matrix}");
+    assert!(matrix.contains("⎣ c  d ⎦"), "{matrix}");
+}
+
+#[test]
+fn test_unknown_latex_command_remains_visible() {
+    let rendered = lines_to_string(&render_markdown(r"Value: $\custom{x}$"));
+    assert!(rendered.contains(r"\customx"), "{rendered}");
+}
+
+#[test]
+fn test_inline_math_renders_inside_table_cells() {
+    let rendered = lines_to_string(&render_markdown(
+        "| Formula | Value |\n| - | - |\n| `$x$` | $\\alpha_2$ |",
+    ));
+    assert!(
+        rendered.contains("$x$"),
+        "code span must remain literal: {rendered}"
+    );
+    assert!(rendered.contains("α₂"), "math cell must render: {rendered}");
 }
 
 #[test]
@@ -338,7 +466,7 @@ fn test_structured_markdown_lines_force_left_alignment() {
         "─┼─",
         "1 │ 2",
         "┌─ math",
-        "│ E = mc^2",
+        "│ E = mc²",
         "└─",
         "────",
         "<div>html</div>",
@@ -853,7 +981,10 @@ fn test_reasoning_summary_line_markup_folds_to_single_dim_italic_trace() {
         "expected bare summary markup, got: {one:?}"
     );
     let none = crate::reasoning_summary_line_markup(0);
-    assert!(none.contains(&format!("*{0}▸ thought{0}*", sentinel)), "{none:?}");
+    assert!(
+        none.contains(&format!("*{0}▸ thought{0}*", sentinel)),
+        "{none:?}"
+    );
 
     // The summary line renders dim + italic with no sentinel leaking into text.
     let lines = render_markdown(&many);
@@ -872,7 +1003,12 @@ fn test_reasoning_summary_line_markup_folds_to_single_dim_italic_trace() {
             if span.content.contains('▸') {
                 saw_marker = true;
             }
-            assert_eq!(span.style.fg, Some(dim), "summary span not dim: {:?}", span.content);
+            assert_eq!(
+                span.style.fg,
+                Some(dim),
+                "summary span not dim: {:?}",
+                span.content
+            );
             assert!(
                 span.style.add_modifier.contains(Modifier::ITALIC),
                 "summary span not italic: {:?}",
@@ -882,4 +1018,3 @@ fn test_reasoning_summary_line_markup_folds_to_single_dim_italic_trace() {
     }
     assert!(saw_marker, "summary marker '▸' must be visible: {lines:?}");
 }
-

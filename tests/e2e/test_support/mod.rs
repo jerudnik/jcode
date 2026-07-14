@@ -85,6 +85,12 @@ impl TestEnvGuard {
         // outcomes nondeterministic across transports.
         jcode::env::set_var("JCODE_MEMORY_ENABLED", "0");
         jcode::env::set_var("JCODE_MEMORY_SIDECAR_ENABLED", "0");
+        // Hermeticity: these leak from developer shells (e.g. a jcode session
+        // running the tests) and change derive_session_provider_key, which
+        // makes History payloads diverge across transports.
+        jcode::env::remove_var("JCODE_RUNTIME_PROVIDER");
+        jcode::env::remove_var("JCODE_ACTIVE_PROVIDER");
+        jcode::env::remove_var("JCODE_OPENROUTER_CACHE_NAMESPACE");
 
         Ok(Self {
             _lock: lock,
@@ -326,9 +332,12 @@ impl WsTestClient {
     async fn subscribe(&mut self) -> Result<u64> {
         let id = self.next_id;
         self.next_id += 1;
+        // The server requires Subscribe to carry an absolute working_dir
+        // (first-request handshake hardening in client_lifecycle).
+        let working_dir = std::env::current_dir()?.to_string_lossy().into_owned();
         self.send_request(Request::Subscribe {
             id,
-            working_dir: None,
+            working_dir: Some(working_dir),
             selfdev: None,
             target_session_id: None,
             client_instance_id: None,
@@ -391,6 +400,45 @@ impl WsTestClient {
             }
         }
     }
+}
+
+/// Connect to the server and perform the mandatory Subscribe handshake.
+///
+/// The server closes any connection whose first non-lightweight request is not
+/// a `Subscribe` carrying an absolute working_dir (handshake hardening in
+/// client_lifecycle). This helper connects, subscribes with the test process's
+/// current dir, and drains the subscribe's events (Ack/SwarmStatus/.../Done) so
+/// later `read_event` loops in tests start from a clean stream.
+pub(crate) async fn connect_subscribed_client(
+    socket_path: &std::path::Path,
+) -> Result<server::Client> {
+    let mut client = server::Client::connect_with_path(socket_path.to_path_buf()).await?;
+    let subscribe_id = client.subscribe().await?;
+    let _ = collect_until_done_unix(&mut client, subscribe_id).await?;
+    Ok(client)
+}
+
+/// Fetch the session history, skipping unrelated broadcast events (e.g.
+/// SwarmStatus fan-out from peers subscribing) that can interleave on the
+/// stream.
+pub(crate) async fn get_history_event_skipping_broadcasts(
+    client: &mut server::Client,
+) -> Result<ServerEvent> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        // get_history_event returns the first non-Ack event; a broadcast (e.g.
+        // SwarmStatus from a peer's subscribe) can arrive ahead of the History
+        // reply, so retry until we see History.
+        let event = client.get_history_event().await?;
+        match event {
+            ServerEvent::History { .. } => return Ok(event),
+            ServerEvent::Error { message, .. } => {
+                anyhow::bail!("get_history failed: {message}")
+            }
+            _ => continue,
+        }
+    }
+    anyhow::bail!("timed out waiting for history event")
 }
 
 pub(crate) async fn collect_until_done_unix(

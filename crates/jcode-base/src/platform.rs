@@ -125,6 +125,7 @@ mod macos_power {
 
 pub use macos_power::PowerAssertion;
 
+#[cfg(any(unix, test))]
 fn desired_nofile_soft_limit(current: u64, hard: u64, minimum: u64) -> Option<u64> {
     let desired = current.max(minimum).min(hard);
     (desired > current).then_some(desired)
@@ -291,10 +292,35 @@ pub fn signal_detached_process_group(pid: u32, signal: i32) -> std::io::Result<(
     #[cfg(windows)]
     {
         let _ = signal;
+        use std::os::windows::process::CommandExt;
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
+            CREATE_NO_WINDOW, OpenProcess, PROCESS_TERMINATE, TerminateProcess,
         };
+
+        // Detached commands commonly run through cmd.exe or PowerShell. Killing
+        // only that shell leaves compilers, test runners, and other descendants
+        // alive. taskkill's /T flag walks the Windows process tree. Keep the
+        // direct Win32 termination below as a fallback if taskkill is missing or
+        // the tree operation fails.
+        let tree_status = std::process::Command::new("taskkill.exe")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        if tree_status.is_ok_and(|status| status.success()) {
+            return Ok(());
+        }
+        // taskkill can report failure when a descendant exits while it walks the
+        // tree, even though it successfully terminated the leader and remaining
+        // descendants. Avoid turning that benign race into a misleading access
+        // denied error from the direct-handle fallback.
+        for _ in 0..20 {
+            if !is_process_running(pid) {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
         unsafe {
             let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
             if handle.is_null() {

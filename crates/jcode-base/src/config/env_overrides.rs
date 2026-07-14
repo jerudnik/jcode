@@ -224,6 +224,11 @@ impl Config {
         if let Ok(v) = std::env::var("JCODE_DISABLED_ANIMATIONS") {
             self.display.disabled_animations = parse_env_list(&v);
         }
+        if let Ok(v) = std::env::var("JCODE_ACTIVE_SESSIONS_MANAGER") {
+            if let Some(parsed) = parse_env_bool(&v) {
+                self.display.active_sessions_manager = parsed;
+            }
+        }
         if let Ok(v) = std::env::var("JCODE_PERFORMANCE") {
             let trimmed = v.trim().to_lowercase();
             if matches!(trimmed.as_str(), "auto" | "full" | "reduced" | "minimal") {
@@ -253,6 +258,11 @@ impl Config {
                 self.display.show_agentgrep_output = parsed;
             }
         }
+        if let Ok(v) = std::env::var("JCODE_LATEX_RENDERING")
+            && let Some(mode) = LatexRenderingMode::parse(&v)
+        {
+            self.display.latex_rendering = mode;
+        }
         if let Ok(v) = std::env::var("JCODE_CHAT_NATIVE_SCROLLBAR") {
             if let Some(parsed) = parse_env_bool(&v) {
                 self.display.native_scrollbars.chat = parsed;
@@ -273,6 +283,11 @@ impl Config {
         if let Ok(v) = std::env::var("JCODE_SWARM_ENABLED") {
             if let Some(parsed) = parse_env_bool(&v) {
                 self.features.swarm = parsed;
+            }
+        }
+        if let Ok(v) = std::env::var("JCODE_ENABLE_MERMAID") {
+            if let Some(parsed) = parse_env_bool(&v) {
+                self.features.mermaid = parsed;
             }
         }
         if let Ok(v) = std::env::var("JCODE_MESSAGE_TIMESTAMPS") {

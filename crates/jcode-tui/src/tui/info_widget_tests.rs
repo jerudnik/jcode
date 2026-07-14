@@ -385,6 +385,132 @@ fn todo_widget_header_says_plan_when_showing_swarm_plan_projection() {
     assert!(text.contains("Todos"), "todos header missing: {text}");
 }
 
+fn todo_item(id: &str, content: &str, status: &str, group: Option<&str>) -> crate::todo::TodoItem {
+    crate::todo::TodoItem {
+        content: content.to_string(),
+        status: status.to_string(),
+        priority: "medium".to_string(),
+        id: id.to_string(),
+        group: group.map(|g| g.to_string()),
+        blocked_by: Vec::new(),
+        assigned_to: None,
+        confidence: Some(80),
+        completion_confidence: None,
+        confidence_history: Vec::new(),
+    }
+}
+
+/// Join spans without separators so assertions can match text that spans
+/// multiple styled segments (e.g. "hill " + "85%").
+fn lines_text_concat(lines: &[ratatui::text::Line<'_>]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn flat_todo_list_shows_hill_climbability_on_header_in_all_widget_sizes() {
+    let data = InfoWidgetData {
+        todos: vec![
+            todo_item("a", "optimize grep", "in_progress", None),
+            todo_item("b", "add bench", "pending", None),
+        ],
+        todo_goals: vec![crate::todo::TodoGoal {
+            group: None,
+            hill_climbability: Some(85),
+            objective: Some("p50 under 50ms".to_string()),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    for text in [
+        lines_text_concat(&render_todos_widget(&data, Rect::new(0, 0, 70, 8))),
+        lines_text_concat(&render_todos_expanded(&data, Rect::new(0, 0, 70, 14))),
+        lines_text_concat(&render_todos_compact(&data, Rect::new(0, 0, 70, 3))),
+    ] {
+        assert!(text.contains("hill 85%"), "hill suffix missing: {text}");
+    }
+}
+
+#[test]
+fn grouped_todos_show_hill_climbability_on_their_group_headers() {
+    let data = InfoWidgetData {
+        todos: vec![
+            todo_item("a", "speed up search", "in_progress", Some("optimize grep")),
+            todo_item("b", "sketch layout", "pending", Some("onboarding design")),
+        ],
+        todo_goals: vec![
+            crate::todo::TodoGoal {
+                group: Some("optimize grep".to_string()),
+                hill_climbability: Some(90),
+                objective: Some("p50 under 50ms".to_string()),
+                ..Default::default()
+            },
+            crate::todo::TodoGoal {
+                group: Some("onboarding design".to_string()),
+                hill_climbability: Some(20),
+                objective: None,
+                ..Default::default()
+            },
+        ],
+        ..Default::default()
+    };
+    for text in [
+        lines_text_concat(&render_todos_widget(&data, Rect::new(0, 0, 70, 10))),
+        lines_text_concat(&render_todos_expanded(&data, Rect::new(0, 0, 70, 14))),
+    ] {
+        assert!(text.contains("hill 90%"), "group hill missing: {text}");
+        assert!(text.contains("hill 20%"), "low group hill missing: {text}");
+    }
+}
+
+#[test]
+fn todos_without_goals_render_no_hill_suffix() {
+    let data = InfoWidgetData {
+        todos: vec![todo_item("a", "do a thing", "pending", None)],
+        ..Default::default()
+    };
+    for text in [
+        lines_text_concat(&render_todos_widget(&data, Rect::new(0, 0, 70, 8))),
+        lines_text_concat(&render_todos_expanded(&data, Rect::new(0, 0, 70, 14))),
+        lines_text_concat(&render_todos_compact(&data, Rect::new(0, 0, 70, 3))),
+    ] {
+        assert!(!text.contains("hill"), "unexpected hill suffix: {text}");
+    }
+}
+
+#[test]
+fn hill_suffix_renders_safely_at_tiny_sizes() {
+    let data = InfoWidgetData {
+        todos: vec![todo_item(
+            "a",
+            "very long content that will need truncation 汉字 emoji 🚀",
+            "in_progress",
+            Some("a very long group name that must truncate"),
+        )],
+        todo_goals: vec![crate::todo::TodoGoal {
+            group: Some("a very long group name that must truncate".to_string()),
+            hill_climbability: Some(100),
+            objective: None,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    for (w, h) in [(0, 0), (1, 1), (5, 2), (12, 4), (200, 50)] {
+        let rect = Rect::new(0, 0, w, h);
+        let _ = render_todos_widget(&data, rect);
+        let _ = render_todos_expanded(&data, rect);
+        let _ = render_todos_compact(&data, rect);
+    }
+}
+
 #[test]
 fn swarm_plan_gate_items_render_like_normal_items() {
     // Deep-mode critique gates share the plan item shape; only the id differs.
@@ -514,7 +640,7 @@ fn memory_widget_hides_sidecar_model_when_idle() {
         .join("\n")
         .to_lowercase();
 
-    assert!(text.contains("memory"));
+    assert!(text.contains("3 memories"));
     assert!(!text.contains("model:"));
     assert!(!text.contains("gpt-5.3"));
     assert!(text.contains("3 memories"));
@@ -677,7 +803,39 @@ fn memory_widget_does_not_stay_done_after_idle_settles() {
 
     assert!(text.contains("128 memories"), "{text}");
     assert!(!text.contains("done"), "{text}");
-    assert!(text.contains("idle") || text.contains("trace:"), "{text}");
+    assert!(!text.contains("idle"), "{text}");
+    assert!(!text.contains("trace:"), "{text}");
+}
+
+#[test]
+fn memory_widget_never_renders_uppercase_state_badges() {
+    let data = InfoWidgetData {
+        memory_info: Some(MemoryInfo {
+            total_count: 128,
+            activity: Some(MemoryActivity {
+                state: MemoryState::SidecarChecking { count: 3 },
+                state_since: Instant::now(),
+                pipeline: None,
+                recent_events: Vec::new(),
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let text = render_memory_widget(&data, Rect::new(0, 0, 40, 8))
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+
+    assert!(text.contains("128 memories"), "{text}");
+    for badge in [
+        "IDLE", "SEARCH", "VERIFY", "READY", "INJECT", "SAVE", "UPDATE", "TOOL", "DONE", "FAILED",
+        "DISABLED",
+    ] {
+        assert!(!text.contains(badge), "unexpected badge {badge}: {text}");
+    }
 }
 
 #[test]
@@ -772,12 +930,13 @@ fn memory_compact_shows_memory_count_before_status() {
         .to_lowercase();
 
     assert!(text.contains("128 memories"), "{text}");
-    assert!(text.contains("idle"), "{text}");
+    assert!(!text.contains("idle"), "{text}");
+    assert!(!text.contains(" · "), "{text}");
     assert!(!text.contains("memory ·"), "{text}");
 }
 
 #[test]
-fn memory_widget_shows_disabled_badge_when_disabled() {
+fn memory_widget_is_hidden_when_disabled() {
     let data = InfoWidgetData {
         memory_info: Some(MemoryInfo {
             total_count: 12,
@@ -789,28 +948,9 @@ fn memory_widget_shows_disabled_badge_when_disabled() {
         ..Default::default()
     };
 
-    // Header/expanded view should render a DISABLED badge alongside the count.
-    let text = render_memory_widget(&data, Rect::new(0, 0, 40, 5))
-        .iter()
-        .flat_map(|line| line.spans.iter())
-        .map(|span| span.content.as_ref())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-
-    assert!(text.contains("disabled"), "{text}");
-    assert!(text.contains("12 memories"), "{text}");
-
-    // Compact (overview) view should also show the disabled state.
-    let compact = render_memory_compact(data.memory_info.as_ref().unwrap(), 40)
-        .iter()
-        .flat_map(|line| line.spans.iter())
-        .map(|span| span.content.as_ref())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase();
-
-    assert!(compact.contains("disabled"), "{compact}");
+    assert!(render_memory_widget(&data, Rect::new(0, 0, 40, 5)).is_empty());
+    assert!(render_memory_compact(data.memory_info.as_ref().unwrap(), 40).is_empty());
+    assert!(!data.has_data_for(WidgetKind::MemoryActivity));
 }
 
 #[test]
@@ -1133,6 +1273,7 @@ fn managed_member(id: &str, status: &str, role: Option<&str>) -> SwarmMemberStat
         initial_prompt_delivered: None,
         todo_progress: Some((2, 5)),
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     }
 }
 
@@ -1215,6 +1356,7 @@ fn swarm_widget_renders_member_roles_and_details() {
                     initial_prompt_delivered: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
+                    runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
                 SwarmMemberStatus {
                     session_id: "tree-12345678".to_string(),
@@ -1232,6 +1374,7 @@ fn swarm_widget_renders_member_roles_and_details() {
                     initial_prompt_delivered: None,
                     todo_progress: None,
                     todo_items: Vec::new(),
+                    runtime: crate::protocol::SwarmMemberRuntime::default(),
                 },
             ],
             ..Default::default()
@@ -1293,6 +1436,7 @@ fn swarm_widget_handles_empty_swarm_and_zero_area_without_panic() {
         initial_prompt_delivered: None,
         todo_progress: None,
         todo_items: Vec::new(),
+        runtime: crate::protocol::SwarmMemberRuntime::default(),
     }];
     let _ = super::render_swarm_widget(&member_data, Rect::new(0, 0, 0, 0));
     let _ = super::render_swarm_widget(&member_data, Rect::new(0, 0, 3, 1));
@@ -1317,6 +1461,7 @@ fn swarm_widget_caps_member_rows_for_large_swarms() {
             initial_prompt_delivered: None,
             todo_progress: None,
             todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
         })
         .collect();
     let data = InfoWidgetData {
@@ -1520,7 +1665,9 @@ fn placements_never_include_border_only_widgets() {
         }),
         usage_info: Some(UsageInfo {
             provider: UsageProvider::Anthropic,
+            primary_limit_label: Some("5-hour".to_string()),
             five_hour: 0.35,
+            secondary_limit_label: Some("Weekly".to_string()),
             seven_day: 0.62,
             available: true,
             ..Default::default()
@@ -1572,7 +1719,9 @@ fn compact_page_height_estimate_matches_rendered_lines() {
         }),
         usage_info: Some(UsageInfo {
             provider: UsageProvider::Anthropic,
+            primary_limit_label: Some("5-hour".to_string()),
             five_hour: 0.3,
+            secondary_limit_label: Some("Weekly".to_string()),
             seven_day: 0.5,
             available: true,
             ..Default::default()

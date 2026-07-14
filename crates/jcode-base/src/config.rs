@@ -8,11 +8,11 @@ pub use jcode_config_types::{
     AssistantProfileError, AssistantProfilesConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig,
     CompactionConfig, CompactionMode, CrossProviderFailoverMode, DiagramDisplayMode,
     DiagramPanePosition, DiffDisplayMode, DisplayConfig, FeatureConfig, GatewayConfig, HooksConfig,
-    KeybindingsConfig, LaunchHotkeyEntry, LaunchHotkeysConfig, MarkdownSpacingMode,
-    NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig, NamedProviderType,
-    NativeScrollbarConfig, NotificationsConfig, PowerConfig, ProviderConfig, ReasoningDisplayMode,
-    SafetyConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode, SwarmStripLayout,
-    TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    KeybindingsConfig, LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig,
+    MarkdownSpacingMode, NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig,
+    NamedProviderType, NativeScrollbarConfig, NotificationsConfig, PowerConfig, ProviderConfig,
+    ReasoningDisplayMode, SafetyConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
+    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -31,6 +31,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "HOME",
     "JCODE_ACP_PROFILE",
     "JCODE_ACP_TOOL_PROFILE",
+    "JCODE_ACTIVE_SESSIONS_MANAGER",
     "JCODE_AMBIENT_ENABLED",
     "JCODE_AMBIENT_MAX_INTERVAL",
     "JCODE_AMBIENT_MIN_INTERVAL",
@@ -100,6 +101,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_JADE_RELAY_TOKEN_ID",
     "JCODE_JADE_RELAY_USER_ID",
     "JCODE_KV_CACHE_MISS_NOTICES",
+    "JCODE_LATEX_RENDERING",
     "JCODE_MARKDOWN_SPACING",
     "JCODE_MEMORY_EMBEDDING_API_KEY_ENV",
     "JCODE_MEMORY_EMBEDDING_BACKEND",
@@ -107,6 +109,7 @@ const CONFIG_ENV_KEYS: &[&str] = &[
     "JCODE_MEMORY_EMBEDDING_DIM",
     "JCODE_MEMORY_EMBEDDING_MODEL",
     "JCODE_MEMORY_ENABLED",
+    "JCODE_ENABLE_MERMAID",
     "JCODE_MEMORY_MODEL",
     "JCODE_MEMORY_SIDECAR_ENABLED",
     "JCODE_PERSIST_MEMORY_INJECTIONS",
@@ -641,7 +644,7 @@ pub struct ToolConfig {
     /// Tool profile: "full" (default), "acp", "minimal"/"lite", or "none".
     pub profile: String,
     /// Explicit allow-list. When set, only these tools are exposed.
-    /// Use "*" or "all" to expose all tools, including default-disabled tools.
+    /// Use "*" or "all" to expose all tools without an allow-list.
     pub enabled: Vec<String>,
     /// Tools to remove after applying profile/enabled.
     pub disabled: Vec<String>,
@@ -679,24 +682,14 @@ pub struct ToolSelection {
 }
 
 impl ToolConfig {
-    const DEFAULT_DISABLED_TOOLS: &'static [&'static str] = &["gmail"];
-
     pub fn selection(&self) -> ToolSelection {
         let mut allowed_tools = self.base_allowed_tools();
-        let (explicit_enabled, enables_all_tools) = self.normalized_enabled_tools();
-        let mut disabled_tools: HashSet<String> = self
+        let disabled_tools: HashSet<String> = self
             .disabled
             .iter()
             .map(|name| normalize_tool_name(name))
             .filter(|name| !name.is_empty())
             .collect();
-
-        for name in Self::DEFAULT_DISABLED_TOOLS {
-            let normalized = normalize_tool_name(name);
-            if !enables_all_tools && !explicit_enabled.contains(&normalized) {
-                disabled_tools.insert(normalized);
-            }
-        }
 
         if let Some(allowed) = allowed_tools.as_mut() {
             for name in &disabled_tools {

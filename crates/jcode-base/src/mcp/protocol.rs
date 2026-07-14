@@ -312,8 +312,7 @@ impl McpConfig {
         // `~/.claude/mcp.json` layout for users who still have it.
         if let Ok(claude_json) = crate::storage::user_home_path(".claude.json") {
             if claude_json.exists() {
-                let cwd = std::env::current_dir().ok();
-                let config = Self::load_claude_json(&claude_json, cwd.as_deref());
+                let config = Self::load_claude_json(&claude_json, None);
                 let count = config.servers.len();
                 if count > 0 {
                     sources.push(format!("{} from Claude Code", count));
@@ -538,36 +537,33 @@ impl McpConfig {
         // plus per-project entries for the project directory.
         if let Ok(claude_json) = crate::storage::user_home_path(".claude.json") {
             if claude_json.exists() {
-                let cwd = match project_dir {
-                    Some(dir) => Some(dir.to_path_buf()),
-                    None => std::env::current_dir().ok(),
-                };
+                let cwd = project_dir.map(std::path::Path::to_path_buf);
                 let config = Self::load_claude_json(&claude_json, cwd.as_deref());
                 merged.servers.extend(config.servers);
             }
         }
 
         // Project-local config files, resolved against the project directory.
-        let project_root = project_dir
-            .map(|dir| dir.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-
-        // Fork seam (APM MCP surface): APM and agent-package managers commonly
-        // materialize MCP manifests in project-local generated paths. Load these
-        // before the jcode/Claude compatibility paths so explicit local overrides
-        // can still win.
-        for generated in [".apm/mcp.json", ".agents/mcp.json"] {
-            let path = project_root.join(generated);
-            if path.exists()
-                && let Ok(config) = Self::load_from_file(&path)
-            {
-                merged.servers.extend(config.servers);
+        // Upstream now skips project-local MCP when no project dir; keep the
+        // fork's APM seam but adopt the conditional structure.
+        if let Some(project_root) = project_dir {
+            // Fork seam (APM MCP surface): APM and agent-package managers commonly
+            // materialize MCP manifests in project-local generated paths. Load these
+            // before the jcode/Claude compatibility paths so explicit local overrides
+            // can still win.
+            for generated in [".apm/mcp.json", ".agents/mcp.json"] {
+                let path = project_root.join(generated);
+                if path.exists()
+                    && let Ok(config) = Self::load_from_file(&path)
+                {
+                    merged.servers.extend(config.servers);
+                }
             }
-        }
 
-        merged
-            .servers
-            .extend(Self::load_project_locals(&project_root).servers);
+            merged
+                .servers
+                .extend(Self::load_project_locals(project_root).servers);
+        }
 
         // jcode only supports stdio servers today. Drop HTTP/SSE entries (common
         // in Claude Code configs) so they don't fail to spawn, but log them so

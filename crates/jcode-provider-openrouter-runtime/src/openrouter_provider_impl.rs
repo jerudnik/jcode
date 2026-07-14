@@ -136,6 +136,19 @@ impl Provider for OpenRouterProvider {
                     request["reasoning_effort"] = serde_json::json!(effort);
                     sent_reasoning_config = true;
                 }
+            } else if self.supports_openai_reasoning_effort() {
+                // GPT-family models on direct compat gateways (e.g. OpenCode
+                // Zen serving gpt-5.3-codex-spark) take the standard OpenAI
+                // `reasoning_effort` field with OpenAI's effort vocabulary.
+                let effort = if jcode_base::prompt::is_swarm_effort(effort) {
+                    "xhigh"
+                } else {
+                    effort
+                };
+                if effort != "none" {
+                    request["reasoning_effort"] = serde_json::json!(effort);
+                    sent_reasoning_config = true;
+                }
             } else if Self::profile_supports_unified_reasoning(
                 self.profile_id.as_deref(),
                 self.send_openrouter_headers,
@@ -318,6 +331,14 @@ impl Provider for OpenRouterProvider {
     }
 
     fn supports_image_input(&self) -> bool {
+        let raw_model = self.model();
+        let model_id = self
+            .strip_session_profile_prefix(&raw_model)
+            .trim()
+            .to_ascii_lowercase();
+        if let Some(supports_images) = self.static_image_input_support.get(&model_id) {
+            return *supports_images;
+        }
         if Self::profile_rejects_image_input(self.profile_id.as_deref()) {
             return false;
         }
@@ -408,7 +429,7 @@ impl Provider for OpenRouterProvider {
     fn set_reasoning_effort(&self, effort: &str) -> Result<()> {
         if !self.supports_any_reasoning_effort() {
             anyhow::bail!(
-                "Reasoning effort is not supported by the current model/profile. It works for OpenRouter, DeepSeek-family models, and profiles with supports_reasoning_effort = true."
+                "Reasoning effort is not supported by the current model/profile. It works for OpenRouter, DeepSeek-family and GPT-family reasoning models, and profiles with supports_reasoning_effort = true."
             );
         }
         let normalized = self.normalize_reasoning_effort_for_self(effort);
@@ -430,10 +451,12 @@ impl Provider for OpenRouterProvider {
                 "swarm",
                 "swarm-deep",
             ]
-        } else if Self::profile_supports_unified_reasoning(
-            self.profile_id.as_deref(),
-            self.send_openrouter_headers,
-        ) {
+        } else if self.supports_openai_reasoning_effort()
+            || Self::profile_supports_unified_reasoning(
+                self.profile_id.as_deref(),
+                self.send_openrouter_headers,
+            )
+        {
             vec![
                 "none",
                 "low",
@@ -719,6 +742,7 @@ impl Provider for OpenRouterProvider {
             extra_body: self.extra_body.clone(),
             static_models: self.static_models.clone(),
             static_context_limits: self.static_context_limits.clone(),
+            static_image_input_support: self.static_image_input_support.clone(),
             send_openrouter_headers: self.send_openrouter_headers,
             models_cache: Arc::clone(&self.models_cache),
             model_catalog_refresh: Arc::clone(&self.model_catalog_refresh),

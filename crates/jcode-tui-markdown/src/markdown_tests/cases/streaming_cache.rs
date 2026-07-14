@@ -273,10 +273,11 @@ fn test_incremental_renderer_streaming_heading_does_not_duplicate() {
 #[test]
 fn test_incremental_renderer_streaming_inline_math() {
     let mut renderer = IncrementalMarkdownRenderer::new(Some(80));
-    let _ = renderer.update("Compute $x");
-    let lines = renderer.update("Compute $x$");
+    let _ = renderer.update("Compute $x^");
+    let lines = renderer.update("Compute $x^2$");
     let rendered = lines_to_string(&lines);
-    assert!(rendered.contains("$x$"));
+    assert!(rendered.contains("x²"), "{rendered}");
+    assert!(!rendered.contains("$x^2$"), "{rendered}");
 }
 
 #[test]
@@ -297,6 +298,26 @@ fn test_incremental_renderer_streaming_display_math() {
         "expected raw $$ delimiters to be consumed: {}",
         rendered
     );
+}
+
+#[test]
+fn test_incremental_renderer_streaming_bracketed_and_fenced_latex() {
+    let mut renderer = IncrementalMarkdownRenderer::new(Some(80));
+
+    let partial = renderer.update("Result:\n\n\\[\\frac{x+1}");
+    let partial_text = lines_to_string(&partial);
+    assert!(partial_text.contains("[\\frac{x+1}"), "{partial_text}");
+    assert!(!partial_text.contains("┌─ math"), "{partial_text}");
+
+    let complete = renderer.update("Result:\n\n\\[\\frac{x+1}{y}\\]");
+    let complete_text = lines_to_string(&complete);
+    assert!(complete_text.contains("─────"), "{complete_text}");
+    assert!(!complete_text.contains("\\frac"), "{complete_text}");
+
+    let fenced = renderer.update("```latex\n\\alpha_2 + x^2\n```");
+    let fenced_text = lines_to_string(&fenced);
+    assert!(fenced_text.contains("α₂ + x²"), "{fenced_text}");
+    assert!(fenced_text.contains("┌─ math"), "{fenced_text}");
 }
 
 #[test]
@@ -342,7 +363,10 @@ fn test_pending_placeholder_line_detection() {
     // Centered display modes prepend a padding span.
     let padded = Line::from(vec![
         Span::raw("        "),
-        Span::styled(MERMAID_PENDING_PLACEHOLDER_TEXT.to_string(), Style::default()),
+        Span::styled(
+            MERMAID_PENDING_PLACEHOLDER_TEXT.to_string(),
+            Style::default(),
+        ),
     ]);
     assert!(line_is_mermaid_pending_placeholder(&padded));
 

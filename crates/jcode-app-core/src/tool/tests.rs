@@ -80,6 +80,21 @@ async fn test_discover_tools_not_registered_when_sponsors_disabled() {
     }
 }
 
+#[tokio::test]
+async fn subagent_tool_is_not_registered() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+
+    assert!(
+        !registry
+            .tool_names()
+            .await
+            .iter()
+            .any(|name| name == "subagent"),
+        "the deprecated direct subagent tool must not be exposed; use swarm instead"
+    );
+}
+
 struct BareSchemaTool;
 
 #[async_trait]
@@ -171,8 +186,73 @@ fn test_resolve_tool_name_oauth_aliases() {
     assert_eq!(Registry::resolve_tool_name("todoread"), "todo");
     assert_eq!(Registry::resolve_tool_name("todowrite"), "todo");
     assert_eq!(Registry::resolve_tool_name("bash"), "bash");
+    assert_eq!(Registry::resolve_tool_name("functions.bash"), "bash");
+    assert_eq!(Registry::resolve_tool_name("functions.shell_exec"), "bash");
     assert_eq!(Registry::resolve_tool_name("batch"), "batch");
     assert_eq!(Registry::resolve_tool_name("memory"), "memory");
+}
+
+#[tokio::test]
+async fn test_batch_resolves_function_namespaced_tools() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let ctx = ToolContext {
+        session_id: "test-batch-function-namespace".to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(std::env::temp_dir()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let result = registry
+        .execute(
+            "batch",
+            serde_json::json!({
+                "tool_calls": [
+                    {"tool": "functions.bash", "command": "true"},
+                    {"tool": "functions.shell_exec", "command": "true"}
+                ]
+            }),
+            ctx,
+        )
+        .await
+        .expect("namespaced batch subcalls should execute");
+
+    assert!(result.output.contains("Completed: 2 succeeded, 0 failed"));
+    assert!(!result.output.contains("Unknown tool"));
+    assert!(result.output.contains("--- [1] bash ---"));
+    assert!(result.output.contains("--- [2] bash ---"));
+    assert!(!result.output.contains("functions."));
+}
+
+#[tokio::test]
+async fn test_batch_rejects_function_namespaced_batch_recursion() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let ctx = ToolContext {
+        session_id: "test-batch-function-namespace-recursion".to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(std::env::temp_dir()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let error = registry
+        .execute(
+            "batch",
+            serde_json::json!({
+                "tool_calls": [{"tool": "functions.batch", "tool_calls": []}]
+            }),
+            ctx,
+        )
+        .await
+        .expect_err("namespaced batch recursion should be rejected");
+
+    assert!(error.to_string().contains("Cannot batch the 'batch' tool"));
 }
 
 #[tokio::test]

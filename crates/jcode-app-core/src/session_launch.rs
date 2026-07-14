@@ -3,7 +3,7 @@
 //! These helpers spawn a fresh `jcode` process (resume or self-dev) inside a
 //! new terminal window. They are pure process/terminal orchestration built on
 //! the low-level `terminal_launch` facade and depend only on core modules
-//! (`id`, `process_title`, `registry`, `server::socket_path`, `platform`), so
+//! (`id`, `process_title`, `platform`), so
 //! they live in the core layer rather than the CLI command layer. This lets
 //! lower layers like `server`, `restart_snapshot`, and `tool` relaunch
 //! sessions without depending on `cli`.
@@ -90,12 +90,21 @@ impl SessionSpawnContext {
 pub fn resumed_window_title(session_id: &str) -> String {
     let session_name = crate::process_title::session_name(session_id);
     let icon = id::session_icon(&session_name);
-    let session_label = crate::process_title::terminal_session_label_for_id(session_id);
-    if let Some(server_info) = crate::registry::find_server_by_socket_sync(&server::socket_path()) {
-        format!("{} jcode/{} {}", icon, server_info.name, session_label)
+    let display_title = crate::process_title::terminal_display_title_for_id(session_id);
+    let session_label = crate::process_title::terminal_session_label(&session_name, None);
+    let fallback_label = if let Some(server_info) =
+        crate::registry::find_server_by_socket_sync(&server::socket_path())
+    {
+        format!("jcode/{} {}", server_info.name, session_label)
     } else {
-        format!("{} jcode {}", icon, session_label)
-    }
+        format!("jcode {}", session_label)
+    };
+    crate::process_title::terminal_window_title(
+        &icon,
+        display_title.as_deref(),
+        Some(&fallback_label),
+        false,
+    )
 }
 
 /// Focus/raise the window for `session_id` via the configured focus hook.

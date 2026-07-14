@@ -130,6 +130,7 @@ use memory_ui::{group_into_tiles, render_memory_tiles, split_by_display_width};
 use messages::get_cached_message_lines;
 #[cfg_attr(test, allow(unused_imports))]
 pub(crate) use messages::{
+    SWARM_AGENT_SNAPSHOT_TITLE, compact_swarm_await_summary, encode_swarm_agent_snapshot,
     render_assistant_message, render_background_task_message, render_reasoning_message,
     render_swarm_message, render_system_message, render_tool_message, render_usage_message,
 };
@@ -142,7 +143,7 @@ pub(crate) use pinned_ui::{
     reset_side_panel_debug_stats, side_panel_debug_json, side_panel_debug_stats,
 };
 use pinned_ui::{
-    collect_pinned_content_cached, draw_pinned_content_cached, draw_side_panel_markdown,
+    collect_pinned_diffs_cached, draw_pinned_content_cached, draw_side_panel_markdown,
 };
 #[cfg(test)]
 use transitions::extract_line_text;
@@ -845,6 +846,9 @@ struct BodyCacheKey {
     /// expand-level geometry into the body, so a level change must rebuild the
     /// body exactly like an image-set change does.
     expanded_images_version: u64,
+    /// Live swarm-member data renders beneath the tool call that spawned each
+    /// member, so status/todo/tool-intent updates must invalidate the body.
+    swarm_members_signature: u64,
 }
 
 #[derive(Clone)]
@@ -925,6 +929,7 @@ impl BodyCacheState {
                     && entry.key.inline_images_visible == key.inline_images_visible
                     && entry.key.images_signature == key.images_signature
                     && entry.key.expanded_images_version == key.expanded_images_version
+                    && entry.key.swarm_members_signature == key.swarm_members_signature
             })
             .max_by_key(|entry| entry.msg_count)
             .map(|entry| (entry.prepared.clone(), entry.msg_count));
@@ -944,6 +949,7 @@ impl BodyCacheState {
                     && entry.key.inline_images_visible == key.inline_images_visible
                     && entry.key.images_signature == key.images_signature
                     && entry.key.expanded_images_version == key.expanded_images_version
+                    && entry.key.swarm_members_signature == key.swarm_members_signature
             })
             .max_by_key(|entry| entry.msg_count)
             .map(|entry| (entry.prepared.clone(), entry.msg_count));
@@ -982,6 +988,7 @@ impl BodyCacheState {
                     && entry.key.inline_images_visible == key.inline_images_visible
                     && entry.key.images_signature == key.images_signature
                     && entry.key.expanded_images_version == key.expanded_images_version
+                    && entry.key.swarm_members_signature == key.swarm_members_signature
             })
             .max_by_key(|(_, entry)| entry.msg_count)
             .map(|(idx, entry)| (false, idx, entry.msg_count));
@@ -1002,6 +1009,7 @@ impl BodyCacheState {
                     && entry.key.inline_images_visible == key.inline_images_visible
                     && entry.key.images_signature == key.images_signature
                     && entry.key.expanded_images_version == key.expanded_images_version
+                    && entry.key.swarm_members_signature == key.swarm_members_signature
             })
             .max_by_key(|(_, entry)| entry.msg_count)
             .map(|(idx, entry)| (true, idx, entry.msg_count));
@@ -1104,6 +1112,8 @@ struct FullPrepCacheKey {
     /// Per-image expand-level version; anchored image geometry is embedded in
     /// the prepared frame, so a level change must invalidate it.
     expanded_images_version: u64,
+    /// Signature of live swarm member cards embedded beneath spawn tool calls.
+    swarm_members_signature: u64,
 }
 
 #[derive(Clone)]
@@ -2295,12 +2305,17 @@ pub(crate) fn swarm_expand_target_from_screen(column: u16, row: u16) -> Option<u
     };
     let text = snapshot.wrapped_plain_line(point.abs_line)?;
     let trimmed = text.trim_end();
-    let badge_start = [messages::SWARM_EXPAND_BADGE, messages::SWARM_COLLAPSE_BADGE]
-        .iter()
-        .find_map(|badge| {
-            let prefix = trimmed.strip_suffix(badge)?;
-            Some(line_display_width(prefix))
-        })?;
+    let badge_start = [
+        messages::SWARM_EXPAND_BADGE,
+        messages::SWARM_COLLAPSE_BADGE,
+        messages::SWARM_DIFF_EXPAND_BADGE,
+        messages::SWARM_DIFF_COLLAPSE_BADGE,
+    ]
+    .iter()
+    .find_map(|badge| {
+        let prefix = trimmed.strip_suffix(badge)?;
+        Some(line_display_width(prefix))
+    })?;
     if point.column < badge_start {
         return None;
     }
@@ -2415,6 +2430,10 @@ pub fn draw(frame: &mut Frame, app: &dyn TuiState) {
         Ok(()) => {}
         Err(payload) => render_recovered_panic_frame(frame, &payload),
     }
+    // Adapt the finished frame for light terminal backgrounds (no-op on dark).
+    // Doing this at the buffer level covers every widget and overlay without
+    // touching individual color call sites.
+    jcode_tui_style::adapt_buffer_for_theme(frame.buffer_mut());
 }
 
 fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
@@ -2537,13 +2556,7 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // Images now render inline in the transcript, so the side panel only handles
     // pinned file diffs. `pin_images` no longer feeds the side-panel surface.
     let has_pinned_content = if collect_diffs {
-        collect_pinned_content_cached(
-            app.display_messages(),
-            &app.side_pane_images(),
-            collect_diffs,
-            false,
-            app.display_messages_version(),
-        )
+        collect_pinned_diffs_cached(app.display_messages(), app.display_messages_version())
     } else {
         false
     };
@@ -2708,8 +2721,8 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
     // see `agents.swarm_strip_layout`) directly above the status line instead
     // of a big gallery band. When the panel is focused (alt+n), the selected
     // agent's row expands in place with its live transcript tail and todos;
-    // alt+n cycles agents, alt+↑/↓ select, alt+o pops out, esc exits, and
-    // plain typing keeps flowing to the chat input. The strip stands
+    // alt+↑/↓ select, alt+o pops out, alt+shift+p opens the swarm prompt,
+    // esc exits, and plain typing keeps flowing to the chat input. The strip stands
     // down while the SwarmStatus dock widget (margin HUD) is showing the same
     // agents, unless the panel is focused (keyboard interaction lives here).
     // The stand-down is sticky (anchored blinks count as engaged, plus a short
@@ -2723,8 +2736,10 @@ fn draw_inner(frame: &mut Frame, app: &dyn TuiState) {
         let members = app.inline_swarm_members();
         if chat_area.width >= 24 {
             let focus_key = crate::tui::keybind::swarm_panel_focus_key_label();
-            // ~8 fps spinner from the wall-clock animation timer.
-            let spinner_frame = (app.animation_elapsed() * 8.0) as usize;
+            // Use the same smooth cadence as the primary status spinner.
+            let spinner_frame = (app.animation_elapsed()
+                * jcode_tui_render::swarm_gallery::STRIP_SPINNER_FPS)
+                as usize;
             // Focused budget: chips + hints + a ~14-line detail viewport, but
             // never more than a third of the chat column so the transcript
             // stays usable on short terminals.

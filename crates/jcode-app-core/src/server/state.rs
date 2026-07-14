@@ -241,6 +241,8 @@ pub struct SwarmMember {
     /// at a few entries by the bus monitor. Rendered in the focused inline
     /// swarm panel; not persisted.
     pub todo_items: Vec<crate::protocol::SwarmTodoItem>,
+    /// Ephemeral model/timing metadata for the inline swarm card.
+    pub runtime: crate::protocol::SwarmMemberRuntime,
 }
 
 impl SwarmMember {
@@ -299,6 +301,7 @@ impl SwarmMember {
             output_tail: None,
             todo_progress: None,
             todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
         }
     }
 }
@@ -460,6 +463,22 @@ pub(super) fn session_event_fanout_sender(
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             let _ = fanout_session_event(&swarm_members, &session_id, event).await;
+        }
+    });
+    tx
+}
+
+pub(super) fn session_event_fanout_sender_with_fallback(
+    session_id: String,
+    swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
+    fallback_tx: mpsc::UnboundedSender<ServerEvent>,
+) -> mpsc::UnboundedSender<ServerEvent> {
+    let (tx, mut rx) = mpsc::unbounded_channel::<ServerEvent>();
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if fanout_session_event(&swarm_members, &session_id, event.clone()).await == 0 {
+                let _ = fallback_tx.send(event);
+            }
         }
     });
     tx

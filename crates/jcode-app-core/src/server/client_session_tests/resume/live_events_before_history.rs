@@ -70,6 +70,7 @@ async fn handle_resume_session_registers_live_events_before_history_replay() -> 
             output_tail: None,
             todo_progress: None,
             todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
         },
     )])));
     let swarms_by_id = Arc::new(RwLock::new(HashMap::<String, HashSet<String>>::new()));
@@ -113,6 +114,7 @@ async fn handle_resume_session_registers_live_events_before_history_replay() -> 
             handle_resume_session(
                 46,
                 target_session_id.to_string(),
+                None,
                 None,
                 false,
                 false,
