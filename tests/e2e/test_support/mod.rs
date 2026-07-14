@@ -402,45 +402,6 @@ impl WsTestClient {
     }
 }
 
-/// Connect to the server and perform the mandatory Subscribe handshake.
-///
-/// The server closes any connection whose first non-lightweight request is not
-/// a `Subscribe` carrying an absolute working_dir (handshake hardening in
-/// client_lifecycle). This helper connects, subscribes with the test process's
-/// current dir, and drains the subscribe's events (Ack/SwarmStatus/.../Done) so
-/// later `read_event` loops in tests start from a clean stream.
-pub(crate) async fn connect_subscribed_client(
-    socket_path: &std::path::Path,
-) -> Result<server::Client> {
-    let mut client = server::Client::connect_with_path(socket_path.to_path_buf()).await?;
-    let subscribe_id = client.subscribe().await?;
-    let _ = collect_until_done_unix(&mut client, subscribe_id).await?;
-    Ok(client)
-}
-
-/// Fetch the session history, skipping unrelated broadcast events (e.g.
-/// SwarmStatus fan-out from peers subscribing) that can interleave on the
-/// stream.
-pub(crate) async fn get_history_event_skipping_broadcasts(
-    client: &mut server::Client,
-) -> Result<ServerEvent> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        // get_history_event returns the first non-Ack event; a broadcast (e.g.
-        // SwarmStatus from a peer's subscribe) can arrive ahead of the History
-        // reply, so retry until we see History.
-        let event = client.get_history_event().await?;
-        match event {
-            ServerEvent::History { .. } => return Ok(event),
-            ServerEvent::Error { message, .. } => {
-                anyhow::bail!("get_history failed: {message}")
-            }
-            _ => continue,
-        }
-    }
-    anyhow::bail!("timed out waiting for history event")
-}
-
 pub(crate) async fn collect_until_done_unix(
     client: &mut server::Client,
     target_id: u64,
