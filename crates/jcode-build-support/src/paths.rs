@@ -534,6 +534,7 @@ pub fn update_launcher_symlink_to_stable() -> Result<PathBuf> {
 /// - Then launcher path
 /// - Then stable channel path
 /// - Finally currently running executable
+///
 /// In nix-managed mode the nix profile owns the binary, so non-self-dev callers
 /// must ignore the self-managed `builds/` shadow (current/canary/shared-server/
 /// stable) and resolve straight to the launcher — the profile binary that `nix`

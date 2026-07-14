@@ -561,4 +561,3 @@ fn test_authorize_ws_device_rejects_unknown_and_revoked_with_401() {
         auth::authorize_ws_device(&registry, &token).expect_err("revoked token must be rejected");
     assert_eq!(err.status(), 401);
 }
-

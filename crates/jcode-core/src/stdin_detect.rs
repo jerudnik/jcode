@@ -213,7 +213,10 @@ mod macos {
     use super::*;
     use std::mem;
 
-    // libproc bindings
+    // Keep the fd-detail libproc bindings colocated with the active fd-listing
+    // probe. They are macOS FFI constants/functions reserved for deeper stdin
+    // diagnostics and may be unused on current builds.
+    #[allow(dead_code)]
     unsafe extern "C" {
         fn proc_pidinfo(
             pid: i32,
@@ -232,8 +235,11 @@ mod macos {
     }
 
     const PROC_PIDLISTFDS: i32 = 1;
+    #[allow(dead_code)]
     const PROC_PIDFDVNODEPATHINFO: i32 = 2;
+    #[allow(dead_code)]
     const PROC_PIDFDSOCKETINFO: i32 = 3;
+    #[allow(dead_code)]
     const PROC_PIDFDPIPEINFO: i32 = 6;
 
     #[repr(C)]
@@ -334,13 +340,13 @@ mod macos {
         let num_threads = ret as usize / mem::size_of::<u64>();
 
         // Check each thread's state
-        for i in 0..num_threads {
+        for thread_id in thread_ids.iter().take(num_threads) {
             let mut tinfo: proc_threadinfo = unsafe { mem::zeroed() };
             let ret = unsafe {
                 proc_pidinfo(
                     pid,
                     PROC_PIDTHREADINFO,
-                    thread_ids[i],
+                    *thread_id,
                     &mut tinfo as *mut _ as *mut libc::c_void,
                     mem::size_of::<proc_threadinfo>() as i32,
                 )
