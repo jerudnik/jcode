@@ -268,41 +268,6 @@ pub(super) async fn maybe_handle_server_state_command(
     Ok(None)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::Duration;
-
-    #[tokio::test]
-    async fn connected_session_snapshot_releases_connections_before_waiting_for_sessions() {
-        let sessions = Arc::new(RwLock::new(HashMap::new()));
-        let client_connections = Arc::new(RwLock::new(HashMap::new()));
-        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
-
-        let sessions_gate = sessions.write().await;
-        let snapshot = connected_session_snapshot(&sessions, &client_connections, &swarm_members);
-        tokio::pin!(snapshot);
-        tokio::select! {
-            _ = &mut snapshot => panic!("snapshot unexpectedly completed"),
-            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
-        }
-
-        let connections_guard =
-            tokio::time::timeout(Duration::from_millis(100), client_connections.write())
-                .await
-                .expect("debug snapshot retained connections while waiting for sessions");
-        drop(connections_guard);
-
-        drop(sessions_gate);
-        let (connected_agents, members) =
-            tokio::time::timeout(Duration::from_secs(1), &mut snapshot)
-                .await
-                .expect("debug snapshot deadlocked");
-        assert!(connected_agents.is_empty());
-        assert!(members.is_empty());
-    }
-}
-
 #[expect(
     clippy::too_many_arguments,
     reason = "server memory payload aggregates many live server structures into one debug snapshot"
@@ -734,4 +699,39 @@ fn estimate_swarm_event_bytes(event: &SwarmEvent) -> usize {
 
 fn path_len(path: &std::path::Path) -> usize {
     path.to_string_lossy().len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn connected_session_snapshot_releases_connections_before_waiting_for_sessions() {
+        let sessions = Arc::new(RwLock::new(HashMap::new()));
+        let client_connections = Arc::new(RwLock::new(HashMap::new()));
+        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+
+        let sessions_gate = sessions.write().await;
+        let snapshot = connected_session_snapshot(&sessions, &client_connections, &swarm_members);
+        tokio::pin!(snapshot);
+        tokio::select! {
+            _ = &mut snapshot => panic!("snapshot unexpectedly completed"),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {}
+        }
+
+        let connections_guard =
+            tokio::time::timeout(Duration::from_millis(100), client_connections.write())
+                .await
+                .expect("debug snapshot retained connections while waiting for sessions");
+        drop(connections_guard);
+
+        drop(sessions_gate);
+        let (connected_agents, members) =
+            tokio::time::timeout(Duration::from_secs(1), &mut snapshot)
+                .await
+                .expect("debug snapshot deadlocked");
+        assert!(connected_agents.is_empty());
+        assert!(members.is_empty());
+    }
 }

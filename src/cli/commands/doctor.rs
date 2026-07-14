@@ -471,9 +471,7 @@ fn drift_messages(
 }
 
 pub fn running_vs_installed_drift() -> Option<String> {
-    if std::env::var_os("JCODE_NIX_MANAGED").is_none() {
-        return None;
-    }
+    std::env::var_os("JCODE_NIX_MANAGED")?;
 
     let running_path = running_binary_path();
     if running_path

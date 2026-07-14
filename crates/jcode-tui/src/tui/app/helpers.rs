@@ -846,7 +846,7 @@ fn resumed_window_title(session_id: &str) -> String {
         format!("jcode {}", session_label)
     };
     crate::process_title::terminal_window_title(
-        &icon,
+        icon,
         display_title.as_deref(),
         Some(&fallback_label),
         false,
@@ -971,15 +971,14 @@ pub(super) fn clipboard_image() -> Option<(String, String)> {
             .output()
         {
             let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if result == "ok" {
-                if let Ok(data) = std::fs::read(&temp_path) {
+            if result == "ok"
+                && let Ok(data) = std::fs::read(&temp_path) {
                     let _ = std::fs::remove_file(&temp_path);
                     if !data.is_empty() {
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
                         return Some(("image/png".to_string(), b64));
                     }
                 }
-            }
         }
     }
 
