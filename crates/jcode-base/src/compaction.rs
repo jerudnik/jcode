@@ -47,7 +47,6 @@ const HARD_THRESHOLD_PENDING_POLL_MS: u64 = 50;
 struct CompactionResult {
     summary_text: String,
     openai_encrypted_content: Option<String>,
-    covers_up_to_turn: usize,
     duration_ms: u64,
     summarized_messages: usize,
 }
@@ -717,6 +716,26 @@ impl CompactionManager {
         true
     }
 
+    fn warn_if_compaction_watermark_drifted(&self, reason: &str) {
+        let Some(summary) = self.active_summary.as_ref() else {
+            return;
+        };
+        if summary.covers_up_to_turn == self.compacted_count {
+            return;
+        }
+
+        crate::logging::warn(&format!(
+            "[compaction/invariant] summary_watermark_drifted reason={} covers_up_to_turn={} original_turn_count={} compacted_count={} total_turns={} summary_chars={} observed_input_tokens={:?}",
+            reason,
+            summary.covers_up_to_turn,
+            summary.original_turn_count,
+            self.compacted_count,
+            self.total_turns,
+            self.summary_chars(),
+            self.observed_input_tokens,
+        ));
+    }
+
     fn log_compaction_state(&self, phase: &str, trigger: &str, all_messages: &[Message]) {
         let active_len = self.active_messages(all_messages).len();
         crate::logging::info(&format!(
@@ -1266,12 +1285,12 @@ impl CompactionManager {
                     .take(self.pending_cutoff)
                     .map(message_char_count)
                     .sum();
-                let summary = Summary {
-                    text: result.summary_text,
-                    openai_encrypted_content: result.openai_encrypted_content,
-                    covers_up_to_turn: result.covers_up_to_turn,
-                    original_turn_count: self.pending_cutoff,
-                };
+                let summary = Summary::advance(
+                    self.active_summary.as_ref(),
+                    self.pending_cutoff,
+                    result.summary_text,
+                    result.openai_encrypted_content,
+                );
 
                 // Advance the compacted count — these messages are now summarized
                 self.compacted_count = self.compacted_count.saturating_add(self.pending_cutoff);
@@ -1286,6 +1305,7 @@ impl CompactionManager {
                 // Store summary
                 self.active_summary = Some(summary);
                 self.discard_oversized_openai_native_compaction();
+                self.warn_if_compaction_watermark_drifted("check_and_apply_complete");
                 self.observed_input_tokens = None;
                 let post_tokens = self.effective_token_count_with(all_messages) as u64;
                 self.last_compaction = Some(CompactionEvent {
@@ -1591,12 +1611,7 @@ impl CompactionManager {
             &active[..cutoff],
         );
 
-        let summary = Summary {
-            text: summary_text,
-            openai_encrypted_content: None,
-            covers_up_to_turn: cutoff,
-            original_turn_count: cutoff,
-        };
+        let summary = Summary::advance(self.active_summary.as_ref(), cutoff, summary_text, None);
 
         self.compacted_count = self
             .compacted_count
@@ -1604,6 +1619,7 @@ impl CompactionManager {
             .min(all_messages.len());
         self.active_chars.set_exact(remaining_suffix_chars[cutoff]);
         self.active_summary = Some(summary);
+        self.warn_if_compaction_watermark_drifted("hard_compact_complete");
         self.observed_input_tokens = None;
         let post_tokens = self.effective_token_count_with(all_messages) as u64;
         self.last_compaction = Some(CompactionEvent {
@@ -1795,7 +1811,6 @@ async fn generate_compaction_artifact(
             return Ok(CompactionResult {
                 summary_text: native.summary_text.unwrap_or_default(),
                 openai_encrypted_content: native.openai_encrypted_content,
-                covers_up_to_turn: messages.len(),
                 duration_ms: start.elapsed().as_millis() as u64,
                 summarized_messages: messages.len(),
             });
@@ -1816,7 +1831,6 @@ async fn generate_compaction_artifact(
     Ok(CompactionResult {
         summary_text: summary,
         openai_encrypted_content: None,
-        covers_up_to_turn: messages.len(),
         duration_ms: start.elapsed().as_millis() as u64,
         summarized_messages: messages.len(),
     })
@@ -1841,18 +1855,20 @@ pub async fn build_transfer_compaction_state(
         }));
     }
 
-    let prior_turns = existing_state
-        .as_ref()
-        .map(|state| state.original_turn_count.max(state.covers_up_to_turn))
-        .unwrap_or(0);
-    let result = generate_compaction_artifact(provider, messages.clone(), existing_summary).await?;
-    let total_turns = prior_turns + messages.len();
+    let result =
+        generate_compaction_artifact(provider, messages.clone(), existing_summary.clone()).await?;
+    let summary = Summary::advance(
+        existing_summary.as_ref(),
+        messages.len(),
+        result.summary_text,
+        result.openai_encrypted_content,
+    );
 
     Ok(Some(crate::session::StoredCompactionState {
-        summary_text: result.summary_text,
-        openai_encrypted_content: result.openai_encrypted_content,
-        covers_up_to_turn: total_turns,
-        original_turn_count: total_turns,
+        summary_text: summary.text,
+        openai_encrypted_content: summary.openai_encrypted_content,
+        covers_up_to_turn: summary.covers_up_to_turn,
+        original_turn_count: summary.original_turn_count,
         compacted_count: 0,
     }))
 }

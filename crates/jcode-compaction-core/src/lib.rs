@@ -93,6 +93,28 @@ pub struct Summary {
     pub original_turn_count: usize,
 }
 
+impl Summary {
+    /// Build a summary that advances the prior compacted transcript watermark by
+    /// `cutoff` newly summarized turns.
+    pub fn advance(
+        prior: Option<&Summary>,
+        cutoff: usize,
+        text: String,
+        openai_encrypted_content: Option<String>,
+    ) -> Self {
+        let prior_turns = prior
+            .map(|summary| summary.original_turn_count.max(summary.covers_up_to_turn))
+            .unwrap_or(0);
+        let total_turns = prior_turns.saturating_add(cutoff);
+        Self {
+            text,
+            openai_encrypted_content,
+            covers_up_to_turn: total_turns,
+            original_turn_count: total_turns,
+        }
+    }
+}
+
 /// Event emitted when compaction is applied
 #[derive(Debug, Clone)]
 pub struct CompactionEvent {
