@@ -1962,6 +1962,41 @@ impl CommunicateTool {
     }
 }
 
+/// Lenient deserializer for `CommunicateInput::nodes`: accepts a JSON array of
+/// node specs, a JSON-encoded string containing that array, or null/absent.
+/// Harnesses and models frequently double-encode structured tool params as
+/// strings; rejecting those turned an otherwise-valid seed_graph call into a
+/// hard error.
+fn deserialize_nodes_lenient<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<Vec<crate::protocol::TaskGraphNodeSpec>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            let parsed: serde_json::Value = serde_json::from_str(trimmed).map_err(|e| {
+                D::Error::custom(format!(
+                    "'nodes' was a string but not valid JSON: {e}. Pass a JSON array of node specs."
+                ))
+            })?;
+            serde_json::from_value(parsed)
+                .map(Some)
+                .map_err(D::Error::custom)
+        }
+        Some(other) => serde_json::from_value(other)
+            .map(Some)
+            .map_err(D::Error::custom),
+    }
+}
+
 #[derive(Clone, Deserialize)]
 struct CommunicateInput {
     action: String,
@@ -1998,7 +2033,9 @@ struct CommunicateInput {
     #[serde(default)]
     gate_id: Option<String>,
     /// Task-DAG node specs for task_graph/expand_node/inject_gap actions.
-    #[serde(default)]
+    /// Accepts either a JSON array or a JSON-encoded string of that array,
+    /// because harnesses/models frequently double-encode structured params.
+    #[serde(default, deserialize_with = "deserialize_nodes_lenient")]
     nodes: Option<Vec<crate::protocol::TaskGraphNodeSpec>>,
     /// Handoff artifact (object) for complete_node.
     #[serde(default)]
