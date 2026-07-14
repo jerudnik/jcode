@@ -3,7 +3,10 @@ use crate::agent::Agent;
 use crate::message::{Message, ToolDefinition};
 use crate::protocol::{CommDeliveryMode, NotificationType, ServerEvent};
 use crate::provider::{EventStream, Provider};
-use crate::server::{ClientConnectionInfo, SessionInterruptQueues, SwarmEvent, SwarmMember};
+use crate::server::{
+    ClientConnectionInfo, SessionInterruptQueues, SwarmEvent, SwarmEventState, SwarmMember,
+    SwarmState, VersionedPlan,
+};
 use crate::tool::Registry;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -41,6 +44,30 @@ async fn test_agent() -> Arc<Mutex<Agent>> {
     let provider: Arc<dyn Provider> = Arc::new(TestProvider);
     let registry = Registry::new(provider.clone()).await;
     Arc::new(Mutex::new(Agent::new(provider, registry)))
+}
+
+fn test_swarm_state(
+    members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
+    swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
+) -> SwarmState {
+    SwarmState {
+        members: Arc::clone(members),
+        swarms_by_id: Arc::clone(swarms_by_id),
+        plans: Arc::new(RwLock::new(HashMap::<String, VersionedPlan>::new())),
+        coordinators: Arc::new(RwLock::new(HashMap::new())),
+    }
+}
+
+fn test_swarm_events(
+    history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
+    counter: &Arc<AtomicU64>,
+    tx: &broadcast::Sender<SwarmEvent>,
+) -> SwarmEventState {
+    SwarmEventState {
+        history: Arc::clone(history),
+        counter: Arc::clone(counter),
+        tx: tx.clone(),
+    }
 }
 
 #[tokio::test]
@@ -165,11 +192,8 @@ async fn comm_message_with_wake_queues_soft_interrupt_for_busy_connected_session
             &client_event_tx,
             &sessions,
             &soft_interrupt_queues,
-            &swarm_members,
-            &swarms_by_id,
-            &event_history,
-            &event_counter,
-            &swarm_event_tx,
+            &test_swarm_state(&swarm_members, &swarms_by_id),
+            &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
             &client_connections,
         ),
     )
@@ -412,11 +436,8 @@ async fn comm_message_accepts_friendly_name_dm_target() {
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
-        &swarm_members,
-        &swarms_by_id,
-        &event_history,
-        &event_counter,
-        &swarm_event_tx,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
         &client_connections,
     )
     .await;
@@ -578,11 +599,8 @@ async fn comm_message_rejects_ambiguous_friendly_name_dm_target() {
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
-        &swarm_members,
-        &swarms_by_id,
-        &event_history,
-        &event_counter,
-        &swarm_event_tx,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
         &client_connections,
     )
     .await;
@@ -688,11 +706,8 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
-        &swarm_members,
-        &swarms_by_id,
-        &event_history,
-        &event_counter,
-        &swarm_event_tx,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
         &client_connections,
     )
     .await;
@@ -727,11 +742,8 @@ async fn comm_broadcast_reaches_only_senders_spawned_subtree() {
         &client_event_tx,
         &sessions,
         &soft_interrupt_queues,
-        &swarm_members,
-        &swarms_by_id,
-        &event_history,
-        &event_counter,
-        &swarm_event_tx,
+        &test_swarm_state(&swarm_members, &swarms_by_id),
+        &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
         &client_connections,
     )
     .await;
@@ -912,11 +924,8 @@ async fn comm_message_wake_delivers_parked_interrupt_once_target_is_idle() {
             &client_event_tx,
             &sessions,
             &soft_interrupt_queues,
-            &swarm_members,
-            &swarms_by_id,
-            &event_history,
-            &event_counter,
-            &swarm_event_tx,
+            &test_swarm_state(&swarm_members, &swarms_by_id),
+            &test_swarm_events(&event_history, &event_counter, &swarm_event_tx),
             &client_connections,
         ),
     )

@@ -6,11 +6,13 @@ use jcode_agent_runtime::{
 };
 use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, LazyLock, Mutex as StdMutex};
 use std::time::Instant;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, broadcast, mpsc};
 
 /// Process-global registry mapping session id -> background-tool signal.
 ///
@@ -110,6 +112,14 @@ pub struct SwarmState {
     pub swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
     pub plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
     pub coordinators: Arc<RwLock<HashMap<String, String>>>,
+}
+
+/// Shared ownership of live swarm event streams and history.
+#[derive(Clone)]
+pub struct SwarmEventState {
+    pub history: Arc<RwLock<VecDeque<SwarmEvent>>>,
+    pub counter: Arc<AtomicU64>,
+    pub tx: broadcast::Sender<SwarmEvent>,
 }
 
 /// First-class snapshot of a single swarm's logical runtime state.

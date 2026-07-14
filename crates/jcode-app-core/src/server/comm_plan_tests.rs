@@ -10,7 +10,8 @@ use super::{handle_comm_approve_plan, handle_comm_propose_plan, plan_cycle_error
 use crate::plan::PlanItem;
 use crate::protocol::ServerEvent;
 use crate::server::{
-    PlanProposalCache, SwarmEvent, SwarmMember, SwarmMutationRuntime, VersionedPlan,
+    PlanProposalCache, SwarmEvent, SwarmEventState, SwarmMember, SwarmMutationRuntime, SwarmState,
+    VersionedPlan,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -153,43 +154,54 @@ fn plan_fixture(swarm_id: &str, coord: &str, worker: &str) -> PlanFixture {
 }
 
 impl PlanFixture {
+    fn swarm_state(&self) -> SwarmState {
+        SwarmState {
+            members: Arc::clone(&self.swarm_members),
+            swarms_by_id: Arc::clone(&self.swarms_by_id),
+            plans: Arc::clone(&self.swarm_plans),
+            coordinators: Arc::clone(&self.swarm_coordinators),
+        }
+    }
+
+    fn swarm_events(&self) -> SwarmEventState {
+        SwarmEventState {
+            history: Arc::clone(&self.event_history),
+            counter: Arc::clone(&self.event_counter),
+            tx: self.swarm_event_tx.clone(),
+        }
+    }
+
     async fn propose(&self, from: &str, items: Vec<PlanItem>) {
+        let swarm_state = self.swarm_state();
+        let swarm_events = self.swarm_events();
         handle_comm_propose_plan(
             1,
             from.to_string(),
             items,
             &self.client_tx,
-            &self.swarm_members,
-            &self.swarms_by_id,
+            &swarm_state,
             &self.plan_proposals,
-            &self.swarm_plans,
-            &self.swarm_coordinators,
             &self.sessions,
             &self.soft_interrupt_queues,
-            &self.event_history,
-            &self.event_counter,
-            &self.swarm_event_tx,
+            &swarm_events,
             &self.mutation_runtime,
         )
         .await;
     }
 
     async fn approve(&self, proposer: &str) {
+        let swarm_state = self.swarm_state();
+        let swarm_events = self.swarm_events();
         handle_comm_approve_plan(
             2,
             self.coord.clone(),
             proposer.to_string(),
             &self.client_tx,
-            &self.swarm_members,
-            &self.swarms_by_id,
+            &swarm_state,
             &self.plan_proposals,
-            &self.swarm_plans,
-            &self.swarm_coordinators,
             &self.sessions,
             &self.soft_interrupt_queues,
-            &self.event_history,
-            &self.event_counter,
-            &self.swarm_event_tx,
+            &swarm_events,
             &self.mutation_runtime,
         )
         .await;
