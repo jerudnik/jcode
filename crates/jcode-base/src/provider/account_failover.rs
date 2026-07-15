@@ -18,7 +18,7 @@ pub(super) fn account_usage_probe(
 }
 
 pub(super) fn same_provider_account_failover_enabled() -> bool {
-    crate::config::Config::load()
+    crate::config::config()
         .provider
         .same_provider_account_failover
 }
