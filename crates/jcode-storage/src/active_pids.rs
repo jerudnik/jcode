@@ -7,7 +7,38 @@
 //! recovery, none of which should pull the full `session` module into scope.
 
 use crate::jcode_dir;
-use std::path::PathBuf;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+const PID_MARKER_LOCK_FILE: &str = ".pid-markers.lock";
+const PID_MARKER_TEMP_PREFIX: &str = ".pid-marker-";
+
+struct PidMarkerLock {
+    file: File,
+}
+
+impl PidMarkerLock {
+    fn acquire() -> Option<Self> {
+        let home = jcode_dir().ok()?;
+        std::fs::create_dir_all(&home).ok()?;
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(home.join(PID_MARKER_LOCK_FILE))
+            .ok()?;
+        fs2::FileExt::lock_exclusive(&file).ok()?;
+        Some(Self { file })
+    }
+}
+
+impl Drop for PidMarkerLock {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
 
 /// Directory holding one file per active session ID (`~/.jcode/active_pids`).
 pub fn active_pids_dir() -> Option<PathBuf> {
@@ -24,34 +55,70 @@ pub fn streaming_pids_dir() -> Option<std::path::PathBuf> {
 
 /// Record that `session_id` is owned by process `pid`.
 pub fn register_active_pid(session_id: &str, pid: u32) {
-    if let Some(dir) = active_pids_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join(session_id), pid.to_string());
-    }
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return;
+    };
+    let Some(dir) = active_pids_dir() else {
+        return;
+    };
+    let _ = write_pid_marker(&dir.join(session_id), pid);
 }
 
 /// Remove the active-PID record for `session_id`, if present.
 pub fn unregister_active_pid(session_id: &str) {
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return;
+    };
     if let Some(dir) = active_pids_dir() {
         let _ = std::fs::remove_file(dir.join(session_id));
     }
     // A closed session is never streaming.
-    unmark_streaming(session_id);
+    if let Some(dir) = streaming_pids_dir() {
+        let _ = std::fs::remove_file(dir.join(session_id));
+    }
 }
 
 /// Mark a session as actively streaming a model response.
 pub fn mark_streaming(session_id: &str) {
-    if let Some(dir) = streaming_pids_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join(session_id), std::process::id().to_string());
-    }
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return;
+    };
+    let Some(dir) = streaming_pids_dir() else {
+        return;
+    };
+    let _ = write_pid_marker(&dir.join(session_id), std::process::id());
 }
 
 /// Clear the streaming marker for a session (turn finished or interrupted).
 pub fn unmark_streaming(session_id: &str) {
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return;
+    };
     if let Some(dir) = streaming_pids_dir() {
         let _ = std::fs::remove_file(dir.join(session_id));
     }
+}
+
+fn write_pid_marker(path: &Path, pid: u32) -> std::io::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "PID marker path has no parent",
+        ));
+    };
+    std::fs::create_dir_all(parent)?;
+
+    // The temp file lives in JCODE_HOME, on the same filesystem as both marker
+    // directories, so persist performs an atomic rename/replace without exposing
+    // a partially-written PID to readers or the sweeper.
+    let home = jcode_dir().map_err(std::io::Error::other)?;
+    let mut temp = tempfile::Builder::new()
+        .prefix(PID_MARKER_TEMP_PREFIX)
+        .tempfile_in(home)?;
+    write!(temp, "{pid}")?;
+    temp.flush()?;
+    temp.persist(path).map_err(|error| error.error)?;
+    Ok(())
 }
 
 /// RAII guard that marks a session as streaming for its lifetime and clears the
@@ -74,6 +141,146 @@ impl Drop for StreamingGuard {
     fn drop(&mut self) {
         unmark_streaming(&self.session_id);
     }
+}
+
+/// Counts of stale PID marker files removed by [`sweep_stale_pid_markers`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PidMarkerSweep {
+    pub active_removed: usize,
+    pub streaming_removed: usize,
+    pub temp_removed: usize,
+}
+
+impl PidMarkerSweep {
+    pub fn total_removed(self) -> usize {
+        self.active_removed + self.streaming_removed + self.temp_removed
+    }
+}
+
+/// Remove an active marker only if it is still stale and its bytes exactly
+/// match a caller's earlier observation.
+///
+/// Crash recovery reads marker and session state before deciding what to do.
+/// This conditional operation closes the gap between that read and deletion:
+/// it reacquires the common marker lock and refuses to unlink a marker that a
+/// live owner replaced in the meantime.
+pub fn remove_active_pid_marker_if_stale_and_matches(session_id: &str, observed: &[u8]) -> bool {
+    if !is_single_path_component(session_id) {
+        return false;
+    }
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return false;
+    };
+    let Some(dir) = active_pids_dir() else {
+        return false;
+    };
+    remove_marker_if_stale_and_matches(&dir.join(session_id), observed)
+}
+
+/// Delete malformed markers and markers whose owning process is no longer live.
+///
+/// This sweep is deliberately independent of session persistence: a missing or
+/// corrupt session JSON file must not make a dead PID marker immortal. Atomic
+/// write temp files left by a crashed writer are reclaimed as well. Registration,
+/// unregistration, streaming guard drops, conditional removal, and this sweep share a
+/// cross-process advisory lock. The lock remains held through final unlink, so a
+/// coordinated live owner cannot be removed between inspection and deletion. If
+/// the lock cannot be acquired, the sweep removes nothing. Removal is best-effort
+/// and idempotent; unreadable entries and non-files are left untouched.
+pub fn sweep_stale_pid_markers() -> PidMarkerSweep {
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return PidMarkerSweep::default();
+    };
+    PidMarkerSweep {
+        active_removed: active_pids_dir()
+            .as_deref()
+            .map(sweep_stale_pid_marker_dir)
+            .unwrap_or_default(),
+        streaming_removed: streaming_pids_dir()
+            .as_deref()
+            .map(sweep_stale_pid_marker_dir)
+            .unwrap_or_default(),
+        temp_removed: jcode_dir()
+            .ok()
+            .as_deref()
+            .map(sweep_pid_marker_temp_files)
+            .unwrap_or_default(),
+    }
+}
+
+fn sweep_pid_marker_temp_files(home: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(home) else {
+        return 0;
+    };
+
+    // Every coordinated writer holds PidMarkerLock from temp creation through
+    // persist. Consequently, a temp file visible while this sweep owns the lock
+    // cannot belong to a live coordinated writer and is crash residue.
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with(PID_MARKER_TEMP_PREFIX))
+        })
+        .filter(|entry| remove_file_if_present(&entry.path()))
+        .count()
+}
+
+fn sweep_stale_pid_marker_dir(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter(|entry| remove_marker_if_stale(&entry.path()))
+        .count()
+}
+
+fn remove_marker_if_stale(path: &Path) -> bool {
+    let Ok(observed) = std::fs::read(path) else {
+        return false;
+    };
+    remove_marker_if_stale_and_matches(path, &observed)
+}
+
+fn remove_marker_if_stale_and_matches(path: &Path, observed: &[u8]) -> bool {
+    // Re-read under the marker lock. This protects callers that made their
+    // observation before acquiring the lock and also rejects uncoordinated
+    // replacements that happen while a sweep is inspecting an entry.
+    let Ok(current) = std::fs::read(path) else {
+        return false;
+    };
+    if current != observed || marker_contents_are_live(&current) {
+        return false;
+    }
+
+    remove_file_if_present(path)
+}
+
+fn remove_file_if_present(path: &Path) -> bool {
+    match std::fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => false,
+    }
+}
+
+fn is_single_path_component(value: &str) -> bool {
+    let mut components = Path::new(value).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+}
+
+fn marker_contents_are_live(contents: &[u8]) -> bool {
+    std::str::from_utf8(contents)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .is_some_and(jcode_core::process::is_running)
 }
 
 /// Find the active session ID currently owned by the given process ID.
@@ -103,23 +310,6 @@ pub fn active_session_ids() -> Vec<String> {
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.file_name().to_string_lossy().to_string())
         .collect()
-}
-
-#[cfg(unix)]
-fn process_is_running(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-#[cfg(not(unix))]
-fn process_is_running(pid: u32) -> bool {
-    // Best-effort fallback for platforms where this low-level storage crate does
-    // not have a process API. The active PID file is still useful, and stale
-    // entries are cleaned up by higher-level session lifecycle code.
-    pid != 0
 }
 
 /// Live snapshot of how many jcode sessions are running, and how many of those
@@ -172,7 +362,7 @@ pub fn session_presence() -> Vec<SessionPresence> {
         else {
             continue;
         };
-        if !process_is_running(pid) {
+        if !jcode_core::process::is_running(pid) {
             continue;
         }
 
@@ -181,7 +371,7 @@ pub fn session_presence() -> Vec<SessionPresence> {
             std::fs::read_to_string(marker)
                 .ok()
                 .and_then(|raw| raw.trim().parse::<u32>().ok())
-                .is_some_and(process_is_running)
+                .is_some_and(jcode_core::process::is_running)
         });
         let streaming_since = if streaming {
             marker_path
@@ -220,6 +410,182 @@ mod tests {
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(unix)]
+    fn exited_child_pid() -> u32 {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("spawn short-lived child");
+        let pid = child.id();
+        child.wait().expect("wait for short-lived child");
+        assert!(
+            !jcode_core::process::is_running(pid),
+            "test child must have exited"
+        );
+        pid
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stale_marker_sweep_removes_dead_and_invalid_but_preserves_live() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let live_pid = std::process::id();
+        let dead_pid = exited_child_pid();
+        let active_dir = active_pids_dir().expect("active marker dir");
+        let streaming_dir = streaming_pids_dir().expect("streaming marker dir");
+        std::fs::create_dir_all(&active_dir).expect("create active marker dir");
+        std::fs::create_dir_all(&streaming_dir).expect("create streaming marker dir");
+
+        std::fs::write(active_dir.join("live"), live_pid.to_string()).expect("write live marker");
+        std::fs::write(active_dir.join("dead"), dead_pid.to_string()).expect("write dead marker");
+        std::fs::write(active_dir.join("invalid"), "not-a-pid").expect("write invalid marker");
+        std::fs::write(active_dir.join("out-of-range"), u32::MAX.to_string())
+            .expect("write out-of-range Unix PID marker");
+        std::fs::write(streaming_dir.join("live"), live_pid.to_string())
+            .expect("write live streaming marker");
+        std::fs::write(streaming_dir.join("dead"), dead_pid.to_string())
+            .expect("write dead streaming marker");
+        std::fs::write(streaming_dir.join("invalid"), [0xff])
+            .expect("write invalid streaming marker");
+
+        let first = sweep_stale_pid_markers();
+        assert_eq!(
+            first,
+            PidMarkerSweep {
+                active_removed: 3,
+                streaming_removed: 2,
+                temp_removed: 0,
+            }
+        );
+        assert_eq!(first.total_removed(), 5);
+        assert!(active_dir.join("live").exists());
+        assert!(streaming_dir.join("live").exists());
+        assert!(!active_dir.join("dead").exists());
+        assert!(!active_dir.join("invalid").exists());
+        assert!(!active_dir.join("out-of-range").exists());
+        assert!(!streaming_dir.join("dead").exists());
+        assert!(!streaming_dir.join("invalid").exists());
+
+        assert_eq!(
+            sweep_stale_pid_markers(),
+            PidMarkerSweep::default(),
+            "repeating the sweep must be idempotent"
+        );
+
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn conditional_cleanup_preserves_a_replaced_live_marker() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let session_id = "session_replaced_during_crash_scan";
+        let dead_pid = exited_child_pid();
+        register_active_pid(session_id, dead_pid);
+        let marker = active_pids_dir()
+            .expect("active marker dir")
+            .join(session_id);
+        let observed = std::fs::read(&marker).expect("read dead marker observation");
+
+        register_active_pid(session_id, std::process::id());
+        assert!(
+            !remove_active_pid_marker_if_stale_and_matches(session_id, &observed),
+            "cleanup must reject an observation replaced before lock acquisition"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&marker).expect("replacement marker remains"),
+            std::process::id().to_string()
+        );
+
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[test]
+    fn sweep_reclaims_atomic_write_temp_residue_idempotently() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let residue = temp.path().join(".pid-marker-crash-residue");
+        let similarly_named_directory = temp.path().join(".pid-marker-directory");
+        std::fs::write(&residue, "partial").expect("write simulated temp residue");
+        std::fs::create_dir(&similarly_named_directory).expect("create similarly named directory");
+
+        let first = sweep_stale_pid_markers();
+        assert_eq!(first.temp_removed, 1);
+        assert_eq!(first.total_removed(), 1);
+        assert!(!residue.exists());
+        assert!(
+            similarly_named_directory.exists(),
+            "only regular temp files are eligible for reclamation"
+        );
+        assert_eq!(
+            sweep_stale_pid_markers(),
+            PidMarkerSweep::default(),
+            "repeating temp reclamation must be idempotent"
+        );
+
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[test]
+    fn lock_failure_leaves_marker_state_untouched() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let active_dir = active_pids_dir().expect("active marker dir");
+        std::fs::create_dir_all(&active_dir).expect("create active marker dir");
+        let existing = active_dir.join("must-stay");
+        std::fs::write(&existing, "invalid").expect("write existing marker");
+        std::fs::create_dir(temp.path().join(PID_MARKER_LOCK_FILE))
+            .expect("make lock path unopenable as a file");
+
+        register_active_pid("not-written", std::process::id());
+        unregister_active_pid("must-stay");
+        assert_eq!(sweep_stale_pid_markers(), PidMarkerSweep::default());
+        assert!(existing.exists(), "lock failure must prevent deletion");
+        assert!(
+            !active_dir.join("not-written").exists(),
+            "lock failure must prevent an uncoordinated write"
+        );
+
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_sweep_removes_dead_marker_without_session_data() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let dead_pid = exited_child_pid();
+        register_active_pid("session_missing_from_store", dead_pid);
+        let marker = active_pids_dir()
+            .expect("active marker dir")
+            .join("session_missing_from_store");
+        assert!(marker.exists());
+        assert!(
+            !temp.path().join("sessions").exists(),
+            "fixture intentionally has no persisted session data"
+        );
+
+        assert_eq!(sweep_stale_pid_markers().active_removed, 1);
+        assert!(
+            !marker.exists(),
+            "storage sweep must delete the dead marker even when session data is missing"
+        );
+
+        jcode_core::env::remove_var("JCODE_HOME");
     }
 
     #[test]

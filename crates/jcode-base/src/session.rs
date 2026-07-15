@@ -46,6 +46,10 @@ pub fn reconcile_active_sessions() -> usize {
             reconciled += 1;
         }
     }
+    // Preserve ordering: persisted Active sessions must consume their markers
+    // and become Crashed before storage removes dead, malformed, or orphaned
+    // markers that could not be tied to loadable session data.
+    crate::storage::sweep_stale_pid_markers();
     reconciled
 }
 use chrono::{DateTime, Utc};
