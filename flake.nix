@@ -63,7 +63,10 @@
           };
           inherit (pkgs) lib;
 
-          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          # Keep the Nix package/devShell aligned with rust-toolchain.toml and
+          # the blocking GitHub Actions gates. Fork CI validates these pins.
+          rustVersion = "1.96.0";
+          rustToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
             extensions = [
               "rust-src"
               "clippy"
