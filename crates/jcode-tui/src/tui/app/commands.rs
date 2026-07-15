@@ -2930,7 +2930,7 @@ fn handle_alignment_command(app: &mut App, trimmed: &str) -> bool {
         .trim();
 
     if rest.is_empty() || matches!(rest, "show" | "status") {
-        let saved = crate::config::Config::load().display.centered;
+        let saved = crate::config::config().display.centered;
         app.push_display_message(DisplayMessage::system(format!(
             "Alignment is currently {}.\nSaved default: {}.\n\nUse /alignment centered or /alignment left to change it permanently, or press Alt+C to toggle it for the current session.",
             alignment_label(app.centered),

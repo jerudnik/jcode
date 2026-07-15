@@ -74,13 +74,13 @@ pub(super) fn agent_model_target_config_path(target: AgentModelTarget) -> &'stat
 }
 
 pub(super) fn load_agent_model_override(target: AgentModelTarget) -> Option<String> {
-    let cfg = crate::config::Config::load();
+    let cfg = crate::config::config();
     match target {
-        AgentModelTarget::Swarm => cfg.agents.swarm_model,
-        AgentModelTarget::Review => cfg.autoreview.model,
-        AgentModelTarget::Judge => cfg.autojudge.model,
-        AgentModelTarget::Memory => cfg.agents.memory_model,
-        AgentModelTarget::Ambient => cfg.ambient.model,
+        AgentModelTarget::Swarm => cfg.agents.swarm_model.clone(),
+        AgentModelTarget::Review => cfg.autoreview.model.clone(),
+        AgentModelTarget::Judge => cfg.autojudge.model.clone(),
+        AgentModelTarget::Memory => cfg.agents.memory_model.clone(),
+        AgentModelTarget::Ambient => cfg.ambient.model.clone(),
     }
 }
 

@@ -1173,7 +1173,7 @@ async fn handle_remote_key_internal(
                 }
 
                 if matches!(trimmed, "/fast default" | "/fast default status") {
-                    let default_tier = crate::config::Config::load().provider.openai_service_tier;
+                    let default_tier = crate::config::config().provider.openai_service_tier.clone();
                     let default_enabled = default_tier.as_deref() == Some("priority");
                     let default_label = default_tier
                         .as_deref()
@@ -1198,7 +1198,7 @@ async fn handle_remote_key_internal(
                         }
                         "status" => {
                             let default_tier =
-                                crate::config::Config::load().provider.openai_service_tier;
+                                crate::config::config().provider.openai_service_tier.clone();
                             let default_enabled = default_tier.as_deref() == Some("priority");
                             let default_label = default_tier
                                 .as_deref()
@@ -1223,7 +1223,7 @@ async fn handle_remote_key_internal(
                     let current_label = current
                         .map(app_mod::service_tier_display_label)
                         .unwrap_or("Standard");
-                    let default_tier = crate::config::Config::load().provider.openai_service_tier;
+                    let default_tier = crate::config::config().provider.openai_service_tier.clone();
                     let default_enabled = default_tier.as_deref() == Some("priority");
                     let default_label = default_tier
                         .as_deref()
@@ -1252,7 +1252,7 @@ async fn handle_remote_key_internal(
                                 .map(app_mod::service_tier_display_label)
                                 .unwrap_or("Standard");
                             let default_tier =
-                                crate::config::Config::load().provider.openai_service_tier;
+                                crate::config::config().provider.openai_service_tier.clone();
                             let default_enabled = default_tier.as_deref() == Some("priority");
                             let default_label = default_tier
                                 .as_deref()
