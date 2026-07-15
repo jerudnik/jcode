@@ -247,32 +247,7 @@ pub fn raise_nofile_limit_best_effort(minimum_soft_limit: u64) {
 /// On Unix, uses `kill(pid, 0)` to check without sending a signal.
 /// On Windows, uses OpenProcess to query the process.
 pub fn is_process_running(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        let result = unsafe { libc::kill(pid as i32, 0) };
-        if result == 0 {
-            return true;
-        }
-        let err = std::io::Error::last_os_error();
-        !matches!(err.raw_os_error(), Some(code) if code == libc::ESRCH)
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
-        use windows_sys::Win32::System::Threading::{
-            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        };
-        unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-            if handle.is_null() {
-                return false;
-            }
-            let mut exit_code = 0u32;
-            let ok = GetExitCodeProcess(handle, &mut exit_code);
-            CloseHandle(handle);
-            ok != 0 && exit_code == STILL_ACTIVE as u32
-        }
-    }
+    jcode_core::process::is_running(pid)
 }
 
 /// Send a signal to an entire detached process group/session led by `pid`.
