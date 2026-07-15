@@ -44,10 +44,10 @@ env:
   CARGO_TERM_COLOR: always
   # Some published crates ship a rust-toolchain.toml inside the crate
   # (convert_case pins 1.83.0, proc-macro2 requests rust-src) and the rustup
-  # proxy honours it per-crate CWD. RUSTUP_TOOLCHAIN takes precedence, so pin
-  # every job to this runner's stable toolchain. (Inherited hard-won fix from
-  # upstream ci.yml; see the comment there.)
-  RUSTUP_TOOLCHAIN: stable
+  # proxy honours it per-crate CWD. RUSTUP_TOOLCHAIN takes precedence, so keep
+  # every blocking fork job on the repository's known-good toolchain.
+  # (Inherited hard-won fix from upstream ci.yml; see the comment there.)
+  RUSTUP_TOOLCHAIN: 1.96.0
 
 jobs:
   quality:
@@ -57,7 +57,60 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify pinned Rust toolchain coherence
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUSTUP_TOOLCHAIN"
+          toolchain_version="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          flake_version="$(sed -n 's/^[[:space:]]*rustVersion = "\([^"]*\)";$/\1/p' flake.nix)"
+          toolchain_refs="$(
+            grep -hE '^[[:space:]]*-[[:space:]]+uses:[[:space:]]+dtolnay/rust-toolchain@[^[:space:]#]+[[:space:]]*$' \
+              .github/workflows/fork-ci.yml .github/workflows/security.yml \
+              | sed -E 's/.*dtolnay\/rust-toolchain@([^[:space:]#]+).*/\1/' \
+              | sort
+          )"
+
+          check_version() {
+            local label="$1"
+            local observed="$2"
+            if [ "$observed" != "$expected" ]; then
+              echo "::error::$label pins '$observed'; expected '$expected'"
+              exit 1
+            fi
+          }
+
+          check_version rust-toolchain.toml "$toolchain_version"
+          check_version flake.nix "$flake_version"
+
+          pinned_count="$(printf '%s\n' "$toolchain_refs" | grep -cFx "$expected" || true)"
+          stable_count="$(printf '%s\n' "$toolchain_refs" | grep -cFx stable || true)"
+          total_count="$(printf '%s\n' "$toolchain_refs" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+          other_refs="$(
+            printf '%s\n' "$toolchain_refs" \
+              | grep -vFx -e "$expected" -e stable || true
+          )"
+          canary_stable_count="$(
+            awk '
+              /^  latest-stable-canary:$/ { in_canary = 1; next }
+              /^  [A-Za-z0-9_-]+:$/ { in_canary = 0 }
+              in_canary && /^[[:space:]]*-[[:space:]]+uses:[[:space:]]+dtolnay\/rust-toolchain@stable[[:space:]]*$/ { count++ }
+              END { print count + 0 }
+            ' .github/workflows/fork-ci.yml
+          )"
+
+          if [ "$pinned_count" -ne 4 ] \
+            || [ "$stable_count" -ne 1 ] \
+            || [ "$canary_stable_count" -ne 1 ] \
+            || [ "$total_count" -ne 5 ] \
+            || [ -n "$other_refs" ]; then
+            echo "::error::unexpected dtolnay/rust-toolchain action inventory"
+            printf 'expected: four @%s blocking refs and one @stable canary ref\n' "$expected"
+            printf 'observed refs:\n%s\n' "$toolchain_refs"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           components: clippy, rustfmt
 
@@ -159,6 +212,33 @@ jobs:
           cargo install cargo-machete --locked
           cargo machete
 
+  latest-stable-canary:
+    name: Latest stable canary (advisory)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Override the repository pin so this advisory job detects forward drift.
+      RUSTUP_TOOLCHAIN: stable
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: latest-stable-canary
+          cache-all-crates: "true"
+
+      - name: Check all targets and all features on latest stable
+        run: cargo check --all-targets --all-features
+
+      - name: Report latest-stable Clippy drift
+        run: cargo clippy --all-targets --all-features
+
   macos:
     name: Build & Test (macOS)
     runs-on: macos-latest
@@ -166,7 +246,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: aarch64-apple-darwin
           # Pre-install rust-src serially so parallel on-demand `rustup
@@ -235,7 +315,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: x86_64-unknown-linux-gnu
           components: rust-src

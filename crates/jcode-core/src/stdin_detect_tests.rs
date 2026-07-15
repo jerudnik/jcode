@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(target_os = "linux")]
+use std::process::{Command, Stdio};
+
 #[test]
 fn test_own_process_not_reading_stdin() {
     let pid = std::process::id();
