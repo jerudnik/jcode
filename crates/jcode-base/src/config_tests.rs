@@ -3,6 +3,7 @@ use super::{
     LatexRenderingMode, ProviderConfig, SessionPickerResumeAction, SwarmSpawnMode, ToolConfig,
     WarnOnce, config_env_fingerprint, populate_context_limits_from_config_ref,
 };
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::Path;
 
@@ -533,12 +534,26 @@ fn global_config_cache_reloads_after_manual_file_edit() {
     std::fs::write(&path, "[display]\ncentered = false\n").expect("write initial config");
 
     assert!(!crate::config::config().display.centered);
+    let initial_generation = crate::config::config_cache_generation();
+    for _ in 0..1_000 {
+        assert!(!crate::config::config().display.centered);
+    }
+    assert_eq!(
+        crate::config::config_cache_generation(),
+        initial_generation,
+        "repeated cached reads must not reparse an unchanged config"
+    );
 
     // Different length as well as mtime so the metadata fingerprint notices the
     // manual edit even on filesystems with coarse timestamp resolution.
     std::fs::write(&path, "[display]\ncentered = true\n# edited\n").expect("edit config");
 
     assert!(crate::config::config().display.centered);
+    assert_eq!(
+        crate::config::config_cache_generation(),
+        initial_generation + 1,
+        "one fingerprint change must trigger exactly one cache reload"
+    );
 
     restore_env_var("JCODE_HOME", prev_home);
     Config::invalidate_cache();
@@ -816,6 +831,52 @@ fn locked_config_patch_preserves_two_concurrent_writers() {
             &second_auth
         ));
         assert_eq!(cfg.auth.trusted_external_source_paths.len(), 2);
+
+        restore_env_var("JCODE_HOME", prev_home);
+        Config::invalidate_cache();
+    });
+}
+
+#[test]
+fn post_login_default_decision_is_atomic_across_concurrent_writers() {
+    let _guard = crate::storage::lock_test_env();
+    with_clean_config_env(|| {
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", dir.path());
+        Config::invalidate_cache();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let first_barrier = barrier.clone();
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            Config::set_post_login_default_if_unset(Some("model-a"), "provider-a")
+                .expect("first post-login writer")
+        });
+        let second_barrier = barrier.clone();
+        let second = std::thread::spawn(move || {
+            second_barrier.wait();
+            Config::set_post_login_default_if_unset(Some("model-b"), "provider-b")
+                .expect("second post-login writer")
+        });
+        barrier.wait();
+
+        let first_changed = first.join().expect("first writer joins");
+        let second_changed = second.join().expect("second writer joins");
+        assert_ne!(first_changed, second_changed, "exactly one writer must win");
+
+        let cfg = Config::load();
+        let pair = (
+            cfg.provider.default_provider.as_deref(),
+            cfg.provider.default_model.as_deref(),
+        );
+        assert!(
+            matches!(
+                pair,
+                (Some("provider-a"), Some("model-a")) | (Some("provider-b"), Some("model-b"))
+            ),
+            "the winning provider and suggested model must be saved atomically: {pair:?}"
+        );
 
         restore_env_var("JCODE_HOME", prev_home);
         Config::invalidate_cache();
@@ -1271,6 +1332,50 @@ default_model = \"gpt-5.5\"\n";
     // Unknown keys are collected, sorted, and deduped.
     let collected: Vec<&str> = unknown.iter().map(String::as_str).collect();
     assert_eq!(collected, vec!["display.totally_unknown", "redraw_fpss"]);
+}
+
+#[test]
+fn unknown_config_key_warnings_are_bounded_to_current_fingerprint() {
+    let _guard = crate::storage::lock_test_env();
+    Config::reset_unknown_config_key_warnings_for_tests();
+    let first_keys = BTreeSet::from([
+        "agents.retired_option".to_string(),
+        "display.misspelled_option".to_string(),
+    ]);
+    let mut emitted = Vec::new();
+
+    assert_eq!(
+        Config::warn_unknown_config_keys_once_with(41, &first_keys, |key| {
+            emitted.push(key.to_string())
+        }),
+        2
+    );
+    assert_eq!(
+        Config::warn_unknown_config_keys_once_with(41, &first_keys, |key| {
+            emitted.push(key.to_string())
+        }),
+        0
+    );
+    assert_eq!(
+        emitted,
+        vec![
+            "agents.retired_option".to_string(),
+            "display.misspelled_option".to_string(),
+        ]
+    );
+
+    let changed_keys = BTreeSet::from(["provider.new_unknown".to_string()]);
+    assert_eq!(
+        Config::warn_unknown_config_keys_once_with(42, &changed_keys, |key| {
+            emitted.push(key.to_string())
+        }),
+        1
+    );
+    assert_eq!(
+        Config::unknown_config_key_warning_state_for_tests(),
+        (Some(42), vec!["provider.new_unknown".to_string()]),
+        "a fingerprint change must discard prior keys instead of growing process state"
+    );
 }
 
 #[test]

@@ -41,6 +41,7 @@ use async_trait::async_trait;
 use jcode_provider_core::FailoverDecision;
 use registry::ProviderRegistry;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 pub use catalog_routes::{
@@ -89,6 +90,7 @@ pub(crate) use routing::{
 /// [`Provider::complete_simple`] path. `Server::new` registers the active
 /// provider here at startup.
 static ACTIVE_PROVIDER: RwLock<Option<Arc<dyn Provider>>> = RwLock::new(None);
+static ACTIVE_PROVIDER_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Register the live agent provider so background helpers (memory sidecar) can
 /// reach whatever provider the user is actually running on. Safe to call more
@@ -97,6 +99,11 @@ pub fn set_active_provider(provider: Arc<dyn Provider>) {
     *ACTIVE_PROVIDER
         .write()
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(provider);
+    ACTIVE_PROVIDER_GENERATION.fetch_add(1, Ordering::Release);
+}
+
+pub(crate) fn active_provider_generation() -> u64 {
+    ACTIVE_PROVIDER_GENERATION.load(Ordering::Acquire)
 }
 
 /// Fetch the registered active provider, if any. Returns a forked handle so the
