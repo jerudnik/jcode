@@ -331,14 +331,20 @@ fn find_crashed_via_pid_files() -> Option<Vec<(String, String)>> {
             None => continue,
         };
 
-        let pid_str = match std::fs::read_to_string(entry.path()) {
-            Ok(s) => s,
+        let marker_contents = match std::fs::read(entry.path()) {
+            Ok(contents) => contents,
             Err(_) => continue,
         };
-        let pid: u32 = match pid_str.trim().parse() {
-            Ok(p) => p,
-            Err(_) => {
-                let _ = std::fs::remove_file(entry.path());
+        let pid: u32 = match std::str::from_utf8(&marker_contents)
+            .ok()
+            .and_then(|raw| raw.trim().parse().ok())
+        {
+            Some(p) => p,
+            None => {
+                storage::remove_active_pid_marker_if_stale_and_matches(
+                    &session_id,
+                    &marker_contents,
+                );
                 continue;
             }
         };
@@ -349,11 +355,20 @@ fn find_crashed_via_pid_files() -> Option<Vec<(String, String)>> {
 
         match Session::load(&session_id) {
             Ok(mut session) => {
-                session.mark_crashed(Some(format!(
-                    "Process {} exited unexpectedly (no shutdown signal captured)",
-                    pid
-                )));
-                let _ = session.save();
+                session.set_status(SessionStatus::Crashed {
+                    message: Some(format!(
+                        "Process {} exited unexpectedly (no shutdown signal captured)",
+                        pid
+                    )),
+                });
+                // Persist the reconciliation before consuming its marker. If
+                // saving fails, leave the marker for a future recovery pass.
+                if session.save().is_ok() {
+                    storage::remove_active_pid_marker_if_stale_and_matches(
+                        &session_id,
+                        &marker_contents,
+                    );
+                }
                 let ts = session.last_active_at.unwrap_or(session.updated_at);
                 if ts <= cutoff {
                     continue;
@@ -364,7 +379,10 @@ fn find_crashed_via_pid_files() -> Option<Vec<(String, String)>> {
                 crashed.push((session_id, name, ts));
             }
             Err(_) => {
-                let _ = std::fs::remove_file(entry.path());
+                storage::remove_active_pid_marker_if_stale_and_matches(
+                    &session_id,
+                    &marker_contents,
+                );
             }
         }
     }

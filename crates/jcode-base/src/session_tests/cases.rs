@@ -69,6 +69,65 @@ fn reconcile_active_sessions_marks_dead_pid_crashed() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn reconcile_active_sessions_sweeps_dead_marker_without_session_data() -> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("missing-session-marker-reconcile")?;
+
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exit 0")
+        .spawn()?;
+    let dead_pid = child.id();
+    let _ = child.wait()?;
+    crate::storage::register_active_pid("session_missing_from_store", dead_pid);
+    let marker = crate::storage::active_pids_dir()
+        .ok_or_else(|| anyhow!("active PID marker directory unavailable"))?
+        .join("session_missing_from_store");
+    assert!(marker.exists());
+
+    assert_eq!(reconcile_active_sessions(), 0);
+    assert!(
+        !marker.exists(),
+        "post-reconciliation sweep must remove markers whose session data cannot be loaded"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn crash_scan_cleans_invalid_and_orphaned_dead_markers() -> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("crash-scan-marker-cleanup")?;
+
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exit 0")
+        .spawn()?;
+    let dead_pid = child.id();
+    let _ = child.wait()?;
+
+    let active_dir = crate::storage::active_pids_dir()
+        .ok_or_else(|| anyhow!("active PID marker directory unavailable"))?;
+    std::fs::create_dir_all(&active_dir)?;
+    let invalid_marker = active_dir.join("session_invalid_marker");
+    let orphaned_marker = active_dir.join("session_orphaned_dead_marker");
+    std::fs::write(&invalid_marker, [0xff])?;
+    crate::storage::register_active_pid("session_orphaned_dead_marker", dead_pid);
+
+    assert!(find_recent_crashed_sessions().is_empty());
+    assert!(
+        !invalid_marker.exists(),
+        "malformed marker should be removed through locked conditional cleanup"
+    );
+    assert!(
+        !orphaned_marker.exists(),
+        "dead marker without session data should be removed through locked conditional cleanup"
+    );
+    Ok(())
+}
+
 #[test]
 fn mark_active_with_pid_records_client_pid() -> Result<()> {
     let _lock = lock_env();
