@@ -11,6 +11,9 @@ use crate::auth;
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 /// Fast/cheap OpenAI model used when Codex credentials are available.
 pub const SIDECAR_OPENAI_MODEL: &str = "gpt-5.6-luna";
@@ -45,6 +48,215 @@ const CLAUDE_CODE_JCODE_NOTICE: &str = "You are jcode, powered by Claude Code. Y
 
 /// Maximum tokens for sidecar responses (keep small for speed/cost)
 const DEFAULT_MAX_TOKENS: u32 = 1024;
+const CONFIGURED_MODEL_ROUTE_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+const CONFIGURED_MODEL_ROUTE_STATE_TTL: Duration = Duration::from_secs(10 * 60);
+const CONFIGURED_MODEL_ROUTE_STATE_CAPACITY: usize = 16;
+const SIDECAR_LOG_FIELD_MAX_CHARS: usize = 160;
+
+static CONFIGURED_MODEL_ROUTE_GATE: OnceLock<Mutex<ConfiguredModelRouteGate>> = OnceLock::new();
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct ConfiguredModelRouteKey {
+    model: String,
+    provider_generation: u64,
+}
+
+#[derive(Debug)]
+struct ConfiguredModelRouteProbe {
+    key: ConfiguredModelRouteKey,
+    attempt_id: u64,
+}
+
+#[derive(Debug)]
+struct ConfiguredModelRouteInFlight {
+    attempt_id: u64,
+    started_at: Instant,
+    suppressed: u64,
+}
+
+#[derive(Debug)]
+struct ConfiguredModelRouteCooldown {
+    failed_at: Instant,
+    last_touched: Instant,
+    failure_kind: &'static str,
+    suppressed: u64,
+}
+
+#[derive(Default, Debug)]
+struct ConfiguredModelRouteGate {
+    cooldowns: HashMap<ConfiguredModelRouteKey, ConfiguredModelRouteCooldown>,
+    in_flight: HashMap<ConfiguredModelRouteKey, ConfiguredModelRouteInFlight>,
+    next_attempt_id: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ConfiguredModelRouteDiagnostic {
+    Failure {
+        message: String,
+        suppressed: u64,
+    },
+    Recovery {
+        model: String,
+        previous_failure_kind: &'static str,
+        suppressed: u64,
+    },
+}
+
+impl ConfiguredModelRouteGate {
+    fn prune_expired(&mut self, now: Instant) {
+        self.in_flight.retain(|_, probe| {
+            now.saturating_duration_since(probe.started_at) < CONFIGURED_MODEL_ROUTE_STATE_TTL
+        });
+        let in_flight = &self.in_flight;
+        self.cooldowns.retain(|key, cooldown| {
+            in_flight.contains_key(key)
+                || now.saturating_duration_since(cooldown.last_touched)
+                    < CONFIGURED_MODEL_ROUTE_STATE_TTL
+        });
+    }
+
+    fn evict_oldest_cooldown_if_full(&mut self, incoming: &ConfiguredModelRouteKey) {
+        if self.cooldowns.contains_key(incoming)
+            || self.cooldowns.len() < CONFIGURED_MODEL_ROUTE_STATE_CAPACITY
+        {
+            return;
+        }
+        if let Some(oldest) = self
+            .cooldowns
+            .iter()
+            .min_by_key(|(_, cooldown)| cooldown.last_touched)
+            .map(|(key, _)| key.clone())
+        {
+            self.cooldowns.remove(&oldest);
+        }
+    }
+
+    fn begin_probe(
+        &mut self,
+        key: ConfiguredModelRouteKey,
+        now: Instant,
+        retry_interval: Duration,
+    ) -> Option<ConfiguredModelRouteProbe> {
+        self.prune_expired(now);
+
+        if let Some(in_flight) = self.in_flight.get_mut(&key) {
+            in_flight.suppressed = in_flight.suppressed.saturating_add(1);
+            return None;
+        }
+        if let Some(cooldown) = self.cooldowns.get_mut(&key) {
+            cooldown.last_touched = now;
+            if now.saturating_duration_since(cooldown.failed_at) < retry_interval {
+                cooldown.suppressed = cooldown.suppressed.saturating_add(1);
+                return None;
+            }
+        }
+        if self.in_flight.len() >= CONFIGURED_MODEL_ROUTE_STATE_CAPACITY {
+            return None;
+        }
+
+        self.next_attempt_id = self.next_attempt_id.wrapping_add(1).max(1);
+        let attempt_id = self.next_attempt_id;
+        self.in_flight.insert(
+            key.clone(),
+            ConfiguredModelRouteInFlight {
+                attempt_id,
+                started_at: now,
+                suppressed: 0,
+            },
+        );
+        Some(ConfiguredModelRouteProbe { key, attempt_id })
+    }
+
+    fn take_matching_in_flight(
+        &mut self,
+        probe: &ConfiguredModelRouteProbe,
+    ) -> Option<ConfiguredModelRouteInFlight> {
+        let current = self.in_flight.get(&probe.key)?;
+        if current.attempt_id != probe.attempt_id {
+            return None;
+        }
+        self.in_flight.remove(&probe.key)
+    }
+
+    fn finish_failure(
+        &mut self,
+        probe: &ConfiguredModelRouteProbe,
+        failure_kind: &'static str,
+        now: Instant,
+    ) -> Option<u64> {
+        let in_flight = self.take_matching_in_flight(probe)?;
+        self.evict_oldest_cooldown_if_full(&probe.key);
+        let previous_suppressed = self
+            .cooldowns
+            .get(&probe.key)
+            .map_or(0, |cooldown| cooldown.suppressed);
+        let suppressed = previous_suppressed.saturating_add(in_flight.suppressed);
+        self.cooldowns.insert(
+            probe.key.clone(),
+            ConfiguredModelRouteCooldown {
+                failed_at: now,
+                last_touched: now,
+                failure_kind,
+                suppressed: 0,
+            },
+        );
+        Some(suppressed)
+    }
+
+    fn finish_success(
+        &mut self,
+        probe: &ConfiguredModelRouteProbe,
+    ) -> Option<ConfiguredModelRouteDiagnostic> {
+        let in_flight = self.take_matching_in_flight(probe)?;
+        let previous = self.cooldowns.remove(&probe.key)?;
+        Some(ConfiguredModelRouteDiagnostic::Recovery {
+            model: probe.key.model.clone(),
+            previous_failure_kind: previous.failure_kind,
+            suppressed: previous.suppressed.saturating_add(in_flight.suppressed),
+        })
+    }
+
+    fn release_probe(&mut self, probe: &ConfiguredModelRouteProbe) {
+        let _ = self.take_matching_in_flight(probe);
+    }
+}
+
+#[derive(Debug)]
+struct ConfiguredModelRouteLease {
+    probe: ConfiguredModelRouteProbe,
+    finished: bool,
+}
+
+impl ConfiguredModelRouteLease {
+    fn finish_failure(mut self, failure_kind: &'static str, now: Instant) -> Option<u64> {
+        let result = configured_model_route_gate()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .finish_failure(&self.probe, failure_kind, now);
+        self.finished = true;
+        result
+    }
+
+    fn finish_success(mut self) -> Option<ConfiguredModelRouteDiagnostic> {
+        let result = configured_model_route_gate()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .finish_success(&self.probe);
+        self.finished = true;
+        result
+    }
+}
+
+impl Drop for ConfiguredModelRouteLease {
+    fn drop(&mut self) {
+        if !self.finished {
+            configured_model_route_gate()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .release_probe(&self.probe);
+        }
+    }
+}
 
 /// Which backend the sidecar is using
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -57,6 +269,80 @@ enum SidecarBackend {
     /// Cursor, Bedrock, OpenRouter). This is what makes the memory sidecar work
     /// on ALL providers instead of only the two with dedicated HTTP clients.
     Provider,
+}
+
+fn configured_model_route_key(model: &str) -> ConfiguredModelRouteKey {
+    ConfiguredModelRouteKey {
+        model: model.to_string(),
+        provider_generation: crate::provider::active_provider_generation(),
+    }
+}
+
+fn configured_model_route_gate() -> &'static Mutex<ConfiguredModelRouteGate> {
+    CONFIGURED_MODEL_ROUTE_GATE.get_or_init(|| Mutex::new(ConfiguredModelRouteGate::default()))
+}
+
+fn begin_configured_model_route_probe(
+    key: ConfiguredModelRouteKey,
+    now: Instant,
+    retry_interval: Duration,
+) -> Option<ConfiguredModelRouteLease> {
+    let probe = configured_model_route_gate()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .begin_probe(key, now, retry_interval)?;
+    Some(ConfiguredModelRouteLease {
+        probe,
+        finished: false,
+    })
+}
+
+fn bounded_sidecar_log_field(value: &str) -> String {
+    let one_line: String = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect();
+    crate::logging::truncate_for_log(&one_line, SIDECAR_LOG_FIELD_MAX_CHARS)
+}
+
+fn log_configured_model_route_diagnostic(diagnostic: ConfiguredModelRouteDiagnostic) {
+    match diagnostic {
+        ConfiguredModelRouteDiagnostic::Failure {
+            mut message,
+            suppressed,
+        } => {
+            if suppressed > 0 {
+                message.push_str(&format!(
+                    "; suppressed {} repeated sidecar construction attempt(s) since the previous diagnostic",
+                    suppressed
+                ));
+            }
+            crate::logging::error(&message);
+        }
+        ConfiguredModelRouteDiagnostic::Recovery {
+            model,
+            previous_failure_kind,
+            suppressed,
+        } => crate::logging::info(&format!(
+            "Sidecar memory model override '{}' route recovered after {}; suppressed {} repeated sidecar construction attempt(s) while unavailable",
+            bounded_sidecar_log_field(&model),
+            previous_failure_kind,
+            suppressed
+        )),
+    }
+}
+
+#[cfg(test)]
+fn reset_configured_model_route_gate_for_tests() {
+    *configured_model_route_gate()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = ConfiguredModelRouteGate::default();
 }
 
 /// Lightweight client for fast sidecar calls
@@ -105,6 +391,29 @@ impl Sidecar {
         }
     }
 
+    #[cfg(test)]
+    fn with_configured_model_at(
+        configured_model: Option<String>,
+        now: Instant,
+        retry_interval: Duration,
+        emit: &mut impl FnMut(ConfiguredModelRouteDiagnostic),
+    ) -> Self {
+        let (backend, model, provider) = if let Some(model) = configured_model {
+            Self::backend_for_configured_model_at(model, now, retry_interval, emit)
+        } else {
+            Self::auto_select_backend()
+        };
+
+        Self {
+            client: crate::provider::shared_http_client(),
+            model,
+            max_tokens: DEFAULT_MAX_TOKENS,
+            backend,
+            provider,
+            reasoning_override: None,
+        }
+    }
+
     /// Route an explicitly configured `agents.memory_model` to a sidecar backend.
     ///
     /// Only an unprefixed, native OpenAI or Claude model keeps its specialized
@@ -117,6 +426,24 @@ impl Sidecar {
     /// auto-selection; it never silently claims an unsupported model.
     fn backend_for_configured_model(
         model: String,
+    ) -> (
+        SidecarBackend,
+        String,
+        Option<std::sync::Arc<dyn crate::provider::Provider>>,
+    ) {
+        Self::backend_for_configured_model_at(
+            model,
+            Instant::now(),
+            CONFIGURED_MODEL_ROUTE_RETRY_INTERVAL,
+            &mut log_configured_model_route_diagnostic,
+        )
+    }
+
+    fn backend_for_configured_model_at(
+        model: String,
+        now: Instant,
+        retry_interval: Duration,
+        emit: &mut impl FnMut(ConfiguredModelRouteDiagnostic),
     ) -> (
         SidecarBackend,
         String,
@@ -136,20 +463,45 @@ impl Sidecar {
 
         // Everything else routes through a model-configured, isolated provider
         // fork built from the ORIGINAL spec.
+        let Some(probe) = begin_configured_model_route_probe(
+            configured_model_route_key(&model),
+            now,
+            retry_interval,
+        ) else {
+            return Self::auto_select_backend();
+        };
         match crate::provider::active_provider_fork_with_model_spec(&model) {
-            Some(Ok(provider)) => (SidecarBackend::Provider, model, Some(provider)),
+            Some(Ok(provider)) => {
+                if let Some(diagnostic) = probe.finish_success() {
+                    emit(diagnostic);
+                }
+                (SidecarBackend::Provider, model, Some(provider))
+            }
             Some(Err(err)) => {
-                crate::logging::error(&format!(
-                    "Sidecar memory model override '{}' (resolved {:?}) failed to fork a configured provider: {:#}; falling back to auto-selection",
-                    model, spec, err
-                ));
+                if let Some(suppressed) = probe.finish_failure("fork-error", now) {
+                    emit(ConfiguredModelRouteDiagnostic::Failure {
+                        message: format!(
+                            "Sidecar memory model override '{}' (resolved {}) failed to fork a configured provider: {}; falling back to auto-selection",
+                            bounded_sidecar_log_field(&model),
+                            bounded_sidecar_log_field(&format!("{spec:?}")),
+                            bounded_sidecar_log_field(&format!("{err:#}"))
+                        ),
+                        suppressed,
+                    });
+                }
                 Self::auto_select_backend()
             }
             None => {
-                crate::logging::error(&format!(
-                    "Sidecar memory model override '{}' (resolved {:?}) has no live provider to fork; falling back to auto-selection",
-                    model, spec
-                ));
+                if let Some(suppressed) = probe.finish_failure("no-live-provider", now) {
+                    emit(ConfiguredModelRouteDiagnostic::Failure {
+                        message: format!(
+                            "Sidecar memory model override '{}' (resolved {}) has no live provider to fork; falling back to auto-selection",
+                            bounded_sidecar_log_field(&model),
+                            bounded_sidecar_log_field(&format!("{spec:?}"))
+                        ),
+                        suppressed,
+                    });
+                }
                 Self::auto_select_backend()
             }
         }
@@ -1112,6 +1464,185 @@ mod tests {
         assert_eq!(SIDECAR_FAST_MODEL, "gpt-5.6-luna");
     }
 
+    fn route_key(model: &str, provider_generation: u64) -> ConfiguredModelRouteKey {
+        ConfiguredModelRouteKey {
+            model: model.to_string(),
+            provider_generation,
+        }
+    }
+
+    #[test]
+    fn configured_route_cooldown_survives_unrelated_config_generation_churn() {
+        let mut gate = ConfiguredModelRouteGate::default();
+        let started = Instant::now();
+        let retry_interval = Duration::from_secs(30);
+        let key = route_key("profile:model-a", 7);
+        let first = gate
+            .begin_probe(key.clone(), started, retry_interval)
+            .expect("initial route probe");
+        assert_eq!(gate.finish_failure(&first, "fork-error", started), Some(0));
+
+        for _unrelated_config_generation in 2..=100 {
+            assert!(
+                gate.begin_probe(
+                    key.clone(),
+                    started + Duration::from_secs(1),
+                    retry_interval,
+                )
+                .is_none(),
+                "config-only churn must not change route identity or reset cooldown"
+            );
+        }
+        assert_eq!(gate.cooldowns.len(), 1);
+        assert_eq!(gate.cooldowns[&key].suppressed, 99);
+    }
+
+    #[test]
+    fn configured_route_cooldowns_survive_alternating_route_keys() {
+        let mut gate = ConfiguredModelRouteGate::default();
+        let started = Instant::now();
+        let retry_interval = Duration::from_secs(30);
+        let first_key = route_key("profile:model-a", 11);
+        let second_key = route_key("profile:model-b", 11);
+
+        for key in [&first_key, &second_key] {
+            let probe = gate
+                .begin_probe(key.clone(), started, retry_interval)
+                .expect("initial probe for each route");
+            assert_eq!(gate.finish_failure(&probe, "fork-error", started), Some(0));
+        }
+        for _ in 0..20 {
+            assert!(
+                gate.begin_probe(
+                    first_key.clone(),
+                    started + Duration::from_secs(1),
+                    retry_interval,
+                )
+                .is_none()
+            );
+            assert!(
+                gate.begin_probe(
+                    second_key.clone(),
+                    started + Duration::from_secs(1),
+                    retry_interval,
+                )
+                .is_none()
+            );
+        }
+
+        assert_eq!(gate.cooldowns.len(), 2);
+        assert_eq!(gate.cooldowns[&first_key].suppressed, 20);
+        assert_eq!(gate.cooldowns[&second_key].suppressed, 20);
+    }
+
+    #[test]
+    fn configured_route_simultaneous_probes_finish_out_of_order_safely() {
+        let mut gate = ConfiguredModelRouteGate::default();
+        let started = Instant::now();
+        let retry_interval = Duration::from_secs(30);
+        let first_key = route_key("profile:model-a", 13);
+        let second_key = route_key("profile:model-b", 13);
+        let first = gate
+            .begin_probe(first_key.clone(), started, retry_interval)
+            .expect("first route begins");
+        let second = gate
+            .begin_probe(second_key.clone(), started, retry_interval)
+            .expect("second route begins concurrently");
+        assert!(
+            gate.begin_probe(first_key.clone(), started, retry_interval)
+                .is_none(),
+            "a duplicate probe for an in-flight route is suppressed"
+        );
+
+        assert_eq!(
+            gate.finish_failure(&second, "no-live-provider", started),
+            Some(0)
+        );
+        assert_eq!(
+            gate.finish_failure(&first, "fork-error", started),
+            Some(1),
+            "the first route retains its own simultaneous suppression count"
+        );
+        assert!(gate.in_flight.is_empty());
+
+        let later = started + retry_interval + Duration::from_millis(1);
+        let first_recovery = gate
+            .begin_probe(first_key, later, retry_interval)
+            .expect("first route retries");
+        let second_recovery = gate
+            .begin_probe(second_key, later, retry_interval)
+            .expect("second route retries");
+        assert!(matches!(
+            gate.finish_success(&second_recovery),
+            Some(ConfiguredModelRouteDiagnostic::Recovery {
+                previous_failure_kind: "no-live-provider",
+                suppressed: 0,
+                ..
+            })
+        ));
+        assert!(matches!(
+            gate.finish_success(&first_recovery),
+            Some(ConfiguredModelRouteDiagnostic::Recovery {
+                previous_failure_kind: "fork-error",
+                suppressed: 0,
+                ..
+            })
+        ));
+        assert!(gate.in_flight.is_empty());
+        assert!(gate.cooldowns.is_empty());
+    }
+
+    #[test]
+    fn configured_route_gate_is_capacity_and_ttl_bounded() {
+        let mut gate = ConfiguredModelRouteGate::default();
+        let started = Instant::now();
+        for index in 0..=CONFIGURED_MODEL_ROUTE_STATE_CAPACITY {
+            let key = route_key(&format!("profile:model-{index}"), 17);
+            let probe = gate
+                .begin_probe(key, started, Duration::ZERO)
+                .expect("sequential bounded probe");
+            assert_eq!(gate.finish_failure(&probe, "fork-error", started), Some(0));
+        }
+        assert_eq!(gate.cooldowns.len(), CONFIGURED_MODEL_ROUTE_STATE_CAPACITY);
+
+        let expired = started + CONFIGURED_MODEL_ROUTE_STATE_TTL + Duration::from_millis(1);
+        let probe = gate
+            .begin_probe(route_key("profile:fresh", 17), expired, Duration::ZERO)
+            .expect("expired state is pruned");
+        assert!(gate.cooldowns.is_empty());
+        gate.release_probe(&probe);
+        assert!(gate.in_flight.is_empty());
+    }
+
+    #[test]
+    fn configured_route_lease_drop_releases_in_flight_probe() {
+        let _guard = crate::storage::lock_test_env();
+        reset_configured_model_route_gate_for_tests();
+        let started = Instant::now();
+        let key = route_key("profile:lease", u64::MAX);
+        let first = begin_configured_model_route_probe(key.clone(), started, Duration::ZERO)
+            .expect("first lease");
+        drop(first);
+        let second = begin_configured_model_route_probe(key, started, Duration::ZERO)
+            .expect("dropped lease releases route");
+        drop(second);
+    }
+
+    #[test]
+    fn configured_route_log_fields_are_single_line_and_bounded() {
+        let raw = format!("model\nwith\tcontrols:{}", "x".repeat(500));
+        let sanitized = bounded_sidecar_log_field(&raw);
+        assert!(
+            !sanitized
+                .chars()
+                .any(|value| matches!(value, '\n' | '\r' | '\t'))
+        );
+        assert!(
+            sanitized.chars().count() <= SIDECAR_LOG_FIELD_MAX_CHARS + 32,
+            "bounded helper includes only a short truncation suffix"
+        );
+    }
+
     #[test]
     fn test_backend_selection_prefers_openai() {
         // Make backend selection deterministic by isolating credentials.
@@ -1517,6 +2048,98 @@ mod tests {
             "gemini-model",
             "a fork/set_model failure must never mutate the live provider selection"
         );
+    }
+
+    #[test]
+    fn configured_sidecar_route_backoff_bounds_attempts_and_reports_recovery_and_relapse() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::TempDir::new().expect("create temp jcode home");
+        let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+        let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
+        reset_configured_model_route_gate_for_tests();
+
+        let stub = std::sync::Arc::new(StubProvider::new("gemini", "[1]"));
+        stub.shared
+            .fail_set_model
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::provider::set_active_provider(stub.clone());
+
+        let started = Instant::now();
+        let retry_interval = Duration::from_secs(30);
+        let mut diagnostics = Vec::new();
+        for _ in 0..100 {
+            let sidecar = Sidecar::with_configured_model_at(
+                Some("omlx:Qwen3.6-MoE".to_string()),
+                started,
+                retry_interval,
+                &mut |diagnostic| diagnostics.push(diagnostic),
+            );
+            assert_eq!(sidecar.backend_name(), "provider");
+            assert_ne!(sidecar.model_name(), "omlx:Qwen3.6-MoE");
+        }
+        assert_eq!(
+            stub.shared
+                .set_model_specs
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .len(),
+            1,
+            "100 constructions inside the backoff window must perform one configured route attempt"
+        );
+        assert_eq!(diagnostics.len(), 1, "the initial failure logs once");
+        assert!(matches!(
+            diagnostics.first(),
+            Some(ConfiguredModelRouteDiagnostic::Failure { suppressed: 0, .. })
+        ));
+
+        stub.shared
+            .fail_set_model
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let recovered = Sidecar::with_configured_model_at(
+            Some("omlx:Qwen3.6-MoE".to_string()),
+            started + retry_interval + Duration::from_millis(1),
+            retry_interval,
+            &mut |diagnostic| diagnostics.push(diagnostic),
+        );
+        assert_eq!(recovered.model_name(), "omlx:Qwen3.6-MoE");
+        assert!(matches!(
+            diagnostics.get(1),
+            Some(ConfiguredModelRouteDiagnostic::Recovery {
+                previous_failure_kind: "fork-error",
+                suppressed: 99,
+                ..
+            })
+        ));
+
+        stub.shared
+            .fail_set_model
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..100 {
+            let _ = Sidecar::with_configured_model_at(
+                Some("omlx:Qwen3.6-MoE".to_string()),
+                started + retry_interval + Duration::from_millis(2),
+                retry_interval,
+                &mut |diagnostic| diagnostics.push(diagnostic),
+            );
+        }
+        assert_eq!(
+            stub.shared
+                .set_model_specs
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .len(),
+            3,
+            "recovery retries once and a later relapse retries once, while repeated constructions remain bounded"
+        );
+        assert_eq!(
+            diagnostics.len(),
+            3,
+            "failure, recovery, and relapse are the only diagnostics for 201 constructions"
+        );
+        assert!(matches!(
+            diagnostics.last(),
+            Some(ConfiguredModelRouteDiagnostic::Failure { suppressed: 0, .. })
+        ));
     }
 
     /// A RUNTIME `complete_simple` failure after successful construction

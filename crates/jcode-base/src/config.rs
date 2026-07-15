@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -26,6 +27,8 @@ const CONFIG_CACHE_CHECK_INTERVAL: Duration = if cfg!(test) {
 } else {
     Duration::from_millis(500)
 };
+
+static CONFIG_CACHE_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 const CONFIG_ENV_KEYS: &[&str] = &[
     "HOME",
@@ -290,6 +293,7 @@ pub fn config() -> &'static Config {
                 &fingerprint,
             ));
             cache.config = leak_config(Config::load());
+            CONFIG_CACHE_GENERATION.fetch_add(1, Ordering::Release);
             // Loading applies env overrides that can themselves set env vars
             // (e.g. copilot_premium propagates config -> JCODE_COPILOT_PREMIUM).
             // Re-fingerprint after the load so those self-inflicted env changes
@@ -453,6 +457,11 @@ pub fn invalidate_config_cache() {
     cache.force_reload = true;
     drop(cache);
     notify_config_reloaded();
+}
+
+#[cfg(test)]
+pub(crate) fn config_cache_generation() -> u64 {
+    CONFIG_CACHE_GENERATION.load(Ordering::Acquire)
 }
 
 fn notify_config_reloaded() {

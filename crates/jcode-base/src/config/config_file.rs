@@ -1,12 +1,21 @@
 use super::*;
 use crate::storage::jcode_dir;
+use std::collections::hash_map::DefaultHasher;
 use std::fs::{File, OpenOptions};
+use std::hash::{Hash, Hasher};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 static WARNED_PINNED_CONFIG_SAVE_KEYS: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
 static LOGGED_CONFIG_LAYER_SUMMARY: WarnOnce = WarnOnce::new();
+static UNKNOWN_CONFIG_KEY_WARNINGS: OnceLock<Mutex<UnknownConfigKeyWarningState>> = OnceLock::new();
+
+#[derive(Default)]
+struct UnknownConfigKeyWarningState {
+    fingerprint: Option<u64>,
+    warned_keys: BTreeSet<String>,
+}
 
 impl Config {
     /// Get the config file path
@@ -79,9 +88,10 @@ impl Config {
                     anyhow::anyhow!("Failed to parse config file {}: {}", path.display(), e)
                 })?;
 
-            for key in &unknown_keys {
-                crate::logging::warn(&format!("Unknown config key '{}' ignored", key));
-            }
+            Self::warn_unknown_config_keys_once(
+                config_content_fingerprint(&content),
+                &unknown_keys,
+            );
 
             config.display.apply_legacy_compat();
             return Ok(Some(config));
@@ -129,9 +139,10 @@ impl Config {
                 )
             })?;
 
-        for key in &unknown_keys {
-            crate::logging::warn(&format!("Unknown config key '{}' ignored", key));
-        }
+        Self::warn_unknown_config_keys_once(
+            config_content_fingerprint(&effective_content),
+            &unknown_keys,
+        );
 
         config.display.apply_legacy_compat();
         config.layer_metadata =
@@ -179,6 +190,61 @@ impl Config {
             unknown_keys.insert(path.to_string());
         })?;
         Ok((config, unknown_keys))
+    }
+
+    fn warn_unknown_config_keys_once(fingerprint: u64, unknown_keys: &BTreeSet<String>) -> usize {
+        Self::warn_unknown_config_keys_once_with(fingerprint, unknown_keys, |key| {
+            crate::logging::warn(&format!("Unknown config key '{}' ignored", key));
+        })
+    }
+
+    pub(crate) fn warn_unknown_config_keys_once_with(
+        fingerprint: u64,
+        unknown_keys: &BTreeSet<String>,
+        mut emit: impl FnMut(&str),
+    ) -> usize {
+        let warnings = UNKNOWN_CONFIG_KEY_WARNINGS
+            .get_or_init(|| Mutex::new(UnknownConfigKeyWarningState::default()));
+        let new_keys = {
+            let mut state = warnings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if state.fingerprint != Some(fingerprint) {
+                state.fingerprint = Some(fingerprint);
+                state.warned_keys.clear();
+            }
+            unknown_keys
+                .iter()
+                .filter(|key| state.warned_keys.insert((*key).clone()))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        for key in &new_keys {
+            emit(key);
+        }
+        new_keys.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_unknown_config_key_warnings_for_tests() {
+        let mut state = UNKNOWN_CONFIG_KEY_WARNINGS
+            .get_or_init(|| Mutex::new(UnknownConfigKeyWarningState::default()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *state = UnknownConfigKeyWarningState::default();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn unknown_config_key_warning_state_for_tests() -> (Option<u64>, Vec<String>) {
+        let state = UNKNOWN_CONFIG_KEY_WARNINGS
+            .get_or_init(|| Mutex::new(UnknownConfigKeyWarningState::default()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (
+            state.fingerprint,
+            state.warned_keys.iter().cloned().collect(),
+        )
     }
 
     /// Normalize `agents.memory_embedding_backend` to exactly `"local"` or
@@ -568,6 +634,32 @@ impl Config {
             provider.unwrap_or("(auto)")
         ));
         Ok(())
+    }
+
+    /// Persist the post-login default only if no provider has been selected yet.
+    ///
+    /// The decision and write share the config-file lock so a concurrent login
+    /// or settings update cannot be overwritten after winning the race.
+    pub fn set_post_login_default_if_unset(
+        suggested_model: Option<&str>,
+        provider: &str,
+    ) -> anyhow::Result<bool> {
+        let mut changed = false;
+        Self::patch_config_file(|cfg| {
+            if cfg.provider.default_provider.is_some() {
+                return false;
+            }
+            if cfg.provider.default_model.is_none() {
+                cfg.provider.default_model = suggested_model.map(ToString::to_string);
+            }
+            cfg.provider.default_provider = Some(provider.to_string());
+            changed = true;
+            true
+        })?;
+        if changed {
+            crate::logging::info(&format!("Saved post-login default provider: {}", provider));
+        }
+        Ok(changed)
     }
 
     /// Update just the default provider in the config file.
@@ -994,6 +1086,12 @@ impl Config {
         }
         Ok(())
     }
+}
+
+fn config_content_fingerprint(content: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    hasher.finish()
 }
 
 struct ConfigFileLock {

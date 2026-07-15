@@ -399,11 +399,6 @@ fn maybe_persist_default_provider_after_login(
     provider: LoginProviderDescriptor,
     options: &LoginOptions,
 ) {
-    let cfg = crate::config::Config::load();
-    if cfg.provider.default_provider.is_some() {
-        return;
-    }
-
     let provider_id =
         crate::provider::MultiProvider::config_default_provider_for_login_provider(provider);
     let Some(provider_id) = provider_id else {
@@ -421,13 +416,10 @@ fn maybe_persist_default_provider_after_login(
         _ => None,
     };
 
-    let model_to_save = cfg
-        .provider
-        .default_model
-        .as_deref()
-        .or(suggested_model.as_deref());
-
-    if let Err(err) = crate::config::Config::set_default_model(model_to_save, Some(provider_id)) {
+    if let Err(err) = crate::config::Config::set_post_login_default_if_unset(
+        suggested_model.as_deref(),
+        provider_id,
+    ) {
         crate::logging::warn(&format!(
             "Failed to save {} as the default provider after login: {}",
             provider_id, err
