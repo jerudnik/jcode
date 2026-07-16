@@ -182,7 +182,12 @@ pub(super) async fn handle_clear_session(
 
     {
         let mut agent_guard = agent.lock().await;
-        agent_guard.mark_closed();
+        if let Err(error) = agent_guard.mark_closed() {
+            crate::logging::warn(&format!(
+                "Failed to persist cleared session close for {}: {}",
+                old_session_id, error
+            ));
+        }
     }
 
     let mut new_agent = Agent::new_with_initial_working_dir(
@@ -827,7 +832,12 @@ async fn cleanup_detached_source_session_if_unused(
 
     {
         let mut agent_guard = source_agent.lock().await;
-        agent_guard.mark_closed();
+        if let Err(error) = agent_guard.mark_closed() {
+            crate::logging::warn(&format!(
+                "Failed to persist detached source close for {}: {}",
+                old_session_id, error
+            ));
+        }
     }
 
     {
@@ -1297,7 +1307,12 @@ pub(super) async fn handle_resume_session(
 
     {
         let mut agent_guard = agent.lock().await;
-        agent_guard.mark_closed();
+        if let Err(error) = agent_guard.mark_closed() {
+            crate::logging::warn(&format!(
+                "Failed to persist pre-resume close for {}: {}",
+                client_session_id, error
+            ));
+        }
     }
 
     let (result, is_canary) = {

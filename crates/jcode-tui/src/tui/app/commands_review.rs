@@ -268,8 +268,12 @@ fn apply_judge_visible_context_if_needed(session: &mut Session, title_override: 
 }
 
 pub(super) fn reset_current_session(app: &mut App) {
-    app.session.mark_closed();
-    let _ = app.session.save();
+    if let Err(error) = app.session.mark_closed_and_persist() {
+        crate::logging::warn(&format!(
+            "failed to persist reset session close state for {}: {}",
+            app.session.id, error
+        ));
+    }
     app.clear_provider_messages();
     app.clear_display_messages();
     // A streaming mermaid preview (STREAMING_PREVIEW_DIAGRAM) belongs to the

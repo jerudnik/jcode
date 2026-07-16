@@ -170,8 +170,12 @@ impl Agent {
         let preserve_debug = self.session.is_debug;
         let preserve_working_dir = self.session.working_dir.clone();
 
-        self.session.mark_closed();
-        self.persist_session_best_effort("pre-clear session close state");
+        if let Err(error) = self.session.mark_closed_and_persist() {
+            logging::warn(&format!(
+                "Failed to persist pre-clear session close state for {}: {}",
+                self.session.id, error
+            ));
+        }
 
         let mut new_session = Session::create(None, None);
         new_session.mark_active();

@@ -4,7 +4,11 @@ pub use crate::storage::{
     SessionCounts, SessionPresence, active_session_ids, find_active_session_id_by_pid,
     mark_streaming, session_counts, session_presence, unmark_streaming,
 };
-use crate::storage::{active_pids_dir, register_active_pid, unregister_active_pid};
+use crate::storage::{
+    SessionPidMarkerObservations, SessionPidMarkerRemoval, active_pids_dir,
+    observe_session_pid_markers, register_active_pid, remove_session_pid_markers_if_unchanged,
+};
+use anyhow::Result;
 
 /// RAII guard that marks a session as actively streaming for its lifetime.
 ///
@@ -38,18 +42,29 @@ impl StreamingGuard {
 /// clients as live forever.
 pub fn reconcile_active_sessions() -> usize {
     let mut reconciled = 0;
+    let mut persistence_failed = false;
     for session_id in active_session_ids() {
         let Ok(mut session) = Session::load(&session_id) else {
             continue;
         };
-        if session.reconcile_dead_owner() {
-            reconciled += 1;
+        match session.reconcile_dead_owner() {
+            Ok(true) => reconciled += 1,
+            Ok(false) => {}
+            Err(error) => {
+                persistence_failed = true;
+                crate::logging::warn(&format!(
+                    "Failed to persist dead-owner reconciliation for session {}: {}",
+                    session_id, error
+                ));
+            }
         }
     }
     // Preserve ordering: persisted Active sessions must consume their markers
     // and become Crashed before storage removes dead, malformed, or orphaned
     // markers that could not be tied to loadable session data.
-    crate::storage::sweep_stale_pid_markers();
+    if !persistence_failed {
+        crate::storage::sweep_stale_pid_markers();
+    }
     reconciled
 }
 use chrono::{DateTime, Utc};
@@ -1034,13 +1049,57 @@ request in this new forked session, using the inherited conversation only as con
     /// Mark session as closed normally
     pub fn mark_closed(&mut self) {
         self.status = SessionStatus::Closed;
-        unregister_active_pid(&self.id);
     }
 
     /// Mark session as crashed
     pub fn mark_crashed(&mut self, message: Option<String>) {
         self.status = SessionStatus::Crashed { message };
-        unregister_active_pid(&self.id);
+    }
+
+    fn maybe_force_terminal_save_failure(&self) -> Result<()> {
+        #[cfg(debug_assertions)]
+        if matches!(
+            std::env::var("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION"),
+            Ok(session_id) if session_id == self.id
+        ) {
+            anyhow::bail!("forced terminal save failure for {}", self.id);
+        }
+        Ok(())
+    }
+
+    fn maybe_replace_terminal_marker_after_observe(&self) {
+        #[cfg(debug_assertions)]
+        if matches!(
+            std::env::var("JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION"),
+            Ok(session_id) if session_id == self.id
+        ) {
+            register_active_pid(&self.id, std::process::id());
+        }
+    }
+
+    fn persist_terminal_state_with_observed_markers(
+        &mut self,
+        observed: SessionPidMarkerObservations,
+    ) -> Result<SessionPidMarkerRemoval> {
+        self.maybe_replace_terminal_marker_after_observe();
+        self.maybe_force_terminal_save_failure()?;
+        self.save()?;
+        Ok(remove_session_pid_markers_if_unchanged(&self.id, &observed))
+    }
+
+    pub fn mark_closed_and_persist(&mut self) -> Result<SessionPidMarkerRemoval> {
+        let observed = observe_session_pid_markers(&self.id);
+        self.mark_closed();
+        self.persist_terminal_state_with_observed_markers(observed)
+    }
+
+    pub fn mark_crashed_and_persist(
+        &mut self,
+        message: Option<String>,
+    ) -> Result<SessionPidMarkerRemoval> {
+        let observed = observe_session_pid_markers(&self.id);
+        self.mark_crashed(message);
+        self.persist_terminal_state_with_observed_markers(observed)
     }
 
     /// Mark session as having an error
@@ -1095,12 +1154,16 @@ request in this new forked session, using the inherited conversation only as con
     }
 
     /// Persist a crash transition if this active session's owner PID is gone.
-    pub fn reconcile_dead_owner(&mut self) -> bool {
-        if self.detect_crash() {
-            let _ = self.save();
-            return true;
+    pub fn reconcile_dead_owner(&mut self) -> Result<bool> {
+        let observed = observe_session_pid_markers(&self.id);
+        if observed.active_marker_is_live() {
+            return Ok(false);
         }
-        false
+        if self.detect_crash() {
+            self.persist_terminal_state_with_observed_markers(observed)?;
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Check if this session is working on the jcode repository
