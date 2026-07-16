@@ -113,10 +113,7 @@ impl PidMarkerIdentity {
     fn from_metadata(metadata: &std::fs::Metadata) -> Self {
         Self {
             len: metadata.len(),
-            modified: match metadata.modified() {
-                Ok(modified) => Some(modified),
-                Err(_) => None,
-            },
+            modified: metadata.modified().ok(),
             #[cfg(unix)]
             dev: metadata.dev(),
             #[cfg(unix)]
