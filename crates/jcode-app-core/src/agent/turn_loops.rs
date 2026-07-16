@@ -150,17 +150,13 @@ impl Agent {
                         }
                         continue;
                     }
-                    self.append_provider_error_response(
+                    return Err(self.append_and_classify_provider_error(
                         self.provider.name(),
                         self.provider.model(),
                         api_start,
-                        &e,
-                        EvidenceErrorClass::ProviderOpen,
-                        provider_correlation.clone(),
-                    );
-                    return Err(Self::classified_evidence_error(
                         e,
                         EvidenceErrorClass::ProviderOpen,
+                        provider_correlation.clone(),
                     ));
                 }
             };
@@ -261,17 +257,13 @@ impl Agent {
                             api_start,
                             vec![("mode", "blocking".to_string()), ("error", err_str)],
                         );
-                        self.append_provider_error_response(
+                        return Err(self.append_and_classify_provider_error(
                             self.provider.name(),
                             self.provider.model(),
                             api_start,
-                            &e,
-                            EvidenceErrorClass::StreamTransport,
-                            provider_correlation.clone(),
-                        );
-                        return Err(Self::classified_evidence_error(
                             e,
                             EvidenceErrorClass::StreamTransport,
+                            provider_correlation.clone(),
                         ));
                     }
                 };

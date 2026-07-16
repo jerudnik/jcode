@@ -170,6 +170,54 @@ impl Agent {
         anyhow::Error::new(ClassifiedEvidenceError { error_class, error })
     }
 
+    /// W7c: shared emission for the ubiquitous terminal pair "append the
+    /// provider error-response evidence, then return the same error wrapped
+    /// with its class". Emits exactly one ProviderResponse evidence event and
+    /// performs no control flow; engine-specific retry/cancel branches stay
+    /// in the turn loops.
+    pub(super) fn append_and_classify_provider_error(
+        &self,
+        provider_name: &str,
+        provider_model: String,
+        started_at: Instant,
+        error: anyhow::Error,
+        error_class: EvidenceErrorClass,
+        correlation: CorrelationIds,
+    ) -> anyhow::Error {
+        self.append_provider_error_response(
+            provider_name,
+            provider_model,
+            started_at,
+            &error,
+            error_class,
+            correlation,
+        );
+        Self::classified_evidence_error(error, error_class)
+    }
+
+    /// W7c: shared emission for turn interruption: constructs the typed
+    /// marker, appends exactly one interrupted ProviderResponse evidence
+    /// event, and returns the marker error unwrapped (interruptions are
+    /// classified by type, not by `ClassifiedEvidenceError`).
+    pub(super) fn append_interrupted_turn_evidence(
+        &self,
+        provider_name: &str,
+        provider_model: String,
+        started_at: Instant,
+        correlation: CorrelationIds,
+    ) -> anyhow::Error {
+        let error = Self::interrupted_turn_error();
+        self.append_provider_error_response(
+            provider_name,
+            provider_model,
+            started_at,
+            &error,
+            EvidenceErrorClass::TurnInterrupted,
+            correlation,
+        );
+        error
+    }
+
     pub(super) fn interrupted_turn_error() -> anyhow::Error {
         anyhow::Error::new(TurnInterruptedError)
     }

@@ -266,16 +266,12 @@ impl Agent {
                             logging::info(
                                 "Graceful shutdown/cancel before API stream opened - stopping turn",
                             );
-                            let error = Self::interrupted_turn_error();
-                            self.append_provider_error_response(
+                            return Err(self.append_interrupted_turn_evidence(
                                 provider.name(),
                                 provider.model(),
                                 api_start,
-                                &error,
-                                EvidenceErrorClass::TurnInterrupted,
                                 provider_correlation.clone(),
-                            );
-                            return Err(error);
+                            ));
                         }
                         result = &mut complete_future => {
                             match result {
@@ -316,17 +312,13 @@ impl Agent {
                                         });
                                         continue;
                                     }
-                                    self.append_provider_error_response(
+                                    return Err(self.append_and_classify_provider_error(
                                         provider.name(),
                                         provider.model(),
                                         api_start,
-                                        &e,
-                                        EvidenceErrorClass::ProviderOpen,
-                                        provider_correlation.clone(),
-                                    );
-                                    return Err(Self::classified_evidence_error(
                                         e,
                                         EvidenceErrorClass::ProviderOpen,
+                                        provider_correlation.clone(),
                                     ));
                                 }
                             }
@@ -418,16 +410,12 @@ impl Agent {
                         logging::info(
                             "Graceful shutdown/cancel while waiting for API stream event - stopping stream",
                         );
-                        let error = Self::interrupted_turn_error();
-                        self.append_provider_error_response(
+                        return Err(self.append_interrupted_turn_evidence(
                             provider.name(),
                             provider.model(),
                             api_start,
-                            &error,
-                            EvidenceErrorClass::TurnInterrupted,
                             provider_correlation.clone(),
-                        );
-                        return Err(error);
+                        ));
                     }
                     event = next_event => event,
                 };
@@ -514,17 +502,13 @@ impl Agent {
                             api_start,
                             vec![("mode", "mpsc".to_string()), ("error", err_str)],
                         );
-                        self.append_provider_error_response(
+                        return Err(self.append_and_classify_provider_error(
                             provider.name(),
                             provider.model(),
                             api_start,
-                            &e,
-                            EvidenceErrorClass::StreamTransport,
-                            provider_correlation.clone(),
-                        );
-                        return Err(Self::classified_evidence_error(
                             e,
                             EvidenceErrorClass::StreamTransport,
+                            provider_correlation.clone(),
                         ));
                     }
                 };
