@@ -253,20 +253,6 @@ fn open_handle<'a>(
     logs.get_mut(path)
 }
 
-/// Drop the cached handle for a swarm's log (e.g. after archival). The file
-/// itself is deliberately kept: completed-swarm logs are the observation/
-/// evaluation dataset per the W1 decision record.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by tests; wired for archival later")
-)]
-pub(super) fn drop_control_log_handle(swarm_id: &str) {
-    let path = control_log_path(swarm_id);
-    if let Ok(mut logs) = CONTROL_LOGS.lock() {
-        logs.remove(&path);
-    }
-}
-
 /// Fold the on-disk control log for a swarm. Query surface for consumers that
 /// want log-derived state (step 5 shim retirement, tests, future daemons).
 /// Reads the file directly rather than the cached fold so it also observes

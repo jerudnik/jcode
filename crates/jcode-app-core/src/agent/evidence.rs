@@ -364,7 +364,6 @@ fn classify_evidence_error(error: &anyhow::Error) -> EvidenceErrorClass {
 #[cfg(test)]
 mod w7a_error_semantics_tests {
     use super::*;
-    use anyhow::Context as _;
 
     /// A lookalike error whose display text matches the interruption marker
     /// but whose type does not. The typed predicate must reject it.
