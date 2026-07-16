@@ -2,6 +2,7 @@ use super::*;
 use jcode_session_types::{
     CorrelationIds, GitSnapshot, PayloadSummary, SessionLogEventKind, SessionLogStatus,
 };
+use std::fmt;
 use uuid::Uuid;
 
 impl Agent {
@@ -44,7 +45,7 @@ impl Agent {
                 output: output.map(|text| {
                     crate::session::payload_summary_text(text, Some("text/plain".to_string()))
                 }),
-                error_class: result.as_ref().err().map(error_class),
+                error_class: result.as_ref().err().map(error_class_for_error),
             },
             correlation,
         );
@@ -144,7 +145,8 @@ impl Agent {
         provider_name: &str,
         provider_model: String,
         started_at: Instant,
-        error: &anyhow::Error,
+        _error: &anyhow::Error,
+        error_class: EvidenceErrorClass,
         correlation: CorrelationIds,
     ) {
         self.append_session_evidence_with_correlation(
@@ -155,10 +157,21 @@ impl Agent {
                 duration_ms: started_at.elapsed().as_millis() as u64,
                 output: None,
                 usage: None,
-                error_class: Some(error_class(error)),
+                error_class: Some(error_class.as_str().to_string()),
             },
             correlation,
         );
+    }
+
+    pub(super) fn classified_evidence_error(
+        error: anyhow::Error,
+        error_class: EvidenceErrorClass,
+    ) -> anyhow::Error {
+        anyhow::Error::new(ClassifiedEvidenceError { error_class, error })
+    }
+
+    pub(super) fn interrupted_turn_error() -> anyhow::Error {
+        anyhow::Error::new(TurnInterruptedError)
     }
 
     pub(super) fn evidence_payload_json<T: serde::Serialize + ?Sized>(
@@ -201,28 +214,78 @@ impl Agent {
 }
 
 fn status_for_result<T>(result: &Result<T>) -> SessionLogStatus {
-    if result.is_ok() {
-        SessionLogStatus::Ok
-    } else {
-        SessionLogStatus::Error
+    match result {
+        Ok(_) => SessionLogStatus::Ok,
+        Err(error) if error.downcast_ref::<TurnInterruptedError>().is_some() => {
+            SessionLogStatus::Interrupted
+        }
+        Err(_) => SessionLogStatus::Error,
     }
 }
 
-pub(super) fn error_class(error: &anyhow::Error) -> String {
-    error
-        .chain()
-        .last()
-        .map(|cause| {
-            cause
-                .to_string()
-                .split(':')
-                .next()
-                .unwrap_or("error")
-                .trim()
-                .chars()
-                .take(120)
-                .collect::<String>()
-        })
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "error".to_string())
+#[derive(Debug)]
+struct TurnInterruptedError;
+
+impl fmt::Display for TurnInterruptedError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("turn interrupted")
+    }
+}
+
+impl std::error::Error for TurnInterruptedError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EvidenceErrorClass {
+    ContextLimit,
+    ProviderOpen,
+    StreamTransport,
+    StreamEvent,
+    TurnInterrupted,
+    Unknown,
+}
+
+impl EvidenceErrorClass {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ContextLimit => "context_limit",
+            Self::ProviderOpen => "provider_open_error",
+            Self::StreamTransport => "stream_transport_error",
+            Self::StreamEvent => "stream_error",
+            Self::TurnInterrupted => "turn_interrupted",
+            Self::Unknown => "unknown_error",
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ClassifiedEvidenceError {
+    error_class: EvidenceErrorClass,
+    error: anyhow::Error,
+}
+
+impl fmt::Display for ClassifiedEvidenceError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.error)
+    }
+}
+
+impl std::error::Error for ClassifiedEvidenceError {}
+
+pub(super) fn error_class_for_error(error: &anyhow::Error) -> String {
+    classify_evidence_error(error).as_str().to_string()
+}
+
+fn classify_evidence_error(error: &anyhow::Error) -> EvidenceErrorClass {
+    for cause in error.chain() {
+        if cause.downcast_ref::<TurnInterruptedError>().is_some() {
+            return EvidenceErrorClass::TurnInterrupted;
+        }
+        if let Some(error) = cause.downcast_ref::<ClassifiedEvidenceError>() {
+            return error.error_class;
+        }
+        if cause.downcast_ref::<StreamError>().is_some() {
+            return EvidenceErrorClass::StreamEvent;
+        }
+    }
+    EvidenceErrorClass::Unknown
 }
