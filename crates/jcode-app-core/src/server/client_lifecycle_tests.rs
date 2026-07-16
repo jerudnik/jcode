@@ -473,7 +473,14 @@ fn cancel_aborts_detached_streaming_turn_with_stale_stop_signal() -> anyhow::Res
             .await
             .expect("streaming turn must abort promptly after cancel (issue #428)")
             .expect("turn task join");
-        result.expect("cancelled turn should checkpoint cleanly");
+        let error = result.expect_err(
+            "cancelled streaming turn should report an interrupted turn, not completed work",
+        );
+        assert_eq!(
+            error.to_string(),
+            "turn interrupted",
+            "cancellation should terminate the live turn via its registered signal"
+        );
 
         // The turn is over, so its cancel registration must be gone and the
         // agent's own signal must be reset so the *next* turn is not aborted
@@ -1364,15 +1371,27 @@ async fn incompatible_initial_subscribe_preflights_before_full_session_initializ
         .expect("server task result");
 
     assert!(!forked.load(Ordering::SeqCst), "provider must not fork");
-    assert!(sessions.read().await.is_empty(), "no Agent/session map entry");
+    assert!(
+        sessions.read().await.is_empty(),
+        "no Agent/session map entry"
+    );
     assert!(
         client_connections.read().await.is_empty(),
         "no client connection entry"
     );
-    assert!(global_session_id.read().await.is_empty(), "no global session id");
+    assert!(
+        global_session_id.read().await.is_empty(),
+        "no global session id"
+    );
     assert_eq!(*client_count.read().await, 0, "client count unchanged");
-    assert!(shutdown_signals.read().await.is_empty(), "no shutdown signal");
-    assert!(soft_interrupt_queues.read().await.is_empty(), "no soft queue");
+    assert!(
+        shutdown_signals.read().await.is_empty(),
+        "no shutdown signal"
+    );
+    assert!(
+        soft_interrupt_queues.read().await.is_empty(),
+        "no soft queue"
+    );
     assert!(swarm_members.read().await.is_empty(), "no member state");
     if let Some(active_dir) = crate::storage::active_pids_dir() {
         assert!(

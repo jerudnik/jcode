@@ -15,24 +15,43 @@ use std::path::{Path, PathBuf};
 
 const PID_MARKER_LOCK_FILE: &str = ".pid-markers.lock";
 const PID_MARKER_TEMP_PREFIX: &str = ".pid-marker-";
+const PID_MARKER_LOCK_ATTEMPTS: usize = 64;
 
 struct PidMarkerLock {
     file: File,
 }
 
 impl PidMarkerLock {
-    fn acquire() -> Option<Self> {
+    fn open_lock_file() -> Option<File> {
         let home = jcode_dir().ok()?;
         std::fs::create_dir_all(&home).ok()?;
-        let file = OpenOptions::new()
+        OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
             .truncate(false)
             .open(home.join(PID_MARKER_LOCK_FILE))
-            .ok()?;
+            .ok()
+    }
+
+    fn acquire_writer() -> Option<Self> {
+        let file = Self::open_lock_file()?;
         fs2::FileExt::lock_exclusive(&file).ok()?;
         Some(Self { file })
+    }
+
+    fn acquire_bounded() -> Option<Self> {
+        let file = Self::open_lock_file()?;
+        for _ in 0..PID_MARKER_LOCK_ATTEMPTS {
+            match fs2::FileExt::try_lock_exclusive(&file) {
+                Ok(()) => return Some(Self { file }),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::yield_now();
+                }
+                Err(_) => return None,
+            }
+        }
+        None
     }
 }
 
@@ -57,7 +76,7 @@ pub fn streaming_pids_dir() -> Option<std::path::PathBuf> {
 
 /// Record that `session_id` is owned by process `pid`.
 pub fn register_active_pid(session_id: &str, pid: u32) {
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_writer() else {
         return;
     };
     let Some(dir) = active_pids_dir() else {
@@ -68,7 +87,7 @@ pub fn register_active_pid(session_id: &str, pid: u32) {
 
 /// Remove the active-PID record for `session_id`, if present.
 pub fn unregister_active_pid(session_id: &str) {
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_writer() else {
         return;
     };
     if let Some(dir) = active_pids_dir() {
@@ -184,7 +203,7 @@ pub fn observe_session_pid_markers(session_id: &str) -> SessionPidMarkerObservat
     if !is_single_path_component(session_id) {
         return SessionPidMarkerObservations::default();
     }
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_bounded() else {
         return SessionPidMarkerObservations::default();
     };
     SessionPidMarkerObservations {
@@ -208,7 +227,7 @@ pub fn remove_session_pid_markers_if_unchanged(
     if !is_single_path_component(session_id) {
         return SessionPidMarkerRemoval::default();
     }
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_bounded() else {
         return SessionPidMarkerRemoval::default();
     };
     SessionPidMarkerRemoval {
@@ -229,7 +248,7 @@ pub fn remove_session_pid_markers_if_unchanged(
 
 /// Mark a session as actively streaming a model response.
 pub fn mark_streaming(session_id: &str) {
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_writer() else {
         return;
     };
     let Some(dir) = streaming_pids_dir() else {
@@ -240,7 +259,7 @@ pub fn mark_streaming(session_id: &str) {
 
 /// Clear the streaming marker for a session (turn finished or interrupted).
 pub fn unmark_streaming(session_id: &str) {
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_writer() else {
         return;
     };
     if let Some(dir) = streaming_pids_dir() {
@@ -317,7 +336,7 @@ pub fn remove_active_pid_marker_if_stale_and_matches(session_id: &str, observed:
     if !is_single_path_component(session_id) {
         return false;
     }
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_bounded() else {
         return false;
     };
     let Some(dir) = active_pids_dir() else {
@@ -337,7 +356,7 @@ pub fn remove_active_pid_marker_if_stale_and_matches(session_id: &str, observed:
 /// the lock cannot be acquired, the sweep removes nothing. Removal is best-effort
 /// and idempotent; unreadable entries and non-files are left untouched.
 pub fn sweep_stale_pid_markers() -> PidMarkerSweep {
-    let Some(_lock) = PidMarkerLock::acquire() else {
+    let Some(_lock) = PidMarkerLock::acquire_bounded() else {
         return PidMarkerSweep::default();
     };
     PidMarkerSweep {
@@ -758,6 +777,89 @@ mod tests {
             !active_dir.join("not-written").exists(),
             "lock failure must prevent an uncoordinated write"
         );
+
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[test]
+    fn held_marker_lock_is_bounded_and_fail_closed_without_sleeping() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+        let _held = PidMarkerLock::acquire_writer().expect("hold marker lock");
+        let active_dir = active_pids_dir().expect("active marker dir");
+        std::fs::create_dir_all(&active_dir).expect("create active marker dir");
+        let marker = active_dir.join("must-stay-held-lock");
+        std::fs::write(&marker, "not-a-pid").expect("write stale marker");
+
+        assert_eq!(
+            sweep_stale_pid_markers(),
+            PidMarkerSweep::default(),
+            "a contended marker lock must return a bounded fail-closed outcome"
+        );
+        assert!(marker.exists(), "contended cleanup must not delete markers");
+
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn conditional_session_marker_cleanup_reports_exact_partial_removals() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let session_id = "session_partial_marker_cleanup";
+        let pid = std::process::id();
+        let active_dir = active_pids_dir().expect("active marker dir");
+        let streaming_dir = streaming_pids_dir().expect("streaming marker dir");
+
+        register_active_pid(session_id, pid);
+        mark_streaming(session_id);
+        let observed = observe_session_pid_markers(session_id);
+        write_pid_marker(&active_dir.join(session_id), pid).expect("replace active marker");
+        let removal = remove_session_pid_markers_if_unchanged(session_id, &observed);
+        assert_eq!(
+            removal,
+            SessionPidMarkerRemoval {
+                active_removed: false,
+                streaming_removed: true,
+            }
+        );
+        assert!(active_dir.join(session_id).exists());
+        assert!(!streaming_dir.join(session_id).exists());
+
+        register_active_pid(session_id, pid);
+        mark_streaming(session_id);
+        let observed = observe_session_pid_markers(session_id);
+        write_pid_marker(&streaming_dir.join(session_id), pid).expect("replace streaming marker");
+        let removal = remove_session_pid_markers_if_unchanged(session_id, &observed);
+        assert_eq!(
+            removal,
+            SessionPidMarkerRemoval {
+                active_removed: true,
+                streaming_removed: false,
+            }
+        );
+        assert!(!active_dir.join(session_id).exists());
+        assert!(streaming_dir.join(session_id).exists());
+
+        register_active_pid(session_id, pid);
+        mark_streaming(session_id);
+        let observed = observe_session_pid_markers(session_id);
+        write_pid_marker(&active_dir.join(session_id), pid).expect("replace active marker again");
+        write_pid_marker(&streaming_dir.join(session_id), pid)
+            .expect("replace streaming marker again");
+        let removal = remove_session_pid_markers_if_unchanged(session_id, &observed);
+        assert_eq!(
+            removal,
+            SessionPidMarkerRemoval {
+                active_removed: false,
+                streaming_removed: false,
+            }
+        );
+        assert!(active_dir.join(session_id).exists());
+        assert!(streaming_dir.join(session_id).exists());
 
         jcode_core::env::remove_var("JCODE_HOME");
     }
