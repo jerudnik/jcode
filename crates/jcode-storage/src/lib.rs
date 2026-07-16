@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 
 mod active_pids;
 pub use active_pids::{
-    PidMarkerSweep, SessionCounts, SessionPresence, StreamingGuard, active_pids_dir,
-    active_session_ids, find_active_session_id_by_pid, mark_streaming, register_active_pid,
-    remove_active_pid_marker_if_stale_and_matches, session_counts, session_presence,
-    streaming_pids_dir, sweep_stale_pid_markers, unmark_streaming, unregister_active_pid,
+    PidMarkerSweep, SessionCounts, SessionPidMarkerObservations, SessionPidMarkerRemoval,
+    SessionPresence, StreamingGuard, active_pids_dir, active_session_ids,
+    find_active_session_id_by_pid, mark_streaming, observe_session_pid_markers,
+    register_active_pid, remove_active_pid_marker_if_stale_and_matches,
+    remove_session_pid_markers_if_unchanged, session_counts, session_presence, streaming_pids_dir,
+    sweep_stale_pid_markers, unmark_streaming, unregister_active_pid,
 };
 
 /// Platform-aware runtime directory for sockets and ephemeral state.

@@ -14,6 +14,27 @@ fn isolated_jcode_home(name: &str) -> Result<(std::path::PathBuf, EnvVarGuard)> 
     Ok((dir, guard))
 }
 
+#[cfg(unix)]
+fn exited_child_pid() -> Result<u32> {
+    let mut child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("exit 0")
+        .spawn()?;
+    let pid = child.id();
+    let _ = child.wait()?;
+    Ok(pid)
+}
+
+fn active_marker_path(session_id: &str) -> Result<std::path::PathBuf> {
+    Ok(crate::storage::active_pids_dir()
+        .ok_or_else(|| anyhow!("active PID marker directory unavailable"))?
+        .join(session_id))
+}
+
+fn live_marker_contents() -> String {
+    std::process::id().to_string()
+}
+
 #[test]
 fn test_session_exists_roundtrip() -> Result<()> {
     let tmp_dir = std::env::temp_dir().join(format!(
@@ -66,6 +87,118 @@ fn reconcile_active_sessions_marks_dead_pid_crashed() -> Result<()> {
     let refreshed = Session::load("session_dead_pid_reconcile")?;
     assert!(matches!(refreshed.status, SessionStatus::Crashed { .. }));
     assert!(!active_session_ids().contains(&"session_dead_pid_reconcile".to_string()));
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn reconcile_save_failure_retains_marker_and_retry_consumes_after_save() -> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("dead-pid-reconcile-save-failure")?;
+    let _fail_guard = EnvVarGuard::set(
+        "JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION",
+        "session_dead_pid_reconcile_save_failure",
+    );
+
+    let dead_pid = exited_child_pid()?;
+    let mut session = Session::create_with_id(
+        "session_dead_pid_reconcile_save_failure".to_string(),
+        None,
+        Some("dead pid save failure".to_string()),
+    );
+    session.mark_active_with_pid(dead_pid);
+    session.save()?;
+    let marker = active_marker_path(&session.id)?;
+
+    assert_eq!(reconcile_active_sessions(), 0);
+    assert!(marker.exists(), "failed terminal save must retain marker");
+    assert!(matches!(
+        Session::load(&session.id)?.status,
+        SessionStatus::Active
+    ));
+
+    drop(_fail_guard);
+    assert_eq!(reconcile_active_sessions(), 1);
+    assert!(matches!(
+        Session::load(&session.id)?.status,
+        SessionStatus::Crashed { .. }
+    ));
+    assert!(
+        !marker.exists(),
+        "successful retry must persist Crashed before consuming the original marker"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_reconcile_success_preserves_replaced_live_successor_marker() -> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("dead-pid-reconcile-replaced-successor")?;
+    let _replace_guard = EnvVarGuard::set(
+        "JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION",
+        "session_dead_pid_reconcile_replaced_successor",
+    );
+
+    let dead_pid = exited_child_pid()?;
+    let mut session = Session::create_with_id(
+        "session_dead_pid_reconcile_replaced_successor".to_string(),
+        None,
+        Some("dead pid replaced successor".to_string()),
+    );
+    session.mark_active_with_pid(dead_pid);
+    session.save()?;
+    let marker = active_marker_path(&session.id)?;
+
+    assert_eq!(reconcile_active_sessions(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&marker)?,
+        live_marker_contents(),
+        "stale reconciliation must not unlink a successor marker written after observation"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn stale_reconcile_failure_preserves_replaced_live_successor_marker_and_retry_skips_live_owner()
+-> Result<()> {
+    let _lock = lock_env();
+    let (_home, _guard) = isolated_jcode_home("dead-pid-reconcile-replaced-failure")?;
+    let _replace_guard = EnvVarGuard::set(
+        "JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION",
+        "session_dead_pid_reconcile_replaced_failure",
+    );
+    let fail_guard = EnvVarGuard::set(
+        "JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION",
+        "session_dead_pid_reconcile_replaced_failure",
+    );
+
+    let dead_pid = exited_child_pid()?;
+    let mut session = Session::create_with_id(
+        "session_dead_pid_reconcile_replaced_failure".to_string(),
+        None,
+        Some("dead pid replaced failure".to_string()),
+    );
+    session.mark_active_with_pid(dead_pid);
+    session.save()?;
+    let marker = active_marker_path(&session.id)?;
+
+    assert_eq!(reconcile_active_sessions(), 0);
+    assert_eq!(std::fs::read_to_string(&marker)?, live_marker_contents());
+    assert!(matches!(
+        Session::load(&session.id)?.status,
+        SessionStatus::Active
+    ));
+
+    drop(fail_guard);
+    drop(_replace_guard);
+    assert_eq!(reconcile_active_sessions(), 0);
+    assert_eq!(
+        std::fs::read_to_string(&marker)?,
+        live_marker_contents(),
+        "retry must observe the live successor marker and skip stale crash reconciliation"
+    );
     Ok(())
 }
 

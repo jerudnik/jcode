@@ -9,6 +9,8 @@
 use crate::jcode_dir;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 const PID_MARKER_LOCK_FILE: &str = ".pid-markers.lock";
@@ -75,6 +77,153 @@ pub fn unregister_active_pid(session_id: &str) {
     // A closed session is never streaming.
     if let Some(dir) = streaming_pids_dir() {
         let _ = std::fs::remove_file(dir.join(session_id));
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PidMarkerIdentity {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+impl PidMarkerIdentity {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        Self {
+            len: metadata.len(),
+            modified: match metadata.modified() {
+                Ok(modified) => Some(modified),
+                Err(_) => None,
+            },
+            #[cfg(unix)]
+            dev: metadata.dev(),
+            #[cfg(unix)]
+            ino: metadata.ino(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PidMarkerObservation {
+    contents: Vec<u8>,
+    identity: PidMarkerIdentity,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionPidMarkerObservations {
+    pub active: Option<PidMarkerObservation>,
+    pub streaming: Option<PidMarkerObservation>,
+}
+
+impl SessionPidMarkerObservations {
+    pub fn active_pid(&self) -> Option<u32> {
+        self.active
+            .as_ref()
+            .and_then(|observation| pid_from_marker_contents(&observation.contents))
+    }
+
+    pub fn active_marker_is_live(&self) -> bool {
+        self.active_pid()
+            .is_some_and(jcode_core::process::is_running)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionPidMarkerRemoval {
+    pub active_removed: bool,
+    pub streaming_removed: bool,
+}
+
+fn observe_pid_marker(path: &Path) -> Option<PidMarkerObservation> {
+    let metadata_before = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return None,
+    };
+    let contents = match std::fs::read(path) {
+        Ok(contents) => contents,
+        Err(_) => return None,
+    };
+    maybe_replace_marker_after_observation_content_read(path, &contents);
+    let metadata_after = match std::fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return None,
+    };
+    let identity = PidMarkerIdentity::from_metadata(&metadata_before);
+    if identity != PidMarkerIdentity::from_metadata(&metadata_after) {
+        return None;
+    }
+    Some(PidMarkerObservation { contents, identity })
+}
+
+#[cfg(not(test))]
+fn maybe_replace_marker_after_observation_content_read(_path: &Path, _contents: &[u8]) {}
+
+#[cfg(test)]
+fn maybe_replace_marker_after_observation_content_read(path: &Path, contents: &[u8]) {
+    const PATH_VAR: &str = "JCODE_TEST_REPLACE_MARKER_AFTER_OBSERVE_CONTENT_PATH";
+    let Ok(target) = std::env::var(PATH_VAR) else {
+        return;
+    };
+    if target != path.to_string_lossy() {
+        return;
+    }
+    let Some(pid) = pid_from_marker_contents(contents) else {
+        return;
+    };
+    let _ = write_pid_marker(path, pid);
+}
+
+/// Capture the current active and streaming marker bytes plus file identity for
+/// a terminal transition. The observation is intentionally made before session
+/// persistence; later cleanup removes only the same marker file, so a reconnect
+/// that replaces the marker in between cannot be unlinked by stale cleanup.
+pub fn observe_session_pid_markers(session_id: &str) -> SessionPidMarkerObservations {
+    if !is_single_path_component(session_id) {
+        return SessionPidMarkerObservations::default();
+    }
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return SessionPidMarkerObservations::default();
+    };
+    SessionPidMarkerObservations {
+        active: active_pids_dir()
+            .as_deref()
+            .and_then(|dir| observe_pid_marker(&dir.join(session_id))),
+        streaming: streaming_pids_dir()
+            .as_deref()
+            .and_then(|dir| observe_pid_marker(&dir.join(session_id))),
+    }
+}
+
+/// Remove terminal markers only when they are still the exact files observed
+/// before durable session persistence. Unlike stale-marker sweeping, this may
+/// remove a live PID owned by the current process after it has persisted a
+/// terminal state, but it will not remove a marker replaced by another owner.
+pub fn remove_session_pid_markers_if_unchanged(
+    session_id: &str,
+    observed: &SessionPidMarkerObservations,
+) -> SessionPidMarkerRemoval {
+    if !is_single_path_component(session_id) {
+        return SessionPidMarkerRemoval::default();
+    }
+    let Some(_lock) = PidMarkerLock::acquire() else {
+        return SessionPidMarkerRemoval::default();
+    };
+    SessionPidMarkerRemoval {
+        active_removed: active_pids_dir()
+            .as_deref()
+            .zip(observed.active.as_ref())
+            .is_some_and(|(dir, observation)| {
+                remove_marker_if_unchanged(&dir.join(session_id), observation)
+            }),
+        streaming_removed: streaming_pids_dir()
+            .as_deref()
+            .zip(observed.streaming.as_ref())
+            .is_some_and(|(dir, observation)| {
+                remove_marker_if_unchanged(&dir.join(session_id), observation)
+            }),
     }
 }
 
@@ -262,6 +411,25 @@ fn remove_marker_if_stale_and_matches(path: &Path, observed: &[u8]) -> bool {
     remove_file_if_present(path)
 }
 
+fn remove_marker_if_unchanged(path: &Path, observed: &PidMarkerObservation) -> bool {
+    // Re-read contents and metadata under the marker lock. Matching contents
+    // alone are not enough because a successor may register the same PID bytes
+    // via atomic replacement before stale terminal cleanup runs.
+    let Ok(current) = std::fs::read(path) else {
+        return false;
+    };
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if current != observed.contents
+        || PidMarkerIdentity::from_metadata(&metadata) != observed.identity
+    {
+        return false;
+    }
+
+    remove_file_if_present(path)
+}
+
 fn remove_file_if_present(path: &Path) -> bool {
     match std::fs::remove_file(path) {
         Ok(()) => true,
@@ -277,10 +445,13 @@ fn is_single_path_component(value: &str) -> bool {
 }
 
 fn marker_contents_are_live(contents: &[u8]) -> bool {
+    pid_from_marker_contents(contents).is_some_and(jcode_core::process::is_running)
+}
+
+fn pid_from_marker_contents(contents: &[u8]) -> Option<u32> {
     std::str::from_utf8(contents)
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())
-        .is_some_and(jcode_core::process::is_running)
 }
 
 /// Find the active session ID currently owned by the given process ID.
@@ -505,6 +676,36 @@ mod tests {
             std::process::id().to_string()
         );
 
+        jcode_core::env::remove_var("JCODE_HOME");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn observation_rejects_marker_replaced_between_content_and_metadata_read() {
+        let _guard = lock_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        jcode_core::env::set_var("JCODE_HOME", temp.path());
+
+        let session_id = "session_replaced_during_observation";
+        register_active_pid(session_id, std::process::id());
+        let marker = active_pids_dir()
+            .expect("active marker dir")
+            .join(session_id);
+        jcode_core::env::set_var(
+            "JCODE_TEST_REPLACE_MARKER_AFTER_OBSERVE_CONTENT_PATH",
+            &marker,
+        );
+
+        let observed = observe_session_pid_markers(session_id);
+        assert!(
+            observed.active.is_none(),
+            "unstable content/metadata observations must be rejected"
+        );
+        let removal = remove_session_pid_markers_if_unchanged(session_id, &observed);
+        assert!(!removal.active_removed);
+        assert!(marker.exists(), "replaced marker must survive cleanup");
+
+        jcode_core::env::remove_var("JCODE_TEST_REPLACE_MARKER_AFTER_OBSERVE_CONTENT_PATH");
         jcode_core::env::remove_var("JCODE_HOME");
     }
 

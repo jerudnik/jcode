@@ -396,7 +396,7 @@ impl AmbientRunnerHandle {
 
         let reminder = ambient::format_scheduled_session_message(item);
         let _ = agent.run_once_capture(&reminder).await?;
-        agent.mark_closed();
+        agent.mark_closed()?;
         Ok(())
     }
 
@@ -470,7 +470,7 @@ impl AmbientRunnerHandle {
 
         let reminder = ambient::format_scheduled_session_message(item);
         let _ = agent.run_once_capture(&reminder).await?;
-        agent.mark_closed();
+        agent.mark_closed()?;
         Ok(child_session_id)
     }
 
@@ -919,7 +919,7 @@ impl AmbientRunnerHandle {
         if let Some(result) = ambient_tools::take_cycle_result() {
             ambient_tools::unregister_ambient_session(&ambient_session_id);
             let conversation = agent.export_conversation_markdown();
-            agent.mark_closed();
+            agent.mark_closed()?;
             return Ok(AmbientCycleResult {
                 started_at,
                 ended_at: Utc::now(),
@@ -946,7 +946,7 @@ impl AmbientRunnerHandle {
         if let Some(result) = ambient_tools::take_cycle_result() {
             ambient_tools::unregister_ambient_session(&ambient_session_id);
             let conversation = agent.export_conversation_markdown();
-            agent.mark_closed();
+            agent.mark_closed()?;
             return Ok(AmbientCycleResult {
                 started_at,
                 ended_at: Utc::now(),
@@ -970,7 +970,7 @@ impl AmbientRunnerHandle {
             status: CycleStatus::Incomplete,
             conversation: Some(agent.export_conversation_markdown()),
         };
-        agent.mark_closed();
+        agent.mark_closed()?;
         Ok(forced)
     }
 

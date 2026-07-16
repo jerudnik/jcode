@@ -991,7 +991,7 @@ async fn mark_closed_persists_soft_interrupts_for_restore_after_reload() {
         SoftInterruptSource::System,
     );
 
-    agent.mark_closed();
+    agent.mark_closed().expect("persist close");
 
     let mut restored = Agent::new(provider, registry);
     restored
