@@ -139,6 +139,28 @@ impl Agent {
         }
     }
 
+    pub(super) fn append_provider_error_response(
+        &self,
+        provider_name: &str,
+        provider_model: String,
+        started_at: Instant,
+        error: &anyhow::Error,
+        correlation: CorrelationIds,
+    ) {
+        self.append_session_evidence_with_correlation(
+            SessionLogEventKind::ProviderResponse {
+                provider: provider_name.to_string(),
+                model: provider_model,
+                status: SessionLogStatus::Error,
+                duration_ms: started_at.elapsed().as_millis() as u64,
+                output: None,
+                usage: None,
+                error_class: Some(error_class(error)),
+            },
+            correlation,
+        );
+    }
+
     pub(super) fn evidence_payload_json<T: serde::Serialize + ?Sized>(
         &self,
         value: &T,
@@ -186,7 +208,7 @@ fn status_for_result<T>(result: &Result<T>) -> SessionLogStatus {
     }
 }
 
-fn error_class(error: &anyhow::Error) -> String {
+pub(super) fn error_class(error: &anyhow::Error) -> String {
     error
         .chain()
         .last()
