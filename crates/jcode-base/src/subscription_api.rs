@@ -108,7 +108,11 @@ pub async fn fetch_subscription_me() -> Result<SubscriptionMe> {
         .text()
         .await
         .context("failed to read jcode subscription /me response")?;
-    let me: SubscriptionMe = match serde_json::from_str(&body) {
+    apply_subscription_me_body(&body)
+}
+
+fn apply_subscription_me_body(body: &str) -> Result<SubscriptionMe> {
+    let me: SubscriptionMe = match serde_json::from_str(body) {
         Ok(me) => me,
         Err(error) => {
             record_jcode_validation(false, "jcode subscription /me response was malformed");
@@ -133,6 +137,16 @@ pub async fn fetch_subscription_me() -> Result<SubscriptionMe> {
     }
 
     Ok(me)
+}
+
+/// Apply a successful `/v1/me` response body without opening a socket.
+///
+/// This is available only to tests and downstream test-support builds. It uses
+/// the same parser, tier-cache update, and auth-validation path as
+/// [`fetch_subscription_me`].
+#[cfg(any(test, feature = "test-support"))]
+pub fn apply_subscription_me_fixture(body: &str) -> Result<SubscriptionMe> {
+    apply_subscription_me_body(body)
 }
 
 fn is_authoritative_denial_status(status: StatusCode) -> bool {
@@ -220,6 +234,56 @@ mod tests {
                 SubscriptionTierFreshness::UnknownDenied
             );
         }
+    }
+
+    #[test]
+    fn subscription_me_fixture_applies_live_plus_truth_without_network() {
+        let _guard = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp home");
+        crate::env::set_var("JCODE_HOME", temp_home.path());
+        crate::env::set_var(subscription_catalog::JCODE_API_KEY_ENV, "fixture-key");
+        crate::auth::AuthStatus::invalidate_cache();
+
+        let me = apply_subscription_me_fixture(
+            r#"{
+                "account_id": "acct_fixture",
+                "email": "fixture@example.invalid",
+                "tier": "plus",
+                "status": "active",
+                "usage": {"used_usd": 0.0, "budget_usd": 100.0}
+            }"#,
+        )
+        .expect("offline fixture should apply");
+
+        assert_eq!(me.parsed_tier(), Some(JcodeTier::Plus));
+        assert_eq!(me.tier_truth().freshness, SubscriptionTierFreshness::Live);
+        assert_eq!(subscription_catalog::cached_tier(), Some(JcodeTier::Plus));
+        assert!(crate::auth::validation::get("jcode").unwrap().success);
+
+        crate::env::remove_var(subscription_catalog::JCODE_API_KEY_ENV);
+        crate::env::remove_var("JCODE_HOME");
+        crate::auth::AuthStatus::invalidate_cache();
+    }
+
+    #[test]
+    fn subscription_me_fixture_malformed_body_fails_closed_without_network() {
+        let _guard = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp home");
+        crate::env::set_var("JCODE_HOME", temp_home.path());
+        subscription_catalog::store_cached_tier(Some(JcodeTier::Flagship))
+            .expect("seed stale flagship tier");
+
+        let error = apply_subscription_me_fixture(r#"{"account_id":"acct_fixture""#)
+            .expect_err("malformed fixture must fail");
+
+        assert!(error.to_string().contains("failed to parse"));
+        assert_eq!(subscription_catalog::cached_tier(), None);
+        assert!(!subscription_catalog::is_model_allowed_for_current_tier(
+            "claude-fable-5"
+        ));
+        assert!(!crate::auth::validation::get("jcode").unwrap().success);
+
+        crate::env::remove_var("JCODE_HOME");
     }
 
     #[test]
