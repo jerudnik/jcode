@@ -286,6 +286,46 @@ fn import_review_decision_timer_counts_down_and_times_out() {
 }
 
 #[test]
+fn import_review_timeout_fails_closed_without_import_task_transition() {
+    use crate::external_auth::ExternalAuthReviewCandidate;
+    use crate::tui::app::onboarding_flow::{DECISION_TIMEOUT, ImportReview};
+
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.onboarding_flow = None;
+        app.begin_onboarding_flow_at_login();
+
+        let mut review = ImportReview::new(vec![ExternalAuthReviewCandidate::fixture(
+            "OpenAI/Codex",
+            "Codex auth.json",
+        )])
+        .unwrap();
+        review.shown_at = std::time::Instant::now()
+            - (DECISION_TIMEOUT + std::time::Duration::from_secs(1));
+        if let Some(flow) = app.onboarding_flow.as_mut() {
+            flow.phase = OnboardingPhase::Login {
+                import: Some(review),
+            };
+        }
+
+        assert!(app.onboarding_tick(), "timed-out review should change state");
+        assert!(matches!(
+            app.onboarding_phase(),
+            Some(OnboardingPhase::Login { import: None })
+        ));
+        assert!(app.onboarding_import_in_progress.is_none());
+        assert!(app.onboarding_import_failed_provider.is_none());
+        assert_eq!(
+            app.onboarding_import_error.as_deref(),
+            Some("We couldn't import those logins.")
+        );
+
+        assert!(app.handle_onboarding_continue_prompt_key(KeyCode::Enter));
+        assert!(app.inline_interactive_state.is_some());
+    });
+}
+
+#[test]
 fn login_phase_enter_opens_login_picker() {
     with_temp_jcode_home(|| {
         let mut app = create_test_app();

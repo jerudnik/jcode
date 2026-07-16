@@ -1577,8 +1577,8 @@ impl App {
                 import: Some(_), ..
             }) => {
                 if decision_timed_out {
-                    // Timeout default: import every currently-checked login.
-                    self.onboarding_finish_import_review();
+                    // Silence is not consent to import credentials.
+                    self.onboarding_handle_login_failed(None);
                     return true;
                 }
                 // Keep the countdown notice fresh.
