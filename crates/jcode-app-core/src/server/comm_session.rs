@@ -131,6 +131,11 @@ fn spawn_visible_session_window_with_context(
     provider_key: Option<&str>,
     context: &crate::session_launch::SessionSpawnContext,
 ) -> anyhow::Result<bool> {
+    #[cfg(test)]
+    if let Ok(error) = std::env::var("JCODE_TEST_VISIBLE_SPAWN_ERROR") {
+        return Err(anyhow::anyhow!(error));
+    }
+
     let exe = crate::build::client_update_candidate(selfdev_requested)
         .map(|(path, _label)| path)
         .or_else(|| std::env::current_exe().ok())
@@ -410,6 +415,64 @@ fn cleanup_prepared_visible_spawn_session(session_id: &str) {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SwarmSpawnCreation {
+    Visible { session_id: String },
+    Headless { fallback_detail: Option<String> },
+}
+
+fn auto_fallback_status_detail(fallback_detail: &str, next_detail: Option<&str>) -> String {
+    match next_detail
+        .map(str::trim)
+        .filter(|detail| !detail.is_empty())
+    {
+        Some(detail) => format!("{fallback_detail}; {detail}"),
+        None => fallback_detail.to_string(),
+    }
+}
+
+fn resolve_swarm_spawn_creation(
+    spawn_mode: SwarmSpawnMode,
+    visible_spawn: Option<anyhow::Result<(String, bool)>>,
+) -> anyhow::Result<SwarmSpawnCreation> {
+    match spawn_mode {
+        SwarmSpawnMode::Headless | SwarmSpawnMode::Inline => Ok(SwarmSpawnCreation::Headless {
+            fallback_detail: None,
+        }),
+        SwarmSpawnMode::Visible => {
+            match visible_spawn.expect("visible mode should attempt visible spawn") {
+                Ok((session_id, true)) => Ok(SwarmSpawnCreation::Visible { session_id }),
+                Ok((session_id, false)) => Err(anyhow::anyhow!(
+                    "visible swarm spawn requested, but no visible client was launched for prepared session {session_id}"
+                )),
+                Err(error) => Err(anyhow::anyhow!("visible swarm spawn failed: {error}")),
+            }
+        }
+        SwarmSpawnMode::Auto => {
+            match visible_spawn.expect("auto mode should attempt visible spawn") {
+                Ok((session_id, true)) => Ok(SwarmSpawnCreation::Visible { session_id }),
+                Ok((session_id, false)) => Ok(SwarmSpawnCreation::Headless {
+                    fallback_detail: Some(format!(
+                        "auto fallback requested Auto -> resolved Headless after visible launch returned false for prepared session {session_id}"
+                    )),
+                }),
+                Err(error) => Ok(SwarmSpawnCreation::Headless {
+                    fallback_detail: Some(format!(
+                        "auto fallback requested Auto -> resolved Headless after visible spawn failed: {error}"
+                    )),
+                }),
+            }
+        }
+    }
+}
+
+fn auto_fallback_member_label(base_label: Option<&str>, fallback_detail: &str) -> String {
+    match base_label.map(str::trim).filter(|label| !label.is_empty()) {
+        Some(label) => format!("{label} ({fallback_detail})"),
+        None => fallback_detail.to_string(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn prepare_visible_spawn_session<F>(
     working_dir: Option<&str>,
@@ -619,10 +682,8 @@ pub(super) async fn spawn_swarm_agent(
     let visible_spawn = match resolved_spawn_mode {
         // Inline workers run in-process like headless ones; the difference is
         // purely how the coordinator renders them (a live inline gallery).
-        SwarmSpawnMode::Headless | SwarmSpawnMode::Inline => {
-            Err(anyhow::anyhow!("headless spawn requested"))
-        }
-        SwarmSpawnMode::Visible | SwarmSpawnMode::Auto => prepare_visible_spawn_session(
+        SwarmSpawnMode::Headless | SwarmSpawnMode::Inline => None,
+        SwarmSpawnMode::Visible | SwarmSpawnMode::Auto => Some(prepare_visible_spawn_session(
             resolved_working_dir.as_deref(),
             spawn_model.as_deref(),
             spawn_provider_key.as_deref(),
@@ -645,12 +706,13 @@ pub(super) async fn spawn_swarm_agent(
                     &context,
                 )
             },
-        ),
+        )),
     };
 
-    let (new_session_id, is_headless_fallback) = match visible_spawn {
-        Ok((new_session_id, true)) => Ok((new_session_id, false)),
-        Ok((_, false)) | Err(_) => {
+    let spawn_creation = resolve_swarm_spawn_creation(resolved_spawn_mode, visible_spawn)?;
+    let (new_session_id, is_headless_fallback, fallback_detail) = match spawn_creation {
+        SwarmSpawnCreation::Visible { session_id } => Ok((session_id, false, None)),
+        SwarmSpawnCreation::Headless { fallback_detail } => {
             let cmd = if let Some(ref dir) = resolved_working_dir {
                 format!("create_session:{dir}")
             } else {
@@ -684,7 +746,7 @@ pub(super) async fn spawn_swarm_agent(
                             .and_then(|session_id| session_id.as_str())
                             .map(|session_id| session_id.to_string())
                     })
-                    .map(|session_id| (session_id, true))
+                    .map(|session_id| (session_id, true, fallback_detail.clone()))
                     .ok_or_else(|| anyhow::anyhow!("Failed to parse spawned session id"))
             })
         }
@@ -728,7 +790,19 @@ pub(super) async fn spawn_swarm_agent(
     // member lists can show the task, not just the animal name. An explicit
     // spawn `label` wins; otherwise the label is derived from the raw prompt
     // (before completion-report boilerplate is appended).
-    if let Some(label_text) = label.as_deref().or(initial_message.as_deref()) {
+    if let Some(fallback_detail) = fallback_detail.as_deref() {
+        let fallback_label = auto_fallback_member_label(
+            label.as_deref().or(initial_message.as_deref()),
+            fallback_detail,
+        );
+        set_member_task_label(&new_session_id, &fallback_label, swarm_members).await;
+        let mut members = swarm_members.write().await;
+        if let Some(member) = members.get_mut(&new_session_id) {
+            member.detail = Some(fallback_detail.to_string());
+        }
+        drop(members);
+        broadcast_swarm_status(swarm_id, swarm_members, swarms_by_id).await;
+    } else if let Some(label_text) = label.as_deref().or(initial_message.as_deref()) {
         set_member_task_label(&new_session_id, label_text, swarm_members).await;
     }
     {
@@ -771,16 +845,29 @@ pub(super) async fn spawn_swarm_agent(
         };
         if let Some(agent_arc) = agent_arc {
             let sid_clone = new_session_id.clone();
+            let fallback_detail_for_status = fallback_detail.clone();
             let swarm_members2 = Arc::clone(swarm_members);
             let swarms_by_id2 = Arc::clone(swarms_by_id);
             let event_history2 = Arc::clone(event_history);
             let event_counter2 = Arc::clone(event_counter);
             let swarm_event_tx2 = swarm_event_tx.clone();
             tokio::spawn(async move {
+                let running_detail = fallback_detail_for_status
+                    .as_deref()
+                    .map(|fallback| {
+                        auto_fallback_status_detail(
+                            fallback,
+                            Some(&format!(
+                                "initial prompt queued: {}",
+                                truncate_detail(&initial_msg, 120)
+                            )),
+                        )
+                    })
+                    .or_else(|| Some(truncate_detail(&initial_msg, 120)));
                 update_member_status(
                     &sid_clone,
                     "running",
-                    Some(truncate_detail(&initial_msg, 120)),
+                    running_detail,
                     &swarm_members2,
                     &swarms_by_id2,
                     Some(&event_history2),
@@ -811,8 +898,24 @@ pub(super) async fn spawn_swarm_agent(
                     None
                 };
                 let (new_status, new_detail) = match result {
-                    Ok(()) => ("ready", None),
-                    Err(ref error) => ("failed", Some(truncate_detail(&error.to_string(), 120))),
+                    Ok(()) => (
+                        "ready",
+                        fallback_detail_for_status
+                            .as_deref()
+                            .map(|fallback| auto_fallback_status_detail(fallback, None)),
+                    ),
+                    Err(ref error) => (
+                        "failed",
+                        fallback_detail_for_status
+                            .as_deref()
+                            .map(|fallback| {
+                                auto_fallback_status_detail(
+                                    fallback,
+                                    Some(&truncate_detail(&error.to_string(), 120)),
+                                )
+                            })
+                            .or_else(|| Some(truncate_detail(&error.to_string(), 120))),
+                    ),
                 };
                 update_member_status_with_report(
                     &sid_clone,

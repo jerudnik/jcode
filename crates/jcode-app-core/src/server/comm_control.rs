@@ -731,7 +731,7 @@ async fn next_runnable_task_id_reclaiming_stranded(
     };
     let assignee_is_dead = move |session_id: &str| -> bool {
         match member_statuses.get(session_id) {
-            Some(status) => matches!(status.as_str(), "failed" | "stopped" | "crashed"),
+            Some(status) => super::swarm::member_status_is_dead(status),
             // Not a member of this swarm anymore: nothing can drive it.
             None => true,
         }
@@ -1720,22 +1720,34 @@ async fn handle_comm_assign_task_with_mode(
             let content =
                 deep_mode_assignment_content(plan, &item_id, is_composite_synthesis, &hydrated);
 
+            let previous_assignee = plan
+                .task_progress
+                .get(&item_id)
+                .and_then(|progress| progress.assigned_session_id.as_deref())
+                .or(plan.items[found_idx].assigned_to.as_deref())
+                .map(str::to_string);
             // Index resolved under this same plan lock, so it stays valid.
             let item = &mut plan.items[found_idx];
             item.assigned_to = Some(target_session.clone());
             item.status = "queued".to_string();
-            plan.task_progress.insert(
-                item_id.clone(),
-                SwarmTaskProgress {
-                    assigned_session_id: Some(target_session.clone()),
-                    assignment_summary: Some(truncate_detail(
-                        &combine_assignment_text(&content, message.as_deref()),
-                        120,
-                    )),
-                    assigned_at_unix_ms: Some(now_ms),
-                    ..SwarmTaskProgress::default()
-                },
-            );
+            let progress = plan.task_progress.entry(item_id.clone()).or_default();
+            progress.assigned_session_id = Some(target_session.clone());
+            progress.assignment_summary = Some(truncate_detail(
+                &combine_assignment_text(&content, message.as_deref()),
+                120,
+            ));
+            progress.assigned_at_unix_ms = Some(now_ms);
+            progress.stale_since_unix_ms = None;
+            if let Some(previous_assignee) = previous_assignee
+                && previous_assignee != target_session
+            {
+                jcode_plan::append_progress_provenance(
+                    progress,
+                    format!(
+                        "assignment takeover: reassigned from {previous_assignee} to {target_session}"
+                    ),
+                );
+            }
             plan.version += 1;
             plan.participants.insert(req_session_id.clone());
             plan.participants.insert(target_session.clone());
@@ -2046,11 +2058,11 @@ pub(super) async fn handle_comm_assign_next(
             )
             .await
             {
-                Ok(spawned_session) => {
+                Ok(spawned_session_id) => {
                     handle_comm_assign_task(
                         id,
                         req_session_id,
-                        Some(spawned_session),
+                        Some(spawned_session_id),
                         Some(selected_task_id),
                         message,
                         client_event_tx,
