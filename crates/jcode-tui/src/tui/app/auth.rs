@@ -15,6 +15,23 @@ use super::*;
 use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::Arc;
 
+fn jcode_subscription_tier_label(
+    tier_truth: &crate::subscription_catalog::SubscriptionTierSnapshot,
+) -> String {
+    match tier_truth.freshness {
+        crate::subscription_catalog::SubscriptionTierFreshness::Live
+        | crate::subscription_catalog::SubscriptionTierFreshness::Cache => {
+            tier_truth.effective_tier.display_name().to_string()
+        }
+        crate::subscription_catalog::SubscriptionTierFreshness::Default => {
+            "unknown (treated as Plus)".to_string()
+        }
+        crate::subscription_catalog::SubscriptionTierFreshness::UnknownDenied => {
+            format!("unknown-denied ({})", tier_truth.reason)
+        }
+    }
+}
+
 impl App {
     fn open_auth_browser(url: &str) -> bool {
         // Honors --no-browser/NO_BROWSER/JCODE_NO_BROWSER and never opens real
@@ -155,10 +172,8 @@ impl App {
                 handle.spawn(async move {
                     match crate::subscription_api::fetch_subscription_me().await {
                         Ok(me) => {
-                            let tier_label = me
-                                .parsed_tier()
-                                .map(|tier| tier.display_name().to_string())
-                                .unwrap_or_else(|| me.tier.clone());
+                            let tier_truth = me.tier_truth();
+                            let tier_label = jcode_subscription_tier_label(&tier_truth);
                             let resets = me
                                 .usage
                                 .resets_at
