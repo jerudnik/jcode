@@ -195,3 +195,352 @@ The cross-surface naming question exposed by W2 is pinned at
 [`docs/proposals/observability-field-naming.md`](../../proposals/observability-field-naming.md).
 This checkpoint changes no source behavior and authorizes no live, external,
 credentialed, telemetry, payment, publication, or release action.
+
+### 2026-07-16T05:11:00Z W2 integration PASS amendment
+
+W2/R05B is integrated at merge commit
+`cc1f93847f2bab2bb27a5af0ed741e518d94457a`. The final branch closure commit
+is `7be320f49`. Independent correctness and scope reviews both returned
+**PASS** and are preserved as
+[`reviews/2026-07-16-w2-low-friction-grok-rereview.md`](reviews/2026-07-16-w2-low-friction-grok-rereview.md),
+SHA-256 `53f53949901ff7d91e3eaafe10bb2e6553f506fc5fe6da1e17fcd0030f81b384`, and
+[`reviews/2026-07-16-w2-low-friction-fable-scope-rereview.md`](reviews/2026-07-16-w2-low-friction-fable-scope-rereview.md),
+SHA-256 `5c775609d17f2e851810001aa9ab1fd747f1ba2fd928252ef3a9fc11d33b2607`.
+
+Post-integration offline validation passed all thirteen focused W2/R05B and
+R05A fixture commands plus the affected three-package check: `14/14` exits
+matched `0`. The mandatory R09 matrix matched every pre-encoded exit without
+`--update`: classifier `17/17`, dependency boundary, wildcard `16`,
+warning `0`, shell syntax, and diff check passed; panic remained red at
+`31 -> 48`, swallowed-error remained red at `2987 -> 3074`, and production-
+and test-size gates remained red. The first combined attempt completed all
+fourteen Rust checks and then stopped because the dev shell did not expose
+`python3`; that failure is preserved, and the Python phase passed with the
+cached architecture-compatible pinned interpreter. Evidence is under
+[`evidence/2026-07-16-w2-integration/`](evidence/2026-07-16-w2-integration/);
+manifest-file SHA-256 `8d98a81240dd38c016a5dec4ef4d00a0effd06acc8e52e14b7906370ce1ae877`.
+
+The earlier Active Blockers statement that explicit `Visible` silently falls
+back, takeover resets history, cap-fail overwrites provenance, and liveness is
+duplicated is superseded by this amendment. Explicit `Visible` now fails
+closed, `Auto` alone falls back, progress/reclaim history is appended, one
+liveness authority is used, churn is bounded, and the dead-PID chain is covered.
+`CommSpawnResponse` and durable mutation replay are restored to their original
+shape, `PROTOCOL_VERSION` remains `1`, and the removed W2 symbols have zero
+hits under `crates/`. Response-leg fallback metadata remains deferred to
+R03A/future fork-owned API governance. No live swarm pilot or swarm widening is
+authorized.
+
+Preservation remains unchanged: only the user's
+`docs/fork/recovery/ORCHESTRATOR_PROMPT.md` edit is dirty, prompt diff SHA-256
+`8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`, and
+four stashes remain. No provider, credential, network, daemon, reload,
+publication, release, installation, updater, live terminal, or quality-baseline
+action occurred.
+
+### 2026-07-16T06:34:00Z W3 integration PASS amendment
+
+W3/R04 lifecycle widening is serially integrated by fast-forward at
+`566d7930606f96add92aed65564c95b539a03df0`. The final source/test head was
+`221a9474450a00ba761a989cd765c7e16cb85edc`; the append-only evidence correction
+and closure commit is `566d79306`. The earlier `120529497` twelve-fixture
+handoff remains preserved as non-authoritative history rather than rewritten.
+
+Independent final source/test reviews both returned **PASS** with no IMPORTANT or
+CRITICAL findings: Sol `session_chicken_1784182289665_4b173f0b2a17adad` and
+Fable `session_chick_1784183012716_c896c5ce7e1388b1`. The Fable review retained
+one minor note only: `runtime_cleanup_completed` is currently informational and
+always true.
+
+Post-integration validation at the exact integrated head repeated all fourteen
+named W3 fixtures with required guards and fresh disposable `JCODE_HOME` and
+`JCODE_RUNTIME_DIR`: 14 sections, 14 exact named passes, and 14 exit-zero
+sections, with no zero-filter result counted. Transcript SHA-256 is
+`59a1ad41431683555e2bb41b7137cc81eb30507ea13b24abf8b4fad50f50bd2a`.
+
+The affected three-package check, 17-test classifier, dependency boundaries,
+wildcard re-export budget, warning budget, shell syntax, and diff check exited
+`0`. Panic, swallowed-error, production-size, and test-size returned their
+unchanged expected-red `1`. No command used `--update`; W3-specific debt remains
+attributed in the R04 evidence package. Durable post-integration evidence is
+under [`evidence/2026-07-16-w3-integration/`](evidence/2026-07-16-w3-integration/).
+
+Preservation remains unchanged: only the user's
+`docs/fork/recovery/ORCHESTRATOR_PROMPT.md` edit is dirty, prompt diff SHA-256
+`8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`, and
+exactly four stashes remain. No provider, credential, daemon, reload, network,
+release, publication, installer, updater, live pilot, protocol/schema,
+quality-baseline, or externally visible action occurred. W3 is complete only
+for the deterministic lifecycle-widening contract; any live lifecycle pilot
+still requires a separate authorization gate.
+
+### 2026-07-16T07:26:39Z W6 integration PASS amendment
+
+W6/R10 acquisition and release safety is serially integrated at merge commit
+`e228fdb0183c5aae01b46b17ad364fbd7dfa1ef3`. The reviewed branch closure is
+`19d90af988a52ad31294beceb89c8ffe51920e2c`; the authoritative source/test
+review head is `c07654e259ef8bd016df1085437fd26e0e6c7e0d`. Later W6 commits preserve
+review and incident evidence only and do not change source, tests, or workflow
+behavior.
+
+The initial independent Grok review returned **FAIL** because unchanged
+`scripts/quick-release.sh` could create a public release before `SHA256SUMS`.
+That review remains byte-exact at
+[`reviews/2026-07-16-w6-r10-grok-fail-original.md`](reviews/2026-07-16-w6-r10-grok-fail-original.md),
+SHA-256 `d5560863860cff632ade2b031b144de03f44619f595f5598df93f8f7b90f7fce`.
+W6 expanded its declaration by exactly that path, composed the upstream fixed
+draft-staging behavior, added deterministic entrypoint invariants, and obtained
+two final independent **PASS** reviews: Grok
+[`reviews/2026-07-16-w6-r10-grok-pass-final.md`](reviews/2026-07-16-w6-r10-grok-pass-final.md),
+SHA-256 `07ee7c3f8d435377a8e951881e32617fda40308f649b5579f20140582b5b7625`,
+and Fable
+[`reviews/2026-07-16-w6-r10-fable-pass-final.md`](reviews/2026-07-16-w6-r10-fable-pass-final.md),
+SHA-256 `0aa72e35b43f7edd92f0658c281f4712e704e9c6627172ed41ab60cfc9c1e8a9`.
+
+Post-integration no-Nix validation passed the hermetic Python acquisition suite
+`6/6`, guarded Rust checksum tests `3/3`, affected
+`cargo check -p jcode-app-core`, touched shell syntax, integrated evidence
+manifest, and the unchanged R09 green gates. Panic, swallowed-error,
+production-size, and test-size gates retained their expected-red exit `1`;
+no command used `--update`. Durable deterministic-gzip transcripts and raw
+hashes are under
+[`evidence/2026-07-16-w6-integration/`](evidence/2026-07-16-w6-integration/).
+
+The optional coordinator actionlint and PowerShell attempts are explicitly
+invalid evidence. `nix shell --offline` unexpectedly contacted configured
+public/LAN caches and an SSH remote builder, so both attempts were cancelled
+after approximately 226 seconds. No remaining build process, release, ref
+movement, or repository mutation was found. The accepted post-integration run
+used no Nix invocation, network, remote builder, `gh`, tag, release, live
+updater/installer, profile mutation, credential, daemon, or reload action.
+
+Preservation remains unchanged: only the user's
+`docs/fork/recovery/ORCHESTRATOR_PROMPT.md` edit is dirty, prompt diff SHA-256
+`8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`, and
+exactly four stashes remain. W6 closes only the reviewed deterministic
+acquisition, checksum, reload-opt-in, and draft-publication contract. It does
+not authorize a real tag, release, publication, installer/updater run, package
+build, signing job, credential use, profile mutation, or daemon reload.
+
+### 2026-07-16T08:20:03Z W4 integration PASS amendment
+
+W4/R02 route-composition closure is serially integrated at merge commit
+`bce68e09852ac4bcc64131f318c7042d5d099143`. The reviewed branch closure is
+`6cc72ef780af5c3cdc5a8ac04622a6950b733705`; its source head remained the
+already-integrated W3 tree because W4 is evidence-only and changes no Rust.
+
+Independent final Opus and Fable reviews both returned **PASS** with zero
+IMPORTANT or CRITICAL findings. Their byte-exact artifacts are preserved under
+[`evidence/2026-07-16-w4-r02-route-closure/reviews/`](evidence/2026-07-16-w4-r02-route-closure/reviews/):
+Opus SHA-256 `28984d90d1749945a1f19fad6e3ee5949640012a352d6e26e68fbfd70849aab9`
+and Fable SHA-256 `62e247e180774c6640facb284b6a696b64b2cbf9a6a3a99857ecc9b704561b56`.
+
+Post-integration direct-tool validation passed the exact existing catalog-route
+fixture with `1 passed; 0 failed`, `cargo check -p jcode-base`, the committed W4
+evidence manifest, zero-Rust-diff and path-boundary guards, and all unchanged R09
+expected exits. Classifier, dependency, wildcard, warning, shell syntax, and
+diff check exited `0`; panic, swallowed-error, production-size, and test-size
+remained expected-red at exit `1`. No command used `--update`.
+
+The first coordinator process-boundary probe is preserved as invalid evidence:
+shell expansion malformed its awk `$0` expression, producing exit `2` before
+any Cargo test ran. The corrected accepted run recorded identical before/after
+process snapshots with only the same pre-existing SSH mux and no remote builder.
+Durable deterministic-gzip evidence is under
+[`evidence/2026-07-16-w4-integration/`](evidence/2026-07-16-w4-integration/).
+
+Preservation remains unchanged: only the user's
+`docs/fork/recovery/ORCHESTRATOR_PROMPT.md` edit is dirty, prompt diff SHA-256
+`8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`, and
+exactly four stashes remain. W4 changes no subscription catalog/API, tier or
+pricing governance, protocol, baseline, provider/account, credential, network,
+daemon, reload, publication, release, installer, updater, or external action.
+It closes only the evidence-backed optimistic-fallback versus definitive-fresh-
+absence route-composition contract and the fork's documented non-adoption of
+upstream commercial tier expansion.
+
+### 2026-07-16T08:23:30Z W5 integration PASS amendment
+
+W5/R08A onboarding-consent safety is serially integrated at merge commit
+`34743816cf7c668393d0fe407a19e917d4fa7e2b`. The reviewed branch closure is
+`52aed00e95887f8c694dd3249927fbaeed1a04ba`; the corrected discriminating test
+is `95861f4f5f354dbb3123c19754ac1ca1d13083ac`; and the frozen correction-
+evidence head was `f42f79bfcd3c0ec27f839b0ccef54f4755d9d056`.
+
+Fresh independent Opus and Fable reviews both returned **PASS** with zero
+IMPORTANT or CRITICAL findings. Their byte-exact artifacts are preserved under
+[`reviews/`](reviews/): Opus SHA-256
+`582b3d122a36e85ef60dfc76ad9f2c4d848d3c62791975ae2f82fae41c8806f5`
+and Fable SHA-256
+`d701676fd28fd82db90a285cab4c69810dce9977920dc5431d5230fbcde8f6bf`.
+The prior contradictory mutation-surviving PASS remains preserved as an
+evidence failure and is not counted.
+
+Post-integration direct-tool validation passed the corrected timeout regression
+and all three companion consent/liveness fixtures with exactly `1 passed; 0
+failed` each, `cargo check -p jcode-tui`, source rustfmt, both committed W5
+evidence manifests, the preserved red-on-bug mutation proof, the net-zero
+production diff and one-test path guards, and all unchanged R09 expected exits.
+Classifier, dependency, wildcard, warning, shell syntax, and diff check exited
+`0`; panic, swallowed-error, production-size, and test-size remained expected-
+red at exit `1`. No command used `--update`.
+
+Before/after process snapshots were identical and contained only the same pre-
+existing SSH mux; no remote builder appeared. Durable deterministic-gzip
+evidence is under
+[`evidence/2026-07-16-w5-integration/`](evidence/2026-07-16-w5-integration/).
+
+Preservation remains unchanged: only the user's
+`docs/fork/recovery/ORCHESTRATOR_PROMPT.md` edit is dirty, prompt diff SHA-256
+`8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`, and
+exactly four stashes remain. W5 authorizes no provider/account access,
+credentials, network, daemon, reload, publication, release, installer, updater,
+profile mutation, or external action. It closes only the fail-closed import-
+review timeout and explicit-consent transition contract.
+
+### 2026-07-16T08:35:01Z Phase 6 coordinator audit PASS candidate
+
+The final coordinator integration review passed at source head
+`51168d16e9c708ae4afff09a6fc6402642d17782`. Accepted evidence is under
+[`evidence/2026-07-16-phase6-final-audit/`](evidence/2026-07-16-phase6-final-audit/),
+whose `SHA256SUMS` SHA-256 is
+`9af58f1563f266066edd6da9208983da62eeb0b1997ec78f9c26318221dcd2a3`.
+
+The accepted manifest contains 76 expected-exit entries and zero mismatches:
+48 build-support tests, 81 protocol tests, 38 R02 subscription tests, 4 R02
+provider-filter tests, 14 exact R04 fixtures with per-fixture disposable homes,
+11 R12 fixtures, affected checks for build-support/protocol/base/app-core/
+storage/TUI, the R09 matrix, and preservation/process guards all matched.
+
+R09 current truth is reproducible without baseline movement: classifier 17/17,
+dependency boundaries, wildcard total 16, warning 0, shell syntax, and diff
+check passed; panic `31 -> 48`, swallowed-error `2987 -> 3074`, production-size,
+and test-size remained expected-red at exit `1`. No command used a baseline
+update. All 17 recovery evidence manifests verify.
+
+Fixed refs, merge base, branch, `vendor/upstream`, sole dirty prompt path and
+hash, four stashes, no active build, and before/after process equality passed.
+The same pre-existing SSH mux appeared before and after; no remote builder was
+observed. The accepted run invoked direct cached Cargo only, not Nix or
+`scripts/dev_cargo.sh`, and exercised no network, provider, credential,
+daemon/reload, live swarm, tool/MCP, release, installer/updater, signing,
+publication, or profile mutation.
+
+The first audit attempt is preserved as invalid because its R02 suite passed 38
+tests while a historical count guard still required 35. No product test failed
+in that attempt.
+
+Coordinator verdict: **PASS as a final-review candidate**. Remaining work is
+the required independent spot check, independent architecture/maintainability
+review, joint Sol/Fable sign-off, byte-exact report preservation, and final
+overlay-retirement amendment. No product-code failure remains known.
+
+### 2026-07-16T08:47:55Z independent spot-check PASS amendment
+
+Independent Opus review of candidate commit `4f96772b6` returned **PASS** with
+zero IMPORTANT or CRITICAL findings. The byte-exact report is
+[`reviews/2026-07-16-phase6-spot-check-opus.md`](reviews/2026-07-16-phase6-spot-check-opus.md),
+SHA-256 `092dbf4ec862b23b8d778f029772b46b434202e816622bd1f71c4bfa1f759dcc`.
+
+The reviewer reproduced all 17 evidence manifests, the package and raw hashes,
+fixed refs and preservation, protocol v1, authority-writer guards, sampled seam
+evidence, deferred-risk completeness, append-only status corrections, and the
+historical invalid R02 count attempt. It reran no Cargo suite and relied on the
+byte-verified accepted raw logs, as requested.
+
+Its only LOW finding was wording: `manifest.tsv` has 76 physical lines but only
+62 real expected-exit checks because 14 embedded Python commands continue onto
+a second line. The active docs and package metadata now say `62 checks / 76
+physical lines`. No result changed. The corrected package `SHA256SUMS` SHA-256
+is `ca8ff5b9f3b6c09dc0ff05de9b3c1c426fc2373706eeeca26cad87126f2e14d8`.
+
+The first path-scoped candidate commit attempt hit a local `.git/index.lock`
+race from overlapping identical coordinator invocations. No history moved; the
+lock was removed only after confirming no live Git process, and the staged docs
+were committed once. This is a preserved process failure, not accepted audit
+evidence.
+
+Next gate: independent architecture and maintainability review informed by this
+audit. Joint Sol/Fable sign-off remains pending.
+
+### 2026-07-16T09:09:20Z architecture and maintainability PASS amendment
+
+Independent Fable architecture review of corrected head `6cbed3a95`, informed
+by the committed Opus spot audit, returned **PASS** with zero IMPORTANT or
+CRITICAL findings. The byte-exact report is
+[`reviews/2026-07-16-phase6-architecture-fable.md`](reviews/2026-07-16-phase6-architecture-fable.md),
+SHA-256 `3fa06d1109c5fc56c9cf1bc73dcea540cff084b5ef4fcc1a0a8dcd48e3910865`.
+
+The review found five LOW maintainability items: duplicated W1 evidence blocks,
+string-only interruption identification, timing-dependent `failed` versus
+`stopped` display status after reload, a missing wrapped-error source chain, and
+unbounded direct-takeover provenance text. None changes current correctness,
+terminal/reclaim semantics, security, or the accepted offline evidence.
+
+`RECOVERY_PLAN.md` section 17 now records them as an explicit W7 architecture
+defer with owners, reasons, evidence gaps, and concrete triggers. The original
+W7 growth trigger is marked observed and ripe. W7 remains outside required
+recovery because starting new source work after the accepted final audit would
+reopen a pinned, independently passing behavior chain for LOW cleanup. The next
+R12/R04/R05A/R05B-adjacent source change is the mandatory scheduling boundary.
+
+Architecture gate is closed. Next and final review gate: joint Sol/Fable
+sign-off on the completed seam ledgers and recovery plan.
+
+### 2026-07-16T09:20:07Z final joint-signoff and closure amendment
+
+Phase 6 is **complete**. Fresh Sol and Fable signers reviewed the completed seam
+ledgers and recovery plan together at fixed head `17586246a`; both returned
+**PASS** with zero unresolved IMPORTANT or CRITICAL findings and no material
+overclaim:
+
+- Sol report SHA-256
+  `228f5937dd7eafa6570ed857b3a8db43a1ed43c0a3c9ad6dcaf6e2d29ef8ebe4`;
+- Fable report SHA-256
+  `7da9ca6810bde9db1035b68e1d2a46f3c0966c6610db7c19553acc96cacc13d3`.
+
+Final acceptance vector: coordinator audit 62/62 real checks; 17/17 evidence
+manifests; Opus spot PASS; Fable architecture PASS; joint Sol/Fable PASS. All
+four independent reports have zero unresolved IMPORTANT/CRITICAL findings.
+
+The final signed system remains bounded to accepted source head `51168d16e9` and
+offline preserved evidence. Protocol/session-type production diffs remain
+empty, `PROTOCOL_VERSION = 1`, no new production identity writer exists, and
+the three special recovery overlays R00/R09/R11 are now retired append-only.
+Their policies persist as normal governance. R09 expected-red debt remains
+visible and unattributed beyond its recorded owners. W7 is observed and ripe,
+but validly deferred with a mandatory next-adjacent-source-change trigger.
+
+Reproduction anchors:
+
+1. verify all 17 evidence manifests from their owning directories;
+2. verify the corrected package `SHA256SUMS` hash
+   `ca8ff5b9f3b6c09dc0ff05de9b3c1c426fc2373706eeeca26cad87126f2e14d8`;
+3. run the package `accepted/verify_raw.sh` and preserved invalid-attempt raw
+   verifier;
+4. verify the four review hashes recorded in `RECOVERY_PLAN.md` sections
+   16-18;
+5. confirm branch `recovery/2026-07-15`, four stashes, pinned
+   `vendor/upstream`, and sole dirty prompt diff hash
+   `8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`.
+
+No live/external action is authorized or implied by this closure. No further
+Phase 6 recovery workstream remains open.
+
+#### Final-closure process notes
+
+Two non-product failures are preserved rather than hidden:
+
+1. the first multi-file retirement patch used stale expected tail text for
+   `RESPONSIBILITIES.md`, `seams/README.md`, and R00, so those three hunks did
+   not apply while the other append-only hunks did; current tails were then
+   inspected and the three missing amendments were appended without replacing
+   prior content;
+2. the first independent manifest parser assumed a header and at least five TSV
+   columns, filtered all real rows, and failed with an observed count of zero;
+   inspection showed the accepted manifest is headerless with four top-level
+   columns plus indented command continuations. The corrected parser counted 62
+   checks, zero expected/actual mismatches, and four expected-red rows.
+
+Neither failure changed source, evidence bytes, reports, refs, stashes,
+baselines, or test outcomes.

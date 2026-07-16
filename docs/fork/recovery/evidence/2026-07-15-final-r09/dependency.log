@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/Users/jrudnik/labs/jcode/scripts/check_dependency_boundaries.py", line 115, in <module>
+    raise SystemExit(main())
+  File "/Users/jrudnik/labs/jcode/scripts/check_dependency_boundaries.py", line 70, in main
+    metadata = cargo_metadata()
+  File "/Users/jrudnik/labs/jcode/scripts/check_dependency_boundaries.py", line 55, in cargo_metadata
+    result = subprocess.run(
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+FileNotFoundError: [Errno 2] No such file or directory: 'cargo'

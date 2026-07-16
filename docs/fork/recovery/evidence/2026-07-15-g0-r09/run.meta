@@ -1,0 +1,9 @@
+utc=2026-07-15T19:29:38Z
+branch=recovery/2026-07-15
+head=6c6a4f2c8c78a7f9a08e39a4356e2ab401370de3
+dirty_paths=docs/fork/recovery/ORCHESTRATOR_PROMPT.md
+prompt_diff_sha256=8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00
+arch=arm64
+python=Python 3.9.6
+disk=43272028KiB_available
+manifest_sha256=267736890c0152b99bb334ddf6197fadf4f7c1feea55e0ec5926d61e97f44a1e

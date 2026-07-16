@@ -1,0 +1,35 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+   Compiling jcode-protocol v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-protocol)
+   Compiling jcode-telemetry-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-telemetry-core)
+   Compiling jcode-setup-hints v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-setup-hints)
+   Compiling jcode-build-support v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-build-support)
+   Compiling jcode-base v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-base)
+   Compiling jcode-app-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-app-core)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 48.18s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 3 tests
+test server::handshake::tests::legacy_client_gets_no_verdict_event ... ok
+test server::handshake::tests::matching_protocol_and_hash_is_compatible_with_event ... ok
+test server::handshake::tests::advertised_client_gets_a_verdict_event ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1091 filtered out; finished in 0.00s
+

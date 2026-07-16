@@ -1,0 +1,13 @@
+Panic-prone usage budget exceeded:
+  - total panic-prone count grew: 31 -> 46
+  - new production panic-prone usage: crates/jcode-app-core/src/tool/communicate.rs (1)
+  - new production panic-prone usage: crates/jcode-base/src/config.rs (1)
+  - new production panic-prone usage: crates/jcode-base/src/config/config_file.rs (2)
+  - production panic-prone usage grew: crates/jcode-plan/src/dag/ops.rs (1 -> 2)
+  - new production panic-prone usage: crates/jcode-render-core/src/math.rs (4)
+  - new production panic-prone usage: crates/jcode-render-core/src/preprocess.rs (2)
+  - new production panic-prone usage: crates/jcode-telemetry-core/src/lib.rs (1)
+  - new production panic-prone usage: crates/jcode-tui/src/tui/app/remote/key_handling.rs (1)
+  - new production panic-prone usage: crates/jcode-tui/src/tui/ui_messages.rs (1)
+  - production panic-prone usage grew: src/bin/memory_recall_bench.rs (14 -> 15)
+Run scripts/check_panic_budget.py --update only after intentional cleanup.

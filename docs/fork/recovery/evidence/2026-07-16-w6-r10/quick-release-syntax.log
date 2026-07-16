@@ -1,0 +1,2 @@
+$ bash -n scripts/quick-release.sh scripts/install.sh scripts/install_release.sh
+exit=0

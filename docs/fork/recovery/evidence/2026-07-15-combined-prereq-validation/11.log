@@ -1,0 +1,38 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Checking jcode-build-meta v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-build-meta)
+    Checking jcode-selfdev-types v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-selfdev-types)
+    Checking jcode-setup-hints v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-setup-hints)
+    Checking jcode-protocol v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-protocol)
+    Checking jcode-telemetry-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-telemetry-core)
+    Checking jcode-build-support v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-build-support)
+    Checking jcode-base v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-base)
+    Checking jcode-app-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-app-core)
+    Finished `dev` profile [unoptimized] target(s) in 15.51s
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Checking jcode-protocol v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-protocol)
+    Checking jcode-telemetry-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-telemetry-core)
+    Checking jcode-setup-hints v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-setup-hints)
+    Checking jcode-build-support v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-build-support)
+    Checking jcode-base v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-base)
+    Checking jcode-app-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-app-core)
+    Checking jcode-tui-permissions v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-tui-permissions)
+    Checking jcode-tui v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-tui)
+    Finished `dev` profile [unoptimized] target(s) in 20.72s

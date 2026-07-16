@@ -1,0 +1,82 @@
+W3 R04 authoritative command and process summary
+
+SOURCE_TEST_HEAD: 221a9474450a00ba761a989cd765c7e16cb85edc
+AUTHORITATIVE_TARGETED_LOG_SHA256: 00ada583b2905765f31b6e6a7c3870fd31baa2cdb58cd160131f8279219183df
+R09_RAW_MANIFEST_SHA256: 13a923f1445d85e2d3378dde90c15557398bccf6b533ec02306afca281d50721
+TOUCHED_RUSTFMT_LOG_SHA256: a53a9a18d19b33d8086494618527bda794524ac90ddded8b35c3d5cbe1df9fd6
+INHERITED_WORKSPACE_FMT_RED_LOG_SHA256: 0eba67dc83350c7ebdb7b62889ad67e1e50d3839ad26b6c0b44ca6deb8620452
+
+Required guard manifest used by the authoritative targeted and affected-check drivers:
+FORK_NUDGE_MAX_AGE=2147483647
+FORK_NUDGE_AUTOSYNC=0
+CARGO_NET_OFFLINE=true
+JCODE_NO_TELEMETRY=1
+JCODE_HOME=<fresh disposable directory per fixture>
+JCODE_RUNTIME_DIR=<fresh disposable directory per fixture>
+
+===== authoritative targeted ladder
+The byte-identical 14-section transcript is targeted-fixtures.log.
+SECTION_COUNT: 14
+EXACT_NAMED_PASS_COUNT: 14
+EXIT_ZERO_COUNT: 14
+No zero-filter result was counted.
+
+===== touched-file formatting
+COMMAND: nix develop --offline . --command rustfmt --edition 2024 --check <eight W3 Rust files>
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+EXIT: 0
+
+===== affected package check
+COMMAND: scripts/dev_cargo.sh check -p jcode-app-core -p jcode-base -p jcode-storage
+EXIT: 0
+RAW_LOG_SHA256: 6a92635b29ec6d93b6ba0c7cb2700804fd8a314f726bd1954d948c8e254c4599
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+   Compiling jcode-build-meta v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-build-meta)
+    Checking jcode-telemetry-core v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-telemetry-core)
+    Checking jcode-setup-hints v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-setup-hints)
+    Checking jcode-build-support v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-build-support)
+    Checking jcode-base v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-base)
+    Checking jcode-app-core v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-app-core)
+    Finished `dev` profile [unoptimized] target(s) in 4.53s
+
+===== inherited workspace formatting debt
+COMMAND: scripts/dev_cargo.sh fmt -- --check
+EXIT: 1
+This workspace-wide check was not used as the W3 formatting gate because it reports only inherited, out-of-declaration formatting deltas:
+- crates/jcode-app-core/src/build.rs
+- crates/jcode-app-core/src/server/handshake.rs
+- crates/jcode-base/src/subscription_api.rs
+- crates/jcode-build-support/src/tests.rs
+The raw failed-attempt log is preserved by SHA-256 above. W3 did not edit those files.
+
+===== path and preservation checks before evidence correction
+W3 changed paths were the eight declared Rust files, the declared evidence package, and the append-only R04 ledger. The initially declared but untouched background/reload source paths remained unchanged.
+The recovery branch remained at 4542c837ebead43d6ac8f175f9b17908219c17a0 with only the user-owned ORCHESTRATOR_PROMPT.md diff.
+ORCHESTRATOR_PROMPT diff SHA-256: 8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00
+Stash count: 4
+
+===== preserved non-authoritative attempts
+History and commit 12052949752cd3c88511597827cd74238fe6b866 preserve the earlier attempt transcripts. They are not authoritative evidence. Rejected attempts included:
+- a warm run without visibly explicit guards;
+- a zero-filter resumable-render fixture;
+- cancellation and wait-render assertions that exposed real contract mismatches before correction;
+- drivers whose live process environment lacked one or more required guards;
+- validation invalidated by concurrent source/test formatting or rename commits;
+- direct-driver shell bug `label: unbound variable`;
+- workspace-wide formatting red on inherited out-of-declaration files;
+- dependency-boundary invocation outside the pinned dev shell.
+The premature evidence commit recorded 12 passes without a guard manifest and omitted the Persisted and SkippedLockTimeout outcome fixtures. The corrected package supersedes those completion claims while preserving that commit in history.

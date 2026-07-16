@@ -1,0 +1,2 @@
+JCODE_STEP {"command": "bash -n scripts/*.sh", "command_sha256": "8f6eb9061d8b44228a2a4c94f872926fd163fac14045d650cc6f9ffbb4d561b0", "expected_exit": 0, "name": "shell_syntax", "started_utc": "2026-07-15T20:23:37.576021Z", "timeout_seconds": 300}
+JCODE_STEP_RESULT {"actual_exit": 0, "elapsed_seconds": 0.035, "ended_utc": "2026-07-15T20:23:37.611443Z", "name": "shell_syntax"}
