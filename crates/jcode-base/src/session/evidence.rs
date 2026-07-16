@@ -167,7 +167,7 @@ fn next_sequence_for_evidence_path(path: &Path) -> Result<u64> {
         .into_iter()
         .map(|event| event.sequence)
         .max()
-        .map_or(1, |sequence| sequence.saturating_add(1)))
+        .map_or(0, |sequence| sequence.saturating_add(1)))
 }
 
 fn local_node_snapshot(working_dir: Option<String>) -> NodeSnapshot {
@@ -264,12 +264,12 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(first.sequence, 1);
-        assert_eq!(second.sequence, 2);
+        assert_eq!(first.sequence, 0);
+        assert_eq!(second.sequence, 1);
         let events = read_session_evidence("session-1").unwrap();
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0].sequence, 1);
-        assert_eq!(events[1].sequence, 2);
+        assert_eq!(events[0].sequence, 0);
+        assert_eq!(events[1].sequence, 1);
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(event.sequence, 2);
+        assert_eq!(event.sequence, 1);
     }
 
     #[test]
@@ -325,7 +325,7 @@ mod tests {
 
         let events = read_session_evidence_from_path(&path).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].sequence, 1);
+        assert_eq!(events[0].sequence, 0);
     }
 
     #[test]

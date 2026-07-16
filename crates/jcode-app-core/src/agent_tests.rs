@@ -5,6 +5,11 @@ use crate::provider::{EventStream, Provider};
 use crate::tool::Registry;
 use crate::tool::ToolOutput;
 use async_trait::async_trait;
+use jcode_session_types::{
+    SESSION_LOG_EVENT_SCHEMA_VERSION, SessionLogEvent, SessionLogEventKind, SessionLogStatus,
+};
+use std::ffi::OsString;
+use std::io::Write;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -14,6 +19,39 @@ struct DelayedProvider {
 }
 
 struct NativeAutoCompactionProvider;
+
+#[derive(Clone)]
+enum ScriptedProviderEvent {
+    Event(StreamEvent),
+    TransportError(&'static str),
+}
+
+#[derive(Clone)]
+struct ScriptedEvidenceProvider {
+    events: Vec<ScriptedProviderEvent>,
+}
+
+struct ScopedEnvVar {
+    key: &'static str,
+    previous: Option<OsString>,
+}
+
+impl ScopedEnvVar {
+    fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let previous = std::env::var_os(key);
+        crate::env::set_var(key, value);
+        Self { key, previous }
+    }
+}
+
+impl Drop for ScopedEnvVar {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => crate::env::set_var(self.key, value),
+            None => crate::env::remove_var(self.key),
+        }
+    }
+}
 
 fn content_text(content: &[ContentBlock]) -> &str {
     match content.first() {
@@ -110,6 +148,417 @@ impl Provider for NativeAutoCompactionProvider {
     async fn complete_simple(&self, _prompt: &str, _system: &str) -> Result<String> {
         Ok("manual summary from native-auto provider".to_string())
     }
+}
+
+#[async_trait]
+impl Provider for ScriptedEvidenceProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let (tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(8);
+        let events = self.events.clone();
+        tokio::spawn(async move {
+            for event in events {
+                let result = match event {
+                    ScriptedProviderEvent::Event(event) => Ok(event),
+                    ScriptedProviderEvent::TransportError(message) => Err(anyhow::anyhow!(message)),
+                };
+                let _ = tx.send(result).await;
+            }
+        });
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+
+    fn name(&self) -> &str {
+        "r12-fixture"
+    }
+
+    fn model(&self) -> String {
+        "r12-fixture-model".to_string()
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(self.clone())
+    }
+}
+
+async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
+    let provider: Arc<dyn Provider> = Arc::new(ScriptedEvidenceProvider { events });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+    agent
+}
+
+fn provider_terminal_counts(
+    events: &[SessionLogEvent],
+) -> (usize, usize, usize, Vec<SessionLogStatus>) {
+    let mut requests = 0;
+    let mut responses = 0;
+    let mut finishes = 0;
+    let mut response_statuses = Vec::new();
+    for event in events {
+        match &event.kind {
+            SessionLogEventKind::ProviderRequest { .. } => requests += 1,
+            SessionLogEventKind::ProviderResponse { status, .. } => {
+                responses += 1;
+                response_statuses.push(*status);
+            }
+            SessionLogEventKind::TurnFinished { .. } => finishes += 1,
+            _ => {}
+        }
+    }
+    (requests, responses, finishes, response_statuses)
+}
+
+fn assert_strict_terminal_error_evidence(events: &[SessionLogEvent], expected_error_class: &str) {
+    assert_eq!(
+        events.len(),
+        4,
+        "error fixture must persist exactly four events"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3],
+        "event sequence must be exact and contiguous"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.schema_version == SESSION_LOG_EVENT_SCHEMA_VERSION)
+    );
+
+    let turn_id = events[0]
+        .correlation
+        .turn_id
+        .clone()
+        .expect("turn id on TurnStarted");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.correlation.turn_id.as_deref() == Some(turn_id.as_str()))
+    );
+
+    match &events[0].kind {
+        SessionLogEventKind::TurnStarted {
+            user_message_index,
+            image_count,
+            input,
+        } => {
+            assert_eq!(*image_count, 0);
+            assert!(input.is_some());
+            assert!(*user_message_index > 0);
+        }
+        other => panic!("expected TurnStarted, got {other:?}"),
+    }
+    assert!(events[0].correlation.provider_request_id.is_none());
+
+    let request_id = match &events[1].kind {
+        SessionLogEventKind::ProviderRequest {
+            provider,
+            model,
+            route,
+            tool_count,
+            prompt,
+            ..
+        } => {
+            assert_eq!(provider, "r12-fixture");
+            assert_eq!(model, "r12-fixture-model");
+            assert_eq!(route.as_deref(), Some("r12-fixture-route"));
+            assert_eq!(*tool_count, 0, "fixture must advertise no tools");
+            assert!(prompt.is_some());
+            events[1]
+                .correlation
+                .provider_request_id
+                .clone()
+                .expect("provider request id")
+        }
+        other => panic!("expected ProviderRequest, got {other:?}"),
+    };
+
+    match &events[2].kind {
+        SessionLogEventKind::ProviderResponse {
+            provider,
+            model,
+            status,
+            output,
+            usage,
+            error_class,
+            ..
+        } => {
+            assert_eq!(provider, "r12-fixture");
+            assert_eq!(model, "r12-fixture-model");
+            assert_eq!(*status, SessionLogStatus::Error);
+            assert!(output.is_none());
+            assert!(usage.is_none());
+            let error_class = error_class.as_deref().expect("provider error class");
+            assert_eq!(error_class, expected_error_class);
+            assert!(!error_class.is_empty());
+            assert!(!error_class.contains("token="));
+            assert!(!error_class.contains("request="));
+        }
+        other => panic!("expected ProviderResponse, got {other:?}"),
+    }
+    assert_eq!(
+        events[2].correlation.provider_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+
+    match &events[3].kind {
+        SessionLogEventKind::TurnFinished {
+            status,
+            output,
+            error_class,
+            ..
+        } => {
+            assert_eq!(*status, SessionLogStatus::Error);
+            assert!(output.is_none());
+            assert_eq!(error_class.as_deref(), Some(expected_error_class));
+        }
+        other => panic!("expected TurnFinished, got {other:?}"),
+    }
+    assert!(events[3].correlation.provider_request_id.is_none());
+
+    assert_eq!(
+        provider_terminal_counts(events),
+        (1, 1, 1, vec![SessionLogStatus::Error])
+    );
+}
+
+#[tokio::test]
+async fn r12_no_tool_turn_emits_and_persists_exactly_one_terminal_provider_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let mut agent = scripted_agent(vec![
+        ScriptedProviderEvent::Event(StreamEvent::TextDelta("fixture answer".to_string())),
+        ScriptedProviderEvent::Event(StreamEvent::TokenUsage {
+            input_tokens: Some(7),
+            output_tokens: Some(3),
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        }),
+        ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+            stop_reason: Some("end_turn".to_string()),
+        }),
+    ])
+    .await;
+    let session_id = agent.session_id().to_string();
+
+    let output = agent
+        .run_once_capture("strict R12 fixture")
+        .await
+        .expect("strict no-tool turn should succeed");
+    assert_eq!(output, "fixture answer");
+
+    let evidence_path = crate::session::session_evidence_path(&session_id).unwrap();
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_eq!(
+        events.len(),
+        4,
+        "strict fixture must persist exactly four events"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2, 3]
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.schema_version == SESSION_LOG_EVENT_SCHEMA_VERSION)
+    );
+
+    let turn_id = events[0]
+        .correlation
+        .turn_id
+        .clone()
+        .expect("turn id on TurnStarted");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.correlation.turn_id.as_deref() == Some(turn_id.as_str()))
+    );
+
+    let request_id = events[1]
+        .correlation
+        .provider_request_id
+        .clone()
+        .expect("provider request id");
+    assert_eq!(
+        events[2].correlation.provider_request_id.as_deref(),
+        Some(request_id.as_str())
+    );
+    assert!(events[0].correlation.provider_request_id.is_none());
+    assert!(events[3].correlation.provider_request_id.is_none());
+
+    match &events[0].kind {
+        SessionLogEventKind::TurnStarted {
+            user_message_index,
+            image_count,
+            input,
+        } => {
+            assert_eq!(*image_count, 0);
+            assert!(input.is_some());
+            assert!(*user_message_index > 0);
+        }
+        other => panic!("expected TurnStarted, got {other:?}"),
+    }
+    match &events[1].kind {
+        SessionLogEventKind::ProviderRequest {
+            provider,
+            model,
+            route,
+            tool_count,
+            prompt,
+            ..
+        } => {
+            assert_eq!(provider, "r12-fixture");
+            assert_eq!(model, "r12-fixture-model");
+            assert_eq!(route.as_deref(), Some("r12-fixture-route"));
+            assert_eq!(*tool_count, 0, "fixture must advertise no tools");
+            assert!(prompt.is_some());
+        }
+        other => panic!("expected ProviderRequest, got {other:?}"),
+    }
+    match &events[2].kind {
+        SessionLogEventKind::ProviderResponse {
+            provider,
+            model,
+            status,
+            output,
+            usage,
+            error_class,
+            ..
+        } => {
+            assert_eq!(provider, "r12-fixture");
+            assert_eq!(model, "r12-fixture-model");
+            assert_eq!(*status, SessionLogStatus::Ok);
+            assert!(output.is_some());
+            let usage = usage.as_ref().expect("deterministic token usage");
+            assert_eq!(usage.input_tokens, Some(7));
+            assert_eq!(usage.output_tokens, Some(3));
+            assert_eq!(usage.total_tokens, Some(10));
+            assert!(error_class.is_none());
+        }
+        other => panic!("expected ProviderResponse, got {other:?}"),
+    }
+    match &events[3].kind {
+        SessionLogEventKind::TurnFinished { status, output, .. } => {
+            assert_eq!(*status, SessionLogStatus::Ok);
+            assert!(output.is_some());
+        }
+        other => panic!("expected TurnFinished, got {other:?}"),
+    }
+    assert_eq!(
+        provider_terminal_counts(&events),
+        (1, 1, 1, vec![SessionLogStatus::Ok])
+    );
+
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&evidence_path)
+        .unwrap()
+        .write_all(b"{\"event_id\":")
+        .unwrap();
+    let replayed = crate::session::read_session_evidence_from_path(&evidence_path).unwrap();
+    assert_eq!(
+        replayed, events,
+        "trailing malformed line must not fabricate completion"
+    );
+}
+
+#[tokio::test]
+async fn r12_blocking_raw_transport_error_persists_terminal_provider_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = scripted_agent(vec![ScriptedProviderEvent::TransportError(
+        "r12 raw transport failure: token=secret request=abc",
+    )])
+    .await;
+    let session_id = agent.session_id().to_string();
+
+    let result = agent.run_once_capture("raw transport").await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_strict_terminal_error_evidence(&events, "r12 raw transport failure");
+}
+
+#[tokio::test]
+async fn r12_blocking_stream_event_error_persists_terminal_provider_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = scripted_agent(vec![ScriptedProviderEvent::Event(StreamEvent::Error {
+        message: "r12 stream event failure: token=secret request=abc".to_string(),
+        retry_after_secs: Some(2),
+    })])
+    .await;
+    let session_id = agent.session_id().to_string();
+
+    let result = agent.run_once_capture("stream event error").await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_strict_terminal_error_evidence(&events, "r12 stream event failure");
+}
+
+#[tokio::test]
+async fn r12_mpsc_raw_transport_error_persists_terminal_provider_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = scripted_agent(vec![ScriptedProviderEvent::TransportError(
+        "r12 mpsc raw transport failure: token=secret request=abc",
+    )])
+    .await;
+    let session_id = agent.session_id().to_string();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let result = agent
+        .run_once_streaming_mpsc("mpsc raw transport", Vec::new(), None, tx)
+        .await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_strict_terminal_error_evidence(&events, "r12 mpsc raw transport failure");
+}
+
+#[tokio::test]
+async fn r12_mpsc_stream_event_error_persists_terminal_provider_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = scripted_agent(vec![ScriptedProviderEvent::Event(StreamEvent::Error {
+        message: "r12 mpsc stream event failure: token=secret request=abc".to_string(),
+        retry_after_secs: Some(2),
+    })])
+    .await;
+    let session_id = agent.session_id().to_string();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let result = agent
+        .run_once_streaming_mpsc("mpsc stream event error", Vec::new(), None, tx)
+        .await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_strict_terminal_error_evidence(&events, "r12 mpsc stream event failure");
 }
 
 #[test]
