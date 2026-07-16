@@ -51,7 +51,7 @@ fn is_completed(status: &str) -> bool {
     matches!(status, "completed" | "done")
 }
 
-fn is_failed(status: &str) -> bool {
+pub(crate) fn member_status_is_dead(status: &str) -> bool {
     matches!(status, "failed" | "stopped" | "crashed")
 }
 
@@ -83,7 +83,7 @@ pub fn decide_jumpstart(item: &PlanItem, items: &[PlanItem]) -> JumpstartVerb {
     if is_completed(&item.status) {
         return JumpstartVerb::AlreadyDone;
     }
-    if is_failed(&item.status) || item.status == "running_stale" {
+    if member_status_is_dead(&item.status) || item.status == "running_stale" {
         return JumpstartVerb::Retry;
     }
     if item.status == "running" {

@@ -285,6 +285,125 @@ async fn communicate_run_plan_with_empty_plan_returns_inline_even_in_background_
 }
 
 #[tokio::test]
+async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_cleans_failed_workers()
+{
+    let _env_lock = crate::storage::lock_test_env();
+    let runtime_dir = tempfile::TempDir::new().expect("runtime tempdir");
+    let repo_dir = std::env::current_dir().expect("repo cwd");
+    let socket_path = runtime_dir.path().join("jcode.sock");
+    let _runtime = EnvGuard::set("JCODE_RUNTIME_DIR", runtime_dir.path());
+    let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
+    let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
+    let _spawn_mode = EnvGuard::set("JCODE_SWARM_SPAWN_MODE", "headless");
+    let _deep_cap = EnvGuard::set("JCODE_SWARM_MAX_CONCURRENT_AGENTS", "2");
+    crate::config::invalidate_config_cache();
+
+    let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let provider: Arc<dyn Provider> = Arc::new(FailingTestProvider {
+        calls: Arc::clone(&provider_calls),
+        message: "pre-prompt fixture failure",
+    });
+    let server = Arc::new(Server::new(provider));
+    let mut server_task = {
+        let server = Arc::clone(&server);
+        tokio::spawn(async move { server.run().await })
+    };
+
+    wait_for_server_socket(&socket_path, &mut server_task)
+        .await
+        .expect("server socket should be ready");
+
+    let mut client = RawClient::connect(&socket_path)
+        .await
+        .expect("client should connect");
+    client.subscribe(&repo_dir).await.expect("subscribe");
+    let session = client.session_id().await.expect("session id");
+
+    let tool = CommunicateTool::new();
+    let ctx = test_ctx(&session, &repo_dir);
+    let nodes: Vec<_> = (0..6)
+        .map(|i| {
+            json!({
+                "id": format!("node-{i}"),
+                "content": format!("node {i} fails before prompt completion"),
+                "priority": 10
+            })
+        })
+        .collect();
+
+    let seed_output = tool
+        .execute(
+            json!({
+                "action": "task_graph",
+                "mode": "deep",
+                "nodes": nodes
+            }),
+            ctx.clone(),
+        )
+        .await
+        .expect("seed task graph");
+    assert!(
+        seed_output.output.contains("Seeded task graph (6 nodes)"),
+        "unexpected seed output: {}",
+        seed_output.output
+    );
+
+    let error = tokio::time::timeout(
+        Duration::from_secs(20),
+        tool.execute(
+            json!({
+                "action": "run_plan",
+                "background": false,
+                "timeout_minutes": 1
+            }),
+            ctx.clone(),
+        ),
+    )
+    .await
+    .expect("run_plan should not hang")
+    .expect_err("failing workers should trip churn abort");
+    let message = error.to_string();
+
+    let configured_concurrency = 2;
+    let declared_bound =
+        configured_concurrency * RunPlanChurnGuard::max_created_sessions_before_abort(1);
+    let created_sessions = provider_calls.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(declared_bound, 6, "configured concurrency * 3 bound");
+    assert_eq!(
+        created_sessions, declared_bound,
+        "run_plan should create exactly the bounded three configured waves before aborting"
+    );
+    assert!(message.contains("run_plan aborted after 3 consecutive assignment wave(s)"));
+    assert!(message.contains("possible spawn churn"));
+    assert!(
+        message.contains("Residue policy: pre-prompt failed sessions are finished owned workers")
+    );
+    assert!(message.contains("run_plan error cleanup cleans them by default"));
+    assert!(message.contains("retain_agents=true retains them for inspection"));
+    assert!(
+        message.contains("Finished workers collected: Stopped 6 swarm worker(s)"),
+        "default residue policy should clean failed workers in the returned error: {message}"
+    );
+
+    let members = client
+        .comm_list(&session)
+        .await
+        .expect("list after cleanup");
+    let retained_failed_workers = members
+        .iter()
+        .filter(|member| member.session_id != session)
+        .filter(|member| member.status.as_deref() == Some("failed"))
+        .count();
+    assert_eq!(
+        retained_failed_workers, 0,
+        "default residue policy cleans pre-prompt failed workers instead of retaining failed residue"
+    );
+
+    server_task.abort();
+    crate::config::invalidate_config_cache();
+}
+
+#[tokio::test]
 async fn communicate_status_returns_busy_snapshot_for_running_member() {
     let _env_lock = crate::storage::lock_test_env();
     let runtime_dir = tempfile::TempDir::new().expect("runtime tempdir");

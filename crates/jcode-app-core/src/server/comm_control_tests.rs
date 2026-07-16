@@ -7,7 +7,7 @@ use crate::provider::{EventStream, Provider};
 use crate::server::comm_await::{CommAwaitMembersContext, handle_comm_await_members};
 use crate::server::{
     AwaitMembersRuntime, SwarmEvent, SwarmEventType, SwarmMember, SwarmMutationRuntime,
-    VersionedPlan,
+    SwarmTaskProgress, VersionedPlan,
 };
 use crate::tool::Registry;
 use anyhow::Result;
