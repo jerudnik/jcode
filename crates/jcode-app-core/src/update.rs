@@ -278,19 +278,19 @@ fn checksum_asset(release: &GitHubRelease) -> Option<&GitHubAsset> {
     release.assets.iter().find(|a| a.name == "SHA256SUMS")
 }
 
-fn verify_asset_checksum_if_available(
+fn verify_asset_checksum_required(
     client: &reqwest::blocking::Client,
     release: &GitHubRelease,
     asset: &GitHubAsset,
     bytes: &[u8],
 ) -> Result<()> {
-    let Some(checksum_asset) = checksum_asset(release) else {
-        crate::logging::info(&format!(
-            "Release {} does not include SHA256SUMS; skipping checksum verification",
-            release.tag_name
-        ));
-        return Ok(());
-    };
+    let checksum_asset = checksum_asset(release).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Release {} does not include SHA256SUMS; refusing to install unchecked asset {}",
+            release.tag_name,
+            asset.name
+        )
+    })?;
 
     let response = client
         .get(&checksum_asset.browser_download_url)
@@ -996,7 +996,7 @@ pub fn download_and_install_blocking_with_progress(
     let (bytes, _total) =
         download_asset_with_resume(&client, &download_url, total_hint, &mut on_progress)?;
 
-    verify_asset_checksum_if_available(&client, release, asset, &bytes)?;
+    verify_asset_checksum_required(&client, release, asset, &bytes)?;
 
     let mut installed_version_dir: Option<PathBuf> = None;
     if asset.name.ends_with(".tar.gz") {

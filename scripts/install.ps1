@@ -145,6 +145,42 @@ function Test-CommandExists([string]$CommandName) {
     return [bool](Get-Command $CommandName -ErrorAction SilentlyContinue)
 }
 
+function Test-AssetChecksum {
+    param(
+        [Parameter(Mandatory = $true)][string]$ChecksumPath,
+        [Parameter(Mandatory = $true)][string]$AssetName,
+        [Parameter(Mandatory = $true)][string]$AssetPath
+    )
+
+    $expected = $null
+    foreach ($line in Get-Content -LiteralPath $ChecksumPath) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) { continue }
+        $parts = $trimmed -split '\s+', 2
+        if ($parts.Count -lt 2) { continue }
+        $digest = $parts[0].ToLowerInvariant()
+        $name = $parts[1].TrimStart('*')
+        if ($name -eq $AssetName) {
+            if ($digest -notmatch '^[0-9a-f]{64}$') {
+                Write-Err "SHA256SUMS contains an invalid digest for $AssetName"
+            }
+            $expected = $digest
+            break
+        }
+    }
+
+    if (-not $expected) {
+        Write-Err "SHA256SUMS does not list $AssetName; refusing to install"
+    }
+
+    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $AssetPath).Hash.ToLowerInvariant()
+    if ($actual -ne $expected) {
+        Write-Err "Checksum mismatch for $AssetName: expected $expected, got $actual"
+    }
+
+    Write-Info "Verified SHA256 checksum for $AssetName"
+}
+
 function Test-AlacrittyInstalled {
     return [bool](Find-AlacrittyPath)
 }
@@ -421,6 +457,7 @@ if (-not $Version) { Write-Err "Failed to determine latest version" }
 $VersionNum = $Version.TrimStart('v')
 $TgzUrl = "https://github.com/$Repo/releases/download/$Version/$Artifact.tar.gz"
 $ExeUrl = "https://github.com/$Repo/releases/download/$Version/$Artifact.exe"
+$ChecksumUrl = "https://github.com/$Repo/releases/download/$Version/SHA256SUMS"
 
 $BuildsDir = Join-Path $env:LOCALAPPDATA "jcode\builds"
 $StableDir = Join-Path $BuildsDir "stable"
@@ -443,38 +480,56 @@ if ($Existing) {
 }
 Write-Info "  launcher: $LauncherPath"
 
-foreach ($d in @($InstallDir, $StableDir, $VersionDir)) {
-    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
-}
-
 $TempDir = Join-Path $env:TEMP "jcode-install-$(Get-Random)"
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 $DownloadMode = ""
 $DownloadPath = Join-Path $TempDir "jcode.download"
+$DownloadedAsset = ""
+$RequiresChecksum = $false
 
 if ($ResolvedArtifactExePath) {
     Write-Info "Using local artifact exe: $ResolvedArtifactExePath"
     Copy-Item -Path $ResolvedArtifactExePath -Destination $DownloadPath -Force
     $DownloadMode = "bin"
+    $DownloadedAsset = Split-Path -Leaf $ResolvedArtifactExePath
 } elseif ($ResolvedArtifactTgzPath) {
     Write-Info "Using local artifact archive: $ResolvedArtifactTgzPath"
     Copy-Item -Path $ResolvedArtifactTgzPath -Destination $DownloadPath -Force
     $DownloadMode = "tar"
+    $DownloadedAsset = Split-Path -Leaf $ResolvedArtifactTgzPath
 } else {
     try {
         Write-Info "Downloading $Artifact.exe..."
         Invoke-WebRequest -Uri $ExeUrl -OutFile $DownloadPath
         $DownloadMode = "bin"
+        $DownloadedAsset = "$Artifact.exe"
+        $RequiresChecksum = $true
     } catch {
         try {
             Write-Info "Trying archive download..."
             Invoke-WebRequest -Uri $TgzUrl -OutFile $DownloadPath
             $DownloadMode = "tar"
+            $DownloadedAsset = "$Artifact.tar.gz"
+            $RequiresChecksum = $true
         } catch {
             $DownloadMode = ""
         }
     }
+}
+
+if ($RequiresChecksum -and $DownloadMode) {
+    $ChecksumPath = Join-Path $TempDir "SHA256SUMS"
+    try {
+        Invoke-WebRequest -Uri $ChecksumUrl -OutFile $ChecksumPath
+    } catch {
+        Write-Err "Release $Version does not include SHA256SUMS; refusing to install unchecked asset $DownloadedAsset"
+    }
+    Test-AssetChecksum -ChecksumPath $ChecksumPath -AssetName $DownloadedAsset -AssetPath $DownloadPath
+}
+
+foreach ($d in @($InstallDir, $StableDir, $VersionDir)) {
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
 $DestBin = Join-Path $VersionDir "jcode.exe"
@@ -536,12 +591,9 @@ Copy-Item -Path $DestBin -Destination (Join-Path $StableDir "jcode.exe") -Force
 Set-Content -Path (Join-Path $BuildsDir "stable-version") -Value $VersionNum
 Copy-Item -Path (Join-Path $StableDir "jcode.exe") -Destination $LauncherPath -Force
 
-# Gracefully reload any running background server onto the freshly installed
-# binary (issue #291). `server reload` only reloads a genuinely-older daemon,
-# hands its live sessions to the new process, and is a no-op when nothing is
-# running, so it is safe to call unconditionally. Best-effort: never fail the
-# install over it.
-if ($env:JCODE_SKIP_SERVER_RELOAD -ne "1") {
+# R01 owns live daemon target selection. Reload is therefore explicit opt-in and
+# best-effort; JCODE_SKIP_SERVER_RELOAD remains a hard disable for wrappers.
+if ($env:JCODE_RELOAD_SERVER -eq "1" -and $env:JCODE_SKIP_SERVER_RELOAD -ne "1") {
     try {
         & $LauncherPath server reload 2>$null | Out-Null
     } catch {

@@ -57,6 +57,7 @@ VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep
 
 URL_TGZ="https://github.com/$REPO/releases/download/$VERSION/$ARTIFACT.tar.gz"
 URL_BIN="https://github.com/$REPO/releases/download/$VERSION/$ARTIFACT"
+URL_SHA256SUMS="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
 
 if [ "$IS_WINDOWS" = true ]; then
   EXE=".exe"
@@ -90,10 +91,51 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
 download_mode=""
+downloaded_asset=""
 if curl -fsSL "$URL_TGZ" -o "$tmpdir/jcode.download" 2>/dev/null; then
   download_mode="tar"
+  downloaded_asset="$ARTIFACT.tar.gz"
 elif curl -fsSL "$URL_BIN" -o "$tmpdir/jcode.download" 2>/dev/null; then
   download_mode="bin"
+  downloaded_asset="$ARTIFACT"
+fi
+
+file_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print tolower($1)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print tolower($1)}'
+  else
+    err "sha256sum or shasum is required to verify release assets"
+  fi
+}
+
+verify_download_checksum() {
+  asset="$1"
+  checksum_path="$tmpdir/SHA256SUMS"
+  curl -fsSL "$URL_SHA256SUMS" -o "$checksum_path" \
+    || err "Release $VERSION does not include SHA256SUMS; refusing to install unchecked asset $asset"
+  expected=$(awk -v asset="$asset" '
+    /^[[:space:]]*#/ || NF < 2 { next }
+    {
+      digest=tolower($1); name=$2; sub(/^\*/, "", name)
+      if (name == asset) { print digest; found=1; exit }
+    }
+    END { if (!found) exit 1 }
+  ' "$checksum_path") \
+    || err "SHA256SUMS does not list $asset; refusing to install"
+  case "$expected" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+    *) err "SHA256SUMS contains an invalid digest for $asset" ;;
+  esac
+  actual=$(file_sha256 "$tmpdir/jcode.download")
+  [ "$actual" = "$expected" ] \
+    || err "Checksum mismatch for $asset: expected $expected, got $actual"
+  info "Verified SHA256 checksum for $asset"
+}
+
+if [ -n "$download_mode" ]; then
+  verify_download_checksum "$downloaded_asset"
 fi
 
 mkdir -p "$INSTALL_DIR" "$stable_dir" "$current_dir" "$version_dir"
@@ -185,14 +227,9 @@ if [ "$(uname -s)" = "Darwin" ]; then
   fi
 fi
 
-# Retire any background server still running the old binary so the freshly
-# installed version is picked up without the user having to kill a daemon by
-# hand (issue #291). We use the graceful `server reload` path, which hands live
-# headless/swarm sessions to a newly-exec'd server instead of dropping them, and
-# only reloads when the running server is genuinely older than what we just
-# installed (so a newer/dev daemon is never downgraded). This is best-effort:
-# it must never fail the install, and it is skipped when no server is running.
-if [ "${JCODE_SKIP_SERVER_RELOAD:-}" != "1" ]; then
+# R01 owns live daemon target selection. Reload is therefore explicit opt-in and
+# best-effort; JCODE_SKIP_SERVER_RELOAD remains a hard disable for wrappers.
+if [ "${JCODE_RELOAD_SERVER:-}" = "1" ] && [ "${JCODE_SKIP_SERVER_RELOAD:-}" != "1" ]; then
   reload_bin="$launcher_path"
   [ -x "$reload_bin" ] || reload_bin="$stable_dir/$bin_name"
   if [ -x "$reload_bin" ]; then
