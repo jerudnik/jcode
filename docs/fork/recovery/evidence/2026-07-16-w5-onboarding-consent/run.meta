@@ -1,0 +1,16 @@
+repo=/Users/jrudnik/labs/jcode-w5-consent
+head=b3b0103160883a5f5e6894d071e816bff92cccd1
+date=2026-07-16T07:14:10Z
+rust_bin=/nix/store/iywn852j3pnz291ywvil7rxhibqn8953-rust-default-1.96.0/bin
+python_bin=/Library/Developer/CommandLineTools/usr/bin/python3
+cargo=cargo 1.96.0 (30a34c682 2026-05-25)
+rustfmt=rustfmt 1.9.0-stable (ac68faa20c 2026-05-25)
+python=Python 3.9.6
+CARGO_NET_OFFLINE=true
+JCODE_NO_TELEMETRY=1
+FORK_NUDGE_MAX_AGE=2147483647
+FORK_NUDGE_AUTOSYNC=0
+CARGO_TARGET_DIR=/tmp/jcode-w5-consent-target
+JCODE_HOME=/tmp/jcode-w5-home.rMArXa
+JCODE_RUNTIME_DIR=/tmp/jcode-w5-runtime.aiJIJU
+nix_invocations=none

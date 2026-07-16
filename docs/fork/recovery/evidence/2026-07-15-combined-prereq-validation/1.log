@@ -1,0 +1,69 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+fork: (remote state refreshing in background; rerun for an updated verdict)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+   Compiling jcode-build-meta v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-build-meta)
+   Compiling jcode-selfdev-types v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-selfdev-types)
+   Compiling jcode-build-support v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-build-support)
+    Finished `test` profile [unoptimized] target(s) in 3.15s
+     Running unittests src/lib.rs (target/debug/deps/jcode_build_support-d71e31dbb851cb78)
+
+running 48 tests
+test paths::tests::nix_managed_override_only_for_managed_non_selfdev ... ok
+test paths::tests::resolve_binary_payload_keeps_small_script_without_payload ... ok
+test paths::tests::resolve_binary_payload_keeps_real_binary ... ok
+test paths::tests::is_jcode_repo_accepts_git_file_for_worktree ... ok
+test paths::tests::resolve_binary_payload_maps_wrapper_to_payload ... ok
+test paths::tests::resolve_binary_payload_refuses_ambiguous_payloads ... ok
+test paths::tests::find_repo_in_ancestors_finds_workspace_from_crate_dir ... ok
+test paths::tests::resolve_binary_payload_ignores_non_jcode_abs_paths ... ok
+test paths::tests::resolve_binary_payload_follows_channel_symlink_to_wrapper ... ok
+test paths::tests::nix_wrapper_and_self_dev_build_are_not_phantom_updates ... ok
+test paths::tests::resolve_binary_payload_nix_wrapper_basename_is_jcode_not_self ... ok
+test paths::tests::resolve_binary_payload_unwraps_nix_exec_target ... ok
+test paths::tests::resolve_binary_payload_refuses_two_distinct_exec_targets ... ok
+test tests::advance_shared_server_carries_forward_when_tracking_stable ... ok
+test tests::dev_binary_matches_source_only_on_exact_metadata ... ok
+test tests::advance_shared_server_preserves_pinned_selfdev_build ... ok
+test tests::installed_immutable_binary_sidecar_projects_exact_runtime_identity ... ok
+test tests::launcher_dir_uses_sandbox_bin_when_jcode_home_is_set ... ok
+test tests::normal_shared_server_candidate_allows_shared_channel_matching_stable ... ok
+test tests::normal_shared_server_candidate_ignores_shared_channel_with_corrupt_marker ... ok
+test tests::normal_shared_server_candidate_ignores_shared_channel_with_missing_marker ... ok
+test tests::same_commit_dirty_source_states_project_distinct_runtime_identities_without_live_builds ... ok
+test tests::same_commit_dirty_sidecars_project_distinct_runtime_identities ... ok
+test tests::pending_activation_can_complete_and_roll_back ... ok
+test tests::normal_shared_server_candidate_repairs_stale_shared_channel_to_stable ... ok
+test tests::repair_is_noop_when_shared_server_already_matches_stable ... ok
+test tests::repair_never_downgrades_when_stable_is_older ... ok
+test tests::test_binary_choice_for_canary_session ... ok
+test tests::test_binary_version_hash_mismatch_rejects_publish_candidate ... ok
+test tests::test_build_manifest_default ... ok
+test tests::test_canary_status_serialization ... ok
+test tests::repair_preserves_fresher_selfdev_pin ... ok
+test tests::test_dev_binary_source_metadata_mismatch_rejects_publish_candidate ... ok
+test tests::repair_preserves_older_selfdev_pin ... ok
+test tests::test_find_repo_in_ancestors_walks_upward ... ok
+test tests::test_smoke_test_server_protocol_uses_fresh_connection_after_ping ... ok
+test tests::repair_repoints_stale_shared_server_to_newer_stable ... ok
+test tests::selfdev_reload_target_diverges_from_update_probe_when_shared_server_pinned ... ok
+test tests::shared_server_candidate_prefers_approved_channel_over_current ... ok
+test tests::shared_server_does_not_track_stable_when_pinned_to_selfdev ... ok
+test tests::shared_server_tracks_stable_when_equal_to_stable ... ok
+test tests::shared_server_tracks_stable_when_marker_missing ... ok
+test tests::test_client_update_candidate_prefers_dev_binary_for_selfdev ... ok
+test tests::update_advances_daemon_reload_target_when_shared_server_tracks_stable ... ok
+test tests::update_launcher_symlink_stays_inside_sandbox_home ... ok
+test tests::update_leaves_daemon_reload_target_stale_when_shared_server_pinned_to_selfdev ... ok
+test tests::version_match_detects_installed_channel_by_semver_or_git_hash ... ok
+test tests::dirty_source_state_uses_fingerprint_in_version_label ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s
+

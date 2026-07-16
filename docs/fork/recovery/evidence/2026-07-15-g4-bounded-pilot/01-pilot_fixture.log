@@ -1,0 +1,27 @@
+JCODE_STEP {"command": "cargo test -p jcode-app-core --lib agent_tests::recovery_pilot_one_fixture_route_subscribe_turn_evidence -- --exact --nocapture --test-threads=1", "command_sha256": "300a00e1cd87d2cf216f5b4d7b96c21b78e1b71aec3359bd1e9e794cd85d2455", "expected_exit": 0, "name": "pilot_fixture", "started_utc": "2026-07-15T20:23:11.998387Z", "timeout_seconds": 1800}
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: failed running `"xcrun" "--sdk" "macosx" "--show-sdk-path"` to find MacOSX.sdk
+  |
+  = note: error: unable to find sdk: 'macosx'
+  = note: the SDK is needed by the linker to know where to find symbols in system libraries and for embedding the SDK version in the final object file
+  = note: found active developer directory at "/Library/Developer/CommandLineTools"
+
+warning: `jcode-app-core` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized] target(s) in 0.71s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test agent_tests::recovery_pilot_one_fixture_route_subscribe_turn_evidence ... 
+PILOT_OBSERVATION {"account_id":"acct_fixture","auth_after":"request_valid","auth_before":"credential_present","credential":"oauth","evidence_events":4,"handshake":"compatible","memory_enabled":false,"model":"gpt-5.5","provider":"jcode","replay_events":4,"route":"jcode-subscription","runtime_projection_distinct":true,"telemetry_enabled":false,"terminal_counts":{"finish":1,"request":1,"response":1},"tier":"plus","tier_freshness":"live","tool_count":0,"usage":{"input":7,"output":3,"total":10}}
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1094 filtered out; finished in 0.52s
+
+JCODE_STEP_RESULT {"actual_exit": 0, "elapsed_seconds": 1.375, "ended_utc": "2026-07-15T20:23:13.373613Z", "name": "pilot_fixture"}

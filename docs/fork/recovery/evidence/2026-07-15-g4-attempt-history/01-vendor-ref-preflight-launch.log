@@ -1,0 +1,26 @@
+[stderr] warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+[stderr] Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+[stderr] Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+[stderr] Traceback (most recent call last):
+[stderr]   File "/Users/jrudnik/labs/jcode/scripts/recovery_validation_driver.py", line 483, in <module>
+[stderr]     raise SystemExit(main())
+[stderr]   File "/Users/jrudnik/labs/jcode/scripts/recovery_validation_driver.py", line 421, in main
+[stderr]     preflight = repository_snapshot()
+[stderr]   File "/Users/jrudnik/labs/jcode/scripts/recovery_validation_driver.py", line 157, in repository_snapshot
+[stderr]     vendor_head = run_capture(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT / "vendor/upstream").strip()
+[stderr]   File "/Users/jrudnik/labs/jcode/scripts/recovery_validation_driver.py", line 60, in run_capture
+[stderr]     result = subprocess.run(
+[stderr]   File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+[stderr]     with Popen(*popenargs, **kwargs) as process:
+[stderr]   File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+[stderr]     self._execute_child(args, executable, preexec_fn, close_fds,
+[stderr]   File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+[stderr]     raise child_exception_type(errno_num, err_msg, err_filename)
+[stderr] FileNotFoundError: [Errno 2] No such file or directory: PosixPath('/Users/jrudnik/labs/jcode/vendor/upstream')
+
+--- Command finished with exit code: 1 ---

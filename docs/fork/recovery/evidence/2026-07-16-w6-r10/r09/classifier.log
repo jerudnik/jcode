@@ -1,0 +1,11 @@
+name=classifier
+expected_exit=0
+command=python3 -m unittest discover -s tests -p test_rust_production_filter.py
+--- output ---
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.010s
+
+OK
+
+actual_exit=0

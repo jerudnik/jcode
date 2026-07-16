@@ -1,0 +1,7 @@
+JCODE_STEP {"command": "python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'", "command_sha256": "1acdb87dbe8b37ac176714f1769da60a21a954bfd33609ef52aebc2b0ad63ddb", "expected_exit": 0, "name": "classifier", "started_utc": "2026-07-15T20:23:13.374054Z", "timeout_seconds": 300}
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.004s
+
+OK
+JCODE_STEP_RESULT {"actual_exit": 0, "elapsed_seconds": 0.077, "ended_utc": "2026-07-15T20:23:13.451486Z", "name": "classifier"}

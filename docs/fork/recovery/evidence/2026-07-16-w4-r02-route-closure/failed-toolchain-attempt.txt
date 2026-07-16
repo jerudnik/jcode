@@ -1,0 +1,6 @@
+status=invalid_toolchain_failure
+background_task=7967177mwt
+attempt_dir=/tmp/jcode-w4-r02-route-closure-20260716T074316Z
+failure=direct split cargo/rustc PATH lacked visible std sysroot
+exact_catalog_route_test_exit=101
+result_counted=false

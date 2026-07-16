@@ -1,0 +1,26 @@
+rust_toolchain	0	0	bash -lc cargo --version && rustc --version && rustc --print sysroot
+pre_status	0	0	git status --short
+no_rust_diff_before	0	0	bash -lc test -z "$(git diff -- crates/**/*.rs crates/*.rs 2>/dev/null)"
+exact_catalog_route_test	0	0	cargo test -p jcode-base --lib provider::catalog_routes::tests::openrouter_alternative_routes_skip_models_absent_from_catalog -- --exact --nocapture
+exact_catalog_route_test_one_passed	0	0	bash -lc grep -E 'test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; .* filtered out' '/tmp/jcode-w4-r02-route-closure-20260716T074408Z-combined/raw/exact_catalog_route_test.txt'
+cargo_check_jcode_base	0	0	cargo check -p jcode-base
+no_rust_diff_after	0	0	bash -lc test -z "$(git diff -- crates/**/*.rs crates/*.rs 2>/dev/null)"
+changed_paths_allowed	1	1	bash -lc git diff --name-only | grep -Ev '^(docs/fork/recovery/seams/R02-config-provider-routing/ledger.md|docs/fork/recovery/evidence/2026-07-16-w4-r02-route-closure/)'
+classifier	0	0	/usr/bin/python3 -m unittest discover -s tests -p test_rust_production_filter.py
+dependency	0	0	/usr/bin/python3 scripts/check_dependency_boundaries.py
+panic	1	1	/usr/bin/python3 scripts/check_panic_budget.py
+swallowed	1	1	/usr/bin/python3 scripts/check_swallowed_error_budget.py
+code_size	1	1	/usr/bin/python3 scripts/check_code_size_budget.py
+test_size	1	1	/usr/bin/python3 scripts/check_test_size_budget.py
+wildcard	0	0	/usr/bin/python3 scripts/check_wildcard_reexport_budget.py
+warning	0	0	bash scripts/check_warning_budget.sh
+shell_syntax	0	0	bash -n scripts/agent_trace.sh scripts/antigravity_live_coverage.sh scripts/antigravity_schema_probe.sh scripts/auth_fixture.sh scripts/auth_regression_matrix.sh scripts/auto_screenshot.sh scripts/bench_compile.sh scripts/bench_selfdev_build.sh scripts/bench_selfdev_checkpoints.sh scripts/benchmark_tools.sh scripts/branch-model-status.sh scripts/build_linux_compat.sh scripts/capture_demo.sh scripts/capture_screenshot.sh scripts/cargo_exec.sh scripts/check_startup_budget.sh scripts/check_warning_budget.sh scripts/check_web_mobile.sh scripts/clean_target.sh scripts/compile_time_probe.sh scripts/debug_socket_test.sh scripts/desktop_journey_e2e.sh scripts/desktop_reload_window_e2e.sh scripts/dev_cargo.sh scripts/fork-health.sh scripts/fork-nudge.sh scripts/fork-rail-status.sh scripts/fork-touched-clippy.sh scripts/generate_release_notes.sh scripts/install_release.sh scripts/install-git-hooks.sh scripts/install.sh scripts/launch_agentcard_discovery_demo.sh scripts/memory_probe.sh scripts/memory_regression_gate.sh scripts/onboarding_sandbox.sh scripts/quick-release.sh scripts/real_provider_smoke.sh scripts/record_demo.sh scripts/refactor_phase1_verify.sh scripts/refactor_shadow.sh scripts/remote_build.sh scripts/remote_config.sh scripts/replay_recording.sh scripts/rerere-cache.sh scripts/rerere-rebase.sh scripts/run_openrelay_discovery_test.sh scripts/run_tb21_publishable.sh scripts/run_terminal_bench_claude.sh scripts/run_terminal_bench_harbor.sh scripts/screenshot_watcher.sh scripts/security_preflight.sh scripts/stale_server_upgrade_sandbox.sh scripts/stress_test_40.sh scripts/sync-local.sh scripts/test_auth_e2e.sh scripts/test_e2e.sh scripts/test_fast.sh scripts/uninstall.sh scripts/update_packages.sh scripts/verify_alt_shift_e_reaches_terminal.sh
+diff_check	0	0	git diff --check
+no_update_guard	0	1	/usr/bin/python3 -c import pathlib,sys; root=pathlib.Path(sys.argv[1]); needle="-"+"-update"; bad=[]
+for p in list((root/"raw").glob("*.txt"))+[root/"manifest.tsv"]:
+    if p.name=="no_update_guard.txt": continue
+    if needle in p.read_text(errors="replace"):
+        bad.append(str(p))
+print("NO_UPDATE_HITS", len(bad))
+print("\n".join(bad))
+sys.exit(1 if bad else 0) /tmp/jcode-w4-r02-route-closure-20260716T074408Z-combined

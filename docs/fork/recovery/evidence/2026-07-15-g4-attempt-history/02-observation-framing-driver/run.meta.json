@@ -1,0 +1,30 @@
+{
+  "architecture": "arm64",
+  "branch": "recovery/2026-07-15",
+  "ended_utc": "2026-07-15T20:22:09.918825Z",
+  "environment": {
+    "CARGO_NET_OFFLINE": "true",
+    "JCODE_NO_TELEMETRY": "1",
+    "NIX_CONFIG": "substitute = false"
+  },
+  "failure": "pilot_fixture exit 125 != expected 0",
+  "head": "b1f5d187da1823cfd14560db77cc4572be5efcb6",
+  "name": "2026-07-15-phase3-bounded-pilot",
+  "plan_sha256": "28563740d66302e23d70fe28c34c4d6ed563c553a7eec206dd09dbcd8840134b",
+  "plan_source": "/Users/jrudnik/labs/jcode/docs/fork/recovery/pilot/2026-07-15-g4-validation-plan.json",
+  "python": "3.9.6 (default, May 22 2026, 11:13:45) \n[Clang 21.0.0 (clang-2100.1.1.101)]",
+  "repo_root": "/Users/jrudnik/labs/jcode",
+  "result": "failed",
+  "schema_version": 1,
+  "started_utc": "2026-07-15T20:21:55.249806Z",
+  "steps_planned": 10,
+  "steps_run": 1,
+  "tool_paths": {
+    "bash": "/nix/store/55976waa157aqb1ncbwm6b8sa64b6m3h-bash-5.3p9/bin/bash",
+    "cargo": "/nix/store/iywn852j3pnz291ywvil7rxhibqn8953-rust-default-1.96.0/bin/cargo",
+    "git": "/etc/profiles/per-user/jrudnik/bin/git",
+    "nix": "/nix/var/nix/profiles/default/bin/nix",
+    "python3": "/usr/bin/python3",
+    "rustc": "/nix/store/iywn852j3pnz291ywvil7rxhibqn8953-rust-default-1.96.0/bin/rustc"
+  }
+}

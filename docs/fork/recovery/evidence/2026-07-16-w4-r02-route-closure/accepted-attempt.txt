@@ -1,0 +1,9 @@
+status=accepted
+background_task=383680ygrb
+attempt_dir=/tmp/jcode-w4-r02-route-closure-20260716T075303Z-accepted
+exact_catalog_route_test=0
+exact_catalog_route_test_one_passed=0
+cargo_check_jcode_base=0
+no_update_invocation_guard=0
+final_status=0
+result_counted=true

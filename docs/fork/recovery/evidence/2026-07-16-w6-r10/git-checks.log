@@ -1,0 +1,5 @@
+$ git diff --check
+exit=0
+
+$ git status --short
+?? docs/fork/recovery/evidence/2026-07-16-w6-r10/

@@ -1,0 +1,8 @@
+status=superseded_no_update_guard_false_positive
+background_task=848872a5nf
+attempt_dir=/tmp/jcode-w4-r02-route-closure-20260716T074408Z-combined
+failure=no_update_guard_scanned_checker_stdout_and_found_inherited_advisory_text
+no_update_guard_expected=0
+no_update_guard_actual=1
+final_status_ran=false
+result_counted=false

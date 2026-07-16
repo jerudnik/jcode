@@ -1,0 +1,66 @@
+# R07A Tool execution and MCP lifecycle/schema authority: lightweight ledger
+
+| Field | Value |
+|---|---|
+| State | `adjudicated` |
+| Baseline | fork `7ff4fc6be8dcf0410f2f61994752fdf5ee93e6e4`; upstream `802f6909825809e882d9c2d575b7e478dce57d3b`; merge base `631935dd1d3b2e31e167e2b12ad463e54bcf4b8d` |
+| Review mode | `light` |
+| Research budget | `6 decisive checkpoints; 6 consumed without expansion` |
+| Authority challenged | The shared pool/cooldown predates the fork and exists at all fixed refs. Only the fork adds the direct self-reference guard and owned-child cap. Two-sided path overlap is not treated as equivalence or upstream authority. |
+| Recommended disposition | `retain-fork` |
+| Confidence | high for config/schema guards and isolated state topology; medium for the complete live-process/error-path census, which was intentionally not run |
+
+R07A owns registry lookup and dispatch, per-session MCP manager/handles, shared-pool state, connection/reconnect cooldown, schema-cache hint/reconciliation, and execution-time allow/disable/pre-tool gates. It excludes discovery admission and network policy (R07B, deferred), telemetry/reporting consent (R07C), provider routing (R02), generic process/session supervision (R04), worker dispatch (R05B), and presentation. R00, R09, and R11 bind this ledger; R12 invokes tools during turns but does not own their authority.
+
+## Six-checkpoint evidence ledger
+
+| # | Finding | Fixed-ref evidence and deterministic reproduction | Consequence |
+|---:|---|---|---|
+| 1 | Fork-only incident safeguards are necessary, while shared-pool cooldown is common baseline behavior. | `git grep` at the three fixed refs finds `FAILED_CONNECT_RETRY_COOLDOWN` in `mcp/pool.rs` everywhere, but finds `MAX_OWNED_MCP_CHILDREN`, `is_jcode_mcp_serve_shim`, and `drop_self_referential_servers` only at fork. Fork deltas from merge base are `client.rs +92/-2`, `manager.rs +26/-6`, `protocol.rs +183/-12`; upstream has no client delta and only `+6/-6`, `+7/-12` respectively. | Retain the fork safeguards. Do not adopt or compose upstream merely because the MCP paths overlap. |
+| 2 | Registry dispatch enforces session allow/disable policy before any selected tool executes. | Fork `crates/jcode-app-core/src/tool/mod.rs:53-92` owns the session-policy map; `:320-343` produces deterministic sorted definitions; `:545-642` resolves aliases, rejects disallowed/disabled/unknown tools, runs the optional `pre_tool` gate, drops the registry lock before execution, and emits lifecycle outcomes. | The registry is the execution-time authority. A discovery listing, telemetry event, or render status cannot grant permission to execute a tool. |
+| 3 | MCP ownership is explicit and bounded across manager, shared pool, and per-session clients. | `mcp/manager.rs:44-107,120-257` separates pooled handles from owned clients, skips disabled auto-connect, routes `shared:true` to the pool, and refuses a non-shared spawn when the owned-child permit is exhausted. `mcp/client.rs:14-60` implements the process-wide cap of 64 with an RAII reservation. `mcp/pool.rs:20-57,65-142,166-205,268-310` owns clients, handles, config, refs, in-flight connects, and failed-connect records, with a 30-second retry cooldown. | `shared:false` is a per-session lifecycle choice, not a free spawn path. R04 owns generic daemon/child supervision, while R07A owns these MCP handle and connection semantics. |
+| 4 | Self-referential daemon MCP shims are rejected before connection, directly addressing the documented forkbomb. | `mcp/protocol.rs:228-258,491-503,570-582` detects a jcode-ish command whose first non-flag argument is `mcp-serve`, removes it during merged config load, and leaves external clients unaffected. Unit tests `:636-690` cover true, false, and drop-only cases. `docs/architecture/MCP_SERVE_FORKBOMB_INCIDENT.md` traces the former recursive config -> owned client -> `tools/list` -> headless-session path; `MCP_SERVER_REGISTRATION_GUARDRAILS.md` documents direct-detection limits and independent caps. | The guard is a footgun backstop, not a security boundary. Shell-obfuscated recursion, live daemon shutdown, headless-session caps, and generic process supervision remain outside this light ledger and may require R04/full review. |
+| 5 | Cached schemas are fingerprints-bound hints, never execution truth. | `mcp/schema_cache.rs:1-23,60-84,90-176` hashes command/args/sorted env/shared, ignores mismatches, updates only changed entries, prunes removed servers, and treats failed disk writes as non-fatal. `tool/mod.rs:828-895` registers cached proxies before background connection and reconciles live tools afterwards; `mcp/manager.rs:334-407` does connect-on-first-call with a 30-second bound. `schema_cache_tests.rs:29-150` is pure and covers stable/sensitive fingerprints, mismatch rejection, updates, and pruning. | A schema hint can improve advertisement but cannot authorize a stale server or bypass a real connection. Any change that lets cache content execute without the live manager is a stop condition. |
+| 6 | Deterministic no-server fixtures exist; no live MCP process, network, credential, daemon, or tool side effect was used. | Source fixtures include isolated counter cap tests (`mcp/client.rs:420-442`), self-reference tests (`protocol.rs:636-690`), schema-cache tests (`schema_cache_tests.rs:29-150`), and hermetic management tests constructed with `McpConfig::default()` (`tool/mcp.rs:468-638`). An attempted `CARGO_NET_OFFLINE=true nix develop --offline . --command cargo test -p jcode-base --lib mcp::schema_cache_tests` waited on the shared Cargo target and was cancelled without a test result, so no execution pass is claimed. | The next R07A implementation slice must run these no-server tests with disposable `JCODE_HOME`/runtime directories and an uncontended target. It must not substitute a real MCP server for fixture coverage. |
+
+## State-writer and cross-seam contract
+
+| Surface | Writer/reader authority | Contract and boundary |
+|---|---|---|
+| Session tool policy and registry | `set_session_tool_policy`/`clear_session_tool_policy`; `Registry::register` and `Registry::execute` | Policy must be evaluated before dispatch. Dynamic MCP registration may add `mcp` and `mcp__<server>__<tool>` proxies, but cannot bypass allow/disable or the pre-tool gate. |
+| Per-session MCP lifecycle | `McpManager` maps `pool_handles` and `owned_clients`; `connect`, `disconnect`, `disconnect_all`, and `call_tool` | Handles are released or owned clients shut down on disconnect. R04 owns the broader session/process terminal state, not these schema/handle maps. |
+| Shared lifecycle/cooldown | `SharedMcpPool` maps `clients`, `handles`, `config`, `ref_counts`, `connecting`, and `last_errors` | One leader connects per server, waiters share its result, and a failed connection cools down. A new state writer that bypasses these maps escalates to full review. |
+| Schema cache | `McpSchemaCache::update`, `retain_servers`, and best-effort `save` | Cache is config-fingerprint-bound, removable on config deletion, and replaced by live schema. It is not a server-admission or network-consent decision. |
+| MCP config guard | `McpConfig` load/merge plus `drop_self_referential_servers` | Disabled servers remain configured but are not auto-spawned. Direct daemon self-shims are removed; external client launches are not blocked. |
+| Turn and telemetry seams | R12 invokes the registry; R07C owns reporting/opt-out | R12 must not invent individual tool permission. `Registry::execute` calls telemetry after an attempt, so R07C's kill switch remains binding and no telemetry claim is made here. |
+| Discovery/network seam | R07B | `discover_tools`, sponsored discovery provenance, HTTP/browser/computer transport admission, and external capability disclosure are deferred. A tool/MCP change that needs discovery ranking, network admission, or sponsor policy stops and escalates R07B. |
+| Swarm/process seam | R05B and R04 | A swarm may request work, but R05B owns worker assignment/spawn/reclaim and R04 owns generic lifecycle. R07A does not compensate for a failed worker by spawning sessions or altering liveness policy. |
+
+## Pilot relevance, negative findings, and R09 debt
+
+- **Pilot relevance and defer boundary:** `RESPONSIBILITIES.md:31-32` makes R07A relevant only if tools are exercised and R07B relevant only if discovery/network is exercised. The approved Phase 3 question is no-tool, so neither an MCP connection nor a tool call is permitted in that pilot. Stop rather than broaden if a test asks for a real MCP server, network, credential, live daemon, discovery result, or provider route.
+- **Negative findings:** no live MCP server or child process was started; no config under the user home was read or modified by a test; no network/credential/daemon/browser/computer path was exercised; no schema cache was treated as live truth; and `git diff --name-only 7ff4fc6be..HEAD -- crates scripts` was empty before this documentation work. The deferred fixture command produced no test result because shared Cargo contention prevented it from starting.
+- **Incident finding:** the forkbomb is real evidence for the direct-shim guard and owned-child cap, but its headless session creation, detached-daemon shutdown, and dead-PID sweep belong to R04/R05B. The incident does not authorize a live reproduction.
+- **R09 debt:** `docs/archive/CODE_QUALITY_TODO.md` records `tool/mod.rs` over 800 LOC, oversized `mcp/client.rs`, and existing panic/expect/unimplemented debt in `mcp/protocol.rs`, `mcp/pool.rs`, `mcp/manager.rs`, and `tool/mcp.rs`. This ledger neither hides nor rebaselines it. Before any R07A source change, assign exact touched production-size, test-size, panic, and swallowed-error deltas to R07A, run the trusted R09 classifier/ratchets without `--update`, and leave unrelated R04/R05B debt visible.
+
+## Disposition and conditions
+
+- **Recommended disposition:** `retain-fork`. Keep the fork-only direct self-reference filter and owned-child cap together with the existing shared-pool, cooldown, registry, and cache contracts. This is not approval of a real MCP connection or a broad claim of semantic equivalence to upstream.
+- **Acceptance or retirement condition:** retain until a bounded no-server fixture proves: disabled servers do not auto-spawn; self-shims are removed while external configurations survive; cap reservation refuses at limit and releases on drop; pool cooldown deduplicates failure; a fingerprint mismatch is not advertised; and a cached proxy connects only at call time. Retire only with an equivalent, replayable lifecycle design and an R00-recorded rollback/migration plan.
+- **Rollback or stop conditions:** stop before implementation if a cache becomes execution truth, a direct or obfuscated self-reference can reach spawn without an independent cap, a pooled handle leaks across sessions, a reconnect ignores cooldown, dispatch bypasses policy/pre-tool gating, or validation requires a live MCP server/network/credential/daemon. Roll back an isolated change on any regression of the no-server fixtures, leaving config and cache formats intact.
+- **Escalate to full review if:** discovery/network consent becomes executable; the schema format or fingerprint inputs migrate; an MCP lifecycle fault reaches an incident; a new pool/manager/config state writer cannot be proven through the above maps; a tool-enabled provider pilot is proposed; or generic child/session shutdown must be changed with R04.
+- **Coordinator approval:** pending.
+- **Fable review:** pending.
+
+## Explicit gaps
+
+- The actual no-server Cargo tests were not completed in this session because the shared build target was contended. Their source and hermetic construction were inspected, but they are not reported as passing.
+- The direct guard intentionally does not detect shell-obfuscated self-reference, and multi-host MCP sharing/conflict behavior was not assessed. The independent caps bound only configured process/session dimensions documented by the incident.
+- The manager’s sponsored-discovery provenance hooks and registry telemetry call sites were located but intentionally not exercised. They belong to R07B/R07C consent review, not this ledger.
+- Real server protocol interoperability, connection cancellation, browser/computer tools, provider routing, evidence persistence, renderer state, R04 shutdown, and R05B worker failure/reclaim were intentionally not tested.
+
+## 2026-07-15 W0 approval amendment
+
+Coordinator approval: **PASS as a fail-closed `retain-fork` light record**. The independent five-ledger review is [`../../reviews/2026-07-15-remaining-light-ledgers-opus-review.md`](../../reviews/2026-07-15-remaining-light-ledgers-opus-review.md), SHA-256 `b537bc5674fdb9385e60c2dd18a44db5e61ba4f57146cd57fbf91f7a58a8a55d`.
+
+The stale Fable-pending line is discharged by corrected Phase 4 Fable plan SHA-256 `b0bae9803fa726a489e0560fdc423daefa20bd8478ede0aa2772f7684ea21eb9` and independent plan review SHA-256 `3f2d31cb5fb9ead893ed8b1e4ce451072757cc5d0206236833dac1b3a886fe92`. No tool, MCP server, discovery, network, credential, or daemon exercise is approved; the no-server fixture execution and every escalation trigger remain deferred.
