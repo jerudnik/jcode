@@ -88,12 +88,12 @@ run_expect protocol_version 0 grep -Eq 'pub const PROTOCOL_VERSION: u32 = 1;' \
   crates/jcode-protocol/src/lib.rs
 
 run_expect rustfmt 0 cargo fmt --all -- --check
-run_expect classifier 0 python3 -m unittest discover -s tests -p test_rust_production_filter.py
-run_expect classifier_compile 0 python3 -m py_compile \
+run_expect classifier 0 /usr/bin/python3 -m unittest discover -s tests -p test_rust_production_filter.py
+run_expect classifier_compile 0 /usr/bin/python3 -m py_compile \
   scripts/rust_production_filter.py scripts/check_panic_budget.py \
   scripts/check_swallowed_error_budget.py tests/test_rust_production_filter.py
-run_expect dependency 0 python3 scripts/check_dependency_boundaries.py
-run_expect wildcard 0 python3 scripts/check_wildcard_reexport_budget.py
+run_expect dependency 0 /usr/bin/python3 scripts/check_dependency_boundaries.py
+run_expect wildcard 0 /usr/bin/python3 scripts/check_wildcard_reexport_budget.py
 run_expect warning 0 bash scripts/check_warning_budget.sh
 run_expect shell_syntax 0 bash -n scripts/*.sh
 run_expect diff_check 0 git diff --check
@@ -143,14 +143,14 @@ run_expect workspace_clippy 0 cargo clippy --workspace --all-targets -- -D warni
 run_expect tui_build 0 cargo build -p jcode --bin jcode
 run_expect binary_version 0 target/debug/jcode --version
 
-run_expect panic 1 python3 scripts/check_panic_budget.py
+run_expect panic 1 /usr/bin/python3 scripts/check_panic_budget.py
 run_expect panic_exact 0 grep -F '31 -> 48' "$out/raw/panic.txt"
-run_expect swallowed 1 python3 scripts/check_swallowed_error_budget.py
+run_expect swallowed 1 /usr/bin/python3 scripts/check_swallowed_error_budget.py
 run_expect swallowed_exact 0 grep -F '2987 -> 3074' "$out/raw/swallowed.txt"
-run_expect code_size 1 python3 scripts/check_code_size_budget.py
-run_expect test_size 1 python3 scripts/check_test_size_budget.py
+run_expect code_size 1 /usr/bin/python3 scripts/check_code_size_budget.py
+run_expect test_size 1 /usr/bin/python3 scripts/check_test_size_budget.py
 
-run_expect no_update_invocation 0 python3 -c \
+run_expect no_update_invocation 0 /usr/bin/python3 -c \
   'import pathlib,sys; p=pathlib.Path(sys.argv[1]); needle="-"+"-update"; text=p.read_text(); text=text.replace("needle=\"-\"+\"-update\"", "needle=<constructed>"); raise SystemExit(needle in text)' \
   "$0"
 run_expect final_status 0 bash -lc 'test -z "$(git status --short)"'
