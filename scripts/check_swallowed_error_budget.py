@@ -25,85 +25,23 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# These scripts are invoked as `python3 scripts/...`, which puts the scripts
+# directory on sys.path and makes this sibling import available.
+from rust_production_filter import production_lines, production_rust_files
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BASELINE_FILE = REPO_ROOT / "scripts" / "swallowed_error_budget.json"
-SCAN_ROOTS = (REPO_ROOT / "src", REPO_ROOT / "crates")
 PATTERNS = {
     "let_underscore": re.compile(r"\blet\s+_\s*="),
     "dot_ok": re.compile(r"\.ok\(\)"),
     "unwrap_or_default": re.compile(r"\.unwrap_or_default\(\)"),
 }
-CFG_TEST_RE = re.compile(r"^\s*#\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]")
-ITEM_START_RE = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:mod|fn)\b")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--update", action="store_true", help="refresh the baseline")
     return parser.parse_args()
-
-
-def is_test_rust_file(path: Path) -> bool:
-    rel = path.relative_to(REPO_ROOT).as_posix()
-    if path.suffix != ".rs":
-        return False
-    parts = rel.split("/")
-    if parts[0] == "tests" or any(
-        part == "tests" or part.endswith("_tests") or part.endswith("_test") or part.startswith("tests_")
-        for part in parts
-    ):
-        return True
-    name = path.name
-    return (
-        name == "tests.rs"
-        or name.endswith("_tests.rs")
-        or name.endswith("_test.rs")
-        or name.startswith("tests_")
-    )
-
-
-def production_rust_files() -> list[Path]:
-    files: list[Path] = []
-    for root in SCAN_ROOTS:
-        if not root.exists():
-            continue
-        for path in sorted(root.rglob("*.rs")):
-            if path.suffix == ".rs" and not is_test_rust_file(path):
-                files.append(path)
-    return files
-
-
-def brace_delta(line: str) -> int:
-    return line.count("{") - line.count("}")
-
-
-def production_lines(path: Path) -> list[str]:
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    output: list[str] = []
-    skip_stack: list[int] = []
-    pending_cfg_test = False
-
-    for line in lines:
-        stripped = line.strip()
-        current_depth = sum(skip_stack)
-        if current_depth == 0:
-            if pending_cfg_test and ITEM_START_RE.match(line):
-                delta = brace_delta(line)
-                if delta > 0:
-                    skip_stack.append(delta)
-                pending_cfg_test = False
-                continue
-            if pending_cfg_test and stripped and not stripped.startswith("#"):
-                pending_cfg_test = False
-            if CFG_TEST_RE.match(line):
-                pending_cfg_test = True
-                continue
-            output.append(line)
-        else:
-            skip_stack[-1] += brace_delta(line)
-            if skip_stack[-1] <= 0:
-                skip_stack.pop()
-    return output
 
 
 def zero_counts() -> dict[str, int]:
