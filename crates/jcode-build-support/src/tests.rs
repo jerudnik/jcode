@@ -140,7 +140,10 @@ fn same_commit_dirty_sidecars_project_distinct_runtime_identities() {
 
     assert_eq!(first.short_hash, second.short_hash, "same commit fixture");
     assert_eq!(first_projection.version_label, "abc1234-dirty-111111111111");
-    assert_eq!(second_projection.version_label, "abc1234-dirty-222222222222");
+    assert_eq!(
+        second_projection.version_label,
+        "abc1234-dirty-222222222222"
+    );
     assert_eq!(
         first_projection.source_fingerprint.as_deref(),
         Some("111111111111aaaa")

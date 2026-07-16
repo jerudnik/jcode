@@ -73,10 +73,7 @@ pub(super) fn log_subscribe_handshake_evaluation(
             ),
             ("server_protocol", PROTOCOL_VERSION.to_string()),
             ("server_hash", evaluation.server_hash.clone()),
-            (
-                "compatibility",
-                format!("{:?}", evaluation.compatibility),
-            ),
+            ("compatibility", format!("{:?}", evaluation.compatibility)),
             ("detail", evaluation.detail.clone()),
             (
                 "client_runtime_identity",
@@ -108,11 +105,7 @@ pub(super) fn evaluate_and_notify(
     client_runtime_identity: Option<&RuntimeIdentityProjection>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) -> HandshakeCompatibility {
-    let evaluation = evaluate_subscribe_handshake(
-        id,
-        client_protocol_version,
-        client_build_hash,
-    );
+    let evaluation = evaluate_subscribe_handshake(id, client_protocol_version, client_build_hash);
     log_subscribe_handshake_evaluation(
         id,
         client_protocol_version,

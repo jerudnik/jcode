@@ -95,7 +95,9 @@ pub async fn fetch_subscription_me() -> Result<SubscriptionMe> {
                 "jcode subscription /me denied entitlement authorization",
             );
             subscription_catalog::deny_live_tier_truth("subscription authorization denied")
-                .context("failed to clear jcode subscription tier cache after denied /me response")?;
+                .context(
+                    "failed to clear jcode subscription tier cache after denied /me response",
+                )?;
         }
         anyhow::bail!(
             "jcode subscription API returned {}: {}",
@@ -462,11 +464,9 @@ mod tests {
                 "claude-fable-5"
             ));
 
-            let api_base = serve_me_once_with_status(
-                status,
-                r#"{"error":"subscription denied"}"#.to_string(),
-            )
-            .await;
+            let api_base =
+                serve_me_once_with_status(status, r#"{"error":"subscription denied"}"#.to_string())
+                    .await;
             crate::env::set_var(subscription_catalog::JCODE_API_BASE_ENV, api_base);
 
             let error = fetch_subscription_me()
@@ -474,10 +474,9 @@ mod tests {
                 .expect_err("authoritative HTTP denial should fail fetch");
 
             assert!(
-                error.to_string().contains(&format!(
-                    "jcode subscription API returned {}",
-                    status
-                )),
+                error
+                    .to_string()
+                    .contains(&format!("jcode subscription API returned {}", status)),
                 "{error}"
             );
             assert_eq!(subscription_catalog::cached_tier(), None);
