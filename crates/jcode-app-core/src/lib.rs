@@ -53,6 +53,10 @@ pub mod tool;
 pub mod turn_cancel_registry;
 pub mod update;
 
+#[cfg(test)]
+#[path = "recovery_pilot_tests.rs"]
+mod agent_tests;
+
 use std::sync::Mutex;
 
 static CURRENT_SESSION_ID: Mutex<Option<String>> = Mutex::new(None);

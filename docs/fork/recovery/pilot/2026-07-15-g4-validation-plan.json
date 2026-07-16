@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "name": "2026-07-15-phase3-bounded-pilot",
+  "branch": "recovery/2026-07-15",
+  "prompt_diff_sha256": "8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00",
+  "expected_stash_count": 4,
+  "vendor_upstream_head": "631935dd1d3b2e31e167e2b12ad463e54bcf4b8d",
+  "minimum_free_gib": 20,
+  "forbidden_output_substrings": [
+    "fixture-key",
+    "begin telemetry session"
+  ],
+  "environment": {
+    "CARGO_NET_OFFLINE": "true",
+    "JCODE_NO_TELEMETRY": "1",
+    "NIX_CONFIG": "substitute = false"
+  },
+  "steps": [
+    {
+      "name": "pilot_fixture",
+      "expected_exit": 0,
+      "timeout_seconds": 1800,
+      "command": "cargo test -p jcode-app-core --lib agent_tests::recovery_pilot_one_fixture_route_subscribe_turn_evidence -- --exact --nocapture --test-threads=1"
+    },
+    {
+      "name": "classifier",
+      "expected_exit": 0,
+      "timeout_seconds": 300,
+      "command": "python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'"
+    },
+    {
+      "name": "panic",
+      "expected_exit": 1,
+      "timeout_seconds": 300,
+      "command": "python3 scripts/check_panic_budget.py"
+    },
+    {
+      "name": "swallowed",
+      "expected_exit": 1,
+      "timeout_seconds": 300,
+      "command": "python3 scripts/check_swallowed_error_budget.py"
+    },
+    {
+      "name": "code_size",
+      "expected_exit": 1,
+      "timeout_seconds": 300,
+      "command": "python3 scripts/check_code_size_budget.py"
+    },
+    {
+      "name": "test_size",
+      "expected_exit": 1,
+      "timeout_seconds": 300,
+      "command": "python3 scripts/check_test_size_budget.py"
+    },
+    {
+      "name": "wildcard",
+      "expected_exit": 0,
+      "timeout_seconds": 300,
+      "command": "python3 scripts/check_wildcard_reexport_budget.py"
+    },
+    {
+      "name": "warning",
+      "expected_exit": 0,
+      "timeout_seconds": 300,
+      "command": "bash scripts/check_warning_budget.sh"
+    },
+    {
+      "name": "shell_syntax",
+      "expected_exit": 0,
+      "timeout_seconds": 300,
+      "command": "bash -n scripts/*.sh"
+    },
+    {
+      "name": "diff_check",
+      "expected_exit": 0,
+      "timeout_seconds": 300,
+      "command": "git diff --check"
+    }
+  ]
+}
