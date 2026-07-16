@@ -1,6 +1,6 @@
 use super::{
-    App, antigravity_input_requires_state_validation, save_tui_openai_compatible_api_base,
-    save_tui_openai_compatible_key,
+    App, antigravity_input_requires_state_validation, jcode_subscription_tier_label,
+    save_tui_openai_compatible_api_base, save_tui_openai_compatible_key,
 };
 
 fn with_temp_jcode_home<T>(f: impl FnOnce() -> T) -> T {
@@ -49,6 +49,18 @@ fn antigravity_manual_callback_url_keeps_state_validation() {
         "http://127.0.0.1:51121/oauth-callback?code=abc&state=expected_state",
         Some("expected_state")
     ));
+}
+
+#[test]
+fn jcode_subscription_tier_label_uses_tier_truth_not_raw_tier() {
+    let denied = crate::subscription_catalog::classify_live_tier(Some("flagship"), "inactive");
+    assert_eq!(
+        jcode_subscription_tier_label(&denied),
+        "unknown-denied (inactive subscription status)"
+    );
+
+    let accepted = crate::subscription_catalog::classify_live_tier(Some("flagship"), "active");
+    assert_eq!(jcode_subscription_tier_label(&accepted), "Flagship");
 }
 
 #[test]
