@@ -67,6 +67,17 @@ pub struct SwarmTaskProgress {
     pub dead_assignee_reclaims: Option<u32>,
 }
 
+pub fn append_progress_provenance(progress: &mut SwarmTaskProgress, note: impl AsRef<str>) {
+    let note = note.as_ref().trim();
+    if note.is_empty() {
+        return;
+    }
+    progress.checkpoint_summary = Some(match progress.checkpoint_summary.take() {
+        Some(existing) if !existing.trim().is_empty() => format!("{existing} | {note}"),
+        _ => note.to_string(),
+    });
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SwarmPlanItemSpec {
     pub id: String,
@@ -631,10 +642,13 @@ pub fn reclaim_stranded_assignment(plan: &mut VersionedPlan, task_id: &str) -> b
     let progress = plan.task_progress.entry(task_id.to_string()).or_default();
     progress.assigned_session_id = None;
     progress.dead_assignee_reclaims = Some(progress.dead_assignee_reclaims.unwrap_or(0) + 1);
-    progress.checkpoint_summary = Some(format!(
-        "assignment reclaimed: previous assignee {} is dead",
-        previous_assignee.as_deref().unwrap_or("<unknown>")
-    ));
+    append_progress_provenance(
+        progress,
+        format!(
+            "assignment reclaimed: previous assignee {} is dead",
+            previous_assignee.as_deref().unwrap_or("<unknown>")
+        ),
+    );
     plan.version += 1;
     true
 }
@@ -1115,6 +1129,9 @@ mod tests {
             SwarmTaskProgress {
                 assigned_session_id: Some("dead-session".to_string()),
                 last_heartbeat_unix_ms: Some(42),
+                last_detail: Some("old detail".to_string()),
+                checkpoint_summary: Some("old checkpoint".to_string()),
+                checkpoint_count: Some(3),
                 ..SwarmTaskProgress::default()
             },
         );
@@ -1133,6 +1150,11 @@ mod tests {
             Some(42),
             "prior run history preserved"
         );
+        assert_eq!(progress.last_detail.as_deref(), Some("old detail"));
+        assert_eq!(progress.checkpoint_count, Some(3));
+        let checkpoint_summary = progress.checkpoint_summary.as_deref().unwrap_or_default();
+        assert!(checkpoint_summary.contains("old checkpoint"));
+        assert!(checkpoint_summary.contains("assignment reclaimed"));
         assert_eq!(plan.version, version_before + 1, "version bump for pollers");
 
         // The reclaimed item is now visible to the normal unassigned picker.

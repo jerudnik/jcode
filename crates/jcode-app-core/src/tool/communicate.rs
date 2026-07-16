@@ -566,6 +566,11 @@ struct RunPlanChurnGuard {
 impl RunPlanChurnGuard {
     const MAX_WAVES_WITHOUT_COMPLETION: usize = 3;
 
+    #[cfg(test)]
+    fn max_created_sessions_before_abort(concurrency_limit: usize) -> usize {
+        concurrency_limit.saturating_mul(Self::MAX_WAVES_WITHOUT_COMPLETION)
+    }
+
     fn record_wave(
         &mut self,
         assignments: &[(String, String)],
@@ -615,7 +620,7 @@ impl RunPlanChurnGuard {
                 .join(", ")
         };
         format!(
-            "run_plan aborted after {} consecutive assignment wave(s) produced no completed nodes; possible spawn churn. Churned node(s): {nodes}. Lost worker(s): {workers}. Inspect swarm membership and worker subscribe logs before retrying.",
+            "run_plan aborted after {} consecutive assignment wave(s) produced no completed nodes; possible spawn churn. Churned node(s): {nodes}. Lost worker(s): {workers}. Residue policy: pre-prompt failed sessions are finished owned workers; run_plan error cleanup cleans them by default, while retain_agents=true retains them for inspection. Inspect swarm membership and worker subscribe logs before retrying.",
             self.consecutive_assignment_waves_without_completion
         )
     }

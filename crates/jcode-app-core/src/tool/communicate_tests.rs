@@ -180,22 +180,62 @@ fn task_id_from_output_path_extracts_background_task_id() {
 #[test]
 fn run_plan_churn_guard_aborts_after_three_assignment_waves_without_completion() {
     let mut guard = RunPlanChurnGuard::default();
+    let concurrency_limit = 2;
+    let initial_sessions = 1;
+    let max_created = RunPlanChurnGuard::max_created_sessions_before_abort(concurrency_limit);
 
     assert_eq!(
-        guard.record_wave(&[("node-a".into(), "session_a".into())], 0, 0),
+        guard.record_wave(
+            &[
+                ("node-a".into(), "session_a".into()),
+                ("node-b".into(), "session_b".into()),
+            ],
+            0,
+            0,
+        ),
         None
     );
     assert_eq!(
-        guard.record_wave(&[("node-b".into(), "session_b".into())], 0, 0),
+        guard.record_wave(
+            &[
+                ("node-c".into(), "session_c".into()),
+                ("node-d".into(), "session_d".into()),
+            ],
+            0,
+            0,
+        ),
         None
     );
     let message = guard
-        .record_wave(&[("node-c".into(), "session_c".into())], 0, 0)
+        .record_wave(
+            &[
+                ("node-e".into(), "session_e".into()),
+                ("node-f".into(), "session_f".into()),
+            ],
+            0,
+            0,
+        )
         .expect("third churn wave should abort");
 
+    assert_eq!(max_created, 6);
+    assert_eq!(
+        initial_sessions + max_created,
+        7,
+        "declared bound: initial sessions + concurrency_limit * MAX_WAVES_WITHOUT_COMPLETION"
+    );
     assert!(message.contains("possible spawn churn"));
-    assert!(message.contains("node-a, node-b, node-c"));
-    assert!(message.contains("session_a, session_b, session_c"));
+    assert!(
+        message.contains("Residue policy: pre-prompt failed sessions are finished owned workers")
+    );
+    assert!(message.contains("run_plan error cleanup cleans them by default"));
+    assert!(message.contains("retain_agents=true retains them for inspection"));
+    assert!(message.contains("node-a, node-b, node-c, node-d, node-e, node-f"));
+    assert!(message.contains("session_a, session_b, session_c, session_d, session_e, session_f"));
+    assert_eq!(
+        guard.lost_workers.len(),
+        max_created,
+        "aborted churn keeps lost-worker ids for inspection until normal terminal-member retention/cleanup handles them"
+    );
 }
 
 #[test]
@@ -1526,6 +1566,34 @@ impl Provider for DelayedTestProvider {
 
     fn fork(&self) -> Arc<dyn Provider> {
         Arc::new(Self { delay: self.delay })
+    }
+}
+
+#[derive(Clone)]
+struct FailingTestProvider {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+    message: &'static str,
+}
+
+#[async_trait]
+impl Provider for FailingTestProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(anyhow::anyhow!(self.message))
+    }
+
+    fn name(&self) -> &str {
+        "test-failing"
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(self.clone())
     }
 }
 
