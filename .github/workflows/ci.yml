@@ -66,6 +66,10 @@ jobs:
         shell: bash
         run: python3 scripts/check_test_size_budget.py
 
+      - name: Run Rust production filter tests
+        shell: bash
+        run: python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'
+
       - name: Enforce panic-prone usage ratchet
         shell: bash
         run: python3 scripts/check_panic_budget.py
