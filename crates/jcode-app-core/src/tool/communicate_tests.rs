@@ -1590,6 +1590,7 @@ impl RawClient {
             terminal_env: Vec::new(),
             protocol_version: None,
             build_hash: None,
+            runtime_identity: None,
             spawn_swarm_id: None,
             spawn_session_id: None,
             client_pid: None,
@@ -1614,6 +1615,17 @@ impl RawClient {
         protocol_version: Option<u32>,
         build_hash: Option<String>,
     ) -> Result<u64> {
+        self.subscribe_with_identity_and_pid(working_dir, protocol_version, build_hash, None)
+            .await
+    }
+
+    async fn subscribe_with_identity_and_pid(
+        &mut self,
+        working_dir: &Path,
+        protocol_version: Option<u32>,
+        build_hash: Option<String>,
+        client_pid: Option<u32>,
+    ) -> Result<u64> {
         let id = self.next_id;
         self.next_id += 1;
         self.send_request(Request::Subscribe {
@@ -1627,9 +1639,10 @@ impl RawClient {
             terminal_env: Vec::new(),
             protocol_version,
             build_hash,
+            runtime_identity: None,
             spawn_swarm_id: None,
             spawn_session_id: None,
-            client_pid: None,
+            client_pid,
         })
         .await?;
         Ok(id)

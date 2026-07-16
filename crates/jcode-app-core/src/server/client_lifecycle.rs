@@ -94,6 +94,56 @@ fn initial_subscribe_working_dir(request: &Request) -> std::result::Result<Strin
     }
 }
 
+async fn preflight_initial_incompatible_advertised_subscribe(
+    request: &Request,
+    writer: &Arc<Mutex<crate::transport::WriteHalf>>,
+) -> Result<bool> {
+    let Request::Subscribe {
+        id,
+        protocol_version,
+        build_hash,
+        runtime_identity,
+        ..
+    } = request
+    else {
+        return Ok(false);
+    };
+    if protocol_version.is_none() {
+        return Ok(false);
+    }
+
+    let evaluation = super::handshake::evaluate_subscribe_handshake(
+        *id,
+        *protocol_version,
+        build_hash.as_deref(),
+    );
+    if evaluation.compatibility.is_compatible() {
+        return Ok(false);
+    }
+
+    super::handshake::log_subscribe_handshake_evaluation(
+        *id,
+        *protocol_version,
+        build_hash.as_deref(),
+        runtime_identity.as_ref(),
+        &evaluation,
+    );
+    if let Some(event) = evaluation.verdict_event {
+        write_direct_event(writer, &event).await?;
+    }
+    write_direct_event(
+        writer,
+        &ServerEvent::Error {
+            id: *id,
+            message: "Refusing incompatible advertised client; reconnect with a matching jcode binary"
+                .to_string(),
+            retry_after_secs: None,
+        },
+    )
+    .await?;
+    Ok(true)
+}
+
 struct ProcessingMessage {
     id: u64,
     content: String,
@@ -440,6 +490,10 @@ pub(super) async fn handle_client(
             return Ok(());
         }
     };
+
+    if preflight_initial_incompatible_advertised_subscribe(&initial_request, &writer).await? {
+        return Ok(());
+    }
 
     // Per-client state
     let mut client_is_processing = false;
@@ -1346,6 +1400,7 @@ pub(super) async fn handle_client(
                 terminal_env,
                 protocol_version: client_protocol_version,
                 build_hash: client_build_hash,
+                runtime_identity: client_runtime_identity,
                 spawn_swarm_id,
                 spawn_session_id,
                 client_pid,
@@ -1360,17 +1415,26 @@ pub(super) async fn handle_client(
                     });
                     continue;
                 }
-                current_client_instance_id = client_instance_id.clone();
                 // NS1: compare the client's advertised build/protocol identity
                 // against this daemon's and emit a typed verdict so the client
                 // can re-exec into the matching launcher on a mismatch. Legacy
                 // clients (no advertised identity) receive no verdict event.
-                super::handshake::evaluate_and_notify(
+                let compatibility = super::handshake::evaluate_and_notify(
                     id,
                     client_protocol_version,
                     client_build_hash.as_deref(),
+                    client_runtime_identity.as_ref(),
                     &client_event_tx,
                 );
+                if client_protocol_version.is_some() && !compatibility.is_compatible() {
+                    let _ = client_event_tx.send(ServerEvent::Error {
+                        id,
+                        message: "Refusing incompatible advertised client; reconnect with a matching jcode binary".to_string(),
+                        retry_after_secs: None,
+                    });
+                    break;
+                }
+                current_client_instance_id = client_instance_id.clone();
                 {
                     let mut connections = client_connections.write().await;
                     if let Some(info) = connections.get_mut(&client_connection_id) {

@@ -225,11 +225,18 @@ pub enum Request {
         /// `docs/architecture/SELFDEV_NIX_DAEMON_DIVERGENCE.md` (G1).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         protocol_version: Option<u32>,
-        /// Short git hash of the client binary (`jcode_build_meta::GIT_HASH`),
-        /// used by the server to decide whether attaching to a
-        /// substantially-different daemon is safe. Absent for legacy clients.
+        /// R03A compatibility-only token: short git hash of the client binary
+        /// (`jcode_build_meta::GIT_HASH`), used only to decide whether attaching
+        /// to a substantially-different daemon is safe. Absent for legacy
+        /// clients. R01 canonical runtime identity lives in
+        /// `runtime_identity`, because same-commit dirty builds can share this
+        /// hash while representing different source states.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         build_hash: Option<String>,
+        /// R01-owned canonical runtime identity projection. Optional/additive so
+        /// older clients and servers keep decoding the wire format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runtime_identity: Option<jcode_selfdev_types::RuntimeIdentityProjection>,
         /// Authoritative swarm id for spawned swarm workers. Visible terminal
         /// spawns may start in a different process cwd than the persisted
         /// session working directory; when present, the server must not re-home
@@ -844,6 +851,10 @@ pub enum ServerEvent {
         /// The server's own short git hash.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         server_build_hash: Option<String>,
+        /// R01-owned server runtime identity projection. Optional/additive;
+        /// clients that only understand the compatibility verdict can ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        server_runtime_identity: Option<jcode_selfdev_types::RuntimeIdentityProjection>,
         /// Human-readable explanation of what matched or mismatched.
         detail: String,
     },
