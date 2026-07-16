@@ -67,15 +67,119 @@ pub struct SwarmTaskProgress {
     pub dead_assignee_reclaims: Option<u32>,
 }
 
+/// W7d: hard byte bound on `checkpoint_summary` provenance. Takeover/reclaim
+/// churn appends a note per event; without a cap the summary grows without
+/// bound in persisted plans and broadcasts.
+pub const PROGRESS_PROVENANCE_MAX_BYTES: usize = 2048;
+
+const PROVENANCE_SEPARATOR: &str = " | ";
+/// Byte budget reserved for the original checkpoint segment when the summary
+/// must be truncated. The remainder of the budget goes to the omission marker
+/// and the newest notes.
+const PROVENANCE_HEAD_MAX_BYTES: usize = 512;
+
+fn provenance_omission_marker(omitted: u64) -> String {
+    format!("[{omitted} older notes omitted]")
+}
+
+fn parse_provenance_omission_marker(segment: &str) -> Option<u64> {
+    segment
+        .strip_prefix('[')?
+        .strip_suffix(" older notes omitted]")?
+        .parse()
+        .ok()
+}
+
+/// Truncate to at most `max_bytes` on a UTF-8 character boundary.
+fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
+    if value.len() <= max_bytes {
+        return value;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    &value[..end]
+}
+
+/// Append a provenance note to `checkpoint_summary`, keeping the summary
+/// within [`PROGRESS_PROVENANCE_MAX_BYTES`].
+///
+/// Retention policy (deliberately not a plain tail-keep): the original
+/// checkpoint segment is always preserved (truncated to a bounded head
+/// budget if oversized), dropped middle notes are replaced by a visible
+/// `[N older notes omitted]` marker whose count carries forward across
+/// successive truncations, and the newest notes that fit within the budget
+/// are kept. The newest note is always retained, truncated if necessary.
 pub fn append_progress_provenance(progress: &mut SwarmTaskProgress, note: impl AsRef<str>) {
     let note = note.as_ref().trim();
     if note.is_empty() {
         return;
     }
-    progress.checkpoint_summary = Some(match progress.checkpoint_summary.take() {
-        Some(existing) if !existing.trim().is_empty() => format!("{existing} | {note}"),
-        _ => note.to_string(),
-    });
+
+    let existing = progress
+        .checkpoint_summary
+        .take()
+        .filter(|value| !value.trim().is_empty());
+
+    let combined = match existing {
+        Some(existing) => format!("{existing}{PROVENANCE_SEPARATOR}{note}"),
+        None => note.to_string(),
+    };
+    if combined.len() <= PROGRESS_PROVENANCE_MAX_BYTES {
+        progress.checkpoint_summary = Some(combined);
+        return;
+    }
+
+    // Over budget: re-derive segments and apply head + marker + newest-tail.
+    let mut segments: Vec<&str> = combined.split(PROVENANCE_SEPARATOR).collect();
+    let head = truncate_utf8(segments.remove(0), PROVENANCE_HEAD_MAX_BYTES).to_string();
+
+    // Carry forward a previous omission count if one directly follows the head.
+    let mut omitted: u64 = 0;
+    if let Some(first) = segments.first()
+        && let Some(previous) = parse_provenance_omission_marker(first)
+    {
+        omitted = previous;
+        segments.remove(0);
+    }
+
+    // Keep the newest segments that fit alongside head + marker. The marker's
+    // rendered width is stable for the counts reachable here, so budget with
+    // the final count pessimistically by assuming all middle notes drop.
+    let marker_budget = provenance_omission_marker(omitted + segments.len() as u64).len();
+    let fixed = head.len() + PROVENANCE_SEPARATOR.len() + marker_budget;
+    let mut kept: Vec<&str> = Vec::new();
+    let mut used = fixed;
+    for segment in segments.iter().rev() {
+        let cost = PROVENANCE_SEPARATOR.len() + segment.len();
+        if used + cost > PROGRESS_PROVENANCE_MAX_BYTES && !kept.is_empty() {
+            break;
+        }
+        if used + cost > PROGRESS_PROVENANCE_MAX_BYTES {
+            // Even the newest note alone does not fit: keep a truncated form.
+            let available =
+                PROGRESS_PROVENANCE_MAX_BYTES.saturating_sub(used + PROVENANCE_SEPARATOR.len());
+            kept.push(truncate_utf8(segment, available));
+            break;
+        }
+        used += cost;
+        kept.push(segment);
+    }
+    kept.reverse();
+    omitted += (segments.len() - kept.len()) as u64;
+
+    let mut summary = head;
+    if omitted > 0 {
+        summary.push_str(PROVENANCE_SEPARATOR);
+        summary.push_str(&provenance_omission_marker(omitted));
+    }
+    for segment in kept {
+        summary.push_str(PROVENANCE_SEPARATOR);
+        summary.push_str(segment);
+    }
+    debug_assert!(summary.len() <= PROGRESS_PROVENANCE_MAX_BYTES);
+    progress.checkpoint_summary = Some(summary);
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1170,5 +1274,90 @@ mod tests {
             Some(1)
         );
         assert!(!reclaim_stranded_assignment(&mut plan, "missing"));
+    }
+
+    #[test]
+    fn provenance_appends_verbatim_under_budget() {
+        let mut progress = SwarmTaskProgress {
+            checkpoint_summary: Some("original checkpoint".to_string()),
+            ..Default::default()
+        };
+        append_progress_provenance(&mut progress, "takeover 1");
+        append_progress_provenance(&mut progress, "  ");
+        append_progress_provenance(&mut progress, "takeover 2");
+        assert_eq!(
+            progress.checkpoint_summary.as_deref(),
+            Some("original checkpoint | takeover 1 | takeover 2")
+        );
+    }
+
+    #[test]
+    fn provenance_churn_stays_bounded_and_keeps_original_plus_newest() {
+        let mut progress = SwarmTaskProgress {
+            checkpoint_summary: Some("original checkpoint".to_string()),
+            ..Default::default()
+        };
+        for index in 0..500 {
+            append_progress_provenance(
+                &mut progress,
+                format!(
+                    "assignment takeover: reassigned from worker-{index} to worker-{}",
+                    index + 1
+                ),
+            );
+        }
+        let summary = progress.checkpoint_summary.as_deref().unwrap();
+        assert!(
+            summary.len() <= PROGRESS_PROVENANCE_MAX_BYTES,
+            "summary must stay bounded, got {} bytes",
+            summary.len()
+        );
+        assert!(
+            summary.starts_with("original checkpoint"),
+            "original checkpoint must survive churn: {summary}"
+        );
+        assert!(
+            summary.contains("older notes omitted]"),
+            "omission must be visible: {summary}"
+        );
+        assert!(
+            summary.ends_with("to worker-500"),
+            "newest note must survive: {summary}"
+        );
+        // The omission marker count reflects all dropped notes across
+        // successive truncations, not just the last pass.
+        let omitted = summary
+            .split(" | ")
+            .find_map(|segment| {
+                segment
+                    .strip_prefix('[')?
+                    .strip_suffix(" older notes omitted]")?
+                    .parse::<u64>()
+                    .ok()
+            })
+            .expect("omission marker present");
+        let kept_notes = summary
+            .split(" | ")
+            .filter(|segment| segment.starts_with("assignment takeover"))
+            .count() as u64;
+        assert_eq!(omitted + kept_notes, 500, "every note accounted for");
+    }
+
+    #[test]
+    fn provenance_truncates_oversized_head_and_note_on_char_boundaries() {
+        let mut progress = SwarmTaskProgress {
+            checkpoint_summary: Some("é".repeat(2000)),
+            ..Default::default()
+        };
+        append_progress_provenance(&mut progress, "à".repeat(3000));
+        let summary = progress.checkpoint_summary.as_deref().unwrap();
+        assert!(summary.len() <= PROGRESS_PROVENANCE_MAX_BYTES);
+        assert!(summary.starts_with('é'), "head preserved");
+        assert!(
+            summary.contains(" | à"),
+            "newest note kept in truncated form"
+        );
+        // Would panic on a broken char boundary.
+        let _ = summary.chars().count();
     }
 }
