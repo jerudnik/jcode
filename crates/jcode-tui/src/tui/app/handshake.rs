@@ -58,11 +58,14 @@ pub(crate) fn decide_handshake_action(ctx: &HandshakeContext<'_>) -> HandshakeAc
         return HandshakeAction::Attach;
     }
 
-    // Incompatible, but we already re-execed once: do not loop. Attaching to a
-    // mismatched daemon is the lesser evil versus an infinite relaunch cycle,
-    // and the user has already been told once.
+    // Incompatible, but we already re-execed once: do not loop and do not attach
+    // to the mismatched daemon. Fail closed with a visible refusal.
     if ctx.already_reexeced {
-        return HandshakeAction::Attach;
+        return HandshakeAction::Refuse(format!(
+            "Refusing to attach to an incompatible daemon after one re-exec attempt. {}\n\
+             Fix: rebuild/reload a matching daemon, or launch the matching jcode binary directly.",
+            ctx.detail
+        ));
     }
 
     match &ctx.reexec_target {
@@ -74,7 +77,11 @@ pub(crate) fn decide_handshake_action(ctx: &HandshakeContext<'_>) -> HandshakeAc
             let target_payload = canonical_payload(target);
             let current_payload = ctx.current_exe.map(canonical_payload);
             if current_payload.as_deref() == Some(target_payload.as_path()) {
-                return HandshakeAction::Attach;
+                return HandshakeAction::Refuse(format!(
+                    "Refusing to attach to an incompatible daemon because the resolved launcher is the current executable. {}\n\
+                     Fix: reload the daemon to a matching binary, or install a distinct matching launcher.",
+                    ctx.detail
+                ));
             }
             HandshakeAction::ReExec(target.clone())
         }
@@ -230,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn incompatible_after_reexec_attaches_to_avoid_loop() {
+    fn incompatible_after_reexec_refuses_to_avoid_loop_and_attach() {
         let target = PathBuf::from("/home/u/.jcode/builds/current/jcode");
         let action = decide_handshake_action(&ctx(
             HandshakeCompatibility::IncompatibleReconnect,
@@ -238,11 +245,17 @@ mod tests {
             None,
             true, // already re-execed once
         ));
-        assert_eq!(action, HandshakeAction::Attach);
+        match action {
+            HandshakeAction::Refuse(message) => {
+                assert!(message.contains("after one re-exec attempt"));
+                assert!(message.contains("client abc != server def"));
+            }
+            other => panic!("expected Refuse, got {other:?}"),
+        }
     }
 
     #[test]
-    fn incompatible_target_equals_current_attaches() {
+    fn incompatible_target_equals_current_refuses() {
         // Re-execing into the same binary would not fix a server-side mismatch.
         let same = PathBuf::from("/usr/local/bin/jcode-real");
         let action = decide_handshake_action(&ctx(
@@ -251,7 +264,13 @@ mod tests {
             Some(same.as_path()),
             false,
         ));
-        assert_eq!(action, HandshakeAction::Attach);
+        match action {
+            HandshakeAction::Refuse(message) => {
+                assert!(message.contains("current executable"));
+                assert!(message.contains("client abc != server def"));
+            }
+            other => panic!("expected Refuse, got {other:?}"),
+        }
     }
 
     #[test]

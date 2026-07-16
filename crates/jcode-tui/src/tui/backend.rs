@@ -337,6 +337,9 @@ impl RemoteConnection {
             // re-exec into the matching launcher (see tui::app::handshake).
             protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
             build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
+            runtime_identity: Some(crate::build::current_runtime_identity_projection(
+                "tui-client",
+            )),
             spawn_swarm_id: std::env::var("JCODE_SPAWN_SWARM_ID").ok(),
             spawn_session_id: std::env::var("JCODE_SPAWN_SESSION_ID").ok(),
             client_pid: Some(std::process::id()),

@@ -1,4 +1,5 @@
 use super::{has_live_listener, is_server_ready};
+use jcode_selfdev_types::RuntimeIdentityProjection;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -18,6 +19,7 @@ pub fn write_reload_marker() {
         pid: std::process::id(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         detail: None,
+        runtime_identity: None,
     }
     .write();
 }
@@ -74,6 +76,16 @@ pub fn write_reload_state(
     phase: ReloadPhase,
     detail: Option<String>,
 ) {
+    write_reload_state_with_runtime_identity(request_id, hash, phase, detail, None)
+}
+
+pub fn write_reload_state_with_runtime_identity(
+    request_id: &str,
+    hash: &str,
+    phase: ReloadPhase,
+    detail: Option<String>,
+    runtime_identity: Option<RuntimeIdentityProjection>,
+) {
     ReloadState {
         request_id: request_id.to_string(),
         hash: hash.to_string(),
@@ -81,6 +93,7 @@ pub fn write_reload_state(
         pid: std::process::id(),
         timestamp: chrono::Utc::now().to_rfc3339(),
         detail,
+        runtime_identity,
     }
     .write();
 }
@@ -95,11 +108,12 @@ pub fn publish_reload_socket_ready() {
 
     let current_pid = std::process::id();
     if state.phase == ReloadPhase::Starting && state.pid == current_pid {
-        write_reload_state(
+        write_reload_state_with_runtime_identity(
             &state.request_id,
             &state.hash,
             ReloadPhase::SocketReady,
             state.detail.clone(),
+            state.runtime_identity.clone(),
         );
         crate::logging::info(&format!(
             "Published reload socket-ready state for request {}",
@@ -405,6 +419,7 @@ pub struct ReloadSignal {
     pub triggering_session: Option<String>,
     pub prefer_selfdev_binary: bool,
     pub request_id: String,
+    pub runtime_identity: Option<RuntimeIdentityProjection>,
 }
 
 #[derive(Clone, Debug)]
@@ -430,6 +445,8 @@ pub struct ReloadState {
     pub timestamp: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_identity: Option<RuntimeIdentityProjection>,
 }
 
 impl ReloadState {
@@ -504,6 +521,15 @@ pub fn send_reload_signal(
     triggering_session: Option<String>,
     prefer_selfdev_binary: bool,
 ) -> String {
+    send_reload_signal_with_runtime_identity(hash, triggering_session, prefer_selfdev_binary, None)
+}
+
+pub fn send_reload_signal_with_runtime_identity(
+    hash: String,
+    triggering_session: Option<String>,
+    prefer_selfdev_binary: bool,
+    runtime_identity: Option<RuntimeIdentityProjection>,
+) -> String {
     let request_id = crate::id::new_id("reload");
     crate::logging::info(&format!(
         "send_reload_signal: request={} hash={} triggering_session={:?} prefer_selfdev_binary={} current_pid={}",
@@ -519,6 +545,7 @@ pub fn send_reload_signal(
         triggering_session,
         prefer_selfdev_binary,
         request_id: request_id.clone(),
+        runtime_identity,
     }));
     request_id
 }
@@ -664,6 +691,38 @@ mod tests {
 
         assert_eq!(status, ReloadWaitStatus::Ready);
     }
+
+    #[test]
+    #[allow(clippy::await_holding_lock)]
+    fn publish_socket_ready_preserves_starting_runtime_identity() {
+        let _lock = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _guard = EnvGuard::set_runtime_dir(temp.path());
+        let identity = RuntimeIdentityProjection {
+            version_label: "abc1234-dirty-111111111111".to_string(),
+            source_fingerprint: Some("111111111111aaaa".to_string()),
+            source_dirty: Some(true),
+            source_hash: Some("abc1234".to_string()),
+            source_full_hash: Some("abc1234-full".to_string()),
+            activation_channel: "selfdev".to_string(),
+            resolved_executable_payload: std::path::PathBuf::from("/tmp/jcode-test"),
+        };
+
+        write_reload_state_with_runtime_identity(
+            "req-runtime",
+            "hash-runtime",
+            ReloadPhase::Starting,
+            Some("starting".to_string()),
+            Some(identity.clone()),
+        );
+
+        publish_reload_socket_ready();
+
+        let state = ReloadState::load().expect("reload state after socket ready");
+        assert_eq!(state.phase, ReloadPhase::SocketReady);
+        assert_eq!(state.runtime_identity, Some(identity));
+    }
+
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn wait_for_reload_ack_returns_matching_ack() {
@@ -792,6 +851,7 @@ mod tests {
             pid: current,
             timestamp: chrono::Utc::now().to_rfc3339(),
             detail: None,
+            runtime_identity: None,
         }
         .write();
 
@@ -819,6 +879,7 @@ mod tests {
             pid: current.wrapping_add(1),
             timestamp: chrono::Utc::now().to_rfc3339(),
             detail: None,
+            runtime_identity: None,
         }
         .write();
         clear_reload_marker_if_stale_for_pid(current);
@@ -835,6 +896,7 @@ mod tests {
             pid: current,
             timestamp: chrono::Utc::now().to_rfc3339(),
             detail: None,
+            runtime_identity: None,
         }
         .write();
         clear_reload_marker_if_stale_for_pid(current);

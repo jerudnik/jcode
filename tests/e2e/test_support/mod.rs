@@ -346,6 +346,7 @@ impl WsTestClient {
             terminal_env: Vec::new(),
             protocol_version: None,
             build_hash: None,
+            runtime_identity: None,
             spawn_swarm_id: None,
             spawn_session_id: None,
             client_pid: Some(std::process::id()),

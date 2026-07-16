@@ -345,8 +345,16 @@ impl SelfDevTool {
         crate::logging::info("Reload context saved successfully");
 
         // Signal the server via in-process channel (replaces filesystem-based rebuild-signal)
-        let request_id =
-            server::send_reload_signal(hash.clone(), Some(session_id.to_string()), true);
+        let runtime_identity = source.runtime_identity_projection(
+            "selfdev",
+            crate::build::resolve_binary_payload(&target_binary),
+        );
+        let request_id = server::send_reload_signal_with_runtime_identity(
+            hash.clone(),
+            Some(session_id.to_string()),
+            true,
+            Some(runtime_identity),
+        );
         crate::logging::info(&format!(
             "selfdev reload: request={} session_id={} hash={} execution_mode={:?}",
             request_id, session_id, hash, execution_mode

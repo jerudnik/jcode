@@ -474,7 +474,8 @@ pub use self::reload_state::{
     await_reload_handoff, clear_reload_marker, inspect_reload_wait_status,
     publish_reload_socket_ready, recent_reload_state, reload_marker_active, reload_marker_exists,
     reload_marker_path, reload_process_alive, reload_state_summary, send_reload_signal,
-    wait_for_reload_ack, wait_for_reload_handoff_event, write_reload_marker, write_reload_state,
+    send_reload_signal_with_runtime_identity, wait_for_reload_ack, wait_for_reload_handoff_event,
+    write_reload_marker, write_reload_state, write_reload_state_with_runtime_identity,
 };
 
 pub use self::lifecycle::configure_temporary_server;

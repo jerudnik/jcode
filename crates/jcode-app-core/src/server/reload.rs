@@ -93,11 +93,12 @@ pub(super) async fn await_reload_signal(
             }),
         );
         let reload_started = std::time::Instant::now();
-        crate::server::write_reload_state(
+        crate::server::write_reload_state_with_runtime_identity(
             &signal.request_id,
             &signal.hash,
             crate::server::ReloadPhase::Starting,
             signal.triggering_session.clone(),
+            signal.runtime_identity.clone(),
         );
         super::acknowledge_reload_signal(&signal);
 
@@ -177,30 +178,33 @@ pub(super) async fn await_reload_signal(
                 cmd.arg("serve").arg("--socket").arg(socket.as_os_str());
                 prepare_server_exec(&mut cmd, &socket);
                 let err = crate::platform::replace_process(&mut cmd);
-                crate::server::write_reload_state(
+                crate::server::write_reload_state_with_runtime_identity(
                     &signal.request_id,
                     &signal.hash,
                     crate::server::ReloadPhase::Failed,
                     Some(err.to_string()),
+                    signal.runtime_identity.clone(),
                 );
                 crate::logging::error(&format!(
                     "Failed to exec into {} {:?}: {}",
                     label, binary, err
                 ));
             } else {
-                crate::server::write_reload_state(
+                crate::server::write_reload_state_with_runtime_identity(
                     &signal.request_id,
                     &signal.hash,
                     crate::server::ReloadPhase::Failed,
                     Some(format!("missing binary: {}", binary.display())),
+                    signal.runtime_identity.clone(),
                 );
             }
         } else {
-            crate::server::write_reload_state(
+            crate::server::write_reload_state_with_runtime_identity(
                 &signal.request_id,
                 &signal.hash,
                 crate::server::ReloadPhase::Failed,
                 Some("no reloadable binary found".to_string()),
+                signal.runtime_identity.clone(),
             );
         }
         std::process::exit(42);

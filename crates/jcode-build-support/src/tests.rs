@@ -102,6 +102,88 @@ fn dev_binary_matches_source_only_on_exact_metadata() {
 }
 
 #[test]
+fn same_commit_dirty_source_states_project_distinct_runtime_identities_without_live_builds() {
+    let first = source_state_fixture("abc1234", "111111111111aaaa");
+    let second = source_state_fixture("abc1234", "222222222222bbbb");
+
+    let first_projection = first.runtime_identity_projection("selfdev", "/tmp/jcode-a");
+    let second_projection = second.runtime_identity_projection("selfdev", "/tmp/jcode-b");
+
+    assert_eq!(first.short_hash, second.short_hash, "same commit fixture");
+    assert_ne!(first.fingerprint, second.fingerprint);
+    assert_ne!(first.version_label, second.version_label);
+    assert_ne!(first_projection, second_projection);
+    assert_eq!(
+        first_projection.source_fingerprint.as_deref(),
+        Some("111111111111aaaa")
+    );
+    assert_eq!(first_projection.source_dirty, Some(true));
+    assert_eq!(first_projection.source_hash.as_deref(), Some("abc1234"));
+    assert_eq!(first_projection.activation_channel, "selfdev");
+}
+
+#[test]
+fn same_commit_dirty_sidecars_project_distinct_runtime_identities() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let first_binary = dir.path().join("jcode-first");
+    let second_binary = dir.path().join("jcode-second");
+    std::fs::write(&first_binary, "first").expect("write first binary");
+    std::fs::write(&second_binary, "second").expect("write second binary");
+
+    let first = source_state_fixture("abc1234", "111111111111aaaa");
+    let second = source_state_fixture("abc1234", "222222222222bbbb");
+    write_dev_binary_source_metadata(&first_binary, &first).expect("write first sidecar");
+    write_dev_binary_source_metadata(&second_binary, &second).expect("write second sidecar");
+
+    let first_projection = runtime_identity_projection_for_binary(&first_binary, "tui-client");
+    let second_projection = runtime_identity_projection_for_binary(&second_binary, "tui-client");
+
+    assert_eq!(first.short_hash, second.short_hash, "same commit fixture");
+    assert_eq!(first_projection.version_label, "abc1234-dirty-111111111111");
+    assert_eq!(second_projection.version_label, "abc1234-dirty-222222222222");
+    assert_eq!(
+        first_projection.source_fingerprint.as_deref(),
+        Some("111111111111aaaa")
+    );
+    assert_eq!(
+        second_projection.source_fingerprint.as_deref(),
+        Some("222222222222bbbb")
+    );
+    assert_eq!(first_projection.source_dirty, Some(true));
+    assert_eq!(second_projection.source_dirty, Some(true));
+    assert_ne!(first_projection, second_projection);
+}
+
+#[test]
+fn installed_immutable_binary_sidecar_projects_exact_runtime_identity() {
+    with_temp_jcode_home(|| {
+        let source = source_state_fixture("fedcba9", "999999999999cccc");
+        let versioned = install_binary_at_version(
+            std::env::current_exe().as_ref().unwrap(),
+            &source.version_label,
+        )
+        .expect("install immutable binary");
+        write_dev_binary_source_metadata(&versioned, &source).expect("write immutable sidecar");
+
+        let projection = runtime_identity_projection_for_binary(&versioned, "shared-server");
+
+        assert_eq!(projection.version_label, "fedcba9-dirty-999999999999");
+        assert_eq!(
+            projection.source_fingerprint.as_deref(),
+            Some("999999999999cccc")
+        );
+        assert_eq!(projection.source_dirty, Some(true));
+        assert_eq!(projection.source_hash.as_deref(), Some("fedcba9"));
+        assert_eq!(projection.source_full_hash.as_deref(), Some("fedcba9-full"));
+        assert_eq!(projection.activation_channel, "shared-server");
+        assert_eq!(
+            projection.resolved_executable_payload,
+            resolve_binary_payload(&versioned)
+        );
+    });
+}
+
+#[test]
 fn test_build_manifest_default() {
     let manifest = BuildManifest::default();
     assert!(manifest.stable.is_none());

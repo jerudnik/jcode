@@ -40,9 +40,78 @@ use std::time::{Duration, Instant};
 
 pub use jcode_selfdev_types::{
     BinaryChoice, BinaryVersionReport, BuildInfo, CanaryStatus, CrashInfo, DevBinarySourceMetadata,
-    MigrationContext, PendingActivation, PublishedBuild, SelfDevBuildCommand, SelfDevBuildTarget,
-    SourceState,
+    MigrationContext, PendingActivation, PublishedBuild, RuntimeIdentityProjection,
+    SelfDevBuildCommand, SelfDevBuildTarget, SourceState,
 };
+
+fn metadata_version_label(metadata: &DevBinarySourceMetadata) -> String {
+    if metadata.dirty {
+        let prefix: String = metadata.source_fingerprint.chars().take(12).collect();
+        format!("{}-dirty-{}", metadata.short_hash, prefix)
+    } else {
+        metadata.short_hash.clone()
+    }
+}
+
+fn runtime_identity_projection_from_metadata(
+    metadata: DevBinarySourceMetadata,
+    activation_channel: String,
+    resolved_executable_payload: PathBuf,
+) -> RuntimeIdentityProjection {
+    RuntimeIdentityProjection {
+        version_label: metadata_version_label(&metadata),
+        source_fingerprint: Some(metadata.source_fingerprint),
+        source_dirty: Some(metadata.dirty),
+        source_hash: Some(metadata.short_hash),
+        source_full_hash: Some(metadata.full_hash),
+        activation_channel,
+        resolved_executable_payload,
+    }
+}
+
+fn read_dev_binary_source_metadata(binary: &Path) -> Option<DevBinarySourceMetadata> {
+    storage::read_json(&binary_source_metadata_path(binary)).ok()
+}
+
+pub fn runtime_identity_projection_for_binary(
+    binary: &Path,
+    activation_channel: impl Into<String>,
+) -> RuntimeIdentityProjection {
+    let activation_channel = activation_channel.into();
+    let resolved_payload = resolve_binary_payload(binary);
+    if let Some(metadata) = read_dev_binary_source_metadata(&resolved_payload)
+        .or_else(|| read_dev_binary_source_metadata(binary))
+    {
+        return runtime_identity_projection_from_metadata(
+            metadata,
+            activation_channel,
+            resolved_payload,
+        );
+    }
+
+    RuntimeIdentityProjection {
+        version_label: jcode_build_meta::VERSION.to_string(),
+        source_fingerprint: None,
+        source_dirty: None,
+        source_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
+        source_full_hash: None,
+        activation_channel,
+        resolved_executable_payload: resolved_payload,
+    }
+}
+
+/// Best-effort R01 canonical projection for the currently running process.
+///
+/// Release/ambient binaries cannot always reconstruct the build-time dirty source
+/// fingerprint, so those fields are optional. Dirty selfdev publication paths
+/// should prefer [`SourceState::runtime_identity_projection`] with the exact
+/// requested source state.
+pub fn current_runtime_identity_projection(
+    activation_channel: impl Into<String>,
+) -> RuntimeIdentityProjection {
+    let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("unknown"));
+    runtime_identity_projection_for_binary(&current_exe, activation_channel)
+}
 
 /// Manifest tracking build versions and their status
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -707,6 +776,7 @@ pub fn publish_local_current_build_for_source(
     validate_dev_binary_matches_source(repo_dir, &binary, source)?;
     let previous_current_version = read_current_version()?;
     let versioned_path = install_binary_at_version(&binary, &source.version_label)?;
+    write_dev_binary_source_metadata(&versioned_path, source)?;
     let installed_report = read_binary_version_report(&versioned_path)?;
     if installed_report
         .version

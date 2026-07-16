@@ -82,6 +82,57 @@ pub struct SourceState {
     pub changed_paths: usize,
 }
 
+/// R01-owned canonical projection of the runtime identity that produced or is
+/// executing a jcode binary.
+///
+/// This is distinct from the R03A `build_hash` compatibility token. Dirty builds
+/// from the same commit can share a short hash while representing different
+/// source states; the source fingerprint and version label are therefore part of
+/// the canonical identity that reload/restart evidence must preserve.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimeIdentityProjection {
+    /// Immutable label for this source state, e.g. `<hash>` or
+    /// `<hash>-dirty-<fingerprint-prefix>`.
+    pub version_label: String,
+    /// Stable fingerprint of the source state when known. Optional for older or
+    /// release binaries that cannot reconstruct the build-time source tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
+    /// Whether the source state was dirty when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_dirty: Option<bool>,
+    /// Short source/build hash used for human correlation. This is not the R03A
+    /// compatibility verdict by itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    /// Full source/build hash when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_full_hash: Option<String>,
+    /// Channel or mechanism that selected the executable, e.g. `selfdev`,
+    /// `shared-server`, `generic-client`, or `tui-client`.
+    pub activation_channel: String,
+    /// Payload executable after wrapper/symlink resolution where possible.
+    pub resolved_executable_payload: std::path::PathBuf,
+}
+
+impl SourceState {
+    pub fn runtime_identity_projection(
+        &self,
+        activation_channel: impl Into<String>,
+        resolved_executable_payload: impl Into<std::path::PathBuf>,
+    ) -> RuntimeIdentityProjection {
+        RuntimeIdentityProjection {
+            version_label: self.version_label.clone(),
+            source_fingerprint: Some(self.fingerprint.clone()),
+            source_dirty: Some(self.dirty),
+            source_hash: Some(self.short_hash.clone()),
+            source_full_hash: Some(self.full_hash.clone()),
+            activation_channel: activation_channel.into(),
+            resolved_executable_payload: resolved_executable_payload.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PublishedBuild {
     pub version: String,

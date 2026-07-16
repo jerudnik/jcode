@@ -410,6 +410,7 @@ async fn do_reload_returns_after_ack_in_direct_mode() {
         triggering_session: None,
         prefer_selfdev_binary: true,
         request_id: "ignored".to_string(),
+        runtime_identity: None,
     });
 
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -418,6 +419,7 @@ async fn do_reload_returns_after_ack_in_direct_mode() {
         triggering_session: None,
         prefer_selfdev_binary: true,
         request_id,
+        runtime_identity: None,
     });
 
     let ack = waiter
