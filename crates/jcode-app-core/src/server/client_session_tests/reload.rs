@@ -39,6 +39,34 @@ fn detects_reload_interrupted_tool_result() {
 }
 
 #[test]
+fn detects_resumable_reload_interrupted_wait_with_error_bit() {
+    let agent = test_agent(vec![crate::session::StoredMessage {
+        id: "msg_wait_reload".to_string(),
+        role: crate::message::Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "tool_wait".to_string(),
+            content: "[Tool 'bg' wait interrupted by server reload after 1.2s. The underlying operation may still be running. Resume the wait by rerunning the same tool call with input: {\"action\":\"wait\",\"task_id\":\"bg-123\"}]".to_string(),
+            is_error: Some(true),
+        }],
+        display_role: None,
+        timestamp: None,
+        tool_duration_ms: None,
+        token_usage: None,
+    }]);
+
+    assert!(session_was_interrupted_by_reload(&agent));
+    let ContentBlock::ToolResult {
+        content, is_error, ..
+    } = &agent.messages()[0].content[0]
+    else {
+        panic!("expected production-shaped tool result");
+    };
+    assert_eq!(is_error, &Some(true));
+    assert!(content.contains("may still be running"));
+    assert!(content.contains("Resume the wait"));
+}
+
+#[test]
 fn detects_reload_skipped_tool_result() {
     let agent = test_agent(vec![crate::session::StoredMessage {
         id: "msg_3".to_string(),

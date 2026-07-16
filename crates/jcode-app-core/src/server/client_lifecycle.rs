@@ -135,8 +135,9 @@ async fn preflight_initial_incompatible_advertised_subscribe(
         writer,
         &ServerEvent::Error {
             id: *id,
-            message: "Refusing incompatible advertised client; reconnect with a matching jcode binary"
-                .to_string(),
+            message:
+                "Refusing incompatible advertised client; reconnect with a matching jcode binary"
+                    .to_string(),
             retry_after_secs: None,
         },
     )
@@ -2744,7 +2745,7 @@ pub(super) async fn handle_client(
         }
     }
 
-    cleanup_client_connection(
+    let cleanup_outcome = cleanup_client_connection(
         &sessions,
         &client_session_id,
         client_is_processing,
@@ -2766,6 +2767,12 @@ pub(super) async fn handle_client(
         &swarm_event_tx,
     )
     .await?;
+    if cleanup_outcome.terminal_persistence_incomplete() {
+        crate::logging::warn(&format!(
+            "Session {} disconnect cleanup completed without durable terminal persistence",
+            client_session_id
+        ));
+    }
     Ok(())
 }
 

@@ -723,6 +723,84 @@ mod tests {
         assert_eq!(state.runtime_identity, Some(identity));
     }
 
+    #[test]
+    #[allow(clippy::await_holding_lock)]
+    fn restart_identity_projection_carries_dirty_same_commit_without_reclassification() {
+        let _lock = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let _guard = EnvGuard::set_runtime_dir(temp.path());
+        let dirty_identity = RuntimeIdentityProjection {
+            version_label: "deadbee-dirty-aaaaaaaaaaaa".to_string(),
+            source_fingerprint: Some("aaaaaaaaaaaa1111".to_string()),
+            source_dirty: Some(true),
+            source_hash: Some("deadbee".to_string()),
+            source_full_hash: Some("deadbeefdeadbeef".to_string()),
+            activation_channel: "selfdev".to_string(),
+            resolved_executable_payload: std::path::PathBuf::from("/tmp/dirty-jcode"),
+        };
+        let clean_same_commit = RuntimeIdentityProjection {
+            version_label: "deadbee-clean-bbbbbbbbbbbb".to_string(),
+            source_fingerprint: Some("bbbbbbbbbbbb2222".to_string()),
+            source_dirty: Some(false),
+            source_hash: Some("deadbee".to_string()),
+            source_full_hash: Some("deadbeefdeadbeef".to_string()),
+            activation_channel: "selfdev".to_string(),
+            resolved_executable_payload: std::path::PathBuf::from("/tmp/clean-jcode"),
+        };
+
+        write_reload_state_with_runtime_identity(
+            "req-dirty",
+            "same-build-hash",
+            ReloadPhase::Starting,
+            Some("starting dirty".to_string()),
+            Some(dirty_identity.clone()),
+        );
+        publish_reload_socket_ready();
+        let dirty_state = ReloadState::load().expect("dirty restart state");
+        assert_eq!(dirty_state.runtime_identity, Some(dirty_identity));
+
+        write_reload_state_with_runtime_identity(
+            "req-clean",
+            "same-build-hash",
+            ReloadPhase::Starting,
+            Some("starting clean".to_string()),
+            Some(clean_same_commit.clone()),
+        );
+        publish_reload_socket_ready();
+        let clean_state = ReloadState::load().expect("clean restart state");
+        assert_eq!(clean_state.runtime_identity, Some(clean_same_commit));
+        assert_eq!(clean_state.hash, "same-build-hash");
+
+        let (same_commit_verdict, same_commit_detail) =
+            jcode_protocol::HandshakeCompatibility::evaluate(
+                Some(jcode_protocol::PROTOCOL_VERSION),
+                Some(&dirty_state.hash),
+                jcode_protocol::PROTOCOL_VERSION,
+                Some(&clean_state.hash),
+            );
+        assert_eq!(
+            same_commit_verdict,
+            jcode_protocol::HandshakeCompatibility::Compatible,
+            "R03A compatibility verdict remains a build-hash/protocol decision: {same_commit_detail}"
+        );
+        assert_ne!(
+            dirty_state.runtime_identity, clean_state.runtime_identity,
+            "R01 runtime identity projection must still distinguish dirty same-commit restarts"
+        );
+
+        let (mismatched_verdict, _) = jcode_protocol::HandshakeCompatibility::evaluate(
+            Some(jcode_protocol::PROTOCOL_VERSION),
+            Some("different-build-hash"),
+            jcode_protocol::PROTOCOL_VERSION,
+            Some(&clean_state.hash),
+        );
+        assert_eq!(
+            mismatched_verdict,
+            jcode_protocol::HandshakeCompatibility::IncompatibleReconnect,
+            "fixture observes the R03A reconnect verdict instead of deriving compatibility from R04 state"
+        );
+    }
+
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn wait_for_reload_ack_returns_matching_ack() {
