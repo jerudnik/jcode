@@ -1469,6 +1469,19 @@ pub(super) async fn record_swarm_event_for_session(
     .await;
 }
 
+/// W7b: single authoritative mapping from a finished turn's error to the
+/// terminal member status label. Typed interruptions are user cancellations
+/// (`stopped`/`cancelled`); everything else is `failed` with a truncated
+/// detail. Both turn-completion consumers must use this helper so the final
+/// label cannot depend on which consumer writes last.
+pub(super) fn terminal_status_for_turn_error(error: &anyhow::Error) -> (&'static str, String) {
+    if crate::agent::Agent::error_is_turn_interruption(error) {
+        ("stopped", "cancelled".to_string())
+    } else {
+        ("failed", truncate_detail(&error.to_string(), 120))
+    }
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "member status updates need swarm membership, broadcast state, and optional event history sinks"
@@ -1913,8 +1926,8 @@ mod tests {
         broadcast_swarm_plan, broadcast_swarm_plan_with_previous, broadcast_swarm_status,
         member_status_is_dead, now_unix_ms, parse_swarm_tasks, refresh_swarm_task_staleness,
         remove_session_from_swarm, salvage_assignments_of_dead_member, swarm_ancestors,
-        swarm_is_self_or_ancestor, swarm_spawn_depth, touch_swarm_task_progress,
-        update_member_status, update_member_status_with_report,
+        swarm_is_self_or_ancestor, swarm_spawn_depth, terminal_status_for_turn_error,
+        touch_swarm_task_progress, update_member_status, update_member_status_with_report,
     };
     use crate::plan::PlanItem;
     use crate::protocol::{NotificationType, ServerEvent};
@@ -1943,6 +1956,96 @@ mod tests {
     #[test]
     fn truncate_detail_collapses_whitespace_and_ellipsizes() {
         assert_eq!(truncate_detail("hello   there\nworld", 11), "hello th...");
+    }
+
+    #[test]
+    fn terminal_status_maps_typed_interruption_to_stopped_cancelled() {
+        let interrupted = crate::agent::Agent::interrupted_turn_error_for_tests();
+        assert_eq!(
+            terminal_status_for_turn_error(&interrupted),
+            ("stopped", "cancelled".to_string())
+        );
+
+        // Wrapped interruptions keep the deterministic label.
+        let wrapped = interrupted.context("while awaiting detached turn");
+        assert_eq!(
+            terminal_status_for_turn_error(&wrapped),
+            ("stopped", "cancelled".to_string())
+        );
+    }
+
+    #[test]
+    fn terminal_status_keeps_failed_for_non_interruption_errors() {
+        let plain = anyhow::anyhow!("provider exploded");
+        assert_eq!(
+            terminal_status_for_turn_error(&plain),
+            ("failed", "provider exploded".to_string())
+        );
+
+        // A lookalike display string must not become stopped/cancelled.
+        let lookalike = anyhow::anyhow!("turn interrupted");
+        assert_eq!(terminal_status_for_turn_error(&lookalike).0, "failed");
+    }
+
+    /// W7b determinism: a cancelled detached turn ends `stopped/cancelled`
+    /// regardless of whether the cancel path or the turn-completion consumer
+    /// writes the terminal member status last. Both writers now derive the
+    /// label from the same typed mapping, so both orderings converge.
+    #[tokio::test]
+    async fn detached_cancel_final_member_status_is_stopped_for_both_write_orders() {
+        for completion_writes_last in [false, true] {
+            let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+            let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+                "swarm-1".to_string(),
+                HashSet::from(["worker".to_string()]),
+            )])));
+            let (mut worker, _worker_rx) = swarm_member("worker", "agent", true);
+            worker.status = "running".to_string();
+            swarm_members
+                .write()
+                .await
+                .insert("worker".to_string(), worker);
+
+            // The cancel path writes the literal stopped/cancelled pair
+            // (client_lifecycle::cancel_processing_message). The completion
+            // consumer maps the interrupted error through the shared helper.
+            let interrupted = crate::agent::Agent::interrupted_turn_error_for_tests();
+            let (completion_status, completion_detail) =
+                terminal_status_for_turn_error(&interrupted);
+
+            let writes: [(&str, String); 2] = if completion_writes_last {
+                [
+                    ("stopped", "cancelled".to_string()),
+                    (completion_status, completion_detail),
+                ]
+            } else {
+                [
+                    (completion_status, completion_detail),
+                    ("stopped", "cancelled".to_string()),
+                ]
+            };
+            for (status, detail) in writes {
+                update_member_status(
+                    "worker",
+                    status,
+                    Some(detail),
+                    &swarm_members,
+                    &swarms_by_id,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
+            }
+
+            let members = swarm_members.read().await;
+            let worker = members.get("worker").expect("worker member");
+            assert_eq!(
+                worker.status, "stopped",
+                "final label must be stopped when completion writes last = {completion_writes_last}"
+            );
+            assert_eq!(worker.detail.as_deref(), Some("cancelled"));
+        }
     }
 
     #[test]

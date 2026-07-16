@@ -1122,10 +1122,13 @@ pub(super) async fn handle_agent_task(
             let _ = ctx.client_event_tx.send(ServerEvent::Done { id });
         }
         Err(e) => {
+            // W7b: deterministic terminal label via the shared typed mapping;
+            // detached completion stays consistent with the cancel path.
+            let (status, detail) = super::swarm::terminal_status_for_turn_error(&e);
             update_member_status(
                 client_session_id,
-                "failed",
-                Some(truncate_detail(&e.to_string(), 120)),
+                status,
+                Some(detail),
                 ctx.swarm_members,
                 ctx.swarms_by_id,
                 Some(ctx.event_history),

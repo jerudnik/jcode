@@ -783,10 +783,15 @@ pub(super) async fn handle_client(
                         }
                         Err(e) => {
                             if let Some(session_id) = done_session.as_deref() {
+                                // W7b: deterministic terminal label via the
+                                // shared typed mapping; interrupted turns end
+                                // stopped/cancelled regardless of write order.
+                                let (status, detail) =
+                                    super::swarm::terminal_status_for_turn_error(&e);
                                 update_member_status(
                                     session_id,
-                                    "failed",
-                                    Some(truncate_detail(&e.to_string(), 120)),
+                                    status,
+                                    Some(detail),
                                     &swarm_members,
                                     &swarms_by_id,
                                     Some(&event_history),
