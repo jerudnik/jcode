@@ -174,6 +174,15 @@ impl Agent {
         anyhow::Error::new(TurnInterruptedError)
     }
 
+    /// Typed predicate for turn interruption, usable by server consumers
+    /// without string comparison. Traverses the whole `anyhow` chain so
+    /// wrapped interruptions (for example `context(...)` layers or
+    /// `ClassifiedEvidenceError` wrappers) are still recognized, while
+    /// lookalike string errors are not.
+    pub(crate) fn error_is_turn_interruption(error: &anyhow::Error) -> bool {
+        classify_evidence_error(error) == EvidenceErrorClass::TurnInterrupted
+    }
+
     pub(super) fn evidence_payload_json<T: serde::Serialize + ?Sized>(
         &self,
         value: &T,
@@ -269,7 +278,14 @@ impl fmt::Display for ClassifiedEvidenceError {
     }
 }
 
-impl std::error::Error for ClassifiedEvidenceError {}
+impl std::error::Error for ClassifiedEvidenceError {
+    /// Expose the wrapped error so `anyhow` chain traversal and downcast
+    /// walks (for example `StreamError::retry_after_secs` recovery) keep
+    /// working through the classification wrapper (W7a).
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
+}
 
 pub(super) fn error_class_for_error(error: &anyhow::Error) -> String {
     classify_evidence_error(error).as_str().to_string()
@@ -288,4 +304,105 @@ fn classify_evidence_error(error: &anyhow::Error) -> EvidenceErrorClass {
         }
     }
     EvidenceErrorClass::Unknown
+}
+
+#[cfg(test)]
+mod w7a_error_semantics_tests {
+    use super::*;
+    use anyhow::Context as _;
+
+    /// A lookalike error whose display text matches the interruption marker
+    /// but whose type does not. The typed predicate must reject it.
+    #[derive(Debug)]
+    struct LookalikeInterruption;
+
+    impl fmt::Display for LookalikeInterruption {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("turn interrupted")
+        }
+    }
+
+    impl std::error::Error for LookalikeInterruption {}
+
+    #[test]
+    fn interruption_predicate_accepts_direct_marker() {
+        let error = Agent::interrupted_turn_error();
+        assert!(Agent::error_is_turn_interruption(&error));
+    }
+
+    #[test]
+    fn interruption_predicate_accepts_context_wrapped_marker() {
+        let error = Agent::interrupted_turn_error()
+            .context("while streaming")
+            .context("outer turn layer");
+        assert!(
+            Agent::error_is_turn_interruption(&error),
+            "predicate must traverse the anyhow context chain"
+        );
+    }
+
+    #[test]
+    fn interruption_predicate_accepts_classified_wrapped_marker() {
+        let error = Agent::classified_evidence_error(
+            Agent::interrupted_turn_error(),
+            EvidenceErrorClass::TurnInterrupted,
+        );
+        assert!(Agent::error_is_turn_interruption(&error));
+    }
+
+    #[test]
+    fn interruption_predicate_rejects_lookalike_string_error() {
+        let error = anyhow::Error::new(LookalikeInterruption);
+        assert_eq!(error.to_string(), "turn interrupted");
+        assert!(
+            !Agent::error_is_turn_interruption(&error),
+            "string-equal display text must not satisfy the typed predicate"
+        );
+    }
+
+    #[test]
+    fn interruption_predicate_rejects_plain_and_stream_errors() {
+        assert!(!Agent::error_is_turn_interruption(&anyhow::anyhow!(
+            "turn interrupted"
+        )));
+        let stream = anyhow::Error::new(StreamError::new("stream broke".into(), Some(7)));
+        assert!(!Agent::error_is_turn_interruption(&stream));
+    }
+
+    #[test]
+    fn classified_error_source_exposes_inner_chain() {
+        let inner = anyhow::Error::new(StreamError::new("rate limited".into(), Some(42)));
+        let wrapped = Agent::classified_evidence_error(inner, EvidenceErrorClass::StreamEvent);
+
+        let classified = wrapped
+            .downcast_ref::<ClassifiedEvidenceError>()
+            .expect("outer classified wrapper");
+        let source = std::error::Error::source(classified)
+            .expect("W7a: ClassifiedEvidenceError must expose its inner error");
+        assert_eq!(source.to_string(), "rate limited");
+    }
+
+    #[test]
+    fn classified_error_chain_preserves_retry_after_secs() {
+        let inner = anyhow::Error::new(StreamError::new("rate limited".into(), Some(42)));
+        let wrapped = Agent::classified_evidence_error(inner, EvidenceErrorClass::StreamEvent);
+
+        let retry = wrapped
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<StreamError>())
+            .and_then(|stream_error| stream_error.retry_after_secs);
+        assert_eq!(
+            retry,
+            Some(42),
+            "retry metadata must survive classification wrapping via source()"
+        );
+    }
+
+    #[test]
+    fn classification_still_reads_class_through_wrapping() {
+        let inner = anyhow::Error::new(StreamError::new("boom".into(), None));
+        let wrapped = Agent::classified_evidence_error(inner, EvidenceErrorClass::ProviderOpen)
+            .context("outer layer");
+        assert_eq!(error_class_for_error(&wrapped), "provider_open_error");
+    }
 }
