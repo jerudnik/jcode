@@ -630,8 +630,12 @@ impl App {
                 &self.provider.model(),
                 crate::telemetry::SessionEndReason::NormalExit,
             );
-            self.session.mark_closed();
-            let _ = self.session.save();
+            if let Err(error) = self.session.mark_closed_and_persist() {
+                crate::logging::warn(&format!(
+                    "failed to persist quit session close state for {}: {}",
+                    self.session.id, error
+                ));
+            }
             self.should_quit = true;
             return true;
         }

@@ -967,20 +967,18 @@ impl Agent {
         }
     }
 
-    /// Mark this agent session as closed and persist it.
-    pub fn mark_closed(&mut self) {
+    /// Mark this agent session as closed and persist it before clearing markers.
+    pub fn mark_closed(&mut self) -> Result<()> {
         crate::telemetry::end_session_with_reason(
             self.provider.name(),
             &self.provider.model(),
             crate::telemetry::SessionEndReason::NormalExit,
         );
         self.persist_soft_interrupt_snapshot();
-        self.session.mark_closed();
-        if !self.session.messages.is_empty() {
-            self.persist_session_best_effort("session close state");
-        }
+        self.session.mark_closed_and_persist()?;
         self.fire_session_lifecycle_hook("session_end", "close");
         self.herdr_reporter.release_agent(self.session.id.clone());
+        Ok(())
     }
 
     /// Fire a session lifecycle observer hook (`session_start`/`session_end`).
@@ -999,17 +997,15 @@ impl Agent {
         crate::hooks::dispatch_observer(event);
     }
 
-    pub fn mark_crashed(&mut self, message: Option<String>) {
+    pub fn mark_crashed(&mut self, message: Option<String>) -> Result<()> {
         crate::telemetry::record_crash(
             self.provider.name(),
             &self.provider.model(),
             crate::telemetry::SessionEndReason::Unknown,
         );
         self.persist_soft_interrupt_snapshot();
-        self.session.mark_crashed(message);
-        if !self.session.messages.is_empty() {
-            self.persist_session_best_effort("session crash state");
-        }
+        self.session.mark_crashed_and_persist(message)?;
+        Ok(())
     }
 
     /// Get the last token usage from the most recent API request

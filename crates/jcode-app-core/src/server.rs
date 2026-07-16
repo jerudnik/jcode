@@ -871,7 +871,12 @@ impl Server {
                 remove_background_tool_signal(&session_id);
                 {
                     let mut agent_guard = agent.lock().await;
-                    agent_guard.mark_closed();
+                    if let Err(error) = agent_guard.mark_closed() {
+                        crate::logging::warn(&format!(
+                            "Failed to persist skipped headless recovery close for session {}: {}",
+                            session_id, error
+                        ));
+                    }
                 }
                 stats.skipped += 1;
                 update_member_status(
@@ -926,9 +931,14 @@ impl Server {
                 remove_background_tool_signal(&session_id);
                 {
                     let mut agent_guard = agent.lock().await;
-                    agent_guard.mark_crashed(Some(
+                    if let Err(error) = agent_guard.mark_crashed(Some(
                         "Headless reload recovery directive was missing".to_string(),
-                    ));
+                    )) {
+                        crate::logging::warn(&format!(
+                            "Failed to persist failed headless recovery crash for session {}: {}",
+                            session_id, error
+                        ));
+                    }
                 }
                 continue;
             };

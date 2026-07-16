@@ -12,9 +12,27 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast};
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 
 const RELOAD_DISCONNECT_MARKER_MAX_AGE: Duration = Duration::from_secs(30);
+const AGENT_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(test)]
+static TEST_AGENT_LOCK_TIMEOUT_MS: AtomicU64 = AtomicU64::new(u64::MAX);
+
+fn agent_lock_timeout() -> Duration {
+    #[cfg(test)]
+    {
+        let millis = TEST_AGENT_LOCK_TIMEOUT_MS.load(Ordering::SeqCst);
+        if millis != u64::MAX {
+            return Duration::from_millis(millis);
+        }
+    }
+    AGENT_LOCK_TIMEOUT
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DisconnectDisposition {
@@ -107,24 +125,38 @@ pub(super) async fn cleanup_client_connection(
         let mut sessions_guard = sessions.write().await;
         if let Some(agent_arc) = sessions_guard.remove(client_session_id) {
             drop(sessions_guard);
-            let lock_result =
-                tokio::time::timeout(std::time::Duration::from_secs(2), agent_arc.lock()).await;
+            let lock_result = tokio::time::timeout(agent_lock_timeout(), agent_arc.lock()).await;
 
             match lock_result {
                 Ok(mut agent) => {
                     match disposition {
                         DisconnectDisposition::Closed => {
-                            agent.mark_closed();
+                            if let Err(error) = agent.mark_closed() {
+                                crate::logging::warn(&format!(
+                                    "Failed to persist closed disconnect state for session {}: {}",
+                                    client_session_id, error
+                                ));
+                            }
                         }
                         DisconnectDisposition::Reloading => {
-                            agent.mark_crashed(Some(
+                            if let Err(error) = agent.mark_crashed(Some(
                                 "Server reload interrupted processing".to_string(),
-                            ));
+                            )) {
+                                crate::logging::warn(&format!(
+                                    "Failed to persist reloading disconnect state for session {}: {}",
+                                    client_session_id, error
+                                ));
+                            }
                         }
                         DisconnectDisposition::Crashed => {
-                            agent.mark_crashed(Some(
+                            if let Err(error) = agent.mark_crashed(Some(
                                 "Client disconnected while processing".to_string(),
-                            ));
+                            )) {
+                                crate::logging::warn(&format!(
+                                    "Failed to persist crashed disconnect state for session {}: {}",
+                                    client_session_id, error
+                                ));
+                            }
                         }
                     }
 
@@ -254,7 +286,350 @@ pub(super) async fn cleanup_client_connection(
 
 #[cfg(test)]
 mod tests {
-    use super::{DisconnectDisposition, disconnect_disposition};
+    use super::{
+        ClientConnectionInfo, ClientDebugState, DisconnectDisposition, FileTouchService,
+        InterruptSignal, SessionAgents, SwarmEvent, SwarmMember, TEST_AGENT_LOCK_TIMEOUT_MS,
+        VersionedPlan, cleanup_client_connection, disconnect_disposition,
+    };
+    use crate::agent::Agent;
+    use crate::message::{Message, StreamEvent, ToolDefinition};
+    use crate::provider::{EventStream, Provider};
+    use crate::session::{Session, SessionStatus};
+    use crate::tool::Registry;
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::sync::Arc;
+    use std::sync::atomic::Ordering;
+    use std::time::Instant;
+    use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+    use tokio_stream::wrappers::ReceiverStream;
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prev = std::env::var_os(key);
+            crate::env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(prev) = &self.prev {
+                crate::env::set_var(self.key, prev);
+            } else {
+                crate::env::remove_var(self.key);
+            }
+        }
+    }
+
+    struct TestProvider;
+
+    #[async_trait]
+    impl Provider for TestProvider {
+        async fn complete(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDefinition],
+            _system: &str,
+            _resume_session_id: Option<&str>,
+        ) -> Result<EventStream> {
+            let (_tx, rx) = mpsc::channel::<Result<StreamEvent>>(1);
+            Ok(Box::pin(ReceiverStream::new(rx)))
+        }
+
+        fn name(&self) -> &str {
+            "test"
+        }
+
+        fn fork(&self) -> Arc<dyn Provider> {
+            Arc::new(Self)
+        }
+    }
+
+    fn test_swarm_member(session_id: &str) -> SwarmMember {
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        SwarmMember {
+            session_id: session_id.to_string(),
+            event_tx,
+            event_txs: HashMap::new(),
+            working_dir: None,
+            swarm_id: Some("swarm-r04".to_string()),
+            swarm_enabled: true,
+            status: "running".to_string(),
+            detail: None,
+            task_label: None,
+            subagent_type: None,
+            friendly_name: Some(session_id.to_string()),
+            report_back_to_session_id: Some("coordinator".to_string()),
+            initial_prompt_delivered: None,
+            latest_completion_report: None,
+            role: "agent".to_string(),
+            joined_at: Instant::now(),
+            last_status_change: Instant::now(),
+            is_headless: false,
+            output_tail: None,
+            todo_progress: None,
+            todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
+        }
+    }
+
+    struct CleanupHarness {
+        sessions: SessionAgents,
+        swarm_members: Arc<RwLock<HashMap<String, SwarmMember>>>,
+        swarms_by_id: Arc<RwLock<HashMap<String, HashSet<String>>>>,
+        swarm_coordinators: Arc<RwLock<HashMap<String, String>>>,
+        swarm_plans: Arc<RwLock<HashMap<String, VersionedPlan>>>,
+        file_touch: FileTouchService,
+        client_debug_state: Arc<RwLock<ClientDebugState>>,
+        client_connections: Arc<RwLock<HashMap<String, ClientConnectionInfo>>>,
+        shutdown_signals: Arc<RwLock<HashMap<String, InterruptSignal>>>,
+        soft_interrupt_queues: super::super::SessionInterruptQueues,
+        event_history: Arc<RwLock<VecDeque<SwarmEvent>>>,
+        event_counter: Arc<std::sync::atomic::AtomicU64>,
+        swarm_event_tx: broadcast::Sender<SwarmEvent>,
+    }
+
+    impl CleanupHarness {
+        async fn new(session_id: &str) -> Result<(Self, Arc<Mutex<Agent>>)> {
+            let provider: Arc<dyn Provider> = Arc::new(TestProvider);
+            let registry = Registry::new(provider.clone()).await;
+            let mut session = Session::create_with_id(
+                session_id.to_string(),
+                None,
+                Some("r04 disconnect fixture".to_string()),
+            );
+            session.mark_active();
+            session.save()?;
+            let agent = Arc::new(Mutex::new(Agent::new_with_session(
+                provider, registry, session, None,
+            )));
+            let (swarm_event_tx, _swarm_event_rx) = broadcast::channel(8);
+            let (disconnect_tx, _disconnect_rx) = mpsc::unbounded_channel();
+            let sessions = Arc::new(RwLock::new(HashMap::from([(
+                session_id.to_string(),
+                Arc::clone(&agent),
+            )])));
+            let swarm_members = Arc::new(RwLock::new(HashMap::from([(
+                session_id.to_string(),
+                test_swarm_member(session_id),
+            )])));
+            let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
+                "swarm-r04".to_string(),
+                HashSet::from([session_id.to_string()]),
+            )])));
+            let client_connections = Arc::new(RwLock::new(HashMap::from([(
+                "conn-old".to_string(),
+                ClientConnectionInfo {
+                    client_id: "client-old".to_string(),
+                    session_id: session_id.to_string(),
+                    client_instance_id: None,
+                    debug_client_id: Some("debug-old".to_string()),
+                    connected_at: Instant::now(),
+                    last_seen: Instant::now(),
+                    is_processing: false,
+                    current_tool_name: None,
+                    terminal_env: Vec::new(),
+                    disconnect_tx,
+                },
+            )])));
+            Ok((
+                Self {
+                    sessions,
+                    swarm_members,
+                    swarms_by_id,
+                    swarm_coordinators: Arc::new(RwLock::new(HashMap::new())),
+                    swarm_plans: Arc::new(RwLock::new(HashMap::new())),
+                    file_touch: FileTouchService::new(),
+                    client_debug_state: Arc::new(RwLock::new(ClientDebugState::default())),
+                    client_connections,
+                    shutdown_signals: Arc::new(RwLock::new(HashMap::from([(
+                        session_id.to_string(),
+                        InterruptSignal::new(),
+                    )]))),
+                    soft_interrupt_queues: Arc::new(RwLock::new(HashMap::new())),
+                    event_history: Arc::new(RwLock::new(VecDeque::new())),
+                    event_counter: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    swarm_event_tx,
+                },
+                agent,
+            ))
+        }
+
+        async fn cleanup(&self, session_id: &str, processing: bool) -> Result<()> {
+            let mut processing_task = processing.then(|| {
+                tokio::spawn(async {
+                    std::future::pending::<()>().await;
+                })
+            });
+            let event_handle = tokio::spawn(async {
+                std::future::pending::<()>().await;
+            });
+            cleanup_client_connection(
+                &self.sessions,
+                session_id,
+                processing,
+                &mut processing_task,
+                event_handle,
+                &self.swarm_members,
+                &self.swarms_by_id,
+                &self.swarm_coordinators,
+                &self.swarm_plans,
+                &self.file_touch,
+                &self.client_debug_state,
+                "debug-old",
+                &self.client_connections,
+                "conn-old",
+                &self.shutdown_signals,
+                &self.soft_interrupt_queues,
+                &self.event_history,
+                &self.event_counter,
+                &self.swarm_event_tx,
+            )
+            .await
+        }
+    }
+
+    fn marker_path(session_id: &str) -> Result<std::path::PathBuf> {
+        Ok(crate::storage::active_pids_dir()
+            .ok_or_else(|| anyhow::anyhow!("active marker dir unavailable"))?
+            .join(session_id))
+    }
+
+    fn assert_live_successor_marker(session_id: &str) -> Result<()> {
+        assert_eq!(
+            std::fs::read_to_string(marker_path(session_id)?)?,
+            std::process::id().to_string()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn crashed_disconnect_save_failure_retains_successor_marker_and_cleans_runtime_state()
+    -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_r04_disconnect_crash_failure";
+        let _replace_guard = EnvGuard::set(
+            "JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION",
+            session_id,
+        );
+        let _fail_guard = EnvGuard::set("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION", session_id);
+        let (harness, _agent) = CleanupHarness::new(session_id).await?;
+
+        harness.cleanup(session_id, true).await?;
+
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Active
+        ));
+        assert_live_successor_marker(session_id)?;
+        assert!(harness.swarm_members.read().await.get(session_id).is_none());
+        assert!(
+            harness
+                .shutdown_signals
+                .read()
+                .await
+                .get(session_id)
+                .is_none()
+        );
+        assert!(harness.sessions.read().await.get(session_id).is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reloading_disconnect_save_failure_retains_successor_marker_and_active_session()
+    -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let runtime = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let _runtime_guard = EnvGuard::set("JCODE_RUNTIME_DIR", runtime.path());
+        crate::server::clear_reload_marker();
+        crate::server::write_reload_state(
+            "r04-reload",
+            "test-hash",
+            crate::server::ReloadPhase::Starting,
+            None,
+        );
+        let session_id = "session_r04_disconnect_reload_failure";
+        let _replace_guard = EnvGuard::set(
+            "JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION",
+            session_id,
+        );
+        let _fail_guard = EnvGuard::set("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION", session_id);
+        let (harness, _agent) = CleanupHarness::new(session_id).await?;
+
+        harness.cleanup(session_id, true).await?;
+
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Active
+        ));
+        assert_live_successor_marker(session_id)?;
+        assert!(harness.swarm_members.read().await.get(session_id).is_none());
+        crate::server::clear_reload_marker();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn idle_closed_disconnect_persists_closed_before_preserving_successor_marker()
+    -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_r04_disconnect_idle_closed";
+        let _replace_guard = EnvGuard::set(
+            "JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION",
+            session_id,
+        );
+        let (harness, _agent) = CleanupHarness::new(session_id).await?;
+
+        harness.cleanup(session_id, false).await?;
+
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Closed
+        ));
+        assert_live_successor_marker(session_id)?;
+        assert!(harness.swarm_members.read().await.get(session_id).is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn disconnect_agent_lock_timeout_is_observable_without_terminal_persistence() -> Result<()>
+    {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        TEST_AGENT_LOCK_TIMEOUT_MS.store(0, Ordering::SeqCst);
+        let session_id = "session_r04_disconnect_lock_timeout";
+        let (harness, agent) = CleanupHarness::new(session_id).await?;
+        let held_agent_lock = agent.lock().await;
+
+        let result = harness.cleanup(session_id, false).await;
+        TEST_AGENT_LOCK_TIMEOUT_MS.store(u64::MAX, Ordering::SeqCst);
+        drop(held_agent_lock);
+        result?;
+
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Active
+        ));
+        assert!(
+            marker_path(session_id)?.exists(),
+            "timeout branch must not claim or remove persisted terminal marker state"
+        );
+        assert!(harness.swarm_members.read().await.get(session_id).is_none());
+        Ok(())
+    }
 
     #[test]
     fn idle_disconnect_is_closed() {
