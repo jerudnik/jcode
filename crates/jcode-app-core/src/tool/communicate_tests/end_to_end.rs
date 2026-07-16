@@ -681,9 +681,8 @@ async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
 }
 
 /// NS1 live check: a client that advertises a build hash the daemon does not
-/// share receives an `IncompatibleReconnect` verdict over the wire, before the
-/// subscribe `Done`. This is the server half of the re-exec decision proven
-/// against a real `Server::run()` socket, not a fixture.
+/// share receives an `IncompatibleReconnect` verdict over the wire and the
+/// server fails closed before subscribe side effects or success `Done`.
 #[tokio::test]
 async fn handshake_emits_incompatible_verdict_for_mismatched_client() {
     let _env_lock = crate::storage::lock_test_env();
@@ -709,11 +708,13 @@ async fn handshake_emits_incompatible_verdict_for_mismatched_client() {
     let mut client = RawClient::connect(&socket_path)
         .await
         .expect("client should connect");
+    let advertised_pid = std::process::id().saturating_add(100_000);
     let id = client
-        .subscribe_with_identity(
+        .subscribe_with_identity_and_pid(
             &repo_dir,
             Some(jcode_protocol::PROTOCOL_VERSION),
             Some("0000000-not-a-real-build-hash".to_string()),
+            Some(advertised_pid),
         )
         .await
         .expect("subscribe with mismatched identity");
@@ -746,14 +747,37 @@ async fn handshake_emits_incompatible_verdict_for_mismatched_client() {
         other => panic!("expected HandshakeVerdict, got {other:?}"),
     }
 
-    // The verdict precedes the normal subscribe completion.
-    client
-        .read_until(
-            Duration::from_secs(5),
-            |event| matches!(event, ServerEvent::Done { id: done_id } if *done_id == id),
-        )
+    let terminal = client
+        .read_until(Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::Error { id: error_id, .. } if *error_id == id)
+                || matches!(event, ServerEvent::Done { id: done_id } if *done_id == id)
+        })
         .await
-        .expect("subscribe should still complete after the verdict");
+        .expect("incompatible advertised subscribe should receive a terminal response");
+    match terminal {
+        ServerEvent::Error { message, .. } => {
+            assert!(
+                message.contains("Refusing incompatible advertised client"),
+                "error should explain fail-closed refusal, got: {message}"
+            );
+        }
+        ServerEvent::Done { .. } => panic!("incompatible advertised subscribe must not succeed"),
+        other => panic!("expected Error or Done sentinel, got {other:?}"),
+    }
+
+    let active_dir = crate::storage::active_pids_dir().expect("active_pids dir path");
+    if active_dir.exists() {
+        let advertised_pid_text = advertised_pid.to_string();
+        for entry in std::fs::read_dir(&active_dir).expect("read active_pids") {
+            let entry = entry.expect("read active pid entry");
+            let contents = std::fs::read_to_string(entry.path()).expect("read active pid marker");
+            assert_ne!(
+                contents.trim(),
+                advertised_pid_text.as_str(),
+                "fail-closed subscribe must not register the advertised client PID marker"
+            );
+        }
+    }
 
     server_task.abort();
 }

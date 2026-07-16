@@ -90,11 +90,13 @@ impl Client {
             client_has_local_history,
             allow_session_takeover,
             terminal_env: crate::terminal_launch::snapshot_client_terminal_env(),
-            // Advertise this client's protocol/build identity so the server can
-            // return a compatibility verdict (NS1). Sourced from the compiled
-            // build metadata, the same identity `jcode doctor` reads.
-            protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
-            build_hash: Some(jcode_build_meta::GIT_HASH.to_string()),
+            // Generic API clients do not consume the Subscribe handshake verdict
+            // synchronously, so they must not advertise identity. Advertising is
+            // reserved for clients that enforce the verdict (the TUI) or for
+            // explicit tests. Legacy/no-verdict behavior stays additive.
+            protocol_version: None,
+            build_hash: None,
+            runtime_identity: None,
             spawn_swarm_id: std::env::var("JCODE_SPAWN_SWARM_ID").ok(),
             spawn_session_id: std::env::var("JCODE_SPAWN_SESSION_ID").ok(),
             client_pid: Some(std::process::id()),
@@ -347,5 +349,46 @@ impl Client {
         let json = serde_json::to_string(&request)? + "\n";
         self.writer.write_all(json.as_bytes()).await?;
         Ok(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn generic_client_subscribe_omits_unconsumed_handshake_advertisement() {
+        use tokio::io::AsyncBufReadExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = dir.path().join("jcode.sock");
+        let listener = tokio::net::UnixListener::bind(&socket_path).expect("bind unix listener");
+
+        let connect_task = tokio::spawn(Client::connect_with_path(socket_path.clone()));
+        let (server_stream, _) = listener.accept().await.expect("accept client");
+        let mut client = connect_task
+            .await
+            .expect("connect task")
+            .expect("client connect");
+
+        client.subscribe().await.expect("subscribe writes request");
+
+        let mut reader = tokio::io::BufReader::new(server_stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.expect("read subscribe");
+        let request: Request = serde_json::from_str(&line).expect("parse subscribe");
+        let Request::Subscribe {
+            protocol_version,
+            build_hash,
+            runtime_identity,
+            ..
+        } = request
+        else {
+            panic!("expected Subscribe, got {request:?}");
+        };
+        assert_eq!(protocol_version, None);
+        assert_eq!(build_hash, None);
+        assert_eq!(runtime_identity, None);
     }
 }

@@ -208,6 +208,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         terminal_env: vec![("ZELLIJ_SESSION_NAME".to_string(), "sessionB".to_string())],
         protocol_version: Some(1),
         build_hash: Some("abc1234".to_string()),
+        runtime_identity: None,
         spawn_swarm_id: Some("/tmp/project/.git".to_string()),
         spawn_session_id: Some("session_spawned".to_string()),
         client_pid: Some(4242),
@@ -226,6 +227,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         terminal_env,
         protocol_version,
         build_hash,
+        runtime_identity,
         spawn_swarm_id,
         spawn_session_id,
         client_pid,
@@ -236,6 +238,7 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
     assert_eq!(id, 89);
     assert_eq!(protocol_version, Some(1));
     assert_eq!(build_hash.as_deref(), Some("abc1234"));
+    assert!(runtime_identity.is_none());
     assert_eq!(spawn_swarm_id.as_deref(), Some("/tmp/project/.git"));
     assert_eq!(spawn_session_id.as_deref(), Some("session_spawned"));
     assert_eq!(working_dir.as_deref(), Some("/tmp/project"));
@@ -248,6 +251,45 @@ fn test_subscribe_request_roundtrip_preserves_session_takeover_flags() -> Result
         terminal_env,
         vec![("ZELLIJ_SESSION_NAME".to_string(), "sessionB".to_string())]
     );
+    Ok(())
+}
+
+#[test]
+fn test_subscribe_request_roundtrip_preserves_optional_runtime_identity_projection() -> Result<()> {
+    let projection = jcode_selfdev_types::RuntimeIdentityProjection {
+        version_label: "abc1234-dirty-111111111111".to_string(),
+        source_fingerprint: Some("111111111111aaaa".to_string()),
+        source_dirty: Some(true),
+        source_hash: Some("abc1234".to_string()),
+        source_full_hash: Some("abc1234-full".to_string()),
+        activation_channel: "tui-client".to_string(),
+        resolved_executable_payload: "/tmp/jcode".into(),
+    };
+    let req = Request::Subscribe {
+        id: 92,
+        working_dir: Some("/tmp/project".to_string()),
+        selfdev: None,
+        target_session_id: None,
+        client_instance_id: None,
+        client_has_local_history: false,
+        allow_session_takeover: false,
+        terminal_env: Vec::new(),
+        protocol_version: Some(1),
+        build_hash: Some("abc1234".to_string()),
+        runtime_identity: Some(projection.clone()),
+        spawn_swarm_id: None,
+        spawn_session_id: None,
+        client_pid: None,
+    };
+    let json = serde_json::to_string(&req)?;
+    assert!(json.contains("runtime_identity"));
+    let Request::Subscribe {
+        runtime_identity, ..
+    } = parse_request_json(&json)?
+    else {
+        return Err(anyhow!("expected Subscribe"));
+    };
+    assert_eq!(runtime_identity, Some(projection));
     Ok(())
 }
 
@@ -266,6 +308,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
         terminal_env,
         protocol_version,
         build_hash,
+        runtime_identity,
         spawn_swarm_id,
         spawn_session_id,
         client_pid,
@@ -283,6 +326,7 @@ fn test_subscribe_request_defaults_optional_flags() -> Result<()> {
     assert!(terminal_env.is_empty());
     assert_eq!(protocol_version, None);
     assert_eq!(build_hash, None);
+    assert_eq!(runtime_identity, None);
     assert_eq!(spawn_swarm_id, None);
     assert_eq!(spawn_session_id, None);
     assert_eq!(client_pid, None);

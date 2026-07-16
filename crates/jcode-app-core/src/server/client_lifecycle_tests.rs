@@ -630,6 +630,7 @@ fn subscribe_request(working_dir: Option<&str>) -> Request {
         terminal_env: Vec::new(),
         protocol_version: None,
         build_hash: None,
+        runtime_identity: None,
         spawn_swarm_id: None,
         spawn_session_id: None,
         client_pid: None,
@@ -1233,6 +1234,156 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
         sessions.read().await.is_empty(),
         "lightweight control request should not allocate a live agent session"
     );
+}
+
+#[tokio::test]
+async fn incompatible_initial_subscribe_preflights_before_full_session_initialization() {
+    let _env = IsolatedReloadRecoveryEnv::new();
+    let (server_stream, client_stream) = crate::transport::Stream::pair().expect("socket pair");
+    let forked = Arc::new(AtomicBool::new(false));
+    let provider_template: Arc<dyn Provider> = Arc::new(PanicOnForkProvider {
+        forked: Arc::clone(&forked),
+    });
+
+    let sessions: SessionAgents = Arc::new(RwLock::new(HashMap::new()));
+    let global_session_id = Arc::new(RwLock::new(String::new()));
+    let client_count = Arc::new(RwLock::new(0usize));
+    let client_connections = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_members = Arc::new(RwLock::new(HashMap::new()));
+    let swarms_by_id = Arc::new(RwLock::new(HashMap::new()));
+    let plan_proposals = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_plans = Arc::new(RwLock::new(HashMap::new()));
+    let swarm_coordinators = Arc::new(RwLock::new(HashMap::new()));
+    let file_touch = FileTouchService::new();
+    let client_debug_state = Arc::new(RwLock::new(ClientDebugState::default()));
+    let (_debug_response_tx, _) = broadcast::channel(8);
+    let event_history = Arc::new(RwLock::new(std::collections::VecDeque::new()));
+    let event_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (swarm_event_tx, _) = broadcast::channel(8);
+    let swarm_state = SwarmState {
+        members: Arc::clone(&swarm_members),
+        swarms_by_id,
+        plans: swarm_plans,
+        coordinators: swarm_coordinators,
+    };
+    let swarm_events = SwarmEventState {
+        history: event_history,
+        counter: event_counter,
+        tx: swarm_event_tx,
+    };
+    let (_global_event_tx, _) = broadcast::channel(8);
+    let global_is_processing = Arc::new(RwLock::new(false));
+    let shutdown_signals = Arc::new(RwLock::new(HashMap::new()));
+    let soft_interrupt_queues: SessionInterruptQueues = Arc::new(RwLock::new(HashMap::new()));
+    let mcp_pool = Arc::new(crate::mcp::SharedMcpPool::from_default_config());
+
+    let server_task = tokio::spawn(handle_client(
+        server_stream,
+        Arc::clone(&sessions),
+        _global_event_tx,
+        provider_template,
+        global_is_processing,
+        Arc::clone(&global_session_id),
+        Arc::clone(&client_count),
+        Arc::clone(&client_connections),
+        swarm_state,
+        plan_proposals,
+        file_touch,
+        client_debug_state,
+        _debug_response_tx,
+        swarm_events,
+        "jcode-test".to_string(),
+        "🧪".to_string(),
+        mcp_pool,
+        Arc::clone(&shutdown_signals),
+        Arc::clone(&soft_interrupt_queues),
+        AwaitMembersRuntime::default(),
+        SwarmMutationRuntime::default(),
+    ));
+
+    let (client_reader, mut client_writer) = client_stream.into_split();
+    let mut client_reader = BufReader::new(client_reader);
+    let advertised_pid = std::process::id().saturating_add(50_000);
+    let request = Request::Subscribe {
+        id: 42,
+        working_dir: Some(std::env::temp_dir().to_string_lossy().to_string()),
+        selfdev: None,
+        target_session_id: None,
+        client_instance_id: Some("client-initial-mismatch".to_string()),
+        client_has_local_history: false,
+        allow_session_takeover: false,
+        terminal_env: Vec::new(),
+        protocol_version: Some(jcode_protocol::PROTOCOL_VERSION),
+        build_hash: Some("0000000-not-a-real-build-hash".to_string()),
+        runtime_identity: None,
+        spawn_swarm_id: None,
+        spawn_session_id: None,
+        client_pid: Some(advertised_pid),
+    };
+    let payload = serde_json::to_string(&request).expect("serialize request") + "\n";
+    client_writer
+        .write_all(payload.as_bytes())
+        .await
+        .expect("write request");
+
+    let mut line = String::new();
+    client_reader
+        .read_line(&mut line)
+        .await
+        .expect("read verdict bytes");
+    match decode_request_or_event(&line) {
+        ServerEvent::HandshakeVerdict {
+            id, compatibility, ..
+        } => {
+            assert_eq!(id, 42);
+            assert_eq!(
+                compatibility,
+                jcode_protocol::HandshakeCompatibility::IncompatibleReconnect
+            );
+        }
+        other => panic!("expected handshake verdict, got {other:?}"),
+    }
+
+    line.clear();
+    client_reader
+        .read_line(&mut line)
+        .await
+        .expect("read terminal error");
+    match decode_request_or_event(&line) {
+        ServerEvent::Error { id, message, .. } => {
+            assert_eq!(id, 42);
+            assert!(message.contains("Refusing incompatible advertised client"));
+        }
+        other => panic!("expected terminal error, got {other:?}"),
+    }
+
+    drop(client_writer);
+    server_task
+        .await
+        .expect("server task join")
+        .expect("server task result");
+
+    assert!(!forked.load(Ordering::SeqCst), "provider must not fork");
+    assert!(sessions.read().await.is_empty(), "no Agent/session map entry");
+    assert!(
+        client_connections.read().await.is_empty(),
+        "no client connection entry"
+    );
+    assert!(global_session_id.read().await.is_empty(), "no global session id");
+    assert_eq!(*client_count.read().await, 0, "client count unchanged");
+    assert!(shutdown_signals.read().await.is_empty(), "no shutdown signal");
+    assert!(soft_interrupt_queues.read().await.is_empty(), "no soft queue");
+    assert!(swarm_members.read().await.is_empty(), "no member state");
+    if let Some(active_dir) = crate::storage::active_pids_dir() {
+        assert!(
+            !active_dir.exists()
+                || std::fs::read_dir(&active_dir)
+                    .expect("read active_pids")
+                    .next()
+                    .is_none(),
+            "no active PID marker should be written"
+        );
+    }
 }
 
 fn decode_request_or_event(line: &str) -> ServerEvent {
