@@ -8,9 +8,14 @@ use async_trait::async_trait;
 use jcode_session_types::{
     SESSION_LOG_EVENT_SCHEMA_VERSION, SessionLogEvent, SessionLogEventKind, SessionLogStatus,
 };
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::Write;
+use std::pin::Pin;
+use std::sync::Mutex;
+use std::task::{Context, Poll};
 use tokio::sync::mpsc as tokio_mpsc;
+use tokio::sync::oneshot;
 use tokio_stream::wrappers::ReceiverStream;
 
 struct DelayedProvider {
@@ -20,6 +25,15 @@ struct DelayedProvider {
 
 struct NativeAutoCompactionProvider;
 
+struct MidStreamCancelProvider {
+    polled_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+}
+
+struct NotifyingStream {
+    polled_tx: Option<oneshot::Sender<()>>,
+    inner: ReceiverStream<Result<StreamEvent>>,
+}
+
 #[derive(Clone)]
 enum ScriptedProviderEvent {
     Event(StreamEvent),
@@ -27,8 +41,19 @@ enum ScriptedProviderEvent {
 }
 
 #[derive(Clone)]
+enum ScriptedProviderAttempt {
+    OpenError(&'static str),
+    Stream(Vec<ScriptedProviderEvent>),
+}
+
+#[derive(Clone)]
 struct ScriptedEvidenceProvider {
     events: Vec<ScriptedProviderEvent>,
+}
+
+#[derive(Clone)]
+struct RetryEvidenceProvider {
+    attempts: Arc<Mutex<VecDeque<ScriptedProviderAttempt>>>,
 }
 
 struct ScopedEnvVar {
@@ -50,6 +75,17 @@ impl Drop for ScopedEnvVar {
             Some(value) => crate::env::set_var(self.key, value),
             None => crate::env::remove_var(self.key),
         }
+    }
+}
+
+impl tokio_stream::Stream for NotifyingStream {
+    type Item = Result<StreamEvent>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(tx) = self.polled_tx.take() {
+            let _ = tx.send(());
+        }
+        Pin::new(&mut self.inner).poll_next(cx)
     }
 }
 
@@ -151,6 +187,49 @@ impl Provider for NativeAutoCompactionProvider {
 }
 
 #[async_trait]
+impl Provider for MidStreamCancelProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let (tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(8);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            let _ = tx
+                .send(Ok(StreamEvent::TextDelta("late text".to_string())))
+                .await;
+            let _ = tx
+                .send(Ok(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }))
+                .await;
+        });
+        let polled_tx = self.polled_tx.lock().unwrap().take();
+        Ok(Box::pin(NotifyingStream {
+            polled_tx,
+            inner: ReceiverStream::new(rx),
+        }))
+    }
+
+    fn name(&self) -> &str {
+        "r12-fixture"
+    }
+
+    fn model(&self) -> String {
+        "r12-fixture-model".to_string()
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(Self {
+            polled_tx: self.polled_tx.clone(),
+        })
+    }
+}
+
+#[async_trait]
 impl Provider for ScriptedEvidenceProvider {
     async fn complete(
         &self,
@@ -186,6 +265,62 @@ impl Provider for ScriptedEvidenceProvider {
     }
 }
 
+#[async_trait]
+impl Provider for RetryEvidenceProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> Result<EventStream> {
+        let attempt = self
+            .attempts
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("scripted retry attempt");
+        match attempt {
+            ScriptedProviderAttempt::OpenError(message) => Err(anyhow::anyhow!(message)),
+            ScriptedProviderAttempt::Stream(events) => {
+                let (tx, rx) = tokio_mpsc::channel::<Result<StreamEvent>>(8);
+                tokio::spawn(async move {
+                    for event in events {
+                        let result = match event {
+                            ScriptedProviderEvent::Event(event) => Ok(event),
+                            ScriptedProviderEvent::TransportError(message) => {
+                                Err(anyhow::anyhow!(message))
+                            }
+                        };
+                        let _ = tx.send(result).await;
+                    }
+                });
+                Ok(Box::pin(ReceiverStream::new(rx)))
+            }
+        }
+    }
+
+    fn name(&self) -> &str {
+        "r12-fixture"
+    }
+
+    fn model(&self) -> String {
+        "r12-fixture-model".to_string()
+    }
+
+    fn supports_compaction(&self) -> bool {
+        true
+    }
+
+    fn context_window(&self) -> usize {
+        1_000
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(self.clone())
+    }
+}
+
 async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
     let provider: Arc<dyn Provider> = Arc::new(ScriptedEvidenceProvider { events });
     let registry = Registry::new(provider.clone()).await;
@@ -194,6 +329,43 @@ async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
     agent.memory_enabled = false;
     agent.session.route_api_method = Some("r12-fixture-route".to_string());
     agent
+}
+
+async fn retry_agent(attempts: Vec<ScriptedProviderAttempt>) -> Agent {
+    let provider: Arc<dyn Provider> = Arc::new(RetryEvidenceProvider {
+        attempts: Arc::new(Mutex::new(attempts.into())),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+    seed_context_limit_retry_messages(&mut agent);
+    agent
+}
+
+async fn mid_stream_cancel_agent(polled_tx: oneshot::Sender<()>) -> Agent {
+    let provider: Arc<dyn Provider> = Arc::new(MidStreamCancelProvider {
+        polled_tx: Arc::new(Mutex::new(Some(polled_tx))),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+    agent
+}
+
+fn seed_context_limit_retry_messages(agent: &mut Agent) {
+    for i in 0..30 {
+        agent.add_message(
+            Role::User,
+            vec![ContentBlock::Text {
+                text: format!("prior turn {i} {}", "x".repeat(120)),
+                cache_control: None,
+            }],
+        );
+    }
 }
 
 fn provider_terminal_counts(
@@ -215,6 +387,16 @@ fn provider_terminal_counts(
         }
     }
     (requests, responses, finishes, response_statuses)
+}
+
+fn assert_stable_error_class(error_class: &str, expected_error_class: &str) {
+    assert_eq!(error_class, expected_error_class);
+    assert!(!error_class.is_empty());
+    assert!(!error_class.contains("token="));
+    assert!(!error_class.contains("request="));
+    assert!(!error_class.contains("sk-secret"));
+    assert_ne!(error_class, "token=secret request=abc");
+    assert_ne!(error_class, "invalid API key sk-secret");
 }
 
 fn assert_strict_terminal_error_evidence(events: &[SessionLogEvent], expected_error_class: &str) {
@@ -301,10 +483,7 @@ fn assert_strict_terminal_error_evidence(events: &[SessionLogEvent], expected_er
             assert!(output.is_none());
             assert!(usage.is_none());
             let error_class = error_class.as_deref().expect("provider error class");
-            assert_eq!(error_class, expected_error_class);
-            assert!(!error_class.is_empty());
-            assert!(!error_class.contains("token="));
-            assert!(!error_class.contains("request="));
+            assert_stable_error_class(error_class, expected_error_class);
         }
         other => panic!("expected ProviderResponse, got {other:?}"),
     }
@@ -322,7 +501,8 @@ fn assert_strict_terminal_error_evidence(events: &[SessionLogEvent], expected_er
         } => {
             assert_eq!(*status, SessionLogStatus::Error);
             assert!(output.is_none());
-            assert_eq!(error_class.as_deref(), Some(expected_error_class));
+            let error_class = error_class.as_deref().expect("turn error class");
+            assert_stable_error_class(error_class, expected_error_class);
         }
         other => panic!("expected TurnFinished, got {other:?}"),
     }
@@ -331,6 +511,193 @@ fn assert_strict_terminal_error_evidence(events: &[SessionLogEvent], expected_er
     assert_eq!(
         provider_terminal_counts(events),
         (1, 1, 1, vec![SessionLogStatus::Error])
+    );
+}
+
+fn assert_common_r12_sequence(events: &[SessionLogEvent], expected_sequences: Vec<u64>) -> String {
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        expected_sequences,
+        "event sequence must be exact and contiguous"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.schema_version == SESSION_LOG_EVENT_SCHEMA_VERSION)
+    );
+    let turn_id = events[0]
+        .correlation
+        .turn_id
+        .clone()
+        .expect("turn id on TurnStarted");
+    assert!(
+        events
+            .iter()
+            .all(|event| event.correlation.turn_id.as_deref() == Some(turn_id.as_str()))
+    );
+    turn_id
+}
+
+fn request_id(event: &SessionLogEvent, expected_provider: &str, expected_model: &str) -> String {
+    match &event.kind {
+        SessionLogEventKind::ProviderRequest {
+            provider,
+            model,
+            route,
+            tool_count,
+            prompt,
+            ..
+        } => {
+            assert_eq!(provider, expected_provider);
+            assert_eq!(model, expected_model);
+            assert_eq!(route.as_deref(), Some("r12-fixture-route"));
+            assert_eq!(*tool_count, 0, "fixture must advertise no tools");
+            assert!(prompt.is_some());
+            event
+                .correlation
+                .provider_request_id
+                .clone()
+                .expect("provider request id")
+        }
+        other => panic!("expected ProviderRequest, got {other:?}"),
+    }
+}
+
+fn assert_provider_response(
+    event: &SessionLogEvent,
+    request_id: &str,
+    expected_provider: &str,
+    expected_model: &str,
+    expected_status: SessionLogStatus,
+    expected_error_class: Option<&str>,
+) {
+    match &event.kind {
+        SessionLogEventKind::ProviderResponse {
+            provider,
+            model,
+            status,
+            output,
+            error_class,
+            ..
+        } => {
+            assert_eq!(provider, expected_provider);
+            assert_eq!(model, expected_model);
+            assert_eq!(*status, expected_status);
+            match expected_status {
+                SessionLogStatus::Ok => assert!(output.is_some()),
+                _ => assert!(output.is_none()),
+            }
+            match (error_class.as_deref(), expected_error_class) {
+                (Some(error_class), Some(expected_error_class)) => {
+                    assert_stable_error_class(error_class, expected_error_class);
+                }
+                (None, None) => {}
+                other => panic!("unexpected provider error class: {other:?}"),
+            }
+        }
+        other => panic!("expected ProviderResponse, got {other:?}"),
+    }
+    assert_eq!(
+        event.correlation.provider_request_id.as_deref(),
+        Some(request_id)
+    );
+}
+
+fn assert_turn_finished(
+    event: &SessionLogEvent,
+    expected_status: SessionLogStatus,
+    expected_error_class: Option<&str>,
+) {
+    match &event.kind {
+        SessionLogEventKind::TurnFinished {
+            status,
+            output,
+            error_class,
+            ..
+        } => {
+            assert_eq!(*status, expected_status);
+            if expected_status != SessionLogStatus::Ok {
+                assert!(output.is_none());
+            }
+            match (error_class.as_deref(), expected_error_class) {
+                (Some(error_class), Some(expected_error_class)) => {
+                    assert_stable_error_class(error_class, expected_error_class);
+                }
+                (None, None) => {}
+                other => panic!("unexpected turn error class: {other:?}"),
+            }
+        }
+        other => panic!("expected TurnFinished, got {other:?}"),
+    }
+    assert!(event.correlation.provider_request_id.is_none());
+}
+
+fn assert_cancelled_provider_attempt(
+    events: &[SessionLogEvent],
+    expected_provider: &str,
+    expected_model: &str,
+) {
+    assert_eq!(events.len(), 4);
+    assert_common_r12_sequence(events, vec![0, 1, 2, 3]);
+    assert!(matches!(
+        events[0].kind,
+        SessionLogEventKind::TurnStarted { .. }
+    ));
+    assert!(events[0].correlation.provider_request_id.is_none());
+    let request_id = request_id(&events[1], expected_provider, expected_model);
+    assert_provider_response(
+        &events[2],
+        &request_id,
+        expected_provider,
+        expected_model,
+        SessionLogStatus::Error,
+        Some("turn_interrupted"),
+    );
+    assert_turn_finished(
+        &events[3],
+        SessionLogStatus::Interrupted,
+        Some("turn_interrupted"),
+    );
+    assert_eq!(
+        provider_terminal_counts(events),
+        (1, 1, 1, vec![SessionLogStatus::Error])
+    );
+}
+
+fn assert_two_attempt_retry_evidence(events: &[SessionLogEvent], first_error_class: &str) {
+    assert_eq!(events.len(), 6);
+    assert_common_r12_sequence(events, vec![0, 1, 2, 3, 4, 5]);
+    assert!(matches!(
+        events[0].kind,
+        SessionLogEventKind::TurnStarted { .. }
+    ));
+    assert!(events[0].correlation.provider_request_id.is_none());
+    let first_request_id = request_id(&events[1], "r12-fixture", "r12-fixture-model");
+    assert_provider_response(
+        &events[2],
+        &first_request_id,
+        "r12-fixture",
+        "r12-fixture-model",
+        SessionLogStatus::Error,
+        Some(first_error_class),
+    );
+    let second_request_id = request_id(&events[3], "r12-fixture", "r12-fixture-model");
+    assert_ne!(first_request_id, second_request_id);
+    assert_provider_response(
+        &events[4],
+        &second_request_id,
+        "r12-fixture",
+        "r12-fixture-model",
+        SessionLogStatus::Ok,
+        None,
+    );
+    assert_turn_finished(&events[5], SessionLogStatus::Ok, None);
+    assert_eq!(
+        provider_terminal_counts(events),
+        (2, 2, 1, vec![SessionLogStatus::Error, SessionLogStatus::Ok])
     );
 }
 
@@ -496,7 +863,7 @@ async fn r12_blocking_raw_transport_error_persists_terminal_provider_response() 
     let result = agent.run_once_capture("raw transport").await;
     assert!(result.is_err());
     let events = crate::session::read_session_evidence(&session_id).unwrap();
-    assert_strict_terminal_error_evidence(&events, "r12 raw transport failure");
+    assert_strict_terminal_error_evidence(&events, "stream_transport_error");
 }
 
 #[tokio::test]
@@ -515,7 +882,7 @@ async fn r12_blocking_stream_event_error_persists_terminal_provider_response() {
     let result = agent.run_once_capture("stream event error").await;
     assert!(result.is_err());
     let events = crate::session::read_session_evidence(&session_id).unwrap();
-    assert_strict_terminal_error_evidence(&events, "r12 stream event failure");
+    assert_strict_terminal_error_evidence(&events, "stream_error");
 }
 
 #[tokio::test]
@@ -536,7 +903,7 @@ async fn r12_mpsc_raw_transport_error_persists_terminal_provider_response() {
         .await;
     assert!(result.is_err());
     let events = crate::session::read_session_evidence(&session_id).unwrap();
-    assert_strict_terminal_error_evidence(&events, "r12 mpsc raw transport failure");
+    assert_strict_terminal_error_evidence(&events, "stream_transport_error");
 }
 
 #[tokio::test]
@@ -558,7 +925,158 @@ async fn r12_mpsc_stream_event_error_persists_terminal_provider_response() {
         .await;
     assert!(result.is_err());
     let events = crate::session::read_session_evidence(&session_id).unwrap();
-    assert_strict_terminal_error_evidence(&events, "r12 mpsc stream event failure");
+    assert_strict_terminal_error_evidence(&events, "stream_error");
+}
+
+#[tokio::test]
+async fn r12_raw_secret_prefix_transport_error_uses_closed_error_class() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = scripted_agent(vec![ScriptedProviderEvent::TransportError(
+        "token=secret request=abc: transient transport failure",
+    )])
+    .await;
+    let session_id = agent.session_id().to_string();
+
+    let result = agent.run_once_capture("raw secret prefix").await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_strict_terminal_error_evidence(&events, "stream_transport_error");
+}
+
+#[tokio::test]
+async fn r12_no_colon_provider_open_secret_uses_closed_error_class() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = retry_agent(vec![ScriptedProviderAttempt::OpenError(
+        "invalid API key sk-secret",
+    )])
+    .await;
+    let session_id = agent.session_id().to_string();
+
+    let result = agent
+        .run_once_capture("no-colon provider open secret")
+        .await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_strict_terminal_error_evidence(&events, "provider_open_error");
+}
+
+#[tokio::test]
+async fn r12_mpsc_cancel_before_open_persists_interrupted_terminal_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let provider: Arc<dyn Provider> = Arc::new(DelayedProvider {
+        open_delay: Duration::from_secs(5),
+        first_event_delay: Duration::ZERO,
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+    agent.request_graceful_shutdown();
+    let session_id = agent.session_id().to_string();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let result = agent
+        .run_once_streaming_mpsc("cancel before open", Vec::new(), None, tx)
+        .await;
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_cancelled_provider_attempt(&events, "delayed", "unknown");
+}
+
+#[tokio::test]
+async fn r12_mpsc_mid_stream_cancel_persists_interrupted_terminal_response() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    let (polled_tx, polled_rx) = oneshot::channel();
+    let mut agent = mid_stream_cancel_agent(polled_tx).await;
+    let stop_signal = agent.graceful_shutdown_signal();
+    let session_id = agent.session_id().to_string();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let handle = tokio::spawn(async move {
+        agent
+            .run_once_streaming_mpsc("mid stream cancel", Vec::new(), None, tx)
+            .await
+    });
+    polled_rx.await.expect("stream polled after open");
+    stop_signal.fire();
+    let result = handle.await.expect("streaming turn task");
+    assert!(result.is_err());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_cancelled_provider_attempt(&events, "r12-fixture", "r12-fixture-model");
+}
+
+#[tokio::test]
+async fn r12_open_context_limit_retry_persists_terminal_response_per_attempt() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = retry_agent(vec![
+        ScriptedProviderAttempt::OpenError(
+            "context length exceeded tokens: token=secret request=abc",
+        ),
+        ScriptedProviderAttempt::Stream(vec![
+            ScriptedProviderEvent::Event(StreamEvent::TextDelta("retry answer".to_string())),
+            ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                stop_reason: Some("end_turn".to_string()),
+            }),
+        ]),
+    ])
+    .await;
+    let session_id = agent.session_id().to_string();
+
+    let output = agent
+        .run_once_capture("open context limit retry")
+        .await
+        .expect("retry should recover");
+    assert_eq!(output, "retry answer");
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_two_attempt_retry_evidence(&events, "context_limit");
+}
+
+#[tokio::test]
+async fn r12_mid_stream_context_limit_retry_persists_terminal_response_per_attempt() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut agent = retry_agent(vec![
+        ScriptedProviderAttempt::Stream(vec![ScriptedProviderEvent::Event(StreamEvent::Error {
+            message: "context length exceeded tokens: token=secret request=abc".to_string(),
+            retry_after_secs: None,
+        })]),
+        ScriptedProviderAttempt::Stream(vec![
+            ScriptedProviderEvent::Event(StreamEvent::TextDelta("retry answer".to_string())),
+            ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                stop_reason: Some("end_turn".to_string()),
+            }),
+        ]),
+    ])
+    .await;
+    let session_id = agent.session_id().to_string();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let result = agent
+        .run_once_streaming_mpsc("mid stream context limit retry", Vec::new(), None, tx)
+        .await;
+    assert!(result.is_ok());
+    let events = crate::session::read_session_evidence(&session_id).unwrap();
+    assert_two_attempt_retry_evidence(&events, "context_limit");
 }
 
 #[test]
