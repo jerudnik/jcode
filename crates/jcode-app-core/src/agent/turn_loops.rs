@@ -138,16 +138,11 @@ impl Agent {
                         }
                         continue;
                     }
-                    self.append_session_evidence_with_correlation(
-                        jcode_session_types::SessionLogEventKind::ProviderResponse {
-                            provider: self.provider.name().to_string(),
-                            model: self.provider.model(),
-                            status: jcode_session_types::SessionLogStatus::Error,
-                            duration_ms: api_start.elapsed().as_millis() as u64,
-                            output: None,
-                            usage: None,
-                            error_class: Some(e.to_string().chars().take(120).collect()),
-                        },
+                    self.append_provider_error_response(
+                        self.provider.name(),
+                        self.provider.model(),
+                        api_start,
+                        &e,
                         provider_correlation.clone(),
                     );
                     return Err(e);
@@ -238,6 +233,13 @@ impl Agent {
                             "stream_error",
                             api_start,
                             vec![("mode", "blocking".to_string()), ("error", err_str)],
+                        );
+                        self.append_provider_error_response(
+                            self.provider.name(),
+                            self.provider.model(),
+                            api_start,
+                            &e,
+                            provider_correlation.clone(),
                         );
                         return Err(e);
                     }
@@ -633,6 +635,15 @@ impl Agent {
                                         .unwrap_or_else(|| "none".to_string()),
                                 ),
                             ],
+                        );
+                        let error =
+                            anyhow::Error::new(StreamError::new(message.clone(), retry_after_secs));
+                        self.append_provider_error_response(
+                            self.provider.name(),
+                            self.provider.model(),
+                            api_start,
+                            &error,
+                            provider_correlation.clone(),
                         );
                         return Err(StreamError::new(message, retry_after_secs).into());
                     }
