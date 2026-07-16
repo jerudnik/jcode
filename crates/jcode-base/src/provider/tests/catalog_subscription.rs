@@ -238,8 +238,8 @@ fn test_subscription_model_guard_gates_flagship_models_on_plus_tier() {
     crate::subscription_catalog::clear_runtime_env();
     crate::subscription_catalog::apply_runtime_env();
 
-    // Unknown/absent tier behaves like Plus: flagship models rejected with an
-    // upgrade hint.
+    // With no accepted live or cached tier, the local fallback is the lowest
+    // safe tier: flagship models rejected with an upgrade hint.
     let error = ensure_model_allowed_for_subscription("claude-fable-5")
         .expect_err("fable should be gated on Plus");
     assert!(error.to_string().contains("Flagship"), "{error}");
@@ -247,10 +247,58 @@ fn test_subscription_model_guard_gates_flagship_models_on_plus_tier() {
     assert!(ensure_model_allowed_for_subscription("gpt-5.6-sol").is_err());
 
     // Flagship tier unlocks them.
-    crate::env::set_var(crate::subscription_catalog::JCODE_TIER_ENV, "flagship");
+    crate::subscription_catalog::store_cached_tier(Some(crate::subscription_catalog::JcodeTier::Flagship))
+        .expect("persist flagship tier");
     assert!(ensure_model_allowed_for_subscription("claude-fable-5").is_ok());
     assert!(ensure_model_allowed_for_subscription("sol").is_ok());
 
+    crate::env::remove_var(crate::subscription_catalog::JCODE_TIER_ENV);
+    crate::env::remove_var("JCODE_HOME");
+    crate::subscription_catalog::clear_runtime_env();
+}
+
+#[test]
+fn test_subscription_admission_and_display_agree_for_each_accepted_tier() {
+    let _guard = crate::storage::lock_test_env();
+    let temp_home = tempfile::tempdir().expect("temp home");
+    crate::env::set_var("JCODE_HOME", temp_home.path().to_string_lossy().to_string());
+    crate::env::remove_var(crate::subscription_catalog::JCODE_TIER_ENV);
+    crate::subscription_catalog::clear_runtime_env();
+    crate::subscription_catalog::apply_runtime_env();
+
+    let all_model_ids: Vec<String> = crate::subscription_catalog::curated_models()
+        .iter()
+        .map(|model| model.id.to_string())
+        .collect();
+
+    for tier in crate::subscription_catalog::JcodeTier::ALL.iter().copied() {
+        crate::subscription_catalog::store_cached_tier(Some(tier)).expect("persist accepted tier");
+
+        let expected: Vec<String> = crate::subscription_catalog::curated_models()
+            .iter()
+            .filter(|model| tier.allows(model.min_tier))
+            .map(|model| model.id.to_string())
+            .collect();
+        let displayed = filtered_display_models(all_model_ids.clone());
+
+        assert_eq!(displayed, expected, "picker/display mismatch for {tier:?}");
+        for model in crate::subscription_catalog::curated_models() {
+            let admitted = ensure_model_allowed_for_subscription(model.id).is_ok();
+            assert_eq!(
+                admitted,
+                tier.allows(model.min_tier),
+                "set_model admission mismatch for {} on {tier:?}",
+                model.id
+            );
+            assert_eq!(
+                crate::subscription_catalog::canonical_model_id(&format!("{}@openai", model.id)),
+                Some(model.id),
+                "route identity suffix should not change canonical model identity"
+            );
+        }
+    }
+
+    crate::subscription_catalog::store_cached_tier(None).expect("clear tier");
     crate::env::remove_var(crate::subscription_catalog::JCODE_TIER_ENV);
     crate::env::remove_var("JCODE_HOME");
     crate::subscription_catalog::clear_runtime_env();
@@ -278,7 +326,8 @@ fn test_filtered_display_models_respects_curated_subscription_catalog() {
         vec!["claude-opus-4-8".to_string(), "gpt-5.5".to_string()]
     );
 
-    crate::env::set_var(crate::subscription_catalog::JCODE_TIER_ENV, "flagship");
+    crate::subscription_catalog::store_cached_tier(Some(crate::subscription_catalog::JcodeTier::Flagship))
+        .expect("persist flagship tier");
     let filtered = filtered_display_models(vec![
         "claude-fable-5".to_string(),
         "gpt-5.6-sol".to_string(),
