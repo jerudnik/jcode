@@ -437,6 +437,18 @@ fn history_reload_recovery_does_not_mark_delivered_until_continuation_is_accepte
         "matching accepted continuation should mark the recovery intent delivered"
     );
     assert!(
+        !super::super::reload_recovery::path_for_session(session_id)?.exists(),
+        "accepted continuation must remove the durable intent record immediately"
+    );
+    assert!(
+        !super::super::reload_recovery::mark_delivered_if_matching_continuation(
+            session_id,
+            "stored continuation",
+            "unit_test_second_accept",
+        )?,
+        "a removed recovery intent must not be delivered twice"
+    );
+    assert!(
         !super::super::reload_recovery::has_pending_for_session(session_id),
         "accepted continuation should consume the durable pending intent"
     );

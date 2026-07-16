@@ -41,6 +41,57 @@ enum DisconnectDisposition {
     Reloading,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CleanupClientConnectionOutcome {
+    pub terminal_persistence: TerminalPersistenceOutcome,
+    pub runtime_cleanup_completed: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalPersistenceOutcome {
+    Persisted,
+    NotRequired,
+    Failed,
+    SkippedLockTimeout,
+}
+
+impl CleanupClientConnectionOutcome {
+    fn full() -> Self {
+        Self {
+            terminal_persistence: TerminalPersistenceOutcome::Persisted,
+            runtime_cleanup_completed: true,
+        }
+    }
+
+    fn no_terminal_persistence_required() -> Self {
+        Self {
+            terminal_persistence: TerminalPersistenceOutcome::NotRequired,
+            runtime_cleanup_completed: true,
+        }
+    }
+
+    fn partial_without_terminal_persistence() -> Self {
+        Self {
+            terminal_persistence: TerminalPersistenceOutcome::Failed,
+            runtime_cleanup_completed: true,
+        }
+    }
+
+    fn skipped_terminal_persistence_on_lock_timeout() -> Self {
+        Self {
+            terminal_persistence: TerminalPersistenceOutcome::SkippedLockTimeout,
+            runtime_cleanup_completed: true,
+        }
+    }
+
+    pub(super) fn terminal_persistence_incomplete(self) -> bool {
+        matches!(
+            self.terminal_persistence,
+            TerminalPersistenceOutcome::Failed | TerminalPersistenceOutcome::SkippedLockTimeout
+        )
+    }
+}
+
 fn disconnect_disposition(disconnected_while_processing: bool) -> DisconnectDisposition {
     if !disconnected_while_processing {
         return DisconnectDisposition::Closed;
@@ -88,7 +139,7 @@ pub(super) async fn cleanup_client_connection(
     event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     event_counter: &Arc<std::sync::atomic::AtomicU64>,
     swarm_event_tx: &broadcast::Sender<SwarmEvent>,
-) -> Result<()> {
+) -> Result<CleanupClientConnectionOutcome> {
     let disconnected_while_processing = client_is_processing
         || processing_task
             .as_ref()
@@ -118,9 +169,10 @@ pub(super) async fn cleanup_client_connection(
             client_session_id
         ));
         event_handle.abort();
-        return Ok(());
+        return Ok(CleanupClientConnectionOutcome::no_terminal_persistence_required());
     }
 
+    let mut terminal_persistence = TerminalPersistenceOutcome::NotRequired;
     {
         let mut sessions_guard = sessions.write().await;
         if let Some(agent_arc) = sessions_guard.remove(client_session_id) {
@@ -132,30 +184,39 @@ pub(super) async fn cleanup_client_connection(
                     match disposition {
                         DisconnectDisposition::Closed => {
                             if let Err(error) = agent.mark_closed() {
+                                terminal_persistence = TerminalPersistenceOutcome::Failed;
                                 crate::logging::warn(&format!(
                                     "Failed to persist closed disconnect state for session {}: {}",
                                     client_session_id, error
                                 ));
+                            } else {
+                                terminal_persistence = TerminalPersistenceOutcome::Persisted;
                             }
                         }
                         DisconnectDisposition::Reloading => {
                             if let Err(error) = agent.mark_crashed(Some(
                                 "Server reload interrupted processing".to_string(),
                             )) {
+                                terminal_persistence = TerminalPersistenceOutcome::Failed;
                                 crate::logging::warn(&format!(
                                     "Failed to persist reloading disconnect state for session {}: {}",
                                     client_session_id, error
                                 ));
+                            } else {
+                                terminal_persistence = TerminalPersistenceOutcome::Persisted;
                             }
                         }
                         DisconnectDisposition::Crashed => {
                             if let Err(error) = agent.mark_crashed(Some(
                                 "Client disconnected while processing".to_string(),
                             )) {
+                                terminal_persistence = TerminalPersistenceOutcome::Failed;
                                 crate::logging::warn(&format!(
                                     "Failed to persist crashed disconnect state for session {}: {}",
                                     client_session_id, error
                                 ));
+                            } else {
+                                terminal_persistence = TerminalPersistenceOutcome::Persisted;
                             }
                         }
                     }
@@ -201,6 +262,7 @@ pub(super) async fn cleanup_client_connection(
                     }
                 }
                 Err(_) => {
+                    terminal_persistence = TerminalPersistenceOutcome::SkippedLockTimeout;
                     crate::logging::warn(&format!(
                         "Session {} cleanup timed out waiting for agent lock (stuck task); skipping graceful shutdown",
                         client_session_id
@@ -281,7 +343,18 @@ pub(super) async fn cleanup_client_connection(
     }
 
     event_handle.abort();
-    Ok(())
+    Ok(match terminal_persistence {
+        TerminalPersistenceOutcome::Persisted => CleanupClientConnectionOutcome::full(),
+        TerminalPersistenceOutcome::NotRequired => {
+            CleanupClientConnectionOutcome::no_terminal_persistence_required()
+        }
+        TerminalPersistenceOutcome::Failed => {
+            CleanupClientConnectionOutcome::partial_without_terminal_persistence()
+        }
+        TerminalPersistenceOutcome::SkippedLockTimeout => {
+            CleanupClientConnectionOutcome::skipped_terminal_persistence_on_lock_timeout()
+        }
+    })
 }
 
 #[cfg(test)]
@@ -289,7 +362,8 @@ mod tests {
     use super::{
         ClientConnectionInfo, ClientDebugState, DisconnectDisposition, FileTouchService,
         InterruptSignal, SessionAgents, SwarmEvent, SwarmMember, TEST_AGENT_LOCK_TIMEOUT_MS,
-        VersionedPlan, cleanup_client_connection, disconnect_disposition,
+        TerminalPersistenceOutcome, VersionedPlan, cleanup_client_connection,
+        disconnect_disposition,
     };
     use crate::agent::Agent;
     use crate::message::{Message, StreamEvent, ToolDefinition};
@@ -462,7 +536,11 @@ mod tests {
             ))
         }
 
-        async fn cleanup(&self, session_id: &str, processing: bool) -> Result<()> {
+        async fn cleanup(
+            &self,
+            session_id: &str,
+            processing: bool,
+        ) -> Result<super::CleanupClientConnectionOutcome> {
             let mut processing_task = processing.then(|| {
                 tokio::spawn(async {
                     std::future::pending::<()>().await;
@@ -524,8 +602,16 @@ mod tests {
         let _fail_guard = EnvGuard::set("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION", session_id);
         let (harness, _agent) = CleanupHarness::new(session_id).await?;
 
-        harness.cleanup(session_id, true).await?;
+        let outcome = harness.cleanup(session_id, true).await?;
 
+        assert_eq!(
+            outcome,
+            super::CleanupClientConnectionOutcome {
+                terminal_persistence: TerminalPersistenceOutcome::Failed,
+                runtime_cleanup_completed: true,
+            },
+            "callers must distinguish partial runtime cleanup from terminal persistence"
+        );
         assert!(matches!(
             Session::load(session_id)?.status,
             SessionStatus::Active
@@ -567,8 +653,13 @@ mod tests {
         let _fail_guard = EnvGuard::set("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION", session_id);
         let (harness, _agent) = CleanupHarness::new(session_id).await?;
 
-        harness.cleanup(session_id, true).await?;
+        let outcome = harness.cleanup(session_id, true).await?;
 
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::Failed
+        );
+        assert!(outcome.runtime_cleanup_completed);
         assert!(matches!(
             Session::load(session_id)?.status,
             SessionStatus::Active
@@ -592,8 +683,13 @@ mod tests {
         );
         let (harness, _agent) = CleanupHarness::new(session_id).await?;
 
-        harness.cleanup(session_id, false).await?;
+        let outcome = harness.cleanup(session_id, false).await?;
 
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::Persisted
+        );
+        assert!(outcome.runtime_cleanup_completed);
         assert!(matches!(
             Session::load(session_id)?.status,
             SessionStatus::Closed
@@ -617,8 +713,13 @@ mod tests {
         let result = harness.cleanup(session_id, false).await;
         TEST_AGENT_LOCK_TIMEOUT_MS.store(u64::MAX, Ordering::SeqCst);
         drop(held_agent_lock);
-        result?;
+        let outcome = result?;
 
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::SkippedLockTimeout
+        );
+        assert!(outcome.runtime_cleanup_completed);
         assert!(matches!(
             Session::load(session_id)?.status,
             SessionStatus::Active
@@ -627,6 +728,134 @@ mod tests {
             marker_path(session_id)?.exists(),
             "timeout branch must not claim or remove persisted terminal marker state"
         );
+        assert!(harness.swarm_members.read().await.get(session_id).is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn disconnect_cleanup_outcome_contract_distinguishes_all_terminal_states() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+
+        let persisted_session = "session_r04_outcome_persisted";
+        let (persisted_harness, _agent) = CleanupHarness::new(persisted_session).await?;
+        let persisted = persisted_harness.cleanup(persisted_session, false).await?;
+        assert_eq!(
+            persisted.terminal_persistence,
+            TerminalPersistenceOutcome::Persisted
+        );
+
+        let successor_session = "session_r04_outcome_successor";
+        let (successor_harness, _agent) = CleanupHarness::new(successor_session).await?;
+        let (disconnect_tx, _disconnect_rx) = mpsc::unbounded_channel();
+        successor_harness.client_connections.write().await.insert(
+            "conn-successor".to_string(),
+            ClientConnectionInfo {
+                client_id: "client-successor".to_string(),
+                session_id: successor_session.to_string(),
+                client_instance_id: None,
+                debug_client_id: Some("debug-successor".to_string()),
+                connected_at: Instant::now(),
+                last_seen: Instant::now(),
+                is_processing: false,
+                current_tool_name: None,
+                terminal_env: Vec::new(),
+                disconnect_tx,
+            },
+        );
+        let not_required = successor_harness.cleanup(successor_session, false).await?;
+        assert_eq!(
+            not_required.terminal_persistence,
+            TerminalPersistenceOutcome::NotRequired
+        );
+
+        let failed_session = "session_r04_outcome_failed";
+        let _fail_guard =
+            EnvGuard::set("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION", failed_session);
+        let (failed_harness, _agent) = CleanupHarness::new(failed_session).await?;
+        let failed = failed_harness.cleanup(failed_session, true).await?;
+        assert_eq!(
+            failed.terminal_persistence,
+            TerminalPersistenceOutcome::Failed
+        );
+
+        let timeout_session = "session_r04_outcome_timeout";
+        let (timeout_harness, timeout_agent) = CleanupHarness::new(timeout_session).await?;
+        TEST_AGENT_LOCK_TIMEOUT_MS.store(0, Ordering::SeqCst);
+        let held_agent_lock = timeout_agent.lock().await;
+        let timeout_result = timeout_harness.cleanup(timeout_session, false).await;
+        TEST_AGENT_LOCK_TIMEOUT_MS.store(u64::MAX, Ordering::SeqCst);
+        drop(held_agent_lock);
+        let timeout = timeout_result?;
+        assert_eq!(
+            timeout.terminal_persistence,
+            TerminalPersistenceOutcome::SkippedLockTimeout
+        );
+
+        for outcome in [persisted, not_required, failed, timeout] {
+            assert!(outcome.runtime_cleanup_completed);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn successor_connected_cleanup_reports_terminal_not_required() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_r04_disconnect_successor";
+        let (harness, _agent) = CleanupHarness::new(session_id).await?;
+        let (disconnect_tx, _disconnect_rx) = mpsc::unbounded_channel();
+        harness.client_connections.write().await.insert(
+            "conn-successor".to_string(),
+            ClientConnectionInfo {
+                client_id: "client-successor".to_string(),
+                session_id: session_id.to_string(),
+                client_instance_id: None,
+                debug_client_id: Some("debug-successor".to_string()),
+                connected_at: Instant::now(),
+                last_seen: Instant::now(),
+                is_processing: false,
+                current_tool_name: None,
+                terminal_env: Vec::new(),
+                disconnect_tx,
+            },
+        );
+
+        let outcome = harness.cleanup(session_id, false).await?;
+
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::NotRequired,
+            "successor connection skips destructive terminal persistence rather than claiming it happened"
+        );
+        assert!(outcome.runtime_cleanup_completed);
+        assert!(
+            harness.sessions.read().await.get(session_id).is_some(),
+            "successor branch must not remove the live session agent"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn missing_agent_cleanup_reports_terminal_not_required() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_r04_disconnect_missing_agent";
+        let (harness, _agent) = CleanupHarness::new(session_id).await?;
+        harness.sessions.write().await.remove(session_id);
+
+        let outcome = harness.cleanup(session_id, false).await?;
+
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::NotRequired,
+            "missing agent has no terminal persistence attempt to report as persisted"
+        );
+        assert!(outcome.runtime_cleanup_completed);
         assert!(harness.swarm_members.read().await.get(session_id).is_none());
         Ok(())
     }
