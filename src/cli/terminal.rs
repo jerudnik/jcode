@@ -154,15 +154,14 @@ pub fn install_panic_hook() {
                 telemetry::record_crash(&provider, &model, telemetry::SessionEndReason::Panic);
             }
 
-            if let Ok(mut session) = session::Session::load(&session_id) {
-                if let Err(error) =
+            if let Ok(mut session) = session::Session::load(&session_id)
+                && let Err(error) =
                     session.mark_crashed_and_persist(Some(format!("Panic: {}", info)))
-                {
-                    crate::logging::warn(&format!(
-                        "failed to persist panic crash state for {}: {}",
-                        session_id, error
-                    ));
-                }
+            {
+                crate::logging::warn(&format!(
+                    "failed to persist panic crash state for {}: {}",
+                    session_id, error
+                ));
             }
         }
     }));
@@ -175,13 +174,12 @@ pub fn mark_current_session_crashed(message: String) {
         }
         if let Ok(mut session) = session::Session::load(&session_id)
             && matches!(session.status, session::SessionStatus::Active)
+            && let Err(error) = session.mark_crashed_and_persist(Some(message))
         {
-            if let Err(error) = session.mark_crashed_and_persist(Some(message)) {
-                crate::logging::warn(&format!(
-                    "failed to persist signal crash state for {}: {}",
-                    session_id, error
-                ));
-            }
+            crate::logging::warn(&format!(
+                "failed to persist signal crash state for {}: {}",
+                session_id, error
+            ));
         }
     }
 }
