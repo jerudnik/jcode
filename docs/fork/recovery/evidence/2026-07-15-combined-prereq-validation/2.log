@@ -1,0 +1,100 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+   Compiling jcode-selfdev-types v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-selfdev-types)
+   Compiling jcode-protocol v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-protocol)
+    Finished `test` profile [unoptimized] target(s) in 4.21s
+     Running unittests src/lib.rs (target/debug/deps/jcode_protocol-76cb691500d62c77)
+
+running 81 tests
+test tests::awaited_members_header_incomplete ... ok
+test tests::awaited_members_header_all_done ... ok
+test tests::awaited_members_header_any_mode_partial_match ... ok
+test tests::test_comm_assign_task_response_roundtrip ... ok
+test tests::test_comm_list_models_roundtrip ... ok
+test tests::test_comm_list_swarms_roundtrip ... ok
+test tests::test_comm_assign_task_roundtrip_without_explicit_task_id ... ok
+test tests::test_comm_await_members_defaults ... ok
+test tests::test_comm_await_members_roundtrip ... ok
+test tests::test_comm_members_roundtrip_includes_status ... ok
+test tests::test_comm_assign_next_roundtrip ... ok
+test tests::test_comm_await_members_response_roundtrip ... ok
+test tests::test_comm_plan_status_roundtrip ... ok
+test tests::test_comm_spawn_decodes_without_model_or_effort ... ok
+test tests::test_comm_report_response_roundtrip ... ok
+test tests::test_comm_spawn_roundtrip_with_optional_nonce ... ok
+test tests::test_comm_list_swarms_response_roundtrip ... ok
+test tests::test_comm_stop_roundtrip_with_force ... ok
+test tests::test_comm_report_roundtrip ... ok
+test tests::test_comm_status_roundtrip ... ok
+test tests::test_comm_task_control_response_roundtrip ... ok
+test tests::test_comm_status_response_roundtrip ... ok
+test tests::test_comm_propose_plan_roundtrip ... ok
+test tests::test_comm_task_control_roundtrip ... ok
+test tests::test_connection_type_event_roundtrip ... ok
+test tests::test_error_event_retry_after_back_compat_default ... ok
+test tests::test_compacted_history_request_roundtrip ... ok
+test tests::test_event_roundtrip ... ok
+test tests::test_error_event_retry_after_roundtrip ... ok
+test tests::test_compacted_history_event_roundtrip ... ok
+test tests::test_history_event_decodes_without_compaction_mode_for_older_servers ... ok
+test tests::test_generated_image_event_roundtrip ... ok
+test tests::test_input_shell_request_roundtrip ... ok
+test tests::test_history_event_roundtrip_preserves_side_panel_snapshot ... ok
+test tests::test_interrupted_event_decodes_from_json ... ok
+test tests::test_input_shell_result_event_roundtrip ... ok
+test tests::test_interrupted_event_roundtrip ... ok
+test tests::test_message_request_roundtrip_preserves_images_and_system_reminder ... ok
+test tests::test_memory_activity_event_roundtrip ... ok
+test tests::test_protocol_enum_roundtrips_cover_wire_names ... ok
+test tests::test_notify_auth_changed_provider_hint_is_optional ... ok
+test tests::test_provider_guardrail_event_roundtrip ... ok
+test tests::test_notify_auth_changed_typed_auth_payload_roundtrip ... ok
+test tests::test_rename_session_clear_request_roundtrip_omits_title ... ok
+test tests::test_reload_force_defaults_true_for_legacy_clients ... ok
+test tests::test_reload_force_roundtrip ... ok
+test tests::test_request_roundtrip ... ok
+test tests::test_rename_session_request_roundtrip ... ok
+test tests::test_resume_all_result_event_roundtrip ... ok
+test tests::test_resume_session_defaults_sync_flags ... ok
+test tests::test_resume_all_sessions_request_roundtrip ... ok
+test tests::test_resume_session_roundtrip_preserves_client_sync_flags ... ok
+test tests::test_rewind_undo_request_roundtrip ... ok
+test tests::test_session_close_requested_roundtrip ... ok
+test tests::test_rewind_request_roundtrip ... ok
+test tests::test_set_feature_roundtrip ... ok
+test tests::test_session_renamed_event_roundtrip ... ok
+test tests::test_set_route_deserializes_as_set_model_compat_alias ... ok
+test tests::test_status_detail_event_roundtrip ... ok
+test tests::test_stdin_request_event_defaults ... ok
+test tests::test_stdin_request_event_roundtrip ... ok
+test tests::test_side_panel_state_event_roundtrip ... ok
+test tests::test_stdin_response_deserialize_from_json ... ok
+test tests::test_stdin_response_roundtrip ... ok
+test tests::test_side_pane_images_event_roundtrip ... ok
+test tests::test_subscribe_request_defaults_optional_flags ... ok
+test tests::test_subscribe_request_roundtrip_preserves_optional_runtime_identity_projection ... ok
+test tests::test_swarm_plan_event_roundtrip_with_summary ... ok
+test tests::test_transcript_event_roundtrip ... ok
+test tests::test_structured_set_route_decodes_as_set_route_not_set_model ... ok
+test wire::handshake_verdict_tests::legacy_client_ignores_any_stale_hash ... ok
+test tests::test_transcript_request_roundtrip ... ok
+test tests::test_subscribe_request_roundtrip_preserves_session_takeover_flags ... ok
+test wire::handshake_verdict_tests::legacy_client_with_no_protocol_is_compatible ... ok
+test wire::handshake_verdict_tests::matching_protocol_tolerates_short_vs_full_hash ... ok
+test wire::handshake_verdict_tests::matching_protocol_and_hash_is_compatible ... ok
+test wire::handshake_verdict_tests::protocol_mismatch_is_incompatible ... ok
+test wire::handshake_verdict_tests::same_protocol_different_hash_is_incompatible ... ok
+test wire::handshake_verdict_tests::same_protocol_unknown_hash_is_compatible ... ok
+test tests::test_surface_workspace_protocol_roundtrip ... ok
+test tests::test_protocol_request_roundtrip_randomized_samples ... ok
+
+test result: ok. 81 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

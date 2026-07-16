@@ -1,0 +1,15 @@
+diff --git a/crates/jcode-tui/src/tui/app/onboarding_flow_control.rs b/crates/jcode-tui/src/tui/app/onboarding_flow_control.rs
+index ecc60fe80..79e6872c4 100644
+--- a/crates/jcode-tui/src/tui/app/onboarding_flow_control.rs
++++ b/crates/jcode-tui/src/tui/app/onboarding_flow_control.rs
+@@ -1577,8 +1577,8 @@ impl App {
+                 import: Some(_), ..
+             }) => {
+                 if decision_timed_out {
+-                    // Silence is not consent to import credentials.
+-                    self.onboarding_handle_login_failed(None);
++                    // Timeout default: import every currently-checked login.
++                    self.onboarding_finish_import_review();
+                     return true;
+                 }
+                 // Keep the countdown notice fresh.

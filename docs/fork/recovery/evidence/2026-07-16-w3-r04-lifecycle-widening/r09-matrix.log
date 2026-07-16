@@ -1,0 +1,308 @@
+W3 R04 affected checks and R09 expected-exit matrix
+Source/test HEAD: 221a9474450a00ba761a989cd765c7e16cb85edc
+No command used --update.
+
+HEAD=221a9474450a00ba761a989cd765c7e16cb85edc
+FORK_NUDGE_MAX_AGE=2147483647
+FORK_NUDGE_AUTOSYNC=0
+CARGO_NET_OFFLINE=true
+JCODE_NO_TELEMETRY=1
+
+===== affected_check
+PURPOSE: affected package compilation
+COMMAND: scripts/dev_cargo.sh check -p jcode-app-core -p jcode-base -p jcode-storage
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: 6a92635b29ec6d93b6ba0c7cb2700804fd8a314f726bd1954d948c8e254c4599
+OUTPUT:
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+   Compiling jcode-build-meta v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-build-meta)
+    Checking jcode-telemetry-core v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-telemetry-core)
+    Checking jcode-setup-hints v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-setup-hints)
+    Checking jcode-build-support v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-build-support)
+    Checking jcode-base v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-base)
+    Checking jcode-app-core v0.1.0 (/Users/jrudnik/labs/jcode-w3-r04/crates/jcode-app-core)
+    Finished `dev` profile [unoptimized] target(s) in 4.53s
+
+===== classifier
+PURPOSE: shared Rust production classifier
+COMMAND: python3 -m unittest discover -s tests -p test_rust_production_filter.py
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: ca3691546a64a4d2c903e70a78b53a9453c2785cda14a3ed2f0c3bde38f8d3dd
+OUTPUT:
+.................
+----------------------------------------------------------------------
+Ran 17 tests in 0.004s
+
+OK
+
+===== dependency
+PURPOSE: dependency boundaries under pinned offline dev shell
+COMMAND: nix develop --offline . --command bash -c /Library/Developer/CommandLineTools/usr/bin/python3\ scripts/check_dependency_boundaries.py
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: 82c58accbf2c6bb3a54c97530ea6cda1d70888efd597f59cb5e325aea001b5c6
+OUTPUT:
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dependency boundary check passed
+
+===== panic
+PURPOSE: panic budget expected-red
+COMMAND: python3 scripts/check_panic_budget.py
+EXPECTED_EXIT: 1
+ACTUAL_EXIT: 1
+RAW_LOG_SHA256: 5bc25ce1a45d58a70fb838d8b554f4b8d4c2c811ea70b730c153c5a27ca627ca
+OUTPUT:
+Panic-prone usage budget exceeded:
+  - total panic-prone count grew: 31 -> 48
+  - new production panic-prone usage: crates/jcode-app-core/src/server/comm_session.rs (2)
+  - new production panic-prone usage: crates/jcode-app-core/src/tool/communicate.rs (1)
+  - new production panic-prone usage: crates/jcode-base/src/config.rs (1)
+  - new production panic-prone usage: crates/jcode-base/src/config/config_file.rs (2)
+  - production panic-prone usage grew: crates/jcode-plan/src/dag/ops.rs (1 -> 2)
+  - new production panic-prone usage: crates/jcode-render-core/src/math.rs (4)
+  - new production panic-prone usage: crates/jcode-render-core/src/preprocess.rs (2)
+  - new production panic-prone usage: crates/jcode-telemetry-core/src/lib.rs (1)
+  - new production panic-prone usage: crates/jcode-tui/src/tui/app/remote/key_handling.rs (1)
+  - new production panic-prone usage: crates/jcode-tui/src/tui/ui_messages.rs (1)
+  - production panic-prone usage grew: src/bin/memory_recall_bench.rs (14 -> 15)
+Run scripts/check_panic_budget.py --update only after intentional cleanup.
+
+===== swallowed
+PURPOSE: swallowed-error budget expected-red
+COMMAND: python3 scripts/check_swallowed_error_budget.py
+EXPECTED_EXIT: 1
+ACTUAL_EXIT: 1
+RAW_LOG_SHA256: d48fb431f29846e098b5fcb65b3235cc8b84d75af7aaf73d04713fc549728cc4
+OUTPUT:
+Swallowed-error budget exceeded:
+  - total swallowed-error-like count grew: 2987 -> 3074
+  - dot_ok count grew: 1089 -> 1140
+  - let_underscore count grew: 1117 -> 1120
+  - unwrap_or_default count grew: 781 -> 814
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server.rs (22 -> 24)
+  - new swallowed-error-like usage: crates/jcode-app-core/src/server/client_api.rs (2)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server/client_lifecycle.rs (38 -> 40)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server/client_lightweight_control.rs (5 -> 6)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server/comm_session.rs (22 -> 24)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server/debug_testers.rs (9 -> 11)
+  - new swallowed-error-like usage: crates/jcode-app-core/src/server/reload_recovery.rs (4)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server/state.rs (4 -> 5)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/server/swarm.rs (20 -> 21)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/tool/discover.rs (1 -> 2)
+  - swallowed-error-like usage grew: crates/jcode-app-core/src/tool/todo.rs (2 -> 4)
+  - swallowed-error-like usage grew: crates/jcode-base/src/browser.rs (10 -> 13)
+  - swallowed-error-like usage grew: crates/jcode-base/src/config.rs (2 -> 5)
+  - swallowed-error-like usage grew: crates/jcode-base/src/config/config_file.rs (3 -> 8)
+  - swallowed-error-like usage grew: crates/jcode-base/src/provider/openrouter.rs (6 -> 7)
+  - swallowed-error-like usage grew: crates/jcode-base/src/provider_catalog.rs (7 -> 8)
+  - swallowed-error-like usage grew: crates/jcode-base/src/sidecar.rs (2 -> 3)
+  - new swallowed-error-like usage: crates/jcode-base/src/storage.rs (1)
+  - new swallowed-error-like usage: crates/jcode-base/src/todo.rs (2)
+  - swallowed-error-like usage grew: crates/jcode-build-support/src/lib.rs (13 -> 14)
+  - swallowed-error-like usage grew: crates/jcode-build-support/src/paths.rs (21 -> 22)
+  - new swallowed-error-like usage: crates/jcode-fuzzy/src/lib.rs (2)
+  - new swallowed-error-like usage: crates/jcode-provider-anthropic/src/lib.rs (1)
+  - swallowed-error-like usage grew: crates/jcode-provider-bedrock/src/lib.rs (31 -> 32)
+  - new swallowed-error-like usage: crates/jcode-provider-core/src/retry_after.rs (2)
+  - new swallowed-error-like usage: crates/jcode-provider-cursor-runtime/src/agent_transport.rs (13)
+  - swallowed-error-like usage grew: crates/jcode-provider-openrouter-runtime/src/lib.rs (33 -> 34)
+  - new swallowed-error-like usage: crates/jcode-render-core/src/math.rs (3)
+  - new swallowed-error-like usage: crates/jcode-render-core/src/preprocess.rs (1)
+  - swallowed-error-like usage grew: crates/jcode-setup-hints/src/lib.rs (27 -> 36)
+  - swallowed-error-like usage grew: crates/jcode-setup-hints/src/windows_setup.rs (12 -> 18)
+  - swallowed-error-like usage grew: crates/jcode-storage/src/active_pids.rs (18 -> 30)
+  - swallowed-error-like usage grew: crates/jcode-telemetry-core/src/lib.rs (17 -> 18)
+  - new swallowed-error-like usage: crates/jcode-tui-markdown/src/markdown_latex_image.rs (5)
+  - swallowed-error-like usage grew: crates/jcode-tui-render/src/swarm_gallery.rs (3 -> 4)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/commands.rs (31 -> 32)
+  - new swallowed-error-like usage: crates/jcode-tui/src/tui/app/commands_swarm.rs (3)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/inline_interactive.rs (20 -> 21)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/input.rs (8 -> 10)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/remote.rs (10 -> 11)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/remote/key_handling.rs (27 -> 28)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/remote/server_events.rs (13 -> 15)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/app/todos_view.rs (3 -> 4)
+  - new swallowed-error-like usage: crates/jcode-tui/src/tui/backend.rs (3)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/mod.rs (2 -> 3)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/session_picker.rs (11 -> 12)
+  - new swallowed-error-like usage: crates/jcode-tui/src/tui/session_picker/render.rs (1)
+  - new swallowed-error-like usage: crates/jcode-tui/src/tui/theme_detect.rs (4)
+  - swallowed-error-like usage grew: crates/jcode-tui/src/tui/ui_messages.rs (5 -> 9)
+  - new swallowed-error-like usage: crates/jcode-tui/src/tui/ui_prepare.rs (1)
+  - swallowed-error-like usage grew: src/cli/commands/doctor.rs (5 -> 14)
+  - new swallowed-error-like usage: src/cli/mcp_serve.rs (4)
+  - swallowed-error-like usage grew: src/cli/tui_launch.rs (4 -> 5)
+Run scripts/check_swallowed_error_budget.py --update only after intentional cleanup.
+
+===== code_size
+PURPOSE: production-size budget expected-red
+COMMAND: python3 scripts/check_code_size_budget.py
+EXPECTED_EXIT: 1
+ACTUAL_EXIT: 1
+RAW_LOG_SHA256: 62f975f5114a45820cc1905940d3837a1df4d0b5c7120642ced50932200bd006
+OUTPUT:
+Code-size budget exceeded. Existing oversized Rust files must shrink or stay flat, and new oversized production files are not allowed:
+  - oversized file grew: crates/jcode-app-core/src/agent/turn_loops.rs (1251 -> 1314 LOC)
+  - oversized file grew: crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs (1774 -> 1868 LOC)
+  - oversized file grew: crates/jcode-app-core/src/overnight.rs (1274 -> 1275 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server.rs (2080 -> 2242 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server/client_lifecycle.rs (3191 -> 3205 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server/client_session.rs (1456 -> 1517 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server/comm_control.rs (2729 -> 2739 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server/comm_session.rs (1341 -> 1661 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server/jade_relay.rs (1428 -> 1483 LOC)
+  - oversized file grew: crates/jcode-app-core/src/server/swarm.rs (3138 -> 3584 LOC)
+  - oversized file grew: crates/jcode-app-core/src/tool/communicate.rs (3178 -> 3427 LOC)
+  - oversized file grew: crates/jcode-base/src/auth/lifecycle.rs (2332 -> 2334 LOC)
+  - oversized file grew: crates/jcode-base/src/auth/mod.rs (1455 -> 1481 LOC)
+  - oversized file grew: crates/jcode-base/src/compaction.rs (1862 -> 1878 LOC)
+  - oversized file grew: crates/jcode-base/src/memory_agent.rs (1892 -> 1901 LOC)
+  - oversized file grew: crates/jcode-base/src/provider/catalog_routes.rs (1296 -> 1378 LOC)
+  - oversized file grew: crates/jcode-base/src/provider/mod.rs (2700 -> 2797 LOC)
+  - oversized file grew: crates/jcode-base/src/session.rs (1602 -> 1703 LOC)
+  - oversized file grew: crates/jcode-base/src/sidecar.rs (1299 -> 2235 LOC)
+  - oversized file grew: crates/jcode-base/src/skill.rs (1292 -> 1458 LOC)
+  - oversized file grew: crates/jcode-config-types/src/lib.rs (1988 -> 2055 LOC)
+  - oversized file grew: crates/jcode-provider-bedrock/src/lib.rs (1820 -> 1916 LOC)
+  - oversized file grew: crates/jcode-provider-core/src/lib.rs (1609 -> 1632 LOC)
+  - oversized file grew: crates/jcode-provider-doctor/src/lifecycle_driver.rs (1990 -> 1994 LOC)
+  - oversized file grew: crates/jcode-provider-openai-runtime/src/openai_stream_runtime.rs (1603 -> 1632 LOC)
+  - oversized file grew: crates/jcode-provider-openrouter-runtime/src/lib.rs (2651 -> 2770 LOC)
+  - new oversized file exceeds 1200 LOC: crates/jcode-render-core/src/math.rs (1250 LOC)
+  - oversized file grew: crates/jcode-setup-hints/src/lib.rs (1811 -> 2417 LOC)
+  - oversized file grew: crates/jcode-telemetry-core/src/lib.rs (1846 -> 1940 LOC)
+  - oversized file grew: crates/jcode-tui-mermaid/src/mermaid_viewport.rs (1317 -> 1351 LOC)
+  - oversized file grew: crates/jcode-tui-render/src/swarm_gallery.rs (2556 -> 3023 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app.rs (2354 -> 2362 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/auth.rs (2955 -> 2976 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/commands.rs (3352 -> 3353 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/inline_interactive.rs (3350 -> 3633 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/input.rs (3367 -> 3599 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/onboarding_flow_control.rs (1546 -> 1610 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/remote.rs (1876 -> 1915 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/remote/key_handling.rs (2547 -> 2712 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/remote/server_events.rs (2768 -> 2866 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/state_ui.rs (2186 -> 2199 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/state_ui_input_helpers.rs (1884 -> 1887 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/tui_lifecycle.rs (1244 -> 1251 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/tui_state.rs (2264 -> 2349 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/app/turn.rs (1471 -> 1476 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/backend.rs (1702 -> 1823 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/info_widget.rs (2214 -> 2242 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/mod.rs (2069 -> 2130 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/session_picker.rs (2174 -> 2320 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/session_picker/loading.rs (2998 -> 3017 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui.rs (3373 -> 3388 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui_inline_image.rs (1251 -> 1278 LOC)
+  - new oversized file exceeds 1200 LOC: crates/jcode-tui/src/tui/ui_inline_interactive.rs (1207 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui_input.rs (2818 -> 2821 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui_messages.rs (2399 -> 3316 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui_pinned.rs (2011 -> 2046 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui_prepare.rs (2360 -> 2434 LOC)
+  - oversized file grew: crates/jcode-tui/src/tui/ui_tools.rs (1481 -> 1607 LOC)
+  - oversized file grew: src/bin/memory_recall_bench.rs (2667 -> 2672 LOC)
+  - oversized file grew: src/cli/acp.rs (1799 -> 1803 LOC)
+  - oversized file grew: src/cli/dispatch.rs (1260 -> 1270 LOC)
+  - oversized file grew: src/cli/provider_init.rs (1801 -> 1826 LOC)
+Run scripts/check_code_size_budget.py --update only after intentional cleanup.
+
+===== test_size
+PURPOSE: test-size budget expected-red
+COMMAND: python3 scripts/check_test_size_budget.py
+EXPECTED_EXIT: 1
+ACTUAL_EXIT: 1
+RAW_LOG_SHA256: 479865058a0ea06f150545859da300f50f7897d406ec63b8e11d1bd0c1737786
+OUTPUT:
+Test-size budget exceeded:
+  - oversized test file grew: crates/jcode-app-core/src/agent_tests.rs (1321 -> 2309 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-app-core/src/server/client_lifecycle_tests.rs (1410 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/server/comm_control_tests/dag_e2e.rs (1252 -> 1332 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-app-core/src/server/comm_session_tests.rs (1395 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/server/swarm_persistence_tests.rs (1201 -> 1368 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/tool/communicate_tests.rs (1639 -> 2096 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/tool/selfdev/tests.rs (1319 -> 1343 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-base/src/compaction_tests.rs (1293 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-base/src/config_tests.rs (1504 LOC)
+  - oversized test file grew: crates/jcode-base/src/live_tests.rs (3087 -> 3088 LOC)
+  - oversized test file grew: crates/jcode-base/src/provider/tests/model_resolution.rs (2233 -> 2414 LOC)
+  - oversized test file grew: crates/jcode-base/src/session_tests/cases.rs (2411 -> 2646 LOC)
+  - oversized test file grew: crates/jcode-desktop/src/main_tests.rs (10371 -> 10466 LOC)
+  - oversized test file grew: crates/jcode-plan/src/dag/tests.rs (1336 -> 1423 LOC)
+  - oversized test file grew: crates/jcode-provider-anthropic-runtime/src/anthropic_tests.rs (1723 -> 1799 LOC)
+  - oversized test file grew: crates/jcode-provider-openrouter-runtime/src/openrouter_tests.rs (2687 -> 2923 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests.rs (1467 -> 1660 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/commands_accounts_01/part_01.rs (1487 -> 1538 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/remote_events_reload_01/part_01.rs (1746 -> 1808 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/remote_events_reload_04.rs (2226 -> 2472 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/remote_startup_input_02/part_01.rs (1347 -> 1358 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/app/tests/scroll_copy_02/part_02.rs (1203 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/state_model_poke_02/part_01.rs (1308 -> 1337 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/state_model_poke_03.rs (2467 -> 2585 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/info_widget_tests.rs (1623 -> 1782 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/session_picker/loading_tests.rs (1268 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/session_picker_tests.rs (2179 -> 2319 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/ui_messages/tests.rs (1384 -> 1985 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/ui_tests/prepare.rs (1286 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/ui_tests/tools.rs (1205 LOC)
+  - oversized test file grew: tests/e2e/test_support/mod.rs (1381 -> 1394 LOC)
+Run scripts/check_test_size_budget.py --update only after intentional cleanup.
+
+===== wildcard
+PURPOSE: wildcard re-export budget
+COMMAND: python3 scripts/check_wildcard_reexport_budget.py
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: 346482cd544bebff4bea7d28e9fee875dfb39b4578aba710c58d5da744bcf9ae
+OUTPUT:
+wildcard re-export budget check passed (total=16)
+
+===== warning
+PURPOSE: warning budget
+COMMAND: bash scripts/check_warning_budget.sh
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: 36a4b30cf2c1af3d24352902ebe33106e9d27b68813a1fb5190874627230cbd2
+OUTPUT:
+Warning budget OK: current=0 baseline=0
+
+===== shell_syntax
+PURPOSE: shell syntax
+COMMAND: bash -n scripts/agent_trace.sh scripts/antigravity_live_coverage.sh scripts/antigravity_schema_probe.sh scripts/auth_fixture.sh scripts/auth_regression_matrix.sh scripts/auto_screenshot.sh scripts/bench_compile.sh scripts/bench_selfdev_build.sh scripts/bench_selfdev_checkpoints.sh scripts/benchmark_tools.sh scripts/branch-model-status.sh scripts/build_linux_compat.sh scripts/capture_demo.sh scripts/capture_screenshot.sh scripts/cargo_exec.sh scripts/check_startup_budget.sh scripts/check_warning_budget.sh scripts/check_web_mobile.sh scripts/clean_target.sh scripts/compile_time_probe.sh scripts/debug_socket_test.sh scripts/desktop_journey_e2e.sh scripts/desktop_reload_window_e2e.sh scripts/dev_cargo.sh scripts/fork-health.sh scripts/fork-nudge.sh scripts/fork-rail-status.sh scripts/fork-touched-clippy.sh scripts/generate_release_notes.sh scripts/install_release.sh scripts/install-git-hooks.sh scripts/install.sh scripts/launch_agentcard_discovery_demo.sh scripts/memory_probe.sh scripts/memory_regression_gate.sh scripts/onboarding_sandbox.sh scripts/quick-release.sh scripts/real_provider_smoke.sh scripts/record_demo.sh scripts/refactor_phase1_verify.sh scripts/refactor_shadow.sh scripts/remote_build.sh scripts/remote_config.sh scripts/replay_recording.sh scripts/rerere-cache.sh scripts/rerere-rebase.sh scripts/run_openrelay_discovery_test.sh scripts/run_tb21_publishable.sh scripts/run_terminal_bench_claude.sh scripts/run_terminal_bench_harbor.sh scripts/screenshot_watcher.sh scripts/security_preflight.sh scripts/stale_server_upgrade_sandbox.sh scripts/stress_test_40.sh scripts/sync-local.sh scripts/test_auth_e2e.sh scripts/test_e2e.sh scripts/test_fast.sh scripts/uninstall.sh scripts/update_packages.sh scripts/verify_alt_shift_e_reaches_terminal.sh
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+OUTPUT:
+
+
+===== diff_check
+PURPOSE: source-head diff check
+COMMAND: git diff --check
+EXPECTED_EXIT: 0
+ACTUAL_EXIT: 0
+RAW_LOG_SHA256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+OUTPUT:
+
+
+===== W3-specific expected-red attribution
+swallowed-error: crates/jcode-app-core/src/server/client_lifecycle.rs (38 -> 40)
+swallowed-error: crates/jcode-storage/src/active_pids.rs (18 -> 30)
+production-size: crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs (1774 -> 1868 LOC)
+production-size: crates/jcode-app-core/src/server/client_lifecycle.rs (3191 -> 3205 LOC)
+test-size: crates/jcode-app-core/src/server/client_lifecycle_tests.rs is 1410 LOC
+No baseline was updated.

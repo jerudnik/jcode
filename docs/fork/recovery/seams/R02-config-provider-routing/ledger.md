@@ -285,3 +285,40 @@ not a synthetic source diff.
 The related future cross-surface naming decision is pinned separately in
 [`docs/proposals/observability-field-naming.md`](../../../../proposals/observability-field-naming.md).
 That proposal does not widen R02, R03A, W2, or any durable schema now.
+
+## W4 closure declaration (2026-07-16 UTC)
+
+W4 closes R02 as a bounded documentation-and-evidence confirmation, not a new catalog or governance adoption. Product truth is fixed for this closure: upstream commercial tier expansion (`pro`, `max`, `ultra`, and associated pricing/budget/model-floor constants) is a documented non-adoption unless a future product-owned fixture supersedes it. This closure does not reopen tier governance and does not alter `subscription_catalog`, `subscription_api`, governance, baselines, prompts, protocols, `RECOVERY_PLAN`, or `PROGRESS`.
+
+The only implementation surface rechecked by W4 is `crates/jcode-base/src/provider/catalog_routes.rs`. Current code already composes fork provider/profile identity with OpenRouter definitive-absence suppression: a missing or unknown fresh catalog stays optimistic, while a fresh catalog that definitively omits a fallback model suppresses the OpenRouter route. The existing targeted test `provider::catalog_routes::tests::openrouter_alternative_routes_skip_models_absent_from_catalog` proves both sides of that contract, so W4 makes no synthetic Rust diff.
+
+W4 evidence is restricted to a new evidence directory under `docs/fork/recovery/evidence/`. It must record exact offline commands, path-boundary guards, non-zero-filter results, and R09 expected exits. Any need to change behavior beyond `catalog_routes.rs` plus targeted tests is out of scope and remains a stop condition.
+
+## W4 concurrency and interruption amendment (2026-07-16 UTC)
+
+W4 was frozen immediately after commit `b14c3415722c76d674046dfca088ba47e9717ce7` because the coordinator determined that W5 and W6 already occupied the recovery plan's two-full-slice concurrency cap. The freeze was procedural, not a source or product-truth finding. W4 resumes only after W6 is fully integrated and post-integration closed, as the second active slice alongside W5.
+
+The first W4 validation attempt is invalid and non-authoritative evidence. Background task `642651535l` started `env CARGO_NET_OFFLINE=true scripts/dev_cargo.sh test -p jcode-base --lib provider::catalog_routes::tests -- --nocapture`, re-entered the repo Nix dev shell because `cargo` was not on `PATH`, and was coordinator-terminated before any test result completed. Its process exit was `143` (`SIGTERM`). No pass, fail, or regression result is counted from that attempt.
+
+The ignored local file `docs/fork/recovery/evidence/2026-07-16-w4-r02-route-closure/commands.log` is preserved append-only as invalid/interrupted raw evidence only. It is ignored by the global `*.log` rule and must not be treated as a tracked result manifest. The resumed W4 closure must preserve this interruption in tracked evidence before counting any new validation result.
+
+## W4 evidence-only route closure (2026-07-16 UTC)
+
+W4 is closed as an evidence-only route-composition confirmation at source head `e17fe0cee` plus this documentation commit. No Rust source changed. The product-truth audit artifact `/tmp/crocodile_1784183153541_240726e5ac746626-final.md` is preserved under `docs/fork/recovery/evidence/2026-07-16-w4-r02-route-closure/reviews/product-truth-audit-crocodile.md` with SHA-256 `c6581850509a0d7925b91175f50f48b24633d8fec9f81c44f7882ce48c44d54b`, confirming upstream commercial tier expansion remains a documented non-adoption.
+
+The counted validation is the distinct accepted attempt `383680ygrb`, using the cached combined Rust toolchain directly with `CARGO_NET_OFFLINE=true`, disposable `JCODE_HOME`/`JCODE_RUNTIME_DIR`, and telemetry/nudge guards. It did not use Nix, `scripts/dev_cargo.sh`, network, providers, daemon, credentials, baselines, `--update`, or source mutation. The exact existing test `provider::catalog_routes::tests::openrouter_alternative_routes_skip_models_absent_from_catalog` exited `0`, and its nonzero filter proved `1 passed; 0 failed`. `cargo check -p jcode-base` exited `0`. Rust-diff guards before and after exited `0`, and the non-allowed-path filter exited `1` as expected.
+
+R09 remained unchanged and visible without `--update`: classifier `0`, dependency `0`, panic `1`, swallowed-error `1`, code-size `1`, test-size `1`, wildcard `0`, warning `0`, shell syntax `0`, and diff check `0`. The accepted no-update proof inspects executed command metadata and driver content only, not checker stdout, and exited `0`; final status also exited `0`. The prior resumed attempt `848872a5nf` is preserved only as a superseded no-update-guard false-positive because it scanned inherited checker advisory text mentioning `--update` and never reached `final_status`.
+
+The accepted evidence package, deterministic gzip raw logs, manifests, superseded/invalid attempts, and SHA-256 manifest are in `docs/fork/recovery/evidence/2026-07-16-w4-r02-route-closure/`. The ignored original `commands.log` remains append-only invalid raw evidence and is not a tracked result. W4 did not alter `RECOVERY_PLAN`, `PROGRESS`, prompt, baselines, subscription catalog/API, protocol, provider/account, governance, or any Rust file. Remaining reviewer need: independent review of the R02 ledger additions and the W4 evidence directory only.
+
+## W4 final independent review closure (2026-07-16 UTC)
+
+Two independent reviews of frozen W4 head `db1e48d26c25a9379feab7a7dd9207ed521517fe` returned PASS with zero IMPORTANT and zero CRITICAL findings. Their exact artifacts are preserved under `docs/fork/recovery/evidence/2026-07-16-w4-r02-route-closure/reviews/`:
+
+| Review | Artifact | SHA-256 | Verdict |
+|---|---|---|---|
+| Opus | `w4-final-opus-review.md` | `28984d90d1749945a1f19fad6e3ee5949640012a352d6e26e68fbfd70849aab9` | PASS; zero IMPORTANT/CRITICAL findings |
+| Fable | `w4-final-fable-review.md` | `62e247e180774c6640facb284b6a696b64b2cbf9a6a3a99857ecc9b704561b56` | PASS; zero IMPORTANT/CRITICAL findings |
+
+This closes W4 review documentation only. No Rust, prior evidence bytes, declaration, prompt, PROGRESS, plan, baselines, or ignored `commands.log` were altered.

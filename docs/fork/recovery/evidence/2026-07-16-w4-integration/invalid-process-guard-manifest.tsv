@@ -1,0 +1,1 @@
+process_before	0	2	bash -lc ps -axo pid,ppid,comm,args | awk '/nix-daemon __build-remote|ssh john@10\.201\.0\.7|ssh: \/tmp\/nix/ && \/tmp/jcode-w4-integration-driver.sh !~ /awk/ {print}'

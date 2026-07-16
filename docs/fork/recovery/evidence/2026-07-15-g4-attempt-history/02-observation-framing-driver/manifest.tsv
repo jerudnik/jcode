@@ -1,0 +1,2 @@
+name	expected_exit	actual_exit	elapsed_seconds	command_sha256	log	log_sha256	pilot_observation_count	forbidden_output_hits
+pilot_fixture	0	125	14.153	300a00e1cd87d2cf216f5b4d7b96c21b78e1b71aec3359bd1e9e794cd85d2455	01-pilot_fixture.log	aa4fe676a1b97a1d3633dd180d9f3711c10147c7651d6943472f78a968d1ea0b	0	0

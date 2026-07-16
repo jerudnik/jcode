@@ -1,0 +1,7 @@
+name=wildcard
+expected_exit=0
+command=python3 scripts/check_wildcard_reexport_budget.py
+--- output ---
+wildcard re-export budget check passed (total=16)
+
+actual_exit=0

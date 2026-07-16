@@ -1,0 +1,39 @@
+name=test_size
+expected_exit=1
+command=python3 scripts/check_test_size_budget.py
+--- output ---
+Test-size budget exceeded:
+  - oversized test file grew: crates/jcode-app-core/src/agent_tests.rs (1321 -> 2309 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-app-core/src/server/client_lifecycle_tests.rs (1410 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/server/comm_control_tests/dag_e2e.rs (1252 -> 1332 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-app-core/src/server/comm_session_tests.rs (1395 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/server/swarm_persistence_tests.rs (1201 -> 1368 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/tool/communicate_tests.rs (1639 -> 2096 LOC)
+  - oversized test file grew: crates/jcode-app-core/src/tool/selfdev/tests.rs (1319 -> 1343 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-base/src/compaction_tests.rs (1293 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-base/src/config_tests.rs (1504 LOC)
+  - oversized test file grew: crates/jcode-base/src/live_tests.rs (3087 -> 3088 LOC)
+  - oversized test file grew: crates/jcode-base/src/provider/tests/model_resolution.rs (2233 -> 2414 LOC)
+  - oversized test file grew: crates/jcode-base/src/session_tests/cases.rs (2411 -> 2646 LOC)
+  - oversized test file grew: crates/jcode-desktop/src/main_tests.rs (10371 -> 10466 LOC)
+  - oversized test file grew: crates/jcode-plan/src/dag/tests.rs (1336 -> 1423 LOC)
+  - oversized test file grew: crates/jcode-provider-anthropic-runtime/src/anthropic_tests.rs (1723 -> 1799 LOC)
+  - oversized test file grew: crates/jcode-provider-openrouter-runtime/src/openrouter_tests.rs (2687 -> 2923 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests.rs (1467 -> 1660 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/commands_accounts_01/part_01.rs (1487 -> 1538 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/remote_events_reload_01/part_01.rs (1746 -> 1808 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/remote_events_reload_04.rs (2226 -> 2472 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/remote_startup_input_02/part_01.rs (1347 -> 1358 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/app/tests/scroll_copy_02/part_02.rs (1203 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/state_model_poke_02/part_01.rs (1308 -> 1337 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/app/tests/state_model_poke_03.rs (2467 -> 2585 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/info_widget_tests.rs (1623 -> 1782 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/session_picker/loading_tests.rs (1268 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/session_picker_tests.rs (2179 -> 2319 LOC)
+  - oversized test file grew: crates/jcode-tui/src/tui/ui_messages/tests.rs (1384 -> 1985 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/ui_tests/prepare.rs (1286 LOC)
+  - new oversized test file exceeds 1200 LOC: crates/jcode-tui/src/tui/ui_tests/tools.rs (1205 LOC)
+  - oversized test file grew: tests/e2e/test_support/mod.rs (1381 -> 1394 LOC)
+Run scripts/check_test_size_budget.py --update only after intentional cleanup.
+
+actual_exit=1

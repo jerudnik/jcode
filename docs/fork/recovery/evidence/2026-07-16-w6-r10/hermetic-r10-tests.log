@@ -1,0 +1,12 @@
+$ CARGO_NET_OFFLINE=true FORK_NUDGE_MAX_AGE=2147483647 FORK_NUDGE_AUTOSYNC=0 JCODE_NO_TELEMETRY=1 JCODE_HOME=<temp> JCODE_RUNTIME_DIR=<temp> python3 tests/test_r10_release_acquisition.py
+test_mismatched_sha256sum_leaves_existing_install_unchanged (__main__.R10ReleaseAcquisitionTests) ... ok
+test_missing_sha256sums_leaves_existing_install_unchanged (__main__.R10ReleaseAcquisitionTests) ... ok
+test_reload_is_explicit_opt_in_only (__main__.R10ReleaseAcquisitionTests) ... ok
+test_rust_updater_requires_sha256sums_asset (__main__.R10ReleaseAcquisitionTests) ... ok
+test_verified_asset_promotes_exactly_one_version_without_default_reload (__main__.R10ReleaseAcquisitionTests) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.651s
+
+OK
+exit=0

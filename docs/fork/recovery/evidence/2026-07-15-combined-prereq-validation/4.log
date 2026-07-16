@@ -1,0 +1,33 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Finished `test` profile [unoptimized] target(s) in 0.55s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-a200ea70acc46b58)
+
+running 4 tests
+test provider::tests::test_subscription_admission_and_display_agree_for_each_accepted_tier ... ok
+test provider::tests::test_subscription_filters_do_not_activate_from_saved_credentials_alone ... ok
+test provider::tests::test_subscription_model_guard_allows_only_curated_models_when_enabled ... ok
+test provider::tests::test_subscription_model_guard_gates_flagship_models_on_plus_tier ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1166 filtered out; finished in 0.05s
+
+     Running tests/claude_import_integration.rs (target/debug/deps/claude_import_integration-efa732094880f018)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/launch_hotkeys_roundtrip.rs (target/debug/deps/launch_hotkeys_roundtrip-1d86098bd38c3958)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

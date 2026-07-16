@@ -1,0 +1,24 @@
+W2_REVIEW_HEAD f8c5f8204056ff783d99769e4088e7bcceb56d73
+W2_BASE 602709895be96a85a6090690c0b27d5681d17321
+PROTOCOL_VERSION PROTOCOL_VERSION: u32 = 1
+PUBLIC_FIELD_SEARCH_BEGIN
+PUBLIC_FIELD_SEARCH_END
+CHANGED_PATHS_BEGIN
+M	crates/jcode-app-core/src/server/comm_control.rs
+M	crates/jcode-app-core/src/server/comm_control_tests.rs
+M	crates/jcode-app-core/src/server/comm_control_tests/assign_task.rs
+M	crates/jcode-app-core/src/server/comm_session.rs
+M	crates/jcode-app-core/src/server/comm_session_tests.rs
+M	crates/jcode-app-core/src/server/swarm.rs
+M	crates/jcode-app-core/src/swarm_verbs.rs
+M	crates/jcode-app-core/src/tool/communicate.rs
+M	crates/jcode-app-core/src/tool/communicate_tests.rs
+M	crates/jcode-app-core/src/tool/communicate_tests/end_to_end.rs
+M	crates/jcode-plan/src/lib.rs
+A	docs/fork/recovery/reviews/2026-07-15-w2-grok-review.md
+A	docs/fork/recovery/reviews/2026-07-16-w2-scope-adjudication.md
+M	docs/fork/recovery/seams/R05B-worker-dispatch-reclaim/ledger.md
+CHANGED_PATHS_END
+TRACKED_STATUS_BEGIN
+TRACKED_STATUS_END
+PENDING_EVIDENCE_PATH docs/fork/recovery/evidence/2026-07-16-w2-scope-repair/

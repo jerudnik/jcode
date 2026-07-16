@@ -1,0 +1,402 @@
+GUARDS:
+FORK_NUDGE_MAX_AGE=2147483647
+FORK_NUDGE_AUTOSYNC=0
+CARGO_NET_OFFLINE=true
+JCODE_NO_TELEMETRY=1
+HEAD=221a9474450a00ba761a989cd765c7e16cb85edc
+===== orphan-reload
+EXPECTED: background::tests::reconcile_marks_orphan_from_reloaded_process_failed
+COMMAND: scripts/dev_cargo.sh test -p jcode-base --lib background::tests::reconcile_marks_orphan_from_reloaded_process_failed -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Finished `test` profile [unoptimized] target(s) in 0.25s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-a200ea70acc46b58)
+
+running 1 test
+test background::tests::reconcile_marks_orphan_from_reloaded_process_failed ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1171 filtered out; finished in 0.05s
+
+EXIT: 0
+===== post-reload-cancel
+EXPECTED: server::client_lifecycle::tests::cancel_aborts_detached_streaming_turn_with_stale_stop_signal
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_lifecycle::tests::cancel_aborts_detached_streaming_turn_with_stale_stop_signal -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.28s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_lifecycle::tests::cancel_aborts_detached_streaming_turn_with_stale_stop_signal ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.42s
+
+EXIT: 0
+===== graceful-initiator
+EXPECTED: server::reload::reload_tests::graceful_shutdown_sessions_signals_all_running_sessions_including_initiator
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::reload::reload_tests::graceful_shutdown_sessions_signals_all_running_sessions_including_initiator -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.46s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::reload::reload_tests::graceful_shutdown_sessions_signals_all_running_sessions_including_initiator ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.00s
+
+EXIT: 0
+===== graceful-partial
+EXPECTED: server::reload::reload_tests::graceful_shutdown_sessions_times_out_on_partial_checkpoint
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::reload::reload_tests::graceful_shutdown_sessions_times_out_on_partial_checkpoint -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.31s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::reload::reload_tests::graceful_shutdown_sessions_times_out_on_partial_checkpoint ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.12s
+
+EXIT: 0
+===== wait-evidence
+EXPECTED: agent::turn_streaming_mpsc::tests::reload_interrupted_bg_wait_is_interrupted_and_resumable
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib agent::turn_streaming_mpsc::tests::reload_interrupted_bg_wait_is_interrupted_and_resumable -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.30s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test agent::turn_streaming_mpsc::tests::reload_interrupted_bg_wait_is_interrupted_and_resumable ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.00s
+
+EXIT: 0
+===== wait-render
+EXPECTED: server::client_session::tests::reload_tests::detects_resumable_reload_interrupted_wait_with_error_bit
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_session::tests::reload_tests::detects_resumable_reload_interrupted_wait_with_error_bit -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+error (ignored): SQLite database '/Users/jrudnik/.cache/nix/eval-cache-v6/99cdce163ad982e7952549b0054e86cfd6c69e2103a3258e3497e84471952f38.sqlite' is busy
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Blocking waiting for file lock on package cache
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.45s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_session::tests::reload_tests::detects_resumable_reload_interrupted_wait_with_error_bit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.43s
+
+EXIT: 0
+===== recovery-exact-once
+EXPECTED: server::client_state::client_state_tests::history_reload_recovery_does_not_mark_delivered_until_continuation_is_accepted
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_state::client_state_tests::history_reload_recovery_does_not_mark_delivered_until_continuation_is_accepted -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+error (ignored): SQLite database '/Users/jrudnik/.cache/nix/eval-cache-v6/99cdce163ad982e7952549b0054e86cfd6c69e2103a3258e3497e84471952f38.sqlite' is busy
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.36s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_state::client_state_tests::history_reload_recovery_does_not_mark_delivered_until_continuation_is_accepted ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.04s
+
+EXIT: 0
+===== restart-identity
+EXPECTED: server::reload_state::tests::restart_identity_projection_carries_dirty_same_commit_without_reclassification
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::reload_state::tests::restart_identity_projection_carries_dirty_same_commit_without_reclassification -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.36s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::reload_state::tests::restart_identity_projection_carries_dirty_same_commit_without_reclassification ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.04s
+
+EXIT: 0
+===== marker-combinations
+EXPECTED: active_pids::tests::conditional_session_marker_cleanup_reports_exact_partial_removals
+COMMAND: scripts/dev_cargo.sh test -p jcode-storage --lib active_pids::tests::conditional_session_marker_cleanup_reports_exact_partial_removals -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Finished `test` profile [unoptimized] target(s) in 0.14s
+     Running unittests src/lib.rs (target/debug/deps/jcode_storage-9af5437e4092761e)
+
+running 1 test
+test active_pids::tests::conditional_session_marker_cleanup_reports_exact_partial_removals ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+EXIT: 0
+===== marker-lock-bound
+EXPECTED: active_pids::tests::held_marker_lock_is_bounded_and_fail_closed_without_sleeping
+COMMAND: scripts/dev_cargo.sh test -p jcode-storage --lib active_pids::tests::held_marker_lock_is_bounded_and_fail_closed_without_sleeping -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Finished `test` profile [unoptimized] target(s) in 0.13s
+     Running unittests src/lib.rs (target/debug/deps/jcode_storage-9af5437e4092761e)
+
+running 1 test
+test active_pids::tests::held_marker_lock_is_bounded_and_fail_closed_without_sleeping ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+EXIT: 0
+===== terminal-persisted
+EXPECTED: server::client_disconnect_cleanup::tests::idle_closed_disconnect_persists_closed_before_preserving_successor_marker
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_disconnect_cleanup::tests::idle_closed_disconnect_persists_closed_before_preserving_successor_marker -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.29s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_disconnect_cleanup::tests::idle_closed_disconnect_persists_closed_before_preserving_successor_marker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.27s
+
+EXIT: 0
+===== terminal-not-required
+EXPECTED: server::client_disconnect_cleanup::tests::successor_connected_cleanup_reports_terminal_not_required
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_disconnect_cleanup::tests::successor_connected_cleanup_reports_terminal_not_required -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.27s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_disconnect_cleanup::tests::successor_connected_cleanup_reports_terminal_not_required ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.23s
+
+EXIT: 0
+===== terminal-failed
+EXPECTED: server::client_disconnect_cleanup::tests::crashed_disconnect_save_failure_retains_successor_marker_and_cleans_runtime_state
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_disconnect_cleanup::tests::crashed_disconnect_save_failure_retains_successor_marker_and_cleans_runtime_state -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.26s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_disconnect_cleanup::tests::crashed_disconnect_save_failure_retains_successor_marker_and_cleans_runtime_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.23s
+
+EXIT: 0
+===== terminal-lock-timeout
+EXPECTED: server::client_disconnect_cleanup::tests::disconnect_agent_lock_timeout_is_observable_without_terminal_persistence
+COMMAND: scripts/dev_cargo.sh test -p jcode-app-core --lib server::client_disconnect_cleanup::tests::disconnect_agent_lock_timeout_is_observable_without_terminal_persistence -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.33s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_disconnect_cleanup::tests::disconnect_agent_lock_timeout_is_observable_without_terminal_persistence ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1112 filtered out; finished in 0.26s
+
+EXIT: 0

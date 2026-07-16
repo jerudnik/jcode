@@ -1,0 +1,2 @@
+$ git diff --check 566d7930606f96add92aed65564c95b539a03df0..HEAD
+exit=0

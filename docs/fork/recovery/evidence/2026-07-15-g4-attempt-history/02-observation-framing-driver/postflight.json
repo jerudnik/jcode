@@ -1,0 +1,25 @@
+{
+  "active_build_processes": [],
+  "branch": "recovery/2026-07-15",
+  "branches_sha256": "d2ee20bbda724bfcd3bbe8278ca5c3116a2091e240764c29ecd1b22cb6057d33",
+  "dirty_paths": [
+    "docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
+  ],
+  "disk_free_bytes": 40956350464,
+  "disk_total_bytes": 494384795648,
+  "head": "b1f5d187da1823cfd14560db77cc4572be5efcb6",
+  "prompt_diff_sha256": "8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00",
+  "stash_count": 4,
+  "stash_list_sha256": "8754992fbf922b91000539abf0f39ad51dd7679601e79cb564e41c406ba0c8e3",
+  "tool_paths": {
+    "bash": "/nix/store/55976waa157aqb1ncbwm6b8sa64b6m3h-bash-5.3p9/bin/bash",
+    "cargo": "/nix/store/iywn852j3pnz291ywvil7rxhibqn8953-rust-default-1.96.0/bin/cargo",
+    "git": "/etc/profiles/per-user/jrudnik/bin/git",
+    "nix": "/nix/var/nix/profiles/default/bin/nix",
+    "python3": "/usr/bin/python3",
+    "rustc": "/nix/store/iywn852j3pnz291ywvil7rxhibqn8953-rust-default-1.96.0/bin/rustc"
+  },
+  "utc": "2026-07-15T20:22:09.753138Z",
+  "vendor_upstream_head": "631935dd1d3b2e31e167e2b12ad463e54bcf4b8d",
+  "worktrees_sha256": "12262fc78a6afa5ec566de27355e1bf796c9abbc7199eff0721a976649d7d794"
+}

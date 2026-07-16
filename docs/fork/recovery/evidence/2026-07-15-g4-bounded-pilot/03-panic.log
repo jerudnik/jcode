@@ -1,0 +1,15 @@
+JCODE_STEP {"command": "python3 scripts/check_panic_budget.py", "command_sha256": "f27e625fee9b097e4b5c43469e1cd037f4ee3ce07045a9dd3b357bd020165cf4", "expected_exit": 1, "name": "panic", "started_utc": "2026-07-15T20:23:13.451801Z", "timeout_seconds": 300}
+Panic-prone usage budget exceeded:
+  - total panic-prone count grew: 31 -> 46
+  - new production panic-prone usage: crates/jcode-app-core/src/tool/communicate.rs (1)
+  - new production panic-prone usage: crates/jcode-base/src/config.rs (1)
+  - new production panic-prone usage: crates/jcode-base/src/config/config_file.rs (2)
+  - production panic-prone usage grew: crates/jcode-plan/src/dag/ops.rs (1 -> 2)
+  - new production panic-prone usage: crates/jcode-render-core/src/math.rs (4)
+  - new production panic-prone usage: crates/jcode-render-core/src/preprocess.rs (2)
+  - new production panic-prone usage: crates/jcode-telemetry-core/src/lib.rs (1)
+  - new production panic-prone usage: crates/jcode-tui/src/tui/app/remote/key_handling.rs (1)
+  - new production panic-prone usage: crates/jcode-tui/src/tui/ui_messages.rs (1)
+  - production panic-prone usage grew: src/bin/memory_recall_bench.rs (14 -> 15)
+Run scripts/check_panic_budget.py --update only after intentional cleanup.
+JCODE_STEP_RESULT {"actual_exit": 1, "elapsed_seconds": 8.711, "ended_utc": "2026-07-15T20:23:22.162368Z", "name": "panic"}

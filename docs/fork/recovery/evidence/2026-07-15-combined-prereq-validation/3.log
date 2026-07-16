@@ -1,0 +1,69 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+   Compiling jcode-selfdev-types v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-selfdev-types)
+   Compiling jcode-telemetry-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-telemetry-core)
+   Compiling jcode-protocol v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-protocol)
+   Compiling jcode-base v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-base)
+   Compiling jcode-provider-openrouter-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-openrouter-runtime)
+    Finished `test` profile [unoptimized] target(s) in 28.77s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-a200ea70acc46b58)
+
+running 35 tests
+test auth::claude::tests::is_max_subscription_unknown_is_true ... ok
+test auth::claude::tests::is_max_subscription_max_is_true ... ok
+test auth::claude::tests::is_max_subscription_pro_is_false ... ok
+test auth::claude::tests::anthropic_account_subscription_type_serialized_when_present ... ok
+test auth::claude::tests::anthropic_account_subscription_type_omitted_when_none ... ok
+test auth::claude::tests::anthropic_account_no_subscription_type ... ok
+test provider::tests::test_subscription_model_guard_gates_flagship_models_on_plus_tier ... ok
+test provider::tests::test_subscription_model_guard_allows_only_curated_models_when_enabled ... ok
+test provider::jcode::tests::jcode_provider_enables_subscription_runtime_mode ... ok
+test subscription_api::tests::subscription_me_parses_expected_shape ... ok
+test subscription_api::tests::subscription_me_tolerates_missing_resets_at_and_unknown_tier ... ok
+test subscription_api::tests::subscription_me_treats_absent_and_malformed_tier_as_denied ... ok
+test provider::tests::test_filtered_display_models_respects_curated_subscription_catalog ... ok
+test provider::tests::test_subscription_filters_do_not_activate_from_saved_credentials_alone ... ok
+test subscription_catalog::tests::curated_model_lookup_ignores_provider_pin_suffix ... ok
+test subscription_catalog::tests::curated_model_aliases_resolve_to_canonical_ids ... ok
+test subscription_catalog::tests::default_model_is_opus ... ok
+test provider::pricing::tests::cheapness_for_openai_route_falls_back_to_subscription_for_unpriced_api_key_models ... ok
+test subscription_catalog::tests::flagship_models_are_gated_above_plus ... ok
+test subscription_catalog::tests::live_tier_truth_accepts_only_product_owned_tiers ... ok
+test provider::tests::test_subscription_admission_and_display_agree_for_each_accepted_tier ... ok
+test subscription_api::tests::local_me_fixture_http_401_403_clear_stale_flagship_and_downgrade_auth_readiness ... ok
+test subscription_catalog::tests::tier_gating_orders_plus_below_flagship ... ok
+test subscription_catalog::tests::tier_parse_round_trips ... ok
+test subscription_catalog::tests::tier_pricing_matches_launched_plans ... ok
+test subscription_api::tests::local_me_fixture_malformed_json_clears_stale_flagship_cache ... ok
+test subscription_api::tests::local_me_fixture_accepts_each_product_owned_tier_and_validates_auth_readiness ... ok
+test subscription_api::tests::me_endpoint_url_appends_me_to_configured_base ... ok
+test subscription_api::tests::local_me_fixture_unknown_absent_malformed_and_contradictory_tier_clear_stale_flagship ... ok
+test subscription_catalog::tests::ambient_process_tier_env_does_not_grant_entitlement ... ok
+test subscription_catalog::tests::effective_tier_defaults_to_plus_when_no_live_or_cached_truth ... ok
+test subscription_catalog::tests::denied_live_tier_overrides_stale_cache_when_durable_clear_fails ... ok
+test subscription_catalog::tests::live_unknown_denied_tier_clears_stale_flagship_cache ... ok
+test subscription_catalog::tests::runtime_mode_flag_tracks_subscription_activation ... ok
+test subscription_catalog::tests::unaccepted_persisted_tier_is_unknown_denied_truth ... ok
+
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 1135 filtered out; finished in 0.80s
+
+     Running tests/claude_import_integration.rs (target/debug/deps/claude_import_integration-efa732094880f018)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/launch_hotkeys_roundtrip.rs (target/debug/deps/launch_hotkeys_roundtrip-1d86098bd38c3958)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

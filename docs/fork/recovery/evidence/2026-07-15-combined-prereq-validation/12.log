@@ -1,0 +1,27 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Checking jcode-base v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-base)
+    Checking jcode-setup-hints v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-setup-hints)
+    Checking jcode-provider-anthropic v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-anthropic)
+    Checking jcode-provider-copilot-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-copilot-runtime)
+    Checking jcode-provider-openai-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-openai-runtime)
+    Checking jcode-provider-anthropic-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-anthropic-runtime)
+    Checking jcode-provider-antigravity-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-antigravity-runtime)
+    Checking jcode-provider-gemini-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-gemini-runtime)
+    Checking jcode-provider-cursor-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-cursor-runtime)
+    Checking jcode-tui-permissions v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-tui-permissions)
+    Checking jcode-provider-openrouter-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-openrouter-runtime)
+    Checking jcode-app-core v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-app-core)
+    Checking jcode-provider-claude-cli-runtime v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-claude-cli-runtime)
+    Checking jcode-provider-doctor v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-provider-doctor)
+    Checking jcode-tui v0.1.0 (/Users/jrudnik/labs/jcode/crates/jcode-tui)
+    Checking jcode v0.46.0 (/Users/jrudnik/labs/jcode)
+    Finished `dev` profile [unoptimized] target(s) in 21.19s

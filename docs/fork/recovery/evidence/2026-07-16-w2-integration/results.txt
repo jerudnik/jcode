@@ -1,0 +1,19 @@
+W2 focused fixture/package matrix: 14/14 exit 0
+
+R09 expected exits:
+classifier 0 (17/17)
+dependency 0
+panic 1 (31 -> 48)
+swallowed 1 (2987 -> 3074)
+code_size 1
+test_size 1
+wildcard 0 (total 16)
+warning 0 (current 0, baseline 0)
+shell_syntax 0
+diff_check 0
+
+No --update command was used.
+The first combined attempt stopped after the 14 successful Rust checks because
+python3 was absent from the dev-shell PATH. The R09 phase was rerun with the
+cached architecture-compatible pinned interpreter:
+/nix/store/ks6mfpfpfdzd8maf9x114399y5mlsxli-python3-3.13.13/bin/python3

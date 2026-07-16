@@ -1,0 +1,48 @@
+process_before	0	0	/usr/bin/python3 -c import subprocess
+text=subprocess.check_output(["ps","-axo","pid,ppid,comm,args"], text=True)
+needles=("nix-daemon __build-remote","ssh john@10.201.0.7","ssh: /tmp/nix")
+for line in text.splitlines():
+    if any(n in line for n in needles) and "jcode-w5-integration-driver" not in line and "python3 -c" not in line:
+        print(line)
+fixture_timeout	0	0	cargo test -p jcode-tui --lib import_review_timeout_fails_closed_without_import_task_transition -- --nocapture --test-threads=1
+fixture_timeout_one_passed	0	0	bash -lc grep -E 'test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; .* filtered out' '/tmp/jcode-w5-integration-20260716T082241Z-accepted/raw/fixture_timeout.txt'
+fixture_escape	0	0	cargo test -p jcode-tui --lib liveness_esc_always_exits_onboarding_from_every_guided_phase -- --nocapture --test-threads=1
+fixture_escape_one_passed	0	0	bash -lc grep -E 'test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; .* filtered out' '/tmp/jcode-w5-integration-20260716T082241Z-accepted/raw/fixture_escape.txt'
+fixture_decline_all	0	0	cargo test -p jcode-tui --lib liveness_import_review_decline_all_then_enter_escapes -- --nocapture --test-threads=1
+fixture_decline_all_one_passed	0	0	bash -lc grep -E 'test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; .* filtered out' '/tmp/jcode-w5-integration-20260716T082241Z-accepted/raw/fixture_decline_all.txt'
+fixture_affirmative	0	0	cargo test -p jcode-tui --lib import_summary_defaults_to_continue_and_enter_imports_all -- --nocapture --test-threads=1
+fixture_affirmative_one_passed	0	0	bash -lc grep -E 'test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; .* filtered out' '/tmp/jcode-w5-integration-20260716T082241Z-accepted/raw/fixture_affirmative.txt'
+cargo_check_jcode_tui	0	0	cargo check -p jcode-tui
+rustfmt_source	0	0	rustfmt --edition 2024 --check crates/jcode-tui/src/tui/app/onboarding_flow_control.rs
+evidence_top_sha	0	0	bash -lc cd docs/fork/recovery/evidence/2026-07-16-w5-onboarding-consent && shasum -a 256 -c SHA256SUMS
+evidence_correction_sha	0	0	bash -lc cd docs/fork/recovery/evidence/2026-07-16-w5-onboarding-consent/correction-run && shasum -a 256 -c SHA256SUMS
+mutation_exit	0	0	bash -lc test "$(cat docs/fork/recovery/evidence/2026-07-16-w5-onboarding-consent/correction-run/mutation-proof/buggy-timeout-test.exit)" = 101
+mutation_failure_assertion	0	0	bash -lc gzip -dc docs/fork/recovery/evidence/2026-07-16-w5-onboarding-consent/correction-run/mutation-proof/buggy-timeout-test.log.gz | grep -F 'assertion failed: app.onboarding_import_failed_provider.is_none()'
+production_net_zero	0	0	bash -lc test "$(git diff --numstat 9686496f6f2a7bf56ded2b50f8bfe4f74fb806bc..HEAD -- crates/jcode-tui/src/tui/app/onboarding_flow_control.rs)" = $'2\t2\tcrates/jcode-tui/src/tui/app/onboarding_flow_control.rs'
+one_test_pure_addition	0	0	bash -lc test "$(git diff --numstat 9686496f6f2a7bf56ded2b50f8bfe4f74fb806bc..HEAD -- crates/jcode-tui/src/tui/app/tests/onboarding_flow.rs)" = $'40\t0\tcrates/jcode-tui/src/tui/app/tests/onboarding_flow.rs'
+integrated_paths	1	1	bash -lc git diff --name-only 9686496f6f2a7bf56ded2b50f8bfe4f74fb806bc..HEAD | grep -Ev '^(crates/jcode-tui/src/tui/app/onboarding_flow_control.rs|crates/jcode-tui/src/tui/app/tests/onboarding_flow.rs|docs/fork/recovery/evidence/2026-07-16-w5-onboarding-consent/|docs/fork/recovery/reviews/2026-07-16-w5-|docs/fork/recovery/seams/R08A-operator-input-command-semantics/ledger.md)'
+classifier	0	0	/usr/bin/python3 -m unittest discover -s tests -p test_rust_production_filter.py
+dependency	0	0	/usr/bin/python3 scripts/check_dependency_boundaries.py
+panic	1	1	/usr/bin/python3 scripts/check_panic_budget.py
+swallowed	1	1	/usr/bin/python3 scripts/check_swallowed_error_budget.py
+code_size	1	1	/usr/bin/python3 scripts/check_code_size_budget.py
+test_size	1	1	/usr/bin/python3 scripts/check_test_size_budget.py
+wildcard	0	0	/usr/bin/python3 scripts/check_wildcard_reexport_budget.py
+warning	0	0	bash scripts/check_warning_budget.sh
+shell_syntax	0	0	bash -n scripts/agent_trace.sh scripts/antigravity_live_coverage.sh scripts/antigravity_schema_probe.sh scripts/auth_fixture.sh scripts/auth_regression_matrix.sh scripts/auto_screenshot.sh scripts/bench_compile.sh scripts/bench_selfdev_build.sh scripts/bench_selfdev_checkpoints.sh scripts/benchmark_tools.sh scripts/branch-model-status.sh scripts/build_linux_compat.sh scripts/capture_demo.sh scripts/capture_screenshot.sh scripts/cargo_exec.sh scripts/check_startup_budget.sh scripts/check_warning_budget.sh scripts/check_web_mobile.sh scripts/clean_target.sh scripts/compile_time_probe.sh scripts/debug_socket_test.sh scripts/desktop_journey_e2e.sh scripts/desktop_reload_window_e2e.sh scripts/dev_cargo.sh scripts/fork-health.sh scripts/fork-nudge.sh scripts/fork-rail-status.sh scripts/fork-touched-clippy.sh scripts/generate_release_notes.sh scripts/install_release.sh scripts/install-git-hooks.sh scripts/install.sh scripts/launch_agentcard_discovery_demo.sh scripts/memory_probe.sh scripts/memory_regression_gate.sh scripts/onboarding_sandbox.sh scripts/quick-release.sh scripts/real_provider_smoke.sh scripts/record_demo.sh scripts/refactor_phase1_verify.sh scripts/refactor_shadow.sh scripts/remote_build.sh scripts/remote_config.sh scripts/replay_recording.sh scripts/rerere-cache.sh scripts/rerere-rebase.sh scripts/run_openrelay_discovery_test.sh scripts/run_tb21_publishable.sh scripts/run_terminal_bench_claude.sh scripts/run_terminal_bench_harbor.sh scripts/screenshot_watcher.sh scripts/security_preflight.sh scripts/stale_server_upgrade_sandbox.sh scripts/stress_test_40.sh scripts/sync-local.sh scripts/test_auth_e2e.sh scripts/test_e2e.sh scripts/test_fast.sh scripts/uninstall.sh scripts/update_packages.sh scripts/verify_alt_shift_e_reaches_terminal.sh
+diff_check	0	0	git diff --check
+prompt_hash	0	0	bash -lc test "$(git diff -- docs/fork/recovery/ORCHESTRATOR_PROMPT.md | shasum -a 256 | cut -d " " -f1)" = 8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00
+stash_count	0	0	bash -lc test "$(git stash list | wc -l | tr -d " ")" = 4
+process_after	0	0	/usr/bin/python3 -c import subprocess
+text=subprocess.check_output(["ps","-axo","pid,ppid,comm,args"], text=True)
+needles=("nix-daemon __build-remote","ssh john@10.201.0.7","ssh: /tmp/nix")
+for line in text.splitlines():
+    if any(n in line for n in needles) and "jcode-w5-integration-driver" not in line and "python3 -c" not in line:
+        print(line)
+process_equal	0	0	bash -lc diff -u <(tail -n +8 '/tmp/jcode-w5-integration-20260716T082241Z-accepted/raw/process_before.txt' | sed '$d') <(tail -n +8 '/tmp/jcode-w5-integration-20260716T082241Z-accepted/raw/process_after.txt' | sed '$d')
+no_update_invocation	0	0	/usr/bin/python3 -c import pathlib,sys; root=pathlib.Path(sys.argv[1]); needle="-"+"-update"; bad=[]
+for p in [root/"manifest.tsv", pathlib.Path("/tmp/jcode-w5-integration-driver.sh")]:
+ t=p.read_text(errors="replace").replace("needle=\"-\"+\"-update\"", "needle=<constructed>")
+ if needle in t: bad.append(str(p))
+print("hits",len(bad)); print("\n".join(bad)); raise SystemExit(bool(bad)) /tmp/jcode-w5-integration-20260716T082241Z-accepted
+final_status	0	0	git status --short

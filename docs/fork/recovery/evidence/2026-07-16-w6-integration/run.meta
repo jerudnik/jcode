@@ -1,0 +1,12 @@
+date=2026-07-16T07:21:01Z
+head=e228fdb0183c5aae01b46b17ad364fbd7dfa1ef3
+cargo=cargo 1.96.0 (30a34c682 2026-05-25)
+python=Python 3.9.6
+CARGO_NET_OFFLINE=true
+JCODE_NO_TELEMETRY=1
+FORK_NUDGE_MAX_AGE=2147483647
+FORK_NUDGE_AUTOSYNC=0
+CARGO_TARGET_DIR=/Users/jrudnik/labs/jcode-w6-r10/target
+JCODE_HOME=/tmp/jcode-w6-int-home.ymlqui
+JCODE_RUNTIME_DIR=/tmp/jcode-w6-int-runtime.MS1gaF
+nix_invocations=none

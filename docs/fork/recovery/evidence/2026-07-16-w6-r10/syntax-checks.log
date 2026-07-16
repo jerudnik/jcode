@@ -1,0 +1,4 @@
+$ bash -n scripts/install.sh scripts/install_release.sh
+exit=0
+
+pwsh not available; PowerShell parser/static check skipped locally

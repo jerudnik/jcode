@@ -1,0 +1,27 @@
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+warning: function `drop_control_log_handle` is never used
+   --> crates/jcode-app-core/src/server/control_log_sync.rs:263:15
+    |
+263 | pub(super) fn drop_control_log_handle(swarm_id: &str) {
+    |               ^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `jcode-app-core` (lib test) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 0.99s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-071d297a900bb272)
+
+running 1 test
+test server::client_lifecycle::tests::incompatible_initial_subscribe_preflights_before_full_session_initialization ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1093 filtered out; finished in 0.01s
+

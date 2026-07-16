@@ -1,0 +1,8 @@
+background_task=642651535l
+status=invalid_non_authoritative
+command=env CARGO_NET_OFFLINE=true scripts/dev_cargo.sh test -p jcode-base --lib provider::catalog_routes::tests -- --nocapture
+exit=143
+reason=coordinator_terminated_after_W5_W6_two_slice_cap_correction
+result_counted=false
+ignored_source=docs/fork/recovery/evidence/2026-07-16-w4-r02-route-closure/commands.log
+ignored_reason=global_git_ignore_*.log

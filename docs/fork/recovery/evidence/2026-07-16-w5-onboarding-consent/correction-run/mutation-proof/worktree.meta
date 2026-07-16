@@ -1,0 +1,4 @@
+worktree=/tmp/jcode-w5-buggy-worktree.xDbT9u
+head=95861f4f5f354dbb3123c19754ac1ca1d13083ac
+Preparing worktree (detached HEAD 95861f4f5)
+HEAD is now at 95861f4f5 test(w5): discriminate import timeout fallback

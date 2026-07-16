@@ -307,3 +307,181 @@ Accordingly:
 This closes immediate blocker B1 without authorizing a subscription redesign,
 live provider exercise, telemetry policy implementation, payment behavior, or
 any other external action.
+
+## 15. Phase 5 execution and Phase 6 coordinator-audit amendment
+
+The plan-time workstream and blocker statements above remain preserved as
+history. This amendment is the current execution rollup and supersedes only
+their active-status meaning.
+
+- W0 record consistency is complete.
+- W1/R12 truthful cancellation, retry, and closed error-class evidence is
+  integrated and post-integration validated.
+- W2/R05B spawn/reclaim safety is integrated after the preserved scope failure,
+  low-friction wire/replay rollback, fresh correctness and scope PASS reviews,
+  and post-integration validation. Live swarm use remains separately gated.
+- W3/R04 lifecycle widening and all three carried follow-ups are integrated and
+  post-integration validated with the authoritative 14-fixture matrix. Live
+  daemon/reload exercise remains separately gated.
+- W4/R02 is closed as evidence-only route composition plus explicit
+  non-adoption of upstream commercial tier truth. It changes no Rust.
+- W5/R08A closes expiry-as-consent with a net-zero production swap and a
+  mutation-discriminating regression. The earlier contradictory PASS remains
+  preserved as an evidence failure.
+- W6/R10 fail-closes acquisition and composes draft-before-publication ordering.
+  No live release, installer, updater, signing, or publication was exercised.
+- W7 remains optional and deferred wholesale. No refactor is required for
+  recovery completion.
+
+The coordinator's accepted Phase 6 audit ran at source head
+`51168d16e9c708ae4afff09a6fc6402642d17782`. The evidence package is
+[`evidence/2026-07-16-phase6-final-audit/`](evidence/2026-07-16-phase6-final-audit/),
+whose `SHA256SUMS` SHA-256 is
+`9af58f1563f266066edd6da9208983da62eeb0b1997ec78f9c26318221dcd2a3`.
+Its 76 expected-exit entries have zero mismatches: 48 build-support tests, 81
+protocol tests, 38 R02 subscription tests, 4 R02 provider-filter tests, 14 exact
+R04 fixtures, 11 R12 fixtures, affected checks for six packages, and all R09
+and preservation guards matched. The 17 classifier tests, dependency boundary,
+wildcard, warning, shell syntax, and diff checks passed. Panic `31 -> 48`,
+swallowed-error `2987 -> 3074`, production-size, and test-size remained visible
+expected-red exit `1`; no baseline update was used.
+
+Authority reconciliation found no Phase 5 protocol diff from approved source
+head `6c6a4f2c8`, kept `PROTOCOL_VERSION = 1`, added no
+`provider_session_id` assignment, and added no production runtime-identity
+writer outside R01. The new runtime-identity assignment tokens are test-only;
+terminal-token additions are test-only or test-name-only. All 17 seam ledgers
+exist and all 17 recovery evidence manifests verify.
+
+The disposition arithmetic remains fourteen `retain-fork`, two `compose`, and
+one broader `defer`. The R08A disposition remains the broader no-UI defer even
+though W5 closes its named dangerous-consent defect. Section 4 remains the
+authoritative deferred-risk register: every item has an owner, reason, evidence
+gap, and escalation trigger. Plan-time B1 and B2 are closed. B3 remains binding
+for every live or externally visible widening.
+
+Coordinator Phase 6 verdict: **PASS as a review candidate**. Final completion
+still requires the independent spot check, independent architecture and
+maintainability review, and joint Sol/Fable sign-off required by the recovery
+orchestrator.
+
+## 16. Independent Phase 6 spot-check amendment
+
+Independent Opus review of candidate commit
+`4f96772b6f018d303d1da3f1438e3a290c2a5210` returned **PASS** with zero
+IMPORTANT or CRITICAL findings and no material overclaim. The byte-exact report
+is [`reviews/2026-07-16-phase6-spot-check-opus.md`](reviews/2026-07-16-phase6-spot-check-opus.md),
+SHA-256 `092dbf4ec862b23b8d778f029772b46b434202e816622bd1f71c4bfa1f759dcc`.
+
+The reviewer independently verified all 17 recovery manifests, all 88 members
+of the Phase 6 package manifest, 62 accepted raw hashes, 14 invalid-attempt raw
+hashes, fixed refs and preservation, protocol v1, test-only identity additions,
+zero new provider-session assignments, sampled W1-W6 and overlay evidence, the
+deferred-risk register, and honest failed/superseded history.
+
+Its sole LOW finding was labeling the TSV's 76 physical lines as 76 checks. The
+driver actually ran 62 checks; 14 multi-line embedded commands account for the
+extra physical lines. Active wording and package metadata now state that exact
+shape without changing any command, result, or raw transcript. The corrected
+package `SHA256SUMS` SHA-256 is
+`ca8ff5b9f3b6c09dc0ff05de9b3c1c426fc2373706eeeca26cad87126f2e14d8`.
+
+The first attempt to commit the coordinator candidate encountered a local
+`.git/index.lock` race from overlapping identical coordinator invocations. No
+commit or ref moved. After confirming no live Git process, the stale lock alone
+was removed and the already staged path-scoped candidate was committed once.
+This process failure is preserved here rather than omitted.
+
+The spot-check gate is closed. Independent architecture/maintainability review
+and joint Sol/Fable sign-off remain required.
+
+## 17. Independent architecture and maintainability review amendment
+
+Independent Fable architecture review of corrected head
+`6cbed3a95450a2b22637c63145b31fb5aeda0d87`, informed by the committed Opus
+spot audit, returned **PASS** with zero IMPORTANT or CRITICAL findings. The
+byte-exact report is
+[`reviews/2026-07-16-phase6-architecture-fable.md`](reviews/2026-07-16-phase6-architecture-fable.md),
+SHA-256 `3fa06d1109c5fc56c9cf1bc73dcea540cff084b5ef4fcc1a0a8dcd48e3910865`.
+
+The Architect verified the complete Phase 5 production/test diff, the corrected
+62-check package, protocol and durable-schema stability, authority separation,
+security improvements, liveness structure, explicit outcome types, sampled
+ledger/code agreement, and all deferred-risk fields. It found five LOW
+maintainability items and no material mismatch:
+
+1. W1's duplicated provider-evidence blocks make the optional W7 R12 helper
+   consolidation ripe now.
+2. `TurnInterruptedError` crosses the agent/server boundary only through its
+   display string when a consumer wants to distinguish it.
+3. The post-reload cancellation race can label a dead member `failed` rather
+   than `stopped`; reclaim semantics remain identical and pre-W1 false
+   completion is eliminated.
+4. `ClassifiedEvidenceError` does not expose its inner error through
+   `Error::source`; current retry-after consumers still receive the unwrapped
+   `StreamError` path.
+5. `append_progress_provenance` preserves history but has no explicit length
+   cap for repeated direct takeovers.
+
+### W7 architecture defer after trigger observation
+
+| Item | Owner | Reason deferred after Phase 6 | Evidence gap | Escalation trigger |
+|---|---|---|---|---|
+| Provider-evidence helper consolidation and typed interruption predicate | R12, consulting R04/R05B consumers | Behavior is pinned by 11 R12 fixtures; changing source after the final accepted audit would reopen the completed remediation and review chain for a non-correctness cleanup | No unchanged-behavior helper-extraction fixture and no typed cross-module interruption predicate fixture | Before the next R12-adjacent source change, or immediately if a third emission copy or a consumer needing typed interruption appears |
+| Cancelled detached-turn display status normalization | R04/R05B jointly | Current `failed`/`stopped` outcomes are both terminal for the single liveness authority; issue is presentation/observability only | No deterministic `NO_LOCAL_TASK` race fixture that distinguishes final display labels | Any UI/operator logic starts treating `failed` and `stopped` differently, or the next lifecycle/swarm source slice |
+| `ClassifiedEvidenceError::source` preservation | R12 | Current rate-limit/retry-after path remains unwrapped and correct; the missing chain is latent maintainability debt | No wrapped-`StreamError` source-chain/downcast fixture | Any wrapped error must carry retry/rate-limit metadata, or the W7 R12 helper slice |
+| Bounded progress-provenance retention | R05B with R05A schema observation | Unlimited direct-takeover growth is possible but no current correctness or liveness failure is evidenced; arbitrary truncation during recovery would risk erasing the history W2 restored | No repeated-takeover size-bound fixture or product limit for retained provenance | `checkpoint_summary` exceeds 2 KiB in evidence, any plan persistence/broadcast pressure appears, or the next R05A/R05B plan mutation |
+
+The original W7 trigger is therefore recorded as **observed and ripe**, not
+dormant. Recovery completion does not require performing this optional refactor:
+the findings are LOW, current behavior is pinned and fail-safe, the debt is
+visible, and widening source now would violate the bounded final-audit cadence.
+The table above makes the next permissible source change the hard scheduling
+boundary.
+
+Architecture gate verdict: **PASS**. Only joint Sol/Fable sign-off remains.
+
+## 18. Joint sign-off and recovery closure amendment
+
+Fresh Sol and Fable final signers reviewed the completed seam ledgers and this
+recovery plan together at fixed committed head
+`17586246afb11cd54e1db12a0beec05fd29a0612`. Both returned **PASS** with zero
+unresolved IMPORTANT or CRITICAL findings and no material overclaim:
+
+- [`reviews/2026-07-16-phase6-final-signoff-sol.md`](reviews/2026-07-16-phase6-final-signoff-sol.md),
+  SHA-256 `228f5937dd7eafa6570ed857b3a8db43a1ed43c0a3c9ad6dcaf6e2d29ef8ebe4`;
+- [`reviews/2026-07-16-phase6-final-signoff-fable.md`](reviews/2026-07-16-phase6-final-signoff-fable.md),
+  SHA-256 `7da9ca6810bde9db1035b68e1d2a46f3c0966c6610db7c19553acc96cacc13d3`.
+
+The signers independently accepted all nine Phase 6 completion criteria,
+reproduced the corrected audit and preservation state, endorsed the W7
+architecture defer as binding at the next adjacent source change, and
+recommended retirement of R00, R09, and R11 after report preservation.
+
+### Final recovery status
+
+- Phase 5 implementation head: `51168d16e9c708ae4afff09a6fc6402642d17782`.
+- Joint-signoff head: `17586246afb11cd54e1db12a0beec05fd29a0612`.
+- Coordinator offline audit: 62/62 real expected-exit checks matched; the TSV
+  has 76 physical lines because 14 commands contain continuation lines.
+- Evidence integrity: all 17 recovery manifests verify with zero failures.
+- Independent gates: Opus spot PASS, Fable architecture PASS, Sol final PASS,
+  fresh Fable final PASS; zero unresolved IMPORTANT/CRITICAL findings.
+- Protocol and durable replay shape: unchanged; `PROTOCOL_VERSION = 1`.
+- Preservation: `vendor/upstream` pinned, four stashes untouched, and only the
+  user-controlled recovery-prompt edit remains dirty with SHA-256
+  `8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`.
+- Trusted quality gates: green checks remain green; inherited R09 panic,
+  swallowed-error, production-size, and test-size debt remains visible as
+  expected-red and was not rebaselined.
+- External/live claim boundary: no live daemon/reload, provider, credential,
+  network, tool/MCP, swarm, installer/updater, release, publication, signing,
+  profile mutation, remote builder, or Nix invocation is claimed as validated.
+
+R00, R09, and R11 are retired as **special Phase 6 overlays** by append-only
+ledger amendments. Their durable preservation, quality, and documentation rules
+continue under normal repository governance. R08A remains the one broader
+defer; W7 and all other residuals remain owned, evidence-gapped, and
+trigger-bound in sections 4 and 17.
+
+Phase 6 recovery is **complete**. No further recovery source slice is open.

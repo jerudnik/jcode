@@ -1,0 +1,7 @@
+classifier expected=0 actual=0
+panic expected=1 actual=1
+swallowed expected=1 actual=1
+prod_size expected=1 actual=1
+test_size expected=1 actual=1
+wildcard expected=0 actual=0
+warning expected=0 actual=0

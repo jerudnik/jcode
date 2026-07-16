@@ -1,0 +1,2 @@
+JCODE_STEP {"command": "git diff --check", "command_sha256": "466c2f308b48c7661d646fdd068fbecea974c665fe65dbf8ed508f224180ce0b", "expected_exit": 0, "name": "diff_check", "started_utc": "2026-07-15T20:23:37.611804Z", "timeout_seconds": 300}
+JCODE_STEP_RESULT {"actual_exit": 0, "elapsed_seconds": 0.02, "ended_utc": "2026-07-15T20:23:37.632135Z", "name": "diff_check"}

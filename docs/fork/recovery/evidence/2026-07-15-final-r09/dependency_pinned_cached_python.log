@@ -1,0 +1,7 @@
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 5 ahead github/main (local-only commits, nothing to pull)
+/tmp/nix-shell.1sh60N: line 2384: /nix/store/60m4rxhg2fldqaak400c0lry96ijrzqn-python3-3.13.13/bin/python3: cannot execute binary file: Exec format error

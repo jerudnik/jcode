@@ -1,0 +1,4 @@
+rust_toolchain	0	0	bash -lc cargo --version && rustc --version
+pre_status	0	0	git status --short
+no_rust_diff_before	0	0	bash -lc test -z "$(git diff -- crates/**/*.rs crates/*.rs 2>/dev/null)"
+exact_catalog_route_test	0	101	cargo test -p jcode-base --lib provider::catalog_routes::tests::openrouter_alternative_routes_skip_models_absent_from_catalog -- --exact --nocapture
