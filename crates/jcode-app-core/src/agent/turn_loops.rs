@@ -1,3 +1,4 @@
+use super::evidence::EvidenceErrorClass;
 use super::*;
 
 impl Agent {
@@ -126,14 +127,25 @@ impl Agent {
                 Ok(stream) => stream,
                 Err(e) => {
                     if self.try_auto_compact_after_context_limit(&e.to_string()) {
+                        self.append_provider_error_response(
+                            self.provider.name(),
+                            self.provider.model(),
+                            api_start,
+                            &e,
+                            EvidenceErrorClass::ContextLimit,
+                            provider_correlation.clone(),
+                        );
                         context_limit_retries += 1;
                         if context_limit_retries > Self::MAX_CONTEXT_LIMIT_RETRIES {
                             logging::warn(
                                 "Context-limit compaction retry limit reached; giving up",
                             );
-                            return Err(anyhow::anyhow!(
-                                "Context limit exceeded after {} compaction retries",
-                                Self::MAX_CONTEXT_LIMIT_RETRIES
+                            return Err(Self::classified_evidence_error(
+                                anyhow::anyhow!(
+                                    "Context limit exceeded after {} compaction retries",
+                                    Self::MAX_CONTEXT_LIMIT_RETRIES
+                                ),
+                                EvidenceErrorClass::ContextLimit,
                             ));
                         }
                         continue;
@@ -143,9 +155,13 @@ impl Agent {
                         self.provider.model(),
                         api_start,
                         &e,
+                        EvidenceErrorClass::ProviderOpen,
                         provider_correlation.clone(),
                     );
-                    return Err(e);
+                    return Err(Self::classified_evidence_error(
+                        e,
+                        EvidenceErrorClass::ProviderOpen,
+                    ));
                 }
             };
 
@@ -214,14 +230,25 @@ impl Agent {
                                     ),
                                 ],
                             );
+                            self.append_provider_error_response(
+                                self.provider.name(),
+                                self.provider.model(),
+                                api_start,
+                                &e,
+                                EvidenceErrorClass::ContextLimit,
+                                provider_correlation.clone(),
+                            );
                             context_limit_retries += 1;
                             if context_limit_retries > Self::MAX_CONTEXT_LIMIT_RETRIES {
                                 logging::warn(
                                     "Context-limit compaction retry limit reached; giving up",
                                 );
-                                return Err(anyhow::anyhow!(
-                                    "Context limit exceeded after {} compaction retries",
-                                    Self::MAX_CONTEXT_LIMIT_RETRIES
+                                return Err(Self::classified_evidence_error(
+                                    anyhow::anyhow!(
+                                        "Context limit exceeded after {} compaction retries",
+                                        Self::MAX_CONTEXT_LIMIT_RETRIES
+                                    ),
+                                    EvidenceErrorClass::ContextLimit,
                                 ));
                             }
                             retry_after_compaction = true;
@@ -239,9 +266,13 @@ impl Agent {
                             self.provider.model(),
                             api_start,
                             &e,
+                            EvidenceErrorClass::StreamTransport,
                             provider_correlation.clone(),
                         );
-                        return Err(e);
+                        return Err(Self::classified_evidence_error(
+                            e,
+                            EvidenceErrorClass::StreamTransport,
+                        ));
                     }
                 };
 
@@ -593,6 +624,10 @@ impl Agent {
                             eprintln!("[trace] stream_error {}", message);
                         }
                         if self.try_auto_compact_after_context_limit(&message) {
+                            let error = anyhow::Error::new(StreamError::new(
+                                message.clone(),
+                                retry_after_secs,
+                            ));
                             log_agent_provider_stream_lifecycle(
                                 logging::LogLevel::Warn,
                                 self,
@@ -607,14 +642,25 @@ impl Agent {
                                     ),
                                 ],
                             );
+                            self.append_provider_error_response(
+                                self.provider.name(),
+                                self.provider.model(),
+                                api_start,
+                                &error,
+                                EvidenceErrorClass::ContextLimit,
+                                provider_correlation.clone(),
+                            );
                             context_limit_retries += 1;
                             if context_limit_retries > Self::MAX_CONTEXT_LIMIT_RETRIES {
                                 logging::warn(
                                     "Context-limit compaction retry limit reached; giving up",
                                 );
-                                return Err(anyhow::anyhow!(
-                                    "Context limit exceeded after {} compaction retries",
-                                    Self::MAX_CONTEXT_LIMIT_RETRIES
+                                return Err(Self::classified_evidence_error(
+                                    anyhow::anyhow!(
+                                        "Context limit exceeded after {} compaction retries",
+                                        Self::MAX_CONTEXT_LIMIT_RETRIES
+                                    ),
+                                    EvidenceErrorClass::ContextLimit,
                                 ));
                             }
                             retry_after_compaction = true;
@@ -643,6 +689,7 @@ impl Agent {
                             self.provider.model(),
                             api_start,
                             &error,
+                            EvidenceErrorClass::StreamEvent,
                             provider_correlation.clone(),
                         );
                         return Err(StreamError::new(message, retry_after_secs).into());
