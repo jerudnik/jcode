@@ -174,6 +174,13 @@ impl Agent {
         anyhow::Error::new(TurnInterruptedError)
     }
 
+    /// Test-only constructor so server-side fixtures can produce the real
+    /// typed interruption without exposing the private marker type.
+    #[cfg(test)]
+    pub(crate) fn interrupted_turn_error_for_tests() -> anyhow::Error {
+        Self::interrupted_turn_error()
+    }
+
     /// Typed predicate for turn interruption, usable by server consumers
     /// without string comparison. Traverses the whole `anyhow` chain so
     /// wrapped interruptions (for example `context(...)` layers or
