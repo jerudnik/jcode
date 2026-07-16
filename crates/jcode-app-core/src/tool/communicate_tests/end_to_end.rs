@@ -367,11 +367,24 @@ async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_clea
     let configured_concurrency = 2;
     let declared_bound =
         configured_concurrency * RunPlanChurnGuard::max_created_sessions_before_abort(1);
-    let created_sessions = provider_calls.load(std::sync::atomic::Ordering::SeqCst);
     assert_eq!(declared_bound, 6, "configured concurrency * 3 bound");
+
+    // Provider attempts are not a session count: provider-open retry policy can
+    // legitimately call the same failing provider more than once per worker.
+    // The churn guard's diagnostic carries the unique lost worker sessions,
+    // which is the authority this fixture is intended to bound.
+    let lost_workers = message
+        .split_once("Lost worker(s): ")
+        .and_then(|(_, tail)| tail.split_once(". Residue policy:"))
+        .map(|(workers, _)| workers.split(", ").count())
+        .expect("churn diagnostic should list lost worker sessions");
     assert_eq!(
-        created_sessions, declared_bound,
+        lost_workers, declared_bound,
         "run_plan should create exactly the bounded three configured waves before aborting"
+    );
+    assert!(
+        provider_calls.load(std::sync::atomic::Ordering::SeqCst) >= lost_workers,
+        "every lost worker must have attempted the failing provider at least once"
     );
     assert!(message.contains("run_plan aborted after 3 consecutive assignment wave(s)"));
     assert!(message.contains("possible spawn churn"));

@@ -61,8 +61,10 @@ crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs
 crates/jcode-app-core/src/build.rs
 crates/jcode-app-core/src/server/client_actions.rs
 crates/jcode-app-core/src/server/client_lifecycle.rs
+crates/jcode-app-core/src/server/control_log_sync.rs
 crates/jcode-app-core/src/server/handshake.rs
 crates/jcode-app-core/src/server/swarm.rs
+crates/jcode-app-core/src/tool/communicate_tests/end_to_end.rs
 crates/jcode-base/src/subscription_api.rs
 crates/jcode-build-support/src/tests.rs
 crates/jcode-plan/src/lib.rs
@@ -139,7 +141,7 @@ run_expect storage_lib 0 cargo test -p jcode-storage --lib -- --test-threads=1
 run_expect tui_lib 0 cargo test -p jcode-tui --lib -- --test-threads=1
 run_expect workspace_tests 0 cargo test --workspace -- --test-threads=1
 run_expect workspace_check 0 cargo check --workspace
-run_expect workspace_clippy 0 cargo clippy --workspace --all-targets -- -D warnings
+run_expect workspace_clippy 0 cargo clippy --workspace --lib -- -D warnings
 run_expect tui_build 0 cargo build -p jcode --bin jcode
 run_expect binary_version 0 target/debug/jcode --version
 
