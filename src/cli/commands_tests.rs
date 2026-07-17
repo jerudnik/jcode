@@ -1011,3 +1011,30 @@ async fn restore_agent_session_if_requested_restores_resumed_session() {
 
     assert_eq!(resumed.session_id(), original_session_id);
 }
+
+#[tokio::test]
+async fn server_command_client_subscribes_with_working_dir_before_stateful_requests() {
+    use tokio::io::AsyncBufReadExt;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let socket = temp.path().join("jcode.sock");
+    let listener = tokio::net::UnixListener::bind(&socket).expect("bind test socket");
+
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("accept client");
+        let mut reader = tokio::io::BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.expect("read subscribe");
+        let request: crate::protocol::Request = serde_json::from_str(&line).expect("parse request");
+        let crate::protocol::Request::Subscribe { working_dir, .. } = request else {
+            panic!("first request was not Subscribe: {request:?}");
+        };
+        let working_dir = working_dir.expect("subscribe working_dir");
+        assert!(std::path::Path::new(&working_dir).is_absolute());
+    });
+
+    let _client = connect_subscribed_server_command_client(&socket)
+        .await
+        .expect("connect subscribed client");
+    server.await.expect("server task");
+}
