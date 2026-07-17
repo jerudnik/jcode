@@ -1,5 +1,10 @@
 # Coordinator brief: post-recovery fork normalization
 
+> **Historical bootstrap artifact.** Do not use this file as a fresh-session
+> prompt without first reading [`STATUS.md`](STATUS.md). Its branch, commit,
+> worktree, runtime, and host counts describe the pre-promotion starting state
+> and are intentionally preserved rather than rewritten.
+
 Use the following as the first user message in a fresh coordinator session.
 
 ```markdown

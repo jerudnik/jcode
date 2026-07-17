@@ -302,3 +302,29 @@ Explained drift, recorded append-only, no mutation performed in response:
    embedded. It is user configuration, not recovery or normalization output.
    Disposition (ignore, relocate, or commit) is a user decision; it is retained
    untouched and excluded from "unexplained dirty state."
+
+### 2026-07-17 post-promotion and canonical-handoff observation
+
+The pre-promotion facts above are now historical. Before this documentation
+amendment, local and fork-remote `main` both pointed to
+`42aa9cc64183741efb000a6d58c2c920de77e146`. The promoted product/runtime commit
+is `8962bccb32eede3b6746c42bfe6d265df29e4471`; `current`, `stable`, and
+`shared-server` resolve to `8962bccb3-release`, SHA-256
+`6cf81221e8c0cee86ae714d2f1fc9fb55fe8715f45ee8082dc2ecf034a2515fc`.
+
+The canonical checkout `/Users/jrudnik/labs/jcode` switched from
+`recovery/2026-07-15` to `main` at 2026-07-17T16:09:11-04:00, after the original
+external ice inventory was written. The checkout still contains exactly the two
+preserved user-owned paths: modified
+`docs/fork/recovery/ORCHESTRATOR_PROMPT.md`, diff SHA-256
+`8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`, and
+untracked `opencode.json`.
+
+Thirty worktrees, 41 local branches, four stashes, and the local bundle chain
+remain retained through the July 24 soak. All 41 local branch tips and the one
+detached worktree tip now have exact matching refs in the private GitHub archive
+`jerudnik/jcode-recovery-archive`. Worktree directories, caches, ignored files,
+stashes, and bundle payloads are not GitHub worktree data and remain local until
+the separately approved post-soak cleanup or privacy-safe archival decision.
+Exact manifests are under
+[`evidence/2026-07-17-post-promotion-checkpoint/`](evidence/2026-07-17-post-promotion-checkpoint/).
