@@ -1,0 +1,9 @@
+{
+  "socket": "/var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/jcode.sock",
+  "had_listener": true,
+  "forced": false,
+  "reloaded": false,
+  "already_current": true,
+  "handoff_ready": true,
+  "detail": "jcode server is already running the newest binary; no reload needed."
+}

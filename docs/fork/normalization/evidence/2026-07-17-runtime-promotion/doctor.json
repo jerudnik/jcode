@@ -1,0 +1,33 @@
+{
+  "client": {
+    "path": "/Users/jrudnik/.jcode/builds/versions/8962bccb3-release/jcode",
+    "origin": "release",
+    "version": "0.46.0",
+    "git_hash": "8962bccb3",
+    "dirty": null,
+    "build_source_dir": null
+  },
+  "server": {
+    "running": true,
+    "socket": "/var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/jcode.sock",
+    "pid": 63766,
+    "name": "⚓ harbor",
+    "version": "v0.46.0-dev (8962bccb3)",
+    "git_hash": "8962bccb3",
+    "started_at": "2026-07-17T19:57:41.005678+00:00"
+  },
+  "nix_installed": {
+    "path": "/nix/store/8fg6b03y23kaw0np1n6cvplh77qga8v1-jcode-nix-managed/bin/jcode",
+    "version": "v0.46.0",
+    "git_hash": "2ccf43f",
+    "store_hash": "8fg6b03y23kaw0np1n6cvplh77qga8v1"
+  },
+  "github_latest": {
+    "sha": "2ccf43fd",
+    "checked_at": 1784316941
+  },
+  "verdict": "same",
+  "verdict_detail": "client and server are the same committed build",
+  "drift_summary": "running binary is not the nix-installed one (running 8962bccb vs nix 2ccf43f) -- repoint ~/.local/bin/jcode or relaunch",
+  "fallback": "nix run github:jerudnik/jcode -- doctor   (or `jcode server reload`)"
+}
