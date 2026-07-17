@@ -1,0 +1,15 @@
+crates/jcode-app-core/src/agent/evidence.rs
+crates/jcode-app-core/src/agent/turn_loops.rs
+crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs
+crates/jcode-app-core/src/build.rs
+crates/jcode-app-core/src/server/client_actions.rs
+crates/jcode-app-core/src/server/client_lifecycle.rs
+crates/jcode-app-core/src/server/control_log_sync.rs
+crates/jcode-app-core/src/server/handshake.rs
+crates/jcode-app-core/src/server/swarm.rs
+crates/jcode-app-core/src/tool/communicate_tests/end_to_end.rs
+crates/jcode-base/src/subscription_api.rs
+crates/jcode-build-support/src/tests.rs
+crates/jcode-plan/src/lib.rs
+crates/jcode-storage/src/active_pids.rs
+src/cli/terminal.rs
