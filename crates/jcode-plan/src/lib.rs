@@ -82,8 +82,9 @@ fn provenance_omission_marker(omitted: u64) -> String {
     format!("[{omitted} older notes omitted]")
 }
 
-// `.ok()` is intentionally avoided because it is one of the repository's
-// frozen swallowed-error ratchet patterns. Preserve the accepted count.
+// Result-to-Option shorthand is intentionally avoided because it is one of the
+// repository's frozen swallowed-error ratchet patterns. Preserve the accepted
+// count.
 #[allow(clippy::manual_ok_err)]
 fn parse_provenance_omission_marker(segment: &str) -> Option<u64> {
     let value = segment
