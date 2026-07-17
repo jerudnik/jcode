@@ -2098,6 +2098,17 @@ pub async fn run_usage_command(emit_json: bool) -> Result<()> {
     report_info::run_usage_command(emit_json).await
 }
 
+async fn connect_subscribed_server_command_client(
+    socket: &std::path::Path,
+) -> Result<crate::server::Client> {
+    let mut client = crate::server::Client::connect_with_path(socket.to_path_buf()).await?;
+    // Reload is stateful. The server requires a Subscribe carrying an absolute
+    // working directory before it accepts stateful requests. Client::subscribe
+    // supplies the caller's current directory when none is explicitly given.
+    client.subscribe().await?;
+    Ok(client)
+}
+
 /// Gracefully reload the running background server onto the newest binary.
 ///
 /// This is the preferred upgrade path (issue #291): instead of killing the
@@ -2161,7 +2172,7 @@ pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<(
         });
     }
 
-    let mut client = crate::server::Client::connect().await?;
+    let mut client = connect_subscribed_server_command_client(&socket).await?;
 
     // Before asking the (possibly older) daemon to reload, repair a stale
     // `shared-server` channel from the client side. The running server resolves
