@@ -1,0 +1,1 @@
+{"type":"debug_response","id":91,"ok":true,"output":"{\"debug_control_enabled\":true,\"git_hash\":\"8962bccb3\",\"has_update\":false,\"icon\":\"⚓\",\"id\":\"server_harbor_1784318260991_ac35e7033e49d850\",\"name\":\"harbor\",\"session_count\":1,\"swarm_member_count\":12,\"uptime_secs\":196,\"version\":\"v0.46.0-dev (8962bccb3)\"}"}

@@ -15,6 +15,8 @@ This program is tracked by durable initiative
   before mutation.
 - [`COORDINATOR_BRIEF.md`](COORDINATOR_BRIEF.md): copy-ready coordinator brief
   for the next session.
+- [`RUNTIME_AND_NIX_RUNBOOK.md`](RUNTIME_AND_NIX_RUNBOOK.md): clean build,
+  immutable channel, live handoff, verification, and rollback procedure.
 - [`../recovery/reviews/2026-07-16-w7-review.md`](../recovery/reviews/2026-07-16-w7-review.md):
   reviewed W7 scope and implementation order.
 - [`../SYNC_MODEL.md`](../SYNC_MODEL.md): current monitored-curation policy,

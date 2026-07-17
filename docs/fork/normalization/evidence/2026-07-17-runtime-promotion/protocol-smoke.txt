@@ -1,0 +1,4 @@
+working_dir=/Users/jrudnik/labs/jcode-normalization-integration
+request_order=subscribe,ping
+events=ack,mcp_status,mcp_status,ack,pong
+result=pass
