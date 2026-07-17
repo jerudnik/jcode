@@ -17,6 +17,7 @@ export JCODE_RUNTIME_DIR="$out/jcode-runtime"
 mkdir -p "$JCODE_HOME" "$JCODE_RUNTIME_DIR" "$out/raw" "$out/homes"
 manifest="$out/manifest.tsv"
 : > "$manifest"
+candidate_short="$(git rev-parse --short HEAD)"
 
 run_expect() {
   local name=$1 expected=$2
@@ -144,8 +145,10 @@ run_expect storage_lib 0 cargo test -p jcode-storage --lib -- --test-threads=1
 run_expect tui_check 0 cargo check -p jcode-tui
 run_expect workspace_check 0 cargo check --workspace
 run_expect workspace_clippy 0 cargo clippy --workspace --lib -- -D warnings
-run_expect tui_build 0 cargo build -p jcode --bin jcode
+run_expect tui_build 0 env JCODE_BUILD_GIT_HASH="$candidate_short" \
+  cargo build -p jcode --bin jcode
 run_expect binary_version 0 target/debug/jcode --version
+run_expect binary_hash_exact 0 grep -F "($candidate_short)" "$out/raw/binary_version.txt"
 
 run_expect panic 1 /Library/Developer/CommandLineTools/usr/bin/python3 scripts/check_panic_budget.py
 run_expect panic_exact 0 grep -F '31 -> 48' "$out/raw/panic.txt"
