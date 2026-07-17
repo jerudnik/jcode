@@ -110,8 +110,9 @@ struct PidMarkerIdentity {
 }
 
 impl PidMarkerIdentity {
-    // `.ok()` is intentionally avoided because it is one of the repository's
-    // frozen swallowed-error ratchet patterns. Preserve the accepted count.
+    // Result-to-Option shorthand is intentionally avoided because it is one of
+    // the repository's frozen swallowed-error ratchet patterns. Preserve the
+    // accepted count.
     #[allow(clippy::manual_ok_err)]
     fn from_metadata(metadata: &std::fs::Metadata) -> Self {
         Self {
