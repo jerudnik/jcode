@@ -1,26 +1,63 @@
-All verified. Issuing the addendum.
+# Independent operational and safety signoff: N2 exact candidate
 
----
+Date: 2026-07-17
 
-# Review Addendum: Candidate `62b3946b63eac0a5082b52fed98087ccafc2160c`
+Reviewer: independent Opus verification lane
+`session_swan_1784313735465_969518fdcde99b26`
 
-## VERDICT: **PASS** for promotion-readiness at `62b3946b6`
+Reviewed candidate: `62b3946b63eac0a5082b52fed98087ccafc2160c`
 
-This commit differs from `36971a03d` by exactly one 4-line change to the evidence driver (`fix(n2): assert exact candidate binary identity`); no product source changed.
+Reviewed package: `/tmp/jcode-n2-readiness-62b3946b6-final` and the committed
+mirror under `evidence/2026-07-16-n2-readiness/accepted/`.
 
-## Verified
-- **SHA256SUMS**: 55/55 files OK. Manifest = 54 gates (one added vs prior); every gate's actual exit equals expected, only the 4 intended reds (panic/swallowed/code_size/test_size) carry exit 1. All raw logs stamped `HEAD=62b3946b6...`.
-- **binary_version**: `jcode v0.46.0-dev (62b3946b6)` (exit 0) — matches the candidate exactly.
-- **binary_hash_exact** (new gate): `grep -F (62b3946b6)` against binary_version.txt, exit 0.
-- **Driver fix is correct**: `tui_build` now builds with `JCODE_BUILD_GIT_HASH="$(git rev-parse --short HEAD)"`, which `jcode-build-meta/build.rs` declares as `rerun-if-env-changed`, forcing a metadata refresh so the embedded hash cannot lag. The new assertion gate makes identity coherence a hard, self-checking matrix requirement.
-- Product-diff scope unchanged (0 jcode-tui files); all prior-review conclusions (trusted-gate scope vs Phase 6, frozen baselines, rollback bundles, fast-forward possibility, tui --lib exclusion honesty) carry over unaffected.
+## Verdict
 
-## Prior IMPORTANT finding: **RESOLVED**
-The stale-binary finding (`--version` showed `1e5ee7ed0` instead of the candidate) is fixed at the mechanism level, not merely re-run. Binary/build-hash now provably agree with source, satisfying COMPLETION_STANDARD D4.
+**PASS.** No CRITICAL, HIGH, or MEDIUM operational findings affect promotion
+readiness.
 
-## Remaining findings by severity
-- **CRITICAL / IMPORTANT**: none.
-- **MINOR**: (1) The tui --lib "38/37 HOME" diagnostic is still only asserted in a driver comment, not bundled as an artifact (credible, not independently reproduced here). (2) Bundles use SHA-1 git hashing, mitigated by SHA-256 file hashes plus fsck.
+## Independently reproduced evidence
 
-## Unchanged operator cautions
-Main fast-forward, recovery/archive ref deletion, and runtime symlink repoint remain approval-gated and are authorized by neither review. D6 live-runtime and D7 host normalization remain separately required. I did not run builds/tests myself; I relied on the package's recorded exits and logs and the one-commit driver diff.
+- Exact candidate commit and branch verified.
+- Original package `SHA256SUMS`: 55/55 files verified.
+- Manifest: 54/54 expected exit codes equal actual exit codes.
+- All four intended quality gates remain red exactly as designed.
+- Panic exact guard: `31 -> 48`.
+- Swallowed-error exact guard: `2987 -> 3074`.
+- Frozen budget JSON hashes match and their diff against the recovery ref is
+  empty.
+- Binary version is `jcode v0.46.0-dev (62b3946b6)` and the exact-hash gate
+  passes.
+- `clean_start` and `final_status` both pass at the fixed candidate.
+- Expected and actual 15-file product-delta lists match and contain no TUI
+  product source.
+- Recovery and accepted-source refs, rollback hashes, and archive state are
+  recorded consistently.
+- Local `main` is an ancestor of the candidate; a local fast-forward is possible.
+- The canonical dirty checkout is recorded separately from the clean validation
+  worktree.
+- The candidate is local-only and no remote branch contains it.
+- TUI gate scope is disclosed honestly. The two full-library diagnostic logs are
+  committed and explicitly marked non-gating.
+- Committed `EVIDENCE_SHA256SUMS`: 65/65 files verified at review time.
+- `verify_raw.sh`: 54/54 decompressed raw logs verified.
+
+## Low-severity operator awareness
+
+1. The full-TUI diagnostics were produced at ancestor `9f960f835`, not rerun at
+   the exact candidate. They are disclosure evidence, not trusted gates.
+2. Local `main` and remote `origin/main` are not the same ref. Any future push
+   requires deliberate remote reconciliation after approval.
+
+## Approval boundaries
+
+This PASS does not authorize moving `main`, pushing, deleting refs, removing
+worktrees, dropping stashes, repointing runtime, or deleting rollback bundles.
+The four expected-red quality gates must not be updated without intentional
+cleanup and review.
+
+## What was not checked
+
+- The reviewer did not rerun the cargo matrix or full TUI library suite.
+- Remote server state was not fetched or modified.
+- Compressed diagnostic contents were not inspected line by line.
+- No approval-gated or destructive action was performed.
