@@ -1,0 +1,12 @@
+8db279395a2d21edfc3f973b5708e1aaeee52f7cf11a0aaebac065bfdb60fc22  ./archive-summary.txt
+bf14e3cfbbd7abbea833f82c12f1ef904dc3e251ca5c9f21da21866ec89b3773  ./gitleaks-disposition.tsv
+8ece65d2158a4bf50acfed1f9aa344739821ca4240cad6c12fd27a581cce3c56  ./local-branches.tsv
+23cd67bcc783d37198927dc236d818bcfcd846192d3b40d74f6c79f5c8832c93  ./private-archive-heads.tsv
+2d078719cac4dd8715c0b294dcac627245f0f97c355a662aa85f0cbf4cf826e6  ./raw/cli-command-tests.txt
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./raw/diff-check.txt
+c15431bfd7dd09c7db9e0853e3ed240542fe57389533cab693ec9c35e5f499cc  ./raw/jcode-lib-clippy.txt
+aa6179de3ffa1706b3b20839244090d704ed0fffdb90914e7c018337c21d83ba  ./raw/post-n2-commits.tsv
+114f514d344264ee9eec00268e8705c77b782f29569e6b85a04cc0716292ad54  ./raw/release-profile-test.txt
+35fe51d9fb404571bdd855e9016cb5f98c8597830aa45ac6e4dc3c16187551ed  ./raw/source-manifest.txt
+39d817221280aed2b00fe13fe32986e9d0d9025e3aa227caae63f8883c5bac70  ./README.md
+998fba2c5315256884d28fbd7a8903cb1e10ec17d61c1fdeebd95167e9a3bd6b  ./worktrees.tsv

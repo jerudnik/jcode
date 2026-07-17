@@ -1,0 +1,93 @@
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main in sync with github/main (42aa9cc64)
+    Finished `test` profile [unoptimized] target(s) in 1.22s
+     Running unittests src/lib.rs (target/debug/deps/jcode-46e1fc4d90f55b8c)
+
+running 41 tests
+test cli::commands::tests::auth_test_retryable_error_detection_handles_rate_limits ... ok
+test cli::commands::tests::auth_test_retryable_error_detection_rejects_schema_errors ... ok
+test cli::commands::tests::cli_route_display_uses_typed_api_methods ... ok
+test cli::commands::tests::cli_provider_choice_filter_uses_typed_api_methods ... ok
+test cli::commands::tests::cloud_sessions_args_match_jade_helper_contract ... ok
+test cli::commands::tests::auth_test_choice_plan_preserves_explicit_model_for_local_provider ... ok
+test cli::commands::tests::auth_test_choice_plan_leaves_non_compat_provider_unchanged ... ok
+test cli::commands::tests::collect_sync_candidates_picks_only_session_json ... ok
+test cli::commands::tests::collect_cli_model_names_falls_back_when_no_routes_are_available ... ok
+test cli::commands::tests::collect_cli_model_names_prefers_available_routes_and_dedupes ... ok
+test cli::commands::tests::explicit_supported_provider_maps_to_single_auth_target ... ok
+test cli::commands::tests::is_syncable_session_stem_filters_non_session_files ... ok
+test cli::commands::tests::dashboard_views_dir_is_sibling_of_dashboard ... ok
+test cli::commands::tests::explicit_generic_provider_maps_to_generic_auth_target ... ok
+test cli::commands::tests::list_cli_providers_includes_auto_and_openai ... ok
+test cli::commands::tests::parse_cloud_session_list_json_rejects_unexpected_shapes ... ok
+test cli::commands::tests::relative_link_is_relative_to_dashboard_parent ... ok
+test cli::commands::tests::render_cloud_sessions_dashboard_html_handles_empty ... ok
+test cli::commands::tests::render_cloud_sessions_dashboard_html_escapes_and_lists_rows ... ok
+test cli::commands::tests::parse_cloud_session_list_json_accepts_array_and_object_wrappers ... ok
+test cli::commands::tests::resolve_jade_sessions_helper_prefers_explicit_and_env_paths ... ok
+test cli::commands::tests::render_cloud_sessions_dashboard_html_links_rows_with_view_files ... ok
+test cli::commands::tests::run_auto_poke_followup_ignores_precompletion_confidence ... ok
+test cli::commands::tests::run_auto_poke_followup_rechecks_completion_confidence_until_it_passes ... ok
+test cli::commands::tests::run_auto_poke_followup_silent_when_confident_and_earned ... ok
+test cli::commands::tests::run_auto_poke_followup_targets_below_threshold_todos ... ok
+test cli::commands::tests::sanitize_filename_keeps_safe_chars_and_replaces_others ... ok
+{
+  "sessions_dir": "/tmp/nix-shell.KqFxs0/.tmp7IjaIQ/sessions",
+  "dry_run": true,
+  "scanned": 2,
+  "uploaded": 2,
+  "skipped_unchanged": 0,
+  "failed": 0,
+  "reached_max": false,
+  "entries": [
+    {
+      "session_id": "session_alpha",
+      "path": "/tmp/nix-shell.KqFxs0/.tmp7IjaIQ/sessions/session_alpha.json",
+      "status": "would-upload"
+    },
+    {
+      "session_id": "session_beta",
+      "path": "/tmp/nix-shell.KqFxs0/.tmp7IjaIQ/sessions/session_beta.json",
+      "status": "would-upload"
+    }
+  ]
+}
+test cli::commands::tests::cloud_sessions_sync_dry_run_reports_without_uploading_or_writing_state ... ok
+test cli::commands::tests::run_auto_poke_followup_prioritizes_incomplete_todos ... ok
+test cli::commands::tests::test_parse_tailscale_dns_name_invalid_json ... ok
+Saved Jade cloud sessions config to /tmp/nix-shell.KqFxs0/.tmpKg8my0/cloud_sessions.json
+api_base: https://jade.example
+api_token: configured
+api_token_id: dev-admin
+user_id: alice
+helper: /tmp/jade_sessions.py
+Removed Jade cloud sessions config at /tmp/nix-shell.KqFxs0/.tmpKg8my0/cloud_sessions.json
+test cli::commands::tests::cloud_sessions_config_persists_secret_and_feeds_helper_env_without_args ... ok
+test cli::commands::tests::test_parse_tailscale_dns_name_trims_trailing_dot ... ok
+test cli::commands::tests::test_parse_tailscale_dns_name_handles_missing_or_empty ... ok
+test cli::commands::tests::version_command_plain_output_includes_core_fields ... ok
+{
+  "sessions_dir": "/tmp/nix-shell.KqFxs0/.tmpjRbMqO/sessions",
+  "dry_run": false,
+  "throttled": true,
+  "scanned": 0,
+  "uploaded": 0,
+  "skipped_unchanged": 0,
+  "failed": 0,
+  "reached_max": false,
+  "entries": []
+}
+test cli::commands::tests::cloud_sessions_sync_respects_min_interval_throttle ... ok
+test cli::commands::tests::server_command_client_subscribes_with_working_dir_before_stateful_requests ... ok
+test cli::commands::tests::auth_test_choice_plan_skips_local_custom_compat_endpoint_without_models ... ok
+test cli::commands::tests::auth_test_choice_plan_discovers_model_for_hosted_custom_compat_endpoint_with_api_key ... ok
+test cli::commands::tests::auth_test_choice_plan_discovers_model_for_local_custom_compat_endpoint ... ok
+test cli::commands::tests::configured_auth_test_targets_only_include_configured_supported_providers ... ok
+test cli::commands::tests::restore_agent_session_if_requested_restores_resumed_session ... ok
+
+test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 172 filtered out; finished in 0.99s

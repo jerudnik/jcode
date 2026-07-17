@@ -406,11 +406,12 @@ The final coordinator integration review passed at source head
 whose `SHA256SUMS` SHA-256 is
 `9af58f1563f266066edd6da9208983da62eeb0b1997ec78f9c26318221dcd2a3`.
 
-The accepted manifest contains 76 expected-exit entries and zero mismatches:
-48 build-support tests, 81 protocol tests, 38 R02 subscription tests, 4 R02
-provider-filter tests, 14 exact R04 fixtures with per-fixture disposable homes,
-11 R12 fixtures, affected checks for build-support/protocol/base/app-core/
-storage/TUI, the R09 matrix, and preservation/process guards all matched.
+The accepted manifest contains 62 real expected-exit checks across 76 physical
+lines and zero mismatches: 48 build-support tests, 81 protocol tests, 38 R02
+subscription tests, 4 R02 provider-filter tests, 14 exact R04 fixtures with
+per-fixture disposable homes, 11 R12 fixtures, affected checks for
+build-support/protocol/base/app-core/storage/TUI, the R09 matrix, and
+preservation/process guards all matched.
 
 R09 current truth is reproducible without baseline movement: classifier 17/17,
 dependency boundaries, wildcard total 16, warning 0, shell syntax, and diff
@@ -544,3 +545,19 @@ Two non-product failures are preserved rather than hidden:
 
 Neither failure changed source, evidence bytes, reports, refs, stashes,
 baselines, or test outcomes.
+
+### 2026-07-17 post-promotion authority amendment
+
+The phase-summary table at the beginning of this append-only record is a
+historical snapshot. It is superseded by the Phase 6 closure at lines 490-528:
+recovery is complete, and no recovery source workstream remains open. The final
+audit contains **62 real expected-exit checks across 76 physical manifest
+lines**, not 76 distinct checks.
+
+The signed recovery commits remain preserved on `recovery/2026-07-15` and in
+the verified rollback archives. Current `main` does not merge those commits by
+ancestry. Commit `c786be6c303c95bf02e69d81dfaffa06361a82ed` imported the
+forensic recovery record and normalization authority into the curated history.
+Current operating status belongs to
+[`../normalization/STATUS.md`](../normalization/STATUS.md); this file remains the
+immutable explanation of how recovery reached closure.

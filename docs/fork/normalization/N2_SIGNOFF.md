@@ -138,3 +138,30 @@ unrelated local changes.
   SHA-256 hashes protect the bundle files themselves.
 - Promotion and later recovery cleanup are separate decisions. Fast-forwarding
   does not imply permission to erase recovery state.
+
+## 2026-07-17 post-signoff promotion delta
+
+This handoff signs candidate `62b3946b6`; it is not a claim that the later live
+promotion fixes were part of the original 54-gate package. Promotion exposed two
+bounded operational defects, both fixed before the final runtime was selected:
+
+1. `1c368592fa3c7b598b7dc08d372cea2e8f9b38e8` makes standalone server-management
+   clients subscribe with an absolute working directory before issuing stateful
+   reload requests.
+2. `8962bccb32eede3b6746c42bfe6d265df29e4471` separates release and selfdev
+   immutable labels so different build profiles cannot replace bytes under one
+   `versions/<git-hash>` path.
+
+Focused validation was reproduced from clean source head `42aa9cc64`: 41/41 CLI
+command tests passed, jcode library clippy passed with `-D warnings`, the
+profile-qualified release-label test passed, and `git diff --check` passed. Live
+runtime evidence verifies the exact `8962bccb3-release` binary, channel targets,
+doctor identity, subscribed socket ping, handoff, and already-current reload.
+The evidence is under
+[`evidence/2026-07-17-post-promotion-checkpoint/`](evidence/2026-07-17-post-promotion-checkpoint/)
+and [`evidence/2026-07-17-runtime-promotion/`](evidence/2026-07-17-runtime-promotion/).
+
+The complete original N2 matrix was not rerun at the final product commit. This
+delta record therefore closes the missing documentation link but does not claim
+full D9 normalization sign-off. The remaining gates are stated in
+[`STATUS.md`](STATUS.md).

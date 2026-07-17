@@ -1,0 +1,4 @@
+3a260622dfa62f1ba468ff34016010399b59195c	docs(n2): preserve promotion-readiness evidence
+2a78619d01fa1c6c77e321a9c6b691ebe21fdedf	docs(n2): finalize exact-candidate signoffs
+1c368592fa3c7b598b7dc08d372cea2e8f9b38e8	fix(cli): subscribe before server reload
+8962bccb32eede3b6746c42bfe6d265df29e4471	fix(release): isolate immutable profile builds

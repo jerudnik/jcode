@@ -1,5 +1,14 @@
 # Fork recovery workspace
 
+> **Archived forensic record.** Recovery completed on 2026-07-16. The accepted
+> implementation head is `51168d16e9c708ae4afff09a6fc6402642d17782`, and the
+> joint-signoff head is `17586246afb11cd54e1db12a0beec05fd29a0612`. The
+> recovery record was imported into the curated history by `c786be6c3`; those
+> recovery commits are preserved as historical branch identity rather than as
+> ancestors of current `main`. The dated status paragraphs below remain
+> append-only history. Use [`../normalization/STATUS.md`](../normalization/STATUS.md)
+> for the current source, runtime, soak, and cleanup checkpoint.
+
 Previous status checkpoint: Phase 2 evidence ledger complete; Phase 3 bounded pilot remains blocked with two prerequisite nodes after independently verified R04 and R12 integration, 2026-07-15.
 
 Current status amendment, 2026-07-15: the previously named strict prerequisite-node count is zero after sequential R02 and R01/R03A integration and combined validation. This is not a pilot PASS. Pilot authorization remains **OPEN, pending independent G2 adversarial adjudication**, and G2 may inject new blockers.
@@ -25,7 +34,9 @@ Older documents remain useful evidence, but their status labels and measurements
 - [`RESPONSIBILITIES.md`](./RESPONSIBILITIES.md): adjudicated behavior/governance boundaries, six full-review seams, cross-seam invariants, and bounded pilot prerequisites. The coordinator alone edits this file during parallel work.
 - [`SEAM_LEDGER_TEMPLATE.md`](./SEAM_LEDGER_TEMPLATE.md): required structure for one authoritative seam record and its two independent reviews.
 - [`PROGRESS.md`](./PROGRESS.md): phase gates, checkpoints, and blockers. The coordinator alone edits this file.
-- [`ORCHESTRATOR_PROMPT.md`](./ORCHESTRATOR_PROMPT.md): self-contained launch prompt for the recovery session.
+- [`ORCHESTRATOR_PROMPT.md`](./ORCHESTRATOR_PROMPT.md): historical launch prompt
+  for the completed recovery session. Its preserved local user edit is not
+  current repository authority and must not be reused without revalidation.
 - [`seams/README.md`](./seams/README.md): seam-directory ownership and merge-back rules.
 - [`reviews/`](./reviews/): preserved independent reviews for cross-cutting recovery changes.
 - [`evidence/`](./evidence/): byte-exact validation, R09, build-identity, and infrastructure evidence with SHA-256 manifests.

@@ -1,0 +1,11 @@
+archive_repository=https://github.com/jerudnik/jcode-recovery-archive
+archive_visibility=PRIVATE
+local_branch_count=41
+worktree_count=30
+detached_worktree_commit=59c6a0ba0923b5ca9661611015abf8025bb72be2
+remote_archive_branch_count=42
+gitleaks_branch_history_findings=19
+gitleaks_new_nonpublic_findings=0
+gitleaks_archive_set_commits_scanned=6210
+gitleaks_archive_set_bytes_scanned=165577615
+gitleaks_archive_set_scope=41_local_branches_plus_detached_tip
