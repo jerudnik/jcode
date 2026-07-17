@@ -1,0 +1,12 @@
+commit=8962bccb32eede3b6746c42bfe6d265df29e4471
+local_main=8962bccb32eede3b6746c42bfe6d265df29e4471
+branch_head=8962bccb32eede3b6746c42bfe6d265df29e4471
+binary=/Users/jrudnik/.jcode/builds/versions/8962bccb3-release/jcode
+binary_version=jcode v0.46.0-dev (8962bccb3)
+binary_sha256=6cf81221e8c0cee86ae714d2f1fc9fb55fe8715f45ee8082dc2ecf034a2515fc
+current=/Users/jrudnik/.jcode/builds/versions/8962bccb3-release/jcode
+stable=/Users/jrudnik/.jcode/builds/versions/8962bccb3-release/jcode
+shared-server=/Users/jrudnik/.jcode/builds/versions/8962bccb3-release/jcode
+current-version=8962bccb3-release
+stable-version=8962bccb3-release
+shared-server-version=8962bccb3-release
