@@ -338,13 +338,14 @@ The coordinator's accepted Phase 6 audit ran at source head
 [`evidence/2026-07-16-phase6-final-audit/`](evidence/2026-07-16-phase6-final-audit/),
 whose `SHA256SUMS` SHA-256 is
 `9af58f1563f266066edd6da9208983da62eeb0b1997ec78f9c26318221dcd2a3`.
-Its 76 expected-exit entries have zero mismatches: 48 build-support tests, 81
-protocol tests, 38 R02 subscription tests, 4 R02 provider-filter tests, 14 exact
-R04 fixtures, 11 R12 fixtures, affected checks for six packages, and all R09
-and preservation guards matched. The 17 classifier tests, dependency boundary,
-wildcard, warning, shell syntax, and diff checks passed. Panic `31 -> 48`,
-swallowed-error `2987 -> 3074`, production-size, and test-size remained visible
-expected-red exit `1`; no baseline update was used.
+Its 62 real expected-exit checks are encoded across 76 physical manifest lines
+and have zero mismatches: 48 build-support tests, 81 protocol tests, 38 R02
+subscription tests, 4 R02 provider-filter tests, 14 exact R04 fixtures, 11 R12
+fixtures, affected checks for six packages, and all R09 and preservation guards
+matched. The 17 classifier tests, dependency boundary, wildcard, warning, shell
+syntax, and diff checks passed. Panic `31 -> 48`, swallowed-error `2987 ->
+3074`, production-size, and test-size remained visible expected-red exit `1`;
+no baseline update was used.
 
 Authority reconciliation found no Phase 5 protocol diff from approved source
 head `6c6a4f2c8`, kept `PROTOCOL_VERSION = 1`, added no

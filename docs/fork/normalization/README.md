@@ -8,13 +8,23 @@ maintenance, live runtime validation, and a normalized local host.
 This program is tracked by durable initiative
 `post-recovery-fork-normalization`.
 
+## Current checkpoint
+
+Source and runtime promotion are complete, but the full D0-D9 normalization
+program is not. Recovery worktrees and local rollback assets remain under the
+July 24 soak, and final host cleanup and D9 sign-off remain open. See
+[`STATUS.md`](STATUS.md) for the exact source, runtime, remote archive, remaining
+gates, and cleanup boundary.
+
 ## Authoritative files
 
+- [`STATUS.md`](STATUS.md): current source, runtime, soak, remote-archive, and
+  remaining-gate checkpoint.
 - [`COMPLETION_STANDARD.md`](COMPLETION_STANDARD.md): normative, binary completion criteria.
 - [`BASELINE.md`](BASELINE.md): repository and host-topology facts to revalidate
   before mutation.
-- [`COORDINATOR_BRIEF.md`](COORDINATOR_BRIEF.md): copy-ready coordinator brief
-  for the next session.
+- [`COORDINATOR_BRIEF.md`](COORDINATOR_BRIEF.md): preserved bootstrap brief for
+  the original normalization session; its starting facts are historical.
 - [`RUNTIME_AND_NIX_RUNBOOK.md`](RUNTIME_AND_NIX_RUNBOOK.md): clean build,
   immutable channel, live handoff, verification, and rollback procedure.
 - [`../recovery/reviews/2026-07-16-w7-review.md`](../recovery/reviews/2026-07-16-w7-review.md):
