@@ -3,9 +3,9 @@
 # update the stable + current channel symlinks, and point the launcher at current.
 #
 # Paths after install:
-# - ~/.jcode/builds/versions/<hash>/jcode (immutable)
-# - ~/.jcode/builds/stable/jcode -> .../versions/<hash>/jcode
-# - ~/.jcode/builds/current/jcode -> .../versions/<hash>/jcode
+# - ~/.jcode/builds/versions/<hash>-<profile>/jcode (immutable)
+# - ~/.jcode/builds/stable/jcode -> .../versions/<hash>-<profile>/jcode
+# - ~/.jcode/builds/current/jcode -> .../versions/<hash>-<profile>/jcode
 # - ~/.local/bin/jcode -> ~/.jcode/builds/current/jcode (launcher)
 set -euo pipefail
 
@@ -57,9 +57,15 @@ if [[ -z "$hash" ]]; then
   hash="$(date +%Y%m%d%H%M%S)"
 fi
 
-# Install versioned binary into ~/.jcode/builds/versions/<hash>/
+# A selfdev publication uses the bare source label (for example `abc123` or
+# `abc123-dirty-<fingerprint>`). Keep release bytes under a profile-qualified
+# label so publishing the same source from selfdev cannot replace an immutable
+# release binary in place.
+version_label="${hash}-${profile}"
+
+# Install versioned binary into ~/.jcode/builds/versions/<hash>-<profile>/
 builds_dir="$HOME/.jcode/builds"
-version_dir="$builds_dir/versions/$hash"
+version_dir="$builds_dir/versions/$version_label"
 mkdir -p "$version_dir"
 install -m 755 "$bin" "$version_dir/jcode"
 
@@ -69,13 +75,13 @@ mkdir -p "$stable_dir"
 ln -sfn "$version_dir/jcode" "$stable_dir/jcode"
 
 # Update stable-version marker
-printf '%s\n' "$hash" > "$builds_dir/stable-version"
+printf '%s\n' "$version_label" >"$builds_dir/stable-version"
 
 # Update current symlink + marker
 current_dir="$builds_dir/current"
 mkdir -p "$current_dir"
 ln -sfn "$version_dir/jcode" "$current_dir/jcode"
-printf '%s\n' "$hash" > "$builds_dir/current-version"
+printf '%s\n' "$version_label" >"$builds_dir/current-version"
 
 # Update launcher path to current channel
 install_dir="${JCODE_INSTALL_DIR:-$HOME/.local/bin}"
@@ -91,7 +97,7 @@ echo "Updated launcher symlink: $install_dir/jcode -> $current_dir/jcode"
 # best-effort; JCODE_SKIP_SERVER_RELOAD remains a hard disable for wrappers.
 if [ "${JCODE_RELOAD_SERVER:-}" = "1" ] && [ "${JCODE_SKIP_SERVER_RELOAD:-}" != "1" ]; then
   if "$install_dir/jcode" server reload </dev/null >/dev/null 2>&1; then
-    echo "Reloaded the running jcode server onto $hash (if one was active)."
+    echo "Reloaded the running jcode server onto $version_label (if one was active)."
   fi
 fi
 
