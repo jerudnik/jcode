@@ -37,9 +37,10 @@ use model::{
 pub struct BackgroundTaskManager {
     tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
     output_dir: PathBuf,
-    /// Atomic serialized status persistence (F04). Every status-file write
-    /// goes through this store: same-directory temp + rename atomicity,
-    /// per-task write serialization, terminal precedence, surfaced errors.
+    /// Crash-durable serialized status persistence (F04/F05). Every status-file
+    /// write goes through this store: fsynced same-directory temp + rename +
+    /// parent fsync, cross-instance per-task serialization, terminal
+    /// precedence, and surfaced errors.
     store: Arc<store::TaskStatusStore>,
     /// Activity-lease authority (F01 C5): non-detached tasks hold a lease
     /// for their tracked lifetime so the daemon cannot idle-exit while they
@@ -418,8 +419,9 @@ impl BackgroundTaskManager {
         status
     }
 
-    /// Startup/reload sweep: mark orphaned non-detached `Running` status
-    /// files as `Failed` with a "server reloaded" note.
+    /// Startup/reload sweep: remove stale interrupted-write temp files, then
+    /// mark orphaned non-detached `Running` status files as `Failed` with a
+    /// "server reloaded" note.
     ///
     /// Only owner-tagged files are considered, using the liveness rules of
     /// [`Self::status_is_reconcilable_orphan`]. Files without owner metadata
@@ -429,6 +431,7 @@ impl BackgroundTaskManager {
     /// from another live process's task. Returns how many files were
     /// reconciled.
     pub async fn reconcile_orphaned_tasks(&self) -> usize {
+        self.store.cleanup_stale_temp_files().await;
         let mut reconciled = 0;
         let Ok(mut entries) = fs::read_dir(&self.output_dir).await else {
             return reconciled;
@@ -1666,12 +1669,21 @@ struct TerminalSpec {
     wake: bool,
 }
 
-fn build_terminal_status(
-    prior: Option<TaskStatusFile>,
-    spec: &TerminalSpec,
-) -> TaskStatusFile {
-    let prior_progress = prior.as_ref().and_then(|status| status.progress.clone());
-    let prior_event_history = prior.map(|status| status.event_history).unwrap_or_default();
+fn build_terminal_status(prior: Option<TaskStatusFile>, spec: &TerminalSpec) -> TaskStatusFile {
+    // The freshly loaded durable state is authoritative for mutable delivery
+    // flags. This closes the update_delivery-vs-completion and retry-window
+    // race where a stale TerminalSpec snapshot could otherwise overwrite a
+    // delivery change that already persisted (F04-R3-I1 / F05).
+    let (notify, wake, prior_progress, prior_event_history) = prior
+        .map(|status| {
+            (
+                status.notify,
+                status.wake,
+                status.progress,
+                status.event_history,
+            )
+        })
+        .unwrap_or_else(|| (spec.notify, spec.wake, None, Vec::new()));
     let mut final_status = TaskStatusFile {
         task_id: spec.task_id.clone(),
         tool_name: spec.tool_name.clone(),
@@ -1687,8 +1699,8 @@ fn build_terminal_status(
         owner_pid: Some(std::process::id()),
         owner_instance: Some(model::process_instance_token().to_string()),
         detached: false,
-        notify: spec.notify,
-        wake: spec.wake,
+        notify,
+        wake,
         progress: prior_progress,
         event_history: prior_event_history,
     };
