@@ -521,7 +521,7 @@ async fn finalize_non_detached_aborts_adopted_original_future() -> Result<()> {
 }
 
 #[tokio::test]
-async fn live_map_prunes_only_after_terminal_persistence(){
+async fn live_map_prunes_only_after_terminal_persistence() {
     // F04 gate 2: the live-map entry must outlive the moment the status file
     // still claims Running. We poll aggressively during a short task's
     // lifetime and assert the invariant "status file Running => task is in
@@ -530,10 +530,17 @@ async fn live_map_prunes_only_after_terminal_persistence(){
     let tmp = tempdir().unwrap();
     let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
     let info = manager
-        .spawn_with_notify("bash", None, "session-order", false, false, |_p| async move {
-            sleep(Duration::from_millis(50)).await;
-            Ok(TaskResult::completed(Some(0)))
-        })
+        .spawn_with_notify(
+            "bash",
+            None,
+            "session-order",
+            false,
+            false,
+            |_p| async move {
+                sleep(Duration::from_millis(50)).await;
+                Ok(TaskResult::completed(Some(0)))
+            },
+        )
         .await;
 
     for _ in 0..400 {
@@ -565,10 +572,17 @@ async fn progress_and_delivery_survive_concurrent_terminal_completion() {
         tmp.path().to_path_buf(),
     ));
     let info = manager
-        .spawn_with_notify("bash", None, "session-race2", false, false, |_p| async move {
-            sleep(Duration::from_millis(30)).await;
-            Ok(TaskResult::completed(Some(0)))
-        })
+        .spawn_with_notify(
+            "bash",
+            None,
+            "session-race2",
+            false,
+            false,
+            |_p| async move {
+                sleep(Duration::from_millis(30)).await;
+                Ok(TaskResult::completed(Some(0)))
+            },
+        )
         .await;
 
     let mut mutators = Vec::new();
@@ -617,6 +631,243 @@ async fn progress_and_delivery_survive_concurrent_terminal_completion() {
 }
 
 #[tokio::test]
+async fn cross_instance_concurrency_never_tears_json_or_overwrites_terminal_truth() -> Result<()> {
+    // F05 race matrix: three independent managers/stores share one directory.
+    // Progress, delivery, and natural completion race while an unsynchronized
+    // reader continuously parses the final path.
+    let tmp = tempdir()?;
+    let dir = tmp.path().join("tasks");
+    let completion_manager =
+        std::sync::Arc::new(BackgroundTaskManager::with_output_dir(dir.clone()));
+    let progress_manager = std::sync::Arc::new(BackgroundTaskManager::with_output_dir(dir.clone()));
+    let delivery_manager = std::sync::Arc::new(BackgroundTaskManager::with_output_dir(dir));
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let info = completion_manager
+        .spawn_with_notify(
+            "bash",
+            None,
+            "session-cross-instance",
+            false,
+            false,
+            move |_path| async move {
+                let _ = release_rx.await;
+                Ok(TaskResult::completed(Some(0)))
+            },
+        )
+        .await;
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader_stop = std::sync::Arc::clone(&stop);
+    let status_path = completion_manager.status_path_for(&info.task_id);
+    let reader = tokio::spawn(async move {
+        let mut samples = 0usize;
+        while !reader_stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let content = tokio::fs::read_to_string(&status_path)
+                .await
+                .expect("final status path must remain readable");
+            serde_json::from_str::<TaskStatusFile>(&content)
+                .expect("cross-instance reader must never observe torn JSON");
+            samples += 1;
+            tokio::task::yield_now().await;
+        }
+        samples
+    });
+
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(3));
+    let progress_task = {
+        let manager = std::sync::Arc::clone(&progress_manager);
+        let task_id = info.task_id.clone();
+        let barrier = std::sync::Arc::clone(&barrier);
+        tokio::spawn(async move {
+            barrier.wait().await;
+            for i in 0..64u64 {
+                manager
+                    .update_progress(
+                        &task_id,
+                        crate::bus::BackgroundTaskProgress {
+                            kind: BackgroundTaskProgressKind::Determinate,
+                            percent: Some(i as f32),
+                            message: Some(format!("cross-instance-progress-{i}")),
+                            current: Some(i),
+                            total: Some(64),
+                            unit: Some("steps".to_string()),
+                            eta_seconds: None,
+                            updated_at: Utc::now().to_rfc3339(),
+                            source: BackgroundTaskProgressSource::Reported,
+                        },
+                    )
+                    .await?;
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+    };
+    let delivery_task = {
+        let manager = std::sync::Arc::clone(&delivery_manager);
+        let task_id = info.task_id.clone();
+        let barrier = std::sync::Arc::clone(&barrier);
+        tokio::spawn(async move {
+            barrier.wait().await;
+            for i in 0..64u64 {
+                manager
+                    .update_delivery(&task_id, i % 2 == 0, i % 3 == 0)
+                    .await?;
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+    };
+    let completion_task = tokio::spawn(async move {
+        barrier.wait().await;
+        let _ = release_tx.send(());
+    });
+
+    progress_task
+        .await
+        .map_err(|error| anyhow!("join progress writer: {error}"))??;
+    delivery_task
+        .await
+        .map_err(|error| anyhow!("join delivery writer: {error}"))??;
+    completion_task
+        .await
+        .map_err(|error| anyhow!("join completion release: {error}"))?;
+
+    let terminal = loop {
+        let status = completion_manager
+            .status(&info.task_id)
+            .await
+            .ok_or_else(|| anyhow!("cross-instance status disappeared"))?;
+        if status.status != BackgroundTaskStatus::Running {
+            break status;
+        }
+        sleep(Duration::from_millis(5)).await;
+    };
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let samples = reader
+        .await
+        .map_err(|error| anyhow!("join parse reader: {error}"))?;
+    assert!(samples > 0, "reader must sample the status file");
+    assert_eq!(terminal.status, BackgroundTaskStatus::Completed);
+    assert_eq!(terminal.exit_code, Some(0));
+    assert!(terminal.completed_at.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn crash_interruption_preserves_old_status_and_reconcile_cleans_temp() -> Result<()> {
+    // Simulate process death between temp-file write and rename: the old final
+    // file is valid and a truncated sibling temp is owned by a now-dead PID.
+    let tmp = tempdir()?;
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    let old = running_status_fixture("crashold1", "session-old-state");
+    write_status_fixture(&manager, &old).await;
+
+    let mut child = std::process::Command::new("true")
+        .spawn()
+        .map_err(|error| anyhow!("spawn dead-pid fixture: {error}"))?;
+    let dead_pid = child.id();
+    child
+        .wait()
+        .map_err(|error| anyhow!("reap dead-pid fixture: {error}"))?;
+    let temp_path = manager
+        .status_path_for(&old.task_id)
+        .with_extension(format!("json.tmp.{dead_pid}.fixture"));
+    tokio::fs::write(&temp_path, b"{\"task_id\":\"crashold1\",\"status\":").await?;
+
+    let visible = manager
+        .status(&old.task_id)
+        .await
+        .ok_or_else(|| anyhow!("old durable state must remain visible"))?;
+    assert_eq!(visible.status, BackgroundTaskStatus::Running);
+    assert_eq!(visible.session_id, "session-old-state");
+
+    assert_eq!(manager.reconcile_orphaned_tasks().await, 0);
+    assert!(
+        !temp_path.exists(),
+        "startup reconciliation must remove the dead-writer temp"
+    );
+    let after = manager
+        .status(&old.task_id)
+        .await
+        .ok_or_else(|| anyhow!("old state must survive temp cleanup"))?;
+    assert_eq!(after.status, BackgroundTaskStatus::Running);
+    assert_eq!(after.session_id, "session-old-state");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reconcile_cleans_age_expired_temp_even_when_pid_is_live() -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+
+    let tmp = tempdir()?;
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    let temp_path = manager
+        .status_path_for("aged-temp")
+        .with_extension(format!("json.tmp.{}.aged", std::process::id()));
+    tokio::fs::write(&temp_path, b"abandoned").await?;
+
+    let old = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs()
+        .saturating_sub(25 * 60 * 60) as libc::time_t;
+    let times = [
+        libc::timespec {
+            tv_sec: old,
+            tv_nsec: 0,
+        },
+        libc::timespec {
+            tv_sec: old,
+            tv_nsec: 0,
+        },
+    ];
+    let c_path = std::ffi::CString::new(temp_path.as_os_str().as_bytes())?;
+    // SAFETY: c_path is NUL-terminated and times points to two initialized
+    // timespec values for the duration of the call.
+    let rc = unsafe { libc::utimensat(libc::AT_FDCWD, c_path.as_ptr(), times.as_ptr(), 0) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+
+    assert_eq!(manager.reconcile_orphaned_tasks().await, 0);
+    assert!(!temp_path.exists(), "age-expired temp must be removed");
+    Ok(())
+}
+
+#[tokio::test]
+async fn malformed_status_matrix_surfaces_without_false_success_or_crash() -> Result<()> {
+    let tmp = tempdir()?;
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    let fixtures: [(&str, &[u8]); 3] = [
+        ("truncated", b"{\"task_id\":\"truncated\""),
+        ("empty", b""),
+        (
+            "wrong-schema",
+            b"{\"task_id\":\"wrong-schema\",\"unexpected\":true}",
+        ),
+    ];
+    for (task_id, content) in fixtures {
+        tokio::fs::write(manager.status_path_for(task_id), content).await?;
+    }
+
+    // The strict store path surfaces each corruption as Err. Startup and the
+    // user-facing list/status paths log and skip it, without fabricating a
+    // successful task, deleting evidence, or panicking.
+    for (task_id, _) in fixtures {
+        assert!(manager.store.read(task_id).await.is_err(), "{task_id}");
+    }
+    assert_eq!(manager.reconcile_orphaned_tasks().await, 0);
+    assert!(manager.list().await.is_empty());
+    for (task_id, original) in fixtures {
+        assert!(manager.status(task_id).await.is_none(), "{task_id}");
+        assert!(manager.store.read(task_id).await.is_err(), "{task_id}");
+        assert_eq!(
+            tokio::fs::read(manager.status_path_for(task_id)).await?,
+            original
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn spawn_refuses_to_start_when_initial_persistence_fails() {
     // F04-B1: successful initial persistence is a prerequisite for starting
     // non-detached work. Make the output dir unwritable-as-a-dir by using a
@@ -662,12 +913,17 @@ async fn terminal_persistence_failure_retains_tombstone_then_recovers() {
 
     let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
     let info = manager
-        .spawn_with_notify("bash", None, "session-tomb", false, false, move |_p| {
-            async move {
+        .spawn_with_notify(
+            "bash",
+            None,
+            "session-tomb",
+            false,
+            false,
+            move |_p| async move {
                 let _ = release_rx.await;
                 Ok(TaskResult::completed(Some(0)))
-            }
-        })
+            },
+        )
         .await;
     assert!(manager.is_live_task(&info.task_id));
 
@@ -713,10 +969,17 @@ async fn cancel_retains_tombstone_until_terminal_persistence_recovers() {
     let manager = BackgroundTaskManager::with_output_dir(dir.clone());
 
     let info = manager
-        .spawn_with_notify("bash", None, "session-cancel-tomb", false, false, |_p| async move {
-            sleep(Duration::from_secs(300)).await;
-            Ok(TaskResult::completed(Some(0)))
-        })
+        .spawn_with_notify(
+            "bash",
+            None,
+            "session-cancel-tomb",
+            false,
+            false,
+            |_p| async move {
+                sleep(Duration::from_secs(300)).await;
+                Ok(TaskResult::completed(Some(0)))
+            },
+        )
         .await;
     assert!(manager.is_live_task(&info.task_id));
 
