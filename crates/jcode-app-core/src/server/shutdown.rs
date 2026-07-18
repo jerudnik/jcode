@@ -191,9 +191,6 @@ impl ServerActivityLeaseAuthority {
         }
     }
 
-    /// Future single source of truth for "clients present" (design 3.1);
-    /// `client_count` replacement lands with the C1 wiring.
-    #[allow(dead_code)]
     pub(crate) fn client_connection_count(&self) -> usize {
         lock_poisoned_ok(&self.table).count_of(ActivityClass::ClientConnection)
     }
@@ -202,8 +199,6 @@ impl ServerActivityLeaseAuthority {
         lock_poisoned_ok(&self.table).drain_blocking_count()
     }
 
-    /// Attribution surface for `debug_socket` and F03 fixtures.
-    #[allow(dead_code)]
     pub(crate) fn active_count(&self) -> usize {
         lock_poisoned_ok(&self.table).count()
     }
@@ -261,6 +256,68 @@ pub(crate) fn acquire_lease(
 /// Typed snapshot access for the lifecycle monitors and debug surfaces.
 pub(crate) fn lease_authority() -> &'static Arc<ServerActivityLeaseAuthority> {
     typed_authority()
+}
+
+// ---------------------------------------------------------------------------
+// Debug fixture surface (F03)
+// ---------------------------------------------------------------------------
+
+/// Guards acquired via the debug socket, keyed by their lease token. Lets the
+/// F03 runtime fixtures hold any lease class on a live daemon across debug
+/// connections (debug connections themselves never count or lease), then
+/// release and observe the idle exit.
+fn debug_held_leases() -> &'static Mutex<HashMap<u64, ActivityLeaseGuard>> {
+    static HELD: OnceLock<Mutex<HashMap<u64, ActivityLeaseGuard>>> = OnceLock::new();
+    HELD.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn parse_activity_class(name: &str) -> Option<ActivityClass> {
+    ActivityClass::ALL
+        .into_iter()
+        .find(|class| class.as_str() == name)
+}
+
+/// Acquire a lease of `class_name` on behalf of a debug fixture. Returns the
+/// token, or a typed error string (unknown class / ShuttingDown).
+pub(crate) fn debug_acquire_lease(class_name: &str) -> Result<u64, String> {
+    let class = parse_activity_class(class_name).ok_or_else(|| {
+        format!(
+            "unknown lease class '{class_name}'; valid: {}",
+            ActivityClass::ALL
+                .iter()
+                .map(|class| class.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })?;
+    let guard = acquire_lease(class, &format!("debug-fixture-{class_name}"))
+        .map_err(|refused| refused.to_string())?;
+    let token = guard.token().0;
+    lock_poisoned_ok(debug_held_leases()).insert(token, guard);
+    Ok(token)
+}
+
+/// Release a debug-held lease by token. Returns whether it existed.
+pub(crate) fn debug_release_lease(token: u64) -> bool {
+    lock_poisoned_ok(debug_held_leases()).remove(&token).is_some()
+}
+
+/// Snapshot for `shutdown:state`: coordinator phase, active leases, counts.
+pub(crate) fn debug_shutdown_state() -> serde_json::Value {
+    let coordinator = coordinator();
+    let (phase, reason) = {
+        let state = lock_poisoned_ok(&coordinator.state);
+        (format!("{:?}", state.phase), state.reason.map(|r| r.as_str()))
+    };
+    serde_json::json!({
+        "phase": phase,
+        "reason": reason,
+        "active_leases": lease_authority().active_count(),
+        "drain_blocking_leases": lease_authority().drain_blocking_count(),
+        "client_connection_leases": lease_authority().client_connection_count(),
+        "lease_labels": lease_authority().active_labels(),
+        "debug_held_tokens": lock_poisoned_ok(debug_held_leases()).keys().copied().collect::<Vec<_>>(),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -620,11 +677,20 @@ pub(crate) struct ShutdownCoordinator {
     state: Mutex<CoordinatorState>,
     terminal_tx: tokio::sync::watch::Sender<Option<TerminalOutcome>>,
     watchdog: Arc<Watchdog>,
+    /// The lease authority this coordinator drains and claims against.
+    /// The process-global coordinator uses the global authority; tests
+    /// construct private instances with private authorities so real
+    /// state-machine races can be driven in-process (F03).
+    authority: Arc<ServerActivityLeaseAuthority>,
+    /// Test instances disable the real watchdog: it calls `process::exit`
+    /// and would kill the test binary. The watchdog atomic protocol has its
+    /// own unit tests, and the real forced-exit path is proven by the
+    /// process-level runtime fixture (exit code 70).
+    watchdog_enabled: bool,
 }
 
-pub(crate) fn coordinator() -> &'static ShutdownCoordinator {
-    static COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
-    COORDINATOR.get_or_init(|| {
+impl ShutdownCoordinator {
+    fn new(authority: Arc<ServerActivityLeaseAuthority>) -> Self {
         let (terminal_tx, _) = tokio::sync::watch::channel(None);
         ShutdownCoordinator {
             state: Mutex::new(CoordinatorState {
@@ -635,8 +701,38 @@ pub(crate) fn coordinator() -> &'static ShutdownCoordinator {
             }),
             terminal_tx,
             watchdog: Arc::new(Watchdog::new()),
+            authority,
+            watchdog_enabled: true,
         }
-    })
+    }
+
+    /// Private leaked instance for state-machine tests (F03). The small
+    /// intentional leak gives the `&'static self` the executor requires.
+    #[cfg(test)]
+    pub(crate) fn leaked_for_test() -> (&'static Self, Arc<ServerActivityLeaseAuthority>) {
+        let authority = Arc::new(ServerActivityLeaseAuthority::new());
+        let mut coordinator = Self::new(Arc::clone(&authority));
+        coordinator.watchdog_enabled = false;
+        let coordinator = Box::leak(Box::new(coordinator));
+        (coordinator, authority)
+    }
+
+    /// Test observer: the current absolute drain deadline.
+    #[cfg(test)]
+    pub(crate) fn drain_deadline_for_test(&self) -> Option<Instant> {
+        lock_poisoned_ok(&self.state).drain_deadline
+    }
+
+    /// Test observer: the driving reason.
+    #[cfg(test)]
+    pub(crate) fn driving_reason_for_test(&self) -> Option<ExitReason> {
+        self.driving_reason()
+    }
+}
+
+pub(crate) fn coordinator() -> &'static ShutdownCoordinator {
+    static COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
+    COORDINATOR.get_or_init(|| ShutdownCoordinator::new(Arc::clone(typed_authority())))
 }
 
 impl ShutdownCoordinator {
@@ -679,18 +775,20 @@ impl ShutdownCoordinator {
                     // empty AND close acquisition in one critical section.
                     // If any lease exists (client connection or work), the
                     // idle begin is refused and the monitor keeps watching.
-                    if !lease_authority().try_claim_idle_shutdown() {
+                    if !self.authority.try_claim_idle_shutdown() {
                         return BeginOutcome::Refused(RefusalReason::NotQuiescent);
                     }
                 } else {
                     // Close acquisition BEFORE the phase flips so no lease
                     // can slip in between decision and drain.
-                    lease_authority().refuse_new();
+                    self.authority.refuse_new();
                 }
                 state.phase = Phase::Draining;
                 state.reason = Some(requested);
                 state.drain_deadline = Some(Instant::now() + requested.drain_budget());
-                if let Some(budget) = requested.watchdog_budget() {
+                if self.watchdog_enabled
+                    && let Some(budget) = requested.watchdog_budget()
+                {
                     self.watchdog.arm(budget, requested);
                 }
                 drop(state);
@@ -715,7 +813,9 @@ impl ShutdownCoordinator {
                         Some(existing) => existing.min(upgraded),
                         None => upgraded,
                     });
-                    if let Some(budget) = requested.watchdog_budget() {
+                    if self.watchdog_enabled
+                        && let Some(budget) = requested.watchdog_budget()
+                    {
                         self.watchdog.arm(budget, requested);
                     }
                     crate::logging::info(&format!(
@@ -782,7 +882,7 @@ impl ShutdownCoordinator {
                     state.reason.expect("draining without reason"),
                 )
             };
-            let blocking = lease_authority().drain_blocking_count();
+            let blocking = self.authority.drain_blocking_count();
             if blocking == 0 {
                 break;
             }
@@ -791,7 +891,7 @@ impl ShutdownCoordinator {
                     "Shutdown drain deadline reached (reason={}); abandoning {} lease(s): {}",
                     reason.as_str(),
                     blocking,
-                    lease_authority().active_labels().join(", ")
+                    self.authority.active_labels().join(", ")
                 ));
                 break;
             }
@@ -833,7 +933,12 @@ impl ShutdownCoordinator {
             reason.as_str(),
             reason.exit_code()
         ));
-        let _ = self.terminal_tx.send(Some(outcome));
+        // send_replace, not send: `watch::Sender::send` DROPS the value when
+        // no receiver exists yet. A fast executor (empty table, quick
+        // cleanup) can finish before any `wait_terminal` subscriber appears;
+        // the outcome must still be stored or begin_and_wait callers hang
+        // forever (found by the F03 pairwise race fixture).
+        self.terminal_tx.send_replace(Some(outcome));
     }
 
     /// Reload drain entry (design 3.2.3 Handoff): the reload task calls this
@@ -852,7 +957,7 @@ impl ShutdownCoordinator {
                     // Close lease acquisition BEFORE publishing the phase
                     // transition (F02-R2-I1, matching ordinary `begin`): no
                     // lease may be acquired during a reported Draining.
-                    lease_authority().refuse_new();
+                    self.authority.refuse_new();
                     state.phase = Phase::Draining;
                     state.reason = Some(ExitReason::Reload);
                     state.drain_deadline =
@@ -886,7 +991,7 @@ impl ShutdownCoordinator {
                 spawn_on_runtime(self.execute());
                 return Err(ReloadRefused::ShutdownInProgress(reason));
             }
-            if lease_authority().drain_blocking_count() == 0 || Instant::now() >= deadline {
+            if self.authority.drain_blocking_count() == 0 || Instant::now() >= deadline {
                 break;
             }
             tokio::time::sleep(DRAIN_POLL_INTERVAL).await;
@@ -916,7 +1021,9 @@ impl ShutdownCoordinator {
             state.drain_deadline =
                 Some(Instant::now() + ExitReason::ReloadExecFailed.drain_budget());
         }
-        if let Some(budget) = ExitReason::ReloadExecFailed.watchdog_budget() {
+        if self.watchdog_enabled
+            && let Some(budget) = ExitReason::ReloadExecFailed.watchdog_budget()
+        {
             self.watchdog.arm(budget, ExitReason::ReloadExecFailed);
         }
         spawn_on_runtime(self.execute());
@@ -964,6 +1071,19 @@ where
 }
 
 async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
+    // F03 forced-exit fixture injection: a deliberate cleanup hang lets the
+    // fixture prove the coordinator-armed watchdog fires (exit 70, durable
+    // marker) and that Cleaned is never published in that execution.
+    if let Ok(value) = std::env::var("JCODE_TEST_SHUTDOWN_CLEANUP_HANG_MS")
+        && let Ok(ms) = value.parse::<u64>()
+        && ms > 0
+    {
+        crate::logging::warn(&format!(
+            "TEST INJECTION: hanging shutdown cleanup for {ms}ms"
+        ));
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+    }
+
     let Some(config) = config else {
         crate::logging::warn(
             "Shutdown coordinator: no config; skipping sidecar cleanup (test server?)",
