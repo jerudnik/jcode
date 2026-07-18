@@ -237,3 +237,32 @@ remains the independent adversarial F01-V re-review.
 
 **Reopen trigger:** F01-V FAIL, which would inject targeted repair nodes
 rather than re-growing the analysis tree.
+
+## D013. F01 accepted after three-round independent review convergence
+
+**Decision:** F01 is accepted at design revision 4, commit `a70db3700`, after
+the independent architecture critique gate passed in
+`reviews/F01-architecture-re-review.md` Round 3 (commit `1a37ba109`, reviewer
+OpenAI `gpt-5.6-sol` at high effort per D009/D011).
+
+Review trail: revision 1 FAIL (3 blockers), revision 2 FAIL (2 blockers),
+revision 3 FAIL (2 blockers), revision 4 PASS with no blocking, important, or
+revision-requiring minor findings. Each round's findings and dispositions are
+recorded in the review file and `evidence/F01/revision_response.md`.
+
+Binding design outcomes for F02:
+- lease interface in `crates/jcode-core/src/activity.rs` (neutral crate seam);
+- `McpCall` guards at both `McpManager::call_tool` and
+  `SharedMcpPool::call_tool`;
+- `ProviderTurn` guard inside `process_message_streaming_mpsc`, eight
+  production call sites across seven caller families incl. startup
+  reload-recovery (`server.rs:1009`);
+- serialized coordinator executor publishing `Cleaned` (never exiting);
+  top-level runner (`src/cli/dispatch.rs:114`) and coordinator-armed watchdog
+  are the only two authorized termination sites, made mutually exclusive by
+  an atomic Armed/Cancelled handoff;
+- F02 `owned_paths` expanded accordingly (jcode-core activity files, MCP
+  manager/pool, tool/mod.rs, src/cli/dispatch.rs).
+
+**Reopen trigger:** F02 implementation discovering the design unimplementable
+at any specified seam, which injects a repair node and re-runs this gate.
