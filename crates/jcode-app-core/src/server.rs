@@ -749,15 +749,46 @@ impl Server {
             sessions_to_restore
         ));
 
-        // Activity lease (F01 design 3.3.1): one bounded StartupRecovery
-        // lease covers the enumeration/scheduling window (non-empty
-        // candidate set only). Restored turns that actually run acquire
-        // their own ProviderTurn lease at the common boundary; they do not
-        // inherit this one. RAII-dropped when this function returns.
-        let _recovery_lease = self::shutdown::acquire_lease(
+        // Activity lease (F01 design 3.3.1 / F02-B4): one bounded
+        // StartupRecovery lease covers the enumeration/scheduling window
+        // (non-empty candidate set only). Restored turns that actually run
+        // acquire their own ProviderTurn lease at the common boundary; they
+        // do not inherit this one. On ShuttingDown refusal recovery is
+        // aborted: sessions stay durable and the successor daemon recovers
+        // them (no silent unleased work during drain, I6). The guard is
+        // dropped by the TTL watchdog below or on function return.
+        let recovery_lease = match self::shutdown::acquire_lease(
             jcode_core::activity::ActivityClass::StartupRecovery,
             "headless-startup-recovery",
-        );
+        ) {
+            Ok(lease) => lease,
+            Err(refused) => {
+                crate::logging::info(&format!(
+                    "Headless startup recovery skipped during shutdown drain ({refused})."
+                ));
+                return;
+            }
+        };
+        // Hard TTL (F01 design 3.3.1 / F02-I2): a hung recovery must not pin
+        // idle shutdown indefinitely. The TTL task drops the guard; recovery
+        // itself continues (its turns hold their own ProviderTurn leases).
+        let (ttl_cancel_tx, ttl_cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            const STARTUP_RECOVERY_TTL: std::time::Duration =
+                std::time::Duration::from_secs(60);
+            tokio::select! {
+                _ = tokio::time::sleep(STARTUP_RECOVERY_TTL) => {
+                    crate::logging::warn(
+                        "StartupRecovery lease TTL expired; releasing (recovery continues unleased; its turns hold ProviderTurn leases).",
+                    );
+                }
+                _ = ttl_cancel_rx => {}
+            }
+            drop(recovery_lease);
+        });
+        // Dropped on function return: cancels the TTL task, which drops the
+        // guard promptly.
+        let _ttl_cancel = ttl_cancel_tx;
 
         if let Some(delay) = startup_headless_recovery_test_delay() {
             crate::logging::info(&format!(

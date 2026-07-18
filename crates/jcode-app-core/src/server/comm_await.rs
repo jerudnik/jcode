@@ -361,14 +361,27 @@ pub(super) async fn spawn_or_resume_await_members(
     let target_status = state.target_status.clone();
     let mode = state.mode.clone();
 
+    // Activity lease (F01 C8 / F02-B4): acquired BEFORE the watcher task is
+    // spawned. A live await watcher pins the daemon against idle exit while
+    // it is parked. On ShuttingDown refusal no watcher spawns: the await's
+    // durable state (PersistedAwaitMembersState) survives and the successor
+    // daemon resumes it at boot, which is exactly the drain semantics for
+    // C8 ("persist") in F01 design 4.1.
+    let lease = match super::shutdown::acquire_lease(
+        jcode_core::activity::ActivityClass::SwarmWaiter,
+        &key,
+    ) {
+        Ok(lease) => lease,
+        Err(refused) => {
+            crate::logging::info(&format!(
+                "Await watcher {key} not started during shutdown drain ({refused}); \
+                 durable state persists for the successor."
+            ));
+            return;
+        }
+    };
     tokio::spawn(async move {
-        // Activity lease (F01 C8): a live await watcher pins the daemon
-        // against idle exit while it is parked. Durable state persists the
-        // await across restarts; the lease protects the live watcher task.
-        let _lease = super::shutdown::acquire_lease(
-            jcode_core::activity::ActivityClass::SwarmWaiter,
-            &key,
-        );
+        let _lease = lease;
         let mut event_rx = swarm_event_tx.subscribe();
         // W2: the control log is the TRUTH for wakes; nudge channels only
         // schedule re-scans. Subscribe to append nudges BEFORE anchoring the

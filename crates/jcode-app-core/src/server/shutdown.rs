@@ -110,6 +110,20 @@ impl LeaseTable {
         self.refusing = true;
     }
 
+    /// Atomic idle-shutdown claim (F02-B1): under the table lock, verify the
+    /// table is COMPLETELY empty (client connections and drain-blocking work
+    /// alike) and close acquisition in the same critical section. After a
+    /// successful claim no lease of any class can be acquired, so quiescence
+    /// cannot be lost between the idle decision and `begin`.
+    fn try_claim_idle_shutdown(&mut self) -> bool {
+        if !self.active.is_empty() {
+            return false;
+        }
+        self.refusing = true;
+        true
+    }
+
+
     fn labels(&self) -> Vec<String> {
         let mut labels: Vec<String> = self
             .active
@@ -201,6 +215,11 @@ impl ServerActivityLeaseAuthority {
     fn refuse_new(&self) {
         lock_poisoned_ok(&self.table).refuse_new();
     }
+
+    fn try_claim_idle_shutdown(&self) -> bool {
+        lock_poisoned_ok(&self.table).try_claim_idle_shutdown()
+    }
+
 }
 
 impl ActivityLeaseAuthority for ServerActivityLeaseAuthority {
@@ -358,6 +377,9 @@ pub(crate) enum BeginOutcome {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum RefusalReason {
     TemporaryServerNoReload,
+    /// Idle begin refused: the lease table was not empty at claim time
+    /// (F02-B1 atomic idle claim). The monitor keeps watching.
+    NotQuiescent,
 }
 
 /// Pure upgrade decision: a strictly stronger reason upgrades; equal or
@@ -426,10 +448,28 @@ impl Watchdog {
         {
             record_forced_exit_marker("armed", reason);
             let watchdog = Arc::clone(self);
-            std::thread::Builder::new()
+            if let Err(error) = std::thread::Builder::new()
                 .name("jcode-shutdown-watchdog".into())
-                .spawn(move || watchdog.run())
-                .ok();
+                .spawn({
+                    let watchdog = Arc::clone(&watchdog);
+                    move || watchdog.run()
+                })
+            {
+                // F02-B5: without the OS-thread watchdog the I5 bound is
+                // gone. Fail closed onto the tokio blocking pool, whose
+                // workers are dedicated OS threads created lazily.
+                crate::logging::error(&format!(
+                    "Shutdown watchdog thread creation failed ({error}); \
+                     falling back to the blocking pool."
+                ));
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::task::spawn_blocking(move || watchdog.run());
+                } else {
+                    crate::logging::error(
+                        "Shutdown watchdog has NO thread; bounded exit cannot be guaranteed.",
+                    );
+                }
+            }
         }
     }
 
@@ -444,7 +484,12 @@ impl Watchdog {
             Ordering::SeqCst,
             Ordering::SeqCst,
         ) {
-            Ok(_) => true,
+            Ok(_) => {
+                // F02-M1: record clean completion so a stale "armed" marker
+                // cannot masquerade as a forced-exit post-mortem.
+                record_forced_exit_marker("cancelled", current_reason_for_marker());
+                true
+            }
             // Never armed (reload handoff path): nothing to lose against.
             Err(state) => state == WATCHDOG_IDLE || state == WATCHDOG_CANCELLED,
         }
@@ -495,6 +540,37 @@ fn record_forced_exit_marker(event: &str, reason: ExitReason) {
         "at": chrono::Utc::now().to_rfc3339(),
     });
     let _ = std::fs::write(&path, payload.to_string());
+}
+
+/// Spawn a future on the current tokio runtime when available, else on a
+/// dedicated thread with a one-shot runtime (F02-I1: `begin` must not
+/// silently strand `Draining` when called off-runtime, e.g. future callers
+/// on plain OS threads).
+fn spawn_on_runtime<F>(future: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn(future);
+        }
+        Err(_) => {
+            std::thread::Builder::new()
+                .name("jcode-shutdown-executor".into())
+                .spawn(move || {
+                    match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => runtime.block_on(future),
+                        Err(error) => crate::logging::error(&format!(
+                            "Shutdown executor runtime creation failed: {error}"
+                        )),
+                    }
+                })
+                .ok();
+        }
+    }
 }
 
 fn current_reason_for_marker() -> ExitReason {
@@ -591,8 +667,26 @@ impl ShutdownCoordinator {
             // Temporary servers refuse reload (design 3.2.3 / I4).
             return BeginOutcome::Refused(RefusalReason::TemporaryServerNoReload);
         }
+        let is_idle_reason = matches!(
+            requested,
+            ExitReason::PersistentIdle | ExitReason::TemporaryIdle
+        );
         match state.phase {
             Phase::Running => {
+                if is_idle_reason {
+                    // F02-B1: idle exit must be claimed atomically. Under
+                    // the lease-table lock, verify the table is completely
+                    // empty AND close acquisition in one critical section.
+                    // If any lease exists (client connection or work), the
+                    // idle begin is refused and the monitor keeps watching.
+                    if !lease_authority().try_claim_idle_shutdown() {
+                        return BeginOutcome::Refused(RefusalReason::NotQuiescent);
+                    }
+                } else {
+                    // Close acquisition BEFORE the phase flips so no lease
+                    // can slip in between decision and drain.
+                    lease_authority().refuse_new();
+                }
                 state.phase = Phase::Draining;
                 state.reason = Some(requested);
                 state.drain_deadline = Some(Instant::now() + requested.drain_budget());
@@ -605,10 +699,10 @@ impl ShutdownCoordinator {
                     requested.as_str()
                 ));
                 // Stop intake immediately (design 3.2.3).
-                lease_authority().refuse_new();
                 self.cancel_intake();
-                // The accepting caller's context spawns the one executor.
-                tokio::spawn(self.execute());
+                // The accepting caller's context spawns the one executor
+                // (falls back to a dedicated thread off-runtime, F02-I1).
+                spawn_on_runtime(self.execute());
                 BeginOutcome::Accepted
             }
             Phase::Draining => {
@@ -769,6 +863,10 @@ impl ShutdownCoordinator {
         }
         crate::logging::info("Shutdown coordinator: reload drain started");
         lease_authority().refuse_new();
+        // F02-B3: reload Draining stops intake exactly like terminations
+        // (design 3.2.3); accept loops must not admit new connections while
+        // the handoff is being prepared.
+        self.cancel_intake();
 
         loop {
             let (deadline, reason) = {
@@ -782,7 +880,7 @@ impl ShutdownCoordinator {
                 // A stronger termination reason upgraded us mid-drain; the
                 // termination path owns completion now. But no executor was
                 // spawned (reload drains inline), so spawn it here.
-                tokio::spawn(self.execute());
+                spawn_on_runtime(self.execute());
                 return Err(ReloadRefused::ShutdownInProgress(reason));
             }
             if lease_authority().drain_blocking_count() == 0 || Instant::now() >= deadline {
@@ -794,7 +892,7 @@ impl ShutdownCoordinator {
         let mut state = lock_poisoned_ok(&self.state);
         if state.reason != Some(ExitReason::Reload) {
             drop(state);
-            tokio::spawn(self.execute());
+            spawn_on_runtime(self.execute());
             return Err(ReloadRefused::ShutdownInProgress(
                 self.driving_reason().unwrap_or(ExitReason::SigTerm),
             ));
@@ -818,7 +916,7 @@ impl ShutdownCoordinator {
         if let Some(budget) = ExitReason::ReloadExecFailed.watchdog_budget() {
             self.watchdog.arm(budget, ExitReason::ReloadExecFailed);
         }
-        tokio::spawn(self.execute());
+        spawn_on_runtime(self.execute());
         self.wait_terminal().await
     }
 }
@@ -946,6 +1044,23 @@ mod tests {
         assert!(table.release(id));
         assert!(table.is_idle());
         assert!(!table.release(id), "double release must be inert");
+    }
+
+    #[test]
+    fn idle_claim_is_atomic_against_any_lease() {
+        // F02-B1: the claim must fail while ANY lease exists (client
+        // connections included) and must close acquisition on success.
+        let mut table = table_with(&[ActivityClass::ClientConnection]);
+        assert!(!table.try_claim_idle_shutdown(), "client connection blocks idle claim");
+        let mut table = table_with(&[ActivityClass::McpCall]);
+        assert!(!table.try_claim_idle_shutdown(), "work lease blocks idle claim");
+
+        let mut table = LeaseTable::default();
+        assert!(table.try_claim_idle_shutdown());
+        let err = table
+            .acquire(ActivityClass::ProviderTurn, "late", Instant::now())
+            .expect_err("acquisition after a successful idle claim must fail");
+        assert_eq!(err, ActivityLeaseError::ShuttingDown);
     }
 
     #[test]

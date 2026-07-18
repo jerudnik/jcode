@@ -184,8 +184,24 @@ pub(crate) fn spawn_persistent_lifecycle_monitor(
                         .unwrap_or_default()
                         .as_secs()
                 ));
-                super::shutdown::coordinator().begin(super::shutdown::ExitReason::PersistentIdle);
-                return;
+                match super::shutdown::coordinator()
+                    .begin(super::shutdown::ExitReason::PersistentIdle)
+                {
+                    super::shutdown::BeginOutcome::Refused(
+                        super::shutdown::RefusalReason::NotQuiescent,
+                    ) => {
+                        // F02-B1: something acquired a lease between our
+                        // snapshot and the atomic claim. Not idle after all;
+                        // restart the window and keep watching.
+                        crate::logging::info(
+                            "Idle shutdown claim lost to new activity; restarting idle window.",
+                        );
+                        idle_clock.update(false, now);
+                        was_quiescent = false;
+                        continue;
+                    }
+                    _ => return,
+                }
             }
         }
     });
@@ -242,8 +258,21 @@ pub(crate) fn spawn_temporary_lifecycle_monitor(
                     "Temporary server quiescent for {} seconds. Shutting down.",
                     idle_clock.idle_elapsed(now).unwrap_or_default().as_secs()
                 ));
-                super::shutdown::coordinator().begin(super::shutdown::ExitReason::TemporaryIdle);
-                return;
+                match super::shutdown::coordinator()
+                    .begin(super::shutdown::ExitReason::TemporaryIdle)
+                {
+                    super::shutdown::BeginOutcome::Refused(
+                        super::shutdown::RefusalReason::NotQuiescent,
+                    ) => {
+                        crate::logging::info(
+                            "Idle shutdown claim lost to new activity; restarting idle window.",
+                        );
+                        idle_clock.update(false, now);
+                        was_quiescent = false;
+                        continue;
+                    }
+                    _ => return,
+                }
             }
         }
     });

@@ -623,10 +623,28 @@ impl AmbientRunnerHandle {
                 }
             }
 
+            // Activity lease (F01 C9 / F02-B2): acquired BEFORE the durable
+            // dequeue below so the daemon cannot idle-exit between removing a
+            // due item from queue state and completing its delivery. Held
+            // through the whole delivery because the direct/fallback paths
+            // (run_once_capture, dead-session resume) execute provider work
+            // without passing the server's common ProviderTurn boundary.
+            // Dropped at the end of this loop iteration. A ShuttingDown
+            // refusal skips dispatch this tick: the daemon is draining and
+            // the items stay durable for the successor.
+            let delivery_lease = crate::server::shutdown::acquire_lease(
+                jcode_core::activity::ActivityClass::ScheduledDelivery,
+                "ambient-direct-dispatch",
+            );
+
             // Load manager to check should_run and update queue info
             let (should_run, ready_direct_items, next_direct_due) = match AmbientManager::new() {
                 Ok(mut mgr) => {
-                    let ready_direct_items = mgr.take_ready_direct_items();
+                    let ready_direct_items = if delivery_lease.is_ok() {
+                        mgr.take_ready_direct_items()
+                    } else {
+                        Vec::new()
+                    };
                     let next_direct_due = mgr
                         .queue()
                         .items()
@@ -660,6 +678,7 @@ impl AmbientRunnerHandle {
                 self.deliver_ready_direct_items(&provider, ready_direct_items)
                     .await;
             }
+            drop(delivery_lease);
 
             if !should_run {
                 let sleep_secs = if ambient_allowed {

@@ -56,6 +56,36 @@ bounded shutdown"
   reconciliation.
 - Pairwise reason-race runtime fixtures; parent-SIGKILL residue fixture.
 
+## Review round 1 blocker fixes (F02-implementation-review.md, FAIL at ef67216ad)
+
+- F02-B1: idle exit is claimed atomically. `LeaseTable::try_claim_idle_shutdown`
+  verifies complete emptiness and closes acquisition in one critical section;
+  `ClientConnection` leases now mirror `client_count` (one guard per counted
+  connection in `ServerRuntime`), so clients and work live in the same table.
+  Idle `begin` returns `Refused(NotQuiescent)` when the claim loses; the
+  monitors restart the idle window. Non-idle begins call `refuse_new()` BEFORE
+  the phase flips. New pure test `idle_claim_is_atomic_against_any_lease`.
+- F02-B2: `ScheduledDelivery` lease wired in the ambient runner: acquired
+  before the durable `take_ready_direct_items()` dequeue, held through
+  delivery (covering the direct `run_once_capture` fallback paths), dropped
+  after dispatch. Refusal skips the dequeue entirely: items stay durable for
+  the successor daemon.
+- F02-B3: `begin_reload_drain` now calls `cancel_intake()` like terminations.
+- F02-B4: every refusal fails closed. Debug jobs acquire before spawn and
+  error the request; await watchers do not spawn (durable state persists for
+  the successor, the design's C8 "persist" semantics); startup recovery
+  aborts (sessions recovered by the successor); `spawn_with_notify` never
+  runs the task and writes a terminal refused status. Adoption keeps running
+  (the future already exists, pre-adoption execution is the foreground
+  owner's) but is logged and remains abortable by `finalize_non_detached`.
+- F02-B5: watchdog thread-spawn failure falls back to `spawn_blocking`; only
+  a no-runtime-and-no-thread double failure is left logged as unbounded.
+- F02-I1: executor spawning uses `spawn_on_runtime` (tokio handle when
+  present, dedicated thread with a one-shot runtime otherwise), so `begin`
+  off-runtime cannot strand `Draining`.
+- F02-I2: `StartupRecovery` guard is bounded by a 60s TTL task.
+- F02-M1: watchdog cancellation rewrites the durable marker as `cancelled`.
+
 ## Known deviations from the design record
 
 - The one serialized executor is spawned by the first accepted `begin`
@@ -64,7 +94,7 @@ bounded shutdown"
   acceptance spawns), simpler lifecycle.
 - `LeaseTable` uses `Instant` directly instead of an injected `Tick`; the
   pure tests inject instants explicitly.
-- `client_count` is not yet replaced by `ClientConnection` leases (design
-  3.1 replacement); the monitors consult `client_count` plus
-  drain-blocking leases, which preserves the A1 invariant. Full C1
-  unification is left to the F03-verified follow-up.
+- `client_count` still exists alongside the lease table, but every counted
+  connection now also holds a `ClientConnection` lease, and the idle claim
+  consults ONLY the lease table (atomic). The redundant counter is kept for
+  its many read-side consumers; removing it is cosmetic follow-up.
