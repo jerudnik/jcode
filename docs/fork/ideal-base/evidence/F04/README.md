@@ -52,6 +52,35 @@ progress updates).
    level; test `write_failure_is_surfaced_not_swallowed` proves both
    initial and terminal failure surfacing.
 
+## Review round 1 fixes (F04-implementation-review.md, FAIL at 4f1e5adfa)
+
+- F04-B1 (blocking): terminal-persistence failure durability.
+  - `spawn_with_notify` now FAILS CLOSED when the initial `Running` write
+    fails: the task never starts (durable record is a spawn prerequisite).
+    Adoption documents why it cannot fail closed (future already running)
+    and tracks anyway for shutdown-finalize abortability.
+  - `persist_terminal_with_recovery`: on terminal write failure the
+    live-map entry is RETAINED as a visible tombstone (never a phantom
+    "pruned but Running on disk" state) and a detached backoff retry loop
+    prunes only once persistence lands. Used by both wrapper completions
+    and the cancel live branch.
+  - New failure-injection tests:
+    `spawn_refuses_to_start_when_initial_persistence_fails`,
+    `terminal_persistence_failure_retains_tombstone_then_recovers`
+    (break-the-directory injection, heal, observe recovery + prune).
+- F04-I1: `MutateOutcome::Unchanged` variant; no-op equivalent progress
+  updates no longer publish duplicate bus events (pre-F04 behavior
+  restored).
+- F04-I2: `mutate` returning false now yields the PERSISTED state
+  (`Unchanged(existing)`), never the closure's discarded in-memory
+  mutations.
+- F04-M1: dead `read_lenient` removed.
+- F04-M2: `write_atomic` doc corrected (reader-atomic, not crash-durable;
+  fsync hardening deferred to F05 if its gates require it).
+- F04-I3 (nonblocking): terminal paths log-and-continue by design; the
+  recovery loop now bounds the damage. Structured persistence-health events
+  are F05-scope follow-up.
+
 ## Tests
 
 - Store: 6 tests incl. torn-JSON hammer
@@ -62,4 +91,4 @@ progress updates).
 - Manager: `live_map_prunes_only_after_terminal_persistence`,
   `progress_and_delivery_survive_concurrent_terminal_completion`, plus the
   27 pre-existing background tests.
-- Full: jcode-base 1176+2, jcode-app-core 1126 all green.
+- Full: jcode-base 1180/1180, jcode-app-core 1126/1126 all green.
