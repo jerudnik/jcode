@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F03",
+    "node": "F04",
     "state": "accepted",
-    "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
-    "updated_at": "2026-07-18T16:59:00Z",
-    "summary": "F03 accepted (D015). W1 remaining: F04/F05 (background status store), F06 (MCP owner identity), F07+ per graph."
+    "commit": "9c4c99897b88456257525d359f11fa357669c134",
+    "updated_at": "2026-07-18T19:04:00Z",
+    "summary": "F04 accepted (D016). F05 verification runnable next with the review handoff list as seed."
   },
   "nodes": {
     "W0": {
@@ -114,13 +114,14 @@
       "updated_at": "2026-07-18T16:59:00Z"
     },
     "F04": {
-      "state": "implemented",
-      "commit": null,
+      "state": "accepted",
+      "commit": "9c4c99897b88456257525d359f11fa357669c134",
       "evidence": [
-        "docs/fork/ideal-base/evidence/F04"
+        "docs/fork/ideal-base/evidence/F04",
+        "docs/fork/ideal-base/reviews/F04-implementation-review.md"
       ],
-      "summary": "TaskStatusStore implemented: atomic temp+rename writes, per-task serialization, terminal precedence, surfaced failures. All manager writes migrated. Awaiting independent review.",
-      "updated_at": "2026-07-18T18:15:00Z"
+      "summary": "F04 accepted at 9c4c99897 after 3-round review (PASS round 3). TaskStatusStore: atomic, serialized, terminal-precedent, failure-surfacing; fail-closed spawn prerequisite; cancel tombstones; explicit finalize data-loss policy. 10-item F05 handoff recorded.",
+      "updated_at": "2026-07-18T19:04:00Z"
     },
     "F05": {
       "state": "pending",
