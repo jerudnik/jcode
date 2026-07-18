@@ -1,5 +1,9 @@
 # Fork recovery workspace
 
+> Active ideal-base execution now lives under
+> [`../ideal-base/`](../ideal-base/). This recovery namespace remains frozen in
+> place for forensic integrity.
+
 > **Archived forensic record.** Recovery completed on 2026-07-16. The accepted
 > implementation head is `51168d16e9c708ae4afff09a6fc6402642d17782`, and the
 > joint-signoff head is `17586246afb11cd54e1db12a0beec05fd29a0612`. The

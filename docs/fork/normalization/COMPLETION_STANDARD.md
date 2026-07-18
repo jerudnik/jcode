@@ -1,5 +1,10 @@
 # Completion standard: normalized jcode fork
 
+> **Historical normalization standard.** The active ideal-base exit gates are in
+> [`../ideal-base/ACCEPTANCE_STANDARD.md`](../ideal-base/ACCEPTANCE_STANDARD.md).
+> This document remains evidence for how the earlier normalization claim was
+> bounded.
+
 The fork is done only when every applicable gate below passes at one fixed
 committed head and one recorded local-host state. “Clean” means understandable,
 reproducible, owned, and free of unexplained state. It does not mean erasing

@@ -2,50 +2,58 @@
 
 Last audited: 2026-07-18
 
-This directory mixes current operating guidance with immutable recovery and
-normalization evidence. Use the categories below instead of treating every
-dated status statement as current.
+## Active authority
 
-## Current operating state
+The active engineering authority is the
+[`ideal-base/`](ideal-base/) control plane. It carries the accepted starting
+boundary forward from completed normalization and defines the graph-first path to
+an honest ideal durable TUI/CLI foundation.
 
-- [`normalization/STATUS.md`](normalization/STATUS.md): current source, runtime,
-  cleanup, and completion boundary.
-- [`normalization/KNOWN_GOOD_BASELINE.md`](normalization/KNOWN_GOOD_BASELINE.md):
-  exact core-runtime baseline, fixes completed in commit `41e86f3c9`, and ranked
-  remaining lifecycle seams.
+Start here:
+
+- [`ideal-base/README.md`](ideal-base/README.md): authority order, archive boundary,
+  and operating entrypoint.
+- [`ideal-base/COORDINATOR_BOOTSTRAP.md`](ideal-base/COORDINATOR_BOOTSTRAP.md):
+  copy-paste prompt for a completely fresh coordinator session.
+- [`ideal-base/WORK_GRAPH.json`](ideal-base/WORK_GRAPH.json): machine-readable deep
+  graph with dependencies, ownership, gates, and evidence contracts.
+- [`ideal-base/STATE.json`](ideal-base/STATE.json): durable cross-session node
+  disposition.
+- [`ideal-base/ACCEPTANCE_STANDARD.md`](ideal-base/ACCEPTANCE_STANDARD.md): binary
+  exit gates and honest claim labels.
+- [`ideal-base/AUDIT_COVERAGE.md`](ideal-base/AUDIT_COVERAGE.md): all 25 audited
+  work items mapped to executable implementation and verification nodes.
+
+The accepted starting label is **core-runtime validated**. The current immutable
+runtime remains `8962bccb3-release`, selected by `current`, `stable`, and
+`shared-server` when the railway was created. Recovery refs, four stashes,
+rollback bundles, sealed evidence, and private archives remain preserved. Recheck
+all live facts with `scripts/ideal_base_railway.py` before mutation.
+
+## Continuing fork policy
+
+These repository-wide fork policies remain active beside the ideal-base control
+plane:
+
 - [`patch-ledger.md`](patch-ledger.md): downstream patches, ownership, retirement
   conditions, and validation commands.
 - [`SYNC_MODEL.md`](SYNC_MODEL.md): monitored-curation policy for upstream work.
-- [`SECURITY_TRIAGE.md`](SECURITY_TRIAGE.md): fork-only security-triage policy and
-  any advisory rows not already documented by upstream.
+- [`SECURITY_TRIAGE.md`](SECURITY_TRIAGE.md): fork-only security triage and advisory
+  rows not already documented upstream.
 
-The canonical checkout has one worktree. The promoted `current`, `stable`, and
-`shared-server` channels remain on immutable `8962bccb3-release`. Recovery refs,
-four stashes, rollback bundles, sealed evidence, and private archives remain
-preserved.
+## Frozen historical namespaces
 
-## Normative standards and runbooks
+[`normalization/`](normalization/) and [`recovery/`](recovery/) are archived in
+place. Their current paths preserve relative links, checksum manifests, sealed
+evidence, hash citations, review history, and seam ledgers. See
+[`archive/README.md`](archive/README.md) for the boundary.
 
-- [`normalization/COMPLETION_STANDARD.md`](normalization/COMPLETION_STANDARD.md):
-  the binary definition of fully normalized versus honestly core-runtime
-  validated.
-- [`normalization/RUNTIME_AND_NIX_RUNBOOK.md`](normalization/RUNTIME_AND_NIX_RUNBOOK.md):
-  build, immutable-channel, handoff, verification, and rollback procedure.
-- [`normalization/QUALITY_DEBT.md`](normalization/QUALITY_DEBT.md): no-growth
-  policy and its dated N2 measurement.
+Do not refresh their old counts, pending states, or dated labels in place. Critical
+starting facts and acceptance policy have been carried into `ideal-base/`.
+Historical files remain valid evidence for their recorded moment, not active task
+authority.
 
-## Historical records
-
-- [`recovery/README.md`](recovery/README.md): archived six-phase recovery record.
-- [`normalization/BASELINE.md`](normalization/BASELINE.md): append-only
-  pre-normalization host and repository snapshots.
-- [`normalization/N2_SIGNOFF.md`](normalization/N2_SIGNOFF.md): fixed-candidate
-  promotion-readiness evidence before promotion and cleanup.
-- `recovery/evidence/`, `recovery/reviews/`, `recovery/seams/`,
-  `normalization/evidence/`, and `normalization/reviews/`: dated evidence and
-  independent reviews. Old counts and pending states remain valid historical
-  observations unless a current page explicitly adopts them.
-
-The retained [`recovery/ORCHESTRATOR_PROMPT.md`](recovery/ORCHESTRATOR_PROMPT.md)
-is a historical launch artifact at its tracked baseline. Do not reuse it as a
-current task prompt without revalidation.
+The retained
+[`recovery/ORCHESTRATOR_PROMPT.md`](recovery/ORCHESTRATOR_PROMPT.md) is a protected
+historical launch artifact at its tracked baseline. It must remain byte-identical
+and must not be reused as a current prompt.

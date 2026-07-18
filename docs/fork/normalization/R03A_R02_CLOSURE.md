@@ -1,5 +1,10 @@
 # R03A and R02 W7 candidate closure adjudication
 
+> **Frozen closure record.** Its accepted decisions and reopen triggers remain
+> historical evidence. New ideal-base gaps belong in
+> [`../ideal-base/WORK_GRAPH.json`](../ideal-base/WORK_GRAPH.json), not as edits to
+> this adjudication.
+
 Date: 2026-07-16
 
 ## Decision
