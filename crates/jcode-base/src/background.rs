@@ -441,6 +441,9 @@ impl BackgroundTaskManager {
         };
         let count = drained.len();
         for task in drained {
+            if let Some(original) = &task.original_abort {
+                original.abort();
+            }
             task.handle.abort();
             let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
             let mut final_status = TaskStatusFile {
@@ -758,6 +761,7 @@ impl BackgroundTaskManager {
             started_at_rfc3339,
             delivery_flags: delivery_flags_tx,
             handle,
+            original_abort: None,
             activity_lease,
         };
 
@@ -849,6 +853,10 @@ impl BackgroundTaskManager {
         let tasks_for_prune = Arc::clone(&self.tasks);
         let (registered_tx, registered_rx) = tokio::sync::oneshot::channel::<()>();
 
+        // F02-R2-B2: keep abort authority over the ORIGINAL future. Aborting
+        // only the wrapper would drop-detach this JoinHandle and leave the
+        // underlying work running.
+        let original_abort = handle.abort_handle();
         let wrapper_handle = tokio::spawn(async move {
             let tool_result = handle.await;
             let duration_secs = started_at.elapsed().as_secs_f64();
@@ -961,6 +969,7 @@ impl BackgroundTaskManager {
             started_at_rfc3339: initial_status.started_at.clone(),
             delivery_flags: delivery_flags_tx,
             handle: wrapper_handle,
+            original_abort: Some(original_abort),
             // Acquired at adoption: pre-adoption execution was covered by
             // the foreground owner's own lease (F01 design 3.3.3 C5).
             // Refusal during drain is NOT silent unleased new work (F02-B4):
@@ -1307,6 +1316,9 @@ impl BackgroundTaskManager {
     ) -> Result<bool> {
         let mut tasks = self.tasks.write().await;
         if let Some(task) = tasks.remove(task_id) {
+            if let Some(original) = &task.original_abort {
+                original.abort();
+            }
             task.handle.abort();
 
             // Update status file

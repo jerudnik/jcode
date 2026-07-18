@@ -849,6 +849,10 @@ impl ShutdownCoordinator {
             }
             match state.phase {
                 Phase::Running => {
+                    // Close lease acquisition BEFORE publishing the phase
+                    // transition (F02-R2-I1, matching ordinary `begin`): no
+                    // lease may be acquired during a reported Draining.
+                    lease_authority().refuse_new();
                     state.phase = Phase::Draining;
                     state.reason = Some(ExitReason::Reload);
                     state.drain_deadline =
@@ -862,7 +866,6 @@ impl ShutdownCoordinator {
             }
         }
         crate::logging::info("Shutdown coordinator: reload drain started");
-        lease_authority().refuse_new();
         // F02-B3: reload Draining stops intake exactly like terminations
         // (design 3.2.3); accept loops must not admit new connections while
         // the handoff is being prepared.

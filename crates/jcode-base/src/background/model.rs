@@ -232,6 +232,12 @@ pub(super) struct RunningTask {
     pub(super) started_at_rfc3339: String,
     pub(super) delivery_flags: watch::Sender<(bool, bool)>,
     pub(super) handle: JoinHandle<Result<TaskResult>>,
+    /// Abort authority for the ORIGINAL adopted future (F02-R2-B2). For
+    /// spawned tasks the wrapper IS the task and this is `None`. For adopted
+    /// tasks, aborting only the wrapper would drop-detach the original
+    /// `JoinHandle` and let the underlying work keep running; cleanup must
+    /// abort this handle too.
+    pub(super) original_abort: Option<tokio::task::AbortHandle>,
     /// Activity lease (F01 C5): held while the task is tracked in the live
     /// map, dropped at terminal pruning. `None` when acquisition was refused
     /// during shutdown drain (the task then does not pin the daemon).

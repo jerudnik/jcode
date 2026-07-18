@@ -86,6 +86,24 @@ bounded shutdown"
 - F02-I2: `StartupRecovery` guard is bounded by a 60s TTL task.
 - F02-M1: watchdog cancellation rewrites the durable marker as `cancelled`.
 
+## Review round 2 blocker fixes (Round 2 FAIL at 8a09a289d)
+
+- F02-R2-B1: connection admission fails closed. `try_admit_client` makes the
+  `ClientConnection` lease the admission gate: on ShuttingDown refusal the
+  accepted stream / gateway client is dropped UNCOUNTED, preserving the
+  strict one-guard-per-counted-connection pairing the atomic idle claim
+  relies on. `increment_client_count` no longer exists.
+- F02-R2-B2: `RunningTask` stores the ORIGINAL adopted future's
+  `AbortHandle`; `finalize_non_detached` and `cancel_with_grace` abort the
+  original before the wrapper, so cleanup actually cancels adopted work
+  instead of drop-detaching it. New test
+  `finalize_non_detached_aborts_adopted_original_future` proves the original
+  future is cancelled (drop-flag assertion).
+- F02-R2-I1: `begin_reload_drain` calls `refuse_new()` under the coordinator
+  lock BEFORE publishing `Draining`, matching ordinary `begin`.
+- F02-R2-I2: debug jobs acquire the lease before `create_job`, so a refusal
+  leaves no permanently Queued record.
+
 ## Known deviations from the design record
 
 - The one serialized executor is spawned by the first accepted `begin`

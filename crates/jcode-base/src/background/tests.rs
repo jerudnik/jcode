@@ -471,3 +471,51 @@ async fn status_read_self_heals_orphaned_task() -> Result<()> {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn finalize_non_detached_aborts_adopted_original_future() -> Result<()> {
+    // F02-R2-B2: aborting only the adoption wrapper drop-detaches the
+    // original JoinHandle and the underlying work keeps running. Cleanup
+    // must abort the ORIGINAL future via its stored AbortHandle.
+    let tmp = tempdir()?;
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+
+    // The original future signals if it survives past the abort window.
+    let survived = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let survived_flag = std::sync::Arc::clone(&survived);
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel::<()>();
+    let original = tokio::spawn(async move {
+        let _ = started_tx.send(());
+        sleep(Duration::from_millis(300)).await;
+        survived_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(jcode_tool_types::ToolOutput {
+            output: "should never complete".to_string(),
+            title: None,
+            metadata: None,
+            images: Vec::new(),
+        })
+    });
+    started_rx.await.expect("original task should start");
+
+    let info = manager
+        .adopt_with_options("bash", None, "session-adopt-abort", false, false, original)
+        .await;
+    assert!(manager.is_live_task(&info.task_id));
+
+    let finalized = manager.finalize_non_detached("test-shutdown").await;
+    assert_eq!(finalized, 1, "the adopted task must be finalized");
+
+    // Give a detached-but-alive original ample time to reach its flag.
+    sleep(Duration::from_millis(400)).await;
+    assert!(
+        !survived.load(std::sync::atomic::Ordering::SeqCst),
+        "the ORIGINAL adopted future must be aborted, not detached"
+    );
+
+    let status = manager
+        .status(&info.task_id)
+        .await
+        .ok_or_else(|| anyhow!("status should exist"))?;
+    assert_eq!(status.status, BackgroundTaskStatus::Failed);
+    Ok(())
+}
