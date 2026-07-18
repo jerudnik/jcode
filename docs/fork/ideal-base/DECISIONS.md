@@ -146,3 +146,17 @@ about independent adversarial capability, not vendor identity.
 **Reopen trigger:** Anthropic usage restored; subsequent reviews may return to
 Opus-class models. Already-accepted reviews are not re-run solely for vendor
 identity.
+
+## D009a. OpenAI model routing by difficulty
+
+**Amendment to D009 (user-specified):** while Anthropic usage is unavailable,
+route OpenAI workers as follows:
+
+- `gpt-5.6-sol`: hard, critical implementation and adversarial verification.
+- `gpt-5.6-terra`: medium-complexity implementation, review, and investigation.
+- `gpt-5.6-luna`: easy/non-critical context retrieval, search, and summarization.
+
+Do not substitute GPT-4o. Use the actual route name in evidence and review
+artifacts.
+
+**Reopen trigger:** user changes routing or Anthropic usage returns.
