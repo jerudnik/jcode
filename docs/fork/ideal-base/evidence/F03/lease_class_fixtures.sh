@@ -128,8 +128,16 @@ for class in "${LEASE_CLASSES[@]}"; do
   pass "[$class] daemon alive past idle timeout while leased"
 
   debug_cmd "$DIR" "$HOMEDIR" "shutdown:release_lease:$TOKEN" >/dev/null
-  # Release starts a FULL new idle window (quiescence epoch): 5s window +
-  # 10s poll granularity + margin.
+  # F03-I1: release starts a FULL new idle window (quiescence epoch). The
+  # 5s timeout means the daemon MUST still be alive strictly less than 5s
+  # after release; an immediate post-release exit would be an epoch bug.
+  sleep 4
+  if ! kill -0 "$PID" 2>/dev/null; then
+    fail "[$class] daemon exited within 4s of release (idle window not restarted)"
+    rm -rf "$DIR" "$HOMEDIR"; continue
+  fi
+  pass "[$class] alive 4s after release (full new idle window enforced)"
+  # Then the window (5s) + poll granularity (10s) + margin bounds the exit.
   wait_exit_var CODE "$PID" 40
   if [ -z "$CODE" ]; then
     fail "[$class] daemon did not exit after release"; tail -3 "$DIR/daemon.log"; kill -9 "$PID" 2>/dev/null
@@ -164,6 +172,26 @@ else
     pass "[forced] durable marker records fired"
   else
     fail "[forced] marker missing or not fired: $(cat "$MARKER" 2>/dev/null)"
+  fi
+  # F03-I2: forced exit cannot clean up by construction; its residue is
+  # owned by next-boot reconciliation. Prove it IN THE SAME runtime dir:
+  # a successor must boot over the forced-exit residue, then idle-exit
+  # cleanly with zero residue.
+  run_daemon PID2 "$DIR" "$HOMEDIR" -- serve --temporary-server --temp-idle-timeout-secs 5
+  if wait_socket "$DIR" 30 && kill -0 "$PID2" 2>/dev/null; then
+    pass "[forced] successor booted over forced-exit residue"
+    wait_exit_var CODE2 "$PID2" 40
+    if [ -n "$CODE2" ] && [ "$CODE2" -eq 44 ]; then
+      pass "[forced] successor idle-exited 44"
+      residue_check "$DIR" "[forced-successor]"
+    else
+      fail "[forced] successor exit code '$CODE2', expected 44"
+      kill -9 "$PID2" 2>/dev/null
+    fi
+  else
+    fail "[forced] successor failed to boot over forced-exit residue"
+    tail -5 "$DIR/daemon.log"
+    kill -9 "$PID2" 2>/dev/null
   fi
 fi
 rm -rf "$DIR" "$HOMEDIR"

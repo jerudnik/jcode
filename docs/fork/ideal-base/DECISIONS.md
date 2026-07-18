@@ -289,3 +289,26 @@ three consecutive passing runs (`evidence/F02/exit_mode_fixtures_run.log`).
 
 **Reopen trigger:** F03 fixtures uncovering a lease-class or exit-mode gap;
 that injects a repair node against F02's owned paths.
+
+## D015. F03 accepted; review PASS plus post-review harness strengthening
+
+**Decision:** F03 (lease-class and exit-mode verification) is accepted. The
+independent review (`reviews/F03-verification-review.md`, OpenAI `gpt-5.6-sol`
+high effort) returned PASS at commit `d8c223d29` with both acceptance gates
+met and no blocking finding. Its two nonblocking evidence-strength findings
+were then implemented rather than deferred: the harness now asserts a
+minimum post-release liveness window (F03-I1) and boots a successor over the
+forced-exit residue in the same runtime directory (F03-I2). The strengthened
+matrix passes 41/41.
+
+F03 additionally caught and fixed a production defect: terminal-outcome
+publication via `watch::send` dropped the value when no waiter was
+subscribed yet, which could hang `begin_and_wait` forever; now
+`send_replace`.
+
+Remaining coverage limitations (recorded by the review, owned by later
+nodes): real-provider/MCP/swarm integration fixtures, process-level reload
+fixtures, Windows behavior, and owned-descendant cleanup (F06/F08).
+
+**Reopen trigger:** any later node discovering a lease-class or exit-mode
+gap the matrix should have caught; that injects a repair node here.

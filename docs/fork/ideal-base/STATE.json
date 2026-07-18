@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F02",
+    "node": "F03",
     "state": "accepted",
-    "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
-    "updated_at": "2026-07-18T12:15:00Z",
-    "summary": "F02 accepted (D014). F03 lease-class/exit-mode verification is now runnable."
+    "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+    "updated_at": "2026-07-18T16:59:00Z",
+    "summary": "F03 accepted (D015). W1 remaining: F04/F05 (background status store), F06 (MCP owner identity), F07+ per graph."
   },
   "nodes": {
     "W0": {
@@ -104,11 +104,14 @@
       "updated_at": "2026-07-18T12:15:00Z"
     },
     "F03": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Coordinator-led verification: instance-scoped coordinator refactor + real-machine race tests, debug lease fixture surface, runtime fixture harness v2 (per-class holds, forced-exit, SIGKILL residue), then independent review.",
-      "updated_at": "2026-07-18T15:57:00Z"
+      "state": "accepted",
+      "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F03",
+        "docs/fork/ideal-base/reviews/F03-verification-review.md"
+      ],
+      "summary": "F03 accepted: independent review PASS at d8c223d29 (both gates met). 23 in-process coordinator fixtures + 41/41 runtime matrix (strengthened post-review per F03-I1/I2). Found+fixed watch-send lost-publication bug.",
+      "updated_at": "2026-07-18T16:59:00Z"
     },
     "F04": {
       "state": "pending",

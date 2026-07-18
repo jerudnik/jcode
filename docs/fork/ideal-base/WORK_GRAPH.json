@@ -214,7 +214,7 @@
         "id": "F06",
         "content": "Implement explicit pooled MCP child ownership, bounded pre-exit reap, and mcp-serve owner-PID self-liveness.",
         "kind": "implement",
-        "depends_on": ["F02"],
+        "depends_on": ["F02", "F03"],
         "priority": 93,
         "owned_paths": [
           "crates/jcode-base/src/mcp/**",
@@ -962,7 +962,7 @@
       "id": "F06",
       "content": "Implement explicit pooled MCP child ownership, bounded pre-exit reap, and mcp-serve owner-PID self-liveness.",
       "kind": "implement",
-      "depends_on": ["F02"],
+      "depends_on": ["F02", "F03"],
       "priority": 93,
       "owned_paths": [
         "crates/jcode-base/src/mcp/**",

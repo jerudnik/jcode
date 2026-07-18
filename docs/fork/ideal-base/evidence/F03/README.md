@@ -39,8 +39,8 @@ JCODE_HOME, deferred-auth bootstrap, JCODE_DEBUG_CONTROL=1). Transcript:
 
 | Fixture | Result |
 |---|---|
-| A. Hold/release per lease class (all 8 classes) | alive past 5s idle timeout while held; exit 44 after release + full new window; zero residue |
-| B. Forced exit (30s injected cleanup hang + SIGTERM) | watchdog exit code 70; durable marker `fired` |
+| A. Hold/release per lease class (all 8 classes) | alive past 5s idle timeout while held; STILL alive 4s after release (full-new-window assertion, review F03-I1); exit 44; zero residue |
+| B. Forced exit (30s injected cleanup hang + SIGTERM) | watchdog exit code 70; durable marker `fired`; successor boots over the forced-exit residue IN THE SAME runtime dir, idle-exits 44 with zero residue (review F03-I2) |
 | C. Parent SIGKILL | stale socket residue as expected; successor boots over it, idle-exits 44, zero residue |
 | D. Drain refusal typing | covered by unit fixtures (idle-claim atomicity, ShuttingDown refusals) |
 
@@ -55,4 +55,5 @@ JCODE_HOME, deferred-auth bootstrap, JCODE_DEBUG_CONTROL=1). Transcript:
 ## Test totals
 
 - `jcode-app-core --lib`: 1126/1126 (includes the 12 new fixtures).
-- Runtime matrix: 31/31 assertions PASS.
+- Runtime matrix: 41/41 assertions PASS (strengthened per review findings
+  F03-I1 and F03-I2 after the independent PASS verdict at `d8c223d29`).
