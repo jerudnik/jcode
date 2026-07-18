@@ -4,9 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "recorded": "2026-07-18",
-    "summary": "Active authority and machine graph created; implementation graph not yet seeded.",
-    "source_seed": "923c6353e04266f71dc6cc06fc8516e502a9c07f"
+    "node": "W0.1",
+    "state": "accepted",
+    "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+    "updated_at": "2026-07-18T06:14:28Z",
+    "summary": "Baseline revalidated: railway OK, protected hash intact, one worktree, stashes/refs preserved. Drift 1 (railway commits atop seed) benign. Drift 2 (stale selfdev pending_activation from dead session peacock, canary 923c6353e-dirty active as current/shared-server) preserved as F09 fixture per D006."
   },
   "nodes": {
     "W0": {
@@ -52,11 +54,13 @@
       "updated_at": null
     },
     "W0.1": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.1"
+      ],
+      "summary": "Baseline revalidated: railway OK, protected hash intact, one worktree, stashes/refs preserved. Drift 1 (railway commits atop seed) benign. Drift 2 (stale selfdev pending_activation from dead session peacock, canary 923c6353e-dirty active as current/shared-server) preserved as F09 fixture per D006.",
+      "updated_at": "2026-07-18T06:14:28Z"
     },
     "W0.2": {
       "state": "pending",
