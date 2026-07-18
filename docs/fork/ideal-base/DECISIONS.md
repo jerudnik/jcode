@@ -312,3 +312,29 @@ fixtures, Windows behavior, and owned-descendant cleanup (F06/F08).
 
 **Reopen trigger:** any later node discovering a lease-class or exit-mode
 gap the matrix should have caught; that injects a repair node here.
+
+## D016. F04 accepted after three-round independent review convergence
+
+**Decision:** F04 (atomic serialized TaskStatusStore) is accepted at commit
+`9c4c99897`, verified by the independent review
+(`reviews/F04-implementation-review.md`, OpenAI `gpt-5.6-sol` high effort):
+round 1 FAIL (persistence-failure durability B1 plus contract findings),
+round 2 FAIL (cancel tombstone / finalize policy R2-B1), round 3 PASS with
+all three acceptance gates met.
+
+Key guarantees now in force: temp+rename reader-atomicity, per-task write
+serialization, first-terminal-wins precedence (hostile mutations cannot
+resurrect Running), spawn fails closed without a durable initial record,
+terminal-persistence failure retains a live-map tombstone with a backoff
+recovery loop, cancel aborts in place, and shutdown finalize applies an
+explicit two-arm failure policy (orphan-sweep recovery vs loudly logged
+data loss for the adopted/no-record corner, accepted as the honest bound).
+
+The reviewer's 10-item F05 handoff list (crash durability/fsync, stale temp
+cleanup, cross-process writers, task-id collision policy, Windows rename
+semantics, persistence-health events, retry lifecycle, delivery-during-
+recovery, lock-map growth, targeted publication-count tests) is the F05
+work seed.
+
+**Reopen trigger:** F05 fixtures uncovering a store defect; that injects a
+repair node against F04's owned paths.
