@@ -1,14 +1,14 @@
-//! Atomic, serialized persistence for background task status files (F04).
+//! Crash-durable, atomic persistence for background task status files (F04/F05).
 //!
 //! Every status-file write in the manager goes through this store. It
 //! guarantees, per the ideal-base acceptance standard A2:
 //!
-//! - **Atomicity**: writes go to a same-directory temp file and are renamed
-//!   into place, so a reader can never observe torn JSON.
-//! - **Serialization**: all reads-for-write and writes for one task are
-//!   serialized behind a per-task async mutex, so concurrent
-//!   progress/delivery/completion updates cannot interleave read-modify-write
-//!   cycles and lose each other's data.
+//! - **Atomic durability**: writes go to a unique same-directory temp file,
+//!   fsync that file, rename it into place, then fsync the parent directory, so
+//!   readers never observe torn JSON and successful writes survive crashes.
+//! - **Serialization**: all reads-for-write and writes for one task across
+//!   every store instance in this process share a path-keyed async mutex, so
+//!   concurrent progress/delivery/completion cycles cannot lose each other.
 //! - **Terminal precedence**: once a task's persisted status is terminal
 //!   (anything but `Running`), no later mutation can resurrect `Running` or
 //!   replace the terminal truth. The first terminal write wins; subsequent
@@ -22,7 +22,9 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime};
+use tokio::io::AsyncWriteExt;
 
 use super::model::TaskStatusFile;
 use jcode_background_types::BackgroundTaskStatus;
@@ -61,19 +63,18 @@ pub(super) enum MutateOutcome {
 
 pub(super) struct TaskStatusStore {
     dir: PathBuf,
-    /// Per-task write locks. Entries are created on demand and never removed:
-    /// the map is bounded by the number of distinct task ids this process
-    /// touches, each entry is one Arc'd mutex, and leaving them in place
-    /// avoids the classic remove-while-locked race.
-    locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
+
+/// Process-wide locks are keyed by final status path, not store instance, so
+/// independent `BackgroundTaskManager`s sharing a directory serialize the
+/// same task's read-modify-write cycles too.
+static TASK_LOCKS: OnceLock<std::sync::Mutex<HashMap<PathBuf, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+const STALE_TEMP_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
 impl TaskStatusStore {
     pub(super) fn new(dir: PathBuf) -> Self {
-        Self {
-            dir,
-            locks: std::sync::Mutex::new(HashMap::new()),
-        }
+        Self { dir }
     }
 
     pub(super) fn status_path(&self, task_id: &str) -> PathBuf {
@@ -81,30 +82,49 @@ impl TaskStatusStore {
     }
 
     fn lock_for(&self, task_id: &str) -> Arc<tokio::sync::Mutex<()>> {
-        let mut locks = self
-            .locks
+        let path = self.status_path(task_id);
+        let mut locks = TASK_LOCKS
+            .get_or_init(|| std::sync::Mutex::new(HashMap::new()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Arc::clone(
             locks
-                .entry(task_id.to_string())
+                .entry(path)
                 .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
         )
     }
 
-    /// Atomic replacement: serialize, write to a same-directory temp file,
-    /// rename into place. A concurrent reader sees the old file or the new
-    /// file, never a torn mix. NOTE: this is atomic with respect to
-    /// concurrent readers, not durable across power loss/kernel crash (no
-    /// fsync of file or directory); crash-durability hardening is F05 scope
-    /// if its gates require it.
+    /// Crash-durable atomic replacement: serialize, write to a unique
+    /// same-directory temp file, fsync the temp file, rename it into place,
+    /// then fsync the parent directory. A concurrent reader sees the old file
+    /// or the new file, never a torn mix; after a successful return the file
+    /// contents and directory entry have both crossed the durability boundary.
     async fn write_atomic(&self, path: &Path, status: &TaskStatusFile) -> Result<()> {
         let json = serde_json::to_string_pretty(status)
             .with_context(|| format!("serialize status for task {}", status.task_id))?;
-        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-        tokio::fs::write(&tmp, json.as_bytes())
+        let tmp = path.with_extension(format!(
+            "json.tmp.{}.{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
             .await
-            .with_context(|| format!("write temp status file {}", tmp.display()))?;
+            .with_context(|| format!("create temp status file {}", tmp.display()))?;
+        if let Err(error) = async {
+            file.write_all(json.as_bytes()).await?;
+            file.sync_all().await
+        }
+        .await
+        {
+            drop(file);
+            let _ = tokio::fs::remove_file(&tmp).await;
+            return Err(anyhow::Error::from(error))
+                .with_context(|| format!("write and fsync temp status file {}", tmp.display()));
+        }
+        drop(file);
         // Rename is atomic on POSIX within the same filesystem (the temp file
         // is a sibling). On failure, clean up the temp file.
         if let Err(error) = tokio::fs::rename(&tmp, path).await {
@@ -112,7 +132,63 @@ impl TaskStatusStore {
             return Err(anyhow::Error::from(error))
                 .with_context(|| format!("rename status file into place at {}", path.display()));
         }
+        let parent = path
+            .parent()
+            .with_context(|| format!("status path has no parent: {}", path.display()))?;
+        let parent_dir = tokio::fs::File::open(parent)
+            .await
+            .with_context(|| format!("open status parent directory {}", parent.display()))?;
+        parent_dir
+            .sync_all()
+            .await
+            .with_context(|| format!("fsync status parent directory {}", parent.display()))?;
         Ok(())
+    }
+
+    /// Remove abandoned `*.json.tmp.*` siblings left by interrupted writers.
+    /// A temp file is eligible when its encoded owner PID is dead or when its
+    /// modification time is older than the conservative age bound. Unknown
+    /// suffixes are only removed by age, never merely by name.
+    pub(super) async fn cleanup_stale_temp_files(&self) -> usize {
+        let mut removed = 0;
+        let Ok(mut entries) = tokio::fs::read_dir(&self.dir).await else {
+            return removed;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Some(suffix) = name.split_once(".json.tmp.").map(|(_, suffix)| suffix) else {
+                continue;
+            };
+            let owner_dead = suffix
+                .split('.')
+                .next()
+                .and_then(|pid| pid.parse::<u32>().ok())
+                .is_some_and(|pid| {
+                    pid != std::process::id() && !crate::platform::is_process_running(pid)
+                });
+            let age_expired = entry
+                .metadata()
+                .await
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+                .is_some_and(|age| age >= STALE_TEMP_MAX_AGE);
+            if !owner_dead && !age_expired {
+                continue;
+            }
+            match tokio::fs::remove_file(&path).await {
+                Ok(()) => removed += 1,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => crate::logging::warn(&format!(
+                    "Failed to remove stale background status temp {}: {error}",
+                    path.display()
+                )),
+            }
+        }
+        removed
     }
 
     /// Read a status file. Distinguishes missing (Ok(None)) from malformed
@@ -149,17 +225,19 @@ impl TaskStatusStore {
         Ok(Some(status))
     }
 
-    /// Persist the initial `Running` status for a new task. Refuses to
-    /// clobber an existing terminal file for the same id (id collision).
+    /// Persist the initial `Running` status for a new task. Task IDs are
+    /// create-once: any existing valid status file, including `Running`, is a
+    /// collision and is rejected rather than replacing another task's owner,
+    /// session, progress, or terminal truth. Malformed existing files surface
+    /// as errors and are likewise never silently overwritten here.
     pub(super) async fn write_initial(&self, status: &TaskStatusFile) -> Result<()> {
         let lock = self.lock_for(&status.task_id);
         let _guard = lock.lock().await;
-        if let Ok(Some(existing)) = self.read(&status.task_id).await
-            && is_terminal(&existing)
-        {
+        if let Some(existing) = self.read(&status.task_id).await? {
             anyhow::bail!(
-                "refusing to overwrite terminal status for task {} with a new initial state",
-                status.task_id
+                "refusing initial status for task {}: a {:?} status file already exists",
+                status.task_id,
+                existing.status
             );
         }
         self.write_atomic(&self.status_path(&status.task_id), status)
@@ -389,8 +467,8 @@ mod tests {
     #[tokio::test]
     async fn write_failure_is_surfaced_not_swallowed() {
         let tmp = tempfile::tempdir().unwrap();
-        // Point the store at a path that is a FILE, so temp-file creation
-        // inside it fails deterministically.
+        // Point the store at a path that is a FILE, so its strict collision
+        // read fails before any write can be attempted.
         let bogus_dir = tmp.path().join("not-a-dir");
         tokio::fs::write(&bogus_dir, b"file").await.unwrap();
         let store = TaskStatusStore::new(bogus_dir);
@@ -399,14 +477,16 @@ mod tests {
             .write_initial(&running_status("t3"))
             .await
             .expect_err("write into a non-directory must fail");
-        assert!(error.to_string().contains("write temp status file"), "{error:#}");
+        assert!(error.to_string().contains("read status file"), "{error:#}");
 
         let error = store
             .write_terminal("t3", |existing| terminal_from(existing, "t3"))
             .await
             .expect_err("terminal write failure must be surfaced after retries");
         assert!(
-            error.to_string().contains("terminal status persistence failed"),
+            error
+                .to_string()
+                .contains("terminal status persistence failed"),
             "{error:#}"
         );
     }
@@ -498,6 +578,25 @@ mod tests {
             .write_initial(&running_status("t4"))
             .await
             .expect_err("terminal file must not be clobbered by a new initial state");
-        assert!(error.to_string().contains("refusing to overwrite"), "{error:#}");
+        assert!(error.to_string().contains("already exists"), "{error:#}");
+    }
+
+    #[tokio::test]
+    async fn write_initial_rejects_existing_running_collision_without_clobbering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first_store = TaskStatusStore::new(tmp.path().to_path_buf());
+        let second_store = TaskStatusStore::new(tmp.path().to_path_buf());
+        let mut first = running_status("collision");
+        first.session_id = "original-session".into();
+        first_store.write_initial(&first).await.unwrap();
+
+        let mut collision = running_status("collision");
+        collision.session_id = "colliding-session".into();
+        let error = second_store.write_initial(&collision).await.unwrap_err();
+        assert!(error.to_string().contains("already exists"), "{error:#}");
+
+        let persisted = first_store.read("collision").await.unwrap().unwrap();
+        assert_eq!(persisted.status, BackgroundTaskStatus::Running);
+        assert_eq!(persisted.session_id, "original-session");
     }
 }
