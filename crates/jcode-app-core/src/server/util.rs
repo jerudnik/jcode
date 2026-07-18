@@ -39,9 +39,15 @@ pub(crate) fn embedding_idle_unload_secs() -> u64 {
 pub(crate) async fn get_shared_mcp_pool(
     cell: &OnceCell<Arc<crate::mcp::SharedMcpPool>>,
 ) -> Arc<crate::mcp::SharedMcpPool> {
-    cell.get_or_init(|| async { Arc::new(crate::mcp::SharedMcpPool::from_default_config()) })
-        .await
-        .clone()
+    cell.get_or_init(|| async {
+        // Composition root (F01 design 3.0): the pool receives the server's
+        // activity-lease authority so in-flight MCP calls pin the daemon.
+        Arc::new(crate::mcp::SharedMcpPool::from_default_config_with_activity(
+            super::shutdown::activity_authority(),
+        ))
+    })
+    .await
+    .clone()
 }
 
 pub(crate) fn server_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {

@@ -36,6 +36,12 @@ use model::{
 pub struct BackgroundTaskManager {
     tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
     output_dir: PathBuf,
+    /// Activity-lease authority (F01 C5): non-detached tasks hold a lease
+    /// for their tracked lifetime so the daemon cannot idle-exit while they
+    /// run. Defaults to no-op; the daemon injects its real authority at
+    /// startup via [`Self::set_activity_authority`] (composition-root
+    /// injection, keeping this crate free of server types).
+    activity: std::sync::RwLock<Arc<dyn jcode_core::activity::ActivityLeaseAuthority>>,
 }
 
 impl BackgroundTaskManager {
@@ -47,7 +53,44 @@ impl BackgroundTaskManager {
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             output_dir,
+            activity: std::sync::RwLock::new(
+                jcode_core::activity::noop_activity_authority(),
+            ),
         }
+    }
+
+    /// Inject the daemon's activity-lease authority (F01 C5). Called once by
+    /// the server at startup, before it accepts work.
+    pub fn set_activity_authority(
+        &self,
+        authority: Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    ) {
+        *self
+            .activity
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = authority;
+    }
+
+    fn acquire_task_lease(
+        &self,
+        task_id: &str,
+        tool_name: &str,
+    ) -> Option<jcode_core::activity::ActivityLeaseGuard> {
+        let authority = self
+            .activity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        // During shutdown drain new leases are refused; the task still runs
+        // (registration already happened conceptually) but does not pin the
+        // daemon. That matches design 4.1: post-drain background work is
+        // finalized by the cleanup list.
+        jcode_core::activity::ActivityLeaseGuard::acquire(
+            &authority,
+            jcode_core::activity::ActivityClass::BackgroundTask,
+            &format!("{tool_name}/{task_id}"),
+        )
+        .ok()
     }
 
     /// Create a new background task manager
@@ -486,6 +529,10 @@ impl BackgroundTaskManager {
     {
         let (notify, wake) = normalize_delivery(notify, wake);
         let task_id = Self::generate_task_id();
+        // Activity lease (F01 C5): acquired at method entry, BEFORE the
+        // future is spawned, so it exists before the task can execute. Moved
+        // into the RunningTask record below and dropped at terminal pruning.
+        let activity_lease = self.acquire_task_lease(&task_id, tool_name);
         let output_path = self.output_dir.join(format!("{}.output", task_id));
         let status_path = self.output_dir.join(format!("{}.status.json", task_id));
         let started_at_rfc3339 = chrono::Utc::now().to_rfc3339();
@@ -646,6 +693,7 @@ impl BackgroundTaskManager {
             started_at_rfc3339,
             delivery_flags: delivery_flags_tx,
             handle,
+            activity_lease,
         };
 
         self.tasks
@@ -848,6 +896,9 @@ impl BackgroundTaskManager {
             started_at_rfc3339: initial_status.started_at.clone(),
             delivery_flags: delivery_flags_tx,
             handle: wrapper_handle,
+            // Acquired at adoption: pre-adoption execution was covered by
+            // the foreground owner's own lease (F01 design 3.3.3 C5).
+            activity_lease: self.acquire_task_lease(&task_id, tool_name),
         };
 
         self.tasks

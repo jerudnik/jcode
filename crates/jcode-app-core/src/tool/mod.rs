@@ -768,10 +768,16 @@ impl Registry {
 
         let mcp_manager = if let Some(pool) = shared_pool {
             let sid = session_id.unwrap_or_else(|| "unknown".to_string());
-            Arc::new(RwLock::new(McpManager::with_shared_pool_for_dir(
+            // Composition root (F01 design 3.0): pool-backed managers run in
+            // the daemon, so they receive the server's activity-lease
+            // authority; every MCP call (pooled, owned, connect-on-first-
+            // call) then pins the daemon against idle exit. Pool-less
+            // managers are local/test harnesses and keep the no-op default.
+            Arc::new(RwLock::new(McpManager::with_shared_pool_for_dir_and_activity(
                 pool,
                 sid,
                 working_dir,
+                crate::server::shutdown::activity_authority(),
             )))
         } else {
             Arc::new(RwLock::new(McpManager::new()))

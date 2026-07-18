@@ -90,6 +90,12 @@ pub(super) async fn maybe_start_async_debug_job(
         let msg = msg.to_string();
         let job_id_inner = job_id.clone();
         tokio::spawn(async move {
+            // Activity lease (F01 C4): debug connections do not count as
+            // clients, so the job itself pins the daemon while it runs.
+            let _lease = super::shutdown::acquire_lease(
+                jcode_core::activity::ActivityClass::DebugJob,
+                &job_id_inner,
+            );
             mark_job_running(&jobs, &job_id_inner).await;
 
             let result = super::run_swarm_message(agent.clone(), &msg).await;
@@ -119,6 +125,11 @@ pub(super) async fn maybe_start_async_debug_job(
         let msg = msg.to_string();
         let job_id_inner = job_id.clone();
         tokio::spawn(async move {
+            // Activity lease (F01 C4): see above.
+            let _lease = super::shutdown::acquire_lease(
+                jcode_core::activity::ActivityClass::DebugJob,
+                &job_id_inner,
+            );
             mark_job_running(&jobs, &job_id_inner).await;
 
             let result = {
