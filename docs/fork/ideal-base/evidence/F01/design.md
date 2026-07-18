@@ -1,6 +1,6 @@
 # F01 design record: one shutdown coordinator, one activity-lease authority
 
-Status: design only, revision 3. Revision 1 verified against
+Status: design only, revision 4. Revision 1 verified against
 `c96c4b57de57438d63e23796e6b038027265fca4`; revisions 2-3 re-verified against
 `398b51c07d1f0545bfdccd6a33e6ea9fd76b6574` (main). No source modified.
 Revision 2 resolved the independent FAIL review
@@ -10,7 +10,11 @@ the re-review FAIL (`../../reviews/F01-architecture-re-review.md`, commit
 `09f367098`): B-R1 (startup reload-recovery caller family added, section
 3.3), B-R2 (termination ownership protocol, section 3.2.1), I-R1 (background
 guard scope), I-R2 (two authorized termination sites enumerated), M-R1/M-R2
-(citation and deadline-wording precision).
+(citation and deadline-wording precision). Revision 4 resolves the round-2
+FAIL (same review file, Round 2 section, commit `6e1c59f34`): R2-B1
+(watchdog disarm-before-`Cleaned` atomic handoff, 3.2.4), R2-B2
+(`src/cli/dispatch.rs` added to F02 ownership, 3.2.1), R2-I1 (executor
+prose and lint rule), R2-I2 (honest C5 adopt/pruning boundaries).
 
 Scope contract (A0/A1 of `ACCEPTANCE_STANDARD.md`):
 
@@ -218,16 +222,20 @@ is exactly one source of truth for "clients present": the lease table's
 
 ### 3.2 `ShutdownCoordinator` (the only exit path)
 
-All voluntary exits (E1-E5) converge on the coordinator; direct
-`std::process::exit` outside it becomes a lint/review violation in F02.
+All voluntary exits (E1-E5) converge on the coordinator. The F02 lint/review
+rule: any `std::process::exit` in the daemon image outside the two authorized
+termination sites of 3.2.1 (the top-level runner and the coordinator-armed
+watchdog) is a violation.
 Reload handoff is coordinator **phase state**, never a lease (resolves B2's
 self-block): the coordinator does not wait on anything it owns.
 
 #### 3.2.1 One serialized executor
 
 The coordinator is an actor: one dedicated task owns the phase variable and
-performs every transition, cleanup step, and the final termination call.
-Callers interact only through a cloneable `ShutdownHandle`:
+performs every transition, every cleanup step, and the final
+terminal-publication transition (it does not itself exit the process; see
+termination ownership below). Callers interact only through a cloneable
+`ShutdownHandle`:
 
 ```rust
 impl ShutdownHandle {
@@ -275,6 +283,16 @@ This makes `begin_and_wait` coherent: waiters receive `Cleaned` before the
 process exits, so paths like accept-loop failure can await full cleanup and
 still return through `run()`. `Handoff` remains special: exec replaces the
 process image inside the executor's `Handoff` phase and is not a termination.
+
+Ownership consequence: the sole normal termination site is
+`src/cli/dispatch.rs` (the `serve` arm constructs `Server` at
+`dispatch.rs:106` and calls `run` at `dispatch.rs:114`; verified sole
+production caller). Implementing the outcome-to-code mapping there requires
+changing that file, so `src/cli/dispatch.rs` is added to F02 `owned_paths`
+in `WORK_GRAPH.json` (both copies). F06, which also lists the file for its
+later MCP owner-identity work, depends on F02, so ownership is sequential,
+never concurrent. F02 acceptance evidence must cover normal outcome-to-code
+mapping and the accept-loop code 45 at this site.
 
 #### 3.2.2 Total reason priority lattice
 
@@ -356,8 +374,20 @@ removed by F02. Instead:
 
 - The executor arms one OS-thread watchdog when it accepts a `begin` for a
   termination reason, with deadline `watchdog_deadline(reason)`; it re-arms on
-  upgrade (never later than the previous deadline) and disarms only at
-  `Handoff` exec success.
+  upgrade (never later than the previous deadline).
+- Disarm rule (exactly two disarm cases, both executor-performed): (a) at
+  `Handoff` exec success; (b) after the last cleanup step completes and
+  BEFORE `Cleaned` is published. Disarm is synchronous and decisive: the
+  executor cancels the watchdog through a shared atomic/flag the watchdog
+  thread checks before its `process::exit` call, and confirms cancellation
+  won (e.g. a CAS on a two-state `Armed/Cancelled` cell) before publishing
+  `Cleaned`. If the CAS loses — the watchdog already committed to firing —
+  the executor does NOT publish `Cleaned`; the outcome is `ForcedExit`.
+  Waiters therefore never observe `Cleaned` in an execution where the
+  watchdog fires: the two terminal outcomes are mutually exclusive by the
+  atomic handoff. The pure-model test drives the race between cleanup
+  completion, watchdog deadline, waiter notification, guard unwind, and
+  runner exit (4.3).
 - Budgets are chosen so that
   `drain_deadline(reason) + cleanup_budget < watchdog_deadline(reason)`.
   For `SigTerm` the total stays within the current 3s envelope.
@@ -448,7 +478,7 @@ turn-refused error to the caller; no turn starts silently during drain.
 | C1/C2/C3 `ProviderTurn` | inside `process_message_streaming_mpsc` (`client_lifecycle.rs:3179`) |
 | `StartupRecovery` | `server.rs:721` recovery window (3.3.1) |
 | C4 `DebugJob` | `debug_jobs.rs:72`, wrapping both spawned job tasks (`:92`, `:121`) |
-| C5 `BackgroundTask` | `BackgroundTaskManager` non-detached branches, via the injected authority (3.0). Guard scope: acquired at method entry in `spawn_with_notify` (before the `tokio::spawn` at `background.rs:483-484`) and in the adopt path before its registration, moved into the `RunningTask` record inserted into the live map (`background.rs:584-600`), and dropped at terminal pruning of that record — so the guard exists before the future can execute and lives exactly as long as the tracked task |
+| C5 `BackgroundTask` | `BackgroundTaskManager` non-detached branches, via the injected authority (3.0). Guard scope: for `spawn_with_notify`, acquired at method entry before the `tokio::spawn` at `background.rs:483-484`, so it exists before the future can execute; for the adopt path (`background.rs:628-686`, wrapping an already-running `JoinHandle`), acquired at adoption — execution before adoption belongs to the foreground owner that started the work and is covered by that owner's own lease. In both branches the guard is moved into the `RunningTask` record inserted into the live map (`background.rs:584-600`) and dropped at terminal pruning (`background.rs:551-552`, adopt: `:754-758`) after terminal status persistence; post-pruning wrapper work (output preview, bus publication) is not covered by this lease and is handed off to the scheduled-delivery/turn policy (3.3.2) |
 | C7 `McpCall` | `manager.rs:342` and `pool.rs:232` (3.0.1) |
 | C8 `SwarmWaiter` | `comm_await.rs:364` watcher body (3.3.2) |
 | C9 `ScheduledDelivery` | ambient runner dispatch (3.3.2) |

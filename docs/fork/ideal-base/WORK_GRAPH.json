@@ -145,6 +145,7 @@
           "crates/jcode-core/src/activity.rs",
           "crates/jcode-core/src/lib.rs",
           "crates/jcode-app-core/src/tool/mod.rs",
+          "src/cli/dispatch.rs",
           "docs/fork/ideal-base/evidence/F02/**"
         ],
         "acceptance_gates": [
@@ -892,6 +893,7 @@
         "crates/jcode-core/src/activity.rs",
         "crates/jcode-core/src/lib.rs",
         "crates/jcode-app-core/src/tool/mod.rs",
+        "src/cli/dispatch.rs",
         "docs/fork/ideal-base/evidence/F02/**"
       ],
       "acceptance_gates": [
