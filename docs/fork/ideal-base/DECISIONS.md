@@ -132,3 +132,17 @@ window; the stash entry no longer exists. Coordinator verified
 `cargo test -p jcode-storage --lib active_pids`: 10/10 pass at that commit.
 The change is a bounded test addition consistent with F26's seam and is
 retained on main.
+
+## D009. Temporary review-model substitution: OpenAI for Opus-class
+
+**Decision:** Anthropic usage is exhausted as of 2026-07-18T07:17Z (user
+notice). Until further notice, "Opus-class" verification/critique nodes run on
+the strongest available OpenAI route (`gpt-5.6-sol` at high effort, falling
+back to `gpt-5.5`). Review artifacts must name the actual model used.
+
+**Reason:** the railway must keep moving; the review-model requirement is
+about independent adversarial capability, not vendor identity.
+
+**Reopen trigger:** Anthropic usage restored; subsequent reviews may return to
+Opus-class models. Already-accepted reviews are not re-run solely for vendor
+identity.
