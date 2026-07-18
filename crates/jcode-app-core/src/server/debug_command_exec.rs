@@ -627,18 +627,9 @@ mod tests {
     use jcode_agent_runtime::InterruptSignal;
     use std::collections::HashMap;
     use std::ffi::OsString;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tokio::sync::{Mutex as AsyncMutex, RwLock};
-
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
 
     struct EnvGuard {
         key: &'static str,
@@ -690,7 +681,9 @@ mod tests {
 
     #[tokio::test]
     async fn debug_tool_selfdev_reload_returns_promptly_for_direct_execution() {
-        let _env_lock = lock_env();
+        let _env_lock = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp JCODE_HOME");
+        let _home = EnvGuard::set("JCODE_HOME", &temp_home.path().to_string_lossy());
         let _test_session = EnvGuard::set("JCODE_TEST_SESSION", "1");
         let _debug_control = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
 
@@ -748,6 +741,10 @@ mod tests {
             output.contains("Reload acknowledged") || output.contains("Server is restarting now"),
             "expected reload acknowledgement output, got: {}",
             output
+        );
+        assert!(
+            temp_home.path().join("builds/manifest.json").exists(),
+            "selfdev reload state should be confined to the temporary JCODE_HOME"
         );
     }
 
