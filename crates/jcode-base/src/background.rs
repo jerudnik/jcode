@@ -667,10 +667,19 @@ impl BackgroundTaskManager {
             progress: None,
             event_history: Vec::new(),
         };
+        // F04-B1: successful initial persistence is a PREREQUISITE for
+        // starting non-detached work. Without a durable `Running` file, a
+        // process death mid-task would leave no record for the next-boot
+        // orphan sweep to reconcile. Fail closed: the task never runs.
         if let Err(error) = self.store.write_initial(&initial_status).await {
             crate::logging::error(&format!(
-                "Initial status persistence failed for task {task_id}: {error:#}"
+                "Initial status persistence failed for task {task_id}; refusing to start: {error:#}"
             ));
+            return BackgroundTaskInfo {
+                task_id,
+                output_file: output_path,
+                status_file: status_path,
+            };
         }
         Self::publish_task_started_activity(
             &task_id,
@@ -715,70 +724,35 @@ impl BackgroundTaskManager {
             };
 
             let (notify_flag, wake_flag) = *delivery_flags_rx.borrow();
-            // Terminal write through the store (F04): serialized against
-            // concurrent progress/delivery mutations, atomic on disk, and
-            // first-terminal-wins. The build closure receives the freshly
-            // loaded prior state so progress/event history is preserved
-            // without a separate unserialized read.
-            let terminal_status = status.clone();
-            let terminal_error = error.clone();
-            let tool_name_for_write = tool_name_owned.clone();
-            let display_name_for_write = display_name_owned.clone();
-            let session_id_for_write = session_id_owned.clone();
-            let write_result = store_for_task
-                .write_terminal(&task_id_clone, move |prior| {
-                    let prior_progress =
-                        prior.as_ref().and_then(|status| status.progress.clone());
-                    let prior_event_history =
-                        prior.map(|status| status.event_history).unwrap_or_default();
-                    let mut final_status = TaskStatusFile {
-                        task_id: task_id_clone2,
-                        tool_name: tool_name_for_write,
-                        display_name: display_name_for_write,
-                        session_id: session_id_for_write,
-                        status: terminal_status.clone(),
-                        exit_code,
-                        error: terminal_error.clone(),
-                        started_at: started_at_rfc3339_for_task,
-                        completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                        duration_secs: Some(duration_secs),
-                        pid: None,
-                        owner_pid: Some(std::process::id()),
-                        owner_instance: Some(model::process_instance_token().to_string()),
-                        detached: false,
-                        notify: notify_flag,
-                        wake: wake_flag,
-                        progress: prior_progress,
-                        event_history: prior_event_history,
-                    };
-                    push_task_event(
-                        &mut final_status,
-                        terminal_event_record(
-                            terminal_status.clone(),
-                            exit_code,
-                            terminal_error.as_deref(),
-                        ),
-                    );
-                    final_status
-                })
-                .await;
-            if let Err(persist_error) = write_result {
-                crate::logging::error(&format!(
-                    "Terminal status persistence failed for task {task_id_clone3}: {persist_error:#}"
-                ));
-            }
-            let _ = &status_path_clone;
-
-            // Drop this task from the live map now that its terminal status is
-            // persisted. Order matters: pruning only after the status-file
-            // write keeps "in the live map while the status file says Running"
-            // equivalent to "a task future is actually executing", which the
-            // run_plan duplicate-driver guard and self-dev build reconciliation
-            // rely on. Awaiting registration first means a task that finishes
-            // instantly cannot race the insert below and leave a permanent
-            // phantom entry in the map.
+            // Terminal write through the store with in-process recovery
+            // (F04/F04-B1): serialized, atomic, first-terminal-wins. On
+            // success the live-map entry is pruned; on persistence failure
+            // the entry is retained as a visible tombstone and a detached
+            // retry loop prunes once the write finally lands. Awaiting
+            // registration first means an instantly finishing task cannot
+            // race the insert below and leave a permanent phantom entry.
             let _ = registered_rx.await;
-            tasks_for_prune.write().await.remove(&task_id_clone);
+            let _ = &status_path_clone;
+            let _ = task_id_clone3;
+            persist_terminal_with_recovery(
+                store_for_task,
+                tasks_for_prune,
+                TerminalSpec {
+                    task_id: task_id_clone2,
+                    tool_name: tool_name_owned.clone(),
+                    display_name: display_name_owned.clone(),
+                    session_id: session_id_owned.clone(),
+                    status: status.clone(),
+                    exit_code,
+                    error: error.clone(),
+                    started_at: started_at_rfc3339_for_task,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    duration_secs,
+                    notify: notify_flag,
+                    wake: wake_flag,
+                },
+            )
+            .await;
 
             // Read output preview for notification
             let output_preview = tokio::fs::read_to_string(&output_path_clone)
@@ -890,9 +864,16 @@ impl BackgroundTaskManager {
             progress: None,
             event_history: Vec::new(),
         };
+        // Adoption cannot fail closed on initial-persistence failure: the
+        // future is ALREADY running (a promoted foreground command). Track
+        // it regardless so shutdown finalize can abort it; the terminal
+        // recovery loop (persist_terminal_with_recovery) will eventually
+        // produce a durable record. Only a process death in the window
+        // between a failed initial write and terminal recovery loses the
+        // record, which is no worse than the pre-adoption foreground state.
         if let Err(error) = self.store.write_initial(&initial_status).await {
             crate::logging::error(&format!(
-                "Initial status persistence failed for task {task_id}: {error:#}"
+                "Initial status persistence failed for adopted task {task_id} (tracking anyway): {error:#}"
             ));
         }
         Self::publish_task_started_activity(
@@ -951,63 +932,30 @@ impl BackgroundTaskManager {
             }
 
             let (notify_flag, wake_flag) = *delivery_flags_rx.borrow();
-            // Terminal write through the store (F04): serialized, atomic,
-            // first-terminal-wins; prior progress/events come from the
-            // freshly loaded state inside the same critical section.
-            let terminal_status = status.clone();
-            let terminal_error = error.clone();
-            let tool_name_for_write = tool_name_owned.clone();
-            let display_name_for_write = display_name_owned.clone();
-            let session_id_for_write = session_id_owned.clone();
-            let write_result = store_for_task
-                .write_terminal(&task_id_clone, move |prior| {
-                    let prior_progress =
-                        prior.as_ref().and_then(|status| status.progress.clone());
-                    let prior_event_history =
-                        prior.map(|status| status.event_history).unwrap_or_default();
-                    let mut final_status = TaskStatusFile {
-                        task_id: task_id_clone2,
-                        tool_name: tool_name_for_write,
-                        display_name: display_name_for_write,
-                        session_id: session_id_for_write,
-                        status: terminal_status.clone(),
-                        exit_code,
-                        error: terminal_error.clone(),
-                        started_at: started_at_rfc3339,
-                        completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                        duration_secs: Some(duration_secs),
-                        pid: None,
-                        owner_pid: Some(std::process::id()),
-                        owner_instance: Some(model::process_instance_token().to_string()),
-                        detached: false,
-                        notify: notify_flag,
-                        wake: wake_flag,
-                        progress: prior_progress,
-                        event_history: prior_event_history,
-                    };
-                    push_task_event(
-                        &mut final_status,
-                        terminal_event_record(
-                            terminal_status.clone(),
-                            exit_code,
-                            terminal_error.as_deref(),
-                        ),
-                    );
-                    final_status
-                })
-                .await;
-            if let Err(persist_error) = write_result {
-                crate::logging::error(&format!(
-                    "Adopted terminal persistence failed: {persist_error:#}"
-                ));
-            }
-            let _ = &status_path_clone;
-
-            // Prune the live-map entry only after the terminal status file is
-            // persisted (and after registration below, so instant completions
-            // cannot race the insert and leave a phantom entry).
+            // Terminal write via store with in-process recovery (F04-B1);
+            // prune only after persistence succeeds (helper), registration
+            // awaited first so instant completions cannot leave phantoms.
             let _ = registered_rx.await;
-            tasks_for_prune.write().await.remove(&task_id_clone);
+            let _ = &status_path_clone;
+            persist_terminal_with_recovery(
+                store_for_task,
+                tasks_for_prune,
+                TerminalSpec {
+                    task_id: task_id_clone2,
+                    tool_name: tool_name_owned.clone(),
+                    display_name: display_name_owned.clone(),
+                    session_id: session_id_owned.clone(),
+                    status: status.clone(),
+                    exit_code,
+                    error: error.clone(),
+                    started_at: started_at_rfc3339,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    duration_secs,
+                    notify: notify_flag,
+                    wake: wake_flag,
+                },
+            )
+            .await;
 
             let output_preview = if output_text.len() > 500 {
                 format!("{}...", crate::util::truncate_str(&output_text, 500))
@@ -1335,30 +1283,24 @@ impl BackgroundTaskManager {
             .await?;
 
         let status = match outcome {
+            // Applied: the mutation persisted this progress value; publish.
             store::MutateOutcome::Applied(status) => status,
-            // Terminal truth preserved: no progress event for a finished task.
-            store::MutateOutcome::TerminalPreserved(status) => return Ok(Some(status)),
+            // Unchanged (no-op skip) or terminal truth preserved: nothing
+            // new happened; no bus event (F04-I1).
+            store::MutateOutcome::Unchanged(status)
+            | store::MutateOutcome::TerminalPreserved(status) => return Ok(Some(status)),
             store::MutateOutcome::Missing => return Ok(None),
         };
 
-        // Only publish when the mutation actually applied this progress
-        // value (skipped no-op mutations return early via the closure's
-        // `false`, which yields Applied with unchanged state).
-        let applied = status
-            .progress
-            .as_ref()
-            .is_some_and(|persisted| progress_equivalent(persisted, &progress));
-        if applied {
-            Bus::global().publish(BusEvent::BackgroundTaskProgress(
-                BackgroundTaskProgressEvent {
-                    task_id: status.task_id.clone(),
-                    tool_name: status.tool_name.clone(),
-                    display_name: status.display_name.clone(),
-                    session_id: status.session_id.clone(),
-                    progress,
-                },
-            ));
-        }
+        Bus::global().publish(BusEvent::BackgroundTaskProgress(
+            BackgroundTaskProgressEvent {
+                task_id: status.task_id.clone(),
+                tool_name: status.tool_name.clone(),
+                display_name: status.display_name.clone(),
+                session_id: status.session_id.clone(),
+                progress,
+            },
+        ));
 
         Ok(Some(status))
     }
@@ -1400,7 +1342,8 @@ impl BackgroundTaskManager {
             .await?;
         let status = match outcome {
             store::MutateOutcome::Applied(status)
-            | store::MutateOutcome::TerminalPreserved(status) => status,
+            | store::MutateOutcome::TerminalPreserved(status)
+            | store::MutateOutcome::Unchanged(status) => status,
             store::MutateOutcome::Missing => return Ok(None),
         };
 
@@ -1430,46 +1373,33 @@ impl BackgroundTaskManager {
                 original.abort();
             }
             task.handle.abort();
+            drop(tasks);
 
-            // Update status file
+            // Terminal write with recovery (F04-B1): the cancelled task was
+            // already removed/aborted above, so on persistence failure the
+            // retry loop guarantees a durable terminal record eventually
+            // (the initial Running file exists as a spawn prerequisite, so
+            // even a process death leaves the orphan sweep a record).
             let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
-            let mut final_status = TaskStatusFile {
-                task_id: task.task_id,
-                tool_name: task.tool_name,
-                display_name: task.display_name,
-                session_id: task.session_id,
-                status: BackgroundTaskStatus::Failed,
-                exit_code: None,
-                error: Some("Cancelled by user".to_string()),
-                started_at: task.started_at_rfc3339,
-                completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                duration_secs: Some(task.started_at.elapsed().as_secs_f64()),
-                pid: None,
-                owner_pid: Some(std::process::id()),
-                owner_instance: Some(model::process_instance_token().to_string()),
-                detached: false,
-                notify: notify_flag,
-                wake: wake_flag,
-                progress: None,
-                event_history: Vec::new(),
-            };
-            let event_status = final_status.status.clone();
-            let event_exit_code = final_status.exit_code;
-            let event_error = final_status.error.clone();
-            push_task_event(
-                &mut final_status,
-                terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
-            );
-            let cancel_task_id = final_status.task_id.clone();
-            if let Err(error) = self
-                .store
-                .write_terminal(&cancel_task_id, move |_| final_status)
-                .await
-            {
-                crate::logging::error(&format!(
-                    "Cancel terminal persistence failed: {error:#}"
-                ));
-            }
+            persist_terminal_with_recovery(
+                Arc::clone(&self.store),
+                Arc::clone(&self.tasks),
+                TerminalSpec {
+                    task_id: task.task_id,
+                    tool_name: task.tool_name,
+                    display_name: task.display_name,
+                    session_id: task.session_id,
+                    status: BackgroundTaskStatus::Failed,
+                    exit_code: None,
+                    error: Some("Cancelled by user".to_string()),
+                    started_at: task.started_at_rfc3339,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    duration_secs: task.started_at.elapsed().as_secs_f64(),
+                    notify: notify_flag,
+                    wake: wake_flag,
+                },
+            )
+            .await;
 
             Ok(true)
         } else {
@@ -1691,6 +1621,119 @@ impl BackgroundTaskManager {
 
         matches.sort_by(|a, b| a.task_id.cmp(&b.task_id));
         matches
+    }
+}
+
+
+/// Owned terminal outcome of a task, used to (re)build the final status file
+/// against freshly loaded prior state on every persistence attempt (F04-B1).
+#[derive(Clone)]
+struct TerminalSpec {
+    task_id: String,
+    tool_name: String,
+    display_name: Option<String>,
+    session_id: String,
+    status: BackgroundTaskStatus,
+    exit_code: Option<i32>,
+    error: Option<String>,
+    started_at: String,
+    completed_at: String,
+    duration_secs: f64,
+    notify: bool,
+    wake: bool,
+}
+
+fn build_terminal_status(
+    prior: Option<TaskStatusFile>,
+    spec: &TerminalSpec,
+) -> TaskStatusFile {
+    let prior_progress = prior.as_ref().and_then(|status| status.progress.clone());
+    let prior_event_history = prior.map(|status| status.event_history).unwrap_or_default();
+    let mut final_status = TaskStatusFile {
+        task_id: spec.task_id.clone(),
+        tool_name: spec.tool_name.clone(),
+        display_name: spec.display_name.clone(),
+        session_id: spec.session_id.clone(),
+        status: spec.status.clone(),
+        exit_code: spec.exit_code,
+        error: spec.error.clone(),
+        started_at: spec.started_at.clone(),
+        completed_at: Some(spec.completed_at.clone()),
+        duration_secs: Some(spec.duration_secs),
+        pid: None,
+        owner_pid: Some(std::process::id()),
+        owner_instance: Some(model::process_instance_token().to_string()),
+        detached: false,
+        notify: spec.notify,
+        wake: spec.wake,
+        progress: prior_progress,
+        event_history: prior_event_history,
+    };
+    push_task_event(
+        &mut final_status,
+        terminal_event_record(spec.status.clone(), spec.exit_code, spec.error.as_deref()),
+    );
+    final_status
+}
+
+/// Persist a terminal state with in-process durable recovery (F04-B1).
+///
+/// On immediate success the live-map entry is pruned. On failure the entry
+/// is RETAINED (a visible tombstone, never a phantom "pruned but Running on
+/// disk" state) and a detached retry loop keeps attempting persistence with
+/// backoff, pruning only once the write lands. Across a process death the
+/// initial `Running` file (a spawn prerequisite since F04-B1) is reconciled
+/// by the next-boot orphan sweep.
+async fn persist_terminal_with_recovery(
+    store: Arc<store::TaskStatusStore>,
+    tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
+    spec: TerminalSpec,
+) {
+    let spec_for_first = spec.clone();
+    match store
+        .write_terminal(&spec.task_id, move |prior| {
+            build_terminal_status(prior, &spec_for_first)
+        })
+        .await
+    {
+        Ok(_) => {
+            tasks.write().await.remove(&spec.task_id);
+        }
+        Err(error) => {
+            crate::logging::error(&format!(
+                "Terminal persistence failed for task {}; retaining live-map tombstone and retrying: {error:#}",
+                spec.task_id
+            ));
+            tokio::spawn(async move {
+                let mut delay = std::time::Duration::from_millis(250);
+                loop {
+                    tokio::time::sleep(delay).await;
+                    let spec_for_retry = spec.clone();
+                    match store
+                        .write_terminal(&spec.task_id, move |prior| {
+                            build_terminal_status(prior, &spec_for_retry)
+                        })
+                        .await
+                    {
+                        Ok(_) => {
+                            crate::logging::info(&format!(
+                                "Terminal persistence recovered for task {}",
+                                spec.task_id
+                            ));
+                            tasks.write().await.remove(&spec.task_id);
+                            return;
+                        }
+                        Err(error) => {
+                            crate::logging::warn(&format!(
+                                "Terminal persistence retry failed for task {}: {error:#}",
+                                spec.task_id
+                            ));
+                            delay = (delay * 2).min(std::time::Duration::from_secs(60));
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 

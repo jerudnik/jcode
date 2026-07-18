@@ -615,3 +615,90 @@ async fn progress_and_delivery_survive_concurrent_terminal_completion() {
     }
     panic!("task never reached terminal state");
 }
+
+#[tokio::test]
+async fn spawn_refuses_to_start_when_initial_persistence_fails() {
+    // F04-B1: successful initial persistence is a prerequisite for starting
+    // non-detached work. Make the output dir unwritable-as-a-dir by using a
+    // file path, so the store's temp write fails deterministically.
+    let tmp = tempdir().unwrap();
+    let bogus_dir = tmp.path().join("not-a-dir");
+    tokio::fs::write(&bogus_dir, b"file").await.unwrap();
+    let manager = BackgroundTaskManager::with_output_dir(bogus_dir);
+
+    let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ran_flag = std::sync::Arc::clone(&ran);
+    let info = manager
+        .spawn_with_notify("bash", None, "session-noinit", false, false, move |_p| {
+            let ran_flag = ran_flag;
+            async move {
+                ran_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(TaskResult::completed(Some(0)))
+            }
+        })
+        .await;
+
+    sleep(Duration::from_millis(100)).await;
+    assert!(
+        !ran.load(std::sync::atomic::Ordering::SeqCst),
+        "task must NOT run when the initial status write fails"
+    );
+    assert!(
+        !manager.is_live_task(&info.task_id),
+        "refused task must not be tracked"
+    );
+}
+
+#[tokio::test]
+async fn terminal_persistence_failure_retains_tombstone_then_recovers() {
+    // F04-B1: on terminal persistence failure the live-map entry is
+    // RETAINED (visible tombstone, no phantom prune) and the detached
+    // retry loop prunes once persistence recovers. We simulate failure by
+    // replacing the status dir with a file after the initial write, then
+    // restore it and watch recovery land.
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("tasks");
+    let manager = BackgroundTaskManager::with_output_dir(dir.clone());
+
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let info = manager
+        .spawn_with_notify("bash", None, "session-tomb", false, false, move |_p| {
+            async move {
+                let _ = release_rx.await;
+                Ok(TaskResult::completed(Some(0)))
+            }
+        })
+        .await;
+    assert!(manager.is_live_task(&info.task_id));
+
+    // Break the directory: swap it for a file so temp writes fail.
+    let saved = tmp.path().join("saved-tasks");
+    tokio::fs::rename(&dir, &saved).await.unwrap();
+    tokio::fs::write(&dir, b"block").await.unwrap();
+
+    // Let the task complete; its terminal write must fail.
+    let _ = release_tx.send(());
+    sleep(Duration::from_millis(300)).await;
+    assert!(
+        manager.is_live_task(&info.task_id),
+        "task must remain in the live map (tombstone) while terminal persistence fails"
+    );
+
+    // Heal the directory; the retry loop (250ms initial backoff, doubling)
+    // must persist the terminal state and prune.
+    tokio::fs::remove_file(&dir).await.unwrap();
+    tokio::fs::rename(&saved, &dir).await.unwrap();
+
+    for _ in 0..100 {
+        if !manager.is_live_task(&info.task_id) {
+            let status = manager
+                .status(&info.task_id)
+                .await
+                .expect("terminal status must exist after recovery");
+            assert_ne!(status.status, BackgroundTaskStatus::Running);
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    panic!("terminal persistence never recovered / task never pruned");
+}

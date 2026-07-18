@@ -51,6 +51,10 @@ pub(super) enum MutateOutcome {
     /// Non-terminal fields from the mutation (delivery flags, events) were
     /// still applied and persisted.
     TerminalPreserved(TaskStatusFile),
+    /// The closure declined (returned false): nothing was written. The
+    /// carried state is the PERSISTED state, untouched by the closure's
+    /// in-memory mutations.
+    Unchanged(TaskStatusFile),
     /// No status file exists for this task.
     Missing,
 }
@@ -88,9 +92,12 @@ impl TaskStatusStore {
         )
     }
 
-    /// Atomic write: serialize, write to a same-directory temp file, fsync,
+    /// Atomic replacement: serialize, write to a same-directory temp file,
     /// rename into place. A concurrent reader sees the old file or the new
-    /// file, never a torn mix.
+    /// file, never a torn mix. NOTE: this is atomic with respect to
+    /// concurrent readers, not durable across power loss/kernel crash (no
+    /// fsync of file or directory); crash-durability hardening is F05 scope
+    /// if its gates require it.
     async fn write_atomic(&self, path: &Path, status: &TaskStatusFile) -> Result<()> {
         let json = serde_json::to_string_pretty(status)
             .with_context(|| format!("serialize status for task {}", status.task_id))?;
@@ -124,19 +131,6 @@ impl TaskStatusStore {
         let status: TaskStatusFile = serde_json::from_str(&content)
             .with_context(|| format!("malformed status file {}", path.display()))?;
         Ok(Some(status))
-    }
-
-    /// Lenient read for listing paths: missing OR malformed both yield None
-    /// (the caller cannot act on corruption mid-listing), but malformed is
-    /// logged rather than silently ignored.
-    pub(super) async fn read_lenient(&self, task_id: &str) -> Option<TaskStatusFile> {
-        match self.read(task_id).await {
-            Ok(status) => status,
-            Err(error) => {
-                crate::logging::warn(&format!("Background status read failed: {error:#}"));
-                None
-            }
-        }
     }
 
     /// Parse a status file at an arbitrary path (directory sweeps). Malformed
@@ -192,12 +186,12 @@ impl TaskStatusStore {
             return Ok(MutateOutcome::Missing);
         };
         let terminal_truth = is_terminal(&existing).then(|| existing.clone());
-        let mut updated = existing;
+        let mut updated = existing.clone();
         if !mutate(&mut updated) {
-            return Ok(match terminal_truth {
-                Some(_) => MutateOutcome::TerminalPreserved(updated),
-                None => MutateOutcome::Applied(updated),
-            });
+            // Nothing written: return the PERSISTED state, not the closure's
+            // discarded in-memory mutations (store contract: the returned
+            // state is always persisted truth).
+            return Ok(MutateOutcome::Unchanged(existing));
         }
         if let Some(truth) = terminal_truth {
             // Terminal precedence: terminal fields are immutable.
