@@ -1,0 +1,35 @@
+{
+ "node_id": "i1",
+ "worker_session": "session_parrot_1784361265517_0ee450d4484804d2",
+ "worker_name": "parrot",
+ "model": "gpt-5.5",
+ "artifact": {
+  "confidence": "high",
+  "edge_cases_considered": [
+   "Lease acquired at t=0, held past idle timeout, released at t>timeout with clients still zero. Current design can exit immediately unless epoch is cleared while held.",
+   "Lease acquired and released before timeout. A correct quiescence epoch should restart from release/transition to fully idle, not from acquisition.",
+   "Client count nonzero during part of the window. The same epoch rule must clear while clients are present, then start only after the final client disconnects and leases are zero.",
+   "TemporaryIdle must share the PersistentIdle quiescence semantics, with owner-PID handled separately.",
+   "Stuck lease behavior is intentionally safe by pinning the daemon alive, per design lines 127-133, so auto-expiring leases is not an acceptable correction for I1."
+  ],
+  "evidence": [
+   "Review I1 text: `docs/fork/ideal-base/reviews/F01-architecture-critique.md:176-193` states reset-on-acquire is insufficient, describes the lease-held-longer-than-timeout then release failure scenario, and requires `idle_since` to be `None` while clients or leases are nonzero and set only on transition to fully quiescent.",
+   "Design taxonomy: `docs/fork/ideal-base/evidence/F01/design.md:78-80` requires PersistentIdle only after zero clients and zero leases for the full idle window, and TemporaryIdle to use the same rule.",
+   "Design lease model: `docs/fork/ideal-base/evidence/F01/design.md:118-124` defines pure acquire/release/active/is_idle but no idle epoch state; `docs/fork/ideal-base/evidence/F01/design.md:127-133` says stuck turns keeping the daemon alive are the safe failure mode, reinforcing that held leases must suppress idle progress rather than merely reset once.",
+   "Design shutdown rules: `docs/fork/ideal-base/evidence/F01/design.md:165-168` says PersistentIdle/TemporaryIdle have zero drain deadline because no leases are active by definition, which depends on the idle decision being made only after a truly continuous quiescent interval.",
+   "Conflicting runtime model: `docs/fork/ideal-base/evidence/F01/design.md:208-220` defines `should_exit(clients, leases, idle_elapsed_secs, idle_timeout_secs)` using only current `clients == 0 && leases.is_idle()` plus elapsed time, and defines the idle clock to reset whenever clients are present or a lease is acquired. It does not say the clock is paused/cleared while a lease remains held or reset on release into quiescence.",
+   "Design invariant: `docs/fork/ideal-base/evidence/F01/design.md:252-256` states I1 as a testable invariant: `Exited(PersistentIdle|TemporaryIdle)` is reachable only through states where `clients == 0 && leases.is_idle()` held for the entire idle window.",
+   "Design tests: `docs/fork/ideal-base/evidence/F01/design.md:273-280` calls for state enumeration/property tests and runtime fixtures holding each lease past a short timeout, then releasing and asserting exit. To satisfy A1/I1, that fixture must assert exit only after release plus a fresh timeout, not immediate exit.",
+   "Acceptance standard: `docs/fork/ideal-base/ACCEPTANCE_STANDARD.md:17-23` requires idle exit to have zero clients and zero active work leases, and a no-provider blocking fixture proving the daemon remains alive while each lease is held and exits only after release plus timeout.",
+   "Critique revision gate: `docs/fork/ideal-base/reviews/F01-architecture-critique.md:291-306` says F01 should not be accepted until the revised design defines a continuous quiescence epoch for idle timeout, making this I1 issue an acceptance blocker for the design revision."
+  ],
+  "findings": "I1 is valid. Classification: IMPORTANT design contradiction and F01 acceptance blocker, although not a standalone Blocking Finding in the critique. The review's concern is exactly supported by the design evidence: the design's invariant and taxonomy require a continuous zero-client/zero-lease idle window, but the proposed runtime model only makes `should_exit` consume a current snapshot plus externally supplied `idle_elapsed_secs`, with prose saying the clock resets when clients are present or a lease is acquired. That does not encode a continuous quiescence epoch. A lease can be acquired, held longer than the timeout while the elapsed clock continues from acquisition, then released, after which the current snapshot is quiescent and `idle_elapsed_secs >= timeout`, allowing immediate idle exit. This contradicts I1's own requirement that zero clients and zero leases held for the entire idle window, and it violates A1's fixture requirement that the daemon exits only after release plus timeout. Required correction criteria: (1) replace the external elapsed-only idle decision with explicit quiescence epoch state, e.g. `idle_since: Option<Tick>` maintained by the lifecycle model; (2) keep `idle_since = None` whenever `clients > 0` or any drain-blocking lease is nonzero, including the whole interval a lease is held; (3) set `idle_since` only on transition into `clients == 0 && leases.is_idle()`; (4) allow PersistentIdle/TemporaryIdle exit only when the system is still quiescent and `now - idle_since >= idle_timeout`; (5) specify the same semantics for temporary idle; (6) add pure tests for acquire/hold-past-timeout/release requiring a full new timeout, plus runtime no-provider fixtures per lease class that hold beyond timeout, release, prove no exit before a full post-release timeout, then prove exit and residue cleanup.",
+  "open_questions": [],
+  "validation": "Read-only verification only. I located I1 in the architecture critique, read the full F01 design record sections covering A0/A1 scope, lease authority, shutdown rules, ExitDecision semantics, matrix, invariants, and test plan, and compared them with the acceptance standard. No files were edited and no tests were run because this is a design-evidence adjudication.",
+  "what_i_did_not_check": [
+   "I did not execute daemon fixtures or compile tests, because F01 is design-only and the requested work was citation/design analysis.",
+   "I did not inspect implementation source beyond the cited design/review/acceptance docs, because I1 is about internal consistency of the F01 design evidence.",
+   "I did not analyze I2/I3 or the blocking B findings except where their revision gate context establishes that I1 blocks F01 acceptance."
+  ]
+ }
+}

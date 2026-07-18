@@ -140,6 +140,11 @@
           "crates/jcode-app-core/src/server.rs",
           "crates/jcode-app-core/src/server/**/*.rs",
           "crates/jcode-base/src/background.rs",
+          "crates/jcode-base/src/mcp/manager.rs",
+          "crates/jcode-base/src/mcp/pool.rs",
+          "crates/jcode-core/src/activity.rs",
+          "crates/jcode-core/src/lib.rs",
+          "crates/jcode-app-core/src/tool/mod.rs",
           "docs/fork/ideal-base/evidence/F02/**"
         ],
         "acceptance_gates": [
@@ -882,6 +887,11 @@
         "crates/jcode-app-core/src/server.rs",
         "crates/jcode-app-core/src/server/**/*.rs",
         "crates/jcode-base/src/background.rs",
+        "crates/jcode-base/src/mcp/manager.rs",
+        "crates/jcode-base/src/mcp/pool.rs",
+        "crates/jcode-core/src/activity.rs",
+        "crates/jcode-core/src/lib.rs",
+        "crates/jcode-app-core/src/tool/mod.rs",
         "docs/fork/ideal-base/evidence/F02/**"
       ],
       "acceptance_gates": [
