@@ -358,3 +358,32 @@ independent vendors while concentrating implementation on the strongest
 verified implementation route.
 
 **Reopen trigger:** route availability changes or user re-routes.
+
+## D018. F05 accepted; first cross-vendor delegated node
+
+**Decision:** F05 (background status durability verification) is accepted at
+commit `9f4d34d11`, the first node executed under the D017 delegation
+routing: implementation by an OpenAI `gpt-5.6-sol` high-effort swarm worker
+through the native task DAG, independent review by Anthropic
+`claude-opus-4-8` (`reviews/F05-verification-review.md`, first-round PASS,
+zero blocking findings, both gates met).
+
+Hardening delivered: fsync durability in `write_atomic` (temp-file sync
+before rename, parent-directory sync after, surfaced errors), stale
+`*.json.tmp.*` sweep on the startup reconcile path with live-writer
+protection, task-ID collision policy documented and tested, and the F05
+verification matrix (cross-instance concurrency, crash-interruption/torn
+write, malformed-file matrix, orphan re-verification).
+
+Review follow-ups (nonblocking): F05-I1 cross-process last-writer-wins on
+non-terminal fields remains an honest deferral (production topology is a
+single global manager); test naming could be tightened.
+
+Process note: the DAG driver's deep-mode gate auto-expanded the review node
+into 30+ analysis children after the implementation completed; per the D012
+lesson the coordinator snapshotted (`evidence/F05/plan_snapshot_before_prune.json`)
+and cleared the plan, then ran the review as a directly-routed cross-vendor
+session instead.
+
+**Reopen trigger:** F08's integrated gate or later store work uncovering a
+durability defect.
