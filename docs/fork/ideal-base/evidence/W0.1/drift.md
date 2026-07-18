@@ -76,3 +76,14 @@ the activation itself proceeded (channels point at the new build, the live
 shared server was started 2026-07-17 15:42 and predates it), but the
 `pending_activation` marker was never cleared. Disposition unchanged:
 preserved untouched per D006 as an F09 fixture.
+
+## Correction (2026-07-18T06:19Z)
+
+`jcode debug server:info` reports the live shared server is
+`v0.46.0-dev (923c6353e, dirty)` with uptime ~2000s at 06:18Z, i.e. it took the
+activated canary via in-place reload around 05:45Z (the `ps lstart` value of
+2026-07-17 15:42 reflects the original process spawn; reload exec preserves the
+PID). The earlier sentence claiming the running server "predates" the
+activation is therefore wrong about the running image: the activation itself
+completed successfully end to end. Only the `pending_activation` marker was
+left uncleared, which remains the F09 fixture.
