@@ -509,9 +509,26 @@ impl BackgroundTaskManager {
                 .write_terminal(&task_id_for_write, move |_| final_status)
                 .await
             {
-                crate::logging::error(&format!(
-                    "Shutdown finalize persistence failed: {error:#}"
-                ));
+                // Explicit failure policy (F04-R2-B1): with a durable
+                // Running record on disk, the next-boot orphan sweep is the
+                // recovery authority and this log suffices (the daemon is
+                // exiting; no retry loop can outlive it). Without one (an
+                // adopted task whose permitted initial write failed AND
+                // whose terminal write now failed while storage is broken),
+                // the record is irrecoverably lost; state that loudly as
+                // accepted data loss rather than pretending otherwise.
+                if task.durable_record {
+                    crate::logging::error(&format!(
+                        "Shutdown finalize persistence failed for {task_id_for_write} \
+                         (initial Running record exists; next-boot orphan sweep will reconcile): {error:#}"
+                    ));
+                } else {
+                    crate::logging::error(&format!(
+                        "DATA LOSS: shutdown finalize persistence failed for adopted task \
+                         {task_id_for_write} with no durable record (initial write also failed); \
+                         the task outcome cannot be recovered: {error:#}"
+                    ));
+                }
             }
         }
         count
@@ -797,6 +814,7 @@ impl BackgroundTaskManager {
             handle,
             original_abort: None,
             activity_lease,
+            durable_record: true,
         };
 
         self.tasks
@@ -871,11 +889,15 @@ impl BackgroundTaskManager {
         // produce a durable record. Only a process death in the window
         // between a failed initial write and terminal recovery loses the
         // record, which is no worse than the pre-adoption foreground state.
-        if let Err(error) = self.store.write_initial(&initial_status).await {
-            crate::logging::error(&format!(
-                "Initial status persistence failed for adopted task {task_id} (tracking anyway): {error:#}"
-            ));
-        }
+        let durable_record = match self.store.write_initial(&initial_status).await {
+            Ok(()) => true,
+            Err(error) => {
+                crate::logging::error(&format!(
+                    "Initial status persistence failed for adopted task {task_id} (tracking anyway): {error:#}"
+                ));
+                false
+            }
+        };
         Self::publish_task_started_activity(
             &task_id,
             tool_name,
@@ -1012,6 +1034,7 @@ impl BackgroundTaskManager {
                     None
                 }
             },
+            durable_record,
         };
 
         self.tasks
@@ -1367,37 +1390,37 @@ impl BackgroundTaskManager {
         task_id: &str,
         _graceful_timeout: std::time::Duration,
     ) -> Result<bool> {
-        let mut tasks = self.tasks.write().await;
-        if let Some(task) = tasks.remove(task_id) {
+        let tasks = self.tasks.read().await;
+        if let Some(task) = tasks.get(task_id) {
+            // Abort IN PLACE (F04-R2-B1): the entry STAYS in the live map as
+            // a tombstone until terminal persistence succeeds, so a failed
+            // write can never leave a cancelled task with neither a map
+            // entry nor a durable record. The recovery helper prunes on
+            // success (immediately or from its retry loop).
             if let Some(original) = &task.original_abort {
                 original.abort();
             }
             task.handle.abort();
+            let spec = TerminalSpec {
+                task_id: task.task_id.clone(),
+                tool_name: task.tool_name.clone(),
+                display_name: task.display_name.clone(),
+                session_id: task.session_id.clone(),
+                status: BackgroundTaskStatus::Failed,
+                exit_code: None,
+                error: Some("Cancelled by user".to_string()),
+                started_at: task.started_at_rfc3339.clone(),
+                completed_at: chrono::Utc::now().to_rfc3339(),
+                duration_secs: task.started_at.elapsed().as_secs_f64(),
+                notify: task.delivery_flags.borrow().0,
+                wake: task.delivery_flags.borrow().1,
+            };
             drop(tasks);
 
-            // Terminal write with recovery (F04-B1): the cancelled task was
-            // already removed/aborted above, so on persistence failure the
-            // retry loop guarantees a durable terminal record eventually
-            // (the initial Running file exists as a spawn prerequisite, so
-            // even a process death leaves the orphan sweep a record).
-            let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
             persist_terminal_with_recovery(
                 Arc::clone(&self.store),
                 Arc::clone(&self.tasks),
-                TerminalSpec {
-                    task_id: task.task_id,
-                    tool_name: task.tool_name,
-                    display_name: task.display_name,
-                    session_id: task.session_id,
-                    status: BackgroundTaskStatus::Failed,
-                    exit_code: None,
-                    error: Some("Cancelled by user".to_string()),
-                    started_at: task.started_at_rfc3339,
-                    completed_at: chrono::Utc::now().to_rfc3339(),
-                    duration_secs: task.started_at.elapsed().as_secs_f64(),
-                    notify: notify_flag,
-                    wake: wake_flag,
-                },
+                spec,
             )
             .await;
 

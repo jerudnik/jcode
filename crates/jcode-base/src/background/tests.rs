@@ -702,3 +702,48 @@ async fn terminal_persistence_failure_retains_tombstone_then_recovers() {
     }
     panic!("terminal persistence never recovered / task never pruned");
 }
+
+#[tokio::test]
+async fn cancel_retains_tombstone_until_terminal_persistence_recovers() {
+    // F04-R2-B1: cancel aborts in place; the live-map entry must remain (as
+    // a tombstone) while terminal persistence fails, and be pruned once the
+    // retry loop lands the write.
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("tasks");
+    let manager = BackgroundTaskManager::with_output_dir(dir.clone());
+
+    let info = manager
+        .spawn_with_notify("bash", None, "session-cancel-tomb", false, false, |_p| async move {
+            sleep(Duration::from_secs(300)).await;
+            Ok(TaskResult::completed(Some(0)))
+        })
+        .await;
+    assert!(manager.is_live_task(&info.task_id));
+
+    // Break the status directory, then cancel.
+    let saved = tmp.path().join("saved-tasks");
+    tokio::fs::rename(&dir, &saved).await.unwrap();
+    tokio::fs::write(&dir, b"block").await.unwrap();
+
+    let cancelled = manager.cancel(&info.task_id).await.unwrap();
+    assert!(cancelled);
+    sleep(Duration::from_millis(100)).await;
+    assert!(
+        manager.is_live_task(&info.task_id),
+        "cancelled task must remain as a tombstone while terminal persistence fails"
+    );
+
+    // Heal and observe recovery + prune + persisted cancel outcome.
+    tokio::fs::remove_file(&dir).await.unwrap();
+    tokio::fs::rename(&saved, &dir).await.unwrap();
+    for _ in 0..100 {
+        if !manager.is_live_task(&info.task_id) {
+            let status = manager.status(&info.task_id).await.unwrap();
+            assert_eq!(status.status, BackgroundTaskStatus::Failed);
+            assert_eq!(status.error.as_deref(), Some("Cancelled by user"));
+            return;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    panic!("cancel tombstone never recovered");
+}

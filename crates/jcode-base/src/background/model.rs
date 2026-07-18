@@ -244,6 +244,12 @@ pub(super) struct RunningTask {
     /// Never read: the guard's lifetime IS its function.
     #[allow(dead_code)]
     pub(super) activity_lease: Option<jcode_core::activity::ActivityLeaseGuard>,
+    /// Whether a durable `Running` record exists on disk (F04-R2-B1).
+    /// True for spawned tasks (initial persistence is a spawn
+    /// prerequisite); false only for adopted tasks whose permitted initial
+    /// write failed. Shutdown finalize uses this to apply its explicit
+    /// data-loss policy when terminal persistence also fails.
+    pub(super) durable_record: bool,
 }
 
 /// Result from a background task execution
