@@ -519,3 +519,99 @@ async fn finalize_non_detached_aborts_adopted_original_future() -> Result<()> {
     assert_eq!(status.status, BackgroundTaskStatus::Failed);
     Ok(())
 }
+
+#[tokio::test]
+async fn live_map_prunes_only_after_terminal_persistence(){
+    // F04 gate 2: the live-map entry must outlive the moment the status file
+    // still claims Running. We poll aggressively during a short task's
+    // lifetime and assert the invariant "status file Running => task is in
+    // the live map" never breaks (the converse - terminal file while briefly
+    // still mapped - is allowed and unobservable as a phantom).
+    let tmp = tempdir().unwrap();
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    let info = manager
+        .spawn_with_notify("bash", None, "session-order", false, false, |_p| async move {
+            sleep(Duration::from_millis(50)).await;
+            Ok(TaskResult::completed(Some(0)))
+        })
+        .await;
+
+    for _ in 0..400 {
+        let status = manager.status(&info.task_id).await;
+        let live = manager.is_live_task(&info.task_id);
+        if let Some(status) = status {
+            if status.status == BackgroundTaskStatus::Running {
+                assert!(
+                    live,
+                    "status file claims Running but the task is not in the live map (pruned before terminal persistence)"
+                );
+            } else if !live {
+                return; // terminal + pruned: done, invariant held throughout
+            }
+        }
+        sleep(Duration::from_millis(2)).await;
+    }
+    panic!("task never reached terminal+pruned within the poll budget");
+}
+
+#[tokio::test]
+async fn progress_and_delivery_survive_concurrent_terminal_completion() {
+    // F04: a terminal completion racing progress/delivery mutations must
+    // preserve the terminal truth while the mutations either apply to
+    // non-terminal fields or are cleanly superseded - never resurrect
+    // Running, never tear the file.
+    let tmp = tempdir().unwrap();
+    let manager = std::sync::Arc::new(BackgroundTaskManager::with_output_dir(
+        tmp.path().to_path_buf(),
+    ));
+    let info = manager
+        .spawn_with_notify("bash", None, "session-race2", false, false, |_p| async move {
+            sleep(Duration::from_millis(30)).await;
+            Ok(TaskResult::completed(Some(0)))
+        })
+        .await;
+
+    let mut mutators = Vec::new();
+    for i in 0..4u64 {
+        let manager = std::sync::Arc::clone(&manager);
+        let task_id = info.task_id.clone();
+        mutators.push(tokio::spawn(async move {
+            for j in 0..20u64 {
+                let _ = manager
+                    .update_progress(
+                        &task_id,
+                        crate::bus::BackgroundTaskProgress {
+                            kind: crate::bus::BackgroundTaskProgressKind::Determinate,
+                            percent: Some(((i * 20 + j) % 100) as f32),
+                            message: Some(format!("m{i}-{j}")),
+                            current: None,
+                            total: None,
+                            unit: None,
+                            eta_seconds: None,
+                            updated_at: chrono::Utc::now().to_rfc3339(),
+                            source: crate::bus::BackgroundTaskProgressSource::Reported,
+                        },
+                    )
+                    .await;
+                let _ = manager.update_delivery(&task_id, j % 2 == 0, false).await;
+            }
+        }));
+    }
+    for mutator in mutators {
+        mutator.await.unwrap();
+    }
+
+    // Wait for terminal state and assert it is the completion, not a
+    // mutation artifact.
+    for _ in 0..300 {
+        if let Some(status) = manager.status(&info.task_id).await
+            && status.status != BackgroundTaskStatus::Running
+        {
+            assert_eq!(status.status, BackgroundTaskStatus::Completed);
+            assert_eq!(status.exit_code, Some(0));
+            return;
+        }
+        sleep(Duration::from_millis(5)).await;
+    }
+    panic!("task never reached terminal state");
+}
