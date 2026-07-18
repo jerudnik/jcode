@@ -49,7 +49,7 @@ pub fn selfdev_status_output() -> Result<ToolOutput> {
         status.push_str("**Shared server:** none\n");
     }
 
-    if let Some(ref stable) = manifest.stable {
+    if let Ok(Some(stable)) = build::read_stable_version() {
         status.push_str(&format!("**Stable:** {}\n", stable));
     } else {
         status.push_str("**Stable:** none\n");

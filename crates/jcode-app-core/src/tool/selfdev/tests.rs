@@ -1,14 +1,9 @@
 use super::*;
 use crate::bus::BackgroundTaskStatus;
 use std::ffi::OsStr;
-use std::sync::{LazyLock, Mutex};
-
-static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+    crate::storage::lock_test_env()
 }
 
 struct EnvVarGuard {
@@ -151,7 +146,6 @@ fn test_reload_context_path() {
 
 #[test]
 fn test_reload_context_save_and_load_for_session_uses_session_scoped_file() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -242,7 +236,6 @@ fn test_recovery_directive_returns_none_when_no_reload_recovery_needed() {
 
 #[test]
 fn reload_timeout_secs_defaults_to_15() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let _guard = EnvVarGuard::remove("JCODE_SELFDEV_RELOAD_TIMEOUT_SECS");
     assert_eq!(SelfDevTool::reload_timeout_secs(), 15);
@@ -250,7 +243,6 @@ fn reload_timeout_secs_defaults_to_15() {
 
 #[test]
 fn reload_timeout_secs_honors_valid_env_override() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let _guard = EnvVarGuard::set("JCODE_SELFDEV_RELOAD_TIMEOUT_SECS", "27");
     assert_eq!(SelfDevTool::reload_timeout_secs(), 27);
@@ -258,7 +250,6 @@ fn reload_timeout_secs_honors_valid_env_override() {
 
 #[test]
 fn reload_timeout_secs_ignores_empty_invalid_and_zero_values() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let _guard = EnvVarGuard::set("JCODE_SELFDEV_RELOAD_TIMEOUT_SECS", "   ");
     assert_eq!(SelfDevTool::reload_timeout_secs(), 15);
@@ -364,7 +355,6 @@ fn non_selfdev_schema_only_exposes_onramp_actions() {
 
 #[tokio::test]
 async fn test_action_queues_command_in_test_mode() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -441,7 +431,6 @@ fn reload_repo_resolver_uses_working_dir_when_primary_detection_fails() {
 
 #[tokio::test]
 async fn enter_creates_selfdev_session_in_test_mode() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -518,7 +507,6 @@ async fn enter_creates_selfdev_session_in_test_mode() {
 
 #[tokio::test]
 async fn enter_falls_back_to_fresh_session_when_parent_missing() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -549,7 +537,6 @@ async fn enter_falls_back_to_fresh_session_when_parent_missing() {
 
 #[tokio::test]
 async fn reload_in_non_selfdev_session_is_upgrade_in_place() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -578,7 +565,6 @@ async fn reload_in_non_selfdev_session_is_upgrade_in_place() {
 
 #[tokio::test]
 async fn socket_actions_require_selfdev_session() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -605,7 +591,6 @@ async fn socket_actions_require_selfdev_session() {
 
 #[tokio::test]
 async fn find_config_reports_key_paths() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -629,7 +614,6 @@ async fn find_config_reports_key_paths() {
 
 #[tokio::test]
 async fn setup_reports_dependency_checks() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -661,7 +645,6 @@ async fn setup_reports_dependency_checks() {
 
 #[tokio::test]
 async fn build_requires_reason() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -680,7 +663,6 @@ async fn build_requires_reason() {
 
 #[tokio::test]
 async fn build_queues_background_tasks_and_reports_queue_status() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -756,7 +738,6 @@ async fn build_queues_background_tasks_and_reports_queue_status() {
 
 #[tokio::test]
 async fn build_reload_waits_for_build_then_reloads() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -816,7 +797,6 @@ async fn build_reload_waits_for_build_then_reloads() {
 
 #[tokio::test]
 async fn build_dedupes_identical_reason_and_version_with_attached_watcher() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -877,7 +857,6 @@ async fn build_dedupes_identical_reason_and_version_with_attached_watcher() {
 
 #[tokio::test]
 async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -941,7 +920,6 @@ async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
 
 #[test]
 fn status_output_prunes_stale_pending_requests() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -1005,13 +983,36 @@ fn status_output_prunes_stale_pending_requests() {
 }
 
 #[test]
+fn status_output_reads_the_persisted_stable_channel_marker() {
+    let _lock = lock_env();
+    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
+
+    let mut manifest = build::BuildManifest::load().expect("load manifest");
+    manifest.stable = Some("stale-manifest-value".to_string());
+    manifest.save().expect("save manifest");
+    std::fs::write(
+        build::stable_version_file().expect("stable version path"),
+        "stable-marker-value\n",
+    )
+    .expect("write stable version marker");
+
+    let status_output = selfdev_status_output().expect("status output");
+    assert!(
+        status_output
+            .output
+            .contains("**Stable:** stable-marker-value")
+    );
+    assert!(!status_output.output.contains("stale-manifest-value"));
+}
+
+#[test]
 fn freshly_queued_request_survives_reconcile_before_task_metadata_exists() {
     // Regression: the queue handler saves the request *before* spawning its
     // background task, so for a moment it has no task id / status file. A
     // concurrent reconcile (status output, another agent's queue poll, or the
     // task's own first wait_for_turn iteration) used to prune it as stale,
     // killing the build instantly with "Queued build request disappeared".
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -1068,7 +1069,6 @@ fn freshly_queued_request_survives_reconcile_before_task_metadata_exists() {
 
 #[tokio::test]
 async fn build_ignores_stale_pending_requests_when_computing_queue_position() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -1171,7 +1171,6 @@ async fn build_ignores_stale_pending_requests_when_computing_queue_position() {
 
 #[test]
 fn reconcile_pending_state_maps_superseded_background_status() {
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
@@ -1262,7 +1261,6 @@ fn reconcile_keeps_running_request_not_yet_registered_in_live_task_map() {
     // queue poll) could then see status=Running + is_live_task=false and prune
     // the request instantly: "Queued build request disappeared". Within the
     // bootstrap grace window a Running-but-unregistered task must survive.
-    let _storage_guard = crate::storage::lock_test_env();
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());

@@ -48,6 +48,16 @@ fn parse_create_session_command(cmd: &str) -> Option<(Option<String>, bool)> {
     None
 }
 
+fn update_default_session_after_destroy(
+    current_session_id: &mut String,
+    destroyed_session_id: &str,
+    replacement_session_id: Option<String>,
+) {
+    if current_session_id == destroyed_session_id {
+        *current_session_id = replacement_session_id.unwrap_or_default();
+    }
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "session admin debug commands need sessions, swarm state, provider template, queues, and event history"
@@ -113,32 +123,37 @@ pub(super) async fn maybe_handle_session_admin_command(
 
         let removed_agent = {
             let mut sessions_guard = sessions.write().await;
-            sessions_guard.remove(target_id)
+            let Some(removed) = sessions_guard.remove(target_id) else {
+                return Err(anyhow::anyhow!("Unknown session_id '{}'", target_id));
+            };
+
+            // Keep removal and default repair in one transition. Otherwise two
+            // concurrent destroys can choose each other's already-removed session
+            // as the replacement default.
+            let replacement_session_id = sessions_guard.keys().min().cloned();
+            let mut current_session_id = session_id.write().await;
+            update_default_session_after_destroy(
+                &mut current_session_id,
+                target_id,
+                replacement_session_id,
+            );
+            removed
         };
+
         remove_session_interrupt_queue(soft_interrupt_queues, target_id).await;
         remove_background_tool_signal(target_id);
-        if let Some(ref agent_arc) = removed_agent {
-            let agent = agent_arc.lock().await;
-            let memory_enabled = agent.memory_enabled();
-            let transcript = if memory_enabled {
-                Some(agent.build_transcript_for_extraction())
-            } else {
-                None
-            };
-            let sid = target_id.to_string();
-            let working_dir = agent.working_dir().map(|dir| dir.to_string());
-            drop(agent);
-            if let Some(transcript) = transcript {
-                crate::memory_agent::trigger_final_extraction_with_dir(
-                    transcript,
-                    sid,
-                    working_dir,
-                );
-            }
-        }
-
-        if removed_agent.is_none() {
-            return Err(anyhow::anyhow!("Unknown session_id '{}'", target_id));
+        let agent = removed_agent.lock().await;
+        let memory_enabled = agent.memory_enabled();
+        let transcript = if memory_enabled {
+            Some(agent.build_transcript_for_extraction())
+        } else {
+            None
+        };
+        let sid = target_id.to_string();
+        let working_dir = agent.working_dir().map(|dir| dir.to_string());
+        drop(agent);
+        if let Some(transcript) = transcript {
+            crate::memory_agent::trigger_final_extraction_with_dir(transcript, sid, working_dir);
         }
 
         let (swarm_id, friendly_name) = {
@@ -221,4 +236,31 @@ pub(super) async fn maybe_handle_session_admin_command(
     }
 
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_default_session_after_destroy;
+
+    #[test]
+    fn destroying_default_session_selects_replacement_or_clears_it() {
+        let mut current = "session-b".to_string();
+        update_default_session_after_destroy(
+            &mut current,
+            "session-b",
+            Some("session-a".to_string()),
+        );
+        assert_eq!(current, "session-a");
+
+        update_default_session_after_destroy(&mut current, "session-a", None);
+        assert!(current.is_empty());
+
+        current = "session-c".to_string();
+        update_default_session_after_destroy(
+            &mut current,
+            "session-b",
+            Some("session-a".to_string()),
+        );
+        assert_eq!(current, "session-c");
+    }
 }

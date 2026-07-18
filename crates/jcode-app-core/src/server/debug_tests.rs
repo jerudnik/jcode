@@ -94,6 +94,20 @@ mod tests {
             ("server", "state")
         );
     }
+
+    #[test]
+    fn debug_command_errors_are_returned_as_failed_responses() {
+        let event = debug_response_event(42, Err(anyhow::anyhow!("Unknown session_id 'missing'")));
+
+        match event {
+            ServerEvent::DebugResponse { id, ok, output } => {
+                assert_eq!(id, 42);
+                assert!(!ok);
+                assert_eq!(output, "Unknown session_id 'missing'");
+            }
+            other => panic!("expected debug response, got {other:?}"),
+        }
+    }
 }
 
 mod transcript_routing_tests {
