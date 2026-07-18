@@ -1,0 +1,1119 @@
+//! Single bounded shutdown coordinator and server activity-lease authority.
+//!
+//! F02 implementation of the accepted F01 design
+//! (`docs/fork/ideal-base/evidence/F01/design.md`, revision 4):
+//!
+//! - `ServerActivityLeaseAuthority`: the concrete `ActivityLeaseAuthority`
+//!   over a pure `LeaseTable` (design 3.1). All work classes that must keep
+//!   the daemon alive at `client_count == 0` hold RAII leases.
+//! - `ShutdownCoordinator`: the one voluntary exit path (design 3.2). All
+//!   exits converge on `begin(reason)`; phases are
+//!   `Running -> Draining -> CleaningUp -> Cleaned` (or `Handoff` for
+//!   reload). The executor NEVER calls `std::process::exit`: it publishes
+//!   `Cleaned { reason, code }` and the top-level runner
+//!   (`src/cli/dispatch.rs`) performs the one normal termination call.
+//! - Coordinator-armed watchdog (design 3.2.4): the only other authorized
+//!   termination site. `Cleaned` and `ForcedExit` are made mutually
+//!   exclusive by an atomic Armed/Cancelled handoff.
+//!
+//! The authority and coordinator are process-global: the daemon is a
+//! per-process singleton (enforced by the daemon lock). In-process test
+//! servers share them (last-configured sidecar identity wins), which is the
+//! same compromise the process-global reload channel already makes.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use jcode_core::activity::{
+    ActivityClass, ActivityLeaseAuthority, ActivityLeaseError, ActivityLeaseGuard,
+    ActivityLeaseToken,
+};
+
+// ---------------------------------------------------------------------------
+// Pure lease table (design 3.1)
+// ---------------------------------------------------------------------------
+
+struct LeaseEntry {
+    class: ActivityClass,
+    label: String,
+    acquired_at: Instant,
+}
+
+/// Pure lease state: acquire/release/is_idle/refuse_new. No clocks beyond
+/// caller-supplied instants, no process state.
+#[derive(Default)]
+pub(crate) struct LeaseTable {
+    next_id: u64,
+    active: HashMap<u64, LeaseEntry>,
+    refusing: bool,
+}
+
+impl LeaseTable {
+    fn acquire(
+        &mut self,
+        class: ActivityClass,
+        label: &str,
+        now: Instant,
+    ) -> Result<u64, ActivityLeaseError> {
+        if self.refusing {
+            return Err(ActivityLeaseError::ShuttingDown);
+        }
+        self.next_id += 1;
+        let id = self.next_id;
+        self.active.insert(
+            id,
+            LeaseEntry {
+                class,
+                label: label.to_string(),
+                acquired_at: now,
+            },
+        );
+        Ok(id)
+    }
+
+    fn release(&mut self, id: u64) -> bool {
+        self.active.remove(&id).is_some()
+    }
+
+    pub(crate) fn is_idle(&self) -> bool {
+        self.active.is_empty()
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        self.active.len()
+    }
+
+    fn count_of(&self, class: ActivityClass) -> usize {
+        self.active
+            .values()
+            .filter(|entry| entry.class == class)
+            .count()
+    }
+
+    /// Drain-blocking work excludes client connections: connections are
+    /// closed by intake shutdown, not waited for (design 4.1 C1 "abandon").
+    fn drain_blocking_count(&self) -> usize {
+        self.active
+            .values()
+            .filter(|entry| entry.class != ActivityClass::ClientConnection)
+            .count()
+    }
+
+    fn refuse_new(&mut self) {
+        self.refusing = true;
+    }
+
+    fn labels(&self) -> Vec<String> {
+        let mut labels: Vec<String> = self
+            .active
+            .values()
+            .map(|entry| {
+                format!(
+                    "{}:{} ({}s)",
+                    entry.class.as_str(),
+                    entry.label,
+                    entry.acquired_at.elapsed().as_secs()
+                )
+            })
+            .collect();
+        labels.sort();
+        labels
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Quiescence epoch (design 4.2)
+// ---------------------------------------------------------------------------
+
+/// One explicit quiescence epoch: `idle_since` is `None` whenever the system
+/// is not fully quiescent, and is set only on the transition INTO quiescence.
+/// A lease held past the timeout then released starts a full new window.
+#[derive(Default)]
+pub(crate) struct IdleClock {
+    idle_since: Option<Instant>,
+}
+
+impl IdleClock {
+    pub(crate) fn update(&mut self, quiescent: bool, now: Instant) {
+        if quiescent {
+            self.idle_since.get_or_insert(now);
+        } else {
+            self.idle_since = None;
+        }
+    }
+
+    pub(crate) fn should_exit(&self, now: Instant, timeout: Duration) -> bool {
+        matches!(self.idle_since, Some(since) if now.duration_since(since) >= timeout)
+    }
+
+    pub(crate) fn idle_elapsed(&self, now: Instant) -> Option<Duration> {
+        self.idle_since.map(|since| now.duration_since(since))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server activity-lease authority
+// ---------------------------------------------------------------------------
+
+fn lock_poisoned_ok<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub(crate) struct ServerActivityLeaseAuthority {
+    table: Mutex<LeaseTable>,
+}
+
+impl ServerActivityLeaseAuthority {
+    fn new() -> Self {
+        Self {
+            table: Mutex::new(LeaseTable::default()),
+        }
+    }
+
+    pub(crate) fn client_connection_count(&self) -> usize {
+        lock_poisoned_ok(&self.table).count_of(ActivityClass::ClientConnection)
+    }
+
+    pub(crate) fn drain_blocking_count(&self) -> usize {
+        lock_poisoned_ok(&self.table).drain_blocking_count()
+    }
+
+    pub(crate) fn active_count(&self) -> usize {
+        lock_poisoned_ok(&self.table).count()
+    }
+
+    pub(crate) fn active_labels(&self) -> Vec<String> {
+        lock_poisoned_ok(&self.table).labels()
+    }
+
+    fn refuse_new(&self) {
+        lock_poisoned_ok(&self.table).refuse_new();
+    }
+}
+
+impl ActivityLeaseAuthority for ServerActivityLeaseAuthority {
+    fn acquire(
+        &self,
+        class: ActivityClass,
+        label: &str,
+    ) -> Result<ActivityLeaseToken, ActivityLeaseError> {
+        lock_poisoned_ok(&self.table)
+            .acquire(class, label, Instant::now())
+            .map(ActivityLeaseToken)
+    }
+
+    fn release(&self, token: ActivityLeaseToken) {
+        lock_poisoned_ok(&self.table).release(token.0);
+    }
+}
+
+fn typed_authority() -> &'static Arc<ServerActivityLeaseAuthority> {
+    static AUTHORITY: OnceLock<Arc<ServerActivityLeaseAuthority>> = OnceLock::new();
+    AUTHORITY.get_or_init(|| Arc::new(ServerActivityLeaseAuthority::new()))
+}
+
+/// The process-global authority as the neutral trait object, for injection
+/// into `jcode-base` composition roots (MCP manager/pool, background).
+pub(crate) fn activity_authority() -> Arc<dyn ActivityLeaseAuthority> {
+    Arc::clone(typed_authority()) as Arc<dyn ActivityLeaseAuthority>
+}
+
+/// Server-internal convenience: acquire a lease against the global authority.
+/// A `ShuttingDown` refusal means new work must not start (invariant I6).
+pub(crate) fn acquire_lease(
+    class: ActivityClass,
+    label: &str,
+) -> Result<ActivityLeaseGuard, ActivityLeaseError> {
+    ActivityLeaseGuard::acquire(&activity_authority(), class, label)
+}
+
+/// Typed snapshot access for the lifecycle monitors and debug surfaces.
+pub(crate) fn lease_authority() -> &'static Arc<ServerActivityLeaseAuthority> {
+    typed_authority()
+}
+
+// ---------------------------------------------------------------------------
+// Exit reasons (design 3.2.2, 3.2.5)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExitReason {
+    SigTerm,
+    ReloadExecFailed,
+    AcceptLoopFailure,
+    Reload,
+    TemporaryOwnerExit,
+    TemporaryIdle,
+    PersistentIdle,
+}
+
+impl ExitReason {
+    /// Total priority lattice (design 3.2.2). Higher wins. The two idle
+    /// reasons tie (a server is persistent xor temporary, so the tie is
+    /// unreachable in practice; a tie is not an upgrade).
+    pub(crate) fn priority(self) -> u8 {
+        match self {
+            ExitReason::SigTerm => 6,
+            ExitReason::ReloadExecFailed => 5,
+            ExitReason::AcceptLoopFailure => 4,
+            ExitReason::Reload => 3,
+            ExitReason::TemporaryOwnerExit => 2,
+            ExitReason::TemporaryIdle | ExitReason::PersistentIdle => 1,
+        }
+    }
+
+    /// Exit-code table (design 3.2.5). `Reload` has no code: handoff execs.
+    pub(crate) fn exit_code(self) -> i32 {
+        match self {
+            ExitReason::SigTerm => 0,
+            ExitReason::PersistentIdle
+            | ExitReason::TemporaryIdle
+            | ExitReason::TemporaryOwnerExit => super::EXIT_IDLE_TIMEOUT,
+            ExitReason::ReloadExecFailed => 42,
+            ExitReason::AcceptLoopFailure => EXIT_ACCEPT_LOOP_FAILURE,
+            ExitReason::Reload => 0,
+        }
+    }
+
+    /// Drain deadline per reason (design 3.2.3). Idle exits get zero by
+    /// definition: quiescence was the precondition.
+    pub(crate) fn drain_budget(self) -> Duration {
+        match self {
+            ExitReason::SigTerm
+            | ExitReason::AcceptLoopFailure
+            | ExitReason::TemporaryOwnerExit => Duration::from_secs(2),
+            ExitReason::ReloadExecFailed => Duration::from_secs(1),
+            ExitReason::PersistentIdle | ExitReason::TemporaryIdle => Duration::ZERO,
+            // Bounded by the reload graceful-shutdown timeout.
+            ExitReason::Reload => Duration::from_secs(5),
+        }
+    }
+
+    /// Watchdog deadline: strictly above `drain_budget + CLEANUP_BUDGET`
+    /// (invariant I5). Termination reasons only; reload handoff is not
+    /// watchdog-armed (exec replaces the image; its failure upgrades to
+    /// `ReloadExecFailed`, which is).
+    pub(crate) fn watchdog_budget(self) -> Option<Duration> {
+        match self {
+            ExitReason::Reload => None,
+            ExitReason::SigTerm => Some(Duration::from_secs(3)),
+            _ => Some(self.drain_budget() + CLEANUP_BUDGET + Duration::from_secs(1)),
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            ExitReason::SigTerm => "sigterm",
+            ExitReason::ReloadExecFailed => "reload-exec-failed",
+            ExitReason::AcceptLoopFailure => "accept-loop-failure",
+            ExitReason::Reload => "reload",
+            ExitReason::TemporaryOwnerExit => "temporary-owner-exit",
+            ExitReason::TemporaryIdle => "temporary-idle",
+            ExitReason::PersistentIdle => "persistent-idle",
+        }
+    }
+}
+
+/// Distinct nonzero code for accept-loop failure (design 3.2.5).
+pub(crate) const EXIT_ACCEPT_LOOP_FAILURE: i32 = 45;
+
+/// Distinct code for a watchdog forced exit (design 3.2.5; EX_SOFTWARE).
+pub(crate) const EXIT_FORCED: i32 = 70;
+
+/// Total cleanup-phase budget; each step is individually bounded below this.
+const CLEANUP_BUDGET: Duration = Duration::from_millis(700);
+
+/// Per-step cleanup bound.
+const CLEANUP_STEP_BUDGET: Duration = Duration::from_millis(250);
+
+/// Poll interval while draining leases.
+const DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+// ---------------------------------------------------------------------------
+// Pure begin decision (design 3.2.2)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum BeginOutcome {
+    /// This reason now drives (first begin, or an upgrade).
+    Accepted,
+    /// An equal-or-stronger reason already drives.
+    SupersededBy(ExitReason),
+    /// Typed refusal (e.g. reload on a temporary server).
+    Refused(RefusalReason),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum RefusalReason {
+    TemporaryServerNoReload,
+}
+
+/// Pure upgrade decision: a strictly stronger reason upgrades; equal or
+/// weaker is superseded. Upgrades re-derive the absolute deadline as
+/// `min(current_deadline, now + full_budget(new))` (design 3.2.2).
+pub(crate) fn decide_upgrade(current: ExitReason, requested: ExitReason) -> bool {
+    requested.priority() > current.priority()
+}
+
+// ---------------------------------------------------------------------------
+// Terminal outcomes (design 3.2.1)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalOutcome {
+    /// Full cleanup ran; the process has NOT exited. The top-level runner
+    /// performs the one normal termination call.
+    Cleaned { reason: ExitReason, code: i32 },
+}
+
+// ---------------------------------------------------------------------------
+// Watchdog: atomic Armed/Cancelled handoff (design 3.2.4)
+// ---------------------------------------------------------------------------
+
+const WATCHDOG_IDLE: u8 = 0;
+const WATCHDOG_ARMED: u8 = 1;
+const WATCHDOG_CANCELLED: u8 = 2;
+const WATCHDOG_FIRING: u8 = 3;
+
+struct Watchdog {
+    state: AtomicU8,
+    /// Absolute deadline in micros since `origin`. Only ever decreases while
+    /// armed (upgrades never extend).
+    deadline_micros: AtomicU64,
+    origin: Instant,
+}
+
+impl Watchdog {
+    fn new() -> Self {
+        Self {
+            state: AtomicU8::new(WATCHDOG_IDLE),
+            deadline_micros: AtomicU64::new(u64::MAX),
+            origin: Instant::now(),
+        }
+    }
+
+    fn deadline_from_now(&self, budget: Duration) -> u64 {
+        (self.origin.elapsed() + budget).as_micros() as u64
+    }
+
+    /// Arm (or bring forward) the watchdog. Spawns the OS thread once.
+    fn arm(self: &Arc<Self>, budget: Duration, reason: ExitReason) {
+        let new_deadline = self.deadline_from_now(budget);
+        // Never later than the previous deadline.
+        self.deadline_micros
+            .fetch_min(new_deadline, Ordering::SeqCst);
+        if self
+            .state
+            .compare_exchange(
+                WATCHDOG_IDLE,
+                WATCHDOG_ARMED,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            record_forced_exit_marker("armed", reason);
+            let watchdog = Arc::clone(self);
+            std::thread::Builder::new()
+                .name("jcode-shutdown-watchdog".into())
+                .spawn(move || watchdog.run())
+                .ok();
+        }
+    }
+
+    /// Executor-side decisive cancellation. Returns `true` if cancellation
+    /// won (the watchdog can no longer fire); `false` if the watchdog
+    /// already committed to firing, in which case `Cleaned` must NOT be
+    /// published (design 3.2.4: mutual exclusion by atomic handoff).
+    fn cancel(&self) -> bool {
+        match self.state.compare_exchange(
+            WATCHDOG_ARMED,
+            WATCHDOG_CANCELLED,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => true,
+            // Never armed (reload handoff path): nothing to lose against.
+            Err(state) => state == WATCHDOG_IDLE || state == WATCHDOG_CANCELLED,
+        }
+    }
+
+    fn run(self: Arc<Self>) {
+        loop {
+            let now = self.origin.elapsed().as_micros() as u64;
+            let deadline = self.deadline_micros.load(Ordering::SeqCst);
+            if now < deadline {
+                let sleep = Duration::from_micros((deadline - now).min(200_000));
+                std::thread::sleep(sleep);
+                continue;
+            }
+            // Deadline reached: attempt to claim the firing permit.
+            match self.state.compare_exchange(
+                WATCHDOG_ARMED,
+                WATCHDOG_FIRING,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    crate::logging::warn(
+                        "Shutdown watchdog fired: cleanup exceeded its deadline; forcing exit.",
+                    );
+                    record_forced_exit_marker("fired", current_reason_for_marker());
+                    std::process::exit(EXIT_FORCED);
+                }
+                Err(_) => return, // Cancelled: executor won.
+            }
+        }
+    }
+}
+
+/// Durable forced-exit marker (design 3.2.4): recorded when the watchdog is
+/// armed and when it fires, so a post-mortem can see cleanup was preempted
+/// even though the dying process cannot log afterwards.
+fn record_forced_exit_marker(event: &str, reason: ExitReason) {
+    let Ok(dir) = crate::storage::jcode_dir().map(|dir| dir.join("state")) else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("shutdown-watchdog.json");
+    let payload = serde_json::json!({
+        "event": event,
+        "reason": reason.as_str(),
+        "pid": std::process::id(),
+        "at": chrono::Utc::now().to_rfc3339(),
+    });
+    let _ = std::fs::write(&path, payload.to_string());
+}
+
+fn current_reason_for_marker() -> ExitReason {
+    coordinator()
+        .driving_reason()
+        .unwrap_or(ExitReason::SigTerm)
+}
+
+// ---------------------------------------------------------------------------
+// Coordinator (design 3.2)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Running,
+    Draining,
+    CleaningUp,
+    Handoff,
+    Terminal,
+}
+
+/// Sidecar identity and hooks the coordinator cleans up / cancels.
+/// Configured by `Server::run` before any exit authority can fire.
+/// Re-configurable (last write wins) for in-process test servers.
+#[derive(Clone)]
+pub(crate) struct ShutdownConfig {
+    pub(crate) server_name: String,
+    pub(crate) socket_path: PathBuf,
+    pub(crate) debug_socket_path: PathBuf,
+    pub(crate) temporary: bool,
+    /// Cancelled at `Draining` start to stop intake (design 3.2.3).
+    pub(crate) intake_cancel: Option<tokio_util::sync::CancellationToken>,
+    /// MCP pool cell: shut down pool-wide during cleanup when initialized.
+    pub(crate) mcp_pool:
+        Option<Arc<tokio::sync::OnceCell<Arc<crate::mcp::SharedMcpPool>>>>,
+}
+
+struct CoordinatorState {
+    phase: Phase,
+    reason: Option<ExitReason>,
+    /// Absolute drain deadline for the executing drain.
+    drain_deadline: Option<Instant>,
+    config: Option<ShutdownConfig>,
+}
+
+pub(crate) struct ShutdownCoordinator {
+    state: Mutex<CoordinatorState>,
+    terminal_tx: tokio::sync::watch::Sender<Option<TerminalOutcome>>,
+    watchdog: Arc<Watchdog>,
+}
+
+pub(crate) fn coordinator() -> &'static ShutdownCoordinator {
+    static COORDINATOR: OnceLock<ShutdownCoordinator> = OnceLock::new();
+    COORDINATOR.get_or_init(|| {
+        let (terminal_tx, _) = tokio::sync::watch::channel(None);
+        ShutdownCoordinator {
+            state: Mutex::new(CoordinatorState {
+                phase: Phase::Running,
+                reason: None,
+                drain_deadline: None,
+                config: None,
+            }),
+            terminal_tx,
+            watchdog: Arc::new(Watchdog::new()),
+        }
+    })
+}
+
+impl ShutdownCoordinator {
+    /// Configure sidecar identity/hooks. Called by `Server::run` before any
+    /// exit authority (idle monitors, SIGTERM handler, reload task) spawns.
+    pub(crate) fn configure(&self, config: ShutdownConfig) {
+        lock_poisoned_ok(&self.state).config = Some(config);
+    }
+
+    fn driving_reason(&self) -> Option<ExitReason> {
+        lock_poisoned_ok(&self.state).reason
+    }
+
+    pub(crate) fn has_begun(&self) -> bool {
+        lock_poisoned_ok(&self.state).phase != Phase::Running
+    }
+
+    /// Non-blocking begin (design 3.2.1). On first acceptance this task
+    /// becomes the executor: it spawns the drain-cleanup future. Upgrades
+    /// mutate the driving reason/deadline; the executing future observes
+    /// them each poll (serialized executor by construction: only the first
+    /// acceptance spawns).
+    pub(crate) fn begin(&'static self, requested: ExitReason) -> BeginOutcome {
+        let mut state = lock_poisoned_ok(&self.state);
+        if requested == ExitReason::Reload
+            && state.config.as_ref().is_some_and(|config| config.temporary)
+        {
+            // Temporary servers refuse reload (design 3.2.3 / I4).
+            return BeginOutcome::Refused(RefusalReason::TemporaryServerNoReload);
+        }
+        match state.phase {
+            Phase::Running => {
+                state.phase = Phase::Draining;
+                state.reason = Some(requested);
+                state.drain_deadline = Some(Instant::now() + requested.drain_budget());
+                if let Some(budget) = requested.watchdog_budget() {
+                    self.watchdog.arm(budget, requested);
+                }
+                drop(state);
+                crate::logging::info(&format!(
+                    "Shutdown coordinator: begin(reason={})",
+                    requested.as_str()
+                ));
+                // Stop intake immediately (design 3.2.3).
+                lease_authority().refuse_new();
+                self.cancel_intake();
+                // The accepting caller's context spawns the one executor.
+                tokio::spawn(self.execute());
+                BeginOutcome::Accepted
+            }
+            Phase::Draining => {
+                let current = state.reason.expect("draining without reason");
+                if decide_upgrade(current, requested) {
+                    state.reason = Some(requested);
+                    // Upgrades only shorten or preserve (design 3.2.2).
+                    let upgraded = Instant::now() + requested.drain_budget();
+                    state.drain_deadline = Some(match state.drain_deadline {
+                        Some(existing) => existing.min(upgraded),
+                        None => upgraded,
+                    });
+                    if let Some(budget) = requested.watchdog_budget() {
+                        self.watchdog.arm(budget, requested);
+                    }
+                    crate::logging::info(&format!(
+                        "Shutdown coordinator: upgrade {} -> {}",
+                        current.as_str(),
+                        requested.as_str()
+                    ));
+                    BeginOutcome::Accepted
+                } else {
+                    BeginOutcome::SupersededBy(current)
+                }
+            }
+            Phase::CleaningUp | Phase::Handoff | Phase::Terminal => {
+                BeginOutcome::SupersededBy(state.reason.expect("post-drain without reason"))
+            }
+        }
+    }
+
+    /// Begin and await the terminal outcome of the whole shutdown
+    /// (design 3.2.1). Returns the outcome regardless of which reason won.
+    pub(crate) async fn begin_and_wait(
+        &'static self,
+        requested: ExitReason,
+    ) -> Result<TerminalOutcome, RefusalReason> {
+        if let BeginOutcome::Refused(refusal) = self.begin(requested) {
+            return Err(refusal);
+        }
+        Ok(self.wait_terminal().await)
+    }
+
+    /// Observe the terminal outcome without requesting shutdown.
+    pub(crate) async fn wait_terminal(&self) -> TerminalOutcome {
+        let mut rx = self.terminal_tx.subscribe();
+        loop {
+            if let Some(outcome) = *rx.borrow_and_update() {
+                return outcome;
+            }
+            if rx.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
+    fn cancel_intake(&self) {
+        let token = lock_poisoned_ok(&self.state)
+            .config
+            .as_ref()
+            .and_then(|config| config.intake_cancel.clone());
+        if let Some(token) = token {
+            token.cancel();
+        }
+    }
+
+    /// The one executor future: drain, clean up, publish `Cleaned`.
+    async fn execute(&'static self) {
+        // Drain: wait for drain-blocking leases up to the (upgradable)
+        // deadline. Client-connection leases are closed by intake
+        // cancellation, not drained (design 4.1).
+        loop {
+            let (deadline, reason) = {
+                let state = lock_poisoned_ok(&self.state);
+                (
+                    state.drain_deadline.expect("draining without deadline"),
+                    state.reason.expect("draining without reason"),
+                )
+            };
+            let blocking = lease_authority().drain_blocking_count();
+            if blocking == 0 {
+                break;
+            }
+            if Instant::now() >= deadline {
+                crate::logging::warn(&format!(
+                    "Shutdown drain deadline reached (reason={}); abandoning {} lease(s): {}",
+                    reason.as_str(),
+                    blocking,
+                    lease_authority().active_labels().join(", ")
+                ));
+                break;
+            }
+            tokio::time::sleep(DRAIN_POLL_INTERVAL).await;
+        }
+
+        let (reason, config) = {
+            let mut state = lock_poisoned_ok(&self.state);
+            state.phase = Phase::CleaningUp;
+            (
+                state.reason.expect("cleanup without reason"),
+                state.config.clone(),
+            )
+        };
+
+        run_cleanup(reason, config.as_ref()).await;
+
+        // Decisive watchdog cancellation BEFORE publishing `Cleaned`
+        // (design 3.2.4). If the watchdog already committed to firing, the
+        // process is dying with `ForcedExit`; `Cleaned` must never be
+        // observed in that execution.
+        if !self.watchdog.cancel() {
+            crate::logging::warn(
+                "Shutdown watchdog already firing; suppressing Cleaned publication.",
+            );
+            std::future::pending::<()>().await;
+        }
+
+        {
+            let mut state = lock_poisoned_ok(&self.state);
+            state.phase = Phase::Terminal;
+        }
+        let outcome = TerminalOutcome::Cleaned {
+            reason,
+            code: reason.exit_code(),
+        };
+        crate::logging::info(&format!(
+            "Shutdown coordinator: cleanup complete (reason={}, code={})",
+            reason.as_str(),
+            reason.exit_code()
+        ));
+        let _ = self.terminal_tx.send(Some(outcome));
+    }
+
+    /// Reload drain entry (design 3.2.3 Handoff): the reload task calls this
+    /// before its persistence/exec steps. Returns `Ok(())` when drain is
+    /// complete and the phase is `Handoff`; the reload task then owns the
+    /// handoff. If a stronger termination reason wins during the drain, the
+    /// reload must abort and let the termination executor finish.
+    pub(crate) async fn begin_reload_drain(&'static self) -> Result<(), ReloadRefused> {
+        {
+            let mut state = lock_poisoned_ok(&self.state);
+            if state.config.as_ref().is_some_and(|config| config.temporary) {
+                return Err(ReloadRefused::TemporaryServer);
+            }
+            match state.phase {
+                Phase::Running => {
+                    state.phase = Phase::Draining;
+                    state.reason = Some(ExitReason::Reload);
+                    state.drain_deadline =
+                        Some(Instant::now() + ExitReason::Reload.drain_budget());
+                }
+                _ => {
+                    return Err(ReloadRefused::ShutdownInProgress(
+                        state.reason.expect("non-running without reason"),
+                    ));
+                }
+            }
+        }
+        crate::logging::info("Shutdown coordinator: reload drain started");
+        lease_authority().refuse_new();
+
+        loop {
+            let (deadline, reason) = {
+                let state = lock_poisoned_ok(&self.state);
+                (
+                    state.drain_deadline.expect("draining without deadline"),
+                    state.reason.expect("draining without reason"),
+                )
+            };
+            if reason != ExitReason::Reload {
+                // A stronger termination reason upgraded us mid-drain; the
+                // termination path owns completion now. But no executor was
+                // spawned (reload drains inline), so spawn it here.
+                tokio::spawn(self.execute());
+                return Err(ReloadRefused::ShutdownInProgress(reason));
+            }
+            if lease_authority().drain_blocking_count() == 0 || Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(DRAIN_POLL_INTERVAL).await;
+        }
+
+        let mut state = lock_poisoned_ok(&self.state);
+        if state.reason != Some(ExitReason::Reload) {
+            drop(state);
+            tokio::spawn(self.execute());
+            return Err(ReloadRefused::ShutdownInProgress(
+                self.driving_reason().unwrap_or(ExitReason::SigTerm),
+            ));
+        }
+        state.phase = Phase::Handoff;
+        Ok(())
+    }
+
+    /// Reload exec failed (design 3.2.3): re-enter the termination path so
+    /// the historic bare `exit(42)` finally gets full sidecar cleanup. The
+    /// caller awaits `Cleaned { code: 42 }`; `run()` returns; the top-level
+    /// runner exits.
+    pub(crate) async fn reload_exec_failed(&'static self) -> TerminalOutcome {
+        {
+            let mut state = lock_poisoned_ok(&self.state);
+            state.phase = Phase::Draining;
+            state.reason = Some(ExitReason::ReloadExecFailed);
+            state.drain_deadline =
+                Some(Instant::now() + ExitReason::ReloadExecFailed.drain_budget());
+        }
+        if let Some(budget) = ExitReason::ReloadExecFailed.watchdog_budget() {
+            self.watchdog.arm(budget, ExitReason::ReloadExecFailed);
+        }
+        tokio::spawn(self.execute());
+        self.wait_terminal().await
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum ReloadRefused {
+    /// Typed refusal: temporary servers do not reload (design I4).
+    TemporaryServer,
+    /// A termination is already in progress; reload loses (design 3.2.2).
+    ShutdownInProgress(ExitReason),
+}
+
+// ---------------------------------------------------------------------------
+// Cleanup list (design 3.4): only real APIs, each step bounded.
+// ---------------------------------------------------------------------------
+
+/// Pure step plan, unit-testable (design 4.3).
+pub(crate) fn cleanup_step_plan(temporary: bool) -> Vec<&'static str> {
+    let mut steps = vec![
+        "unregister-registry",
+        "remove-socket",
+        "remove-debug-socket",
+        "remove-hash-sidecar",
+    ];
+    if temporary {
+        steps.push("remove-temporary-metadata");
+    }
+    steps.extend(["disconnect-mcp-pool", "finalize-background", "flush-log"]);
+    steps
+}
+
+async fn bounded_step<F>(name: &str, step: F)
+where
+    F: std::future::Future<Output = ()>,
+{
+    if tokio::time::timeout(CLEANUP_STEP_BUDGET, step).await.is_err() {
+        crate::logging::warn(&format!(
+            "Shutdown cleanup step '{name}' exceeded its budget; continuing."
+        ));
+    }
+}
+
+async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
+    let Some(config) = config else {
+        crate::logging::warn(
+            "Shutdown coordinator: no config; skipping sidecar cleanup (test server?)",
+        );
+        return;
+    };
+
+    // 1. Unregister registry.
+    bounded_step("unregister-registry", async {
+        crate::registry::unregister_server_bounded(&config.server_name).await;
+    })
+    .await;
+
+    // 2-3. Remove main + debug sockets.
+    crate::transport::remove_socket(&config.socket_path);
+    crate::transport::remove_socket(&config.debug_socket_path);
+
+    // 4. Remove the `.hash` sidecar.
+    let hash_path = format!("{}.hash", config.socket_path.display());
+    let _ = std::fs::remove_file(&hash_path);
+
+    // 5. Remove temporary metadata when temporary.
+    if config.temporary {
+        super::lifecycle::cleanup_temporary_metadata(&config.socket_path);
+    }
+
+    // 6. Shut down MCP children pool-wide.
+    if let Some(cell) = config.mcp_pool.as_ref()
+        && let Some(pool) = cell.get()
+    {
+        let pool = Arc::clone(pool);
+        bounded_step("disconnect-mcp-pool", async move {
+            pool.disconnect_all().await;
+        })
+        .await;
+    }
+
+    // 7. Finalize non-detached background statuses.
+    bounded_step("finalize-background", async {
+        let finalized = crate::background::global()
+            .finalize_non_detached(reason.as_str())
+            .await;
+        if finalized > 0 {
+            crate::logging::info(&format!(
+                "Shutdown: finalized {finalized} non-detached background task(s)."
+            ));
+        }
+    })
+    .await;
+
+    // 8. Flush the lifecycle log (best effort: emit the final record).
+    crate::logging::info(&format!(
+        "Shutdown cleanup complete (reason={})",
+        reason.as_str()
+    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table_with(classes: &[ActivityClass]) -> LeaseTable {
+        let mut table = LeaseTable::default();
+        for (index, class) in classes.iter().enumerate() {
+            table
+                .acquire(*class, &format!("t{index}"), Instant::now())
+                .unwrap();
+        }
+        table
+    }
+
+    #[test]
+    fn lease_table_acquire_release_idle() {
+        let mut table = LeaseTable::default();
+        assert!(table.is_idle());
+        let id = table
+            .acquire(ActivityClass::ProviderTurn, "turn", Instant::now())
+            .unwrap();
+        assert!(!table.is_idle());
+        assert_eq!(table.count(), 1);
+        assert!(table.release(id));
+        assert!(table.is_idle());
+        assert!(!table.release(id), "double release must be inert");
+    }
+
+    #[test]
+    fn lease_table_refuses_after_drain_begins() {
+        let mut table = LeaseTable::default();
+        table.refuse_new();
+        let err = table
+            .acquire(ActivityClass::DebugJob, "late", Instant::now())
+            .expect_err("acquire after refuse_new must fail");
+        assert_eq!(err, ActivityLeaseError::ShuttingDown);
+    }
+
+    #[test]
+    fn client_connections_are_not_drain_blocking() {
+        let table = table_with(&[
+            ActivityClass::ClientConnection,
+            ActivityClass::ClientConnection,
+        ]);
+        assert_eq!(table.count(), 2);
+        assert_eq!(table.drain_blocking_count(), 0);
+        let table = table_with(&[ActivityClass::ClientConnection, ActivityClass::McpCall]);
+        assert_eq!(table.drain_blocking_count(), 1);
+    }
+
+    #[test]
+    fn idle_clock_quiescence_epoch() {
+        // I1: a lease held past the timeout then released requires a FULL
+        // new window (F01 design 4.2).
+        let timeout = Duration::from_secs(300);
+        let mut clock = IdleClock::default();
+        let t0 = Instant::now();
+
+        // Quiescent at t0: window starts.
+        clock.update(true, t0);
+        assert!(!clock.should_exit(t0 + Duration::from_secs(299), timeout));
+        assert!(clock.should_exit(t0 + Duration::from_secs(300), timeout));
+
+        // Lease acquired at t0+100 (non-quiescent): epoch resets to None.
+        clock.update(false, t0 + Duration::from_secs(100));
+        assert!(!clock.should_exit(t0 + Duration::from_secs(500), timeout));
+
+        // Lease held past the timeout, then released at t0+500: full new
+        // window required from t0+500.
+        clock.update(true, t0 + Duration::from_secs(500));
+        assert!(!clock.should_exit(t0 + Duration::from_secs(799), timeout));
+        assert!(clock.should_exit(t0 + Duration::from_secs(800), timeout));
+    }
+
+    #[test]
+    fn reason_lattice_is_total_and_strict() {
+        use ExitReason::*;
+        let order = [
+            SigTerm,
+            ReloadExecFailed,
+            AcceptLoopFailure,
+            Reload,
+            TemporaryOwnerExit,
+        ];
+        for (i, stronger) in order.iter().enumerate() {
+            for weaker in &order[i + 1..] {
+                assert!(
+                    decide_upgrade(*weaker, *stronger),
+                    "{stronger:?} must upgrade over {weaker:?}"
+                );
+                assert!(
+                    !decide_upgrade(*stronger, *weaker),
+                    "{weaker:?} must not upgrade over {stronger:?}"
+                );
+            }
+            assert!(
+                !decide_upgrade(*stronger, *stronger),
+                "{stronger:?} tie is not an upgrade"
+            );
+        }
+        // Idle reasons tie with each other and lose to everything else.
+        assert!(!decide_upgrade(PersistentIdle, TemporaryIdle));
+        assert!(!decide_upgrade(TemporaryIdle, PersistentIdle));
+        for reason in order {
+            assert!(decide_upgrade(PersistentIdle, reason));
+        }
+    }
+
+    #[test]
+    fn exit_codes_match_design_table() {
+        assert_eq!(ExitReason::SigTerm.exit_code(), 0);
+        assert_eq!(ExitReason::PersistentIdle.exit_code(), 44);
+        assert_eq!(ExitReason::TemporaryIdle.exit_code(), 44);
+        assert_eq!(ExitReason::TemporaryOwnerExit.exit_code(), 44);
+        assert_eq!(ExitReason::ReloadExecFailed.exit_code(), 42);
+        assert_eq!(ExitReason::AcceptLoopFailure.exit_code(), 45);
+        assert_eq!(EXIT_FORCED, 70);
+    }
+
+    #[test]
+    fn watchdog_budget_exceeds_drain_plus_cleanup() {
+        // Invariant I5: drain + cleanup < watchdog for every termination
+        // reason. Reload (handoff) is not watchdog-armed.
+        for reason in [
+            ExitReason::SigTerm,
+            ExitReason::ReloadExecFailed,
+            ExitReason::AcceptLoopFailure,
+            ExitReason::TemporaryOwnerExit,
+            ExitReason::TemporaryIdle,
+            ExitReason::PersistentIdle,
+        ] {
+            let watchdog = reason
+                .watchdog_budget()
+                .expect("termination reasons are watchdog-armed");
+            assert!(
+                reason.drain_budget() + CLEANUP_BUDGET < watchdog,
+                "{reason:?}: drain {:?} + cleanup {CLEANUP_BUDGET:?} must be < watchdog {watchdog:?}",
+                reason.drain_budget(),
+            );
+        }
+        assert_eq!(ExitReason::Reload.watchdog_budget(), None);
+    }
+
+    #[test]
+    fn watchdog_cancel_and_fire_are_mutually_exclusive() {
+        // Executor wins: cancel succeeds, a later fire attempt must fail.
+        let watchdog = Watchdog::new();
+        watchdog.state.store(WATCHDOG_ARMED, Ordering::SeqCst);
+        assert!(watchdog.cancel());
+        assert!(
+            watchdog
+                .state
+                .compare_exchange(
+                    WATCHDOG_ARMED,
+                    WATCHDOG_FIRING,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_err(),
+            "cancelled watchdog must not claim the firing permit"
+        );
+
+        // Watchdog wins: firing claimed, executor cancel must lose.
+        let watchdog = Watchdog::new();
+        watchdog.state.store(WATCHDOG_FIRING, Ordering::SeqCst);
+        assert!(!watchdog.cancel(), "executor must observe the lost race");
+
+        // Never armed (reload path): cancel trivially succeeds.
+        let watchdog = Watchdog::new();
+        assert!(watchdog.cancel());
+    }
+
+    #[test]
+    fn watchdog_deadline_only_decreases() {
+        let watchdog = Watchdog::new();
+        watchdog.deadline_micros.store(5_000_000, Ordering::SeqCst);
+        watchdog
+            .deadline_micros
+            .fetch_min(3_000_000, Ordering::SeqCst);
+        assert_eq!(watchdog.deadline_micros.load(Ordering::SeqCst), 3_000_000);
+        // A later, larger deadline must not extend.
+        watchdog
+            .deadline_micros
+            .fetch_min(9_000_000, Ordering::SeqCst);
+        assert_eq!(watchdog.deadline_micros.load(Ordering::SeqCst), 3_000_000);
+    }
+
+    #[test]
+    fn cleanup_plan_covers_design_step_list() {
+        let persistent = cleanup_step_plan(false);
+        assert_eq!(
+            persistent,
+            vec![
+                "unregister-registry",
+                "remove-socket",
+                "remove-debug-socket",
+                "remove-hash-sidecar",
+                "disconnect-mcp-pool",
+                "finalize-background",
+                "flush-log",
+            ]
+        );
+        let temporary = cleanup_step_plan(true);
+        assert!(temporary.contains(&"remove-temporary-metadata"));
+        assert_eq!(temporary.len(), persistent.len() + 1);
+    }
+}

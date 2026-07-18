@@ -42,6 +42,7 @@ mod reload_recovery;
 mod reload_state;
 mod reload_trace;
 mod runtime;
+mod shutdown;
 mod socket;
 mod swarm;
 mod swarm_mutation_state;
