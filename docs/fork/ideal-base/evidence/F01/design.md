@@ -1,11 +1,16 @@
 # F01 design record: one shutdown coordinator, one activity-lease authority
 
-Status: design only, revision 2. Original verified against
-`c96c4b57de57438d63e23796e6b038027265fca4`; this revision re-verified against
+Status: design only, revision 3. Revision 1 verified against
+`c96c4b57de57438d63e23796e6b038027265fca4`; revisions 2-3 re-verified against
 `398b51c07d1f0545bfdccd6a33e6ea9fd76b6574` (main). No source modified.
-Revision 2 resolves the independent FAIL review
+Revision 2 resolved the independent FAIL review
 (`../../reviews/F01-architecture-critique.md`, commit `7563a1237`); the
-finding-by-finding mapping is in `revision_response.md`.
+finding-by-finding mapping is in `revision_response.md`. Revision 3 resolves
+the re-review FAIL (`../../reviews/F01-architecture-re-review.md`, commit
+`09f367098`): B-R1 (startup reload-recovery caller family added, section
+3.3), B-R2 (termination ownership protocol, section 3.2.1), I-R1 (background
+guard scope), I-R2 (two authorized termination sites enumerated), M-R1/M-R2
+(citation and deadline-wording precision).
 
 Scope contract (A0/A1 of `ACCEPTANCE_STANDARD.md`):
 
@@ -28,7 +33,7 @@ Every process-exit authority in the daemon image, at the commit above:
 | E3 | SIGTERM handler | `server.rs:1204-1226`, `exit(0)` at `server.rs:1222`; 3s watchdog thread `exit(0)` at `server.rs:1215-1219` | SIGTERM | Registry unregister only (`server.rs:1221`) | Sockets, metadata, hash, all work classes; watchdog can preempt even the registry cleanup |
 | E4 | Exec-based reload | `crates/jcode-app-core/src/server/reload.rs:57-211`; `replace_process` around `reload.rs:180`; failure fallback `std::process::exit(42)` at `reload.rs:210` | Reload signal channel (`await_reload_signal`, wired at `server.rs:1187-1202`) | Persists recovery intents (`reload.rs:118`, `persist_reload_recovery_intents` at :214), graceful-shutdowns sessions (`reload.rs:130`, `graceful_shutdown_sessions` at :334), removes sockets pre-exec (`reload.rs:19`), marks listener FDs close-on-exec (`server.rs:2115-2121`) | Non-session work classes (debug jobs, MCP in-flight calls, swarm waiters are killed by exec without lease drain); exit(42) fallback path skips socket cleanup it already did but leaves no registry/metadata reconciliation |
 | E5 | Accept-loop failure return | `server.rs:2181-2197`: either listener exiting cancels the runtime task scope (`runtime.rs:303-305` `tasks.shutdown()`) and returns `Ok(())` from `run()` | Listener error | Joins owned connection tasks | No socket/registry/metadata removal on this path; process exit code is the caller's |
-| E6 | Parent SIGKILL / crash | (no code: involuntary) | External | Nothing | Everything; next boot relies on stale-socket reap (`socket.rs:71` + documented rationale), background orphan reconcile (`server.rs:1171-1186`), reload-marker stale clear (`server.rs:2126`), reload-recovery GC (`server.rs:2128-2139`), PID-marker sweep (`jcode-base/src/session.rs:66`) |
+| E6 | Parent SIGKILL / crash | (no code: involuntary) | External | Nothing | Everything; next boot relies on stale-socket reap (`reap_stale_socket_if_dead`, `socket.rs:76-126`), background orphan reconcile (`server.rs:1171-1186`), reload-marker stale clear (`server.rs:2126`), reload-recovery GC (`server.rs:2128-2139`), PID-marker sweep (`jcode-base/src/session.rs:66`) |
 
 Confirmed absences (grounds for this design):
 
@@ -241,16 +246,35 @@ enum BeginOutcome {
 }
 
 enum TerminalOutcome {
-    Exited { reason: Reason, code: i32 },   // full cleanup ran
+    Cleaned { reason: Reason, code: i32 },   // full cleanup ran; process NOT yet exited
     ForcedExit { reason: Reason, code: i32 }, // watchdog preempted cleanup
     Handoff,                                 // exec replaced the image
 }
 ```
 
 Because exactly one task executes transitions, cleanup runs at most once (a
-phase latch makes re-entry impossible) and the process terminates at exactly
-one call site inside the executor. Concurrent callers cannot both run cleanup;
-they observe `SupersededBy` and may `wait_terminal`.
+phase latch makes re-entry impossible). Concurrent callers cannot both run
+cleanup; they observe `SupersededBy` and may `wait_terminal`.
+
+Termination ownership (revision 3, resolves re-review B-R2): the executor
+NEVER calls `std::process::exit`. It finishes cleanup, publishes
+`Cleaned { reason, code }` to all waiters, and stops. `Server::run` awaits the
+coordinator's terminal state alongside its listener handles and returns a
+typed `ServerExit { reason, code }` value (or the accept-loop `Err`); its
+local resource guards, including the daemon lock, drop as `run()`'s scope
+unwinds, AFTER every cleanup step. The binary's top-level runner (the sole
+caller of `run()`) then performs the one normal process-termination call,
+`std::process::exit(code)`. There are exactly two authorized termination
+sites in the whole image:
+
+1. the top-level runner, after `run()` returns with a `Cleaned` outcome
+   (normal path);
+2. the coordinator-armed watchdog thread (`ForcedExit`, 3.2.4).
+
+This makes `begin_and_wait` coherent: waiters receive `Cleaned` before the
+process exits, so paths like accept-loop failure can await full cleanup and
+still return through `run()`. `Handoff` remains special: exec replaces the
+process image inside the executor's `Handoff` phase and is not a termination.
 
 #### 3.2.2 Total reason priority lattice
 
@@ -265,8 +289,9 @@ Rules:
 
 - A `begin` with a strictly stronger reason than the driving one is an
   upgrade: it is `Accepted`, replaces the driving reason, and re-derives the
-  drain deadline as `min(remaining_deadline, full_deadline(new_reason))` —
-  upgrades can only shorten or preserve a running drain, never extend it.
+  absolute drain deadline as
+  `new_deadline = min(current_absolute_deadline, now + full_budget(new_reason))`
+  — upgrades can only shorten or preserve a running drain, never extend it.
 - Equal or weaker reasons return `SupersededBy(driving)` and change nothing.
 - The two idle reasons are mutually exclusive by construction (a server is
   persistent xor temporary), so their equal ranking is unreachable in
@@ -287,11 +312,11 @@ Pairwise race tests for every ordered pair of reasons are mandatory (4.3).
 Running
   -> Draining(reason, deadline)   // intake stopped, waiting for lease table
   -> CleaningUp(reason)           // leases drained OR deadline hit
-  -> (terminate)                  // TerminalOutcome::Exited
+  -> Cleaned                      // publish TerminalOutcome::Cleaned; runner exits
 Running
   -> Draining(Reload, deadline)
   -> Handoff                      // reload persistence + exec
-  -> (exec failure) Draining(ReloadExecFailed) -> CleaningUp -> terminate
+  -> (exec failure) Draining(ReloadExecFailed) -> CleaningUp -> Cleaned
 ```
 
 - `Draining` stops intake first: accept loops stop accepting (the existing
@@ -317,11 +342,12 @@ Running
   (`server.rs:1668-1685`), so temporary servers CAN receive reload signals
   today. The refusal is typed, logged, reported to the requester, and tested.
 - Accept-loop failure: the failure arms in `Server::run`
-  (`server.rs:2181-2196`) call
-  `begin_and_wait(AcceptLoopFailure)` and only then return
-  `Err(AcceptLoopFailed)`; `run()`'s caller maps that to a distinct nonzero
-  exit code (3.2.5). The local `_daemon_lock` guard (`server.rs:2099`)
-  remains in scope across the await, so the lock outlives cleanup ordering.
+  (`server.rs:2181-2196`) call `begin_and_wait(AcceptLoopFailure)`, receive
+  `Cleaned { .., code: 45 }` (the executor does not exit the process, 3.2.1),
+  and only then return `Err(AcceptLoopFailed)`. The top-level runner
+  (`src/cli/dispatch.rs:114`) maps that to exit code 45. The local
+  `_daemon_lock` guard (`server.rs:2099`) remains in scope across the await
+  and drops during `run()` unwind, after every cleanup step.
 
 #### 3.2.4 The watchdog is coordinator-owned (resolves I2)
 
@@ -336,7 +362,7 @@ removed by F02. Instead:
   `drain_deadline(reason) + cleanup_budget < watchdog_deadline(reason)`.
   For `SigTerm` the total stays within the current 3s envelope.
 - If the watchdog fires, the outcome is `ForcedExit`, a distinct terminal
-  outcome with its own exit code, never reported as `Exited`. Before
+  outcome with its own exit code, never reported as `Cleaned`. Before
   sleeping, the watchdog thread records a durable "forced-exit armed" marker
   (reason, phase, timestamp) so a post-mortem can see cleanup was preempted
   even though the dying process cannot log afterwards.
@@ -354,10 +380,11 @@ removed by F02. Instead:
 
 | Outcome | Code |
 |---|---|
-| `Exited(SigTerm)` | 0 |
-| `Exited(PersistentIdle | TemporaryIdle | TemporaryOwnerExit)` | 44 (`EXIT_IDLE_TIMEOUT`, `server.rs:527`) |
-| `Exited(ReloadExecFailed)` | 42 (kept, `reload.rs:210`) |
-| `Exited(AcceptLoopFailure)` | 45 (new, distinct) |
+| `Cleaned(SigTerm)` | 0 |
+| `Cleaned(PersistentIdle | TemporaryIdle | TemporaryOwnerExit)` | 44 (`EXIT_IDLE_TIMEOUT`, `server.rs:527`) |
+| `Cleaned(ReloadExecFailed)` | 42 (kept, `reload.rs:210`) |
+| `Cleaned(AcceptLoopFailure)` | 45 (new, distinct) |
+| (codes applied by the top-level runner in `src/cli/dispatch.rs:114`, the sole caller of `Server::run`) | |
 | `ForcedExit(any reason)` | 70 (new, distinct; EX_SOFTWARE convention) |
 | `Handoff` | (no exit: exec) |
 
@@ -377,10 +404,14 @@ construction. Enumerated caller families at `398b51c07`:
 | Spawned/headless initial turns | `comm_session.rs:886` |
 | Jade relay | `jade_relay.rs:1211`, `jade_relay.rs:1242` |
 | Live wake turns | `live_turn.rs:120` |
+| Startup headless reload-recovery continuation | `server.rs:1009` (inside `recover_headless_sessions_on_startup`) |
 
 A wiring-census test enumerates `process_message_streaming_mpsc` callers
-(grep-based) and fails when a new family appears without a corresponding F03
-fixture entry. Acquisition failure (`ShuttingDown`) surfaces as a typed
+(grep-based over production sources, excluding definitions, imports, and test
+files) and fails when a new family appears without a corresponding F03
+fixture entry. Every family in the table above, including the startup
+reload-recovery continuation at `server.rs:1009`, requires its own F03
+runtime fixture. Acquisition failure (`ShuttingDown`) surfaces as a typed
 turn-refused error to the caller; no turn starts silently during drain.
 
 #### 3.3.1 Startup recovery is its own bounded lease
@@ -417,7 +448,7 @@ turn-refused error to the caller; no turn starts silently during drain.
 | C1/C2/C3 `ProviderTurn` | inside `process_message_streaming_mpsc` (`client_lifecycle.rs:3179`) |
 | `StartupRecovery` | `server.rs:721` recovery window (3.3.1) |
 | C4 `DebugJob` | `debug_jobs.rs:72`, wrapping both spawned job tasks (`:92`, `:121`) |
-| C5 `BackgroundTask` | `BackgroundTaskManager` non-detached spawn/registration branches (e.g. `background.rs:454/529/656/740`), via the injected authority (3.0) |
+| C5 `BackgroundTask` | `BackgroundTaskManager` non-detached branches, via the injected authority (3.0). Guard scope: acquired at method entry in `spawn_with_notify` (before the `tokio::spawn` at `background.rs:483-484`) and in the adopt path before its registration, moved into the `RunningTask` record inserted into the live map (`background.rs:584-600`), and dropped at terminal pruning of that record — so the guard exists before the future can execute and lives exactly as long as the tracked task |
 | C7 `McpCall` | `manager.rs:342` and `pool.rs:232` (3.0.1) |
 | C8 `SwarmWaiter` | `comm_await.rs:364` watcher body (3.3.2) |
 | C9 `ScheduledDelivery` | ambient runner dispatch (3.3.2) |
@@ -452,7 +483,8 @@ later steps. The whole phase fits the cleanup budget (3.2.4).
 
 #### 3.4.1 Residue contract (complete set)
 
-After `Exited`, all of the following are gone or coherent (A0):
+After the process exits following `Cleaned`, all of the following are gone
+or coherent (A0):
 
 main socket, debug socket, `.hash` sidecar, temporary metadata, registry
 entry, **daemon lock file**, reload marker/recovery state, PID markers, and
@@ -514,7 +546,8 @@ precondition).
 
 Involuntary exits (parent SIGKILL, crash, ForcedExit residue): covered not by
 the coordinator but by the recovery ledger the coordinator makes redundant on
-voluntary paths: stale-socket reap (`socket.rs:71`), orphan background
+voluntary paths: stale-socket reap (`reap_stale_socket_if_dead`,
+`socket.rs:76-126`), orphan background
 reconcile (`background.rs:317` via `server.rs:1171`), reload-marker stale
 clear (`server.rs:2126`), recovery GC (`server.rs:2128`), PID sweep
 (`session.rs:66`), stale daemon-lock reap, plus F06's owner-identity work for
@@ -546,13 +579,14 @@ owner-PID probe (`lifecycle.rs:270`) outside the pure core.
 
 Invariants (the testable spec):
 
-- I1 exit-requires-idle: `Exited(PersistentIdle|TemporaryIdle)` is reachable
+- I1 exit-requires-idle: `Cleaned(PersistentIdle|TemporaryIdle)` is reachable
   only when `quiescent` held continuously for the entire idle window
   (`idle_since` epoch semantics above).
-- I2 single-authority: every `Exited` is produced by the one executor after
-  `Draining` and `CleaningUp` (or `Handoff` for reload). `ForcedExit` is the
-  only other way the process ends voluntarily, and it is armed by that same
-  executor (3.2.4).
+- I2 single-authority: every `Cleaned` is produced by the one executor after
+  `Draining` and `CleaningUp` (or `Handoff` for reload), and the process then
+  exits only through the top-level runner (3.2.1). `ForcedExit` via the
+  coordinator-armed watchdog is the only other voluntary process end; the two
+  authorized termination sites are enumerated in 3.2.1.
 - I3 no lease leak: for every `acquire` there is a `release` on every task
   outcome (success, error, panic->guard drop, abort->guard drop).
 - I4 monotone phases: `Running -> Draining -> {CleaningUp|Handoff} ->
@@ -562,7 +596,7 @@ Invariants (the testable spec):
   below `watchdog_deadline(reason)` (3.2.4).
 - I6 no intake after drain: `acquire` fails with a typed error in every phase
   except `Running`.
-- I7 outcome honesty: `Exited` implies the cleanup list fully executed
+- I7 outcome honesty: `Cleaned` implies the cleanup list fully executed
   (failed steps logged); `ForcedExit` implies the forced-exit marker was
   recorded and next-boot reconciliation owns the residue. There is no third
   category and no silent skip.
