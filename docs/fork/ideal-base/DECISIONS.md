@@ -176,3 +176,26 @@ the protected prompt. The revert preserves Git history while restoring the
 required tree state.
 
 **Reopen trigger:** none.
+
+## D011. Expand model rotation and fail F01 before implementation
+
+**Decision:** user-approved non-Anthropic rotation now also includes Kimi K3
+(frontier), Cursor Grok, GLM-5.2, DeepSeek-V4-Pro, and MiniMax M3. D009a remains
+the default OpenAI routing: Sol hard/critical, Terra medium, Luna retrieval.
+These additional models may provide independent lanes where useful; GPT-4o is
+explicitly excluded.
+
+The independent F01 review (`7563a1237`, OpenAI `gpt-5.6-sol`, high effort)
+returned FAIL with three blockers and several important contradictions. F01 is
+therefore not accepted. F02's Anthropic worker hit 429 after producing an
+uncommitted partial implementation; that diff is preserved as stash
+`ideal-base F02 aborted partial implementation ...` and will not be applied
+until the revised F01 design passes a fresh independent critical review.
+
+**Reason:** implementation cannot proceed from a design with an unimplementable
+crate boundary, a self-blocking reload lease, or incomplete provider/MCP turn
+coverage. Preserving the partial diff avoids data loss without treating it as
+accepted work.
+
+**Reopen trigger:** revised F01 design passes independent review; F02 may then
+salvage only compatible pieces from the stash.
