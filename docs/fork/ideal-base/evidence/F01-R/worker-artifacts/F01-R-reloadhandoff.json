@@ -1,0 +1,54 @@
+{
+ "node_id": "F01-R-reloadhandoff",
+ "worker_session": "session_penguin_1784360872325_ffa5f3b1ef2db889",
+ "worker_name": "penguin",
+ "model": "gpt-5.5",
+ "artifact": {
+  "confidence": "high",
+  "edge_cases_considered": [
+   "Self-blocking drain: if C10 is counted in the same drain-blocking table, `begin(Reload)` can never observe empty leases because C10 releases only after the Handoff/exec/failure path. This is the exact review failure at docs/fork/ideal-base/reviews/F01-architecture-critique.md:111-118.",
+   "Late arrival after reload starts: source rejects new turns while marker is `Starting` at client_lifecycle.rs:294-299 and 2799-2805. The design equivalent should be coordinator phase `Draining/ReloadStarting` rejecting work leases, not C10 occupying the work lease table.",
+   "Acquire-order race: if reload tries to acquire normal C10 after `Draining` rejects new acquisitions, reload can be refused by its own stop-intake rule. If it acquires before `Draining`, it self-blocks. This is why C10 cannot be a normal drain-blocking lease.",
+   "Drain/reload race: source reload has a single sequential task from signal to exec/failure at reload.rs:57-210, but F01 design lacks a serialized coordinator executor and complete reason precedence. The fix is one actor/claim for phase transitions, then drain only work leases.",
+   "Waiter race: existing waiters are marker/socket/process waiters with bounded edge waiting and status reinspection; they should not wait on lease-table empty because marker readiness and drain emptiness are different predicates.",
+   "Failure/exec race: source writes `Failed` on exec/missing-binary/no-binary before `exit(42)` at reload.rs:181-210. A formal admin treatment should keep this failed terminal phase and should not release a work lease to unblock drain after failure, because the failure path itself is a coordinator transition.",
+   "Desktop handoff race: desktop child waits for parent release but times out and shows itself if parent fails; parent exits when child ready or cleans up on timeout. This is an admin UI handoff and should remain out of server drain semantics."
+  ],
+  "evidence": [
+   "Design declares `ReloadHandoff` as a `LeaseClass` C10 from signal receipt to exec/failure: docs/fork/ideal-base/evidence/F01/design.md:103-114.",
+   "Design `Draining` phase says stop intake, reject new lease acquisition, and wait for leases before `Handoff`: docs/fork/ideal-base/evidence/F01/design.md:148-169 and docs/fork/ideal-base/evidence/F01/design.md:179-183.",
+   "Design wiring maps `reload.rs:57-211` to `coordinator.begin(Reload) -> Handoff` and C10 acquisition to reload signal receipt: docs/fork/ideal-base/evidence/F01/design.md:188-197.",
+   "Design matrix treats C10 reload as 'is the reason', while other rows mark it n/a/terminal, which supports modeling it as phase state rather than drain-blocking work: docs/fork/ideal-base/evidence/F01/design.md:234-241.",
+   "Review already identifies the self-cycle: `ReloadHandoff` lease is acquired from signal receipt through exec/failure, `begin(Reload)` waits for leases, release only happens in `Handoff`, and no exclusion/admin rule is specified: docs/fork/ideal-base/reviews/F01-architecture-critique.md:111-118.",
+   "Review required correction explicitly says to make coordinator-internal activity distinct from drain-blocking work or remove `ReloadHandoff` from the lease table and represent it solely as phase state: docs/fork/ideal-base/reviews/F01-architecture-critique.md:125-130.",
+   "Review gate requires resolving/removing the `ReloadHandoff` self-lease cycle and defining coordinator execution/precedence semantics: docs/fork/ideal-base/reviews/F01-architecture-critique.md:291-302.",
+   "Current source has no `ActivityLeaseAuthority` implementation; `ActivityLeaseAuthority` appears only in the design doc, not Rust source (grep result).",
+   "Source reload begins by receiving a reload signal, writing `ReloadPhase::Starting`, and acknowledging the signal before persistence/drain/exec: crates/jcode-app-core/src/server/reload.rs:57-103.",
+   "Source reload then persists recovery intents, performs graceful shutdown, and proceeds to exec or writes `ReloadPhase::Failed` then exits 42 on failure: crates/jcode-app-core/src/server/reload.rs:118-210.",
+   "Source graceful reload wait is a session checkpoint wait over running swarm members, not a lease-table wait; it filters signalable sessions, excludes the triggering session, and waits until watched members are no longer running or timeout: crates/jcode-app-core/src/server/reload.rs:363-398 and crates/jcode-app-core/src/server/reload.rs:433-488.",
+   "Source intake guard rejects new client turns while recent reload state is `Starting`: crates/jcode-app-core/src/server/client_lifecycle.rs:294-299 and crates/jcode-app-core/src/server/client_lifecycle.rs:2799-2805.",
+   "Tests assert the reload-starting guard does not spawn provider work for one or multiple sessions: crates/jcode-app-core/src/server/client_lifecycle_tests.rs:708-790 and crates/jcode-app-core/src/server/client_lifecycle_tests.rs:1021-1126.",
+   "Source reload state is marker/admin state with phases `Starting`, `SocketReady`, `Failed`, plus pid/detail/runtime identity fields: crates/jcode-app-core/src/server/reload_state.rs:433-449.",
+   "Replacement server publishes `SocketReady` only when the marker belongs to the current pid and phase is `Starting`: crates/jcode-app-core/src/server/reload_state.rs:101-135.",
+   "Server startup publishes reload socket-ready after accept loops are spawned, then signals ready fd: crates/jcode-app-core/src/server.rs:1096-1118.",
+   "Server startup preserves an in-flight reload marker for this pid but clears unrelated/stale markers: crates/jcode-app-core/src/server.rs:2123-2125.",
+   "Reload waiters use marker/socket/process status, not lease-drain wait: `ReloadWaitStatus` and `inspect_reload_wait_status` are defined at crates/jcode-app-core/src/server/reload_state.rs:158-208; `await_reload_handoff` loops on status at crates/jcode-app-core/src/server/reload_state.rs:235-269; event wake waits are bounded/polling at crates/jcode-app-core/src/server/reload_state.rs:271-300 and crates/jcode-app-core/src/server/reload_state.rs:302-414.",
+   "TUI reconnect waits on reload handoff marker status before reconnecting and recovers on failed/idle states: crates/jcode-tui/src/tui/app/remote/reconnect.rs:208-300 and crates/jcode-tui/src/tui/app/remote/reconnect.rs:456-509.",
+   "Socket tests cover bounded wait and marker transitions to Ready/Failed: crates/jcode-app-core/src/server/socket_tests.rs:374-394 and crates/jcode-app-core/src/server/socket_tests.rs:462-544.",
+   "Desktop `DesktopReloadHandoff` is a separate parent/child file-marker window handoff, not a server activity lease: env parsing/hidden startup at crates/jcode-desktop/src/desktop_reload.rs:69-117, child ready/release wait at crates/jcode-desktop/src/desktop_reload.rs:120-152, watcher poll/release at crates/jcode-desktop/src/desktop_reload.rs:155-224, spawn handoff env at crates/jcode-desktop/src/desktop_reload.rs:632-670, old-process exit/timeout behavior at crates/jcode-desktop/src/desktop_reload.rs:560-589, and watcher test at crates/jcode-desktop/src/main_tests.rs:594-614.",
+   "Desktop design note confirms process-level desktop reload is a window/process marker handoff, separate from daemon work leasing: docs/DESKTOP_STABLE_HOST_RELOAD_STARTUP.md:6-17."
+  ],
+  "findings": "Recommendation: remove `ReloadHandoff` from the drain-blocking `LeaseClass`/lease table in the F01 design and represent reload handoff as serialized `ShutdownCoordinator` phase/admin state. If the design still wants a lease-shaped handle for attribution, it must be a distinct non-drain-blocking administrative guard that is excluded from `LeaseTable::is_idle`, idle quiescence, and drain emptiness. Rationale: the design currently says `ReloadHandoff` is acquired from signal receipt through exec/failure, while `begin(Reload)` enters `Draining` and waits for leases before entering `Handoff`. That creates a self-dependency where reload waits for its own C10 lease and can only proceed by deadline timeout or by an undocumented exclusion rule. Current source does not implement `ActivityLeaseAuthority`; source reload handoff is already administrative marker/state (`Starting`, `SocketReady`, `Failed`) plus reconnect waiters, not a work lease. The design should match that shape: reload begins by atomically claiming the coordinator/executor, stopping intake, publishing reload-starting state, then draining only user/work leases before exec. Reload waiters should await reload phase/marker readiness, not wait for drain emptiness.",
+  "open_questions": [
+   "If F01 wants a named administrative guard for observability, should it be called `ReloadHandoffGuard`, `CoordinatorPhase::ReloadHandoff`, or `AdminActivity::ReloadHandoff`? The key semantic requirement is that it is excluded from drain-blocking `LeaseTable::is_idle`.",
+   "What is the complete precedence lattice among Reload, SigTerm, idle, temporary owner exit, reload exec failure, and accept-loop failure? The review notes this remains undefined at docs/fork/ideal-base/reviews/F01-architecture-critique.md:93-109.",
+   "Should reload source also guard/debug/API requests beyond client message starts during `Starting`? The cited source confirms new turns are rejected, but I did not exhaustively classify every intake path for this subtask."
+  ],
+  "validation": "Read-only validation only. I grepped for `ReloadHandoff`, `reload handoff`, `ActivityLeaseAuthority`, `ReloadPhase`, `publish_reload_socket_ready`, `await_reload_handoff`, and `server_reload_starting`; read the cited design/review/source/test regions; confirmed no Rust `ActivityLeaseAuthority` implementation exists and no edits were made.",
+  "what_i_did_not_check": [
+   "I did not run tests or compile because the instruction was analysis only and no edits.",
+   "I did not exhaustively audit every non-turn intake path such as debug socket commands, MCP calls, gateway connections, and background task starts for reload-starting refusal. That belongs to broader F01 lifecycle coverage.",
+   "I did not inspect child swarm artifacts that may have been spawned earlier, because this atomic analysis used direct source/design review to close the assigned node."
+  ]
+ }
+}

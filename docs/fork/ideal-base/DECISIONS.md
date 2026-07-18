@@ -199,3 +199,41 @@ accepted work.
 
 **Reopen trigger:** revised F01 design passes independent review; F02 may then
 salvage only compatible pieces from the stash.
+
+## D012. Coordinator recovery: direct F01-R revision, over-decomposed plan cleared
+
+**Decision:** the coordinator session (`fish`) was interrupted after the F01-R
+repair fan-out over-decomposed into a 148-node analysis plan and the external
+model rotation partially failed (GLM worker crash failed `b2`; Kimi endpoint
+4xx; Cursor Grok stream error; user reported "glm seems dead"). A fresh
+coordinator (session `monkey`) recovered per EXECUTION_PROTOCOL section 9:
+
+1. Preserved the seven completed typed worker artifacts (`b1`, `i1`, `i2`,
+   `F01-R-watchdog-review-lines`, `F01-R-source-seam`,
+   `F01-R-entry-families`, `F01-R-reloadhandoff`) from session journals into
+   `evidence/F01-R/worker-artifacts/`, and snapshotted the full 148-item plan
+   (version 64) into `evidence/F01-R/pre_clear_plan_snapshot.json`.
+2. Performed the F01-R design revision directly as coordinator work
+   (fable-class design role), producing `evidence/F01/design.md` revision 2
+   and `evidence/F01/revision_response.md`, resolving all three blockers,
+   all five important findings, and the ten-point revision gate. All new
+   file:line citations were mechanically re-verified at `398b51c07`
+   (23/23 pass).
+3. Amended F02 `owned_paths` in `WORK_GRAPH.json` (both `all_nodes` and the
+   W1 expansion) per the chosen `jcode-core` inversion seam:
+   `crates/jcode-core/src/activity.rs`, `crates/jcode-core/src/lib.rs`,
+   `crates/jcode-base/src/mcp/manager.rs`, `crates/jcode-base/src/mcp/pool.rs`,
+   `crates/jcode-app-core/src/tool/mod.rs`.
+4. Cleared the over-decomposed 148-item swarm plan (snapshot preserved), the
+   same quarantine-then-clear treatment W0.3 applied to the earlier stale
+   plan. The unexecuted `b2/b3/i3-i5/gate` analyses are subsumed: the
+   revision responds to every review finding directly and F01-V re-validates
+   them all independently against source.
+
+**Reason:** a 143-node queued analysis swarm was scaffolding for a revision
+that one grounded design pass could produce; reviving it would burn provider
+budget on partially dead routes without changing the acceptance bar, which
+remains the independent adversarial F01-V re-review.
+
+**Reopen trigger:** F01-V FAIL, which would inject targeted repair nodes
+rather than re-growing the analysis tree.

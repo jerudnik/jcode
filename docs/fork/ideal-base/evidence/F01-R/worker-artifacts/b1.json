@@ -1,0 +1,44 @@
+{
+ "node_id": "b1",
+ "worker_session": "session_turkey_1784361265455_60a5db975c8206cf",
+ "worker_name": "turkey",
+ "model": "gpt-5.5",
+ "artifact": {
+  "confidence": "high",
+  "edge_cases_considered": [
+   "Shared pooled MCP server already connected via `pool_handles`: covered by `manager.rs:348-355` and `pool.rs:231-243`, but the lease hook is still in lower `jcode-base`.",
+   "Non-shared/stateful MCP server already connected via `owned_clients`: covered by `manager.rs:357-364`, but omitted by design C7's pooled-only wording and F02 ownership.",
+   "Connect-on-first-call path: `manager.rs:367-388` can create or retry a call through either pooled handles or owned clients, so a single `pool.rs:232` hook is insufficient.",
+   "Idle exit scenario: design says PersistentIdle is n/a for C7 only if a lease blocks it, `design.md:234-238`; missing owned-client lease acquisition makes the guarantee false for non-shared calls.",
+   "Ownership staging: F06 later owns MCP files, but it depends on F02 and acceptance A1/F01/F02 need lease coverage before F03 verifies every lease class, so deferring MCP lease insertion to F06 does not satisfy F02/F01 as written."
+  ],
+  "evidence": [
+   "Review B1 states the failing claim and scope: `docs/fork/ideal-base/reviews/F01-architecture-critique.md:53-66` says the authorities are in `crates/jcode-app-core/src/server/`, C7 is assigned to `pool.rs:232`, MCP lives in lower `jcode-base`, and app-core depends on jcode-base.",
+   "Review B1 states the incomplete census and acceptance mismatch: `docs/fork/ideal-base/reviews/F01-architecture-critique.md:68-77` says C7 covers only pooled calls while A1 requires MCP calls, and F02 owned paths omit `crates/jcode-base/src/mcp/**`.",
+   "Review B1 gives the concrete failure and required correction: `docs/fork/ideal-base/reviews/F01-architecture-critique.md:79-89` describes a non-shared/stateful MCP call surviving outside server-local lease accounting and requires an inversion seam plus expanded MCP ownership.",
+   "Design A1 scope explicitly requires all MCP calls under the lease authority: `docs/fork/ideal-base/evidence/F01/design.md:6-12` and acceptance standard `docs/fork/ideal-base/ACCEPTANCE_STANDARD.md:17-23`.",
+   "Design authority placement confirms both new pure-core components are intended in app-core server paths owned by F02: `docs/fork/ideal-base/evidence/F01/design.md:94-99`.",
+   "Design lease classes include `McpCall` as C7 but describe it as only `Pooled MCP calls in flight`: `docs/fork/ideal-base/evidence/F01/design.md:49-58` and `docs/fork/ideal-base/evidence/F01/design.md:103-114`.",
+   "Design wiring assigns C7 only to `pool.rs:232 around the call`: `docs/fork/ideal-base/evidence/F01/design.md:188-197`.",
+   "Design coverage matrix promises every normal exit handles `C7 MCP call`, including idle being n/a because a lease blocks it, which depends on acquisition actually covering all production MCP calls: `docs/fork/ideal-base/evidence/F01/design.md:226-242`.",
+   "F02 ownership excludes MCP paths and includes only server paths plus `background.rs`: `docs/fork/ideal-base/WORK_GRAPH.json:133-144`. F06 later owns `crates/jcode-base/src/mcp/**`, but F06 depends on F02 and is about child ownership, not F02 lease insertion: `docs/fork/ideal-base/WORK_GRAPH.json:207-218`.",
+   "Actual pooled MCP call path is in `jcode-base`: `crates/jcode-base/src/mcp/pool.rs:231-243`.",
+   "Actual manager supports per-session owned clients and non-shared stateful servers: `crates/jcode-base/src/mcp/manager.rs:1-5`, `crates/jcode-base/src/mcp/manager.rs:44-54`, `crates/jcode-base/src/mcp/manager.rs:114-132`, and `crates/jcode-base/src/mcp/manager.rs:159-192`.",
+   "Actual production call path handles both pooled handles and owned clients: `crates/jcode-base/src/mcp/manager.rs:342-364` and reconnect/retry can call both pooled handles and owned clients at `crates/jcode-base/src/mcp/manager.rs:367-388`.",
+   "The registered MCP tool invokes the manager path directly: `crates/jcode-base/src/mcp/tool.rs:49-58`.",
+   "Crate layering supports the dependency-cycle objection: `jcode-app-core` declares `jcode-base` as a dependency at `crates/jcode-app-core/Cargo.toml:85-89`, while `jcode-base` is the foundational layer described at `crates/jcode-base/Cargo.toml:7-12`."
+  ],
+  "findings": "B1 is sustained. Classification: BLOCKING architecture/design contradiction. The contradiction is not that B1 conflicts with the design evidence, but that the design evidence confirms B1: F01 promises A1 coverage for all MCP calls and places the lease authority in app-core, while its own F02 ownership and C7 wiring only cover an unqualified `pool.rs:232` hook and omit `crates/jcode-base/src/mcp/**`. The production MCP path lives in `jcode-base`, includes both shared-pool and per-session owned-client calls, and is reached by the registered tool. Since `jcode-app-core` depends on `jcode-base`, a server-local authority in app-core cannot be directly imported by `jcode-base` without reversing the dependency edge. Therefore F02 cannot implement F01 literally and F01 fails its architecture gate requiring no owner/lease gap.",
+  "open_questions": [
+   "Which correction approach should the coordinator choose: a lower neutral activity-lease crate/API that `jcode-base` can depend on, or injection of a lease callback/trait into `McpManager` from the app-core composition root?",
+   "Should F02 be expanded to own the MCP call sites directly, or should a new dependent node between F02 and F06 own MCP lease integration while F02 defines only the lower interface?",
+   "Should the design rename C7 from `Pooled MCP calls in flight` to `All production MCP tool calls` and split subcases C7a pooled/shared and C7b owned/non-shared for tests?"
+  ],
+  "validation": "Read-only validation only. I inspected the B1 review text, F01 design record, acceptance standard, WORK_GRAPH ownership, MCP pool/manager/tool source paths, and Cargo crate layering. I did not modify files or run builds/tests because the task is documentary/design verification and explicitly read-only.",
+  "what_i_did_not_check": [
+   "I did not run `cargo metadata` to mechanically prove the full crate dependency graph. The cited Cargo.toml lines are sufficient for the app-core -> jcode-base edge but not an exhaustive graph proof.",
+   "I did not inspect every caller that constructs `McpManager`; the manager/tool source is enough to validate B1's shared and owned production call paths.",
+   "I did not validate runtime behavior with an actual non-shared MCP server fixture because this node asks for design/review evidence and no edits."
+  ]
+ }
+}
