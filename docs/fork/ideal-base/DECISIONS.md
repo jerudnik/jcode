@@ -338,3 +338,23 @@ work seed.
 
 **Reopen trigger:** F05 fixtures uncovering a store defect; that injects a
 repair node against F04's owned paths.
+
+## D017. Wave-2 delegation routing (user-specified)
+
+**Decision:** from F05/F06 onward, execution runs through the native swarm
+task DAG with this routing:
+
+- Implementation/coding nodes: OpenAI `gpt-5.6-sol` at high effort.
+- Independent review nodes rotate across: Anthropic `claude-opus-4-8`
+  (usage restored per user), Kimi `k3`, Cursor `cursor-grok-4.5-high`, and
+  `MiniMax-M3`. Reviews must name the model actually used; if a route
+  fails (429/dead endpoint), fall to the next in the rotation and record it.
+- The coordinator (this session) seeds a SMALL node set, forbids worker-side
+  node expansion (the F01-R over-decomposition lesson, D012), accepts
+  artifacts, and checkpoints.
+
+**Reason:** user instruction 2026-07-18T19:15Z; spreads review across
+independent vendors while concentrating implementation on the strongest
+verified implementation route.
+
+**Reopen trigger:** route availability changes or user re-routes.
