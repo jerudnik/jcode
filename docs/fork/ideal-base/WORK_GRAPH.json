@@ -180,7 +180,8 @@
         ],
         "acceptance_gates": [
           "No direct non-atomic status-file writes remain",
-          "Live task is not removed before terminal persistence succeeds or is durably recoverable"
+          "Live task is not removed before terminal persistence succeeds or is durably recoverable",
+          "Status-serialization and write failures are surfaced, not swallowed"
         ],
         "evidence": ["status store tests", "write-failure injection"],
         "review_model": "opus",
@@ -212,7 +213,8 @@
         "owned_paths": [
           "crates/jcode-base/src/mcp/**",
           "crates/jcode-app-core/src/server/**",
-          "src/cli/commands/**/*mcp*",
+          "src/cli/mcp_serve.rs",
+          "src/cli/dispatch.rs",
           "docs/fork/ideal-base/evidence/F06/**"
         ],
         "acceptance_gates": [
@@ -276,6 +278,7 @@
         "priority": 100,
         "owned_paths": [
           "crates/jcode-app-core/src/tool/selfdev/**",
+          "crates/jcode-selfdev-types/src/**",
           "crates/jcode-build-support/src/**",
           "docs/fork/ideal-base/evidence/F09/**"
         ],
@@ -919,7 +922,8 @@
       ],
       "acceptance_gates": [
         "No direct non-atomic status-file writes remain",
-        "Live task is not removed before terminal persistence succeeds or is durably recoverable"
+        "Live task is not removed before terminal persistence succeeds or is durably recoverable",
+        "Status-serialization and write failures are surfaced, not swallowed"
       ],
       "evidence": ["status store tests", "write-failure injection"],
       "review_model": "opus",
@@ -951,7 +955,8 @@
       "owned_paths": [
         "crates/jcode-base/src/mcp/**",
         "crates/jcode-app-core/src/server/**",
-        "src/cli/commands/**/*mcp*",
+        "src/cli/mcp_serve.rs",
+        "src/cli/dispatch.rs",
         "docs/fork/ideal-base/evidence/F06/**"
       ],
       "acceptance_gates": [
@@ -1013,6 +1018,7 @@
       "priority": 100,
       "owned_paths": [
         "crates/jcode-app-core/src/tool/selfdev/**",
+        "crates/jcode-selfdev-types/src/**",
         "crates/jcode-build-support/src/**",
         "docs/fork/ideal-base/evidence/F09/**"
       ],

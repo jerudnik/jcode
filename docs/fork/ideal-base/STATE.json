@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W0.1",
+    "node": "W0.2",
     "state": "accepted",
-    "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
-    "updated_at": "2026-07-18T06:14:28Z",
-    "summary": "Baseline revalidated: railway OK, protected hash intact, one worktree, stashes/refs preserved. Drift 1 (railway commits atop seed) benign. Drift 2 (stale selfdev pending_activation from dead session peacock, canary 923c6353e-dirty active as current/shared-server) preserved as F09 fixture per D006."
+    "commit": "fb00ab840",
+    "updated_at": "2026-07-18T06:29:44Z",
+    "summary": "Source census: 25/25 files and 11/11 dirs exist; no wholly stale seam; all F-nodes retained. Amendments proposed: GN-1 fix F06 stale glob (mcp-serve at src/cli/mcp_serve.rs), GN-2 add jcode-selfdev-types to F09, GN-5 add explicit F04 surfaced-failure gate; scope guards GN-3 (reuse OwnedChildPermit), GN-4 (startup sweep pre-exists). Spot-checked by coordinator: background.rs:133 non-atomic swallow, mobile_server.rs CWD-first, release.yml:436 StrictHostKeyChecking=no, telemetry_state.rs uncompiled, zero *mcp* matches under src/cli/commands."
   },
   "nodes": {
     "W0": {
@@ -63,11 +63,13 @@
       "updated_at": "2026-07-18T06:14:28Z"
     },
     "W0.2": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "fb00ab840",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.2"
+      ],
+      "summary": "Source census: 25/25 files and 11/11 dirs exist; no wholly stale seam; all F-nodes retained. Amendments proposed: GN-1 fix F06 stale glob (mcp-serve at src/cli/mcp_serve.rs), GN-2 add jcode-selfdev-types to F09, GN-5 add explicit F04 surfaced-failure gate; scope guards GN-3 (reuse OwnedChildPermit), GN-4 (startup sweep pre-exists). Spot-checked by coordinator: background.rs:133 non-atomic swallow, mobile_server.rs CWD-first, release.yml:436 StrictHostKeyChecking=no, telemetry_state.rs uncompiled, zero *mcp* matches under src/cli/commands.",
+      "updated_at": "2026-07-18T06:29:44Z"
     },
     "W0.3": {
       "state": "pending",

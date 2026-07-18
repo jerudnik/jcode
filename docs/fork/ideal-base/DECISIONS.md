@@ -99,3 +99,26 @@ snapshot preserves the final plan state.
 
 **Reopen trigger:** none. If the stashed worker diff proves useful for F26 it
 may be cherry-picked by the F26 owner.
+
+## D008. Apply W0.2 census amendments GN-1, GN-2, GN-5 to the work graph
+
+**Decision:** based on the accepted W0.2 source census
+(`evidence/W0.2/source_census.md`, commit `fb00ab840`):
+
+- F06 owned path `src/cli/commands/**/*mcp*` (matched zero files) is replaced
+  with `src/cli/mcp_serve.rs` and `src/cli/dispatch.rs`.
+- F09 gains owned path `crates/jcode-selfdev-types/src/**` because
+  `PendingActivation` lives there.
+- F04 gains the explicit acceptance gate "Status-serialization and write
+  failures are surfaced, not swallowed".
+
+GN-3 (reuse `OwnedChildPermit`, no second cap counter) and GN-4 (startup PID
+sweep pre-exists; F26 starts with a verify of the existing sweep) are recorded
+as binding scope guards for F12 and F26 owners rather than graph edits. GN-6
+is an observation only.
+
+**Reason:** implementation nodes cannot commit inside their ownership boundary
+when the boundary names nonexistent paths, and gates must cover the confirmed
+swallowed-error behavior at `background.rs:133`.
+
+**Reopen trigger:** further source drift discovered by any F-node owner.
