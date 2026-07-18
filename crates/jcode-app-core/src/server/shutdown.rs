@@ -414,6 +414,11 @@ const CLEANUP_BUDGET: Duration = Duration::from_millis(700);
 /// Per-step cleanup bound.
 const CLEANUP_STEP_BUDGET: Duration = Duration::from_millis(250);
 
+/// Fits inside `CLEANUP_STEP_BUDGET` with headroom for pool map teardown and
+/// logging. The tracker divides this bound across graceful, TERM, and KILL.
+const MCP_POOL_DISCONNECT_BUDGET: Duration = Duration::from_millis(25);
+const MCP_CHILD_REAP_GRACE: Duration = Duration::from_millis(175);
+
 /// Poll interval while draining leases.
 const DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -1110,13 +1115,42 @@ async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
         super::lifecycle::cleanup_temporary_metadata(&config.socket_path);
     }
 
-    // 6. Shut down MCP children pool-wide.
+    // 6. Shut down MCP children pool-wide, then reap every pooled or
+    // per-session child registered to this daemon within one fixed budget.
     if let Some(cell) = config.mcp_pool.as_ref()
         && let Some(pool) = cell.get()
     {
         let pool = Arc::clone(pool);
         bounded_step("disconnect-mcp-pool", async move {
-            pool.disconnect_all().await;
+            if tokio::time::timeout(MCP_POOL_DISCONNECT_BUDGET, pool.disconnect_all())
+                .await
+                .is_err()
+            {
+                crate::logging::warn(
+                    "Shutdown: MCP pool disconnect exceeded 25ms; reaping tracked PIDs directly.",
+                );
+            }
+            let report = pool.reap_tracked_children(MCP_CHILD_REAP_GRACE).await;
+            let remaining = pool.tracked_children();
+            if !report.unreaped.is_empty() {
+                crate::logging::warn(&format!(
+                    "Shutdown: MCP SIGKILL deadline expired for PID(s) {:?}",
+                    report.unreaped
+                ));
+            }
+            if !remaining.is_empty() {
+                crate::logging::warn(&format!(
+                    "Shutdown: MCP tracker retained children after reap: {:?}",
+                    remaining
+                ));
+            } else if report.initial > 0 {
+                crate::logging::info(&format!(
+                    "Shutdown: reaped {} tracked MCP child(ren) (TERM={}, KILL={}).",
+                    report.initial,
+                    report.term_signaled.len(),
+                    report.kill_signaled.len()
+                ));
+            }
         })
         .await;
     }
@@ -1363,5 +1397,13 @@ mod tests {
         let temporary = cleanup_step_plan(true);
         assert!(temporary.contains(&"remove-temporary-metadata"));
         assert_eq!(temporary.len(), persistent.len() + 1);
+    }
+
+    #[test]
+    fn mcp_disconnect_and_reap_fit_cleanup_step_budget() {
+        assert!(
+            MCP_POOL_DISCONNECT_BUDGET + MCP_CHILD_REAP_GRACE < CLEANUP_STEP_BUDGET,
+            "MCP cleanup needs scheduler/logging headroom inside the bounded step"
+        );
     }
 }

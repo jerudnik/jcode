@@ -4,7 +4,10 @@
 //! are managed by the pool and reused across sessions. Servers marked `shared: false`
 //! (e.g., Playwright with browser state) are spawned per-session.
 
-use super::client::{MAX_OWNED_MCP_CHILDREN, McpClient, McpHandle, OwnedChildPermit};
+use super::client::{
+    DEFAULT_MCP_REAP_GRACE, MAX_OWNED_MCP_CHILDREN, McpChildTracker, McpClient, McpHandle,
+    OwnedChildPermit,
+};
 use super::pool::SharedMcpPool;
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef, ToolCallResult};
 use anyhow::{Context, Result, anyhow};
@@ -183,6 +186,11 @@ impl McpManager {
         // Connect non-shared servers per-session
         if !owned_servers.is_empty() {
             let mut spawn_handles = Vec::new();
+            let child_tracker = self
+                .pool
+                .as_ref()
+                .map(|pool| pool.child_tracker())
+                .unwrap_or_else(McpChildTracker::process);
 
             for (name, config) in owned_servers {
                 let Some(permit) = OwnedChildPermit::try_acquire() else {
@@ -195,14 +203,18 @@ impl McpManager {
                 };
                 let name = name.clone();
                 let config = config.clone();
+                let child_tracker = Arc::clone(&child_tracker);
                 let handle = tokio::spawn(async move {
-                    let result = match McpClient::connect(name.clone(), &config).await {
-                        Ok(mut client) => {
-                            client.attach_child_permit(permit);
-                            Ok(client)
-                        }
-                        Err(e) => Err(e),
-                    };
+                    let result =
+                        match McpClient::connect_with_tracker(name.clone(), &config, child_tracker)
+                            .await
+                        {
+                            Ok(mut client) => {
+                                client.attach_child_permit(permit);
+                                Ok(client)
+                            }
+                            Err(e) => Err(e),
+                        };
                     (name, result)
                 });
                 spawn_handles.push(handle);
@@ -269,7 +281,12 @@ impl McpManager {
                 "owned MCP child cap {MAX_OWNED_MCP_CHILDREN} reached; not spawning '{name}'"
             ));
         };
-        let mut client = McpClient::connect(name.to_string(), config)
+        let child_tracker = self
+            .pool
+            .as_ref()
+            .map(|pool| pool.child_tracker())
+            .unwrap_or_else(McpChildTracker::process);
+        let mut client = McpClient::connect_with_tracker(name.to_string(), config, child_tracker)
             .await
             .with_context(|| format!("Failed to connect to MCP server '{}'", name))?;
         client.attach_child_permit(permit);
@@ -319,10 +336,26 @@ impl McpManager {
         }
 
         // Shutdown owned clients
-        {
+        let (child_tracker, pids) = {
             let mut clients = self.owned_clients.write().await;
+            let child_tracker = self
+                .pool
+                .as_ref()
+                .map(|pool| pool.child_tracker())
+                .unwrap_or_else(McpChildTracker::process);
+            let mut pids = Vec::with_capacity(clients.len());
             for (_, mut client) in clients.drain() {
-                client.shutdown().await;
+                pids.push(client.request_shutdown());
+            }
+            (child_tracker, pids)
+        };
+        if !pids.is_empty() {
+            let report = child_tracker.reap_pids(&pids, DEFAULT_MCP_REAP_GRACE).await;
+            if !report.unreaped.is_empty() {
+                crate::logging::warn(&format!(
+                    "MCP manager: child PID(s) still live after bounded reap: {:?}",
+                    report.unreaped
+                ));
             }
         }
     }
