@@ -20,7 +20,7 @@ the working tree at the commit above and cross-checked against
 `evidence/W0.2/source_census.md`. Gates for this node:
 
 - "Pure lifecycle state model covers every normal exit and active work class":
-  satisfied by the matrix in `design.md` section 5 (every row is a normal exit
+  satisfied by the matrix in `design.md` section 4.1 (every row is a normal exit
   reason, every column a censused work class, every cell a defined behavior).
 - "Independent architecture critique finds no owner/lease gap": deferred to the
   independent fable+opus review declared by the node; this artifact is the
