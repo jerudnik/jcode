@@ -168,3 +168,121 @@ All other audited citations materially matched the named definitions, call paths
 ## Confidence
 
 **High.** The two blockers follow from an exhaustive exact-tree reference search and a direct contradiction among the design's own executor, terminal-outcome, and accept-loop-return requirements. The crate dependency and MCP checks are source-verified, and the remaining original findings were checked individually rather than accepted from `revision_response.md` claims.
+
+# Round 2: revision 3 re-review
+
+- Exact reviewed commit: `6e1c59f3476d195b64927fda568efaae1d8b2965` (`F01: revision 3 resolving re-review blockers B-R1 and B-R2`).
+- Reviewer model actually used: OpenAI `gpt-5.6-sol`, high effort.
+- Review mode: independent, adversarial round-2 re-review.
+- Date: 2026-07-18.
+
+## Verdict
+
+**FAIL. Revision 3 resolves B-R1 and the central await-and-return contradiction, but introduces or leaves two blocking implementation gaps in the new termination protocol.**
+
+1. The coordinator-owned watchdog remains armed after `Cleaned` is published. It is specified to disarm only on successful `Handoff`, so it can force-exit after cleanup has already been reported complete.
+2. The new sole normal termination site requires changing `src/cli/dispatch.rs`, but F02 does not own that path in either F02 node in `WORK_GRAPH.json`.
+
+The document also retains stale executor-termination prose and an overstatement in the background guard-lifetime description. PASS is therefore not available under the no-blocker standard.
+
+## Validation performed
+
+I reviewed the exact committed tree at `6e1c59f34`, which was also the checked-out clean HEAD. I read the complete commit diff, the full revision-3 `design.md`, and the appended revision-3 section of `revision_response.md`.
+
+Independent source checks included:
+
+- a repository-wide Rust search for every definition, import, test, and call of `process_message_streaming_mpsc`;
+- classification of every production call site and comparison to the revised caller-family table;
+- a search for every construction and `.run().await` call involving `jcode_app_core::server::Server`, separating unrelated `McpServe::run` and `AcpRuntime::run` methods;
+- inspection of `src/cli/dispatch.rs:106-115`, the current `Server::run` signature and accept-loop arms, daemon-lock scope, all actual process-exit sites, and both F02 `owned_paths` arrays;
+- a full-text consistency search for `Exited`, `Cleaned`, `ForcedExit`, `Handoff`, termination ownership, and deadline wording;
+- inspection of the real background spawn, registration, adopt, and terminal-pruning boundaries.
+
+I also rechecked the round-1 PASS areas for revision-3 regressions: the neutral `jcode-core` seam, F02 MCP ownership, pooled and owned MCP surfaces, common provider-turn boundary, headless/recovery separation, total reason order, reload self-lease removal, quiescence epoch, cleanup APIs/residue set, and temporary reload refusal. The revision-3 diff does not regress those areas.
+
+No Cargo build or test was run, as instructed.
+
+## Findings
+
+### Blocking
+
+#### R2-B1. The watchdog can fire after `Cleaned`, violating terminal-outcome honesty and exactly-once termination
+
+Revision 3 correctly changes normal completion to a pre-exit `Cleaned` outcome: the executor publishes `Cleaned`, stops, `Server::run` unwinds its guards, and the top-level runner exits (`design.md:248-277`). However, the watchdog rule still says it “disarms only at `Handoff` exec success” (`design.md:357-360`). No rule disarms it when cleanup completes or when `Cleaned` is published.
+
+That was survivable in revision 2 only because the executor itself exited the process immediately. Under revision 3 there is now a real interval between `Cleaned` publication and top-level process exit while `Server::run` returns and its guards unwind. During that interval the still-armed OS thread can call the forced-exit site. This creates an execution in which:
+
+1. waiters have already observed `Cleaned`, which promises full cleanup and normal runner-owned termination;
+2. the watchdog then produces `ForcedExit` and code 70;
+3. the process has two incompatible terminal outcomes, and the top-level runner may never perform the claimed normal termination.
+
+This contradicts outcome honesty at `design.md:599-602`, the “exactly two authorized sites” protocol at `design.md:259-277`, and the revision response's claim that the protocol preserves exactly-once termination (`revision_response.md:206-218`). It is a new regression caused by separating cleanup completion from process exit.
+
+Required correction: the executor must atomically cancel/disarm and join or otherwise render the watchdog unable to fire **before** publishing `Cleaned`. The design must specify the synchronization rule and test the race between cleanup completion, watchdog deadline, waiter notification, guard unwind, and runner exit. `Handoff` success remains a separate disarm case.
+
+#### R2-B2. F02 does not own the new normal termination site
+
+Revision 3 moves the sole normal process-exit call to the top-level daemon runner and identifies `src/cli/dispatch.rs:114` as that site (`design.md:259-277`, `:344-350`, `:381-389`). Actual source confirms that this is the sole production caller of `jcode_app_core::server::Server::run`:
+
+- `src/cli/dispatch.rs:106` constructs `server::Server`;
+- `src/cli/dispatch.rs:114` currently calls `server.run().await?`;
+- all other direct calls of this `Server::run` are under test modules;
+- `src/cli/mcp_serve.rs:46` and `src/cli/acp.rs:1605` invoke unrelated types' `run` methods.
+
+The new protocol necessarily changes `dispatch.rs`: current source has no daemon exit-code mapping or normal `std::process::exit` at line 114, and current `Server::run` returns `Result<()>` (`crates/jcode-app-core/src/server.rs:2092`). Yet neither F02 `owned_paths` array contains `src/cli/dispatch.rs`. F02 owns server files, background/MCP/core files, tool injection, and its evidence directory only. The path appears under a different later graph node, not F02.
+
+Therefore F02 cannot implement the design's sole normal termination authority within its authorized write set. If F02 changes only its owned paths, `dispatch.rs:114` continues to propagate `Result` through `?`, cannot map `ServerExit`, and cannot become the promised sole exit site. This is the same class of implementability failure as original B1, now at the upper composition boundary.
+
+Required correction: add `src/cli/dispatch.rs` to both F02 `owned_paths` arrays in `WORK_GRAPH.json`, and list that ownership consequence in section 3.2.1. The F02 acceptance evidence must cover normal outcome-to-code mapping and accept-loop code 45 at this site.
+
+### Important
+
+#### R2-I1. Stale prose still assigns a final termination call to the executor
+
+Immediately before the corrected protocol, `design.md:226-230` still says the coordinator actor “performs every transition, cleanup step, and the final termination call.” Section 3.2 is also titled “the only exit path,” and `design.md:221-222` says direct `std::process::exit` outside it is a violation. Those statements conflict with `design.md:259-272`, where the executor never calls `process::exit` and the normal exit site is the external top-level runner.
+
+The later detailed protocol is clear enough to identify the intended architecture, so this is not a separate blocker beyond R2-B2. It must nevertheless be corrected to “final cleanup/terminal-publication transition,” and the lint rule must explicitly permit the two enumerated termination sites while rejecting all other daemon-image exit sites.
+
+#### R2-I2. The C5 guard does not literally live exactly as long as every underlying task
+
+The corrected C5 citation now points to real boundaries. For `spawn_with_notify`, the future is spawned at `background.rs:483-484`, its `RunningTask` is inserted at `:584-600`, and terminal pruning occurs at `:551-552`. The adopt branch wraps an already-running `JoinHandle` at `background.rs:628-686` and prunes at `:754-758`.
+
+The design's implementation direction is adequate for daemon lifetime accounting once work is managed as background work, but two claims are too strong:
+
+- an adopted task is already running before `adopt_with_options` can acquire its lease, so the guard cannot exist “before the future can execute” for that branch;
+- pruning drops the proposed guard after terminal status persistence but before the wrapper finishes output-preview and bus-publication work, so it does not literally live until the wrapper future returns.
+
+This does not reopen a blocking idle gap because pre-adoption execution belongs to its foreground owner, and post-pruning delivery is covered by the scheduled-delivery/turn handoff policy. The design should state those ownership handoffs explicitly instead of claiming identical future lifetime.
+
+### Minor
+
+#### R2-M1. `revision_response.md` retains superseded revision-2 claims without marking them historical
+
+The cumulative response still says the deadline rule is `min(remaining, full_deadline(new_reason))`, the executor owns `terminate(code)`, and `ForcedExit` is not a successful `Exited` in its earlier revision-2 sections (`revision_response.md:57-76`, `:114-125`). The revision-3 section supersedes these claims, but the file header still calls `design.md` revision 2 (`revision_response.md:8`). Marking earlier sections as historical or updating their terminology would prevent contradictory implementation guidance.
+
+## Disposition of prior round-1 findings
+
+| Prior finding | Round-2 disposition |
+|---|---|
+| B-R1 missing startup recovery caller | **Resolved.** The table now includes `server.rs:1009`, and independent search found exactly eight production call sites across seven listed families. The census specification excludes definitions, imports, and tests and requires a dedicated startup reload-recovery fixture. |
+| B-R2 awaitable completion vs executor exit | **Partially resolved, still blocking overall.** `Cleaned` makes accept-loop await-and-return and lock unwind coherent, and `dispatch.rs:114` is the sole production `Server::run` caller. The watchdog post-`Cleaned` race and missing F02 ownership prevent acceptance. |
+| I-R1 inaccurate C5 boundaries | **Substantially resolved.** Real spawn, registration, and pruning lines are cited. The adopt/pre-execution and exact-lifetime wording remains overstated as R2-I2. |
+| I-R2 termination-site ambiguity | **Resolved in the detailed protocol.** Normal runner and forced watchdog sites are enumerated, though stale actor prose remains as R2-I1. |
+| M-R1 stale-socket citation | **Resolved.** Both citations now identify `reap_stale_socket_if_dead` at `socket.rs:76-126`. |
+| M-R2 deadline units | **Resolved.** The rule now uses absolute deadlines: `min(current_absolute_deadline, now + full_budget(new_reason))`. |
+
+## Regression check of round-1 PASS items
+
+No new regression was found in the crate inversion seam, MCP pooled/owned/connect-on-first-call coverage, provider guard placement, headless existence/recovery split, reason lattice, reload phase ownership, idle epoch, cleanup API/residue contract, or temporary reload refusal. The blockers are confined to implementation ownership and watchdog synchronization in the new revision-3 termination handoff.
+
+## What I did not check
+
+- I did not compile or run Rust tests, per instruction.
+- I did not execute live daemon, accept-loop, watchdog, provider, MCP, or residue fixtures.
+- I did not validate platform-specific process-exit behavior on Windows.
+- I did not review unrelated graph nodes except to distinguish their ownership of `src/cli/dispatch.rs` from F02's ownership.
+- I did not assess implementation code for `Cleaned`, `ServerExit`, or watchdog cancellation because revision 3 remains design-only and those APIs do not yet exist.
+
+## Confidence
+
+**High.** The provider and `Server::run` caller enumerations are exact-tree searches. Both blockers follow directly from explicit revision-3 text and committed graph ownership: the watchdog is disarmed only for `Handoff`, and F02 lacks the path that revision 3 makes the sole normal termination site.
