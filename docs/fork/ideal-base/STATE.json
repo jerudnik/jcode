@@ -104,11 +104,11 @@
       "updated_at": "2026-07-18T12:15:00Z"
     },
     "F03": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Coordinator-led verification: instance-scoped coordinator refactor + real-machine race tests, debug lease fixture surface, runtime fixture harness v2 (per-class holds, forced-exit, SIGKILL residue), then independent review.",
+      "updated_at": "2026-07-18T15:57:00Z"
     },
     "F04": {
       "state": "pending",
