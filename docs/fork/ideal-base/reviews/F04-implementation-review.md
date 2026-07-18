@@ -166,3 +166,146 @@ The function provides atomic replacement to concurrent readers, not durable comm
 ## Confidence
 
 **High (99%).** The blocking sequence follows directly from explicit control flow: initial write errors do not stop execution, terminal errors do not stop pruning, and no alternate recovery record is created. The progress no-op regression and false-return state defect are similarly direct. Both requested test suites pass, but the new gate test exercises only successful persistence and therefore cannot invalidate the failure-path finding.
+
+# Round 2: blocker-fix re-review
+
+## Verdict
+
+**FAIL.**
+
+Reviewed exact commit `10209b09cb8fdb06f1a8e454fa0ea936fc574902` (`F04: fix review blockers - persistence-failure durability (F04-B1) and store contract (I1/I2/M1/M2)`) at HEAD `10209b09cb8fdb06f1a8e454fa0ea936fc574902`.
+
+Reviewer route: **OpenAI `gpt-5.6-sol`, high effort**.
+
+The fix closes the original blocker for ordinary spawned tasks and natural wrapper completion: a spawn now fails closed if its initial `Running` write fails, and both spawn/adoption wrappers retain their live-map entry after terminal failure while a backoff loop retries. I1, I2, M1, and M2 are correctly fixed. Cancel and shutdown-finalize are also persistence-safe for tasks whose initial `Running` file exists because that file is a durable next-boot recovery record.
+
+One blocking hole remains at the intersection the new design explicitly permits: adoption may continue after its initial write fails, but cancel removes that adopted task before terminal persistence and `finalize_non_detached` drains it before terminal persistence. If the terminal write also fails and the process exits before the detached cancel retry succeeds, no live-map tombstone and no status file exists. The orphan sweep has nothing to recover. This is avoidable for cancel by retaining/reinserting the aborted `RunningTask` as a tombstone until persistence succeeds. Shutdown finalize needs an explicit failure policy for the same initial-write-failed adopted state. Gate 2 therefore remains false as an absolute lifecycle guarantee.
+
+## Validation performed
+
+### Exact diff and evidence
+
+- Confirmed clean baseline and `HEAD == 10209b09cb8fdb06f1a8e454fa0ea936fc574902` before appending this review.
+- Read `git show 10209b09c` for all five changed paths, then read the complete updated `background/store.rs`, relevant `background.rs` lifecycle/mutation regions, both new manager tests, and `evidence/F04/README.md`.
+- Verified the updated evidence SHA-256 entry matches the README.
+- Re-censused production status serialization/writes and live-map removal sites. No direct production status write was reintroduced. The only map removals are shutdown finalize, cancel, and the terminal-recovery helper.
+
+### Tests run
+
+1. `scripts/dev_cargo.sh test -p jcode-base --lib background`
+   - **37 passed; 0 failed; 0 ignored; 1146 filtered out; 0.60s**.
+2. `scripts/dev_cargo.sh test -p jcode-base --lib`
+   - **1180 passed; 0 failed; 3 ignored; 32.90s**.
+
+### B1 path analysis
+
+#### Spawn initial persistence
+
+`spawn_with_notify` acquires its activity lease, constructs the initial state, and returns before publishing, spawning, or inserting a `RunningTask` when `write_initial` fails (`background.rs:619-683`). The local activity lease drops on return. The test `spawn_refuses_to_start_when_initial_persistence_fails` verifies the closure never runs and the task is not tracked. This closes the original no-record spawn sequence.
+
+#### Natural spawn and adoption completion
+
+Both wrappers await registration and call `persist_terminal_with_recovery` (`background.rs:727-758`, `:934-958`). The helper removes the map entry only on immediate terminal-write success. On failure it logs, leaves the existing `RunningTask` entry in place as a tombstone, and starts an exponential-backoff retry that removes only after `write_terminal` returns success (`:1679-1737`). The test `terminal_persistence_failure_retains_tombstone_then_recovers` breaks the directory after initial persistence, observes the retained entry, heals the directory, then observes terminal persistence and pruning. This closes the original natural-completion blocker.
+
+#### Cancel
+
+For an ordinary spawned task or successfully persisted adopted task, cancel's ordering is acceptable: it removes and aborts the live task first, but the already-persisted `Running` file is durable recovery authority; the helper retries in-process, and a process death makes the owner stale so the next-boot orphan sweep can finalize it.
+
+The helper does not actually retain a cancel tombstone, however. Cancel has already removed the `RunningTask` at `background.rs:1371` before calling the helper at `:1384`, so on write failure the helper's “retaining live-map tombstone” log is false for this caller. That distinction is blocking when the task is an adopted future whose permitted initial write failed: there is neither a map entry nor an initial file after removal. See F04-R2-B1 below.
+
+#### Adoption initial failure
+
+The rationale at `background.rs:867-873` is sound as far as fail-closed execution is concerned: adoption receives an already-running foreground future, so refusing to start it is impossible. Tracking it despite the initial error preserves shutdown abort authority. Natural completion also uses the tombstone helper, so it remains tracked while terminal persistence fails.
+
+The rationale does not justify removing this exceptional task on cancel/finalize without durable replacement. The implementation knows whether initial persistence succeeded and can preserve failure state in memory until a terminal record lands.
+
+#### Shutdown finalize
+
+For tasks with an initial file, `finalize_non_detached` draining before terminal writes is acceptable because the daemon is exiting and the initial `Running` file is precisely the next-boot recovery record. The method aborts both wrapper and adopted original authority and attempts terminal persistence synchronously.
+
+For an adopted task whose initial write failed, the same ordering has no recovery record. The method drains it at `background.rs:465-471`, logs a terminal error at `:507-515`, returns its success-shaped count, and shutdown may complete. There is no retry loop, tombstone, or file for the next process.
+
+### I1 and I2 behavior
+
+- `MutateOutcome::Unchanged(TaskStatusFile)` now explicitly represents closure-declined writes and carries the untouched existing persisted state.
+- `mutate(false)` returns `Unchanged(existing)` before terminal restoration/write logic, so hostile in-memory edits are discarded and the returned value is persisted truth (`store.rs:188-195`).
+- Progress matching publishes only for `Applied`; `Unchanged`, `TerminalPreserved`, and `Missing` return before bus publication (`background.rs:1285-1303`). An applied mutation reaches exactly one publish call. Thus equivalent no-op updates no longer publish and applied updates publish once.
+- `update_delivery` handles `Unchanged` consistently with the other state-bearing outcomes. Its closure currently always returns true, so that arm is defensive rather than reachable through current manager behavior.
+
+## Findings
+
+### Blocking
+
+#### F04-R2-B1: cancel/finalize can erase the only recovery authority for an adopted task whose initial persistence failed
+
+A concrete cancel sequence remains:
+
+1. A foreground future is adopted while the status directory is unavailable.
+2. `write_initial` fails; adoption logs and tracks the already-running future without a status file (`background.rs:867-878`).
+3. Cancel removes the `RunningTask` from the map and aborts it (`:1370-1376`).
+4. Terminal persistence also fails. `persist_terminal_with_recovery` logs that it is retaining a tombstone, but the map entry is already absent; it can only launch an in-memory detached retry (`:1687-1736`).
+5. If the process exits before storage recovers, the retry disappears. No initial or terminal file exists, so orphan reconciliation cannot discover the task.
+
+Shutdown finalize has the same terminal state without even the detached retry: it drains the map, terminal persistence fails, and shutdown continues. This is narrower than round 1 and requires the specifically documented adoption-initial-write failure, but it directly violates gate 2 and is avoidable.
+
+Fix cancel by keeping the removed `RunningTask` as an explicit tombstone when terminal persistence fails, or by changing the helper to accept/reinsert it atomically before returning failure. Record whether initial persistence succeeded so the ordinary durable-file case and exceptional no-file case are explicit. For shutdown finalize, do not report the no-file case as finalized: retry until a bounded shutdown deadline and then propagate an incomplete-finalization result to the coordinator, or persist a recovery marker in an independent durable location. Add failure-injection tests for adopted-initial-failure followed by cancel and shutdown finalize.
+
+### Important
+
+#### F04-R2-I1: terminal persistence health still is not propagated through manager results
+
+Round-1 I3 remains nonblocking. The recovery loop materially reduces damage, and every failure is logged. Nevertheless, cancel returns `Ok(true)`, wrappers publish completion, and shutdown finalize returns its count even when terminal state is not yet persisted. Automated callers cannot distinguish durable completion from retry-pending or unrecoverable shutdown finalization. A structured persistence-pending/error result or bus event remains desirable.
+
+### Minor
+
+#### F04-R2-M1: the evidence README still names removed `read_lenient`
+
+The code correctly removed dead `TaskStatusStore::read_lenient`, and test builds no longer warn about it. The evidence design section still says malformed files are handled by “`read_lenient`/`read_path`” at `evidence/F04/README.md:21`. Update the evidence text to name only current APIs/behavior.
+
+#### F04-R2-M2: no manager test directly counts no-op progress publications
+
+The I1 fix is clear from exhaustive `MutateOutcome` matching and has no alternate publish site in the method. The existing progress test covers one applied event, but no new regression test submits the exact same progress twice and asserts that the second call emits zero bus events. Add that targeted test to lock the restored behavior.
+
+## Disposition of round-1 findings
+
+| Round-1 finding | Disposition | Evidence |
+|---|---|---|
+| F04-B1 | **Partially fixed, still blocking** | Spawn fails closed; natural spawn/adoption completion retains tombstones and retries. Cancel/finalize still lose all recovery authority for adopted tasks whose permitted initial write failed. |
+| F04-I1 | **Fixed** | `Unchanged` returns before progress publication; `Applied` reaches one publish call. |
+| F04-I2 | **Fixed** | `mutate(false)` returns untouched `existing` persisted truth. All manager matches handle `Unchanged`. |
+| F04-I3 | **Improved, remains nonblocking** | Failures are logged and retry-pending state is retained for natural completion, but manager APIs/events still do not communicate persistence health structurally. |
+| F04-M1 | **Fixed in code** | `read_lenient` is removed and warning is gone. Evidence has one stale reference. |
+| F04-M2 | **Fixed** | Store documentation now correctly claims reader atomicity, not crash durability/fsync. |
+
+## Gate checklist
+
+| Acceptance gate | Result | Evidence |
+|---|---|---|
+| No direct non-atomic status-file writes remain | **PASS** | Re-census found no direct status serialization/write in production `background.rs`; status writes remain centralized in the store. |
+| Live task is not removed before terminal persistence succeeds or is durably recoverable | **FAIL** | Normal spawn/cancel/finalize and natural wrappers are now safe through a retained map entry or initial file. An adopted task may have no initial file, yet cancel removes it before terminal persistence and shutdown finalize drains it; terminal failure then leaves no durable recovery authority. |
+| Status-serialization and write failures are surfaced, not swallowed | **PASS with qualification** | Store errors propagate; manager terminal paths log them and retry natural/cancel completion. Success-shaped manager results still hide persistence health from callers, but failures are not silent. |
+
+## F05 handoff list
+
+1. Crash/power-loss behavior around temp write/rename, including file and parent-directory fsync.
+2. Malformed/truncated destination recovery and stale `*.tmp.<pid>` cleanup.
+3. Cross-process same-task writers, PID reuse, and same-process independent store instances sharing one temp path.
+4. Task-ID collision policy for existing `Running` files.
+5. Windows replace-over-existing semantics and rename fault injection.
+6. Structured persistence-health results/events for retry-pending terminal states.
+7. Bounded retry lifecycle and shutdown coordination for retry tasks, including storage that never recovers.
+8. Lock-map growth measurement/reclamation for long-lived high-cardinality processes.
+
+The adopted-no-initial-file cancel/finalize defect is **not** handed to F05 because it is a live F04 gate-2 defect with a direct in-process fix.
+
+## What I did not check
+
+- I did not run `jcode-app-core`, the full workspace, Miri, Loom, sanitizers, or filesystem fault-injection frameworks.
+- I did not run a process-crash fixture, cross-process writer race, Windows test, disk-full test, or power-loss durability test.
+- I did not add a temporary adopted-initial-failure cancel/finalize test; the failure state follows directly from the explicit error branches and complete map-removal/write census.
+- I did not inspect all downstream consumers of completion/progress bus events outside `jcode-base`.
+- I did not modify implementation code.
+
+## Confidence
+
+**High (99%).** The major repair is real and both requested suites pass. The remaining blocker is a narrow but explicit composition of supported branches: adoption continues after initial persistence failure, while cancel/finalize remove it before a successful terminal write. With no status file and no retained map entry, neither the retry after process death nor orphan reconciliation can exist.
