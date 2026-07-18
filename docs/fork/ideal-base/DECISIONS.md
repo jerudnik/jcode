@@ -160,3 +160,19 @@ Do not substitute GPT-4o. Use the actual route name in evidence and review
 artifacts.
 
 **Reopen trigger:** user changes routing or Anthropic usage returns.
+
+## D010. Revert accidental frozen-recovery mutation from stale scheduler work
+
+**Decision:** stale scheduler work committed `feeef1d4e`, adding
+`docs/fork/recovery/evidence/2026-07-18-p3-gate-recheck/README.md` after the
+ideal-base session had declared `docs/fork/recovery/` frozen. The coordinator
+immediately reverted it with commit `3e479972f`. Tree comparison against the
+pre-incident head shows no remaining recovery-tree diff, and the protected
+orchestrator prompt hash remains `ca3f1998...eed5b6`.
+
+**Reason:** frozen historical namespaces must remain byte-for-byte historical;
+a new commit in that namespace was unauthorized even though it did not alter
+the protected prompt. The revert preserves Git history while restoring the
+required tree state.
+
+**Reopen trigger:** none.
