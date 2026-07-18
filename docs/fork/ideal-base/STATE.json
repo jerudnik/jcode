@@ -114,11 +114,13 @@
       "updated_at": "2026-07-18T16:59:00Z"
     },
     "F04": {
-      "state": "pending",
+      "state": "implemented",
       "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F04"
+      ],
+      "summary": "TaskStatusStore implemented: atomic temp+rename writes, per-task serialization, terminal precedence, surfaced failures. All manager writes migrated. Awaiting independent review.",
+      "updated_at": "2026-07-18T18:15:00Z"
     },
     "F05": {
       "state": "pending",
