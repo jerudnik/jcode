@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W0",
+    "node": "F01",
     "state": "accepted",
-    "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
-    "updated_at": "2026-07-18T06:32:51Z",
-    "summary": "W0 wave complete: baseline revalidated (W0.1), source census accepted with graph amendments D008 (W0.2), plan quarantined/cleared and projections verified (W0.3)."
+    "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
+    "updated_at": "2026-07-18T09:38:30Z",
+    "summary": "F01 design accepted after 3-round independent review convergence (D013). F02 implementation is now runnable."
   },
   "nodes": {
     "W0": {
@@ -83,14 +83,15 @@
       "updated_at": "2026-07-18T06:32:51Z"
     },
     "F01": {
-      "state": "verifying",
-      "commit": "09f367098",
+      "state": "accepted",
+      "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
       "evidence": [
         "docs/fork/ideal-base/evidence/F01",
-        "docs/fork/ideal-base/evidence/F01-R"
+        "docs/fork/ideal-base/evidence/F01-R",
+        "docs/fork/ideal-base/reviews/F01-architecture-re-review.md"
       ],
-      "summary": "Revision 2 design committed (09f367098) resolving FAIL review 7563a1237 (B1-B3, I1-I5, 10-point gate). F01-V independent re-review in progress on OpenAI gpt-5.6-sol per D009/D011/D012.",
-      "updated_at": "2026-07-18T08:43:00Z"
+      "summary": "F01 accepted at design revision 4 (a70db3700). Independent gate PASS at review round 3 (1a37ba109, gpt-5.6-sol high). Three FAIL rounds resolved: crate seam, coordinator protocol, turn boundary, quiescence epoch, watchdog handoff, termination ownership.",
+      "updated_at": "2026-07-18T09:38:30Z"
     },
     "F02": {
       "state": "pending",
