@@ -191,3 +191,130 @@ The watchdog writes an `armed` marker at `server/shutdown.rs:427` and cancellati
 ## Confidence
 
 **High (98%).** The verdict rests on direct source paths and accepted-design invariants, not only on absent tests. F02-B1 and F02-B2 each independently defeat the idle gate. F02-B3 and F02-B4 are direct contradictions of the accepted drain protocol and typed-refusal contract. The requested focused tests and the uncontended runtime fixture rerun all passed, so the FAIL is specifically about uncovered implementation semantics rather than a general build/test failure.
+
+# Round 2: blocker-fix re-review
+
+## Verdict
+
+**FAIL.**
+
+Re-reviewed exact fix commit `8a09a289d2ac5deb6054aa301066feb69eaa651a` (`F02: fix all round-1 review blockers (B1-B5) and important findings`) at HEAD `8a09a289d2ac5deb6054aa301066feb69eaa651a`.
+
+Reviewer route: **OpenAI `gpt-5.6-sol`, high effort**.
+
+The fix closes the original scheduled-delivery gap, reload intake omission, ordinary lease-refusal paths, production-context watchdog fallback, startup-recovery TTL, and stale watchdog marker. Two blocking defects remain. The connection mirror does not fail closed when its `ClientConnection` lease loses to an idle claim, so a counted main/gateway client can still be admitted after the atomic empty-table claim. The adopted-background rationale is also incorrect: cleanup aborts only the wrapper awaiting the original `JoinHandle`; dropping that handle detaches rather than aborts the already-running original task.
+
+## Validation performed
+
+### Exact source review
+
+- Confirmed HEAD is exactly `8a09a289d2ac5deb6054aa301066feb69eaa651a`, with a clean baseline before this review append.
+- Read `git show 8a09a289d` completely for all ten changed paths.
+- Read the new `Review round 1 blocker fixes` section in `docs/fork/ideal-base/evidence/F02/README.md`.
+- Re-read the affected production files at HEAD, including `server/shutdown.rs`, `server/lifecycle.rs`, `server/runtime.rs`, `ambient/runner.rs`, `server.rs`, `server/comm_await.rs`, `server/debug_jobs.rs`, and `jcode-base/src/background.rs`.
+- Enumerated every production `increment_client_count`/`decrement_client_count` call. The main socket and gateway paths both use the mirrored methods; debug clients remain deliberately excluded. No direct counter mutation bypasses those methods.
+- Enumerated every production `take_ready_direct_items`/`pop_ready` call. The ambient runner is the sole production direct-item dequeue; tests are the only other callers of the persistence primitives.
+- Rechecked watchdog arm callers, executor spawn contexts, reload ordering, refusal propagation, StartupRecovery guard lifetime, and the previously clean ProviderTurn/MCP/exit-site areas for regression.
+
+### Tests run
+
+1. `scripts/dev_cargo.sh test -p jcode-app-core --lib server::shutdown`
+   - **11 passed; 0 failed; 1126 filtered out**.
+   - Includes the new `idle_claim_is_atomic_against_any_lease` test.
+2. `scripts/dev_cargo.sh test -p jcode-base --lib background`
+   - **26 passed; 0 failed; 1146 filtered out**.
+
+Both commands re-entered the repository Nix development shell because `cargo` was not on the ambient `PATH`.
+
+I did not rerun the runtime fixture. `target/selfdev/jcode` was built at 07:45:35, before the fix commit timestamp 07:46:27; it may have been built from the pre-commit worktree containing the fixes, but the binary cannot be tied unambiguously to the exact reviewed commit. The updated evidence records a passing rebuilt run. The remaining blockers are concurrency/ownership paths not exercised by the two happy-path fixtures.
+
+## Findings
+
+### Blocking
+
+#### F02-R2-B1: a main/gateway connection that loses lease acquisition to the idle claim is still counted and admitted
+
+`LeaseTable::try_claim_idle_shutdown` itself is correct: it tests complete table emptiness and sets `refusing = true` under one table mutex (`server/shutdown.rs:113-124`). The idle `begin` path uses that claim and returns `Refused(NotQuiescent)` on an existing lease (`server/shutdown.rs:670-705`); both monitors restart their epoch on that refusal (`server/lifecycle.rs:184-202`, `:258-276`).
+
+The remaining race is at connection admission:
+
+- Main accept calls `increment_client_count` immediately after `listener.accept` (`server/runtime.rs:163-176`).
+- Gateway accept does the same after receiving a `GatewayClient` (`server/runtime.rs:221-245`).
+- `increment_client_count` attempts a `ClientConnection` lease but discards `ShuttingDown`; it increments `client_count` regardless (`server/runtime.rs:319-340`).
+- It then attempts to spawn the client task. `RuntimeTaskScope::spawn` rejects only after observing cancellation (`server/runtime.rs:38-56`). Idle `begin` cancels intake only after the lease claim, coordinator phase mutation, watchdog arm, and logging (`server/shutdown.rs:675-705`).
+
+On a multi-threaded runtime, the idle claim can linearize after the OS/gateway accept completes but before `increment_client_count` acquires its lease. The lease is refused, yet the accepted connection is counted and can win the task-registration race before `cancel_intake`. It therefore has no `ClientConnection` guard and is invisible to the supposedly authoritative empty lease table. Even if cancellation tears it down shortly afterward, `Cleaned(idle)` is no longer proven reachable only from zero clients, and new intake did not fail closed after the claim.
+
+The mirror census is otherwise complete, and the pop-any-guard discipline is sound for successfully leased connections because guards are interchangeable for count/quiescence purposes. It becomes unsound only because a refused increment contributes a counter entry without contributing a guard; its later `pop()` can release a different live connection's guard.
+
+Fix by making connection acquisition return an admission result: if the `ClientConnection` lease is refused, close/drop that accepted stream or gateway client without incrementing or spawning. Store one guard in the per-connection task/teardown object, or otherwise preserve a strict successful-acquire-to-decrement pairing.
+
+This keeps gate 1 failed: **idle exit is not yet guaranteed to require zero clients and zero active leases.**
+
+#### F02-R2-B2: adopted background cleanup aborts only the wrapper, not the already-running original future
+
+The evidence says an adopted task that is refused a lease remains tracked so `finalize_non_detached` will abort it. The tracking half exists, but the abort claim is false:
+
+- `adopt_with_options` receives the already-running original `JoinHandle` (`jcode-base/src/background.rs:795-803`).
+- It creates `wrapper_handle = tokio::spawn(async move { let tool_result = handle.await; ... })` (`background.rs:852-875`).
+- `RunningTask.handle` stores only `wrapper_handle` (`background.rs:954-980`).
+- `finalize_non_detached` calls `task.handle.abort()` (`background.rs:434-445`).
+
+Aborting the wrapper drops the captured original `JoinHandle`. Tokio `JoinHandle` drop detaches its task; it does not abort the original future. The original adopted work therefore continues unleased after cleanup has marked it failed-by-shutdown, can race later cleanup steps and sidecar removal, and can still perform side effects after `Cleaned` is published until process termination.
+
+This is particularly material on the exact refusal path: the foreground owner may still be draining or may have been abandoned at its deadline, while adoption inserts an unleased wrapper with no abort handle for the underlying task. Tracking the wrapper does not make the original task abortable.
+
+Store and abort the original task's `AbortHandle` (or retain both original and wrapper abort authorities) in `RunningTask`. Add a test whose adopted original future owns a drop flag, call `finalize_non_detached`, and prove the original future itself is cancelled rather than detached.
+
+This leaves F02-B4 only partially closed and remains a blocking cleanup-honesty defect for gate 2.
+
+### Important but nonblocking
+
+#### F02-R2-I1: reload still flips to `Draining` before closing lease intake
+
+Ordinary `begin` now calls `refuse_new()` before `state.phase = Draining`, closing the original ordering gap (`server/shutdown.rs:675-690`). `begin_reload_drain` still sets `Phase::Draining`, drops the coordinator lock, logs, and only then calls `refuse_new()` and `cancel_intake()` (`server/shutdown.rs:844-869`). A tracked lease can therefore be acquired during a phase that is already reported as `Draining`, contrary to I6.
+
+The lease is visible to the subsequent reload drain loop and bounded by its deadline, so this does not independently defeat the two acceptance gates. The ordering should nevertheless match ordinary `begin`: close acquisition before publishing the phase transition.
+
+#### F02-R2-I2: debug-job refusal leaves a permanently queued job record
+
+Both debug command branches call `create_job` before acquiring `DebugJob` (`server/debug_jobs.rs:86-100`, `:125-136`). On `ShuttingDown`, the request returns an error and no task spawns, which correctly fails closed for work execution. The already-created map entry remains `Queued` with no completion path. Acquire before `create_job`, or mark/remove the record on refusal.
+
+This is state hygiene, not a shutdown-gate blocker.
+
+#### F02-R2-I3: transition/race coverage remains F03 work
+
+The new pure test validates the table operation, but does not drive the accept-versus-idle-claim race, gateway admission, adopted-original cancellation, reload phase/refusal ordering, or the real coordinator state machine. This is the prior F02-I3 and remains appropriately separated as F03/follow-up coverage. The two concrete blockers above are source defects, not merely missing tests.
+
+## Disposition of B1-B5/I1-I2/M1
+
+| Round-1 item | Round-2 disposition | Evidence |
+|---|---|---|
+| F02-B1 atomic idle claim/client unification | **PARTIAL, still blocking** | Table claim and monitor retry are correct. Main and gateway mirrors are present, and pop-any is valid among successfully leased connections. Refused connection acquisition still increments/adopts a client, leaving an unguarded admission race (F02-R2-B1). |
+| F02-B2 `ScheduledDelivery` | **CLOSED** | Lease is acquired before the sole production direct-item dequeue, dequeue is skipped on refusal, and the guard is held through direct/fallback delivery (`ambient/runner.rs:626-681`). No other production direct-item dequeue bypass was found. |
+| F02-B3 reload intake cancellation | **CLOSED for the blocker** | `begin_reload_drain` now calls `cancel_intake()` (`shutdown.rs:865-869`). Phase/refusal ordering remains important F02-R2-I1, but tracked work is still bounded by the reload drain. |
+| F02-B4 fail-closed refusal sites | **PARTIAL, still blocking** | Debug, waiter, startup recovery, and `spawn_with_notify` no longer run new unleased work. Adoption tracking does not abort the underlying original future; it aborts only its wrapper (F02-R2-B2). |
+| F02-B5 watchdog fallback | **CLOSED for current production callers** | All production arm sites run inside Tokio; OS-thread spawn failure falls back to `spawn_blocking`. A simultaneous off-runtime + OS-thread failure remains logged as unbounded, but no production arm caller uses that context. |
+| F02-I1 off-runtime executor spawn | **CLOSED for current production callers; residual double-failure edge** | `spawn_on_runtime` uses the current handle or a dedicated one-shot-runtime thread. Dedicated-thread spawn/runtime-build errors are not recovered, but current production begin callers are on Tokio. |
+| F02-I2 StartupRecovery TTL | **CLOSED** | The guard moves to a TTL task and is dropped after 60 seconds or promptly when the recovery function returns (`server.rs:752-791`). Actual restored turns retain their own ProviderTurn leases. |
+| F02-M1 stale armed marker | **CLOSED** | Successful watchdog cancellation records `cancelled` before `Cleaned` publication (`shutdown.rs:480-495`). The Armed/Cancelled/Firing mutual exclusion remains intact. |
+
+## Gate checklist
+
+| Acceptance gate | Result | Evidence |
+|---|---|---|
+| Idle exit requires zero clients and zero active leases | **FAIL** | The atomic table claim is correct, but a main/gateway accept that loses `ClientConnection` acquisition to the claim is still counted and may be registered without a guard (F02-R2-B1). |
+| SIGTERM, reload, persistent idle, and temporary-owner exits invoke bounded shutdown | **FAIL** | Exit routing, reload intake cancellation, watchdog CAS, and production watchdog fallback are present. Adopted original work is not actually aborted by cleanup and can continue after failed-by-shutdown finalization/Cleaned (F02-R2-B2), so bounded cleanup is not honest for that work class. |
+
+## What I did not check
+
+- I did not run the full `jcode-app-core --lib` suite, workspace tests, Miri, Loom, sanitizers, or model checking.
+- I did not rerun the runtime fixture because the available selfdev binary predates the reviewed commit timestamp and cannot be tied unambiguously to exact commit `8a09a289d`.
+- I did not execute forced-watchdog, reload success/failure/refusal, temporary-owner, accept-loop failure, parent-SIGKILL, or pairwise reason-race fixtures. These remain F03 scope.
+- I did not write a temporary executable test for Tokio's documented JoinHandle-drop detachment semantics; the finding follows directly from the stored-handle ownership in the reviewed source.
+- I did not validate Windows-specific listener and signal behavior.
+- I did not modify implementation code.
+
+## Confidence
+
+**High (99%).** The two blockers are direct ownership/admission defects. The first follows from a refused lease being ignored while the counter and client task proceed. The second follows from `RunningTask` storing only a wrapper handle while the original handle is awaited inside that wrapper; aborting the wrapper necessarily loses cancellation authority over the original task. The focused tests pass, but neither defect is represented by those tests.
