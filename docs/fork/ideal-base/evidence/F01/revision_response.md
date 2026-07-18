@@ -185,3 +185,57 @@ cleanup.
 | 8. watchdog reconciled with I2/I5/I7/A0 | design 3.2.4 |
 | 9. real cleanup APIs and complete residue set | design 3.4, 3.4.1 |
 | 10. temporary reload disposition + pairwise races + per-entry fixtures | design 3.2.3, 4.3 |
+
+---
+
+## Revision 3: response to the re-review FAIL (`F01-architecture-re-review.md`, commit `09f367098`)
+
+Re-reviewer: OpenAI `gpt-5.6-sol`, high effort. Verdict FAIL with two
+blockers (B-R1, B-R2), two important findings (I-R1, I-R2), two minor
+(M-R1, M-R2).
+
+### B-R1 (caller census omits startup reload-recovery) -> RESOLVED
+
+Verified: `crates/jcode-app-core/src/server.rs:1009-1016` calls
+`process_message_streaming_mpsc` directly inside
+`recover_headless_sessions_on_startup`. The caller-family table (design 3.3)
+now includes it as its own family, with its own required F03 fixture, and the
+wiring-census test is specified to scan production call sites only (excluding
+definitions, imports, tests) so this class of omission fails loudly.
+
+### B-R2 (awaitable completion vs executor-owned termination) -> RESOLVED
+
+Adopted the re-review's first suggested protocol (design 3.2.1):
+`TerminalOutcome::Exited` is renamed `Cleaned { reason, code }` and denotes
+"cleanup fully ran, process not yet exited". The executor never calls
+`std::process::exit`. `Server::run` awaits the coordinator terminal state,
+returns typed exit information, and its resource guards (daemon lock) drop on
+scope unwind after cleanup. The top-level runner — the sole `Server::run`
+caller at `src/cli/dispatch.rs:114` — performs the one normal
+process-termination call. Exactly two authorized termination sites exist:
+the top-level runner (normal) and the coordinator-armed watchdog
+(`ForcedExit`). This preserves exactly-once termination, lock ordering, and
+lets accept-loop failure await `Cleaned` and still return `Err`.
+
+### I-R1 (background acquisition branches) -> RESOLVED
+
+The C5 wiring row (design 3.3.3) now cites the real boundaries: guard
+acquired at method entry before the `tokio::spawn` at `background.rs:483-484`
+(and before the adopt-path registration), moved into the `RunningTask` record
+inserted at `background.rs:584-600`, dropped at terminal pruning. The guard
+exists before the future can run and lives exactly as long as the tracked
+task.
+
+### I-R2 (termination-site ambiguity) -> RESOLVED
+
+Design 3.2.1 enumerates the two authorized termination sites explicitly;
+the "exactly one call site inside the executor" claim is removed.
+
+### M-R1 (socket.rs:71 citations) -> RESOLVED
+
+Both citations now name `reap_stale_socket_if_dead` at `socket.rs:76-126`.
+
+### M-R2 (deadline wording) -> RESOLVED
+
+The upgrade rule is stated over absolute deadlines:
+`new_deadline = min(current_absolute_deadline, now + full_budget(new_reason))`.

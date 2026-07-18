@@ -7,12 +7,15 @@ Design-only node: no source code was modified.
 
 History: revision 1 FAILED its independent architecture critique
 (`../../reviews/F01-architecture-critique.md`, reviewer OpenAI `gpt-5.6-sol`
-per decision D009, recorded in D011). Revision 2 resolves every blocking and
-important finding; the mapping is `revision_response.md`.
+per decision D009, recorded in D011). Revision 2 resolved those findings but
+FAILED the independent re-review (`../../reviews/F01-architecture-re-review.md`,
+commit `09f367098`, same reviewer route) on two narrower blockers. Revision 3
+(current) resolves B-R1/B-R2/I-R1/I-R2/M-R1/M-R2; the full mapping for both
+rounds is `revision_response.md`.
 
 Contents:
 
-- `design.md`: the design record (revision 2). It contains
+- `design.md`: the design record (revision 3). It contains
   1. the source ownership census of every current exit authority and work
      class, with file:line references verified against the checkout above;
   2. the exit-reason taxonomy;
@@ -32,7 +35,7 @@ the working tree at the commit above. Gates for this node:
 
 - "Pure lifecycle state model covers every normal exit and active work class":
   satisfied by the matrix in `design.md` section 4.1.
-- "Independent architecture critique finds no owner/lease gap": revision 1
-  failed this gate; revision 2 awaits the independent re-review (F01-V),
-  which per D009/D011 runs on the strongest available non-Anthropic route and
-  must name the actual model used.
+- "Independent architecture critique finds no owner/lease gap": revisions 1
+  and 2 failed this gate; revision 3 awaits the second independent re-review
+  (F01-V round 2), which per D009/D011 runs on the strongest available
+  non-Anthropic route and must name the actual model used.
