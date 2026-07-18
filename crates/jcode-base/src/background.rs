@@ -75,22 +75,63 @@ impl BackgroundTaskManager {
         &self,
         task_id: &str,
         tool_name: &str,
-    ) -> Option<jcode_core::activity::ActivityLeaseGuard> {
+    ) -> Result<
+        jcode_core::activity::ActivityLeaseGuard,
+        jcode_core::activity::ActivityLeaseError,
+    > {
         let authority = self
             .activity
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        // During shutdown drain new leases are refused; the task still runs
-        // (registration already happened conceptually) but does not pin the
-        // daemon. That matches design 4.1: post-drain background work is
-        // finalized by the cleanup list.
         jcode_core::activity::ActivityLeaseGuard::acquire(
             &authority,
             jcode_core::activity::ActivityClass::BackgroundTask,
             &format!("{tool_name}/{task_id}"),
         )
-        .ok()
+    }
+
+    /// Fail-closed refusal path (F02-B4 / F01 I6): the task never runs.
+    /// Writes a terminal Failed status so callers polling the status file
+    /// observe a definite outcome instead of silent unleased execution.
+    async fn write_refused_status(
+        &self,
+        task_id: &str,
+        tool_name: &str,
+        display_name: Option<String>,
+        session_id: &str,
+        status_path: &std::path::Path,
+        notify: bool,
+        wake: bool,
+    ) {
+        let mut refused_status = TaskStatusFile {
+            task_id: task_id.to_string(),
+            tool_name: tool_name.to_string(),
+            display_name,
+            session_id: session_id.to_string(),
+            status: BackgroundTaskStatus::Failed,
+            exit_code: None,
+            error: Some("Refused: daemon is shutting down".to_string()),
+            started_at: chrono::Utc::now().to_rfc3339(),
+            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+            duration_secs: Some(0.0),
+            pid: None,
+            owner_pid: Some(std::process::id()),
+            owner_instance: Some(model::process_instance_token().to_string()),
+            detached: false,
+            notify,
+            wake,
+            progress: None,
+            event_history: Vec::new(),
+        };
+        let event_status = refused_status.status.clone();
+        push_task_event(
+            &mut refused_status,
+            terminal_event_record(event_status, None, Some("Refused: daemon is shutting down")),
+        );
+        if let Ok(json) = serde_json::to_string_pretty(&refused_status) {
+            let _ = fs::write(status_path, json).await;
+        }
     }
 
     /// Create a new background task manager
@@ -529,12 +570,36 @@ impl BackgroundTaskManager {
     {
         let (notify, wake) = normalize_delivery(notify, wake);
         let task_id = Self::generate_task_id();
-        // Activity lease (F01 C5): acquired at method entry, BEFORE the
-        // future is spawned, so it exists before the task can execute. Moved
-        // into the RunningTask record below and dropped at terminal pruning.
-        let activity_lease = self.acquire_task_lease(&task_id, tool_name);
         let output_path = self.output_dir.join(format!("{}.output", task_id));
         let status_path = self.output_dir.join(format!("{}.status.json", task_id));
+        // Activity lease (F01 C5 / F02-B4): acquired at method entry, BEFORE
+        // the future is spawned, so it exists before the task can execute.
+        // Moved into the RunningTask record below, dropped at terminal
+        // pruning. A ShuttingDown refusal fails closed: the task NEVER runs
+        // (I6: no new work starts silently during drain).
+        let activity_lease = match self.acquire_task_lease(&task_id, tool_name) {
+            Ok(lease) => Some(lease),
+            Err(refused) => {
+                crate::logging::warn(&format!(
+                    "Background task {tool_name}/{task_id} refused during shutdown drain: {refused}"
+                ));
+                self.write_refused_status(
+                    &task_id,
+                    tool_name,
+                    display_name.clone(),
+                    session_id,
+                    &status_path,
+                    notify,
+                    wake,
+                )
+                .await;
+                return BackgroundTaskInfo {
+                    task_id,
+                    output_file: output_path,
+                    status_file: status_path,
+                };
+            }
+        };
         let started_at_rfc3339 = chrono::Utc::now().to_rfc3339();
 
         // Write initial status file
@@ -898,7 +963,21 @@ impl BackgroundTaskManager {
             handle: wrapper_handle,
             // Acquired at adoption: pre-adoption execution was covered by
             // the foreground owner's own lease (F01 design 3.3.3 C5).
-            activity_lease: self.acquire_task_lease(&task_id, tool_name),
+            // Refusal during drain is NOT silent unleased new work (F02-B4):
+            // the future already runs, and adopting it into the live map is
+            // what lets the shutdown cleanup's finalize_non_detached abort
+            // and finalize it. The refusal is logged; the task holds no
+            // lease and cannot pin the daemon.
+            activity_lease: match self.acquire_task_lease(&task_id, tool_name) {
+                Ok(lease) => Some(lease),
+                Err(refused) => {
+                    crate::logging::warn(&format!(
+                        "Adopted task {tool_name}/{task_id} unleased during shutdown drain \
+                         ({refused}); shutdown finalize will abort it."
+                    ));
+                    None
+                }
+            },
         };
 
         self.tasks
