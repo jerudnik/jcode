@@ -163,7 +163,7 @@
         "kind": "verify",
         "depends_on": ["F02"],
         "priority": 90,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F03/**"],
+        "owned_paths": ["docs/fork/ideal-base/evidence/F03/**", "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs", "crates/jcode-app-core/src/server.rs", "crates/jcode-app-core/src/server/shutdown.rs", "crates/jcode-app-core/src/server/debug_command_exec.rs", "crates/jcode-app-core/src/server/debug_help.rs"],
         "acceptance_gates": [
           "Short-timeout no-provider fixtures remain alive for each lease class and exit after release",
           "No socket/process residue"
@@ -911,7 +911,7 @@
       "kind": "verify",
       "depends_on": ["F02"],
       "priority": 90,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F03/**"],
+      "owned_paths": ["docs/fork/ideal-base/evidence/F03/**", "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs", "crates/jcode-app-core/src/server.rs", "crates/jcode-app-core/src/server/shutdown.rs", "crates/jcode-app-core/src/server/debug_command_exec.rs", "crates/jcode-app-core/src/server/debug_help.rs"],
       "acceptance_gates": [
         "Short-timeout no-provider fixtures remain alive for each lease class and exit after release",
         "No socket/process residue"
