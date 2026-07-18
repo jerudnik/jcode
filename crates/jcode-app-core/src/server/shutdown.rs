@@ -78,14 +78,18 @@ impl LeaseTable {
         self.active.remove(&id).is_some()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn is_idle(&self) -> bool {
         self.active.is_empty()
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn count(&self) -> usize {
         self.active.len()
     }
 
+    /// Attribution surface for `debug_socket` and F03 fixtures.
+    #[allow(dead_code)]
     fn count_of(&self, class: ActivityClass) -> usize {
         self.active
             .values()
@@ -173,6 +177,9 @@ impl ServerActivityLeaseAuthority {
         }
     }
 
+    /// Future single source of truth for "clients present" (design 3.1);
+    /// `client_count` replacement lands with the C1 wiring.
+    #[allow(dead_code)]
     pub(crate) fn client_connection_count(&self) -> usize {
         lock_poisoned_ok(&self.table).count_of(ActivityClass::ClientConnection)
     }
@@ -181,6 +188,8 @@ impl ServerActivityLeaseAuthority {
         lock_poisoned_ok(&self.table).drain_blocking_count()
     }
 
+    /// Attribution surface for `debug_socket` and F03 fixtures.
+    #[allow(dead_code)]
     pub(crate) fn active_count(&self) -> usize {
         lock_poisoned_ok(&self.table).count()
     }
@@ -240,7 +249,7 @@ pub(crate) fn lease_authority() -> &'static Arc<ServerActivityLeaseAuthority> {
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ExitReason {
+pub enum ExitReason {
     SigTerm,
     ReloadExecFailed,
     AcceptLoopFailure,
@@ -304,7 +313,7 @@ impl ExitReason {
         }
     }
 
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             ExitReason::SigTerm => "sigterm",
             ExitReason::ReloadExecFailed => "reload-exec-failed",
@@ -827,6 +836,7 @@ pub(crate) enum ReloadRefused {
 // ---------------------------------------------------------------------------
 
 /// Pure step plan, unit-testable (design 4.3).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn cleanup_step_plan(temporary: bool) -> Vec<&'static str> {
     let mut steps = vec![
         "unregister-registry",

@@ -56,6 +56,11 @@ pub struct McpManager {
     /// Project directory used to resolve project-local MCP config. `None`
     /// loads only global config and never consults the process working directory.
     project_dir: Option<std::path::PathBuf>,
+    /// Activity-lease authority (F01 C7): every in-flight call (pooled fast
+    /// path, owned per-session path, connect-on-first-call retries) holds a
+    /// lease so the daemon cannot idle-exit mid-call. Defaults to no-op;
+    /// the daemon injects its real authority at the composition root.
+    activity: Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
 }
 
 impl McpManager {
@@ -68,6 +73,7 @@ impl McpManager {
             config: McpConfig::load(),
             session_id: "owned".to_string(),
             project_dir: None,
+            activity: jcode_core::activity::noop_activity_authority(),
         }
     }
 
@@ -84,6 +90,22 @@ impl McpManager {
         session_id: String,
         project_dir: Option<std::path::PathBuf>,
     ) -> Self {
+        Self::with_shared_pool_for_dir_and_activity(
+            pool,
+            session_id,
+            project_dir,
+            jcode_core::activity::noop_activity_authority(),
+        )
+    }
+
+    /// Like [`Self::with_shared_pool_for_dir`], with an injected
+    /// activity-lease authority (F01 C7 composition-root injection).
+    pub fn with_shared_pool_for_dir_and_activity(
+        pool: Arc<SharedMcpPool>,
+        session_id: String,
+        project_dir: Option<std::path::PathBuf>,
+        activity: Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    ) -> Self {
         Self {
             pool: Some(pool),
             pool_handles: RwLock::new(HashMap::new()),
@@ -91,6 +113,7 @@ impl McpManager {
             config: McpConfig::load_for_dir(project_dir.as_deref()),
             session_id,
             project_dir,
+            activity,
         }
     }
 
@@ -103,6 +126,7 @@ impl McpManager {
             config,
             session_id: "owned".to_string(),
             project_dir: None,
+            activity: jcode_core::activity::noop_activity_authority(),
         }
     }
 
@@ -345,6 +369,17 @@ impl McpManager {
         tool: &str,
         arguments: serde_json::Value,
     ) -> Result<ToolCallResult> {
+        // Activity lease (F01 C7): one guard at entry covers the pooled fast
+        // path, the owned per-session path, AND connect-on-first-call
+        // retries, so the daemon cannot idle-exit mid-call regardless of
+        // which route serves it. A ShuttingDown refusal means no new call
+        // may start during drain.
+        let _lease = jcode_core::activity::ActivityLeaseGuard::acquire(
+            &self.activity,
+            jcode_core::activity::ActivityClass::McpCall,
+            &format!("{}/{server}/{tool}", self.session_id),
+        )
+        .map_err(|refused| anyhow::anyhow!("MCP call refused: {refused}"))?;
         // Fast path: already connected via pool handle.
         {
             let handles = self.pool_handles.read().await;

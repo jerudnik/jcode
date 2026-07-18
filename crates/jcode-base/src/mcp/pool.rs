@@ -42,11 +42,23 @@ pub struct SharedMcpPool {
     ref_counts: Mutex<HashMap<String, usize>>,
     connecting: Mutex<HashMap<String, Arc<Notify>>>,
     last_errors: RwLock<HashMap<String, FailedConnectRecord>>,
+    /// Activity-lease authority (F01 C7): in-flight pool calls hold a lease
+    /// so the daemon cannot idle-exit mid-call. Defaults to no-op; the
+    /// daemon injects its real authority at the composition root.
+    activity: std::sync::Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
 }
 
 impl SharedMcpPool {
     /// Create a new shared pool with the given config
     pub fn new(config: McpConfig) -> Self {
+        Self::new_with_activity(config, jcode_core::activity::noop_activity_authority())
+    }
+
+    /// Create a new shared pool with an injected activity-lease authority.
+    pub fn new_with_activity(
+        config: McpConfig,
+        activity: std::sync::Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    ) -> Self {
         Self {
             clients: Mutex::new(HashMap::new()),
             handles: RwLock::new(HashMap::new()),
@@ -54,12 +66,20 @@ impl SharedMcpPool {
             ref_counts: Mutex::new(HashMap::new()),
             connecting: Mutex::new(HashMap::new()),
             last_errors: RwLock::new(HashMap::new()),
+            activity,
         }
     }
 
     /// Create pool loading config from default locations
     pub fn from_default_config() -> Self {
         Self::new(McpConfig::load())
+    }
+
+    /// Create pool from default config with an injected activity authority.
+    pub fn from_default_config_with_activity(
+        activity: std::sync::Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    ) -> Self {
+        Self::new_with_activity(McpConfig::load(), activity)
     }
 
     /// Connect to all configured servers.
@@ -235,6 +255,15 @@ impl SharedMcpPool {
         tool: &str,
         arguments: serde_json::Value,
     ) -> Result<super::protocol::ToolCallResult> {
+        // Activity lease (F01 C7): held for the full pooled call so the
+        // daemon cannot idle-exit mid-call. A ShuttingDown refusal means no
+        // new call may start during drain.
+        let _lease = jcode_core::activity::ActivityLeaseGuard::acquire(
+            &self.activity,
+            jcode_core::activity::ActivityClass::McpCall,
+            &format!("pool/{server}/{tool}"),
+        )
+        .map_err(|refused| anyhow::anyhow!("MCP call refused: {refused}"))?;
         let handles = self.handles.read().await;
         let handle = handles
             .get(server)

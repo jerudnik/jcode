@@ -232,6 +232,12 @@ pub(super) struct RunningTask {
     pub(super) started_at_rfc3339: String,
     pub(super) delivery_flags: watch::Sender<(bool, bool)>,
     pub(super) handle: JoinHandle<Result<TaskResult>>,
+    /// Activity lease (F01 C5): held while the task is tracked in the live
+    /// map, dropped at terminal pruning. `None` when acquisition was refused
+    /// during shutdown drain (the task then does not pin the daemon).
+    /// Never read: the guard's lifetime IS its function.
+    #[allow(dead_code)]
+    pub(super) activity_lease: Option<jcode_core::activity::ActivityLeaseGuard>,
 }
 
 /// Result from a background task execution

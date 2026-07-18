@@ -362,6 +362,13 @@ pub(super) async fn spawn_or_resume_await_members(
     let mode = state.mode.clone();
 
     tokio::spawn(async move {
+        // Activity lease (F01 C8): a live await watcher pins the daemon
+        // against idle exit while it is parked. Durable state persists the
+        // await across restarts; the lease protects the live watcher task.
+        let _lease = super::shutdown::acquire_lease(
+            jcode_core::activity::ActivityClass::SwarmWaiter,
+            &key,
+        );
         let mut event_rx = swarm_event_tx.subscribe();
         // W2: the control log is the TRUTH for wakes; nudge channels only
         // schedule re-scans. Subscribe to append nudges BEFORE anchoring the

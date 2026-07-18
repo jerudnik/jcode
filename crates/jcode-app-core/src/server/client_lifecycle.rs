@@ -3183,6 +3183,18 @@ pub(super) async fn process_message_streaming_mpsc(
     system_reminder: Option<String>,
     event_tx: tokio::sync::mpsc::UnboundedSender<ServerEvent>,
 ) -> Result<()> {
+    // Activity lease (F01 design 3.3): this is the common provider-turn
+    // boundary for every caller family (client message tasks, client
+    // actions, swarm assignment, spawned/headless initial turns, Jade relay,
+    // live wake turns, startup reload-recovery continuations). Acquiring at
+    // the top of the future covers all of them by construction, including
+    // the wait for the per-session agent mutex. A ShuttingDown refusal means
+    // the daemon is draining: no new turn may start.
+    let _lease = super::shutdown::acquire_lease(
+        jcode_core::activity::ActivityClass::ProviderTurn,
+        "streaming-turn",
+    )
+    .map_err(|refused| anyhow::anyhow!("turn refused: {refused}"))?;
     let mut agent = agent.lock().await;
     let session_id = agent.session_id().to_string();
     let result = agent

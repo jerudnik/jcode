@@ -304,6 +304,12 @@ impl ServerRuntime {
         self.tasks.shutdown().await;
     }
 
+    /// The intake cancellation token: cancelled by the shutdown coordinator
+    /// at Draining start so accept loops stop accepting (F01 design 3.2.3).
+    pub(super) fn intake_cancel_token(&self) -> CancellationToken {
+        self.tasks.cancellation.clone()
+    }
+
     async fn increment_client_count(&self) {
         *self.client_count.write().await += 1;
         crate::runtime_memory_log::emit_event(
