@@ -63,3 +63,16 @@ concrete manifest shape (pending activation with dead initiating session and
 No evidence, review, or seam ledger under `docs/fork/recovery/` or
 `docs/fork/normalization/` was modified. Verified via `git status --short`
 (only the new `evidence/W0.1/` directory is untracked).
+
+## Amendment (2026-07-18T06:15Z, user-confirmed cause for Drift 2)
+
+The user confirmed that a selfdev `switch` (activation) was performed
+immediately before this coordinator session started. That explains the
+canary/current/shared-server channel change and the `pending_activation`
+record requested at 2026-07-18T05:45:12Z. The initiating session
+(`session_peacock_...12fe3e2e04160f62`) is now `Closed`, so the record is a
+genuine live instance of the stale-pending-activation class F09 targets:
+the activation itself proceeded (channels point at the new build, the live
+shared server was started 2026-07-17 15:42 and predates it), but the
+`pending_activation` marker was never cleared. Disposition unchanged:
+preserved untouched per D006 as an F09 fixture.
