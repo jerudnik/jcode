@@ -1,0 +1,41 @@
+$ scripts/dev_cargo.sh test -p jcode-base --lib mcp::pool::tests::pooled_child_receives_and_records_owning_daemon_pid -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 57 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Finished `test` profile [unoptimized] target(s) in 0.56s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-a200ea70acc46b58)
+
+running 1 test
+F06_OWNER server=owner-pid-fixture child_pid=98203 owner_pid=98202 env_owner_pid=98202
+test mcp::pool::tests::pooled_child_receives_and_records_owning_daemon_pid ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1191 filtered out; finished in 0.22s
+
+
+$ scripts/dev_cargo.sh test -p jcode-base --lib mcp::client::tests::real_child_ignoring_term_is_killed_and_reaped_within_grace -- --exact --nocapture
+dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main is 57 ahead github/main (local-only commits, nothing to pull)
+dev_cargo: sccache skipped for incremental build (it cannot cache incremental units; set JCODE_SCCACHE=on to force, or use a non-incremental profile)
+    Finished `test` profile [unoptimized] target(s) in 0.22s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-a200ea70acc46b58)
+
+running 1 test
+F06_REAP pid=98725 owner_pid=98724 term=[98725] kill=[98725] unreaped=[] tracked_after=0 elapsed_ms=238
+test mcp::client::tests::real_child_ignoring_term_is_killed_and_reaped_within_grace ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1191 filtered out; finished in 0.26s
+

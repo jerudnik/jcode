@@ -1,0 +1,8 @@
+56238df9507df16c7a711c943a520a0ededa87f7b1fe028db6e114e3b903d7f0  crates/jcode-base/src/mcp/client.rs
+e8e877735938e36869c64d259a6d34f7579d535fb10b421d02b39a9c1e1ee546  crates/jcode-base/src/mcp/manager.rs
+44246900cc675d517eec9d3cae332e0d7de78268920ac51d1a4227cecff0d3ac  crates/jcode-base/src/mcp/mod.rs
+f6fe93492d3c0fb5614e351a1ceeb2be40ba9d1a0d0d9a15ee80fedfa421bf51  crates/jcode-base/src/mcp/pool.rs
+efc97bc8e17bbcc429330d4ecb6ea2718f1766b61170ec3728da5e901909e703  crates/jcode-app-core/src/server/shutdown.rs
+65bab98113549ecea5c4ddf70a888ff05c5acd3f54117ac56f17307d2696e52b  src/cli/mcp_serve.rs
+1c0fc98a306e3859955a733b8a1a620d99821ec915bf394cb9a19cfc8258a92b  docs/fork/ideal-base/evidence/F06/README.md
+d83c1b401b35d36a155baf9ba68a6aff533b70e31bf4af9ff4a86987183870f8  docs/fork/ideal-base/evidence/F06/process-tree.txt
