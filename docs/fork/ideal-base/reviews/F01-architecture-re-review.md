@@ -286,3 +286,104 @@ No new regression was found in the crate inversion seam, MCP pooled/owned/connec
 ## Confidence
 
 **High.** The provider and `Server::run` caller enumerations are exact-tree searches. Both blockers follow directly from explicit revision-3 text and committed graph ownership: the watchdog is disarmed only for `Handoff`, and F02 lacks the path that revision 3 makes the sole normal termination site.
+
+# Round 3: revision 4 re-review
+
+- Exact reviewed commit: `a70db370025c53b449cca4138be7cfd5e55c5f17` (`F01: revision 4 resolving round-2 blockers R2-B1 and R2-B2`).
+- Reviewer model actually used: OpenAI `gpt-5.6-sol`, high effort.
+- Review mode: independent, adversarial round-3 re-review.
+- Date: 2026-07-18.
+
+## Verdict
+
+**PASS.**
+
+Revision 4 closes both round-2 blockers and the remaining important/minor findings. I found no unresolved blocking owner/lease gap, no incoherent termination race, and no regression in the previously accepted portions of the F01 design. The F01 acceptance gate “Independent architecture critique finds no owner/lease gap” is satisfied for the design at exact commit `a70db3700`.
+
+## Validation performed
+
+I reviewed the exact committed tree at `a70db3700`, which was also the clean checked-out HEAD. I read the complete commit diff, the updated design sections 3.2, 3.2.1, 3.2.4, and 3.3.3, the revision-4 response, and the complete `WORK_GRAPH.json` ownership diff.
+
+Read-only checks included:
+
+- modeling both sides of the watchdog cancellation/firing race around the `Armed` handoff;
+- checking ordering of cancellation, `Cleaned` publication, waiter notification, guard unwind, and runner exit;
+- verifying `src/cli/dispatch.rs` appears in both F02 `owned_paths` arrays;
+- verifying both F06 copies depend on F02 and that their overlapping `dispatch.rs` ownership is therefore sequential;
+- rechecking `src/cli/dispatch.rs:106/114` as the sole production construction/call path for `jcode_app_core::server::Server::run`;
+- verifying all revised C5 source boundaries against exact source;
+- searching the complete current design for stale executor-exit, watchdog, `Cleaned`, and `ForcedExit` semantics;
+- reviewing every revision-4 design edit with broad context and rechecking the earlier PASS areas for regressions.
+
+No Cargo build or test was run, as instructed.
+
+## Findings
+
+### Blocking
+
+None.
+
+### Important
+
+None.
+
+### Minor
+
+None requiring another design revision.
+
+Implementation note for F02, already implied by the normative text: the watchdog must participate in the same atomic claim protocol, not merely perform a non-atomic load before exiting. The design states that cancellation is “synchronous and decisive,” that the executor confirms its CAS won, and that an executor CAS loss means the watchdog already committed to firing (`design.md:378-390`). Under those requirements, the atomic winner owns the sole terminal outcome. This is sufficiently specified for F01; F02 tests must enforce it.
+
+## Watchdog race analysis
+
+The revised protocol has two executor-performed disarm cases: successful reload handoff and completion of the final cleanup step before `Cleaned` publication (`design.md:378-385`). For the normal cleanup race, exactly one side can claim the armed watchdog permit:
+
+1. **Executor wins cancellation.** The atomic state changes from armed to cancelled. Only after confirming that win may the executor publish `Cleaned`. A later watchdog wake cannot acquire the firing permit and therefore cannot call `process::exit`. The subsequent interval while waiters resume, `Server::run` unwinds the daemon-lock guard, and `dispatch.rs` maps the code is safe. No forced exit can occur after the published `Cleaned`.
+2. **Watchdog wins firing commitment.** The executor's cancellation CAS loses. The executor is forbidden to publish `Cleaned`; the only terminal outcome is `ForcedExit`, code 70. No waiter can observe successful cleanup followed by a forced exit.
+
+Thus `Cleaned` and `ForcedExit` are mutually exclusive, the post-`Cleaned` race from R2-B1 is closed, and the two authorized process-termination sites remain exactly-once alternatives rather than competing exits. The required pure race test now includes cleanup completion, watchdog deadline, waiter notification, guard unwind, and runner exit.
+
+## Disposition of round-2 findings
+
+| Round-2 finding | Round-3 disposition |
+|---|---|
+| R2-B1 watchdog can fire after `Cleaned` | **Resolved.** Decisive cancellation occurs before publication. If cancellation loses, publication is prohibited and the outcome is exclusively `ForcedExit`. |
+| R2-B2 F02 lacks `src/cli/dispatch.rs` ownership | **Resolved.** The path is present in both F02 graph copies. Both F06 copies depend on F02, so the overlap is sequential. Design 3.2.1 records the consequence and requires F02 evidence for normal code mapping and accept-loop code 45. |
+| R2-I1 stale executor-termination prose | **Resolved.** The actor owns terminal publication, not process exit, and the lint rule explicitly permits only the top-level runner and coordinator-armed watchdog. |
+| R2-I2 C5 guard-lifetime overstatement | **Resolved.** `spawn_with_notify` and `adopt_with_options` are distinguished; pre-adoption work remains under its foreground owner; pruning is accurately cited; post-pruning work is explicitly handed to scheduled-delivery/turn policy. |
+| R2-M1 cumulative response ambiguity | **Resolved.** The header marks earlier response layers as historical and says the latest section/current design governs superseded terminology. |
+
+## Source and ownership verification details
+
+- `spawn_with_notify` spawns at `background.rs:483-484`, inserts the `RunningTask` at `:584-600`, and prunes after terminal persistence at `:551-552`.
+- `adopt_with_options` is at `background.rs:628-686`, wraps an already-running handle, and prunes at `:754-758`.
+- The design honestly excludes output-preview and bus-publication work after pruning and assigns subsequent delivery to section 3.3.2.
+- Both F02 records contain `src/cli/dispatch.rs`.
+- Both F06 records contain `depends_on: ["F02"]` and may therefore modify the overlapping path only later.
+- The design records the ownership consequence at `design.md:287-295` and the runner exit-code mapping at `design.md:409-419`.
+
+## Regression check
+
+No revision-4 regression was found in:
+
+- the crate-safe `jcode-core` activity interface and downward injection seam;
+- pooled, owned, connect-on-first-call, and direct-pool MCP coverage;
+- complete provider-turn caller coverage, including startup reload recovery;
+- separation of headless existence, startup recovery, and active turns;
+- serialized coordinator ownership, total reason precedence, and absolute deadline updates;
+- removal of the reload self-lease;
+- the continuous quiescence epoch;
+- cleanup API honesty and complete residue contract;
+- temporary-server reload refusal;
+- accept-loop awaited cleanup, typed return, lock ordering, and top-level exit-code mapping.
+
+## What I did not check
+
+- I did not compile or run Rust tests, per instruction.
+- I did not execute live daemon, watchdog, accept-loop, provider, MCP, or residue fixtures.
+- I did not validate the future F02 atomic implementation or memory ordering in code because revision 4 is design-only.
+- I did not validate Windows-specific process/thread termination behavior.
+- I did not review unrelated work-graph nodes beyond the F02/F06 dependency and ownership overlap relevant to this gate.
+
+## Confidence
+
+**High.** The prior blockers are closed by explicit normative ordering and committed ownership changes. The watchdog result follows from the stated atomic winner protocol, and both graph copies and all corrected source citations were independently verified at the exact reviewed commit.
