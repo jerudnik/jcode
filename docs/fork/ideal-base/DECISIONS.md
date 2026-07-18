@@ -76,3 +76,26 @@ classified in `evidence/W0.1/drift.md`.
 
 **Reopen trigger:** F09 implementation lands with reconciliation logic, or the
 user explicitly asks for a manual manifest repair first.
+
+## D007. Quarantine the stale persisted swarm plan before railway seeding
+
+**Decision:** the persisted swarm plan for `/Users/jrudnik/labs/jcode/.git`
+still contained the completed historical recovery program (P*, G*, w3-*
+nodes). Seeding W0.2 with `task_graph` merged into that plan, and `run_plan`
+resurrected five stale nodes (G4-pilot-execute, P3_gate_recheck, w3-cluster-b,
+w3-cluster-c, w3-cluster-d) with fresh workers. Those workers were stopped
+within minutes; one had added a partial test to
+`crates/jcode-storage/src/active_pids.rs`, preserved as stash
+`stale-plan worker (w3-cluster-d/blowfish) ...` rather than deleted. The full
+pre-reseed plan snapshot is saved at
+`docs/fork/ideal-base/evidence/W0.3/pre_reseed_plan_snapshot.json`. After the
+in-flight W0.2 node completes, the stale plan will be cleared
+(`swarm:clear_plan`) and the railway graph reseeded cleanly.
+
+**Reason:** the recovery program is a frozen historical namespace; its plan
+nodes must not execute again. Clearing the server-side plan does not rewrite
+history because all recovery evidence lives in the repository, and the
+snapshot preserves the final plan state.
+
+**Reopen trigger:** none. If the stashed worker diff proves useful for F26 it
+may be cherry-picked by the F26 owner.
