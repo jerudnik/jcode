@@ -43,6 +43,8 @@ mod reload_state;
 mod reload_trace;
 mod runtime;
 pub(crate) mod shutdown;
+#[cfg(test)]
+mod shutdown_fixture_tests;
 pub use shutdown::ExitReason;
 mod socket;
 mod swarm;
