@@ -11,8 +11,10 @@ those historical records.
 
 - Canonical checkout: `/Users/jrudnik/labs/jcode`.
 - Canonical branch: `main`.
-- Source checkpoint before this amendment:
+- Post-promotion parent before the known-good baseline:
   `152ececcc57c153731685ff398352a4494bd679b`.
+- Known-good baseline commit:
+  `41e86f3c9f21d942d87161151f9cbe75077b2c6a`.
 - Product/runtime commit:
   `8962bccb32eede3b6746c42bfe6d265df29e4471`.
 - Runtime label: `8962bccb3-release`.
@@ -24,7 +26,7 @@ those historical records.
   no canary and no pending activation.
 - Preserved prompt disposition: `docs/fork/recovery/ORCHESTRATOR_PROMPT.md` is
   restored to its tracked baseline and retained as historical recovery evidence
-  and an architectural example. Fifty-one documentation files reference it.
+  and an architectural example. Dozens of documentation records reference it.
 - Removed local residue: untracked `opencode.json`, auxiliary worktrees, and
   rebuildable Cargo output after validation.
 

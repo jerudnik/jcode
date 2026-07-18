@@ -1,5 +1,11 @@
 # Recovery plan: Phase 4 cross-seam architecture
 
+> **Historical fixed-plan record.** Independent review, remediation, Phase 6
+> audit, and joint sign-off later passed. See the final closure amendment in
+> [`PROGRESS.md`](PROGRESS.md) and current operating state in
+> [`../normalization/STATUS.md`](../normalization/STATUS.md). The status metadata
+> below records the plan-review checkpoint.
+
 - Author role: Cross-Seam Architect (Fable), Phase 4 per `ORCHESTRATOR_PROMPT.md` lines 168-184.
 - Fixed coordinator commit reviewed: `e2464666d5416061627a6811eb59bd953fa5ef42` on `recovery/2026-07-15`.
 - Mode: read-only synthesis of all seventeen non-deferred seam ledgers, `G4_RESULT.md`, the G5 evidence review (`reviews/2026-07-15-g5-g4-evidence-opus.md`, SHA-256 `37f094d26b196612f2171de98d52238abb72bb8b69d59b149e7bb00999db86d3`), `BASELINES.md`, `PRESCREEN.md`, `QUALITY_GATES.md`, `RESPONSIBILITIES.md`, `PROGRESS.md`, and preserved disagreement reviews.

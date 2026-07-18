@@ -10,19 +10,22 @@ This program is tracked by durable initiative
 
 ## Current checkpoint
 
-Source and runtime promotion are complete, but the full D0-D9 normalization
-program is not. Recovery worktrees and local rollback assets remain under the
-July 24 soak, and final host cleanup and D9 sign-off remain open. See
-[`STATUS.md`](STATUS.md) for the exact source, runtime, remote archive, remaining
-gates, and cleanup boundary.
+Source and runtime promotion, core-runtime validation, and source/build-residue
+cleanup are complete. One canonical worktree remains. The full unqualified D9
+claim remains open for the ranked MCP/headless lifecycle seams and for
+separately authorized provider, WebSocket/mobile, schema, and release/update
+validation. See [`STATUS.md`](STATUS.md) and
+[`KNOWN_GOOD_BASELINE.md`](KNOWN_GOOD_BASELINE.md) for the exact boundary.
 
 ## Authoritative files
 
-- [`STATUS.md`](STATUS.md): current source, runtime, soak, remote-archive, and
+- [`STATUS.md`](STATUS.md): current source, runtime, cleanup, remote-archive, and
   remaining-gate checkpoint.
+- [`KNOWN_GOOD_BASELINE.md`](KNOWN_GOOD_BASELINE.md): exact core-runtime
+  checkpoint, completed fixes, validation, and ranked remaining lifecycle seams.
 - [`COMPLETION_STANDARD.md`](COMPLETION_STANDARD.md): normative, binary completion criteria.
-- [`BASELINE.md`](BASELINE.md): repository and host-topology facts to revalidate
-  before mutation.
+- [`BASELINE.md`](BASELINE.md): append-only historical repository and host
+  snapshots. Do not use its old counts as current state.
 - [`COORDINATOR_BRIEF.md`](COORDINATOR_BRIEF.md): preserved bootstrap brief for
   the original normalization session; its starting facts are historical.
 - [`RUNTIME_AND_NIX_RUNBOOK.md`](RUNTIME_AND_NIX_RUNBOOK.md): clean build,
@@ -35,6 +38,15 @@ gates, and cleanup boundary.
 Normalization evidence belongs under `evidence/` and independent reviews under
 `reviews/`. Evidence is committed in a bounded number of dedicated documentation
 commits, not interleaved through the curated product stack.
+
+Supporting fixed-phase records:
+
+- [`N1_STACK_PLAN.md`](N1_STACK_PLAN.md): historical curated integration plan.
+- [`N2_SIGNOFF.md`](N2_SIGNOFF.md): historical promotion-readiness handoff.
+- [`QUALITY_DEBT.md`](QUALITY_DEBT.md): current no-growth policy with a dated N2
+  measurement.
+- [`R03A_R02_CLOSURE.md`](R03A_R02_CLOSURE.md): W7 candidate closure decisions
+  and reopen triggers.
 
 ## Infrastructure review history
 
@@ -67,6 +79,9 @@ three cosmetic/defensive MINOR observations are corrected in the following
 documentation commit and receive a final diff re-review.
 
 ## Program milestones
+
+The table records target outcomes, not current disposition. Current completion
+and boundaries are in [`STATUS.md`](STATUS.md).
 
 | ID | Milestone | Required outcome |
 |---|---|---|

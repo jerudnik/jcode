@@ -1,5 +1,9 @@
 # Recovery baselines
 
+> **Archived append-only snapshots.** These measurements belong to the completed
+> recovery phases and are not current repository or runtime state. Use
+> [`../normalization/STATUS.md`](../normalization/STATUS.md) for current facts.
+
 Append a dated baseline at the start of every recovery phase that depends on refreshed refs. Do not rewrite older snapshots.
 
 ## 2026-07-15 pre-scaffold snapshot

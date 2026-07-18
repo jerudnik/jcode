@@ -1,5 +1,11 @@
 # Phase 0 quality-gate audit
 
+> **Historical Phase 0 measurement.** The fixed refs, gate counts, and
+> “current-tree” wording below describe the recovery checkpoint recorded on
+> 2026-07-15. Later amendments in [`PROGRESS.md`](PROGRESS.md) supersede its
+> operational status. Use
+> [`../normalization/STATUS.md`](../normalization/STATUS.md) for current state.
+
 This record fixes the interpretation of the fork quality gates before any
 synchronization or remediation. Baseline tightening and parser corrections are
 kept distinct from current-tree debt.
