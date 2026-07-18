@@ -41,6 +41,17 @@ class IdealBaseRailwayTests(unittest.TestCase):
             [("W0", "seed_and_expand")],
         )
 
+    def test_bootstrap_prompt_covers_the_full_execution_protocol(self) -> None:
+        prompt = railway.validate_bootstrap_prompt()
+        self.assertIn('mode: "deep"', prompt)
+        self.assertIn("After each accepted node:", prompt)
+        self.assertIn("Continue until every mandatory deterministic node", prompt)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bootstrap.md"
+            path.write_text("````markdown\nDo not push.\n````\nOutside prompt.\n")
+            with self.assertRaisesRegex(railway.RailwayError, "close at end of file"):
+                railway.validate_bootstrap_prompt(path)
+
     def test_cycle_is_rejected(self) -> None:
         nodes = {
             "a": {"id": "a", "depends_on": ["b"]},
