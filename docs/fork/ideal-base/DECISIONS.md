@@ -122,3 +122,13 @@ when the boundary names nonexistent paths, and gates must cover the confirmed
 swallowed-error behavior at `background.rs:133`.
 
 **Reopen trigger:** further source drift discovered by any F-node owner.
+
+## D007a. Stale-worker stash resolved by commit
+
+**Amendment to D007:** the preserved stash ("stale-plan worker
+(w3-cluster-d/blowfish) ...") was applied and committed as `715d5fd21`
+(test(r04): complete streaming-marker 2x2 replacement matrix) during the F01
+window; the stash entry no longer exists. Coordinator verified
+`cargo test -p jcode-storage --lib active_pids`: 10/10 pass at that commit.
+The change is a bounded test addition consistent with F26's seam and is
+retained on main.
