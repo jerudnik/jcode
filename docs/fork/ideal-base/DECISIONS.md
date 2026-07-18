@@ -60,3 +60,19 @@ represented in the graph but cannot execute without the applicable authorization
 publishing, or mutating external systems.
 
 **Reopen trigger:** explicit authorization for the named gate and bounded scope.
+
+## D006. Preserve the observed stale pending activation as F09 reproduction evidence
+
+**Decision:** the stale selfdev `pending_activation` observed at session start on
+2026-07-18 (requested 05:45:12Z by dead session
+`session_peacock_1784221108198_12fe3e2e04160f62`, with `new_version` equal to
+`previous_current_version` `923c6353e-dirty-5a0f07fa7495`) is left untouched.
+No promotion, rollback, or reload is performed on it by the coordinator.
+
+**Reason:** it is a live instance of the exact failure class node F09 must
+reconcile. Clearing it by hand would destroy the best available real-world
+fixture and would mutate runtime state outside the graph. The drift is
+classified in `evidence/W0.1/drift.md`.
+
+**Reopen trigger:** F09 implementation lands with reconciliation logic, or the
+user explicitly asks for a manual manifest repair first.
