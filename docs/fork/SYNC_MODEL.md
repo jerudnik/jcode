@@ -1,5 +1,7 @@
 # Fork Sync Model
 
+Last reviewed: 2026-07-18
+
 See also:
 
 - [`patch-ledger.md`](./patch-ledger.md)
@@ -10,32 +12,39 @@ See also:
 ## Context
 
 The fork (`jerudnik/jcode`) tracks upstream (`1jehuang/jcode`) but has diverged
-substantially. It carries 190+ fork-only commits and now leads the swarm, DAG,
-and comm subsystem.
+substantially. At the locally available refs on 2026-07-18, known-good baseline
+commit `41e86f3c9` carried 323 fork-only commits while `upstream/master` carried
+246 upstream-only commits. The fork leads the swarm, DAG, and comm subsystem.
 
 The W1/W2 control-plane event log, fold-derived DAG state, and
 artifact-dataflow are fork-authored on top of upstream's initial swarm engine.
 Upstream's active work on TUI, goals, providers, and discovery barely overlaps
 the fork's current focus.
 
-## The shift
+## Current mechanism
 
-The sync model is monitored curation, not exact tracking.
+The implemented sync model is an automated three-rail rebase, not exact branch
+identity and not cherry-pick-only curation. Every six hours,
+`.github/workflows/sync.yml` attempts to:
 
-The old model tries to auto-rebase everything: a 6-hour CI rebase, shared
-`rerere`, and automatic replay across all upstream changes. That works while the
-fork is a small additive patch stack, but it becomes expensive once the fork
-owns major behavior that upstream is also reshaping.
+1. fast-forward `vendor/upstream` to `upstream/master`;
+2. rebase `distro/nix` onto that vendor rail;
+3. rebase `main` onto the resulting distro rail.
 
-The current model keeps `vendor/upstream` for visibility, reviews upstream
-commits, and cherry-picks or adapts the changes worth taking. Provider updates,
-TUI improvements, and bug fixes remain good candidates. Fork-owned subsystems
-are curated manually.
+Tracked `rerere` recordings replay known conflicts. A genuinely new conflict
+stops the workflow and opens or updates a `sync-blocked` issue for human
+resolution. Successful rewritten rails are pushed with force-with-lease and
+validation is dispatched explicitly.
+
+This automation provides continuous visibility and cheap replay where the
+conflict is already understood. It does not make upstream authoritative over
+fork-owned behavior. New upstream changes in those surfaces still require human
+review, adaptation, and a recorded conflict decision before the rails advance.
 
 ## Fork-owned subsystems
 
-Upstream changes in these areas are manually rewritten to fit the fork. They are
-not merged mechanically:
+Upstream changes in these areas require explicit human adjudication when the
+automated rebase cannot preserve the fork's established behavior:
 
 - swarm and comm
 - channel and shared-context removal
@@ -55,12 +64,13 @@ invariants are documented in
 
 ## Why
 
-Removing upstream's channels in-fork is a permanent divergence. Under
-exact-tracking, that decision fights every rebase. Under curation, it is simply
-fork-owned surface.
+Removing upstream's channels in-fork is a permanent divergence. The shared
+`rerere` cache makes recurring conflict resolution cheap, while new conflicts
+still stop rather than silently choosing upstream or the fork.
 
-The trade is free auto-updates for control and no thrash. That is the correct
-trade once the fork leads a subsystem.
+The trade is bounded automation with human authority at novel seams. That keeps
+routine upstream intake inexpensive without surrendering fork-owned subsystem
+decisions.
 
 ## Upstreaming
 

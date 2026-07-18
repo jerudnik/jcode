@@ -1,5 +1,10 @@
 # Phase 3 bounded pilot plan
 
+> **Historical pre-execution plan.** G2 later authorized the bounded pilot, G4
+> execution passed, and independent G5 review passed. See
+> [`G4_RESULT.md`](G4_RESULT.md) and
+> [`PROGRESS.md`](PROGRESS.md). The state line below records the design moment.
+
 Date: 2026-07-15
 State: `designed`; execution remains blocked until the dedicated validation driver and fixture slices are committed and validated.
 

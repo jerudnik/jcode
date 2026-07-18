@@ -1,5 +1,11 @@
 # Post-recovery normalization baseline
 
+> **Historical append-only snapshot.** Current operating facts are in
+> [`STATUS.md`](STATUS.md) and
+> [`KNOWN_GOOD_BASELINE.md`](KNOWN_GOOD_BASELINE.md). The worktree counts,
+> branch, dirty paths, and runtime targets below record earlier checkpoints and
+> are intentionally not rewritten.
+
 Observed 2026-07-16 after Phase 6 closure and before normalization work. Every
 fact must be revalidated at the start of each session. This file cannot contain
 the hash of the commit that contains itself. The durable authority commit is

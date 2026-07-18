@@ -15,7 +15,8 @@ closed. The remaining product risks are explicit below.
 ## Exact baseline
 
 - Canonical checkout: `/Users/jrudnik/labs/jcode`, branch `main`.
-- Source checkpoint before this amendment: `152ececcc57c153731685ff398352a4494bd679b`.
+- Post-promotion parent: `152ececcc57c153731685ff398352a4494bd679b`.
+- Known-good baseline commit: `41e86f3c9f21d942d87161151f9cbe75077b2c6a`.
 - Product/runtime commit: `8962bccb32eede3b6746c42bfe6d265df29e4471`.
 - Runtime label: `8962bccb3-release`.
 - Runtime SHA-256:
@@ -25,7 +26,8 @@ closed. The remaining product risks are explicit below.
 - Exactly one Git worktree remains. Recovery refs, stashes, bundles, sealed
   evidence, and private archives remain preserved.
 - `opencode.json` was removed. `ORCHESTRATOR_PROMPT.md` was restored to its
-  tracked baseline and retained because 51 documentation files reference it.
+  tracked baseline and retained because dozens of documentation records
+  reference it.
 
 The sealed isolated campaign is at
 `~/labs/.recovery/jcode/2026-07-17-runtime-stress/`. Its verdict was 321/321
