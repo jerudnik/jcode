@@ -1832,7 +1832,7 @@ impl RawClient {
 
 async fn wait_for_server_socket(
     path: &Path,
-    server_task: &mut tokio::task::JoinHandle<Result<()>>,
+    server_task: &mut tokio::task::JoinHandle<Result<crate::server::ServerExit>>,
 ) -> Result<()> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {

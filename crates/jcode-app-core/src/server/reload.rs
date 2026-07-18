@@ -115,6 +115,28 @@ pub(super) async fn await_reload_signal(
             continue;
         }
 
+        // Claim the shutdown coordinator for reload (F01 design 3.2.3):
+        // stops intake, refuses new lease acquisition, and drains
+        // drain-blocking work up to the reload budget. A temporary server
+        // or an in-progress termination refuses the reload with a typed
+        // outcome instead of racing it.
+        match super::shutdown::coordinator().begin_reload_drain().await {
+            Ok(()) => {}
+            Err(refused) => {
+                crate::logging::warn(&format!(
+                    "Server: reload refused by shutdown coordinator: {refused:?}"
+                ));
+                crate::server::write_reload_state_with_runtime_identity(
+                    &signal.request_id,
+                    &signal.hash,
+                    crate::server::ReloadPhase::Failed,
+                    Some(format!("reload refused: {refused:?}")),
+                    signal.runtime_identity.clone(),
+                );
+                continue;
+            }
+        }
+
         persist_reload_recovery_intents(
             &signal.request_id,
             &swarm_members,
@@ -207,7 +229,12 @@ pub(super) async fn await_reload_signal(
                 signal.runtime_identity.clone(),
             );
         }
-        std::process::exit(42);
+        // Exec failed: re-enter the termination path so the historic bare
+        // exit(42) finally gets full sidecar cleanup (F01 design 3.2.3).
+        // The coordinator publishes Cleaned{code:42}; Server::run returns;
+        // the top-level runner performs the process exit.
+        let _ = super::shutdown::coordinator().reload_exec_failed().await;
+        return;
     }
 }
 

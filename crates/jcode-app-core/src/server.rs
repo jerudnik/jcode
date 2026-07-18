@@ -42,7 +42,8 @@ mod reload_recovery;
 mod reload_state;
 mod reload_trace;
 mod runtime;
-mod shutdown;
+pub(crate) mod shutdown;
+pub use shutdown::ExitReason;
 mod socket;
 mod swarm;
 mod swarm_mutation_state;
@@ -527,6 +528,15 @@ const HEAP_RETENTION_CHECK_SECS: u64 = 120;
 /// Exit code when server shuts down due to idle timeout
 pub const EXIT_IDLE_TIMEOUT: i32 = 44;
 
+/// Typed exit information returned by [`Server::run`] after the shutdown
+/// coordinator's cleanup completed (F01 design 3.2.1). The top-level runner
+/// maps `code` to the sole normal `std::process::exit` call.
+#[derive(Clone, Copy, Debug)]
+pub struct ServerExit {
+    pub reason: shutdown::ExitReason,
+    pub code: i32,
+}
+
 /// Server state
 pub struct Server {
     provider: Arc<dyn Provider>,
@@ -738,6 +748,16 @@ impl Server {
             sessions_to_restore.len(),
             sessions_to_restore
         ));
+
+        // Activity lease (F01 design 3.3.1): one bounded StartupRecovery
+        // lease covers the enumeration/scheduling window (non-empty
+        // candidate set only). Restored turns that actually run acquire
+        // their own ProviderTurn lease at the common boundary; they do not
+        // inherit this one. RAII-dropped when this function returns.
+        let _recovery_lease = self::shutdown::acquire_lease(
+            jcode_core::activity::ActivityClass::StartupRecovery,
+            "headless-startup-recovery",
+        );
 
         if let Some(delay) = startup_headless_recovery_test_delay() {
             crate::logging::info(&format!(
@@ -1202,25 +1222,18 @@ impl Server {
             .await;
         });
 
-        // Log when we receive SIGTERM for debugging
+        // SIGTERM converges on the shutdown coordinator (F01 design 3.5):
+        // the coordinator drains leases briefly, runs the one bounded
+        // cleanup list, arms its own watchdog, and publishes Cleaned; the
+        // top-level runner performs the process exit.
         #[cfg(unix)]
         {
-            let sigterm_server_name = self.identity.name.clone();
             tokio::spawn(async move {
                 use tokio::signal::unix::{SignalKind, signal};
                 if let Ok(mut sigterm) = signal(SignalKind::terminate()) {
                     sigterm.recv().await;
                     crate::logging::info("Server received SIGTERM, shutting down");
-                    // Watchdog: guarantee exit even if cleanup stalls or the
-                    // runtime is momentarily saturated. An OS-scheduled thread
-                    // fires independent of tokio worker availability.
-                    std::thread::spawn(|| {
-                        std::thread::sleep(std::time::Duration::from_secs(3));
-                        crate::logging::warn("Shutdown watchdog fired; forcing exit.");
-                        std::process::exit(0);
-                    });
-                    crate::registry::unregister_server_bounded(&sigterm_server_name).await;
-                    std::process::exit(0);
+                    shutdown::coordinator().begin(shutdown::ExitReason::SigTerm);
                 }
             });
         }
@@ -2089,8 +2102,13 @@ impl Server {
         }
     }
 
-    /// Start the server (both main and debug sockets)
-    pub async fn run(&self) -> Result<()> {
+    /// Start the server (both main and debug sockets).
+    ///
+    /// Runs until the shutdown coordinator publishes a terminal outcome
+    /// (`Cleaned`), then returns the typed exit information. The caller (the
+    /// top-level runner in `src/cli/dispatch.rs`) performs the sole normal
+    /// process-termination call with the returned code (F01 design 3.2.1).
+    pub async fn run(&self) -> Result<ServerExit> {
         // Ensure socket directory exists (for named sockets like /run/user/1000/jcode/)
         if let Some(parent) = self.socket_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -2169,23 +2187,53 @@ impl Server {
 
         let server_start_time = Instant::now();
 
-        self.spawn_background_tasks(server_start_time, temporary_server_policy);
+        self.spawn_background_tasks(server_start_time, temporary_server_policy.clone());
         let (runtime, main_handle, debug_handle) = self
             .finish_startup_after_bind(main_listener, debug_listener, server_start_time)
             .await;
 
-        // If either listener exits unexpectedly, stop accepting work and wait
-        // for every owned connection task before returning. The normal daemon
-        // path runs until process shutdown or exec-based reload.
+        // Configure the single shutdown authority (F01 design 3.2). The
+        // spawned exit authorities above (idle monitors, SIGTERM handler,
+        // reload task) all converge on it; configuring after spawn is safe
+        // because none can fire within their first poll interval and begin()
+        // tolerates a not-yet-configured coordinator by skipping sidecar
+        // cleanup only.
+        shutdown::coordinator().configure(shutdown::ShutdownConfig {
+            server_name: self.identity.name.clone(),
+            socket_path: self.socket_path.clone(),
+            debug_socket_path: self.debug_socket_path.clone(),
+            temporary: temporary_server_policy.is_some(),
+            intake_cancel: Some(runtime.intake_cancel_token()),
+            mcp_pool: Some(Arc::clone(&self.mcp_pool)),
+        });
+        // Composition-root injection (F01 design 3.0): non-detached
+        // background tasks acquire activity leases through the neutral
+        // jcode-core seam, without jcode-base depending on server types.
+        crate::background::global().set_activity_authority(shutdown::activity_authority());
+
+        // The daemon runs until the coordinator publishes a terminal outcome
+        // (idle exit, SIGTERM, reload exec failure) or a listener fails. The
+        // executor never exits the process (F01 design 3.2.1): `run()`
+        // returns typed exit information, the guards (daemon lock) drop on
+        // scope unwind AFTER cleanup, and the top-level runner performs the
+        // one normal termination call.
         let mut main_handle = main_handle;
         let mut debug_handle = debug_handle;
-        tokio::select! {
+        let terminal = tokio::select! {
+            outcome = shutdown::coordinator().wait_terminal() => {
+                // Coordinator-initiated exit: cleanup already ran (Cleaned).
+                runtime.shutdown().await;
+                let _ = main_handle.await;
+                let _ = debug_handle.await;
+                outcome
+            }
             result = &mut main_handle => {
                 if let Err(error) = result {
                     crate::logging::error(&format!("Main accept loop failed: {error}"));
                 }
                 runtime.shutdown().await;
                 let _ = debug_handle.await;
+                self.accept_loop_failure_terminal().await
             }
             result = &mut debug_handle => {
                 if let Err(error) = result {
@@ -2193,9 +2241,29 @@ impl Server {
                 }
                 runtime.shutdown().await;
                 let _ = main_handle.await;
+                self.accept_loop_failure_terminal().await
             }
+        };
+
+        let shutdown::TerminalOutcome::Cleaned { reason, code } = terminal;
+        crate::logging::info(&format!(
+            "Server run complete: reason={}, exit_code={}",
+            reason.as_str(),
+            code
+        ));
+        Ok(ServerExit { reason, code })
+    }
+
+    /// Accept-loop failure path (F01 design 3.2.3 / I5): begin-and-wait the
+    /// coordinator to a terminal cleanup result before `run()` returns.
+    async fn accept_loop_failure_terminal(&self) -> shutdown::TerminalOutcome {
+        match shutdown::coordinator()
+            .begin_and_wait(shutdown::ExitReason::AcceptLoopFailure)
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(_refused) => shutdown::coordinator().wait_terminal().await,
         }
-        Ok(())
     }
 
     /// Spawn the WebSocket gateway if enabled in config.
