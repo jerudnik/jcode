@@ -2298,8 +2298,8 @@ impl Tool for CommunicateTool {
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["all", "any"],
-                    "description": "For await_members: wait for all targeted members or wake when any targeted member matches."
+                    "enum": ["all", "any", "deep", "light"],
+                    "description": "For await_members, use all or any. For task_graph, use deep for recursive gates and typed artifacts or light for flat fan-out."
                 },
                 "target_status": {
                     "type": "array",

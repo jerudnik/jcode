@@ -1,5 +1,10 @@
 # Known-good baseline and remaining seams
 
+> **Frozen historical checkpoint.** The accepted starting facts and remaining
+> work were carried into [`../ideal-base/BASELINE.md`](../ideal-base/BASELINE.md)
+> and [`../ideal-base/WORK_GRAPH.json`](../ideal-base/WORK_GRAPH.json). Preserve
+> this fixed baseline record unchanged apart from archival markers.
+
 Recorded: 2026-07-18
 
 ## Verdict

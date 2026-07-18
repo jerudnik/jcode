@@ -1,5 +1,10 @@
 # Runtime promotion and Nix build runbook
 
+> **Frozen normalization runbook.** It records the transaction used for the
+> current immutable runtime. Revalidate it against current source and
+> [`../ideal-base/BASELINE.md`](../ideal-base/BASELINE.md) before operational use;
+> do not treat its dated identities as automatically current.
+
 This runbook records the supported transaction for promoting a clean source commit
 into the local jcode runtime without confusing source promotion, immutable binary
 installation, channel selection, or live daemon handoff.

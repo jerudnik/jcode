@@ -1,5 +1,10 @@
 # Current fork normalization status
 
+> **Frozen historical checkpoint.** This was the final normalization operating
+> checkpoint. Use [`../ideal-base/BASELINE.md`](../ideal-base/BASELINE.md) and
+> [`../ideal-base/STATE.json`](../ideal-base/STATE.json) for active ideal-base
+> execution. Do not refresh the dated facts below in place.
+
 Recorded: 2026-07-18
 
 This is the current operating checkpoint for the recovery-to-normalization
