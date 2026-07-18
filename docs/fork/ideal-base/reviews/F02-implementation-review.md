@@ -318,3 +318,114 @@ The new pure test validates the table operation, but does not drive the accept-v
 ## Confidence
 
 **High (99%).** The two blockers are direct ownership/admission defects. The first follows from a refused lease being ignored while the counter and client task proceed. The second follows from `RunningTask` storing only a wrapper handle while the original handle is awaited inside that wrapper; aborting the wrapper necessarily loses cancellation authority over the original task. The focused tests pass, but neither defect is represented by those tests.
+
+# Round 3: final re-review
+
+## Verdict
+
+**PASS.**
+
+Re-reviewed exact fix commit `2b560788231e10741267d3dbfe74dc48368225a8` (`F02: fix round-2 review blockers R2-B1 and R2-B2`) at HEAD `2b560788231e10741267d3dbfe74dc48368225a8`.
+
+Reviewer route: **OpenAI `gpt-5.6-sol`, high effort**.
+
+Both round-2 blockers are closed. Counted main and gateway connections can now exist only after successful `ClientConnection` acquisition, and every successful admission has exactly one decrement/release path whether task registration succeeds or fails. Adopted background work retains abort authority over the original future, and both shutdown finalization and user cancellation abort the original before the wrapper. The reload ordering and orphaned debug-record findings are also closed. I found no new blocking implementation defect or regression in the previously clean F02 areas.
+
+The runtime artifact supplied in `target/selfdev/jcode` is not, despite the stated provenance, an exact-commit build: it embeds `8a09a289d` and version metadata `84541c5a1, dirty`, and its filesystem timestamp precedes commit `2b5607882`. My optional fixture rerun against that artifact consequently failed temporary-idle with exit 45. This is an evidence/artifact provenance defect, not a source defect at `2b5607882`, and the fixtures do not cover either round-2 blocker. It does not reverse the implementation PASS, but the exact-build fixture claim should not be relied on until the binary and transcript are regenerated and tied to the reviewed SHA.
+
+## Validation performed
+
+### Exact source and history review
+
+- Confirmed `HEAD == 2b560788231e10741267d3dbfe74dc48368225a8` and the worktree was clean before this review append.
+- Read `git show 2b5607882` completely, including all eight changed paths.
+- Read the changed files at HEAD in context: `server/runtime.rs`, `server/shutdown.rs`, `server/debug_jobs.rs`, `background.rs`, `background/model.rs`, `background/tests.rs`, and the updated F02 evidence files.
+- Confirmed the only source changes after round 2 are the intended fix surface. There is no later source drift.
+- Re-enumerated all `try_admit_client`, `decrement_client_count`, direct `client_count` mutation, `original_abort`, `begin_reload_drain`, and debug `create_job` sites.
+- Rechecked exit routing, intake cancellation, atomic idle claiming, scheduled-delivery coverage, refusal handling, executor spawning, StartupRecovery TTL, watchdog fallback/marker behavior, and the prior ProviderTurn/MCP/temporary-owner/accept-failure areas for regression.
+
+### Focused tests
+
+1. `scripts/dev_cargo.sh test -p jcode-base --lib background`
+   - **27 passed; 0 failed; 1146 filtered out**.
+   - Includes `finalize_non_detached_aborts_adopted_original_future`.
+2. `scripts/dev_cargo.sh test -p jcode-app-core --lib server::shutdown`
+   - **11 passed; 0 failed; 1126 filtered out**.
+   - Includes `idle_claim_is_atomic_against_any_lease`.
+
+Both commands re-entered the repository Nix development shell because `cargo` was not on the ambient `PATH`.
+
+### Runtime fixture/provenance probe
+
+I optionally ran:
+
+`bash docs/fork/ideal-base/evidence/F02/exit_mode_fixtures.sh target/selfdev/jcode`
+
+Observed result:
+
+- temporary-idle: **exit 45, expected 44**; zero residue;
+- SIGTERM: **exit 0**; zero residue;
+- overall: **1 fixture failure**.
+
+The failure is explained by artifact provenance, not by the reviewed source:
+
+- commit timestamp: `2b5607882` at `2026-07-18T08:01:43-04:00`;
+- binary mtime: `2026-07-18T08:00:22-04:00`;
+- binary strings include source SHA `8a09a289d` and build version `84541c5a1, dirty`;
+- binary SHA-256: `db2af8c6f3873558918a82d36ca69ff7dbea6542b991c10e2df3dca7abc950bf`.
+
+The committed `SHA256SUMS` references `exit_mode_fixtures_run.log`, but that transcript is not present in commit `2b5607882`; it exists only as an ignored working-tree file. Its contents say both fixtures passed. Because neither the available binary nor transcript is tied to exact commit `2b5607882`, I did not count the transcript as exact-commit validation.
+
+## Findings
+
+### Blocking
+
+None.
+
+### Important but nonblocking
+
+#### F02-R3-I1: exact-build runtime evidence provenance is false for the available artifact
+
+As detailed above, `target/selfdev/jcode` demonstrably predates and embeds a different source revision, and the referenced fixture transcript is absent from the reviewed commit. The optional rerun failed its temporary-idle expectation because that older binary followed the accept-loop-failure path.
+
+This needs evidence repair: rebuild after checking out exact reviewed SHA, capture the embedded SHA/version and binary digest, rerun the fixture, and commit or otherwise durably bind the transcript and binary digest to the evidence record. It is nonblocking for F02 because the implementation gates are established by direct source review and focused tests, the runtime slice is not intended to exercise R2-B1 or R2-B2, and the broader transition/fixture matrix is explicitly F03 scope.
+
+### F03-only coverage gap
+
+The prior F02-I3 remains deferred as designed. There is still no deterministic runtime race test for accept-versus-idle-claim, no reload phase/acquisition interleaving test, and no full coordinator transition/race matrix. These are valuable F03 tests, not defects in the reviewed implementation.
+
+## Disposition
+
+| Item | Round-3 disposition | Evidence |
+|---|---|---|
+| F02-R2-B1 refused connection admission | **CLOSED** | Main and gateway are the only counted admission paths and both call `try_admit_client` before spawning (`server/runtime.rs:170-180`, `:241-252`). `try_admit_client` returns false without count mutation on `ShuttingDown`; only successful acquisition pushes a guard and increments (`:334-358`). |
+| R2-B1 remaining mutation probe | **CLOSED** | The only production writes are increment at `runtime.rs:351` and decrement at `:366`, both encapsulated by the admission/teardown methods. `increment_client_count` is gone. Debug connections remain deliberately uncounted. |
+| R2-B1 spawn-rejection pairing | **CLOSED** | A successful admission followed by task-registration refusal immediately calls one decrement in both main and gateway paths (`:176-181`, `:251-253`). A registered stream calls one decrement after `handle_client` completes or cancellation wins (`:375-421`). No counted path lacks a release, and no unadmitted path decrements. |
+| F02-R2-B2 adopted original cancellation | **CLOSED** | Adoption captures `handle.abort_handle()` before moving the original handle into the wrapper and stores it in `RunningTask.original_abort` (`background.rs:856-860`, `:962-972`; `background/model.rs:240`). |
+| R2-B2 finalization/cancel ordering | **CLOSED** | `finalize_non_detached` and `cancel_with_grace` both call `original.abort()` before `task.handle.abort()` (`background.rs:443-447`, `:1317-1322`). The new test waits past the original future's completion window and proves its survival flag remains false. |
+| F02-R2-I1 reload phase/refusal ordering | **CLOSED** | Under the coordinator state lock, `begin_reload_drain` calls `refuse_new()` before assigning `Phase::Draining` (`shutdown.rs:844-867`), then cancels intake (`:868-872`). |
+| F02-R2-I2 orphaned queued debug record | **CLOSED** | Both async debug commands acquire `DebugJob` before `create_job` (`debug_jobs.rs:86-102`, `:126-138`). Refusal therefore leaves no queued record and starts no task. |
+| Round-1 B2 scheduled delivery | **REMAINS CLOSED** | No changed source regressed the pre-dequeue `ScheduledDelivery` guard or its delivery lifetime. |
+| Round-1 B3 reload intake | **REMAINS CLOSED** | Reload still invokes `cancel_intake()` immediately after publishing the now correctly ordered transition. |
+| Round-1 B4 other refusal paths | **REMAINS CLOSED** | Debug, waiter, recovery, ordinary background spawning, and adoption behavior remain fail-closed or cleanup-trackable as previously reviewed. |
+| Round-1 B5 / I1 watchdog and executor fallback | **REMAINS CLOSED for current production callers** | No related code changed; production arm/begin callers retain the reviewed Tokio/fallback coverage. |
+| Round-1 I2 / M1 | **REMAIN CLOSED** | StartupRecovery TTL and cancelled watchdog marker are unchanged. |
+
+## Gate checklist
+
+| Acceptance gate | Result | Evidence |
+|---|---|---|
+| Idle exit requires zero clients and zero active leases | **PASS** | Idle claim atomically requires an empty lease table and closes acquisition. Every counted main/gateway connection now requires a successful `ClientConnection` guard first; refused accepted connections are dropped uncounted, and all admitted paths release exactly once. Scheduled delivery and all other enumerated active work remain leased. |
+| SIGTERM, reload, persistent idle, and temporary-owner exits invoke bounded shutdown | **PASS** | All reasons retain coordinator routing, bounded drain/cleanup, intake cancellation, watchdog fallback, and terminal publication. Reload now closes acquisition before publishing `Draining`. Adopted original futures are truly abortable during cleanup rather than detached. No reviewed work class can silently begin or survive cleanup without the intended tracking/termination semantics. |
+
+## What I did not check
+
+- I did not run the entire `jcode-app-core --lib` suite, full workspace suite, Miri, Loom, sanitizers, or model checking.
+- I did not rebuild `target/selfdev/jcode`; the requested fixture rerun used the supplied artifact and exposed that it was not built from exact commit `2b5607882`.
+- I did not execute the F03 lease-class hold/release matrix, forced-watchdog fixture, pairwise reason races, parent-SIGKILL recovery, reload success/failure/refusal fixtures, or Windows-specific process behavior.
+- I did not add a deterministic accept-versus-idle-claim runtime test. The source pairing is complete, and the pure lease-table atomicity test passes.
+- I did not modify implementation or evidence files.
+
+## Confidence
+
+**High (98%).** The PASS rests on complete source-path and ownership analysis of both remaining blockers, not on the disputed runtime artifact. There are exactly two production client-count writes and every route to them is paired with a successful lease acquisition and exactly one teardown. The adopted original future's abort authority is explicitly retained and exercised by a passing regression test. The only material unresolved issue is evidence provenance, which does not reveal a blocking defect in exact source commit `2b5607882`.
