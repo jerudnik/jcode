@@ -94,11 +94,13 @@
       "updated_at": "2026-07-18T09:38:30Z"
     },
     "F02": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "implemented",
+      "commit": "2609e7a8d",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F02"
+      ],
+      "summary": "F02 implemented across 9d9762e6f/e5059a3c2/2609e7a8d: jcode-core lease seam, coordinator+watchdog+cleanup, all exit paths and lease sites wired. Tests: core 34/34, base bg 26/26, app-core 1113/1113; runtime fixtures temp-idle 44 and SIGTERM 0 with zero residue. Awaiting independent verification (F03 gate + review).",
+      "updated_at": "2026-07-18T11:21:45Z"
     },
     "F03": {
       "state": "pending",
