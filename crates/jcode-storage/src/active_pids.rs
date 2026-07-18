@@ -865,6 +865,22 @@ mod tests {
         assert!(active_dir.join(session_id).exists());
         assert!(streaming_dir.join(session_id).exists());
 
+        // Fourth matrix cell: neither marker replaced, so both observed
+        // markers are removed. Completes the 2x2 replacement matrix.
+        register_active_pid(session_id, pid);
+        mark_streaming(session_id);
+        let observed = observe_session_pid_markers(session_id);
+        let removal = remove_session_pid_markers_if_unchanged(session_id, &observed);
+        assert_eq!(
+            removal,
+            SessionPidMarkerRemoval {
+                active_removed: true,
+                streaming_removed: true,
+            }
+        );
+        assert!(!active_dir.join(session_id).exists());
+        assert!(!streaming_dir.join(session_id).exists());
+
         jcode_core::env::remove_var("JCODE_HOME");
     }
 
