@@ -9,7 +9,10 @@
 //! requests to shared server processes. Request/response correlation by
 //! ID ensures no interference between sessions.
 
-use super::client::{McpClient, McpHandle};
+use super::client::{
+    DEFAULT_MCP_REAP_GRACE, McpChildReapReport, McpChildTracker, McpClient, McpHandle,
+    TrackedMcpChild,
+};
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -37,6 +40,8 @@ enum ConnectAttempt {
 /// and hands out cheap `McpHandle` clones to sessions.
 pub struct SharedMcpPool {
     clients: Mutex<HashMap<String, McpClient>>,
+    /// Explicit owner/PID registry for every MCP child spawned by this daemon.
+    child_tracker: Arc<McpChildTracker>,
     handles: RwLock<HashMap<String, McpHandle>>,
     config: RwLock<McpConfig>,
     ref_counts: Mutex<HashMap<String, usize>>,
@@ -61,6 +66,7 @@ impl SharedMcpPool {
     ) -> Self {
         Self {
             clients: Mutex::new(HashMap::new()),
+            child_tracker: McpChildTracker::process(),
             handles: RwLock::new(HashMap::new()),
             config: RwLock::new(config),
             ref_counts: Mutex::new(HashMap::new()),
@@ -161,8 +167,10 @@ impl SharedMcpPool {
         }
     }
 
-    /// Disconnect all servers
-    pub async fn disconnect_all(&self) {
+    /// Disconnect all pooled servers and return the child PIDs for a caller's
+    /// bounded reap pass.
+    pub async fn disconnect_all(&self) -> Vec<u32> {
+        let mut child_pids = Vec::new();
         {
             let mut handles = self.handles.write().await;
             handles.clear();
@@ -170,7 +178,7 @@ impl SharedMcpPool {
         {
             let mut clients = self.clients.lock().await;
             for (_, mut client) in clients.drain() {
-                client.shutdown().await;
+                child_pids.push(client.request_shutdown());
             }
         }
         {
@@ -181,6 +189,28 @@ impl SharedMcpPool {
             let mut errors = self.last_errors.write().await;
             errors.clear();
         }
+        child_pids
+    }
+
+    /// Debug/introspection surface for owned child PID records.
+    pub fn tracked_children(&self) -> Vec<TrackedMcpChild> {
+        self.child_tracker.tracked_children()
+    }
+
+    /// Owning daemon PID injected into every spawned MCP child.
+    pub fn owner_pid(&self) -> u32 {
+        self.child_tracker.owner_pid()
+    }
+
+    /// Bounded graceful -> TERM -> KILL reap for every tracked MCP child,
+    /// including per-session owned children registered through the same daemon
+    /// tracker.
+    pub async fn reap_tracked_children(&self, grace: Duration) -> McpChildReapReport {
+        self.child_tracker.reap_all(grace).await
+    }
+
+    pub(crate) fn child_tracker(&self) -> Arc<McpChildTracker> {
+        Arc::clone(&self.child_tracker)
     }
 
     /// Get handles for all connected servers (for a new session).
@@ -273,7 +303,17 @@ impl SharedMcpPool {
 
     /// Reload config and reconnect all servers
     pub async fn reload(&self) -> (usize, Vec<(String, String)>) {
-        self.disconnect_all().await;
+        let child_pids = self.disconnect_all().await;
+        let report = self
+            .child_tracker
+            .reap_pids(&child_pids, DEFAULT_MCP_REAP_GRACE)
+            .await;
+        if !report.unreaped.is_empty() {
+            crate::logging::warn(&format!(
+                "MCP pool reload: child PID(s) still live after bounded reap: {:?}",
+                report.unreaped
+            ));
+        }
         *self.config.write().await = McpConfig::load();
         self.connect_all().await
     }
@@ -392,7 +432,12 @@ impl SharedMcpPool {
                 }
             }
             ConnectAttempt::Leader(notify) => {
-                let result = McpClient::connect(name.clone(), &config).await;
+                let result = McpClient::connect_with_tracker(
+                    name.clone(),
+                    &config,
+                    Arc::clone(&self.child_tracker),
+                )
+                .await;
                 let outcome = match &result {
                     Ok(_) => Ok(true),
                     Err(error) => Err(format!("{:#}", error)),
@@ -439,7 +484,9 @@ pub fn get_shared_pool() -> Option<Arc<SharedMcpPool>> {
 #[cfg(test)]
 mod tests {
     use super::{ConnectAttempt, SharedMcpPool};
-    use crate::mcp::protocol::McpConfig;
+    use crate::mcp::protocol::{McpConfig, McpServerConfig};
+    use std::collections::HashMap;
+    use std::io::Write;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -459,5 +506,84 @@ mod tests {
         };
 
         assert!(Arc::ptr_eq(&first_notify, &second_notify));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pooled_child_receives_and_records_owning_daemon_pid() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let capture = temp.path().join("owner-pid");
+        let script = temp.path().join("owner-aware-mcp.sh");
+        let body = r##"#!/bin/sh
+printf '%s' "$JCODE_MCP_OWNER_PID" > "$OWNER_CAPTURE"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"owner-aware","version":"1"}}}'
+      ;;
+    *'"tools/list"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[]}}'
+      ;;
+    *'"shutdown"'*) exit 0 ;;
+  esac
+done
+"##;
+        let mut file = std::fs::File::create(&script).expect("create fixture");
+        file.write_all(body.as_bytes()).expect("write fixture");
+        drop(file);
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script, permissions).unwrap();
+
+        let pool = SharedMcpPool::new(McpConfig::default());
+        let config = McpServerConfig {
+            command: script.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            env: HashMap::from([
+                (
+                    "OWNER_CAPTURE".to_string(),
+                    capture.to_string_lossy().into_owned(),
+                ),
+                // The daemon-owned value must overwrite config spoofing.
+                ("JCODE_MCP_OWNER_PID".to_string(), "1".to_string()),
+            ]),
+            shared: true,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+        };
+
+        pool.connect_server("owner-pid-fixture", &config)
+            .await
+            .expect("connect fixture");
+        let owner_pid = pool.owner_pid();
+        assert_eq!(
+            std::fs::read_to_string(&capture).expect("captured owner PID"),
+            owner_pid.to_string()
+        );
+        let tracked = pool
+            .tracked_children()
+            .into_iter()
+            .find(|child| child.server_name == "owner-pid-fixture")
+            .expect("pooled child tracking record");
+        assert_eq!(tracked.owner_pid, owner_pid);
+        assert!(tracked.pid > 0);
+        eprintln!(
+            "F06_OWNER server={} child_pid={} owner_pid={} env_owner_pid={}",
+            tracked.server_name,
+            tracked.pid,
+            tracked.owner_pid,
+            std::fs::read_to_string(&capture).unwrap()
+        );
+
+        pool.disconnect_server("owner-pid-fixture").await;
+        assert!(
+            pool.tracked_children()
+                .into_iter()
+                .all(|child| child.pid != tracked.pid)
+        );
     }
 }

@@ -2,11 +2,13 @@
 
 use super::protocol::*;
 use anyhow::{Context, Result};
+use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, oneshot};
@@ -15,6 +17,292 @@ use tokio::sync::{Mutex, mpsc, oneshot};
 /// process. Shared servers are pool-deduped and not counted here.
 pub(crate) const MAX_OWNED_MCP_CHILDREN: usize = 64;
 static OWNED_MCP_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+
+/// Environment contract used by owned MCP children to monitor their daemon.
+pub const MCP_OWNER_PID_ENV: &str = "JCODE_MCP_OWNER_PID";
+
+/// Default bound for a single-client shutdown outside the daemon coordinator.
+pub(crate) const DEFAULT_MCP_REAP_GRACE: Duration = Duration::from_millis(225);
+
+/// Debug/introspection record for one child process owned by this daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TrackedMcpChild {
+    pub server_name: String,
+    pub pid: u32,
+    pub owner_pid: u32,
+}
+
+/// Result of one bounded graceful -> TERM -> KILL reap pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpChildReapReport {
+    pub initial: usize,
+    pub term_signaled: Vec<u32>,
+    pub kill_signaled: Vec<u32>,
+    /// PIDs that still appeared live after SIGKILL and the grace deadline.
+    /// Their tracking records are removed so shutdown cannot retain stale state.
+    pub unreaped: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReapSignal {
+    Term,
+    Kill,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReapAction {
+    pid: u32,
+    signal: ReapSignal,
+}
+
+fn escalation_actions(pids: &[u32], signal: ReapSignal) -> Vec<ReapAction> {
+    pids.iter()
+        .copied()
+        .map(|pid| ReapAction { pid, signal })
+        .collect()
+}
+
+/// Process-wide child registry. The shared pool owns an Arc to this registry,
+/// and per-session managers use the same Arc so shutdown can reap both pooled
+/// and non-shared children in one bounded pass.
+#[derive(Debug)]
+pub struct McpChildTracker {
+    owner_pid: u32,
+    children: StdMutex<HashMap<u32, TrackedMcpChild>>,
+}
+
+static PROCESS_MCP_CHILD_TRACKER: OnceLock<Arc<McpChildTracker>> = OnceLock::new();
+
+impl McpChildTracker {
+    pub fn process() -> Arc<Self> {
+        Arc::clone(PROCESS_MCP_CHILD_TRACKER.get_or_init(|| {
+            Arc::new(Self {
+                owner_pid: std::process::id(),
+                children: StdMutex::new(HashMap::new()),
+            })
+        }))
+    }
+
+    #[cfg(test)]
+    fn with_owner_pid(owner_pid: u32) -> Arc<Self> {
+        Arc::new(Self {
+            owner_pid,
+            children: StdMutex::new(HashMap::new()),
+        })
+    }
+
+    pub fn owner_pid(&self) -> u32 {
+        self.owner_pid
+    }
+
+    fn register(&self, server_name: String, pid: u32) {
+        self.children
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                pid,
+                TrackedMcpChild {
+                    server_name,
+                    pid,
+                    owner_pid: self.owner_pid,
+                },
+            );
+    }
+
+    fn unregister(&self, pid: u32) {
+        self.children
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&pid);
+    }
+
+    pub fn tracked_children(&self) -> Vec<TrackedMcpChild> {
+        let mut children: Vec<_> = self
+            .children
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .cloned()
+            .collect();
+        children.sort_by_key(|child| child.pid);
+        children
+    }
+
+    pub async fn reap_all(&self, grace: Duration) -> McpChildReapReport {
+        let pids: Vec<u32> = self
+            .children
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .copied()
+            .collect();
+        self.reap_pids(&pids, grace).await
+    }
+
+    pub(crate) async fn reap_pids(&self, pids: &[u32], grace: Duration) -> McpChildReapReport {
+        let tracked: Vec<u32> = {
+            let children = self
+                .children
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            pids.iter()
+                .copied()
+                .filter(|pid| children.contains_key(pid))
+                .collect()
+        };
+        let initial = tracked.len();
+        let started = Instant::now();
+        let graceful_deadline = started + grace / 4;
+        let term_deadline = started + grace * 3 / 4;
+        let final_deadline = started + grace;
+
+        self.wait_for_exit_until(&tracked, graceful_deadline).await;
+
+        let live = self.live_tracked(&tracked);
+        let term_actions = escalation_actions(&live, ReapSignal::Term);
+        let term_signaled = apply_reap_actions(&term_actions);
+        self.wait_for_exit_until(&tracked, term_deadline).await;
+
+        let live = self.live_tracked(&tracked);
+        let kill_actions = escalation_actions(&live, ReapSignal::Kill);
+        let kill_signaled = apply_reap_actions(&kill_actions);
+        self.wait_for_exit_until(&tracked, final_deadline).await;
+
+        let unreaped = self.live_tracked(&tracked);
+        // A completed cleanup step must never retain stale ownership records.
+        // `unreaped` preserves visibility if the OS rejected or delayed SIGKILL.
+        for pid in &tracked {
+            self.unregister(*pid);
+        }
+
+        McpChildReapReport {
+            initial,
+            term_signaled,
+            kill_signaled,
+            unreaped,
+        }
+    }
+
+    async fn wait_for_exit_until(&self, pids: &[u32], deadline: Instant) {
+        loop {
+            if self.live_tracked(pids).is_empty() || Instant::now() >= deadline {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn live_tracked(&self, pids: &[u32]) -> Vec<u32> {
+        let registered: Vec<u32> = {
+            let children = self
+                .children
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            pids.iter()
+                .copied()
+                .filter(|pid| children.contains_key(pid))
+                .collect()
+        };
+
+        let mut live = Vec::new();
+        for pid in registered {
+            if child_is_live(pid) {
+                live.push(pid);
+            } else {
+                self.unregister(pid);
+            }
+        }
+        live
+    }
+}
+
+fn apply_reap_actions(actions: &[ReapAction]) -> Vec<u32> {
+    actions
+        .iter()
+        .filter_map(|action| {
+            signal_child(action.pid, action.signal)
+                .ok()
+                .map(|()| action.pid)
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn child_is_live(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    let mut status = 0;
+    let result = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+    if result == pid {
+        return false;
+    }
+    if result == 0 {
+        return true;
+    }
+
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ECHILD) => {
+            let result = unsafe { libc::kill(pid, 0) };
+            result == 0
+                || matches!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::EPERM)
+                )
+        }
+        Some(libc::ESRCH) => false,
+        _ => true,
+    }
+}
+
+#[cfg(windows)]
+fn child_is_live(pid: u32) -> bool {
+    jcode_core::process::is_running(pid)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn child_is_live(_pid: u32) -> bool {
+    true
+}
+
+#[cfg(unix)]
+fn signal_child(pid: u32, signal: ReapSignal) -> std::io::Result<()> {
+    let signal = match signal {
+        ReapSignal::Term => libc::SIGTERM,
+        ReapSignal::Kill => libc::SIGKILL,
+    };
+    let result = unsafe { libc::kill(pid as libc::pid_t, signal) };
+    if result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn signal_child(pid: u32, signal: ReapSignal) -> std::io::Result<()> {
+    let mut command = std::process::Command::new("taskkill.exe");
+    command.args(["/PID", &pid.to_string(), "/T"]);
+    if signal == ReapSignal::Kill {
+        command.arg("/F");
+    }
+    let status = command.status()?;
+    if status.success() || !child_is_live(pid) {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!(
+            "taskkill failed for MCP child {pid}: {status}"
+        )))
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn signal_child(_pid: u32, _signal: ReapSignal) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "MCP child signaling is unsupported on this platform",
+    ))
+}
 
 /// Pure bounded-CAS reservation against `counter`, capped at `cap`. Returns
 /// true if a slot was reserved (the caller must release exactly once), false if
@@ -169,6 +457,9 @@ impl McpHandle {
 pub struct McpClient {
     handle: McpHandle,
     child: Child,
+    child_pid: u32,
+    child_tracker: Arc<McpChildTracker>,
+    shutdown_started: bool,
     /// Set for owned (non-shared) clients; keeps the process-cap slot reserved
     /// until this client is dropped. None for pool/shared clients.
     _child_permit: Option<OwnedChildPermit>,
@@ -177,6 +468,14 @@ pub struct McpClient {
 impl McpClient {
     /// Connect to an MCP server
     pub async fn connect(name: String, config: &McpServerConfig) -> Result<Self> {
+        Self::connect_with_tracker(name, config, McpChildTracker::process()).await
+    }
+
+    pub(crate) async fn connect_with_tracker(
+        name: String,
+        config: &McpServerConfig,
+        child_tracker: Arc<McpChildTracker>,
+    ) -> Result<Self> {
         crate::logging::info(&format!(
             "MCP: Connecting to '{}' ({} {:?})",
             name, config.command, config.args
@@ -184,6 +483,12 @@ impl McpClient {
 
         let mut env: HashMap<String, String> = std::env::vars().collect();
         env.extend(config.env.clone());
+        // The daemon owns this contract. A server config cannot spoof or erase
+        // the parent identity used by `jcode mcp-serve` self-liveness.
+        env.insert(
+            MCP_OWNER_PID_ENV.to_string(),
+            child_tracker.owner_pid().to_string(),
+        );
 
         let mut child = Command::new(&config.command)
             .args(&config.args)
@@ -193,6 +498,9 @@ impl McpClient {
             .stderr(Stdio::piped())
             .spawn()
             .with_context(|| format!("Failed to spawn MCP server: {}", config.command))?;
+
+        let child_pid = child.id().context("Spawned MCP server has no process ID")?;
+        child_tracker.register(name.clone(), child_pid);
 
         let stdin = child.stdin.take().context("No stdin")?;
         let stdout = child.stdout.take().context("No stdout")?;
@@ -291,6 +599,9 @@ impl McpClient {
         let mut client = Self {
             handle,
             child,
+            child_pid,
+            child_tracker,
+            shutdown_started: false,
             _child_permit: None,
         };
 
@@ -372,15 +683,26 @@ impl McpClient {
 
     /// Shutdown the server
     pub async fn shutdown(&mut self) {
+        let pid = self.request_shutdown();
+        let report = self
+            .child_tracker
+            .reap_pids(&[pid], DEFAULT_MCP_REAP_GRACE)
+            .await;
+        if !report.unreaped.is_empty() {
+            crate::logging::warn(&format!(
+                "MCP: child PID(s) still live after bounded reap: {:?}",
+                report.unreaped
+            ));
+        }
+    }
+
+    pub(crate) fn request_shutdown(&mut self) -> u32 {
+        self.shutdown_started = true;
         let _ = self
             .handle
             .writer_tx
-            .send("{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\"}\n".to_string())
-            .await;
-
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-        let _ = self.child.kill().await;
+            .try_send("{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\"}\n".to_string());
+        self.child_pid
     }
 
     // === Legacy compatibility methods that delegate to handle ===
@@ -408,14 +730,35 @@ impl McpClient {
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        let _ = self.child.start_kill();
+        if self.shutdown_started {
+            return;
+        }
+
+        let _ = self
+            .handle
+            .writer_tx
+            .try_send("{\"jsonrpc\":\"2.0\",\"method\":\"shutdown\"}\n".to_string());
+        let tracker = Arc::clone(&self.child_tracker);
+        let pid = self.child_pid;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = tracker.reap_pids(&[pid], DEFAULT_MCP_REAP_GRACE).await;
+            });
+        } else {
+            let _ = signal_child(pid, ReapSignal::Term);
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_OWNED_MCP_CHILDREN, OwnedChildPermit, try_reserve};
+    use super::{
+        MAX_OWNED_MCP_CHILDREN, McpChildTracker, OwnedChildPermit, ReapAction, ReapSignal,
+        escalation_actions, try_reserve,
+    };
+    use std::process::Stdio;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn try_reserve_enforces_cap_on_isolated_counter() {
@@ -439,5 +782,91 @@ mod tests {
         let permit = OwnedChildPermit::try_acquire();
         assert!(permit.is_some(), "should acquire while far under cap");
         drop(permit);
+    }
+
+    #[test]
+    fn fake_pid_escalation_orders_term_before_kill() {
+        let pids = [101, 202];
+        assert_eq!(
+            escalation_actions(&pids, ReapSignal::Term),
+            vec![
+                ReapAction {
+                    pid: 101,
+                    signal: ReapSignal::Term,
+                },
+                ReapAction {
+                    pid: 202,
+                    signal: ReapSignal::Term,
+                },
+            ]
+        );
+        assert_eq!(
+            escalation_actions(&pids, ReapSignal::Kill),
+            vec![
+                ReapAction {
+                    pid: 101,
+                    signal: ReapSignal::Kill,
+                },
+                ReapAction {
+                    pid: 202,
+                    signal: ReapSignal::Kill,
+                },
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn real_child_ignoring_term_is_killed_and_reaped_within_grace() {
+        let tracker = McpChildTracker::with_owner_pid(std::process::id());
+        let temp = tempfile::tempdir().expect("tempdir");
+        let ready = temp.path().join("term-trap-ready");
+        let mut child = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "trap '' TERM; : > \"$1\"; while :; do sleep 1; done",
+                "f06-term-resistant-child",
+                &ready.to_string_lossy(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn TERM-resistant child");
+        let ready_deadline = Instant::now() + Duration::from_secs(1);
+        while !ready.exists() && Instant::now() < ready_deadline {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert!(ready.exists(), "child must install its TERM trap before reap");
+        let pid = child.id();
+        tracker.register("term-resistant-test".to_string(), pid);
+
+        let started = Instant::now();
+        let report = tracker.reap_all(Duration::from_millis(300)).await;
+        assert_eq!(report.initial, 1);
+        assert_eq!(report.term_signaled, vec![pid]);
+        assert_eq!(report.kill_signaled, vec![pid]);
+        assert!(
+            report.unreaped.is_empty(),
+            "SIGKILL must be observed within grace"
+        );
+        assert!(tracker.tracked_children().is_empty());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        eprintln!(
+            "F06_REAP pid={pid} owner_pid={} term={:?} kill={:?} unreaped={:?} tracked_after={} elapsed_ms={}",
+            tracker.owner_pid(),
+            report.term_signaled,
+            report.kill_signaled,
+            report.unreaped,
+            tracker.tracked_children().len(),
+            started.elapsed().as_millis()
+        );
+
+        // The tracker uses waitpid(WNOHANG), so the std Child may already be
+        // externally reaped. Either outcome proves it is not still running.
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => {}
+            Ok(None) => panic!("child survived TERM then KILL"),
+        }
     }
 }
