@@ -309,3 +309,138 @@ The adopted-no-initial-file cancel/finalize defect is **not** handed to F05 beca
 ## Confidence
 
 **High (99%).** The major repair is real and both requested suites pass. The remaining blocker is a narrow but explicit composition of supported branches: adoption continues after initial persistence failure, while cancel/finalize remove it before a successful terminal write. With no status file and no retained map entry, neither the retry after process death nor orphan reconciliation can exist.
+
+# Round 3: final re-review
+
+## Verdict
+
+**PASS.**
+
+Reviewed exact commit `9c4c99897b88456257525d359f11fa357669c134` (`F04: fix round-2 blocker F04-R2-B1 - cancel tombstone + finalize policy`) at HEAD `9c4c99897b88456257525d359f11fa357669c134`.
+
+Reviewer route: **OpenAI `gpt-5.6-sol`, high effort**.
+
+The remaining live-runtime blocker is closed. Cancel now aborts in place while retaining the `RunningTask` map entry, releases the map read lock before terminal persistence, and delegates all pruning to `persist_terminal_with_recovery`. Immediate success and retry success prune idempotently. Terminal failure leaves a real tombstone even for an adopted task whose initial write failed.
+
+`durable_record` accurately distinguishes tasks with an initial recovery record from the exceptional adopted/no-record state. Shutdown finalization remains necessarily lossy only when all of the following hold: an already-running foreground future was adopted, its initial write failed, its terminal write also fails, and the daemon is exiting while storage remains unavailable. The implementation now identifies and loudly reports that bound instead of claiming recoverability. I accept this as the honest shutdown policy for gate 2: blocking daemon shutdown indefinitely on unavailable persistence would preserve neither execution nor durable state and creates a worse system-level failure. During continued process operation, no live task is pruned without terminal persistence or an existing durable recovery record.
+
+All three F04 acceptance gates are met. No blocking defect remains.
+
+## Validation performed
+
+### Exact source and evidence review
+
+- Confirmed clean baseline and `HEAD == 9c4c99897b88456257525d359f11fa357669c134`.
+- Read the complete `git show 9c4c99897` diff, updated `background.rs`, `background/model.rs`, the new manager test, and `evidence/F04/README.md`.
+- Verified the updated evidence SHA-256 entry matches the README.
+- Re-censused direct production status serialization/writes, terminal store calls, live-map removals, and all `is_live_task` consumers.
+
+### Tests run
+
+1. `scripts/dev_cargo.sh test -p jcode-base --lib background`
+   - **38 passed; 0 failed; 0 ignored; 1146 filtered out; 0.66s**.
+2. `scripts/dev_cargo.sh test -p jcode-base --lib`
+   - **1181 passed; 0 failed; 3 ignored; 35.08s**.
+
+### Cancel locking and concurrency
+
+`cancel_with_grace` obtains a read guard, looks up the task, aborts the wrapper and adopted-original authority in place, copies every field needed by `TerminalSpec`, then explicitly drops the guard before awaiting `persist_terminal_with_recovery` (`background.rs:1393-1425`). The helper may acquire the task-map write lock only after terminal persistence returns, so there is no read-to-write self-deadlock.
+
+Concurrent cancels are safe:
+
+1. Multiple readers may find the same entry and abort handles repeatedly; Tokio abort handles are idempotent.
+2. Each builds an equivalent cancellation terminal spec and drops its read lock before store IO.
+3. The per-task store mutex serializes terminal writes. The first successful terminal write wins; later calls receive `AlreadyTerminal`.
+4. Each success path removes by task ID. Repeated `HashMap::remove` calls are idempotent.
+5. If multiple calls encounter broken storage, multiple retry loops are redundant but safe; the first recovery persists/prunes and later loops observe `AlreadyTerminal`, remove nothing, and exit.
+
+The method retains its existing `Ok(true)` behavior whenever it found a live-map entry, including a concurrent finish/cancel race. First-terminal-wins means a completion that persisted just before cancellation may remain the recorded truth, which is appropriate race semantics.
+
+### Cancel recovery test
+
+`cancel_retains_tombstone_until_terminal_persistence_recovers` proves the intended failure path:
+
+- it starts a long-running spawned task and confirms map membership;
+- it moves the status directory away and replaces it with a file, forcing terminal temp writes to fail;
+- `cancel` returns `true`, after which the test confirms the map entry remains;
+- it restores the directory and waits for retry-driven pruning;
+- it finally reads disk state and requires `Failed` with error `Cancelled by user`.
+
+This is materially stronger than a happy-path ordering test because it proves retention during the actual post-retry error state and the complete recovery-to-prune transition.
+
+### `durable_record` and shutdown finalization
+
+- Spawn sets `durable_record: true` only after `write_initial` succeeded; initial failure returns before task creation/insertion (`background.rs:687-700`, `:814-818`).
+- Adoption assigns the boolean directly from `write_initial`: true on success and false on its permitted failure (`:884-900`, `:1034-1038`). No other `RunningTask` construction exists.
+- `finalize_non_detached` drains and aborts because daemon shutdown cannot leave futures running. If terminal persistence fails with `durable_record == true`, the initial `Running` file is valid next-boot orphan-sweep authority. If false, it emits an explicit `DATA LOSS:` error naming both failed writes and non-recoverability (`:512-531`).
+
+The no-record shutdown corner cannot be made durable while the only persistence target remains unavailable. Retaining an in-memory tombstone cannot survive process exit, and an unbounded shutdown block is operationally worse. A bounded shutdown result propagated to the coordinator could improve observability, but the current loud policy is sufficient for F04's lifecycle gate rather than a reason to keep the daemon alive indefinitely.
+
+### Tombstone visibility and consumers
+
+During a terminal-persistence outage, `list`/`status` continue to show the durable file's `Running` state and `wait` continues waiting or times out. This is conservative: the persisted truth has not yet reached terminal, and claiming completion would violate the same persistence contract. Once retry lands, status becomes terminal and the map entry is pruned.
+
+The two production `is_live_task` consumers are also conservative:
+
+- the run-plan duplicate-driver guard continues blocking a replacement driver while a retry tombstone exists;
+- self-dev reconciliation keeps a `Running` request alive while persistence recovery is pending.
+
+After terminal persistence succeeds, the helper immediately removes the map entry. There is only a short success-to-remove scheduling window in which disk is terminal and `is_live_task` may still be true; this delays replacement/reconciliation rather than allowing duplicate work or corrupting state. `is_live_task` is explicitly best-effort and uses `try_read`, so transient false negatives under a map write lock predate this change and are already handled by caller-specific grace/reconciliation logic.
+
+## Findings
+
+### Blocking
+
+None.
+
+### Important
+
+#### F04-R3-I1: delivery changes made during a terminal retry window can be overwritten by the stale terminal spec
+
+`TerminalSpec` snapshots `notify`/`wake` before the first terminal attempt. `build_terminal_status` preserves prior progress and event history but writes delivery flags from that snapshot. If terminal persistence fails, a caller can update delivery on the retained tombstone; a later retry then reloads that new state but overwrites its delivery flags with the old spec values.
+
+This does not defeat any acceptance gate: the write is still serialized/atomic, terminal truth remains correct, the task remains recoverable, and failures are surfaced. It does weaken the broader claim that serialized delivery/completion updates never lose each other. On retry, prefer delivery flags from `prior` when present, or refresh them from the retained task's watch sender before constructing each attempt. Add a failure-injection test that changes delivery while the tombstone is pending and checks the recovered terminal file.
+
+### Minor
+
+#### F04-R3-M1: evidence still references removed `read_lenient`
+
+`evidence/F04/README.md:21` still names `read_lenient`, which was removed in the round-1 fixes. This is documentation drift only.
+
+#### F04-R3-M2: concurrent cancel safety is source-proven but not regression-tested
+
+The store mutex, first-terminal-wins behavior, handle abort semantics, and idempotent map removes make concurrent cancels safe. A two-caller test would still be useful to lock down `Ok(true)`/terminal-state behavior and ensure only one durable terminal outcome.
+
+## Gate checklist
+
+| Acceptance gate | Result | Evidence |
+|---|---|---|
+| No direct non-atomic status-file writes remain | **PASS** | Re-census found no production status serialization/write outside `TaskStatusStore`; all seven terminal call sites route through the store. |
+| Live task is not removed before terminal persistence succeeds or is durably recoverable | **PASS** | Spawn fails closed; natural wrappers and live cancel retain real tombstones and prune only after store success; durable initial files cover normal cancel/finalize process death; the exceptional adopted/no-record shutdown case is explicitly bounded and loudly reported during daemon exit rather than silently called recoverable. |
+| Status-serialization and write failures are surfaced, not swallowed | **PASS** | Store returns contextual errors and retries terminal writes; manager paths propagate or log them; retry helpers log initial/repeated failures and recovery; shutdown's irrecoverable no-record corner emits an explicit `DATA LOSS:` error. |
+
+## F05 handoff list
+
+1. Crash/power-loss behavior around temp write/rename, including file and parent-directory fsync.
+2. Malformed/truncated destination recovery and stale `*.tmp.<pid>` cleanup.
+3. Cross-process same-task writers, PID reuse, and same-process independent stores sharing one temp path.
+4. Task-ID collision policy for existing `Running` files.
+5. Windows replace-over-existing semantics and rename fault injection.
+6. Structured persistence-health results/events for retry-pending and shutdown data-loss states.
+7. Bounded retry lifecycle, duplicate retry-loop coalescing, and shutdown coordination when storage never recovers.
+8. Preserve delivery updates made during terminal retry recovery.
+9. Per-task lock-map growth measurement/reclamation for long-lived high-cardinality processes.
+10. Direct tests for exact no-op progress publication count and concurrent cancel callers.
+
+## What I did not check
+
+- I did not run `jcode-app-core`, the full workspace, Miri, Loom, sanitizers, or an external filesystem fault-injection framework.
+- I did not run a real process-crash, cross-process writer, Windows, disk-full, or power-loss test.
+- I did not create an adopted-initial-failure shutdown fixture or capture the `DATA LOSS:` log; the branch and `durable_record` assignments were verified statically.
+- I did not execute concurrent cancel callers; safety was established from the read-lock lifetime, store mutex, terminal precedence, and idempotent removal.
+- I did not inspect every downstream bus-event consumer outside the identified live-task consumers.
+- I did not modify implementation code.
+
+## Confidence
+
+**High (98%).** The exact remaining runtime-pruning defect is fixed, the failure-injection test exercises the important broken-storage state transition, every map removal and live-task consumer was rechecked, and both requested test scopes are green. Confidence is below 100% because shutdown data loss under permanently broken storage is an explicit accepted bound rather than a recoverable outcome, and cross-process/crash behavior remains deferred to F05.
