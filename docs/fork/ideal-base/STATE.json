@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F04",
+    "node": "F05",
     "state": "accepted",
-    "commit": "9c4c99897b88456257525d359f11fa357669c134",
-    "updated_at": "2026-07-18T19:04:00Z",
-    "summary": "F04 accepted (D016). F05 verification runnable next with the review handoff list as seed."
+    "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+    "updated_at": "2026-07-18T20:12:00Z",
+    "summary": "F05 accepted (D018). W1 remaining: F06 (MCP owner identity, Sol-high) -> F07 -> F08 integrated gate."
   },
   "nodes": {
     "W0": {
@@ -124,11 +124,14 @@
       "updated_at": "2026-07-18T19:04:00Z"
     },
     "F05": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F05",
+        "docs/fork/ideal-base/reviews/F05-verification-review.md"
+      ],
+      "summary": "F05 accepted at 9f4d34d11. Sol-high implementation via task DAG; Opus 4.8 first-round PASS (0 blockers). fsync durability, stale-temp sweep, collision policy, full verification matrix. 1186/1186 green.",
+      "updated_at": "2026-07-18T20:12:00Z"
     },
     "F06": {
       "state": "pending",
