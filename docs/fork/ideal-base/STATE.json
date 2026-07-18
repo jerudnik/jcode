@@ -4,19 +4,21 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W0.2",
+    "node": "W0",
     "state": "accepted",
-    "commit": "fb00ab840",
-    "updated_at": "2026-07-18T06:29:44Z",
-    "summary": "Source census: 25/25 files and 11/11 dirs exist; no wholly stale seam; all F-nodes retained. Amendments proposed: GN-1 fix F06 stale glob (mcp-serve at src/cli/mcp_serve.rs), GN-2 add jcode-selfdev-types to F09, GN-5 add explicit F04 surfaced-failure gate; scope guards GN-3 (reuse OwnedChildPermit), GN-4 (startup sweep pre-exists). Spot-checked by coordinator: background.rs:133 non-atomic swallow, mobile_server.rs CWD-first, release.yml:436 StrictHostKeyChecking=no, telemetry_state.rs uncompiled, zero *mcp* matches under src/cli/commands."
+    "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+    "updated_at": "2026-07-18T06:32:51Z",
+    "summary": "W0 wave complete: baseline revalidated (W0.1), source census accepted with graph amendments D008 (W0.2), plan quarantined/cleared and projections verified (W0.3)."
   },
   "nodes": {
     "W0": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.1"
+      ],
+      "summary": "W0 wave complete: baseline revalidated (W0.1), source census accepted with graph amendments D008 (W0.2), plan quarantined/cleared and projections verified (W0.3).",
+      "updated_at": "2026-07-18T06:32:51Z"
     },
     "W1": {
       "state": "pending",
@@ -72,11 +74,13 @@
       "updated_at": "2026-07-18T06:29:44Z"
     },
     "W0.3": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.3"
+      ],
+      "summary": "Stale historical swarm plan (94 nodes) snapshotted and cleared; stray resurrected workers stopped and one diff stashed (D007). Ownership/dependency projection validated: next runnable is W1/F01; F02-F04 background.rs overlap serialized by dependency chain.",
+      "updated_at": "2026-07-18T06:32:51Z"
     },
     "F01": {
       "state": "pending",
