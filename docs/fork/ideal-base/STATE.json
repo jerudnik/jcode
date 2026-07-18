@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "program": "ideal-durable-tui-cli-foundation",
+  "program_state": "railway_ready",
+  "active_graph_id": null,
+  "last_checkpoint": {
+    "recorded": "2026-07-18",
+    "summary": "Active authority and machine graph created; implementation graph not yet seeded.",
+    "source_seed": "923c6353e04266f71dc6cc06fc8516e502a9c07f"
+  },
+  "nodes": {
+    "W0": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W1": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W2": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W3": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W4": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W5": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W0.1": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W0.2": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W0.3": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F01": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F02": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F03": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F04": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F05": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F06": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F07": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F08": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F09": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F10": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F11": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F12": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F13": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F14": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F15": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F16": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F17": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F18": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F19": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F20": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F21": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F22": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F23": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F24": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F25": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F26": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F27": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G01": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G02": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G03": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G04": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G05": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "S01": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "S02": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "S03": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    }
+  }
+}

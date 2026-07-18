@@ -1,5 +1,9 @@
 # N1 curated integration stack plan
 
+> **Historical N1 integration plan.** Integration and cleanup completed. Use
+> [`STATUS.md`](STATUS.md) only as a frozen checkpoint and
+> [`../ideal-base/`](../ideal-base/) for current execution authority.
+
 Authored before integration, as required by D2. Base: `main`
 (`6ca1fcf2ec2366c7abc99664a485c40d60cec80e`). Source of truth: the recovery
 line archived at `refs/archive/recovery/2026-07-15`

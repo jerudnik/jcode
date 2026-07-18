@@ -1422,6 +1422,16 @@ fn schema_advertises_supported_swarm_fields() {
     assert!(props.contains_key("prefer_spawn"));
     assert!(props.contains_key("session_ids"));
     assert!(props.contains_key("mode"));
+    assert_eq!(
+        props["mode"]["enum"],
+        json!(["all", "any", "deep", "light"])
+    );
+    assert!(
+        props["mode"]["description"]
+            .as_str()
+            .expect("mode description")
+            .contains("task_graph")
+    );
     assert!(props.contains_key("target_status"));
     assert!(props.contains_key("timeout_minutes"));
     assert!(props.contains_key("concurrency_limit"));

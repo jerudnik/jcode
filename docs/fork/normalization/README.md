@@ -1,5 +1,10 @@
 # Post-recovery fork normalization
 
+> **Frozen historical program record.** Normalization completed before the
+> ideal-base railway was created. Use [`../ideal-base/`](../ideal-base/) for
+> current execution, acceptance, and handoff authority. Preserve the dated facts
+> below as history.
+
 The six-phase recovery is complete. This directory defines the separate program
 that turns the signed recovery branch into the normal operating state of the
 fork: one canonical repository, clean history and task state, completed W7
