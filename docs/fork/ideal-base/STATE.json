@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F01",
+    "node": "F02",
     "state": "accepted",
-    "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
-    "updated_at": "2026-07-18T09:38:30Z",
-    "summary": "F01 design accepted after 3-round independent review convergence (D013). F02 implementation is now runnable."
+    "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
+    "updated_at": "2026-07-18T12:15:00Z",
+    "summary": "F02 accepted (D014). F03 lease-class/exit-mode verification is now runnable."
   },
   "nodes": {
     "W0": {
@@ -94,13 +94,14 @@
       "updated_at": "2026-07-18T09:38:30Z"
     },
     "F02": {
-      "state": "implemented",
-      "commit": "2609e7a8d",
+      "state": "accepted",
+      "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
       "evidence": [
-        "docs/fork/ideal-base/evidence/F02"
+        "docs/fork/ideal-base/evidence/F02",
+        "docs/fork/ideal-base/reviews/F02-implementation-review.md"
       ],
-      "summary": "F02 implemented across 9d9762e6f/e5059a3c2/2609e7a8d: jcode-core lease seam, coordinator+watchdog+cleanup, all exit paths and lease sites wired. Tests: core 34/34, base bg 26/26, app-core 1113/1113; runtime fixtures temp-idle 44 and SIGTERM 0 with zero residue. Awaiting independent verification (F03 gate + review).",
-      "updated_at": "2026-07-18T11:21:45Z"
+      "summary": "F02 accepted at 2b5607882 after 3-round independent review (PASS round 3). Both gates met: atomic idle claim over unified lease table; all exit modes through the bounded coordinator. Fixture transcript regenerated from exact-commit build, 3/3 passes.",
+      "updated_at": "2026-07-18T12:15:00Z"
     },
     "F03": {
       "state": "pending",
