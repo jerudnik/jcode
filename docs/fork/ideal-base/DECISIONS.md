@@ -266,3 +266,26 @@ Binding design outcomes for F02:
 
 **Reopen trigger:** F02 implementation discovering the design unimplementable
 at any specified seam, which injects a repair node and re-runs this gate.
+
+## D014. F02 accepted after three-round independent implementation review
+
+**Decision:** F02 (work-aware activity leases + bounded shutdown coordinator)
+is accepted at commit `2b5607882`, verified by the independent implementation
+review (`reviews/F02-implementation-review.md`, reviewer OpenAI `gpt-5.6-sol`
+high effort): round 1 FAIL (5 blockers), round 2 FAIL (2 blockers), round 3
+PASS with no remaining blocking defect and both acceptance gates met.
+
+Notable hardening driven by the review: atomic idle-shutdown claim with
+`ClientConnection` leases as the admission gate (refused connections dropped
+uncounted), `ScheduledDelivery` lease around the ambient direct-dispatch gap,
+reload intake cancellation with refuse-before-publish ordering, all lease
+refusals failing closed, adopted-original `AbortHandle` retention so cleanup
+aborts rather than detaches, watchdog thread-spawn fallback, off-runtime
+executor spawning, StartupRecovery TTL.
+
+The round-3 review flagged a fixture-binary provenance defect (stale build);
+the transcript was regenerated from a clean-tree exact-commit build with
+three consecutive passing runs (`evidence/F02/exit_mode_fixtures_run.log`).
+
+**Reopen trigger:** F03 fixtures uncovering a lease-class or exit-mode gap;
+that injects a repair node against F02's owned paths.
