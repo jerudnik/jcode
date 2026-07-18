@@ -200,7 +200,7 @@
         "kind": "verify",
         "depends_on": ["F04"],
         "priority": 89,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F05/**"],
+        "owned_paths": ["docs/fork/ideal-base/evidence/F05/**", "crates/jcode-base/src/background/store.rs", "crates/jcode-base/src/background/tests.rs", "crates/jcode-base/src/background.rs"],
         "acceptance_gates": [
           "Concurrent progress/delivery/completion never tears JSON or overwrites terminal truth",
           "Startup reconciles malformed/orphaned state without false success"
@@ -948,7 +948,7 @@
       "kind": "verify",
       "depends_on": ["F04"],
       "priority": 89,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F05/**"],
+      "owned_paths": ["docs/fork/ideal-base/evidence/F05/**", "crates/jcode-base/src/background/store.rs", "crates/jcode-base/src/background/tests.rs", "crates/jcode-base/src/background.rs"],
       "acceptance_gates": [
         "Concurrent progress/delivery/completion never tears JSON or overwrites terminal truth",
         "Startup reconciles malformed/orphaned state without false success"
