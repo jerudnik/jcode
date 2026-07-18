@@ -5,8 +5,15 @@ Review: `docs/fork/ideal-base/reviews/F01-architecture-critique.md`, commit
 blocking findings B1-B3, important findings I1-I5, and a ten-point revision
 gate.
 
-Revised design: `design.md` (revision 2, this directory). Source facts
+Revised design: `design.md` (revision 4, this directory). Source facts
 re-verified at commit `398b51c07d1f0545bfdccd6a33e6ea9fd76b6574`.
+
+NOTE (historical layering): this file is cumulative. The "Blocking findings"
+and "Important findings" sections below record the revision-2 responses to
+the ORIGINAL review and are historical; where later rounds refined them
+(deadline rule wording, executor termination ownership, `Exited` ->
+`Cleaned`), the later sections and the current `design.md` govern. Each
+subsequent round appends its own section.
 
 Inputs beyond the review itself: seven typed worker artifacts preserved under
 `../F01-R/worker-artifacts/` (nodes `b1`, `i1`, `i2`,
@@ -239,3 +246,52 @@ Both citations now name `reap_stale_socket_if_dead` at `socket.rs:76-126`.
 
 The upgrade rule is stated over absolute deadlines:
 `new_deadline = min(current_absolute_deadline, now + full_budget(new_reason))`.
+
+---
+
+## Revision 4: response to the round-2 FAIL (`F01-architecture-re-review.md` Round 2, commit `6e1c59f34`)
+
+Re-reviewer: OpenAI `gpt-5.6-sol`, high effort. Verdict FAIL with blockers
+R2-B1, R2-B2, important R2-I1, R2-I2, minor R2-M1.
+
+### R2-B1 (watchdog can fire after `Cleaned`) -> RESOLVED
+
+Design 3.2.4 now has an explicit disarm rule with exactly two
+executor-performed disarm cases: `Handoff` exec success, and after the last
+cleanup step BEFORE `Cleaned` is published. Disarm is an atomic CAS on a
+two-state `Armed/Cancelled` cell that the watchdog thread checks before its
+exit call; if the CAS loses, `Cleaned` is never published and the outcome is
+`ForcedExit`. The two terminal outcomes are mutually exclusive by the atomic
+handoff, restoring outcome honesty and exactly-once termination. The pure
+test plan (4.3) drives the cleanup-completion / watchdog-deadline /
+waiter-notification / guard-unwind / runner-exit race.
+
+### R2-B2 (F02 does not own the termination site) -> RESOLVED
+
+`src/cli/dispatch.rs` is added to both F02 `owned_paths` arrays in
+`WORK_GRAPH.json`, and design 3.2.1 records the ownership consequence,
+including that F06 (which also lists the file) depends on F02, so ownership
+is sequential rather than concurrent, and that F02 acceptance evidence must
+cover the outcome-to-code mapping and accept-loop code 45 at this site.
+
+### R2-I1 (stale executor-termination prose) -> RESOLVED
+
+Design 3.2.1 intro now says the actor performs the final
+terminal-publication transition and does not itself exit the process. The
+lint rule (3.2 intro) now permits exactly the two authorized termination
+sites and rejects every other daemon-image exit site.
+
+### R2-I2 (C5 guard-lifetime overstatement) -> RESOLVED
+
+The C5 wiring row distinguishes the two branches honestly: `spawn_with_notify`
+acquires before the spawn at `background.rs:483-484`; the adopt path
+(`background.rs:628-686`) acquires at adoption, with pre-adoption execution
+covered by the foreground owner's lease. Pruning boundaries are cited
+(`background.rs:551-552`, adopt `:754-758`), and post-pruning wrapper work is
+explicitly handed off to the scheduled-delivery/turn policy rather than
+claimed as covered.
+
+### R2-M1 (superseded revision-2 claims unmarked) -> RESOLVED
+
+This file now carries a historical-layering note in its header; the current
+`design.md` governs wherever earlier sections used superseded terminology.
