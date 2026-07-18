@@ -22,6 +22,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONTROL_ROOT = REPO_ROOT / "docs/fork/ideal-base"
 GRAPH_PATH = CONTROL_ROOT / "WORK_GRAPH.json"
 STATE_PATH = CONTROL_ROOT / "STATE.json"
+BOOTSTRAP_PATH = CONTROL_ROOT / "COORDINATOR_BOOTSTRAP.md"
 PROTECTED_PROMPT = REPO_ROOT / "docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
 PROTECTED_PROMPT_SHA256 = (
     "ca3f19980b1e4fab0a734397d7c6f41ccd5c203a4fa209cfe9eef2f16beed5b6"
@@ -49,6 +50,14 @@ ARTIFACT_FIELDS = {
     "what_i_did_not_check",
 }
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+BOOTSTRAP_REQUIRED_TEXT = (
+    "Read these files completely before mutation:",
+    "python3 scripts/ideal_base_railway.py check",
+    '`mode: "deep"`',
+    "After each accepted node:",
+    "Do not push.",
+    "Continue until every mandatory deterministic node is accepted",
+)
 ARCHIVE_MARKER_PATHS = [
     REPO_ROOT / "docs/fork/README.md",
     REPO_ROOT / "docs/fork/archive/README.md",
@@ -265,6 +274,27 @@ def validate_markdown_links() -> None:
                 )
 
 
+def validate_bootstrap_prompt(path: Path = BOOTSTRAP_PATH) -> str:
+    lines = path.read_text().splitlines()
+    openings = [index for index, line in enumerate(lines) if line == "````markdown"]
+    closings = [index for index, line in enumerate(lines) if line == "````"]
+    if len(openings) != 1 or len(closings) != 1 or openings[0] >= closings[0]:
+        raise RailwayError(
+            "COORDINATOR_BOOTSTRAP.md must contain one complete copyable prompt"
+        )
+    if closings[0] != len(lines) - 1:
+        raise RailwayError(
+            "COORDINATOR_BOOTSTRAP.md prompt fence must close at end of file"
+        )
+    prompt = "\n".join(lines[openings[0] + 1 : closings[0]])
+    missing = [text for text in BOOTSTRAP_REQUIRED_TEXT if text not in prompt]
+    if missing:
+        raise RailwayError(
+            f"COORDINATOR_BOOTSTRAP.md copyable prompt is incomplete: {missing}"
+        )
+    return prompt
+
+
 def validate_graph(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if graph.get("schema_version") != 1:
         raise RailwayError("unsupported WORK_GRAPH.json schema_version")
@@ -415,6 +445,7 @@ def validate_repository() -> tuple[
             "protected orchestrator prompt hash changed: "
             f"expected {PROTECTED_PROMPT_SHA256}, got {actual_hash}"
         )
+    validate_bootstrap_prompt()
     validate_markdown_links()
     return graph, state, nodes
 

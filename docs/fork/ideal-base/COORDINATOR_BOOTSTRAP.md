@@ -42,7 +42,6 @@ git rev-parse HEAD
 git worktree list --porcelain
 sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md
 ```
-````
 
 Revalidate the current runtime channels and selfdev pending/canary state without
 promoting or reloading anything. If facts differ from `BASELINE.md`, preserve and
@@ -94,7 +93,4 @@ all external gates are honestly dispositioned, the full clean matrix passes twic
 no residue remains, and an independent Opus-class final review reports no blocker
 omission or false claim. Then update the final state, commit the signoff locally,
 and report the exact commit and evidence. Do not push.
-
-```
-
-```
+````
