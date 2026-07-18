@@ -387,3 +387,27 @@ session instead.
 
 **Reopen trigger:** F08's integrated gate or later store work uncovering a
 durability defect.
+
+## D019. F06 accepted; review-route availability findings
+
+**Decision:** F06 (pooled MCP child ownership, bounded pre-exit reap,
+mcp-serve owner-liveness) is accepted at commit `84dc0aa2b`. Implementation
+by `gpt-5.6-sol` high via the task DAG (light mode, D017 routing). The
+independent review (`reviews/F06-implementation-review.md`) is a first-round
+PASS with zero blocking findings; both acceptance gates independently
+reproduced, including the real-process spoof-resistant ownership test and
+the TERM-resistant reap test.
+
+Review-route availability (recorded for D017 rotation): Kimi `k3` fails on
+a tool-schema incompatibility (rejects the swarm tool's `anyOf` JSON
+schema); `cursor-grok-4.5-high` and `MiniMax-M3` are rejected as unknown
+model IDs on the Cursor route in headless sessions. The review therefore
+fell to Anthropic `claude-opus-4-8`, the only currently working reviewer in
+the rotation.
+
+Nonblocking follow-ups from review: PID-reuse hardening for mcp-serve
+owner-liveness (start-time/token cross-check) and single-reaper routing for
+the ECHILD fallback; both are F07/F08-window candidates.
+
+**Reopen trigger:** F08's integrated gate finding a descendant-survival
+case.

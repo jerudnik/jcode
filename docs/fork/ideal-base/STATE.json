@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F05",
+    "node": "F06",
     "state": "accepted",
-    "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
-    "updated_at": "2026-07-18T20:12:00Z",
-    "summary": "F05 accepted (D018). W1 remaining: F06 (MCP owner identity, Sol-high) -> F07 -> F08 integrated gate."
+    "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+    "updated_at": "2026-07-18T21:50:00Z",
+    "summary": "F06 accepted (D019). F07 (MCP health/reconnect) runnable next."
   },
   "nodes": {
     "W0": {
@@ -134,11 +134,14 @@
       "updated_at": "2026-07-18T20:12:00Z"
     },
     "F06": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F06",
+        "docs/fork/ideal-base/reviews/F06-implementation-review.md"
+      ],
+      "summary": "F06 accepted at 84dc0aa2b. Sol-high implementation; Opus 4.8 first-round PASS (0 blockers), both gates reproduced with real-process tests. PID-reuse follow-ups noted for F07/F08.",
+      "updated_at": "2026-07-18T21:50:00Z"
     },
     "F07": {
       "state": "pending",
