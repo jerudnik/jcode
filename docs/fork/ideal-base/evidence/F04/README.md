@@ -81,6 +81,22 @@ progress updates).
   recovery loop now bounds the damage. Structured persistence-health events
   are F05-scope follow-up.
 
+## Review round 2 fix (F04-R2-B1, FAIL at 10209b09c)
+
+- Cancel now aborts IN PLACE: the `RunningTask` entry stays in the live map
+  as a tombstone until `persist_terminal_with_recovery` lands the terminal
+  write (immediately or via its retry loop), so a cancelled task can never
+  end up with neither a map entry nor a durable record. Test
+  `cancel_retains_tombstone_until_terminal_persistence_recovers`.
+- `RunningTask.durable_record` tracks whether an initial `Running` file
+  exists (always true for spawns, false only for adopted tasks whose
+  permitted initial write failed). `finalize_non_detached` applies an
+  explicit failure policy: with a durable record, the next-boot orphan
+  sweep is the recovery authority; without one, the data loss is stated
+  loudly (`DATA LOSS:` log) rather than silently shaped as success. The
+  daemon is exiting, so no in-process retry loop can outlive it; this is
+  the honest residual bound for the adopted+broken-storage corner.
+
 ## Tests
 
 - Store: 6 tests incl. torn-JSON hammer
@@ -91,4 +107,4 @@ progress updates).
 - Manager: `live_map_prunes_only_after_terminal_persistence`,
   `progress_and_delivery_survive_concurrent_terminal_completion`, plus the
   27 pre-existing background tests.
-- Full: jcode-base 1180/1180, jcode-app-core 1126/1126 all green.
+- Full: jcode-base 1181/1181, jcode-app-core 1126/1126 all green.
