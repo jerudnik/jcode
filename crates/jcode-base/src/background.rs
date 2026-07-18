@@ -339,6 +339,60 @@ impl BackgroundTaskManager {
         reconciled
     }
 
+    /// Shutdown finalize (F01 design 3.4 step 6): atomically mark every LIVE
+    /// non-detached task as failed-by-shutdown and abort its future.
+    ///
+    /// Called by the daemon's shutdown coordinator during cleanup so that a
+    /// voluntary exit leaves no `Running` status files behind and the
+    /// next-boot orphan reconcile ([`Self::reconcile_orphaned_tasks`]) is
+    /// unnecessary for voluntary exits. Detached tasks are untouched: they
+    /// outlive the daemon by design. Returns how many tasks were finalized.
+    pub async fn finalize_non_detached(&self, reason: &str) -> usize {
+        let drained: Vec<RunningTask> = {
+            let mut tasks = self.tasks.write().await;
+            let ids: Vec<String> = tasks.keys().cloned().collect();
+            ids.into_iter()
+                .filter_map(|id| tasks.remove(&id))
+                .collect()
+        };
+        let count = drained.len();
+        for task in drained {
+            task.handle.abort();
+            let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
+            let mut final_status = TaskStatusFile {
+                task_id: task.task_id,
+                tool_name: task.tool_name,
+                display_name: task.display_name,
+                session_id: task.session_id,
+                status: BackgroundTaskStatus::Failed,
+                exit_code: None,
+                error: Some(format!("Daemon shutdown ({reason})")),
+                started_at: task.started_at_rfc3339,
+                completed_at: Some(chrono::Utc::now().to_rfc3339()),
+                duration_secs: Some(task.started_at.elapsed().as_secs_f64()),
+                pid: None,
+                owner_pid: Some(std::process::id()),
+                owner_instance: Some(model::process_instance_token().to_string()),
+                detached: false,
+                notify: notify_flag,
+                wake: wake_flag,
+                progress: None,
+                event_history: Vec::new(),
+            };
+            let event_status = final_status.status.clone();
+            let event_exit_code = final_status.exit_code;
+            let event_error = final_status.error.clone();
+            push_task_event(
+                &mut final_status,
+                terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
+            );
+            if let Ok(json) = serde_json::to_string_pretty(&final_status) {
+                let _ = fs::write(&task.status_path, json).await;
+            }
+        }
+        count
+    }
+
     pub fn reserve_task_info(&self) -> BackgroundTaskInfo {
         let task_id = Self::generate_task_id();
         let output_file = self.output_path_for(&task_id);
