@@ -1,5 +1,11 @@
 # G4 bounded pilot result
 
+> **Final amendment.** Independent G5 review later returned **PASS** at fixed
+> commit `da7c155b9`; see
+> [`reviews/2026-07-15-g5-g4-evidence-opus.md`](reviews/2026-07-15-g5-g4-evidence-opus.md).
+> The original coordinator-only status below is retained as the state at the
+> time this result was first recorded.
+
 Status: coordinator validation **PASS**, pending independent G5 review.
 
 The authorized fixture-backed pilot ran at source HEAD `505cd86726f86dc0eedaf3998afae6ed83290d5d` on branch `recovery/2026-07-15`. It used the checked-in plan [`pilot/2026-07-15-g4-validation-plan.json`](./pilot/2026-07-15-g4-validation-plan.json) and dedicated driver `scripts/recovery_validation_driver.py` without `--update`, network access, live providers, a daemon, reload, tools/MCP, memory, publication, installation, cancellation, retry, or compaction.

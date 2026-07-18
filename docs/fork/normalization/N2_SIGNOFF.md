@@ -1,5 +1,11 @@
 # N2 promotion-readiness handoff
 
+> **Historical fixed-candidate record.** This file records the state before
+> promotion and host cleanup. Promotion later completed, the auxiliary
+> worktrees and `opencode.json` were removed, and the current checkpoint is in
+> [`STATUS.md`](STATUS.md) and
+> [`KNOWN_GOOD_BASELINE.md`](KNOWN_GOOD_BASELINE.md).
+
 Date: 2026-07-17
 
 Validated candidate: `62b3946b63eac0a5082b52fed98087ccafc2160c`
