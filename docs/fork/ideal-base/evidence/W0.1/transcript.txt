@@ -1,0 +1,43 @@
+# W0.1 baseline revalidation transcript
+Captured: 2026-07-18T06:13:01Z
+
+## railway check
+ideal-base railway OK: 6 roots, 38 child nodes, 44 state records, protected hash intact
+
+## git identity
+HEAD: daecffa8f837b34f7acf27fc9db1bcf99bf172d4
+branch: main
+ahead of origin/main: 4
+status --short: (empty means clean)
+?? docs/fork/ideal-base/evidence/W0.1/
+
+## worktrees
+worktree /Users/jrudnik/labs/jcode
+HEAD daecffa8f837b34f7acf27fc9db1bcf99bf172d4
+branch refs/heads/main
+
+## protected prompt hash
+ca3f19980b1e4fab0a734397d7c6f41ccd5c203a4fa209cfe9eef2f16beed5b6  docs/fork/recovery/ORCHESTRATOR_PROMPT.md
+
+## stashes
+stash@{0}: On main: WIP fix-config-hotpath-spam part 3 (scorpion): account_failover hot path
+stash@{1}: On main: WIP fix-config-hotpath-spam part 2 (scorpion): Config::load->config() TUI callers
+stash@{2}: On main: WIP fix-config-hotpath-spam (scorpion, stopped mid-work): config warn-once + sidecar log dedup
+stash@{3}: On main: wip before upstream sync
+
+## archive/recovery ref count
+87
+
+## runtime channels (~/.jcode/builds)
+current-version: 923c6353e-dirty-5a0f07fa7495
+stable-version: 8962bccb3-release
+shared-server-version: 923c6353e-dirty-5a0f07fa7495
+canary: 923c6353e-dirty-5a0f07fa7495
+canary_status: testing
+stable: 8962bccb3-release
+pending_activation: {"session_id": "session_peacock_1784221108198_12fe3e2e04160f62", "new_version": "923c6353e-dirty-5a0f07fa7495", "previous_current_version": "923c6353e-dirty-5a0f07fa7495", "previous_shared_server_version": "8962bccb3-release", "source_fingerprint": "5a0f07fa7495ea61", "requested_at": "2026-07-18T05:45:12.489905Z"}
+
+## live jcode processes
+7476 jcode
+56074 /Users/jrudnik/.jcode/builds/versions/8962bccb3-release/jcode setup-hotkey --listen-macos-hotkey
+73928 /Users/jrudnik/.local/bin/jcode menubar
