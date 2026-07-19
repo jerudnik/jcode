@@ -1,1708 +1,2320 @@
 {
-  "schema_version": 1,
-  "program": "ideal-durable-tui-cli-foundation",
-  "graph_mode": "deep",
-  "recorded": "2026-07-18",
-  "artifact_schema": {
-    "required": [
-      "findings",
-      "evidence",
-      "edge_cases_considered",
-      "validation",
-      "open_questions",
-      "confidence",
-      "what_i_did_not_check"
-    ],
-    "confidence": ["low", "medium", "high"]
-  },
-  "root_nodes": [
-    {
-      "id": "W0",
-      "content": "Bootstrap and revalidate the ideal-base authority. Expand the prescribed W0 children, reconcile drift, and seed durable state before mutation.",
-      "kind": "explore",
-      "depends_on": [],
-      "priority": 100
-    },
-    {
-      "id": "W1",
-      "content": "Close runtime ownership and persistence. Expand prescribed W1 children and synthesize only after activity/shutdown, background status, and MCP gates pass.",
-      "kind": "implement",
-      "depends_on": ["W0"],
-      "priority": 95
-    },
-    {
-      "id": "W2",
-      "content": "Close recovery reconciliation and global resource bounds. Expand prescribed W2 children and finish with the integrated lifecycle matrix.",
-      "kind": "implement",
-      "depends_on": ["W1"],
-      "priority": 90
-    },
-    {
-      "id": "W3",
-      "content": "Make deterministic validation and packaging authoritative. Expand prescribed W3 children and close with the full deterministic integration gate.",
-      "kind": "implement",
-      "depends_on": ["W2"],
-      "priority": 80
-    },
-    {
-      "id": "W4",
-      "content": "Close security, quality, provenance, and durable-state hygiene. Expand prescribed W4 children and obtain independent verification.",
-      "kind": "implement",
-      "depends_on": ["W3"],
-      "priority": 70
-    },
-    {
-      "id": "W5",
-      "content": "Disposition external gates, run final deterministic signoff twice, obtain independent critique, and synthesize the ideal-base verdict.",
-      "kind": "verify",
-      "depends_on": ["W4"],
-      "priority": 60
-    }
+ "schema_version": 1,
+ "program": "ideal-durable-tui-cli-foundation",
+ "graph_mode": "deep",
+ "recorded": "2026-07-18",
+ "artifact_schema": {
+  "required": [
+   "findings",
+   "evidence",
+   "edge_cases_considered",
+   "validation",
+   "open_questions",
+   "confidence",
+   "what_i_did_not_check"
   ],
-  "expansions": {
-    "W0": [
-      {
-        "id": "W0.1",
-        "content": "Revalidate Git, worktree, runtime-channel, selfdev, protected hash, archive, and authorization facts against BASELINE.md.",
-        "kind": "explore",
-        "depends_on": [],
-        "priority": 100,
-        "owned_paths": ["docs/fork/ideal-base/evidence/W0.1/**"],
-        "acceptance_gates": [
-          "python3 scripts/ideal_base_railway.py check",
-          "git status --short",
-          "git worktree list --porcelain",
-          "sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
-        ],
-        "evidence": ["baseline command transcript", "drift classification"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W0"
-      },
-      {
-        "id": "W0.2",
-        "content": "Re-audit the source seams named by the graph and inject any source-confirmed missing work before implementation.",
-        "kind": "explore",
-        "depends_on": ["W0.1"],
-        "priority": 95,
-        "owned_paths": ["docs/fork/ideal-base/evidence/W0.2/**"],
-        "acceptance_gates": [
-          "Every retained seam cites current file:symbol evidence",
-          "Every removed seam has a source-backed stale/duplicate explanation"
-        ],
-        "evidence": ["source census", "gap-node list"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W0"
-      },
-      {
-        "id": "W0.3",
-        "content": "Seed or resume the deep task graph from validated WORK_GRAPH.json and STATE.json; verify ownership and dependency projections.",
-        "kind": "verify",
-        "depends_on": ["W0.2"],
-        "priority": 90,
-        "owned_paths": ["docs/fork/ideal-base/evidence/W0.3/**"],
-        "acceptance_gates": [
-          "python3 scripts/ideal_base_railway.py next --json",
-          "Deep task graph accepts the projected runnable wave"
-        ],
-        "evidence": ["seed payload", "graph status snapshot"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W0"
-      }
-    ],
-    "W1": [
-      {
-        "id": "F01",
-        "content": "Design one testable shutdown coordinator and server activity-lease authority, including work-class census and exit reasons.",
-        "kind": "explore",
-        "depends_on": [],
-        "priority": 100,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F01/**"],
-        "acceptance_gates": [
-          "Pure lifecycle state model covers every normal exit and active work class",
-          "Independent architecture critique finds no owner/lease gap"
-        ],
-        "evidence": ["design record", "source ownership census"],
-        "review_model": "fable+opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F02",
-        "content": "Implement work-aware activity leases and route normal daemon exits through the bounded shutdown coordinator.",
-        "kind": "implement",
-        "depends_on": ["F01"],
-        "priority": 95,
-        "owned_paths": [
-          "crates/jcode-app-core/src/server/lifecycle.rs",
-          "crates/jcode-app-core/src/server.rs",
-          "crates/jcode-app-core/src/server/**/*.rs",
-          "crates/jcode-base/src/background.rs",
-          "crates/jcode-base/src/mcp/manager.rs",
-          "crates/jcode-base/src/mcp/pool.rs",
-          "crates/jcode-core/src/activity.rs",
-          "crates/jcode-core/src/lib.rs",
-          "crates/jcode-app-core/src/tool/mod.rs",
-          "src/cli/dispatch.rs",
-          "docs/fork/ideal-base/evidence/F02/**"
-        ],
-        "acceptance_gates": [
-          "Idle exit requires zero clients and zero active leases",
-          "SIGTERM, reload, persistent idle, and temporary-owner exits invoke bounded shutdown"
-        ],
-        "evidence": ["focused tests", "exit-mode process transcript"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F03",
-        "content": "Verify activity leases across provider fixtures, restored/headless turns, debug jobs, background jobs, MCP calls, and swarm waiters.",
-        "kind": "verify",
-        "depends_on": ["F02"],
-        "priority": 90,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F03/**", "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs", "crates/jcode-app-core/src/server.rs", "crates/jcode-app-core/src/server/shutdown.rs", "crates/jcode-app-core/src/server/debug_command_exec.rs", "crates/jcode-app-core/src/server/debug_help.rs"],
-        "acceptance_gates": [
-          "Short-timeout no-provider fixtures remain alive for each lease class and exit after release",
-          "No socket/process residue"
-        ],
-        "evidence": ["lease-class matrix", "residue census"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F04",
-        "content": "Implement an atomic serialized TaskStatusStore for background tasks; surface persistence failures and preserve terminal precedence.",
-        "kind": "implement",
-        "depends_on": ["F02"],
-        "priority": 94,
-        "owned_paths": [
-          "crates/jcode-base/src/background.rs",
-          "crates/jcode-base/src/background/**",
-          "docs/fork/ideal-base/evidence/F04/**"
-        ],
-        "acceptance_gates": [
-          "No direct non-atomic status-file writes remain",
-          "Live task is not removed before terminal persistence succeeds or is durably recoverable",
-          "Status-serialization and write failures are surfaced, not swallowed"
-        ],
-        "evidence": ["status store tests", "write-failure injection"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F05",
-        "content": "Verify background status concurrency, crash interruption, malformed files, orphan reconciliation, and cleanup.",
-        "kind": "verify",
-        "depends_on": ["F04"],
-        "priority": 89,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F05/**", "crates/jcode-base/src/background/store.rs", "crates/jcode-base/src/background/tests.rs", "crates/jcode-base/src/background.rs"],
-        "acceptance_gates": [
-          "Concurrent progress/delivery/completion never tears JSON or overwrites terminal truth",
-          "Startup reconciles malformed/orphaned state without false success"
-        ],
-        "evidence": ["race matrix", "crash/restart transcript"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F06",
-        "content": "Implement explicit pooled MCP child ownership, bounded pre-exit reap, and mcp-serve owner-PID self-liveness.",
-        "kind": "implement",
-        "depends_on": ["F02", "F03"],
-        "priority": 93,
-        "owned_paths": [
-          "crates/jcode-base/src/mcp/**",
-          "crates/jcode-app-core/src/server/**",
-          "src/cli/mcp_serve.rs",
-          "src/cli/dispatch.rs",
-          "docs/fork/ideal-base/evidence/F06/**"
-        ],
-        "acceptance_gates": [
-          "Pooled children receive the owning daemon PID",
-          "Shutdown coordinator disconnects and reaps all tracked children within grace"
-        ],
-        "evidence": ["PID ownership tests", "exit-mode process tree logs"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F07",
-        "content": "Implement dead and hung pooled MCP detection, cache eviction, cooldown, and one bounded reconnect.",
-        "kind": "implement",
-        "depends_on": ["F06"],
-        "priority": 88,
-        "owned_paths": [
-          "crates/jcode-base/src/mcp/client.rs",
-          "crates/jcode-base/src/mcp/pool.rs",
-          "crates/jcode-base/src/mcp/manager.rs",
-          "docs/fork/ideal-base/evidence/F07/**"
-        ],
-        "acceptance_gates": [
-          "Killed child is detected before request timeout",
-          "Hung child is detected by health deadline",
-          "Exactly one reconnect succeeds without daemon reload"
-        ],
-        "evidence": [
-          "killed-child fixture",
-          "hung-child fixture",
-          "reconnect/cooldown assertions"
-        ],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      },
-      {
-        "id": "F08",
-        "content": "Run the integrated MCP and lifecycle adversarial gate across all exit, kill, hang, reconnect, and residue cases.",
-        "kind": "verify",
-        "depends_on": ["F03", "F05", "F07"],
-        "priority": 80,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F08/**"],
-        "acceptance_gates": [
-          "Zero surviving owned descendants in every exit mode",
-          "All activity and status durability matrices pass repeatedly"
-        ],
-        "evidence": ["integrated matrix", "process/socket/file residue report"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W1"
-      }
-    ],
-    "W2": [
-      {
-        "id": "F09",
-        "content": "Add timestamped selfdev pending-activation reconciliation using initiating-session liveness and candidate identity.",
-        "kind": "implement",
-        "depends_on": [],
-        "priority": 100,
-        "owned_paths": [
-          "crates/jcode-app-core/src/tool/selfdev/**",
-          "crates/jcode-selfdev-types/src/**",
-          "crates/jcode-build-support/src/**",
-          "docs/fork/ideal-base/evidence/F09/**"
-        ],
-        "acceptance_gates": [
-          "Dead session plus valid candidate completes safely",
-          "Missing/bad candidate rolls back",
-          "Live canary is preserved"
-        ],
-        "evidence": ["manifest fixture matrix"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W2"
-      },
-      {
-        "id": "F10",
-        "content": "Persist disconnect-cleanup intent before live-session removal; retry after abort and reconcile at startup.",
-        "kind": "implement",
-        "depends_on": [],
-        "priority": 98,
-        "owned_paths": [
-          "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs",
-          "crates/jcode-app-core/src/server/**",
-          "crates/jcode-base/src/session.rs",
-          "docs/fork/ideal-base/evidence/F10/**"
-        ],
-        "acceptance_gates": [
-          "Agent-lock timeout leaves a durable cleanup record",
-          "Restart marks session terminal and clears the record"
-        ],
-        "evidence": ["held-lock fixture", "restart reconciliation transcript"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W2"
-      },
-      {
-        "id": "F11",
-        "content": "Independently verify activation and disconnect reconciliation under crash, restart, missing files, and live-owner cases.",
-        "kind": "verify",
-        "depends_on": ["F09", "F10"],
-        "priority": 90,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F11/**"],
-        "acceptance_gates": [
-          "All recovery matrices pass with no false rollback or fabricated terminal state"
-        ],
-        "evidence": ["combined recovery matrix"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W2"
-      },
-      {
-        "id": "F12",
-        "content": "Add configurable global caps and observability for shared MCP children and live background tasks.",
-        "kind": "implement",
-        "depends_on": ["F11"],
-        "priority": 85,
-        "owned_paths": [
-          "crates/jcode-base/src/mcp/**",
-          "crates/jcode-base/src/background.rs",
-          "crates/jcode-config-types/src/**",
-          "docs/fork/ideal-base/evidence/F12/**"
-        ],
-        "acceptance_gates": [
-          "Low test caps bound process/task/file counts",
-          "Refusal is explicit",
-          "Capacity releases after terminal cleanup"
-        ],
-        "evidence": ["cap overflow fixtures", "metrics/status output"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W2"
-      },
-      {
-        "id": "F13",
-        "content": "Verify caps under concurrent starts, failures, cancellation, and restart reconciliation.",
-        "kind": "verify",
-        "depends_on": ["F12"],
-        "priority": 80,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F13/**"],
-        "acceptance_gates": [
-          "No over-admission or leaked capacity under concurrency",
-          "Restart does not double-count stale owners"
-        ],
-        "evidence": ["concurrency cap matrix"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W2"
-      },
-      {
-        "id": "F14",
-        "content": "Build and run the complete no-provider real-process lifecycle matrix for all W1 and W2 invariants.",
-        "kind": "verify",
-        "depends_on": ["F08", "F13"],
-        "priority": 70,
-        "owned_paths": [
-          "tests/e2e/**",
-          "scripts/**/*lifecycle*",
-          "docs/fork/ideal-base/evidence/F14/**"
-        ],
-        "acceptance_gates": [
-          "Repeated clean runs cover cancel, exit, reload, crash, restart, recovery, and residue",
-          "No provider/network dependency"
-        ],
-        "evidence": ["process matrix harness", "two clean repeated runs"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W2"
-      }
-    ],
-    "W3": [
-      {
-        "id": "F15",
-        "content": "Audit CI test hermeticity and classify every ignored test as deterministic, live, GUI, platform, helper, or performance.",
-        "kind": "explore",
-        "depends_on": [],
-        "priority": 100,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F15/**"],
-        "acceptance_gates": [
-          "Every compile-only/advisory decision has a source-backed reason and exit condition",
-          "No unclassified ignore remains"
-        ],
-        "evidence": ["test census", "flakiness root-cause table"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      },
-      {
-        "id": "F16",
-        "content": "Promote hermetic real-process cancellation, reload, client re-exec, retry, and restart cases into required suites.",
-        "kind": "implement",
-        "depends_on": ["F14", "F15"],
-        "priority": 95,
-        "owned_paths": [
-          "tests/e2e/**",
-          "crates/jcode-app-core/src/**/*test*",
-          "docs/fork/ideal-base/evidence/F16/**"
-        ],
-        "acceptance_gates": [
-          "No required lifecycle case remains ignored for build-layout convenience",
-          "Fixtures use disposable home/runtime and leave zero residue"
-        ],
-        "evidence": ["promoted test list", "required-suite transcript"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      },
-      {
-        "id": "F17",
-        "content": "Make intended Linux, macOS, app-core, and deterministic TUI test rails blocking on push/PR.",
-        "kind": "implement",
-        "depends_on": ["F16"],
-        "priority": 90,
-        "owned_paths": [
-          ".github/workflows/fork-ci.yml",
-          ".github/scripts/**",
-          "docs/fork/ideal-base/evidence/F17/**"
-        ],
-        "acceptance_gates": [
-          "Injected failures in each rail fail CI semantics",
-          "jcode-tui deterministic tests run rather than compile-only"
-        ],
-        "evidence": [
-          "workflow diff",
-          "local/actionlint validation",
-          "failure-injection proof"
-        ],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      },
-      {
-        "id": "F18",
-        "content": "Build and launch the real Nix package on relevant pull requests without enabling non-hermetic package doCheck blindly.",
-        "kind": "implement",
-        "depends_on": ["F15"],
-        "priority": 88,
-        "owned_paths": [
-          ".github/workflows/nix.yml",
-          "flake.nix",
-          "nix/**",
-          "docs/fork/ideal-base/evidence/F18/**"
-        ],
-        "acceptance_gates": [
-          "Relevant path changes run nix build",
-          "result/bin/jcode --version succeeds"
-        ],
-        "evidence": ["Nix build log", "packaged version output"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      },
-      {
-        "id": "F19",
-        "content": "Package and verify mobile static assets from an executable-adjacent or declared share path outside the source checkout.",
-        "kind": "implement",
-        "depends_on": ["F18"],
-        "priority": 84,
-        "owned_paths": [
-          "nix/**",
-          "src/cli/commands/mobile_server.rs",
-          "web/jcode-mobile/**",
-          "scripts/check_web_mobile*",
-          "docs/fork/ideal-base/evidence/F19/**"
-        ],
-        "acceptance_gates": [
-          "Installed binary outside checkout serves index.html",
-          "CWD fallback cannot mask missing packaged assets"
-        ],
-        "evidence": ["installed-package fixture", "HTTP response proof"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      },
-      {
-        "id": "F20",
-        "content": "Extend hermetic installer and Rust updater acquisition fixtures through real local daemon reload and rollback.",
-        "kind": "implement",
-        "depends_on": ["F16", "F19"],
-        "priority": 80,
-        "owned_paths": [
-          "tests/test_r10_release_acquisition.py",
-          "crates/jcode-app-core/src/update.rs",
-          "scripts/install.sh",
-          "docs/fork/ideal-base/evidence/F20/**"
-        ],
-        "acceptance_gates": [
-          "Checksum, interruption, invalid replacement, rollback, and exactly-once reload paths pass without network",
-          "Every failure preserves old runtime/channel pointers"
-        ],
-        "evidence": [
-          "local acquisition matrix",
-          "before/after channel manifests"
-        ],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      },
-      {
-        "id": "F21",
-        "content": "Run the full deterministic CI/package/updater integration gate from clean state twice.",
-        "kind": "verify",
-        "depends_on": ["F17", "F18", "F19", "F20"],
-        "priority": 70,
-        "owned_paths": ["docs/fork/ideal-base/evidence/F21/**"],
-        "acceptance_gates": [
-          "All required suites, Nix build, installed assets, and updater matrix pass twice at one commit"
-        ],
-        "evidence": ["two-run manifest", "residue and source identity report"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W3"
-      }
-    ],
-    "W4": [
-      {
-        "id": "F22",
-        "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
-        "kind": "implement",
-        "depends_on": [],
-        "priority": 100,
-        "owned_paths": [
-          ".cargo/audit.toml",
-          "docs/SECURITY_DEPENDENCIES.md",
-          ".github/workflows/security.yml",
-          ".github/workflows/release.yml",
-          "docs/fork/ideal-base/evidence/F22/**"
-        ],
-        "acceptance_gates": [
-          "Expired ignore fails policy",
-          "Homebrew path uses pinned known_hosts and no StrictHostKeyChecking=no"
-        ],
-        "evidence": ["policy fixtures", "workflow validation"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W4"
-      },
-      {
-        "id": "F23",
-        "content": "Add explicit downward quality targets and zero-growth critical-path budgets without demanding an all-at-once cleanup.",
-        "kind": "implement",
-        "depends_on": [],
-        "priority": 95,
-        "owned_paths": [
-          "scripts/*budget*",
-          ".github/workflows/fork-ci.yml",
-          "docs/fork/ideal-base/evidence/F23/**"
-        ],
-        "acceptance_gates": [
-          "New critical-path panic/swallow/oversize debt fails",
-          "Repository debt trend is reported and cannot increase"
-        ],
-        "evidence": ["budget fixtures", "trend report"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W4"
-      },
-      {
-        "id": "F24",
-        "content": "Pin compatibility build inputs and emit verifiable source/version provenance and SBOM for the declared reproducible artifact subset.",
-        "kind": "implement",
-        "depends_on": ["F21", "F22"],
-        "priority": 90,
-        "owned_paths": [
-          "nix/**",
-          "scripts/build_linux_compat.sh",
-          ".github/workflows/release.yml",
-          "crates/jcode-build-meta/**",
-          "docs/fork/ideal-base/evidence/F24/**"
-        ],
-        "acceptance_gates": [
-          "Two clean builds match within the declared reproducible scope",
-          "Artifacts expose verifiable provenance and SBOM"
-        ],
-        "evidence": ["clean-build comparison", "provenance/SBOM verification"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W4"
-      },
-      {
-        "id": "F25",
-        "content": "Centralize socket/metadata cleanup; diagnose and quarantine malformed swarm state; bound terminal control-log retention.",
-        "kind": "implement",
-        "depends_on": [],
-        "priority": 88,
-        "owned_paths": [
-          "crates/jcode-app-core/src/server/socket.rs",
-          "crates/jcode-app-core/src/server/lifecycle.rs",
-          "crates/jcode-app-core/src/server/swarm_persistence.rs",
-          "docs/fork/ideal-base/evidence/F25/**"
-        ],
-        "acceptance_gates": [
-          "Live listener preserves all sidecars",
-          "Stale cleanup removes all sidecars/registry metadata",
-          "Malformed state warns and quarantines",
-          "Terminal logs obey retention"
-        ],
-        "evidence": [
-          "sidecar matrix",
-          "corruption fixtures",
-          "retention fixtures"
-        ],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W4"
-      },
-      {
-        "id": "F26",
-        "content": "Sweep dead active PID markers at startup/periodically and make telemetry active-session markers process-liveness aware; remove the uncompiled duplicate after equivalence review.",
-        "kind": "implement",
-        "depends_on": [],
-        "priority": 86,
-        "owned_paths": [
-          "crates/jcode-storage/src/active_pids.rs",
-          "crates/jcode-base/src/session.rs",
-          "crates/jcode-telemetry-core/src/state_support.rs",
-          "crates/jcode-app-core/src/telemetry_state.rs",
-          "docs/fork/ideal-base/evidence/F26/**"
-        ],
-        "acceptance_gates": [
-          "Dead markers without session JSON disappear at startup",
-          "Only live PID telemetry markers count",
-          "Full build proves duplicate removal safe"
-        ],
-        "evidence": [
-          "marker fixture matrix",
-          "equivalence review",
-          "build/tests"
-        ],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W4"
-      },
-      {
-        "id": "F27",
-        "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
-        "kind": "verify",
-        "depends_on": ["F22", "F23", "F24", "F25", "F26"],
-        "priority": 70,
-        "owned_paths": [
-          "docs/fork/ideal-base/reviews/**",
-          "docs/fork/ideal-base/evidence/F27/**"
-        ],
-        "acceptance_gates": [
-          "No critical policy, provenance, durable-state, marker, or cleanup gap remains"
-        ],
-        "evidence": [
-          "independent hardening review",
-          "combined validation report"
-        ],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W4"
-      }
-    ],
-    "W5": [
-      {
-        "id": "G01",
-        "content": "Build/smoke aarch64-linux or explicitly downgrade its advertised support to best-effort.",
-        "kind": "verify",
-        "depends_on": [],
-        "priority": 100,
-        "owned_paths": ["docs/fork/ideal-base/evidence/G01/**"],
-        "authorization": "platform capacity or documentation-only downgrade",
-        "acceptance_gates": [
-          "Accepted build/smoke evidence or explicit support downgrade"
-        ],
-        "evidence": ["platform result"],
-        "review_model": "opus",
-        "class": "gated",
-        "parent": "W5"
-      },
-      {
-        "id": "G02",
-        "content": "Run authorized provider-doctor minimal tier and fresh full pre-release catalog tier.",
-        "kind": "verify",
-        "depends_on": [],
-        "priority": 95,
-        "owned_paths": ["docs/fork/ideal-base/evidence/G02/**"],
-        "authorization": "live provider credentials, network, and spend",
-        "acceptance_gates": [
-          "Fresh catalog coverage or authorization_blocked with named next action"
-        ],
-        "evidence": ["redacted provider-doctor ledger"],
-        "review_model": "opus",
-        "class": "gated",
-        "parent": "W5"
-      },
-      {
-        "id": "G03",
-        "content": "Run mobile/iOS simulator or device attach validation after local gateway fixtures remain green.",
-        "kind": "verify",
-        "depends_on": [],
-        "priority": 90,
-        "owned_paths": ["docs/fork/ideal-base/evidence/G03/**"],
-        "authorization": "Apple platform/signing/device access",
-        "acceptance_gates": [
-          "Attach lifecycle passes or authorization_blocked with named next action"
-        ],
-        "evidence": ["simulator/device result"],
-        "review_model": "opus",
-        "class": "gated",
-        "parent": "W5"
-      },
-      {
-        "id": "G04",
-        "content": "Run scheduled Windows and FreeBSD compile/install smokes if those surfaces remain advertised.",
-        "kind": "verify",
-        "depends_on": [],
-        "priority": 85,
-        "owned_paths": ["docs/fork/ideal-base/evidence/G04/**"],
-        "authorization": "platform runners or support downgrade",
-        "acceptance_gates": [
-          "Scheduled smoke evidence or explicit support disposition"
-        ],
-        "evidence": ["platform result"],
-        "review_model": "opus",
-        "class": "gated",
-        "parent": "W5"
-      },
-      {
-        "id": "G05",
-        "content": "Run disposable draft-release acquisition and live updater smoke without publishing a public release.",
-        "kind": "verify",
-        "depends_on": [],
-        "priority": 80,
-        "owned_paths": ["docs/fork/ideal-base/evidence/G05/**"],
-        "authorization": "disposable credentials/assets and network release API",
-        "acceptance_gates": [
-          "Draft acquisition/update succeeds and cleans up, or authorization_blocked"
-        ],
-        "evidence": ["redacted draft-release ledger"],
-        "review_model": "opus",
-        "class": "gated",
-        "parent": "W5"
-      },
-      {
-        "id": "S01",
-        "content": "Run the complete deterministic ideal-base matrix twice from clean state at one fixed commit and prove zero residue.",
-        "kind": "verify",
-        "depends_on": ["F21", "F27"],
-        "priority": 75,
-        "owned_paths": ["docs/fork/ideal-base/evidence/S01/**"],
-        "acceptance_gates": [
-          "All A0-A7 deterministic gates pass twice",
-          "Exact source/runtime identity recorded",
-          "Zero owned residue"
-        ],
-        "evidence": ["two-run signoff package", "SHA256SUMS"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W5"
-      },
-      {
-        "id": "S02",
-        "content": "Perform independent adversarial final review of the exact signoff commit, graph coverage, evidence, and external-gate honesty.",
-        "kind": "verify",
-        "depends_on": ["S01", "G01", "G02", "G03", "G04", "G05"],
-        "priority": 65,
-        "owned_paths": ["docs/fork/ideal-base/reviews/**"],
-        "acceptance_gates": [
-          "No unresolved blocker omission, false pass, material mis-ranking, or stale evidence"
-        ],
-        "evidence": ["exact-commit independent review"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W5"
-      },
-      {
-        "id": "S03",
-        "content": "Synthesize the final ideal-base disposition; hand checkpoint content to the coordinator for atomic state update and local commit without pushing.",
-        "kind": "synthesize",
-        "depends_on": ["S02"],
-        "priority": 50,
-        "owned_paths": ["docs/fork/ideal-base/evidence/S03/**"],
-        "acceptance_gates": [
-          "Every mandatory node accepted",
-          "Every gated node accepted or authorization_blocked",
-          "Worktree clean after local signoff commit"
-        ],
-        "evidence": ["final disposition", "commit and clean-state proof"],
-        "review_model": "opus",
-        "class": "deterministic",
-        "parent": "W5"
-      }
-    ]
-  },
-  "all_nodes": [
-    {
-      "id": "W0.1",
-      "content": "Revalidate Git, worktree, runtime-channel, selfdev, protected hash, archive, and authorization facts against BASELINE.md.",
-      "kind": "explore",
-      "depends_on": [],
-      "priority": 100,
-      "owned_paths": ["docs/fork/ideal-base/evidence/W0.1/**"],
-      "acceptance_gates": [
-        "python3 scripts/ideal_base_railway.py check",
-        "git status --short",
-        "git worktree list --porcelain",
-        "sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
-      ],
-      "evidence": ["baseline command transcript", "drift classification"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W0"
-    },
-    {
-      "id": "W0.2",
-      "content": "Re-audit the source seams named by the graph and inject any source-confirmed missing work before implementation.",
-      "kind": "explore",
-      "depends_on": ["W0.1"],
-      "priority": 95,
-      "owned_paths": ["docs/fork/ideal-base/evidence/W0.2/**"],
-      "acceptance_gates": [
-        "Every retained seam cites current file:symbol evidence",
-        "Every removed seam has a source-backed stale/duplicate explanation"
-      ],
-      "evidence": ["source census", "gap-node list"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W0"
-    },
-    {
-      "id": "W0.3",
-      "content": "Seed or resume the deep task graph from validated WORK_GRAPH.json and STATE.json; verify ownership and dependency projections.",
-      "kind": "verify",
-      "depends_on": ["W0.2"],
-      "priority": 90,
-      "owned_paths": ["docs/fork/ideal-base/evidence/W0.3/**"],
-      "acceptance_gates": [
-        "python3 scripts/ideal_base_railway.py next --json",
-        "Deep task graph accepts the projected runnable wave"
-      ],
-      "evidence": ["seed payload", "graph status snapshot"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W0"
-    },
-    {
-      "id": "F01",
-      "content": "Design one testable shutdown coordinator and server activity-lease authority, including work-class census and exit reasons.",
-      "kind": "explore",
-      "depends_on": [],
-      "priority": 100,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F01/**"],
-      "acceptance_gates": [
-        "Pure lifecycle state model covers every normal exit and active work class",
-        "Independent architecture critique finds no owner/lease gap"
-      ],
-      "evidence": ["design record", "source ownership census"],
-      "review_model": "fable+opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F02",
-      "content": "Implement work-aware activity leases and route normal daemon exits through the bounded shutdown coordinator.",
-      "kind": "implement",
-      "depends_on": ["F01"],
-      "priority": 95,
-      "owned_paths": [
-        "crates/jcode-app-core/src/server/lifecycle.rs",
-        "crates/jcode-app-core/src/server.rs",
-        "crates/jcode-app-core/src/server/**/*.rs",
-        "crates/jcode-base/src/background.rs",
-        "crates/jcode-base/src/mcp/manager.rs",
-        "crates/jcode-base/src/mcp/pool.rs",
-        "crates/jcode-core/src/activity.rs",
-        "crates/jcode-core/src/lib.rs",
-        "crates/jcode-app-core/src/tool/mod.rs",
-        "src/cli/dispatch.rs",
-        "docs/fork/ideal-base/evidence/F02/**"
-      ],
-      "acceptance_gates": [
-        "Idle exit requires zero clients and zero active leases",
-        "SIGTERM, reload, persistent idle, and temporary-owner exits invoke bounded shutdown"
-      ],
-      "evidence": ["focused tests", "exit-mode process transcript"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F03",
-      "content": "Verify activity leases across provider fixtures, restored/headless turns, debug jobs, background jobs, MCP calls, and swarm waiters.",
-      "kind": "verify",
-      "depends_on": ["F02"],
-      "priority": 90,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F03/**", "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs", "crates/jcode-app-core/src/server.rs", "crates/jcode-app-core/src/server/shutdown.rs", "crates/jcode-app-core/src/server/debug_command_exec.rs", "crates/jcode-app-core/src/server/debug_help.rs"],
-      "acceptance_gates": [
-        "Short-timeout no-provider fixtures remain alive for each lease class and exit after release",
-        "No socket/process residue"
-      ],
-      "evidence": ["lease-class matrix", "residue census"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F04",
-      "content": "Implement an atomic serialized TaskStatusStore for background tasks; surface persistence failures and preserve terminal precedence.",
-      "kind": "implement",
-      "depends_on": ["F02"],
-      "priority": 94,
-      "owned_paths": [
-        "crates/jcode-base/src/background.rs",
-        "crates/jcode-base/src/background/**",
-        "docs/fork/ideal-base/evidence/F04/**"
-      ],
-      "acceptance_gates": [
-        "No direct non-atomic status-file writes remain",
-        "Live task is not removed before terminal persistence succeeds or is durably recoverable",
-        "Status-serialization and write failures are surfaced, not swallowed"
-      ],
-      "evidence": ["status store tests", "write-failure injection"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F05",
-      "content": "Verify background status concurrency, crash interruption, malformed files, orphan reconciliation, and cleanup.",
-      "kind": "verify",
-      "depends_on": ["F04"],
-      "priority": 89,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F05/**", "crates/jcode-base/src/background/store.rs", "crates/jcode-base/src/background/tests.rs", "crates/jcode-base/src/background.rs"],
-      "acceptance_gates": [
-        "Concurrent progress/delivery/completion never tears JSON or overwrites terminal truth",
-        "Startup reconciles malformed/orphaned state without false success"
-      ],
-      "evidence": ["race matrix", "crash/restart transcript"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F06",
-      "content": "Implement explicit pooled MCP child ownership, bounded pre-exit reap, and mcp-serve owner-PID self-liveness.",
-      "kind": "implement",
-      "depends_on": ["F02", "F03"],
-      "priority": 93,
-      "owned_paths": [
-        "crates/jcode-base/src/mcp/**",
-        "crates/jcode-app-core/src/server/**",
-        "src/cli/mcp_serve.rs",
-        "src/cli/dispatch.rs",
-        "docs/fork/ideal-base/evidence/F06/**"
-      ],
-      "acceptance_gates": [
-        "Pooled children receive the owning daemon PID",
-        "Shutdown coordinator disconnects and reaps all tracked children within grace"
-      ],
-      "evidence": ["PID ownership tests", "exit-mode process tree logs"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F07",
-      "content": "Implement dead and hung pooled MCP detection, cache eviction, cooldown, and one bounded reconnect.",
-      "kind": "implement",
-      "depends_on": ["F06"],
-      "priority": 88,
-      "owned_paths": [
-        "crates/jcode-base/src/mcp/client.rs",
-        "crates/jcode-base/src/mcp/pool.rs",
-        "crates/jcode-base/src/mcp/manager.rs",
-        "docs/fork/ideal-base/evidence/F07/**"
-      ],
-      "acceptance_gates": [
-        "Killed child is detected before request timeout",
-        "Hung child is detected by health deadline",
-        "Exactly one reconnect succeeds without daemon reload"
-      ],
-      "evidence": [
-        "killed-child fixture",
-        "hung-child fixture",
-        "reconnect/cooldown assertions"
-      ],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F08",
-      "content": "Run the integrated MCP and lifecycle adversarial gate across all exit, kill, hang, reconnect, and residue cases.",
-      "kind": "verify",
-      "depends_on": ["F03", "F05", "F07"],
-      "priority": 80,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F08/**"],
-      "acceptance_gates": [
-        "Zero surviving owned descendants in every exit mode",
-        "All activity and status durability matrices pass repeatedly"
-      ],
-      "evidence": ["integrated matrix", "process/socket/file residue report"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W1"
-    },
-    {
-      "id": "F09",
-      "content": "Add timestamped selfdev pending-activation reconciliation using initiating-session liveness and candidate identity.",
-      "kind": "implement",
-      "depends_on": [],
-      "priority": 100,
-      "owned_paths": [
-        "crates/jcode-app-core/src/tool/selfdev/**",
-        "crates/jcode-selfdev-types/src/**",
-        "crates/jcode-build-support/src/**",
-        "docs/fork/ideal-base/evidence/F09/**"
-      ],
-      "acceptance_gates": [
-        "Dead session plus valid candidate completes safely",
-        "Missing/bad candidate rolls back",
-        "Live canary is preserved"
-      ],
-      "evidence": ["manifest fixture matrix"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W2"
-    },
-    {
-      "id": "F10",
-      "content": "Persist disconnect-cleanup intent before live-session removal; retry after abort and reconcile at startup.",
-      "kind": "implement",
-      "depends_on": [],
-      "priority": 98,
-      "owned_paths": [
-        "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs",
-        "crates/jcode-app-core/src/server/**",
-        "crates/jcode-base/src/session.rs",
-        "docs/fork/ideal-base/evidence/F10/**"
-      ],
-      "acceptance_gates": [
-        "Agent-lock timeout leaves a durable cleanup record",
-        "Restart marks session terminal and clears the record"
-      ],
-      "evidence": ["held-lock fixture", "restart reconciliation transcript"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W2"
-    },
-    {
-      "id": "F11",
-      "content": "Independently verify activation and disconnect reconciliation under crash, restart, missing files, and live-owner cases.",
-      "kind": "verify",
-      "depends_on": ["F09", "F10"],
-      "priority": 90,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F11/**"],
-      "acceptance_gates": [
-        "All recovery matrices pass with no false rollback or fabricated terminal state"
-      ],
-      "evidence": ["combined recovery matrix"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W2"
-    },
-    {
-      "id": "F12",
-      "content": "Add configurable global caps and observability for shared MCP children and live background tasks.",
-      "kind": "implement",
-      "depends_on": ["F11"],
-      "priority": 85,
-      "owned_paths": [
-        "crates/jcode-base/src/mcp/**",
-        "crates/jcode-base/src/background.rs",
-        "crates/jcode-config-types/src/**",
-        "docs/fork/ideal-base/evidence/F12/**"
-      ],
-      "acceptance_gates": [
-        "Low test caps bound process/task/file counts",
-        "Refusal is explicit",
-        "Capacity releases after terminal cleanup"
-      ],
-      "evidence": ["cap overflow fixtures", "metrics/status output"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W2"
-    },
-    {
-      "id": "F13",
-      "content": "Verify caps under concurrent starts, failures, cancellation, and restart reconciliation.",
-      "kind": "verify",
-      "depends_on": ["F12"],
-      "priority": 80,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F13/**"],
-      "acceptance_gates": [
-        "No over-admission or leaked capacity under concurrency",
-        "Restart does not double-count stale owners"
-      ],
-      "evidence": ["concurrency cap matrix"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W2"
-    },
-    {
-      "id": "F14",
-      "content": "Build and run the complete no-provider real-process lifecycle matrix for all W1 and W2 invariants.",
-      "kind": "verify",
-      "depends_on": ["F08", "F13"],
-      "priority": 70,
-      "owned_paths": [
-        "tests/e2e/**",
-        "scripts/**/*lifecycle*",
-        "docs/fork/ideal-base/evidence/F14/**"
-      ],
-      "acceptance_gates": [
-        "Repeated clean runs cover cancel, exit, reload, crash, restart, recovery, and residue",
-        "No provider/network dependency"
-      ],
-      "evidence": ["process matrix harness", "two clean repeated runs"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W2"
-    },
-    {
-      "id": "F15",
-      "content": "Audit CI test hermeticity and classify every ignored test as deterministic, live, GUI, platform, helper, or performance.",
-      "kind": "explore",
-      "depends_on": [],
-      "priority": 100,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F15/**"],
-      "acceptance_gates": [
-        "Every compile-only/advisory decision has a source-backed reason and exit condition",
-        "No unclassified ignore remains"
-      ],
-      "evidence": ["test census", "flakiness root-cause table"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F16",
-      "content": "Promote hermetic real-process cancellation, reload, client re-exec, retry, and restart cases into required suites.",
-      "kind": "implement",
-      "depends_on": ["F14", "F15"],
-      "priority": 95,
-      "owned_paths": [
-        "tests/e2e/**",
-        "crates/jcode-app-core/src/**/*test*",
-        "docs/fork/ideal-base/evidence/F16/**"
-      ],
-      "acceptance_gates": [
-        "No required lifecycle case remains ignored for build-layout convenience",
-        "Fixtures use disposable home/runtime and leave zero residue"
-      ],
-      "evidence": ["promoted test list", "required-suite transcript"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F17",
-      "content": "Make intended Linux, macOS, app-core, and deterministic TUI test rails blocking on push/PR.",
-      "kind": "implement",
-      "depends_on": ["F16"],
-      "priority": 90,
-      "owned_paths": [
-        ".github/workflows/fork-ci.yml",
-        ".github/scripts/**",
-        "docs/fork/ideal-base/evidence/F17/**"
-      ],
-      "acceptance_gates": [
-        "Injected failures in each rail fail CI semantics",
-        "jcode-tui deterministic tests run rather than compile-only"
-      ],
-      "evidence": [
-        "workflow diff",
-        "local/actionlint validation",
-        "failure-injection proof"
-      ],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F18",
-      "content": "Build and launch the real Nix package on relevant pull requests without enabling non-hermetic package doCheck blindly.",
-      "kind": "implement",
-      "depends_on": ["F15"],
-      "priority": 88,
-      "owned_paths": [
-        ".github/workflows/nix.yml",
-        "flake.nix",
-        "nix/**",
-        "docs/fork/ideal-base/evidence/F18/**"
-      ],
-      "acceptance_gates": [
-        "Relevant path changes run nix build",
-        "result/bin/jcode --version succeeds"
-      ],
-      "evidence": ["Nix build log", "packaged version output"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F19",
-      "content": "Package and verify mobile static assets from an executable-adjacent or declared share path outside the source checkout.",
-      "kind": "implement",
-      "depends_on": ["F18"],
-      "priority": 84,
-      "owned_paths": [
-        "nix/**",
-        "src/cli/commands/mobile_server.rs",
-        "web/jcode-mobile/**",
-        "scripts/check_web_mobile*",
-        "docs/fork/ideal-base/evidence/F19/**"
-      ],
-      "acceptance_gates": [
-        "Installed binary outside checkout serves index.html",
-        "CWD fallback cannot mask missing packaged assets"
-      ],
-      "evidence": ["installed-package fixture", "HTTP response proof"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F20",
-      "content": "Extend hermetic installer and Rust updater acquisition fixtures through real local daemon reload and rollback.",
-      "kind": "implement",
-      "depends_on": ["F16", "F19"],
-      "priority": 80,
-      "owned_paths": [
-        "tests/test_r10_release_acquisition.py",
-        "crates/jcode-app-core/src/update.rs",
-        "scripts/install.sh",
-        "docs/fork/ideal-base/evidence/F20/**"
-      ],
-      "acceptance_gates": [
-        "Checksum, interruption, invalid replacement, rollback, and exactly-once reload paths pass without network",
-        "Every failure preserves old runtime/channel pointers"
-      ],
-      "evidence": [
-        "local acquisition matrix",
-        "before/after channel manifests"
-      ],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F21",
-      "content": "Run the full deterministic CI/package/updater integration gate from clean state twice.",
-      "kind": "verify",
-      "depends_on": ["F17", "F18", "F19", "F20"],
-      "priority": 70,
-      "owned_paths": ["docs/fork/ideal-base/evidence/F21/**"],
-      "acceptance_gates": [
-        "All required suites, Nix build, installed assets, and updater matrix pass twice at one commit"
-      ],
-      "evidence": ["two-run manifest", "residue and source identity report"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W3"
-    },
-    {
-      "id": "F22",
-      "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
-      "kind": "implement",
-      "depends_on": [],
-      "priority": 100,
-      "owned_paths": [
-        ".cargo/audit.toml",
-        "docs/SECURITY_DEPENDENCIES.md",
-        ".github/workflows/security.yml",
-        ".github/workflows/release.yml",
-        "docs/fork/ideal-base/evidence/F22/**"
-      ],
-      "acceptance_gates": [
-        "Expired ignore fails policy",
-        "Homebrew path uses pinned known_hosts and no StrictHostKeyChecking=no"
-      ],
-      "evidence": ["policy fixtures", "workflow validation"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W4"
-    },
-    {
-      "id": "F23",
-      "content": "Add explicit downward quality targets and zero-growth critical-path budgets without demanding an all-at-once cleanup.",
-      "kind": "implement",
-      "depends_on": [],
-      "priority": 95,
-      "owned_paths": [
-        "scripts/*budget*",
-        ".github/workflows/fork-ci.yml",
-        "docs/fork/ideal-base/evidence/F23/**"
-      ],
-      "acceptance_gates": [
-        "New critical-path panic/swallow/oversize debt fails",
-        "Repository debt trend is reported and cannot increase"
-      ],
-      "evidence": ["budget fixtures", "trend report"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W4"
-    },
-    {
-      "id": "F24",
-      "content": "Pin compatibility build inputs and emit verifiable source/version provenance and SBOM for the declared reproducible artifact subset.",
-      "kind": "implement",
-      "depends_on": ["F21", "F22"],
-      "priority": 90,
-      "owned_paths": [
-        "nix/**",
-        "scripts/build_linux_compat.sh",
-        ".github/workflows/release.yml",
-        "crates/jcode-build-meta/**",
-        "docs/fork/ideal-base/evidence/F24/**"
-      ],
-      "acceptance_gates": [
-        "Two clean builds match within the declared reproducible scope",
-        "Artifacts expose verifiable provenance and SBOM"
-      ],
-      "evidence": ["clean-build comparison", "provenance/SBOM verification"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W4"
-    },
-    {
-      "id": "F25",
-      "content": "Centralize socket/metadata cleanup; diagnose and quarantine malformed swarm state; bound terminal control-log retention.",
-      "kind": "implement",
-      "depends_on": [],
-      "priority": 88,
-      "owned_paths": [
-        "crates/jcode-app-core/src/server/socket.rs",
-        "crates/jcode-app-core/src/server/lifecycle.rs",
-        "crates/jcode-app-core/src/server/swarm_persistence.rs",
-        "docs/fork/ideal-base/evidence/F25/**"
-      ],
-      "acceptance_gates": [
-        "Live listener preserves all sidecars",
-        "Stale cleanup removes all sidecars/registry metadata",
-        "Malformed state warns and quarantines",
-        "Terminal logs obey retention"
-      ],
-      "evidence": [
-        "sidecar matrix",
-        "corruption fixtures",
-        "retention fixtures"
-      ],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W4"
-    },
-    {
-      "id": "F26",
-      "content": "Sweep dead active PID markers at startup/periodically and make telemetry active-session markers process-liveness aware; remove the uncompiled duplicate after equivalence review.",
-      "kind": "implement",
-      "depends_on": [],
-      "priority": 86,
-      "owned_paths": [
-        "crates/jcode-storage/src/active_pids.rs",
-        "crates/jcode-base/src/session.rs",
-        "crates/jcode-telemetry-core/src/state_support.rs",
-        "crates/jcode-app-core/src/telemetry_state.rs",
-        "docs/fork/ideal-base/evidence/F26/**"
-      ],
-      "acceptance_gates": [
-        "Dead markers without session JSON disappear at startup",
-        "Only live PID telemetry markers count",
-        "Full build proves duplicate removal safe"
-      ],
-      "evidence": [
-        "marker fixture matrix",
-        "equivalence review",
-        "build/tests"
-      ],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W4"
-    },
-    {
-      "id": "F27",
-      "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
-      "kind": "verify",
-      "depends_on": ["F22", "F23", "F24", "F25", "F26"],
-      "priority": 70,
-      "owned_paths": [
-        "docs/fork/ideal-base/reviews/**",
-        "docs/fork/ideal-base/evidence/F27/**"
-      ],
-      "acceptance_gates": [
-        "No critical policy, provenance, durable-state, marker, or cleanup gap remains"
-      ],
-      "evidence": [
-        "independent hardening review",
-        "combined validation report"
-      ],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W4"
-    },
-    {
-      "id": "G01",
-      "content": "Build/smoke aarch64-linux or explicitly downgrade its advertised support to best-effort.",
-      "kind": "verify",
-      "depends_on": [],
-      "priority": 100,
-      "owned_paths": ["docs/fork/ideal-base/evidence/G01/**"],
-      "authorization": "platform capacity or documentation-only downgrade",
-      "acceptance_gates": [
-        "Accepted build/smoke evidence or explicit support downgrade"
-      ],
-      "evidence": ["platform result"],
-      "review_model": "opus",
-      "class": "gated",
-      "parent": "W5"
-    },
-    {
-      "id": "G02",
-      "content": "Run authorized provider-doctor minimal tier and fresh full pre-release catalog tier.",
-      "kind": "verify",
-      "depends_on": [],
-      "priority": 95,
-      "owned_paths": ["docs/fork/ideal-base/evidence/G02/**"],
-      "authorization": "live provider credentials, network, and spend",
-      "acceptance_gates": [
-        "Fresh catalog coverage or authorization_blocked with named next action"
-      ],
-      "evidence": ["redacted provider-doctor ledger"],
-      "review_model": "opus",
-      "class": "gated",
-      "parent": "W5"
-    },
-    {
-      "id": "G03",
-      "content": "Run mobile/iOS simulator or device attach validation after local gateway fixtures remain green.",
-      "kind": "verify",
-      "depends_on": [],
-      "priority": 90,
-      "owned_paths": ["docs/fork/ideal-base/evidence/G03/**"],
-      "authorization": "Apple platform/signing/device access",
-      "acceptance_gates": [
-        "Attach lifecycle passes or authorization_blocked with named next action"
-      ],
-      "evidence": ["simulator/device result"],
-      "review_model": "opus",
-      "class": "gated",
-      "parent": "W5"
-    },
-    {
-      "id": "G04",
-      "content": "Run scheduled Windows and FreeBSD compile/install smokes if those surfaces remain advertised.",
-      "kind": "verify",
-      "depends_on": [],
-      "priority": 85,
-      "owned_paths": ["docs/fork/ideal-base/evidence/G04/**"],
-      "authorization": "platform runners or support downgrade",
-      "acceptance_gates": [
-        "Scheduled smoke evidence or explicit support disposition"
-      ],
-      "evidence": ["platform result"],
-      "review_model": "opus",
-      "class": "gated",
-      "parent": "W5"
-    },
-    {
-      "id": "G05",
-      "content": "Run disposable draft-release acquisition and live updater smoke without publishing a public release.",
-      "kind": "verify",
-      "depends_on": [],
-      "priority": 80,
-      "owned_paths": ["docs/fork/ideal-base/evidence/G05/**"],
-      "authorization": "disposable credentials/assets and network release API",
-      "acceptance_gates": [
-        "Draft acquisition/update succeeds and cleans up, or authorization_blocked"
-      ],
-      "evidence": ["redacted draft-release ledger"],
-      "review_model": "opus",
-      "class": "gated",
-      "parent": "W5"
-    },
-    {
-      "id": "S01",
-      "content": "Run the complete deterministic ideal-base matrix twice from clean state at one fixed commit and prove zero residue.",
-      "kind": "verify",
-      "depends_on": ["F21", "F27"],
-      "priority": 75,
-      "owned_paths": ["docs/fork/ideal-base/evidence/S01/**"],
-      "acceptance_gates": [
-        "All A0-A7 deterministic gates pass twice",
-        "Exact source/runtime identity recorded",
-        "Zero owned residue"
-      ],
-      "evidence": ["two-run signoff package", "SHA256SUMS"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W5"
-    },
-    {
-      "id": "S02",
-      "content": "Perform independent adversarial final review of the exact signoff commit, graph coverage, evidence, and external-gate honesty.",
-      "kind": "verify",
-      "depends_on": ["S01", "G01", "G02", "G03", "G04", "G05"],
-      "priority": 65,
-      "owned_paths": ["docs/fork/ideal-base/reviews/**"],
-      "acceptance_gates": [
-        "No unresolved blocker omission, false pass, material mis-ranking, or stale evidence"
-      ],
-      "evidence": ["exact-commit independent review"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W5"
-    },
-    {
-      "id": "S03",
-      "content": "Synthesize the final ideal-base disposition; hand checkpoint content to the coordinator for atomic state update and local commit without pushing.",
-      "kind": "synthesize",
-      "depends_on": ["S02"],
-      "priority": 50,
-      "owned_paths": ["docs/fork/ideal-base/evidence/S03/**"],
-      "acceptance_gates": [
-        "Every mandatory node accepted",
-        "Every gated node accepted or authorization_blocked",
-        "Worktree clean after local signoff commit"
-      ],
-      "evidence": ["final disposition", "commit and clean-state proof"],
-      "review_model": "opus",
-      "class": "deterministic",
-      "parent": "W5"
-    }
-  ],
-  "audit_coverage": [
-    {
-      "id": "A01",
-      "item": "Work-aware server activity and bounded shutdown authority",
-      "nodes": ["F01", "F02", "F03"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A02",
-      "item": "Atomic serialized recoverable background-task status persistence",
-      "nodes": ["F04", "F05"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A03",
-      "item": "Pooled MCP child ownership and bounded reap",
-      "nodes": ["F06"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A04",
-      "item": "Dead and hung MCP recovery",
-      "nodes": ["F07", "F08"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A05",
-      "item": "Selfdev pending-activation reconciliation",
-      "nodes": ["F09", "F11"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A06",
-      "item": "Durable disconnect cleanup reconciliation",
-      "nodes": ["F10", "F11"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A07",
-      "item": "Global MCP and background resource bounds",
-      "nodes": ["F12", "F13", "F14"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A08",
-      "item": "Required repeated real-process lifecycle matrix",
-      "nodes": ["F14", "F16"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A09",
-      "item": "Blocking Linux test rail",
-      "nodes": ["F17"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A10",
-      "item": "Blocking macOS test rail",
-      "nodes": ["F17"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A11",
-      "item": "Executed deterministic TUI tests",
-      "nodes": ["F17"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A12",
-      "item": "Real Nix package build and launch",
-      "nodes": ["F18"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A13",
-      "item": "Installed mobile static assets",
-      "nodes": ["F19"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A14",
-      "item": "Hermetic installer and updater acquisition fixtures",
-      "nodes": ["F20", "F21"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A15",
-      "item": "Ignored-test classification and CI hermeticity",
-      "nodes": ["F15", "F16", "F21"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A16",
-      "item": "Security advisory expiry and strict Homebrew host identity",
-      "nodes": ["F22"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A17",
-      "item": "Critical-path quality ratchets",
-      "nodes": ["F23"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A18",
-      "item": "Pinned compatibility inputs, provenance, and SBOM",
-      "nodes": ["F24"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A19",
-      "item": "Socket and durable swarm state hygiene",
-      "nodes": ["F25", "F27"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A20",
-      "item": "PID and telemetry liveness cleanup",
-      "nodes": ["F26", "F27"],
-      "class": "deterministic"
-    },
-    {
-      "id": "A21",
-      "item": "aarch64-linux build or support downgrade",
-      "nodes": ["G01"],
-      "class": "gated"
-    },
-    {
-      "id": "A22",
-      "item": "Provider doctor and catalog validation",
-      "nodes": ["G02"],
-      "class": "gated"
-    },
-    {
-      "id": "A23",
-      "item": "Mobile/iOS attach validation",
-      "nodes": ["G03"],
-      "class": "gated"
-    },
-    {
-      "id": "A24",
-      "item": "Windows and FreeBSD scheduled smoke",
-      "nodes": ["G04"],
-      "class": "gated"
-    },
-    {
-      "id": "A25",
-      "item": "Disposable draft-release and live updater smoke",
-      "nodes": ["G05"],
-      "class": "gated"
-    }
-  ],
-  "coordinator_owned_paths": [
-    "docs/fork/ideal-base/STATE.json",
-    "docs/fork/ideal-base/DECISIONS.md"
+  "confidence": [
+   "low",
+   "medium",
+   "high"
   ]
+ },
+ "root_nodes": [
+  {
+   "id": "W0",
+   "content": "Bootstrap and revalidate the ideal-base authority. Expand the prescribed W0 children, reconcile drift, and seed durable state before mutation.",
+   "kind": "explore",
+   "depends_on": [],
+   "priority": 100
+  },
+  {
+   "id": "W1",
+   "content": "Close runtime ownership and persistence. Expand prescribed W1 children and synthesize only after activity/shutdown, background status, and MCP gates pass.",
+   "kind": "implement",
+   "depends_on": [
+    "W0"
+   ],
+   "priority": 95
+  },
+  {
+   "id": "W2",
+   "content": "Close recovery reconciliation and global resource bounds. Expand prescribed W2 children and finish with the integrated lifecycle matrix.",
+   "kind": "implement",
+   "depends_on": [
+    "W1"
+   ],
+   "priority": 90
+  },
+  {
+   "id": "W3",
+   "content": "Make deterministic validation and packaging authoritative. Expand prescribed W3 children and close with the full deterministic integration gate.",
+   "kind": "implement",
+   "depends_on": [
+    "W2"
+   ],
+   "priority": 80
+  },
+  {
+   "id": "W4",
+   "content": "Close security, quality, provenance, and durable-state hygiene. Expand prescribed W4 children and obtain independent verification.",
+   "kind": "implement",
+   "depends_on": [
+    "W3"
+   ],
+   "priority": 70
+  },
+  {
+   "id": "W5",
+   "content": "Disposition external gates, run final deterministic signoff twice, obtain independent critique, and synthesize the ideal-base verdict.",
+   "kind": "verify",
+   "depends_on": [
+    "W4"
+   ],
+   "priority": 60
+  }
+ ],
+ "expansions": {
+  "W0": [
+   {
+    "id": "W0.1",
+    "content": "Revalidate Git, worktree, runtime-channel, selfdev, protected hash, archive, and authorization facts against BASELINE.md.",
+    "kind": "explore",
+    "depends_on": [],
+    "priority": 100,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/W0.1/**"
+    ],
+    "acceptance_gates": [
+     "python3 scripts/ideal_base_railway.py check",
+     "git status --short",
+     "git worktree list --porcelain",
+     "sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
+    ],
+    "evidence": [
+     "baseline command transcript",
+     "drift classification"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W0"
+   },
+   {
+    "id": "W0.2",
+    "content": "Re-audit the source seams named by the graph and inject any source-confirmed missing work before implementation.",
+    "kind": "explore",
+    "depends_on": [
+     "W0.1"
+    ],
+    "priority": 95,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/W0.2/**"
+    ],
+    "acceptance_gates": [
+     "Every retained seam cites current file:symbol evidence",
+     "Every removed seam has a source-backed stale/duplicate explanation"
+    ],
+    "evidence": [
+     "source census",
+     "gap-node list"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W0"
+   },
+   {
+    "id": "W0.3",
+    "content": "Seed or resume the deep task graph from validated WORK_GRAPH.json and STATE.json; verify ownership and dependency projections.",
+    "kind": "verify",
+    "depends_on": [
+     "W0.2"
+    ],
+    "priority": 90,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/W0.3/**"
+    ],
+    "acceptance_gates": [
+     "python3 scripts/ideal_base_railway.py next --json",
+     "Deep task graph accepts the projected runnable wave"
+    ],
+    "evidence": [
+     "seed payload",
+     "graph status snapshot"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W0"
+   }
+  ],
+  "W1": [
+   {
+    "id": "F01",
+    "content": "Design one testable shutdown coordinator and server activity-lease authority, including work-class census and exit reasons.",
+    "kind": "explore",
+    "depends_on": [],
+    "priority": 100,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F01/**"
+    ],
+    "acceptance_gates": [
+     "Pure lifecycle state model covers every normal exit and active work class",
+     "Independent architecture critique finds no owner/lease gap"
+    ],
+    "evidence": [
+     "design record",
+     "source ownership census"
+    ],
+    "review_model": "fable+opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F02",
+    "content": "Implement work-aware activity leases and route normal daemon exits through the bounded shutdown coordinator.",
+    "kind": "implement",
+    "depends_on": [
+     "F01"
+    ],
+    "priority": 95,
+    "owned_paths": [
+     "crates/jcode-app-core/src/server/lifecycle.rs",
+     "crates/jcode-app-core/src/server.rs",
+     "crates/jcode-app-core/src/server/**/*.rs",
+     "crates/jcode-base/src/background.rs",
+     "crates/jcode-base/src/mcp/manager.rs",
+     "crates/jcode-base/src/mcp/pool.rs",
+     "crates/jcode-core/src/activity.rs",
+     "crates/jcode-core/src/lib.rs",
+     "crates/jcode-app-core/src/tool/mod.rs",
+     "src/cli/dispatch.rs",
+     "docs/fork/ideal-base/evidence/F02/**"
+    ],
+    "acceptance_gates": [
+     "Idle exit requires zero clients and zero active leases",
+     "SIGTERM, reload, persistent idle, and temporary-owner exits invoke bounded shutdown"
+    ],
+    "evidence": [
+     "focused tests",
+     "exit-mode process transcript"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F03",
+    "content": "Verify activity leases across provider fixtures, restored/headless turns, debug jobs, background jobs, MCP calls, and swarm waiters.",
+    "kind": "verify",
+    "depends_on": [
+     "F02"
+    ],
+    "priority": 90,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F03/**",
+     "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs",
+     "crates/jcode-app-core/src/server.rs",
+     "crates/jcode-app-core/src/server/shutdown.rs",
+     "crates/jcode-app-core/src/server/debug_command_exec.rs",
+     "crates/jcode-app-core/src/server/debug_help.rs"
+    ],
+    "acceptance_gates": [
+     "Short-timeout no-provider fixtures remain alive for each lease class and exit after release",
+     "No socket/process residue"
+    ],
+    "evidence": [
+     "lease-class matrix",
+     "residue census"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F04",
+    "content": "Implement an atomic serialized TaskStatusStore for background tasks; surface persistence failures and preserve terminal precedence.",
+    "kind": "implement",
+    "depends_on": [
+     "F02"
+    ],
+    "priority": 94,
+    "owned_paths": [
+     "crates/jcode-base/src/background.rs",
+     "crates/jcode-base/src/background/**",
+     "docs/fork/ideal-base/evidence/F04/**"
+    ],
+    "acceptance_gates": [
+     "No direct non-atomic status-file writes remain",
+     "Live task is not removed before terminal persistence succeeds or is durably recoverable",
+     "Status-serialization and write failures are surfaced, not swallowed"
+    ],
+    "evidence": [
+     "status store tests",
+     "write-failure injection"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F05",
+    "content": "Verify background status concurrency, crash interruption, malformed files, orphan reconciliation, and cleanup.",
+    "kind": "verify",
+    "depends_on": [
+     "F04"
+    ],
+    "priority": 89,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F05/**",
+     "crates/jcode-base/src/background/store.rs",
+     "crates/jcode-base/src/background/tests.rs",
+     "crates/jcode-base/src/background.rs"
+    ],
+    "acceptance_gates": [
+     "Concurrent progress/delivery/completion never tears JSON or overwrites terminal truth",
+     "Startup reconciles malformed/orphaned state without false success"
+    ],
+    "evidence": [
+     "race matrix",
+     "crash/restart transcript"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F06",
+    "content": "Implement explicit pooled MCP child ownership, bounded pre-exit reap, and mcp-serve owner-PID self-liveness.",
+    "kind": "implement",
+    "depends_on": [
+     "F02",
+     "F03"
+    ],
+    "priority": 93,
+    "owned_paths": [
+     "crates/jcode-base/src/mcp/**",
+     "crates/jcode-app-core/src/server/**",
+     "src/cli/mcp_serve.rs",
+     "src/cli/dispatch.rs",
+     "docs/fork/ideal-base/evidence/F06/**"
+    ],
+    "acceptance_gates": [
+     "Pooled children receive the owning daemon PID",
+     "Shutdown coordinator disconnects and reaps all tracked children within grace"
+    ],
+    "evidence": [
+     "PID ownership tests",
+     "exit-mode process tree logs"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F07",
+    "content": "Implement dead and hung pooled MCP detection, cache eviction, cooldown, and one bounded reconnect.",
+    "kind": "implement",
+    "depends_on": [
+     "F06"
+    ],
+    "priority": 88,
+    "owned_paths": [
+     "crates/jcode-base/src/mcp/client.rs",
+     "crates/jcode-base/src/mcp/pool.rs",
+     "crates/jcode-base/src/mcp/manager.rs",
+     "docs/fork/ideal-base/evidence/F07/**"
+    ],
+    "acceptance_gates": [
+     "Killed child is detected before request timeout",
+     "Hung child is detected by health deadline",
+     "Exactly one reconnect succeeds without daemon reload"
+    ],
+    "evidence": [
+     "killed-child fixture",
+     "hung-child fixture",
+     "reconnect/cooldown assertions"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "F08",
+    "content": "Run the integrated MCP and lifecycle adversarial gate across all exit, kill, hang, reconnect, and residue cases.",
+    "kind": "verify",
+    "depends_on": [
+     "F03",
+     "F05",
+     "F07"
+    ],
+    "priority": 80,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F08/**"
+    ],
+    "acceptance_gates": [
+     "Zero surviving owned descendants in every exit mode",
+     "All activity and status durability matrices pass repeatedly"
+    ],
+    "evidence": [
+     "integrated matrix",
+     "process/socket/file residue report"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "R01",
+    "content": "Repair the selfdev reload/build subsystem (evidence/reload-incident-2026-07-18): (a) atomic publishing: copy, never hard-link, into immutable versions/<v>; stage and smoke-test in a temp path then rename atomically; a failed publish leaves no partial artifact; (b) explicit reload target selection: one shared target-resolution function across server reload, debug reload, and the selfdev tool; refuse loudly, never silently re-exec the old hash, when no valid newer candidate exists; machine-readable target-decision log; (c) client-to-agent identity binding across exec handoff: durable alias mapping recorded during resume, debug and selfdev commands resolve through it, recovery-intent eligibility keyed on live attached connections, and stale-session errors name the resolved active target.",
+    "kind": "implement",
+    "depends_on": [
+     "F03",
+     "F06"
+    ],
+    "priority": 87,
+    "owned_paths": [
+     "crates/jcode-app-core/src/server/client_lifecycle.rs",
+     "crates/jcode-app-core/src/server/client_session.rs",
+     "crates/jcode-app-core/src/server/debug_command_exec.rs",
+     "crates/jcode-app-core/src/server/reload.rs",
+     "crates/jcode-app-core/src/server/reload_recovery.rs",
+     "crates/jcode-app-core/src/server/util.rs",
+     "crates/jcode-build-support/src/lib.rs",
+     "crates/jcode-build-support/src/paths.rs",
+     "docs/fork/ideal-base/evidence/R01/**",
+     "docs/fork/ideal-base/evidence/R02/**",
+     "src/cli/commands.rs"
+    ],
+    "acceptance_gates": [
+     "Concurrent cargo rebuild cannot corrupt a published version artifact",
+     "Forced reload onto a stale shared-server channel refuses or publishes, never silently re-execs the old hash",
+     "A failed publish leaves no partial versions/<v> directory",
+     "A debug command from a reconnected TUI resolves to its resumed agent",
+     "An attached idle TUI session receives a recovery intent across reload",
+     "A stale session id error reports the resolved active target"
+    ],
+    "evidence": [
+     "docs/fork/ideal-base/evidence/R01"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   },
+   {
+    "id": "R03",
+    "content": "Make TUI terminal-mode ownership explicit across exec handoff: keep the runtime guard armed until exec has provably replaced the process, install an early successor guard that owns inherited modes before any fallible init, and make signal-path cleanup restore all modes (kitty keyboard pop, SGR mouse off, focus off, bracketed paste off, raw mode).",
+    "kind": "implement",
+    "depends_on": [
+     "F03",
+     "F06"
+    ],
+    "priority": 87,
+    "owned_paths": [
+     "src/cli/terminal.rs",
+     "src/cli/hot_exec.rs",
+     "src/cli/tui_launch.rs",
+     "crates/jcode-tui/src/tui/mod.rs",
+     "docs/fork/ideal-base/evidence/R03/**"
+    ],
+    "acceptance_gates": [
+     "An exec failure after handoff restores all terminal modes",
+     "A successor init failure before guard construction restores inherited modes",
+     "Signal-path cleanup emits all four protocol disables"
+    ],
+    "evidence": [
+     "docs/fork/ideal-base/evidence/R03"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W1"
+   }
+  ],
+  "W2": [
+   {
+    "id": "F09",
+    "content": "Add timestamped selfdev pending-activation reconciliation using initiating-session liveness and candidate identity.",
+    "kind": "implement",
+    "depends_on": [],
+    "priority": 100,
+    "owned_paths": [
+     "crates/jcode-app-core/src/tool/selfdev/**",
+     "crates/jcode-selfdev-types/src/**",
+     "crates/jcode-build-support/src/**",
+     "docs/fork/ideal-base/evidence/F09/**"
+    ],
+    "acceptance_gates": [
+     "Dead session plus valid candidate completes safely",
+     "Missing/bad candidate rolls back",
+     "Live canary is preserved"
+    ],
+    "evidence": [
+     "manifest fixture matrix"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   },
+   {
+    "id": "F10",
+    "content": "Persist disconnect-cleanup intent before live-session removal; retry after abort and reconcile at startup.",
+    "kind": "implement",
+    "depends_on": [],
+    "priority": 98,
+    "owned_paths": [
+     "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs",
+     "crates/jcode-app-core/src/server/**",
+     "crates/jcode-base/src/session.rs",
+     "docs/fork/ideal-base/evidence/F10/**"
+    ],
+    "acceptance_gates": [
+     "Agent-lock timeout leaves a durable cleanup record",
+     "Restart marks session terminal and clears the record"
+    ],
+    "evidence": [
+     "held-lock fixture",
+     "restart reconciliation transcript"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   },
+   {
+    "id": "F11",
+    "content": "Independently verify activation and disconnect reconciliation under crash, restart, missing files, and live-owner cases.",
+    "kind": "verify",
+    "depends_on": [
+     "F09",
+     "F10"
+    ],
+    "priority": 90,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F11/**"
+    ],
+    "acceptance_gates": [
+     "All recovery matrices pass with no false rollback or fabricated terminal state"
+    ],
+    "evidence": [
+     "combined recovery matrix"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   },
+   {
+    "id": "F12",
+    "content": "Add configurable global caps and observability for shared MCP children and live background tasks.",
+    "kind": "implement",
+    "depends_on": [
+     "F11"
+    ],
+    "priority": 85,
+    "owned_paths": [
+     "crates/jcode-base/src/mcp/**",
+     "crates/jcode-base/src/background.rs",
+     "crates/jcode-config-types/src/**",
+     "docs/fork/ideal-base/evidence/F12/**"
+    ],
+    "acceptance_gates": [
+     "Low test caps bound process/task/file counts",
+     "Refusal is explicit",
+     "Capacity releases after terminal cleanup"
+    ],
+    "evidence": [
+     "cap overflow fixtures",
+     "metrics/status output"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   },
+   {
+    "id": "F13",
+    "content": "Verify caps under concurrent starts, failures, cancellation, and restart reconciliation.",
+    "kind": "verify",
+    "depends_on": [
+     "F12"
+    ],
+    "priority": 80,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F13/**"
+    ],
+    "acceptance_gates": [
+     "No over-admission or leaked capacity under concurrency",
+     "Restart does not double-count stale owners"
+    ],
+    "evidence": [
+     "concurrency cap matrix"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   },
+   {
+    "id": "F14",
+    "content": "Build and run the complete no-provider real-process lifecycle matrix for all W1 and W2 invariants.",
+    "kind": "verify",
+    "depends_on": [
+     "F08",
+     "F13"
+    ],
+    "priority": 70,
+    "owned_paths": [
+     "tests/e2e/**",
+     "scripts/**/*lifecycle*",
+     "docs/fork/ideal-base/evidence/F14/**"
+    ],
+    "acceptance_gates": [
+     "Repeated clean runs cover cancel, exit, reload, crash, restart, recovery, and residue",
+     "No provider/network dependency"
+    ],
+    "evidence": [
+     "process matrix harness",
+     "two clean repeated runs"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   }
+  ],
+  "W3": [
+   {
+    "id": "F15",
+    "content": "Audit CI test hermeticity and classify every ignored test as deterministic, live, GUI, platform, helper, or performance.",
+    "kind": "explore",
+    "depends_on": [],
+    "priority": 100,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F15/**"
+    ],
+    "acceptance_gates": [
+     "Every compile-only/advisory decision has a source-backed reason and exit condition",
+     "No unclassified ignore remains"
+    ],
+    "evidence": [
+     "test census",
+     "flakiness root-cause table"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   },
+   {
+    "id": "F16",
+    "content": "Promote hermetic real-process cancellation, reload, client re-exec, retry, and restart cases into required suites.",
+    "kind": "implement",
+    "depends_on": [
+     "F14",
+     "F15"
+    ],
+    "priority": 95,
+    "owned_paths": [
+     "tests/e2e/**",
+     "crates/jcode-app-core/src/**/*test*",
+     "docs/fork/ideal-base/evidence/F16/**"
+    ],
+    "acceptance_gates": [
+     "No required lifecycle case remains ignored for build-layout convenience",
+     "Fixtures use disposable home/runtime and leave zero residue"
+    ],
+    "evidence": [
+     "promoted test list",
+     "required-suite transcript"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   },
+   {
+    "id": "F17",
+    "content": "Make intended Linux, macOS, app-core, and deterministic TUI test rails blocking on push/PR.",
+    "kind": "implement",
+    "depends_on": [
+     "F16"
+    ],
+    "priority": 90,
+    "owned_paths": [
+     ".github/workflows/fork-ci.yml",
+     ".github/scripts/**",
+     "docs/fork/ideal-base/evidence/F17/**"
+    ],
+    "acceptance_gates": [
+     "Injected failures in each rail fail CI semantics",
+     "jcode-tui deterministic tests run rather than compile-only"
+    ],
+    "evidence": [
+     "workflow diff",
+     "local/actionlint validation",
+     "failure-injection proof"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   },
+   {
+    "id": "F18",
+    "content": "Build and launch the real Nix package on relevant pull requests without enabling non-hermetic package doCheck blindly.",
+    "kind": "implement",
+    "depends_on": [
+     "F15"
+    ],
+    "priority": 88,
+    "owned_paths": [
+     ".github/workflows/nix.yml",
+     "flake.nix",
+     "nix/**",
+     "docs/fork/ideal-base/evidence/F18/**"
+    ],
+    "acceptance_gates": [
+     "Relevant path changes run nix build",
+     "result/bin/jcode --version succeeds"
+    ],
+    "evidence": [
+     "Nix build log",
+     "packaged version output"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   },
+   {
+    "id": "F19",
+    "content": "Package and verify mobile static assets from an executable-adjacent or declared share path outside the source checkout.",
+    "kind": "implement",
+    "depends_on": [
+     "F18"
+    ],
+    "priority": 84,
+    "owned_paths": [
+     "nix/**",
+     "src/cli/commands/mobile_server.rs",
+     "web/jcode-mobile/**",
+     "scripts/check_web_mobile*",
+     "docs/fork/ideal-base/evidence/F19/**"
+    ],
+    "acceptance_gates": [
+     "Installed binary outside checkout serves index.html",
+     "CWD fallback cannot mask missing packaged assets"
+    ],
+    "evidence": [
+     "installed-package fixture",
+     "HTTP response proof"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   },
+   {
+    "id": "F20",
+    "content": "Extend hermetic installer and Rust updater acquisition fixtures through real local daemon reload and rollback.",
+    "kind": "implement",
+    "depends_on": [
+     "F16",
+     "F19"
+    ],
+    "priority": 80,
+    "owned_paths": [
+     "tests/test_r10_release_acquisition.py",
+     "crates/jcode-app-core/src/update.rs",
+     "scripts/install.sh",
+     "docs/fork/ideal-base/evidence/F20/**"
+    ],
+    "acceptance_gates": [
+     "Checksum, interruption, invalid replacement, rollback, and exactly-once reload paths pass without network",
+     "Every failure preserves old runtime/channel pointers"
+    ],
+    "evidence": [
+     "local acquisition matrix",
+     "before/after channel manifests"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   },
+   {
+    "id": "F21",
+    "content": "Run the full deterministic CI/package/updater integration gate from clean state twice.",
+    "kind": "verify",
+    "depends_on": [
+     "F17",
+     "F18",
+     "F19",
+     "F20"
+    ],
+    "priority": 70,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/F21/**"
+    ],
+    "acceptance_gates": [
+     "All required suites, Nix build, installed assets, and updater matrix pass twice at one commit"
+    ],
+    "evidence": [
+     "two-run manifest",
+     "residue and source identity report"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W3"
+   }
+  ],
+  "W4": [
+   {
+    "id": "F22",
+    "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
+    "kind": "implement",
+    "depends_on": [],
+    "priority": 100,
+    "owned_paths": [
+     ".cargo/audit.toml",
+     "docs/SECURITY_DEPENDENCIES.md",
+     ".github/workflows/security.yml",
+     ".github/workflows/release.yml",
+     "docs/fork/ideal-base/evidence/F22/**"
+    ],
+    "acceptance_gates": [
+     "Expired ignore fails policy",
+     "Homebrew path uses pinned known_hosts and no StrictHostKeyChecking=no"
+    ],
+    "evidence": [
+     "policy fixtures",
+     "workflow validation"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   },
+   {
+    "id": "F23",
+    "content": "Add explicit downward quality targets and zero-growth critical-path budgets without demanding an all-at-once cleanup.",
+    "kind": "implement",
+    "depends_on": [],
+    "priority": 95,
+    "owned_paths": [
+     "scripts/*budget*",
+     ".github/workflows/fork-ci.yml",
+     "docs/fork/ideal-base/evidence/F23/**"
+    ],
+    "acceptance_gates": [
+     "New critical-path panic/swallow/oversize debt fails",
+     "Repository debt trend is reported and cannot increase"
+    ],
+    "evidence": [
+     "budget fixtures",
+     "trend report"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   },
+   {
+    "id": "F24",
+    "content": "Pin compatibility build inputs and emit verifiable source/version provenance and SBOM for the declared reproducible artifact subset.",
+    "kind": "implement",
+    "depends_on": [
+     "F21",
+     "F22"
+    ],
+    "priority": 90,
+    "owned_paths": [
+     "nix/**",
+     "scripts/build_linux_compat.sh",
+     ".github/workflows/release.yml",
+     "crates/jcode-build-meta/**",
+     "docs/fork/ideal-base/evidence/F24/**"
+    ],
+    "acceptance_gates": [
+     "Two clean builds match within the declared reproducible scope",
+     "Artifacts expose verifiable provenance and SBOM"
+    ],
+    "evidence": [
+     "clean-build comparison",
+     "provenance/SBOM verification"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   },
+   {
+    "id": "F25",
+    "content": "Centralize socket/metadata cleanup; diagnose and quarantine malformed swarm state; bound terminal control-log retention.",
+    "kind": "implement",
+    "depends_on": [],
+    "priority": 88,
+    "owned_paths": [
+     "crates/jcode-app-core/src/server/socket.rs",
+     "crates/jcode-app-core/src/server/lifecycle.rs",
+     "crates/jcode-app-core/src/server/swarm_persistence.rs",
+     "docs/fork/ideal-base/evidence/F25/**"
+    ],
+    "acceptance_gates": [
+     "Live listener preserves all sidecars",
+     "Stale cleanup removes all sidecars/registry metadata",
+     "Malformed state warns and quarantines",
+     "Terminal logs obey retention"
+    ],
+    "evidence": [
+     "sidecar matrix",
+     "corruption fixtures",
+     "retention fixtures"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   },
+   {
+    "id": "F26",
+    "content": "Sweep dead active PID markers at startup/periodically and make telemetry active-session markers process-liveness aware; remove the uncompiled duplicate after equivalence review.",
+    "kind": "implement",
+    "depends_on": [],
+    "priority": 86,
+    "owned_paths": [
+     "crates/jcode-storage/src/active_pids.rs",
+     "crates/jcode-base/src/session.rs",
+     "crates/jcode-telemetry-core/src/state_support.rs",
+     "crates/jcode-app-core/src/telemetry_state.rs",
+     "docs/fork/ideal-base/evidence/F26/**"
+    ],
+    "acceptance_gates": [
+     "Dead markers without session JSON disappear at startup",
+     "Only live PID telemetry markers count",
+     "Full build proves duplicate removal safe"
+    ],
+    "evidence": [
+     "marker fixture matrix",
+     "equivalence review",
+     "build/tests"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   },
+   {
+    "id": "F27",
+    "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
+    "kind": "verify",
+    "depends_on": [
+     "F22",
+     "F23",
+     "F24",
+     "F25",
+     "F26"
+    ],
+    "priority": 70,
+    "owned_paths": [
+     "docs/fork/ideal-base/reviews/**",
+     "docs/fork/ideal-base/evidence/F27/**"
+    ],
+    "acceptance_gates": [
+     "No critical policy, provenance, durable-state, marker, or cleanup gap remains"
+    ],
+    "evidence": [
+     "independent hardening review",
+     "combined validation report"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   }
+  ],
+  "W5": [
+   {
+    "id": "G01",
+    "content": "Build/smoke aarch64-linux or explicitly downgrade its advertised support to best-effort.",
+    "kind": "verify",
+    "depends_on": [],
+    "priority": 100,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/G01/**"
+    ],
+    "authorization": "platform capacity or documentation-only downgrade",
+    "acceptance_gates": [
+     "Accepted build/smoke evidence or explicit support downgrade"
+    ],
+    "evidence": [
+     "platform result"
+    ],
+    "review_model": "opus",
+    "class": "gated",
+    "parent": "W5"
+   },
+   {
+    "id": "G02",
+    "content": "Run authorized provider-doctor minimal tier and fresh full pre-release catalog tier.",
+    "kind": "verify",
+    "depends_on": [],
+    "priority": 95,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/G02/**"
+    ],
+    "authorization": "live provider credentials, network, and spend",
+    "acceptance_gates": [
+     "Fresh catalog coverage or authorization_blocked with named next action"
+    ],
+    "evidence": [
+     "redacted provider-doctor ledger"
+    ],
+    "review_model": "opus",
+    "class": "gated",
+    "parent": "W5"
+   },
+   {
+    "id": "G03",
+    "content": "Run mobile/iOS simulator or device attach validation after local gateway fixtures remain green.",
+    "kind": "verify",
+    "depends_on": [],
+    "priority": 90,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/G03/**"
+    ],
+    "authorization": "Apple platform/signing/device access",
+    "acceptance_gates": [
+     "Attach lifecycle passes or authorization_blocked with named next action"
+    ],
+    "evidence": [
+     "simulator/device result"
+    ],
+    "review_model": "opus",
+    "class": "gated",
+    "parent": "W5"
+   },
+   {
+    "id": "G04",
+    "content": "Run scheduled Windows and FreeBSD compile/install smokes if those surfaces remain advertised.",
+    "kind": "verify",
+    "depends_on": [],
+    "priority": 85,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/G04/**"
+    ],
+    "authorization": "platform runners or support downgrade",
+    "acceptance_gates": [
+     "Scheduled smoke evidence or explicit support disposition"
+    ],
+    "evidence": [
+     "platform result"
+    ],
+    "review_model": "opus",
+    "class": "gated",
+    "parent": "W5"
+   },
+   {
+    "id": "G05",
+    "content": "Run disposable draft-release acquisition and live updater smoke without publishing a public release.",
+    "kind": "verify",
+    "depends_on": [],
+    "priority": 80,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/G05/**"
+    ],
+    "authorization": "disposable credentials/assets and network release API",
+    "acceptance_gates": [
+     "Draft acquisition/update succeeds and cleans up, or authorization_blocked"
+    ],
+    "evidence": [
+     "redacted draft-release ledger"
+    ],
+    "review_model": "opus",
+    "class": "gated",
+    "parent": "W5"
+   },
+   {
+    "id": "S01",
+    "content": "Run the complete deterministic ideal-base matrix twice from clean state at one fixed commit and prove zero residue.",
+    "kind": "verify",
+    "depends_on": [
+     "F21",
+     "F27"
+    ],
+    "priority": 75,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/S01/**"
+    ],
+    "acceptance_gates": [
+     "All A0-A7 deterministic gates pass twice",
+     "Exact source/runtime identity recorded",
+     "Zero owned residue"
+    ],
+    "evidence": [
+     "two-run signoff package",
+     "SHA256SUMS"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W5"
+   },
+   {
+    "id": "S02",
+    "content": "Perform independent adversarial final review of the exact signoff commit, graph coverage, evidence, and external-gate honesty.",
+    "kind": "verify",
+    "depends_on": [
+     "S01",
+     "G01",
+     "G02",
+     "G03",
+     "G04",
+     "G05"
+    ],
+    "priority": 65,
+    "owned_paths": [
+     "docs/fork/ideal-base/reviews/**"
+    ],
+    "acceptance_gates": [
+     "No unresolved blocker omission, false pass, material mis-ranking, or stale evidence"
+    ],
+    "evidence": [
+     "exact-commit independent review"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W5"
+   },
+   {
+    "id": "S03",
+    "content": "Synthesize the final ideal-base disposition; hand checkpoint content to the coordinator for atomic state update and local commit without pushing.",
+    "kind": "synthesize",
+    "depends_on": [
+     "S02"
+    ],
+    "priority": 50,
+    "owned_paths": [
+     "docs/fork/ideal-base/evidence/S03/**"
+    ],
+    "acceptance_gates": [
+     "Every mandatory node accepted",
+     "Every gated node accepted or authorization_blocked",
+     "Worktree clean after local signoff commit"
+    ],
+    "evidence": [
+     "final disposition",
+     "commit and clean-state proof"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W5"
+   }
+  ]
+ },
+ "all_nodes": [
+  {
+   "id": "W0.1",
+   "content": "Revalidate Git, worktree, runtime-channel, selfdev, protected hash, archive, and authorization facts against BASELINE.md.",
+   "kind": "explore",
+   "depends_on": [],
+   "priority": 100,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/W0.1/**"
+   ],
+   "acceptance_gates": [
+    "python3 scripts/ideal_base_railway.py check",
+    "git status --short",
+    "git worktree list --porcelain",
+    "sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
+   ],
+   "evidence": [
+    "baseline command transcript",
+    "drift classification"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W0"
+  },
+  {
+   "id": "W0.2",
+   "content": "Re-audit the source seams named by the graph and inject any source-confirmed missing work before implementation.",
+   "kind": "explore",
+   "depends_on": [
+    "W0.1"
+   ],
+   "priority": 95,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/W0.2/**"
+   ],
+   "acceptance_gates": [
+    "Every retained seam cites current file:symbol evidence",
+    "Every removed seam has a source-backed stale/duplicate explanation"
+   ],
+   "evidence": [
+    "source census",
+    "gap-node list"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W0"
+  },
+  {
+   "id": "W0.3",
+   "content": "Seed or resume the deep task graph from validated WORK_GRAPH.json and STATE.json; verify ownership and dependency projections.",
+   "kind": "verify",
+   "depends_on": [
+    "W0.2"
+   ],
+   "priority": 90,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/W0.3/**"
+   ],
+   "acceptance_gates": [
+    "python3 scripts/ideal_base_railway.py next --json",
+    "Deep task graph accepts the projected runnable wave"
+   ],
+   "evidence": [
+    "seed payload",
+    "graph status snapshot"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W0"
+  },
+  {
+   "id": "F01",
+   "content": "Design one testable shutdown coordinator and server activity-lease authority, including work-class census and exit reasons.",
+   "kind": "explore",
+   "depends_on": [],
+   "priority": 100,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F01/**"
+   ],
+   "acceptance_gates": [
+    "Pure lifecycle state model covers every normal exit and active work class",
+    "Independent architecture critique finds no owner/lease gap"
+   ],
+   "evidence": [
+    "design record",
+    "source ownership census"
+   ],
+   "review_model": "fable+opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F02",
+   "content": "Implement work-aware activity leases and route normal daemon exits through the bounded shutdown coordinator.",
+   "kind": "implement",
+   "depends_on": [
+    "F01"
+   ],
+   "priority": 95,
+   "owned_paths": [
+    "crates/jcode-app-core/src/server/lifecycle.rs",
+    "crates/jcode-app-core/src/server.rs",
+    "crates/jcode-app-core/src/server/**/*.rs",
+    "crates/jcode-base/src/background.rs",
+    "crates/jcode-base/src/mcp/manager.rs",
+    "crates/jcode-base/src/mcp/pool.rs",
+    "crates/jcode-core/src/activity.rs",
+    "crates/jcode-core/src/lib.rs",
+    "crates/jcode-app-core/src/tool/mod.rs",
+    "src/cli/dispatch.rs",
+    "docs/fork/ideal-base/evidence/F02/**"
+   ],
+   "acceptance_gates": [
+    "Idle exit requires zero clients and zero active leases",
+    "SIGTERM, reload, persistent idle, and temporary-owner exits invoke bounded shutdown"
+   ],
+   "evidence": [
+    "focused tests",
+    "exit-mode process transcript"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F03",
+   "content": "Verify activity leases across provider fixtures, restored/headless turns, debug jobs, background jobs, MCP calls, and swarm waiters.",
+   "kind": "verify",
+   "depends_on": [
+    "F02"
+   ],
+   "priority": 90,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F03/**",
+    "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs",
+    "crates/jcode-app-core/src/server.rs",
+    "crates/jcode-app-core/src/server/shutdown.rs",
+    "crates/jcode-app-core/src/server/debug_command_exec.rs",
+    "crates/jcode-app-core/src/server/debug_help.rs"
+   ],
+   "acceptance_gates": [
+    "Short-timeout no-provider fixtures remain alive for each lease class and exit after release",
+    "No socket/process residue"
+   ],
+   "evidence": [
+    "lease-class matrix",
+    "residue census"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F04",
+   "content": "Implement an atomic serialized TaskStatusStore for background tasks; surface persistence failures and preserve terminal precedence.",
+   "kind": "implement",
+   "depends_on": [
+    "F02"
+   ],
+   "priority": 94,
+   "owned_paths": [
+    "crates/jcode-base/src/background.rs",
+    "crates/jcode-base/src/background/**",
+    "docs/fork/ideal-base/evidence/F04/**"
+   ],
+   "acceptance_gates": [
+    "No direct non-atomic status-file writes remain",
+    "Live task is not removed before terminal persistence succeeds or is durably recoverable",
+    "Status-serialization and write failures are surfaced, not swallowed"
+   ],
+   "evidence": [
+    "status store tests",
+    "write-failure injection"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F05",
+   "content": "Verify background status concurrency, crash interruption, malformed files, orphan reconciliation, and cleanup.",
+   "kind": "verify",
+   "depends_on": [
+    "F04"
+   ],
+   "priority": 89,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F05/**",
+    "crates/jcode-base/src/background/store.rs",
+    "crates/jcode-base/src/background/tests.rs",
+    "crates/jcode-base/src/background.rs"
+   ],
+   "acceptance_gates": [
+    "Concurrent progress/delivery/completion never tears JSON or overwrites terminal truth",
+    "Startup reconciles malformed/orphaned state without false success"
+   ],
+   "evidence": [
+    "race matrix",
+    "crash/restart transcript"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F06",
+   "content": "Implement explicit pooled MCP child ownership, bounded pre-exit reap, and mcp-serve owner-PID self-liveness.",
+   "kind": "implement",
+   "depends_on": [
+    "F02",
+    "F03"
+   ],
+   "priority": 93,
+   "owned_paths": [
+    "crates/jcode-base/src/mcp/**",
+    "crates/jcode-app-core/src/server/**",
+    "src/cli/mcp_serve.rs",
+    "src/cli/dispatch.rs",
+    "docs/fork/ideal-base/evidence/F06/**"
+   ],
+   "acceptance_gates": [
+    "Pooled children receive the owning daemon PID",
+    "Shutdown coordinator disconnects and reaps all tracked children within grace"
+   ],
+   "evidence": [
+    "PID ownership tests",
+    "exit-mode process tree logs"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F07",
+   "content": "Implement dead and hung pooled MCP detection, cache eviction, cooldown, and one bounded reconnect.",
+   "kind": "implement",
+   "depends_on": [
+    "F06"
+   ],
+   "priority": 88,
+   "owned_paths": [
+    "crates/jcode-base/src/mcp/client.rs",
+    "crates/jcode-base/src/mcp/pool.rs",
+    "crates/jcode-base/src/mcp/manager.rs",
+    "docs/fork/ideal-base/evidence/F07/**"
+   ],
+   "acceptance_gates": [
+    "Killed child is detected before request timeout",
+    "Hung child is detected by health deadline",
+    "Exactly one reconnect succeeds without daemon reload"
+   ],
+   "evidence": [
+    "killed-child fixture",
+    "hung-child fixture",
+    "reconnect/cooldown assertions"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F08",
+   "content": "Run the integrated MCP and lifecycle adversarial gate across all exit, kill, hang, reconnect, and residue cases.",
+   "kind": "verify",
+   "depends_on": [
+    "F03",
+    "F05",
+    "F07"
+   ],
+   "priority": 80,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F08/**"
+   ],
+   "acceptance_gates": [
+    "Zero surviving owned descendants in every exit mode",
+    "All activity and status durability matrices pass repeatedly"
+   ],
+   "evidence": [
+    "integrated matrix",
+    "process/socket/file residue report"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "R01",
+   "content": "Repair the selfdev reload/build subsystem (evidence/reload-incident-2026-07-18): (a) atomic publishing: copy, never hard-link, into immutable versions/<v>; stage and smoke-test in a temp path then rename atomically; a failed publish leaves no partial artifact; (b) explicit reload target selection: one shared target-resolution function across server reload, debug reload, and the selfdev tool; refuse loudly, never silently re-exec the old hash, when no valid newer candidate exists; machine-readable target-decision log; (c) client-to-agent identity binding across exec handoff: durable alias mapping recorded during resume, debug and selfdev commands resolve through it, recovery-intent eligibility keyed on live attached connections, and stale-session errors name the resolved active target.",
+   "kind": "implement",
+   "depends_on": [
+    "F03",
+    "F06"
+   ],
+   "priority": 87,
+   "owned_paths": [
+    "crates/jcode-app-core/src/server/client_lifecycle.rs",
+    "crates/jcode-app-core/src/server/client_session.rs",
+    "crates/jcode-app-core/src/server/debug_command_exec.rs",
+    "crates/jcode-app-core/src/server/reload.rs",
+    "crates/jcode-app-core/src/server/reload_recovery.rs",
+    "crates/jcode-app-core/src/server/util.rs",
+    "crates/jcode-build-support/src/lib.rs",
+    "crates/jcode-build-support/src/paths.rs",
+    "docs/fork/ideal-base/evidence/R01/**",
+    "docs/fork/ideal-base/evidence/R02/**",
+    "src/cli/commands.rs"
+   ],
+   "acceptance_gates": [
+    "Concurrent cargo rebuild cannot corrupt a published version artifact",
+    "Forced reload onto a stale shared-server channel refuses or publishes, never silently re-execs the old hash",
+    "A failed publish leaves no partial versions/<v> directory",
+    "A debug command from a reconnected TUI resolves to its resumed agent",
+    "An attached idle TUI session receives a recovery intent across reload",
+    "A stale session id error reports the resolved active target"
+   ],
+   "evidence": [
+    "docs/fork/ideal-base/evidence/R01"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "R03",
+   "content": "Make TUI terminal-mode ownership explicit across exec handoff: keep the runtime guard armed until exec has provably replaced the process, install an early successor guard that owns inherited modes before any fallible init, and make signal-path cleanup restore all modes (kitty keyboard pop, SGR mouse off, focus off, bracketed paste off, raw mode).",
+   "kind": "implement",
+   "depends_on": [
+    "F03",
+    "F06"
+   ],
+   "priority": 87,
+   "owned_paths": [
+    "src/cli/terminal.rs",
+    "src/cli/hot_exec.rs",
+    "src/cli/tui_launch.rs",
+    "crates/jcode-tui/src/tui/mod.rs",
+    "docs/fork/ideal-base/evidence/R03/**"
+   ],
+   "acceptance_gates": [
+    "An exec failure after handoff restores all terminal modes",
+    "A successor init failure before guard construction restores inherited modes",
+    "Signal-path cleanup emits all four protocol disables"
+   ],
+   "evidence": [
+    "docs/fork/ideal-base/evidence/R03"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W1"
+  },
+  {
+   "id": "F09",
+   "content": "Add timestamped selfdev pending-activation reconciliation using initiating-session liveness and candidate identity.",
+   "kind": "implement",
+   "depends_on": [],
+   "priority": 100,
+   "owned_paths": [
+    "crates/jcode-app-core/src/tool/selfdev/**",
+    "crates/jcode-selfdev-types/src/**",
+    "crates/jcode-build-support/src/**",
+    "docs/fork/ideal-base/evidence/F09/**"
+   ],
+   "acceptance_gates": [
+    "Dead session plus valid candidate completes safely",
+    "Missing/bad candidate rolls back",
+    "Live canary is preserved"
+   ],
+   "evidence": [
+    "manifest fixture matrix"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
+   "id": "F10",
+   "content": "Persist disconnect-cleanup intent before live-session removal; retry after abort and reconcile at startup.",
+   "kind": "implement",
+   "depends_on": [],
+   "priority": 98,
+   "owned_paths": [
+    "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs",
+    "crates/jcode-app-core/src/server/**",
+    "crates/jcode-base/src/session.rs",
+    "docs/fork/ideal-base/evidence/F10/**"
+   ],
+   "acceptance_gates": [
+    "Agent-lock timeout leaves a durable cleanup record",
+    "Restart marks session terminal and clears the record"
+   ],
+   "evidence": [
+    "held-lock fixture",
+    "restart reconciliation transcript"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
+   "id": "F11",
+   "content": "Independently verify activation and disconnect reconciliation under crash, restart, missing files, and live-owner cases.",
+   "kind": "verify",
+   "depends_on": [
+    "F09",
+    "F10"
+   ],
+   "priority": 90,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F11/**"
+   ],
+   "acceptance_gates": [
+    "All recovery matrices pass with no false rollback or fabricated terminal state"
+   ],
+   "evidence": [
+    "combined recovery matrix"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
+   "id": "F12",
+   "content": "Add configurable global caps and observability for shared MCP children and live background tasks.",
+   "kind": "implement",
+   "depends_on": [
+    "F11"
+   ],
+   "priority": 85,
+   "owned_paths": [
+    "crates/jcode-base/src/mcp/**",
+    "crates/jcode-base/src/background.rs",
+    "crates/jcode-config-types/src/**",
+    "docs/fork/ideal-base/evidence/F12/**"
+   ],
+   "acceptance_gates": [
+    "Low test caps bound process/task/file counts",
+    "Refusal is explicit",
+    "Capacity releases after terminal cleanup"
+   ],
+   "evidence": [
+    "cap overflow fixtures",
+    "metrics/status output"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
+   "id": "F13",
+   "content": "Verify caps under concurrent starts, failures, cancellation, and restart reconciliation.",
+   "kind": "verify",
+   "depends_on": [
+    "F12"
+   ],
+   "priority": 80,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F13/**"
+   ],
+   "acceptance_gates": [
+    "No over-admission or leaked capacity under concurrency",
+    "Restart does not double-count stale owners"
+   ],
+   "evidence": [
+    "concurrency cap matrix"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
+   "id": "F14",
+   "content": "Build and run the complete no-provider real-process lifecycle matrix for all W1 and W2 invariants.",
+   "kind": "verify",
+   "depends_on": [
+    "F08",
+    "F13"
+   ],
+   "priority": 70,
+   "owned_paths": [
+    "tests/e2e/**",
+    "scripts/**/*lifecycle*",
+    "docs/fork/ideal-base/evidence/F14/**"
+   ],
+   "acceptance_gates": [
+    "Repeated clean runs cover cancel, exit, reload, crash, restart, recovery, and residue",
+    "No provider/network dependency"
+   ],
+   "evidence": [
+    "process matrix harness",
+    "two clean repeated runs"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
+   "id": "F15",
+   "content": "Audit CI test hermeticity and classify every ignored test as deterministic, live, GUI, platform, helper, or performance.",
+   "kind": "explore",
+   "depends_on": [],
+   "priority": 100,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F15/**"
+   ],
+   "acceptance_gates": [
+    "Every compile-only/advisory decision has a source-backed reason and exit condition",
+    "No unclassified ignore remains"
+   ],
+   "evidence": [
+    "test census",
+    "flakiness root-cause table"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F16",
+   "content": "Promote hermetic real-process cancellation, reload, client re-exec, retry, and restart cases into required suites.",
+   "kind": "implement",
+   "depends_on": [
+    "F14",
+    "F15"
+   ],
+   "priority": 95,
+   "owned_paths": [
+    "tests/e2e/**",
+    "crates/jcode-app-core/src/**/*test*",
+    "docs/fork/ideal-base/evidence/F16/**"
+   ],
+   "acceptance_gates": [
+    "No required lifecycle case remains ignored for build-layout convenience",
+    "Fixtures use disposable home/runtime and leave zero residue"
+   ],
+   "evidence": [
+    "promoted test list",
+    "required-suite transcript"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F17",
+   "content": "Make intended Linux, macOS, app-core, and deterministic TUI test rails blocking on push/PR.",
+   "kind": "implement",
+   "depends_on": [
+    "F16"
+   ],
+   "priority": 90,
+   "owned_paths": [
+    ".github/workflows/fork-ci.yml",
+    ".github/scripts/**",
+    "docs/fork/ideal-base/evidence/F17/**"
+   ],
+   "acceptance_gates": [
+    "Injected failures in each rail fail CI semantics",
+    "jcode-tui deterministic tests run rather than compile-only"
+   ],
+   "evidence": [
+    "workflow diff",
+    "local/actionlint validation",
+    "failure-injection proof"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F18",
+   "content": "Build and launch the real Nix package on relevant pull requests without enabling non-hermetic package doCheck blindly.",
+   "kind": "implement",
+   "depends_on": [
+    "F15"
+   ],
+   "priority": 88,
+   "owned_paths": [
+    ".github/workflows/nix.yml",
+    "flake.nix",
+    "nix/**",
+    "docs/fork/ideal-base/evidence/F18/**"
+   ],
+   "acceptance_gates": [
+    "Relevant path changes run nix build",
+    "result/bin/jcode --version succeeds"
+   ],
+   "evidence": [
+    "Nix build log",
+    "packaged version output"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F19",
+   "content": "Package and verify mobile static assets from an executable-adjacent or declared share path outside the source checkout.",
+   "kind": "implement",
+   "depends_on": [
+    "F18"
+   ],
+   "priority": 84,
+   "owned_paths": [
+    "nix/**",
+    "src/cli/commands/mobile_server.rs",
+    "web/jcode-mobile/**",
+    "scripts/check_web_mobile*",
+    "docs/fork/ideal-base/evidence/F19/**"
+   ],
+   "acceptance_gates": [
+    "Installed binary outside checkout serves index.html",
+    "CWD fallback cannot mask missing packaged assets"
+   ],
+   "evidence": [
+    "installed-package fixture",
+    "HTTP response proof"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F20",
+   "content": "Extend hermetic installer and Rust updater acquisition fixtures through real local daemon reload and rollback.",
+   "kind": "implement",
+   "depends_on": [
+    "F16",
+    "F19"
+   ],
+   "priority": 80,
+   "owned_paths": [
+    "tests/test_r10_release_acquisition.py",
+    "crates/jcode-app-core/src/update.rs",
+    "scripts/install.sh",
+    "docs/fork/ideal-base/evidence/F20/**"
+   ],
+   "acceptance_gates": [
+    "Checksum, interruption, invalid replacement, rollback, and exactly-once reload paths pass without network",
+    "Every failure preserves old runtime/channel pointers"
+   ],
+   "evidence": [
+    "local acquisition matrix",
+    "before/after channel manifests"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F21",
+   "content": "Run the full deterministic CI/package/updater integration gate from clean state twice.",
+   "kind": "verify",
+   "depends_on": [
+    "F17",
+    "F18",
+    "F19",
+    "F20"
+   ],
+   "priority": 70,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/F21/**"
+   ],
+   "acceptance_gates": [
+    "All required suites, Nix build, installed assets, and updater matrix pass twice at one commit"
+   ],
+   "evidence": [
+    "two-run manifest",
+    "residue and source identity report"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W3"
+  },
+  {
+   "id": "F22",
+   "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
+   "kind": "implement",
+   "depends_on": [],
+   "priority": 100,
+   "owned_paths": [
+    ".cargo/audit.toml",
+    "docs/SECURITY_DEPENDENCIES.md",
+    ".github/workflows/security.yml",
+    ".github/workflows/release.yml",
+    "docs/fork/ideal-base/evidence/F22/**"
+   ],
+   "acceptance_gates": [
+    "Expired ignore fails policy",
+    "Homebrew path uses pinned known_hosts and no StrictHostKeyChecking=no"
+   ],
+   "evidence": [
+    "policy fixtures",
+    "workflow validation"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
+  },
+  {
+   "id": "F23",
+   "content": "Add explicit downward quality targets and zero-growth critical-path budgets without demanding an all-at-once cleanup.",
+   "kind": "implement",
+   "depends_on": [],
+   "priority": 95,
+   "owned_paths": [
+    "scripts/*budget*",
+    ".github/workflows/fork-ci.yml",
+    "docs/fork/ideal-base/evidence/F23/**"
+   ],
+   "acceptance_gates": [
+    "New critical-path panic/swallow/oversize debt fails",
+    "Repository debt trend is reported and cannot increase"
+   ],
+   "evidence": [
+    "budget fixtures",
+    "trend report"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
+  },
+  {
+   "id": "F24",
+   "content": "Pin compatibility build inputs and emit verifiable source/version provenance and SBOM for the declared reproducible artifact subset.",
+   "kind": "implement",
+   "depends_on": [
+    "F21",
+    "F22"
+   ],
+   "priority": 90,
+   "owned_paths": [
+    "nix/**",
+    "scripts/build_linux_compat.sh",
+    ".github/workflows/release.yml",
+    "crates/jcode-build-meta/**",
+    "docs/fork/ideal-base/evidence/F24/**"
+   ],
+   "acceptance_gates": [
+    "Two clean builds match within the declared reproducible scope",
+    "Artifacts expose verifiable provenance and SBOM"
+   ],
+   "evidence": [
+    "clean-build comparison",
+    "provenance/SBOM verification"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
+  },
+  {
+   "id": "F25",
+   "content": "Centralize socket/metadata cleanup; diagnose and quarantine malformed swarm state; bound terminal control-log retention.",
+   "kind": "implement",
+   "depends_on": [],
+   "priority": 88,
+   "owned_paths": [
+    "crates/jcode-app-core/src/server/socket.rs",
+    "crates/jcode-app-core/src/server/lifecycle.rs",
+    "crates/jcode-app-core/src/server/swarm_persistence.rs",
+    "docs/fork/ideal-base/evidence/F25/**"
+   ],
+   "acceptance_gates": [
+    "Live listener preserves all sidecars",
+    "Stale cleanup removes all sidecars/registry metadata",
+    "Malformed state warns and quarantines",
+    "Terminal logs obey retention"
+   ],
+   "evidence": [
+    "sidecar matrix",
+    "corruption fixtures",
+    "retention fixtures"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
+  },
+  {
+   "id": "F26",
+   "content": "Sweep dead active PID markers at startup/periodically and make telemetry active-session markers process-liveness aware; remove the uncompiled duplicate after equivalence review.",
+   "kind": "implement",
+   "depends_on": [],
+   "priority": 86,
+   "owned_paths": [
+    "crates/jcode-storage/src/active_pids.rs",
+    "crates/jcode-base/src/session.rs",
+    "crates/jcode-telemetry-core/src/state_support.rs",
+    "crates/jcode-app-core/src/telemetry_state.rs",
+    "docs/fork/ideal-base/evidence/F26/**"
+   ],
+   "acceptance_gates": [
+    "Dead markers without session JSON disappear at startup",
+    "Only live PID telemetry markers count",
+    "Full build proves duplicate removal safe"
+   ],
+   "evidence": [
+    "marker fixture matrix",
+    "equivalence review",
+    "build/tests"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
+  },
+  {
+   "id": "F27",
+   "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
+   "kind": "verify",
+   "depends_on": [
+    "F22",
+    "F23",
+    "F24",
+    "F25",
+    "F26"
+   ],
+   "priority": 70,
+   "owned_paths": [
+    "docs/fork/ideal-base/reviews/**",
+    "docs/fork/ideal-base/evidence/F27/**"
+   ],
+   "acceptance_gates": [
+    "No critical policy, provenance, durable-state, marker, or cleanup gap remains"
+   ],
+   "evidence": [
+    "independent hardening review",
+    "combined validation report"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
+  },
+  {
+   "id": "G01",
+   "content": "Build/smoke aarch64-linux or explicitly downgrade its advertised support to best-effort.",
+   "kind": "verify",
+   "depends_on": [],
+   "priority": 100,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/G01/**"
+   ],
+   "authorization": "platform capacity or documentation-only downgrade",
+   "acceptance_gates": [
+    "Accepted build/smoke evidence or explicit support downgrade"
+   ],
+   "evidence": [
+    "platform result"
+   ],
+   "review_model": "opus",
+   "class": "gated",
+   "parent": "W5"
+  },
+  {
+   "id": "G02",
+   "content": "Run authorized provider-doctor minimal tier and fresh full pre-release catalog tier.",
+   "kind": "verify",
+   "depends_on": [],
+   "priority": 95,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/G02/**"
+   ],
+   "authorization": "live provider credentials, network, and spend",
+   "acceptance_gates": [
+    "Fresh catalog coverage or authorization_blocked with named next action"
+   ],
+   "evidence": [
+    "redacted provider-doctor ledger"
+   ],
+   "review_model": "opus",
+   "class": "gated",
+   "parent": "W5"
+  },
+  {
+   "id": "G03",
+   "content": "Run mobile/iOS simulator or device attach validation after local gateway fixtures remain green.",
+   "kind": "verify",
+   "depends_on": [],
+   "priority": 90,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/G03/**"
+   ],
+   "authorization": "Apple platform/signing/device access",
+   "acceptance_gates": [
+    "Attach lifecycle passes or authorization_blocked with named next action"
+   ],
+   "evidence": [
+    "simulator/device result"
+   ],
+   "review_model": "opus",
+   "class": "gated",
+   "parent": "W5"
+  },
+  {
+   "id": "G04",
+   "content": "Run scheduled Windows and FreeBSD compile/install smokes if those surfaces remain advertised.",
+   "kind": "verify",
+   "depends_on": [],
+   "priority": 85,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/G04/**"
+   ],
+   "authorization": "platform runners or support downgrade",
+   "acceptance_gates": [
+    "Scheduled smoke evidence or explicit support disposition"
+   ],
+   "evidence": [
+    "platform result"
+   ],
+   "review_model": "opus",
+   "class": "gated",
+   "parent": "W5"
+  },
+  {
+   "id": "G05",
+   "content": "Run disposable draft-release acquisition and live updater smoke without publishing a public release.",
+   "kind": "verify",
+   "depends_on": [],
+   "priority": 80,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/G05/**"
+   ],
+   "authorization": "disposable credentials/assets and network release API",
+   "acceptance_gates": [
+    "Draft acquisition/update succeeds and cleans up, or authorization_blocked"
+   ],
+   "evidence": [
+    "redacted draft-release ledger"
+   ],
+   "review_model": "opus",
+   "class": "gated",
+   "parent": "W5"
+  },
+  {
+   "id": "S01",
+   "content": "Run the complete deterministic ideal-base matrix twice from clean state at one fixed commit and prove zero residue.",
+   "kind": "verify",
+   "depends_on": [
+    "F21",
+    "F27"
+   ],
+   "priority": 75,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/S01/**"
+   ],
+   "acceptance_gates": [
+    "All A0-A7 deterministic gates pass twice",
+    "Exact source/runtime identity recorded",
+    "Zero owned residue"
+   ],
+   "evidence": [
+    "two-run signoff package",
+    "SHA256SUMS"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W5"
+  },
+  {
+   "id": "S02",
+   "content": "Perform independent adversarial final review of the exact signoff commit, graph coverage, evidence, and external-gate honesty.",
+   "kind": "verify",
+   "depends_on": [
+    "S01",
+    "G01",
+    "G02",
+    "G03",
+    "G04",
+    "G05"
+   ],
+   "priority": 65,
+   "owned_paths": [
+    "docs/fork/ideal-base/reviews/**"
+   ],
+   "acceptance_gates": [
+    "No unresolved blocker omission, false pass, material mis-ranking, or stale evidence"
+   ],
+   "evidence": [
+    "exact-commit independent review"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W5"
+  },
+  {
+   "id": "S03",
+   "content": "Synthesize the final ideal-base disposition; hand checkpoint content to the coordinator for atomic state update and local commit without pushing.",
+   "kind": "synthesize",
+   "depends_on": [
+    "S02"
+   ],
+   "priority": 50,
+   "owned_paths": [
+    "docs/fork/ideal-base/evidence/S03/**"
+   ],
+   "acceptance_gates": [
+    "Every mandatory node accepted",
+    "Every gated node accepted or authorization_blocked",
+    "Worktree clean after local signoff commit"
+   ],
+   "evidence": [
+    "final disposition",
+    "commit and clean-state proof"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W5"
+  }
+ ],
+ "audit_coverage": [
+  {
+   "id": "A01",
+   "item": "Work-aware server activity and bounded shutdown authority",
+   "nodes": [
+    "F01",
+    "F02",
+    "F03"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A02",
+   "item": "Atomic serialized recoverable background-task status persistence",
+   "nodes": [
+    "F04",
+    "F05"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A03",
+   "item": "Pooled MCP child ownership and bounded reap",
+   "nodes": [
+    "F06"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A04",
+   "item": "Dead and hung MCP recovery",
+   "nodes": [
+    "F07",
+    "F08"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A05",
+   "item": "Selfdev pending-activation reconciliation",
+   "nodes": [
+    "F09",
+    "F11"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A06",
+   "item": "Durable disconnect cleanup reconciliation",
+   "nodes": [
+    "F10",
+    "F11"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A07",
+   "item": "Global MCP and background resource bounds",
+   "nodes": [
+    "F12",
+    "F13",
+    "F14"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A08",
+   "item": "Required repeated real-process lifecycle matrix",
+   "nodes": [
+    "F14",
+    "F16"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A09",
+   "item": "Blocking Linux test rail",
+   "nodes": [
+    "F17"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A10",
+   "item": "Blocking macOS test rail",
+   "nodes": [
+    "F17"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A11",
+   "item": "Executed deterministic TUI tests",
+   "nodes": [
+    "F17"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A12",
+   "item": "Real Nix package build and launch",
+   "nodes": [
+    "F18"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A13",
+   "item": "Installed mobile static assets",
+   "nodes": [
+    "F19"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A14",
+   "item": "Hermetic installer and updater acquisition fixtures",
+   "nodes": [
+    "F20",
+    "F21"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A15",
+   "item": "Ignored-test classification and CI hermeticity",
+   "nodes": [
+    "F15",
+    "F16",
+    "F21"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A16",
+   "item": "Security advisory expiry and strict Homebrew host identity",
+   "nodes": [
+    "F22"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A17",
+   "item": "Critical-path quality ratchets",
+   "nodes": [
+    "F23"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A18",
+   "item": "Pinned compatibility inputs, provenance, and SBOM",
+   "nodes": [
+    "F24"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A19",
+   "item": "Socket and durable swarm state hygiene",
+   "nodes": [
+    "F25",
+    "F27"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A20",
+   "item": "PID and telemetry liveness cleanup",
+   "nodes": [
+    "F26",
+    "F27"
+   ],
+   "class": "deterministic"
+  },
+  {
+   "id": "A21",
+   "item": "aarch64-linux build or support downgrade",
+   "nodes": [
+    "G01"
+   ],
+   "class": "gated"
+  },
+  {
+   "id": "A22",
+   "item": "Provider doctor and catalog validation",
+   "nodes": [
+    "G02"
+   ],
+   "class": "gated"
+  },
+  {
+   "id": "A23",
+   "item": "Mobile/iOS attach validation",
+   "nodes": [
+    "G03"
+   ],
+   "class": "gated"
+  },
+  {
+   "id": "A24",
+   "item": "Windows and FreeBSD scheduled smoke",
+   "nodes": [
+    "G04"
+   ],
+   "class": "gated"
+  },
+  {
+   "id": "A25",
+   "item": "Disposable draft-release and live updater smoke",
+   "nodes": [
+    "G05"
+   ],
+   "class": "gated"
+  }
+ ],
+ "coordinator_owned_paths": [
+  "docs/fork/ideal-base/STATE.json",
+  "docs/fork/ideal-base/DECISIONS.md"
+ ]
 }

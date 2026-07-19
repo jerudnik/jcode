@@ -411,3 +411,35 @@ the ECHILD fallback; both are F07/F08-window candidates.
 
 **Reopen trigger:** F08's integrated gate finding a descendant-survival
 case.
+
+## D020. Reload incident of 2026-07-18 21:38; repair nodes R01/R03 opened
+
+**Decision:** The attempted selfdev reload exposed three architectural faults,
+investigated read-only by three parallel `gpt-5.6-terra` sessions
+(`evidence/reload-incident-2026-07-18/`):
+
+1. `jcode server reload` never selects a binary; it re-execs whatever the
+   `shared-server` channel points at. Only `debug reload`/the selfdev tool
+   publish + smoke + repoint first. The signal's `hash=` is the *running*
+   build's compile-time hash (log noise, not a target).
+2. `install_binary_at_version` hard-links `target/selfdev/jcode` into the
+   "immutable" versions dir, so a concurrent cargo rebuild truncates the
+   published artifact through the shared inode (observed: zero-byte
+   `versions/a87c5f271/jcode`, smoke test EOF).
+3. Client identity is not bound to the resumed agent session across exec
+   handoff (debug commands route raw session ids against the in-memory map;
+   recovery eligibility keys on swarm `running` status, not live attachment),
+   and TUI terminal-mode ownership is disarmed before exec with no successor
+   guard (kitty/SGR-mouse left enabled: the red report-garbage screenshot).
+
+**Action:** Opened W1 repair nodes `R01` (atomic publish + explicit target
+selection + identity binding; merged because their owned paths overlap) and
+`R03` (terminal-mode ownership), both `depends_on` F03+F06, review by Opus
+per D017. Both are runnable now and context-disjoint from F07, which stays
+next for the MCP track.
+
+**Upstream note:** The user granted explicit license to rewrite inherited
+upstream subsystems for sanity rather than mirror them; the reload/build
+subsystem is the first beneficiary.
+
+**Reopen trigger:** F08's integrated gate finding a reload-path regression.
