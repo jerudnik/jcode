@@ -144,18 +144,18 @@ pub async fn run_tui_client(
     let result = app.run_remote(terminal, remote_working_dir).await;
 
     // On the error path, `?` returns here while `tui_runtime` is still alive, so
-    // its `Drop` guarantees the terminal is restored (issue #214). On the happy
-    // path we hand the run result to the guard so it can skip the restore when
-    // we are about to exec a follow-up process.
+    // its `Drop` guarantees the terminal is restored (issue #214).
     let run_result = result?;
 
-    tui_runtime.finish_for_run_result(&run_result, false);
-
     if let Some(code) = run_result.exit_code {
+        tui_runtime.finish(true);
         std::process::exit(code);
     }
 
-    execute_requested_action(&run_result)?;
+    // Keep the runtime guard armed until exec has actually replaced us. An exec
+    // error returns through the closure and triggers the guard's full cleanup.
+    tui_runtime
+        .finish_for_run_result(&run_result, false, || execute_requested_action(&run_result))?;
 
     if !has_requested_action(&run_result)
         && let Some(ref session_id) = run_result.session_id
