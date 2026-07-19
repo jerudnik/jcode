@@ -458,7 +458,7 @@ fn write_terminal_protocol_cleanup(
     first_error.map_or(Ok(()), Err)
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, test))]
 fn write_signal_terminal_cleanup(mut writer: impl Write) -> io::Result<()> {
     let protocol_result = write_terminal_protocol_cleanup(
         &mut writer,
