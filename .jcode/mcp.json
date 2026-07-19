@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "jcode": {
-      "command": "jcode",
-      "args": ["mcp-serve"]
-    }
-  }
-}
