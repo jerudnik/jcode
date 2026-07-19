@@ -86,3 +86,4 @@ Additional broader test observations, unrelated to R03:
 
 - `bd3c4a300 fix(tui): retain terminal ownership across exec`
 - `579d2f072 chore(tui): scope signal capture helper to tests`
+- `a0676f781 test(tui): exercise production signal restore path`
