@@ -45,3 +45,26 @@ Monitoring sub-orchestrator subtrees (learned 2026-07-10, avoid rediscovering):
   have BOTH been silent for ~20+ minutes; a DM interrupts its turn.
 - Design prompts so progress is observable: require a shared ledger file with
   per-worker sections and commit-as-you-go, then monitoring is `ls` + `git log`.
+
+## Coordinator discipline (from the 2026-07-18 ideal-base incidents)
+
+- **Do not mutate the tree while workers own paths in it.** While a plan is
+  running, the coordinator writes only coordinator-owned files (state
+  checkpoints, decision logs). Imperative edits or commands against
+  worker-owned paths mid-run caused the frozen-tree mutation and stash
+  collisions in the F01-era meltdown.
+- **Seed small graphs; encode the review loop in the graph.** Prefer
+  `implement -> review` chains with `depends_on` over stopping between
+  nodes. A FAIL review should become an `inject_gap` fix node plus a re-run
+  of the same review node, not a coordinator takeover.
+- **Expansion is capped in the engine** (depth 2, 24 children per
+  expansion). If a subtask shares most of its context with its siblings,
+  do it directly in one pass instead of decomposing; fan out only
+  context-disjoint work.
+- **Check for stale plan items before seeding.** Accepted work can be
+  resurrected as queued seed copies after reloads; snapshot then
+  `swarm:clear_plan` when the plan does not match the durable checkpoint.
+- **Never drive `jcode debug` swarm commands at your own session** (the
+  debug command waits on the agent loop that is busy running it). Use the
+  native swarm tool (available via `.jcode/mcp.json` -> `jcode mcp-serve`),
+  or a dedicated headless driver session.
