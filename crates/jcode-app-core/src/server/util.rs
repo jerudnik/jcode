@@ -500,69 +500,7 @@ fn format_mtime(time: Option<SystemTime>) -> String {
 }
 
 fn newest_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
-    let candidate = newest_reload_candidate_inner(is_selfdev_session)?;
-    // On Linux a self-dev rebuild rewrites the running binary in place (a dirty
-    // build reuses the same `versions/<hash>` path), which unlinks the running
-    // inode. `current_exe()` then resolves `/proc/self/exe` to a path with a
-    // trailing " (deleted)" marker that is NOT a real file. If we keep that
-    // marker we (a) fail the "same binary" fast-path below, (b) read no mtime so
-    // the freshly-built candidate looks like a downgrade, and (c) fall back to
-    // re-execing the bogus " (deleted)" path, which does not exist -> the server
-    // exits without a replacement and strands every connected client. Strip the
-    // marker so we compare against (and can re-exec) the real on-disk path.
-    let current_exe = std::env::current_exe().ok().map(strip_deleted_suffix);
-
-    // Identity/mtime comparisons must look through release wrapper scripts to
-    // the payload that actually runs (see `build::resolve_binary_payload`):
-    // the running exe is the `.bin` payload while channel candidates are tiny
-    // wrapper scripts, and comparing wrapper-vs-payload mtimes turned every
-    // release install into a phantom "downgrade"/"update". The exec target
-    // stays the original candidate path (the wrapper), which is what sets up
-    // `LD_LIBRARY_PATH` correctly.
-    let candidate_canonical = build::resolve_binary_payload(&candidate.0);
-    let current_canonical = current_exe
-        .as_ref()
-        .map(|p| build::resolve_binary_payload(p));
-
-    let current_mtime = current_canonical.as_deref().and_then(binary_mtime);
-    let candidate_mtime = binary_mtime(candidate_canonical.as_path());
-
-    match guarded_reload_target(
-        candidate.clone(),
-        candidate_canonical.as_path(),
-        current_exe.as_deref(),
-        current_canonical.as_deref(),
-        current_mtime,
-        candidate_mtime,
-    ) {
-        ReloadTargetDecision::UseCandidate(target) => Some(target),
-        ReloadTargetDecision::DowngradeBlockedUseCurrent(target) => {
-            // Never strand clients by re-execing a binary that is gone from disk.
-            // If the running exe was unlinked (e.g. an in-place rebuild) but the
-            // candidate still exists, prefer the candidate over refusing to
-            // reload. The candidate may be older, but a live downgrade beats a
-            // dead server with no replacement.
-            if !target.0.exists() && candidate_canonical.exists() {
-                crate::logging::warn(&format!(
-                    "reload downgrade guard: current binary {:?} is missing on disk; falling back to candidate {:?} to avoid stranding clients",
-                    target.0, candidate.0,
-                ));
-                return Some(candidate);
-            }
-            crate::logging::warn(&format!(
-                "reload downgrade guard: refusing to exec into older candidate; re-execing current binary {:?} instead",
-                target.0,
-            ));
-            Some(target)
-        }
-        ReloadTargetDecision::DowngradeUnverifiable(target) => {
-            crate::logging::warn(&format!(
-                "reload downgrade guard: older candidate {:?} detected but current exe is unavailable; proceeding with candidate",
-                target.0,
-            ));
-            Some(target)
-        }
-    }
+    newest_reload_candidate_inner(is_selfdev_session)
 }
 
 fn binary_mtime(path: &Path) -> Option<SystemTime> {
