@@ -2109,7 +2109,7 @@ async fn connect_subscribed_server_command_client(
     Ok(client)
 }
 
-/// Gracefully reload the running background server onto the newest binary.
+/// Gracefully reload the running background server onto an approved newer target.
 ///
 /// This is the preferred upgrade path (issue #291): instead of killing the
 /// daemon and dropping live headless/swarm sessions, we ask it to hand its
@@ -2117,11 +2117,11 @@ async fn connect_subscribed_server_command_client(
 ///
 /// Behavior:
 /// - With `force == false` (the default), the server only reloads when it is
-///   provably running older code than an available reload candidate. A server
-///   already on the newest binary reports "already up to date" and does
-///   nothing, which keeps an installer from downgrading a newer/dev daemon or
-///   re-entering the reload-loop family (#277).
-/// - With `force == true`, the server reloads unconditionally.
+///   provably running older code than an approved reload candidate. Otherwise it
+///   reports the considered channels and mtimes, which keeps an installer from
+///   downgrading a newer/dev daemon or re-entering the reload-loop family (#277).
+/// - With `force == true`, the server reloads unless target resolution detects a
+///   stale shared-server channel next to a strictly newer valid target.
 /// - If no server is running, this is a successful no-op so installers can call
 ///   it unconditionally.
 pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<()> {
@@ -2174,37 +2174,11 @@ pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<(
 
     let mut client = connect_subscribed_server_command_client(&socket).await?;
 
-    // Before asking the (possibly older) daemon to reload, repair a stale
-    // `shared-server` channel from the client side. The running server resolves
-    // its reload target from that channel; if it still points at the server's
-    // own old binary (the "current client, stale server" state, e.g. after a
-    // no-op `/update`), a forced reload would just re-exec the same old binary.
-    // Repointing shared-server -> stable when stable is strictly newer gives the
-    // reload a newer binary to exec into. Never downgrades; preserves a fresher
-    // self-dev pin. Best-effort: a failure here must not block the reload.
-    match crate::build::repair_stale_shared_server_channel() {
-        Ok(crate::build::SharedServerRepair::Repaired {
-            repaired_to,
-            previous,
-        }) => {
-            crate::logging::info(&format!(
-                "server reload: repaired stale shared-server channel {:?} -> {} before reload",
-                previous, repaired_to
-            ));
-        }
-        Ok(crate::build::SharedServerRepair::AlreadyCurrent) => {}
-        Err(err) => {
-            crate::logging::warn(&format!(
-                "server reload: shared-server channel repair failed (continuing): {}",
-                err
-            ));
-        }
-    }
-
     let request_id = client.reload_with_force(force).await?;
 
     let mut reloading = false;
     let mut skipped = false;
+    let mut skip_detail = None;
 
     // Drive the request to a terminal state. On a real reload the old server
     // exec's a new process, which drops this connection after it sends Done;
@@ -2215,8 +2189,9 @@ pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<(
             Ok(ServerEvent::Reloading { .. }) => {
                 reloading = true;
             }
-            Ok(ServerEvent::ReloadProgress { step, .. }) if step == "skip" => {
+            Ok(ServerEvent::ReloadProgress { step, message, .. }) if step == "skip" => {
                 skipped = true;
+                skip_detail = Some(message);
             }
             Ok(ServerEvent::ReloadProgress { .. }) => {}
             Ok(ServerEvent::Done { id }) if id == request_id => break,
@@ -2243,8 +2218,10 @@ pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<(
             reloaded: false,
             already_current: true,
             handoff_ready: true,
-            detail: "jcode server is already running the newest binary; no reload needed."
-                .to_string(),
+            detail: skip_detail.unwrap_or_else(|| {
+                "jcode server reload skipped; no strictly newer approved reload target was found."
+                    .to_string()
+            }),
         });
     }
 
@@ -2256,7 +2233,7 @@ pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<(
     );
 
     let detail = if handoff_ready {
-        "jcode server reloaded onto the newest binary.".to_string()
+        "jcode server reloaded onto the resolved target binary.".to_string()
     } else {
         "jcode server reload requested; the new server is still coming up.".to_string()
     };
