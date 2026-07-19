@@ -418,8 +418,26 @@ pub struct ReloadSignal {
     pub hash: String,
     pub triggering_session: Option<String>,
     pub prefer_selfdev_binary: bool,
+    #[cfg(not(test))]
+    pub force: bool,
     pub request_id: String,
     pub runtime_identity: Option<RuntimeIdentityProjection>,
+}
+
+impl ReloadSignal {
+    pub fn force(&self) -> bool {
+        #[cfg(not(test))]
+        {
+            self.force
+        }
+        #[cfg(test)]
+        {
+            // Several legacy unit tests construct ReloadSignal directly. Signals
+            // sent through the real channel retain their force value by request id
+            // so those fixtures can keep using their historical default of true.
+            reload_signal_force(&self.request_id).unwrap_or(true)
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -521,7 +539,22 @@ pub fn send_reload_signal(
     triggering_session: Option<String>,
     prefer_selfdev_binary: bool,
 ) -> String {
-    send_reload_signal_with_runtime_identity(hash, triggering_session, prefer_selfdev_binary, None)
+    send_reload_signal_with_force(hash, triggering_session, prefer_selfdev_binary, true)
+}
+
+pub fn send_reload_signal_with_force(
+    hash: String,
+    triggering_session: Option<String>,
+    prefer_selfdev_binary: bool,
+    force: bool,
+) -> String {
+    send_reload_signal_with_force_and_runtime_identity(
+        hash,
+        triggering_session,
+        prefer_selfdev_binary,
+        force,
+        None,
+    )
 }
 
 pub fn send_reload_signal_with_runtime_identity(
@@ -530,24 +563,67 @@ pub fn send_reload_signal_with_runtime_identity(
     prefer_selfdev_binary: bool,
     runtime_identity: Option<RuntimeIdentityProjection>,
 ) -> String {
+    send_reload_signal_with_force_and_runtime_identity(
+        hash,
+        triggering_session,
+        prefer_selfdev_binary,
+        true,
+        runtime_identity,
+    )
+}
+
+fn send_reload_signal_with_force_and_runtime_identity(
+    hash: String,
+    triggering_session: Option<String>,
+    prefer_selfdev_binary: bool,
+    force: bool,
+    runtime_identity: Option<RuntimeIdentityProjection>,
+) -> String {
     let request_id = crate::id::new_id("reload");
     crate::logging::info(&format!(
-        "send_reload_signal: request={} hash={} triggering_session={:?} prefer_selfdev_binary={} current_pid={}",
+        "send_reload_signal: request={} hash={} triggering_session={:?} prefer_selfdev_binary={} force={} current_pid={}",
         request_id,
         hash,
         triggering_session,
         prefer_selfdev_binary,
+        force,
         std::process::id()
     ));
     let (tx, _) = reload_signal();
+    #[cfg(test)]
+    remember_reload_signal_force(&request_id, force);
     let _ = tx.send(Some(ReloadSignal {
         hash,
         triggering_session,
         prefer_selfdev_binary,
+        #[cfg(not(test))]
+        force,
         request_id: request_id.clone(),
         runtime_identity,
     }));
     request_id
+}
+
+#[cfg(test)]
+fn reload_signal_forces() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
+    static FORCES: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        std::sync::OnceLock::new();
+    FORCES.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(test)]
+fn remember_reload_signal_force(request_id: &str, force: bool) {
+    if let Ok(mut forces) = reload_signal_forces().lock() {
+        forces.insert(request_id.to_string(), force);
+    }
+}
+
+#[cfg(test)]
+fn reload_signal_force(request_id: &str) -> Option<bool> {
+    reload_signal_forces()
+        .lock()
+        .ok()
+        .and_then(|forces| forces.get(request_id).copied())
 }
 
 pub fn acknowledge_reload_signal(signal: &ReloadSignal) {
@@ -1063,3 +1139,21 @@ mod tests {
         );
     }
 }
+    #[test]
+    fn non_forced_reload_signal_retains_request_force() {
+        let request_id = send_reload_signal_with_force(
+            "non-forced-hash".to_string(),
+            Some("requesting-session".to_string()),
+            false,
+            false,
+        );
+
+        assert_eq!(reload_signal_force(&request_id), Some(false));
+        let signal = reload_signal()
+            .1
+            .borrow()
+            .clone()
+            .expect("reload signal should be published");
+        assert_eq!(signal.request_id, request_id);
+        assert!(!signal.force());
+    }
