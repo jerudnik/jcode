@@ -1,350 +1,364 @@
 {
-  "schema_version": 1,
-  "program": "ideal-durable-tui-cli-foundation",
-  "program_state": "railway_ready",
-  "active_graph_id": null,
-  "last_checkpoint": {
-    "node": "F06",
-    "state": "accepted",
-    "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
-    "updated_at": "2026-07-18T21:50:00Z",
-    "summary": "F06 accepted (D019). F07 (MCP health/reconnect) runnable next."
+ "schema_version": 1,
+ "program": "ideal-durable-tui-cli-foundation",
+ "program_state": "railway_ready",
+ "active_graph_id": null,
+ "last_checkpoint": {
+  "node": "F06",
+  "state": "accepted",
+  "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+  "updated_at": "2026-07-18T21:50:00Z",
+  "summary": "F06 accepted (D019). F07 (MCP health/reconnect) runnable next."
+ },
+ "nodes": {
+  "W0": {
+   "state": "accepted",
+   "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/W0.1"
+   ],
+   "summary": "W0 wave complete: baseline revalidated (W0.1), source census accepted with graph amendments D008 (W0.2), plan quarantined/cleared and projections verified (W0.3).",
+   "updated_at": "2026-07-18T06:32:51Z"
   },
-  "nodes": {
-    "W0": {
-      "state": "accepted",
-      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/W0.1"
-      ],
-      "summary": "W0 wave complete: baseline revalidated (W0.1), source census accepted with graph amendments D008 (W0.2), plan quarantined/cleared and projections verified (W0.3).",
-      "updated_at": "2026-07-18T06:32:51Z"
-    },
-    "W1": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "W2": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "W3": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "W4": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "W5": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "W0.1": {
-      "state": "accepted",
-      "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/W0.1"
-      ],
-      "summary": "Baseline revalidated: railway OK, protected hash intact, one worktree, stashes/refs preserved. Drift 1 (railway commits atop seed) benign. Drift 2 (stale selfdev pending_activation from dead session peacock, canary 923c6353e-dirty active as current/shared-server) preserved as F09 fixture per D006.",
-      "updated_at": "2026-07-18T06:14:28Z"
-    },
-    "W0.2": {
-      "state": "accepted",
-      "commit": "fb00ab840",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/W0.2"
-      ],
-      "summary": "Source census: 25/25 files and 11/11 dirs exist; no wholly stale seam; all F-nodes retained. Amendments proposed: GN-1 fix F06 stale glob (mcp-serve at src/cli/mcp_serve.rs), GN-2 add jcode-selfdev-types to F09, GN-5 add explicit F04 surfaced-failure gate; scope guards GN-3 (reuse OwnedChildPermit), GN-4 (startup sweep pre-exists). Spot-checked by coordinator: background.rs:133 non-atomic swallow, mobile_server.rs CWD-first, release.yml:436 StrictHostKeyChecking=no, telemetry_state.rs uncompiled, zero *mcp* matches under src/cli/commands.",
-      "updated_at": "2026-07-18T06:29:44Z"
-    },
-    "W0.3": {
-      "state": "accepted",
-      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/W0.3"
-      ],
-      "summary": "Stale historical swarm plan (94 nodes) snapshotted and cleared; stray resurrected workers stopped and one diff stashed (D007). Ownership/dependency projection validated: next runnable is W1/F01; F02-F04 background.rs overlap serialized by dependency chain.",
-      "updated_at": "2026-07-18T06:32:51Z"
-    },
-    "F01": {
-      "state": "accepted",
-      "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/F01",
-        "docs/fork/ideal-base/evidence/F01-R",
-        "docs/fork/ideal-base/reviews/F01-architecture-re-review.md"
-      ],
-      "summary": "F01 accepted at design revision 4 (a70db3700). Independent gate PASS at review round 3 (1a37ba109, gpt-5.6-sol high). Three FAIL rounds resolved: crate seam, coordinator protocol, turn boundary, quiescence epoch, watchdog handoff, termination ownership.",
-      "updated_at": "2026-07-18T09:38:30Z"
-    },
-    "F02": {
-      "state": "accepted",
-      "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/F02",
-        "docs/fork/ideal-base/reviews/F02-implementation-review.md"
-      ],
-      "summary": "F02 accepted at 2b5607882 after 3-round independent review (PASS round 3). Both gates met: atomic idle claim over unified lease table; all exit modes through the bounded coordinator. Fixture transcript regenerated from exact-commit build, 3/3 passes.",
-      "updated_at": "2026-07-18T12:15:00Z"
-    },
-    "F03": {
-      "state": "accepted",
-      "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/F03",
-        "docs/fork/ideal-base/reviews/F03-verification-review.md"
-      ],
-      "summary": "F03 accepted: independent review PASS at d8c223d29 (both gates met). 23 in-process coordinator fixtures + 41/41 runtime matrix (strengthened post-review per F03-I1/I2). Found+fixed watch-send lost-publication bug.",
-      "updated_at": "2026-07-18T16:59:00Z"
-    },
-    "F04": {
-      "state": "accepted",
-      "commit": "9c4c99897b88456257525d359f11fa357669c134",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/F04",
-        "docs/fork/ideal-base/reviews/F04-implementation-review.md"
-      ],
-      "summary": "F04 accepted at 9c4c99897 after 3-round review (PASS round 3). TaskStatusStore: atomic, serialized, terminal-precedent, failure-surfacing; fail-closed spawn prerequisite; cancel tombstones; explicit finalize data-loss policy. 10-item F05 handoff recorded.",
-      "updated_at": "2026-07-18T19:04:00Z"
-    },
-    "F05": {
-      "state": "accepted",
-      "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/F05",
-        "docs/fork/ideal-base/reviews/F05-verification-review.md"
-      ],
-      "summary": "F05 accepted at 9f4d34d11. Sol-high implementation via task DAG; Opus 4.8 first-round PASS (0 blockers). fsync durability, stale-temp sweep, collision policy, full verification matrix. 1186/1186 green.",
-      "updated_at": "2026-07-18T20:12:00Z"
-    },
-    "F06": {
-      "state": "accepted",
-      "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
-      "evidence": [
-        "docs/fork/ideal-base/evidence/F06",
-        "docs/fork/ideal-base/reviews/F06-implementation-review.md"
-      ],
-      "summary": "F06 accepted at 84dc0aa2b. Sol-high implementation; Opus 4.8 first-round PASS (0 blockers), both gates reproduced with real-process tests. PID-reuse follow-ups noted for F07/F08.",
-      "updated_at": "2026-07-18T21:50:00Z"
-    },
-    "F07": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F08": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F09": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F10": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F11": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F12": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F13": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F14": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F15": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F16": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F17": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F18": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F19": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F20": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F21": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F22": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F23": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F24": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F25": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F26": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "F27": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "G01": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "G02": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "G03": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "G04": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "G05": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "S01": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "S02": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
-    "S03": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    }
+  "W1": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "W2": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "W3": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "W4": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "W5": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "W0.1": {
+   "state": "accepted",
+   "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/W0.1"
+   ],
+   "summary": "Baseline revalidated: railway OK, protected hash intact, one worktree, stashes/refs preserved. Drift 1 (railway commits atop seed) benign. Drift 2 (stale selfdev pending_activation from dead session peacock, canary 923c6353e-dirty active as current/shared-server) preserved as F09 fixture per D006.",
+   "updated_at": "2026-07-18T06:14:28Z"
+  },
+  "W0.2": {
+   "state": "accepted",
+   "commit": "fb00ab840",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/W0.2"
+   ],
+   "summary": "Source census: 25/25 files and 11/11 dirs exist; no wholly stale seam; all F-nodes retained. Amendments proposed: GN-1 fix F06 stale glob (mcp-serve at src/cli/mcp_serve.rs), GN-2 add jcode-selfdev-types to F09, GN-5 add explicit F04 surfaced-failure gate; scope guards GN-3 (reuse OwnedChildPermit), GN-4 (startup sweep pre-exists). Spot-checked by coordinator: background.rs:133 non-atomic swallow, mobile_server.rs CWD-first, release.yml:436 StrictHostKeyChecking=no, telemetry_state.rs uncompiled, zero *mcp* matches under src/cli/commands.",
+   "updated_at": "2026-07-18T06:29:44Z"
+  },
+  "W0.3": {
+   "state": "accepted",
+   "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/W0.3"
+   ],
+   "summary": "Stale historical swarm plan (94 nodes) snapshotted and cleared; stray resurrected workers stopped and one diff stashed (D007). Ownership/dependency projection validated: next runnable is W1/F01; F02-F04 background.rs overlap serialized by dependency chain.",
+   "updated_at": "2026-07-18T06:32:51Z"
+  },
+  "F01": {
+   "state": "accepted",
+   "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/F01",
+    "docs/fork/ideal-base/evidence/F01-R",
+    "docs/fork/ideal-base/reviews/F01-architecture-re-review.md"
+   ],
+   "summary": "F01 accepted at design revision 4 (a70db3700). Independent gate PASS at review round 3 (1a37ba109, gpt-5.6-sol high). Three FAIL rounds resolved: crate seam, coordinator protocol, turn boundary, quiescence epoch, watchdog handoff, termination ownership.",
+   "updated_at": "2026-07-18T09:38:30Z"
+  },
+  "F02": {
+   "state": "accepted",
+   "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/F02",
+    "docs/fork/ideal-base/reviews/F02-implementation-review.md"
+   ],
+   "summary": "F02 accepted at 2b5607882 after 3-round independent review (PASS round 3). Both gates met: atomic idle claim over unified lease table; all exit modes through the bounded coordinator. Fixture transcript regenerated from exact-commit build, 3/3 passes.",
+   "updated_at": "2026-07-18T12:15:00Z"
+  },
+  "F03": {
+   "state": "accepted",
+   "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/F03",
+    "docs/fork/ideal-base/reviews/F03-verification-review.md"
+   ],
+   "summary": "F03 accepted: independent review PASS at d8c223d29 (both gates met). 23 in-process coordinator fixtures + 41/41 runtime matrix (strengthened post-review per F03-I1/I2). Found+fixed watch-send lost-publication bug.",
+   "updated_at": "2026-07-18T16:59:00Z"
+  },
+  "F04": {
+   "state": "accepted",
+   "commit": "9c4c99897b88456257525d359f11fa357669c134",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/F04",
+    "docs/fork/ideal-base/reviews/F04-implementation-review.md"
+   ],
+   "summary": "F04 accepted at 9c4c99897 after 3-round review (PASS round 3). TaskStatusStore: atomic, serialized, terminal-precedent, failure-surfacing; fail-closed spawn prerequisite; cancel tombstones; explicit finalize data-loss policy. 10-item F05 handoff recorded.",
+   "updated_at": "2026-07-18T19:04:00Z"
+  },
+  "F05": {
+   "state": "accepted",
+   "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/F05",
+    "docs/fork/ideal-base/reviews/F05-verification-review.md"
+   ],
+   "summary": "F05 accepted at 9f4d34d11. Sol-high implementation via task DAG; Opus 4.8 first-round PASS (0 blockers). fsync durability, stale-temp sweep, collision policy, full verification matrix. 1186/1186 green.",
+   "updated_at": "2026-07-18T20:12:00Z"
+  },
+  "F06": {
+   "state": "accepted",
+   "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/F06",
+    "docs/fork/ideal-base/reviews/F06-implementation-review.md"
+   ],
+   "summary": "F06 accepted at 84dc0aa2b. Sol-high implementation; Opus 4.8 first-round PASS (0 blockers), both gates reproduced with real-process tests. PID-reuse follow-ups noted for F07/F08.",
+   "updated_at": "2026-07-18T21:50:00Z"
+  },
+  "F07": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F08": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F09": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F10": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F11": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F12": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F13": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F14": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F15": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F16": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F17": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F18": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F19": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F20": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F21": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F22": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F23": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F24": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F25": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F26": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "F27": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "G01": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "G02": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "G03": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "G04": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "G05": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "S01": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "S02": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "S03": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "R01": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
+  },
+  "R03": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
   }
+ }
 }
