@@ -93,10 +93,24 @@ impl Provider for OpenRouterProvider {
             allow_image_input,
         );
 
-        // Build tools in OpenAI format
+        // Build tools in OpenAI format. Moonshot/Kimi endpoints additionally
+        // reject `anyOf` beside a parent `type` ("moonshot flavored json
+        // schema"); flatten unions for them so tools like `swarm` do not 400.
+        let kimi_endpoint = self.is_kimi_coding_endpoint(&model);
         let api_tools: Vec<Value> = tools
             .iter()
             .map(|t| {
+                let parameters = if kimi_endpoint {
+                    jcode_provider_openrouter::request::flatten_schema_for_moonshot(
+                        &t.input_schema,
+                    )
+                } else {
+                    // Sanitized so bare `{"type":"object"}` MCP tool schemas
+                    // do not 400 on strict endpoints (issue #446).
+                    jcode_provider_openrouter::request::sanitize_tool_parameters_schema(
+                        &t.input_schema,
+                    )
+                };
                 serde_json::json!({
                     "type": "function",
                     "function": {
@@ -104,9 +118,7 @@ impl Provider for OpenRouterProvider {
                         // Prompt-visible. Approximate token cost for this field:
                         // t.description_token_estimate().
                         "description": t.description,
-                        // Sanitized so bare `{"type":"object"}` MCP tool
-                        // schemas do not 400 on strict endpoints (issue #446).
-                        "parameters": jcode_provider_openrouter::request::sanitize_tool_parameters_schema(&t.input_schema),
+                        "parameters": parameters,
                     }
                 })
             })
