@@ -58,7 +58,7 @@ Injected writers assert these byte sequences are emitted:
 
 ### 4. Existing guards, focused tests, and build
 
-Final commit validation was run in a clean detached worktree at `579d2f072`, sharing only the Cargo target cache with the active worktree.
+Final implementation validation was run in a clean detached worktree containing `a0676f781`, sharing only the Cargo target cache with the active worktree.
 
 Passed:
 
