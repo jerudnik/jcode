@@ -4,11 +4,11 @@
  "program_state": "railway_ready",
  "active_graph_id": null,
  "last_checkpoint": {
-  "node": "F06",
+  "node": "R01",
   "state": "accepted",
-  "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
-  "updated_at": "2026-07-18T21:50:00Z",
-  "summary": "F06 accepted (D019). F07 (MCP health/reconnect) runnable next."
+  "commit": "e3736e7fb",
+  "updated_at": "2026-07-19T05:57:00Z",
+  "summary": "R01+R03 accepted (D022). Reload path repaired and reviewed. Next: D021 subagent bridge, then daemon reload onto new build, then F07."
  },
  "nodes": {
   "W0": {
@@ -347,18 +347,24 @@
    "updated_at": null
   },
   "R01": {
-   "state": "in_progress",
-   "commit": null,
-   "evidence": [],
-   "summary": "Dispatched to gpt-5.6-sol (session lizard, job_1784426556196).",
-   "updated_at": "2026-07-19T02:02:40Z"
+   "state": "accepted",
+   "commit": "e3736e7fb",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/R01",
+    "docs/fork/ideal-base/reviews/R01-implementation-review.md"
+   ],
+   "summary": "Accepted after FAIL->fix->re-review. Atomic publish, explicit reload target resolution, force threaded through ReloadSignal (BLOCKING-1 fix 923bba4aa), alias binding + 7-day GC. Reviews: hog (Opus 4.8, FAIL), dragon (Opus 4.8, PASS).",
+   "updated_at": "2026-07-19T05:57:00Z"
   },
   "R03": {
-   "state": "in_progress",
-   "commit": null,
-   "evidence": [],
-   "summary": "Dispatched to gpt-5.6-sol (session monkey, job_1784426556276).",
-   "updated_at": "2026-07-19T02:02:40Z"
+   "state": "accepted",
+   "commit": "a0676f781",
+   "evidence": [
+    "docs/fork/ideal-base/evidence/R03",
+    "docs/fork/ideal-base/reviews/R03-implementation-review.md"
+   ],
+   "summary": "Accepted first round. Terminal-mode ownership: guard armed through exec, InheritedTerminalGuard, full signal-path disables. Review: dromedary (Opus 4.8, PASS) with 4 non-blocking hardening notes.",
+   "updated_at": "2026-07-19T05:57:00Z"
   }
  }
 }
