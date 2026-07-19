@@ -458,12 +458,14 @@ fn write_terminal_protocol_cleanup(
     first_error.map_or(Ok(()), Err)
 }
 
-#[cfg(all(unix, test))]
-fn write_signal_terminal_cleanup(mut writer: impl Write) -> io::Result<()> {
-    let protocol_result = write_terminal_protocol_cleanup(
-        &mut writer,
-        &inherited_all_modes_state(),
-    );
+#[cfg(unix)]
+fn restore_signal_terminal(
+    mut writer: impl Write,
+    disable_raw_mode: impl FnOnce(),
+) -> io::Result<()> {
+    let protocol_result =
+        write_terminal_protocol_cleanup(&mut writer, &inherited_all_modes_state());
+    disable_raw_mode();
     let screen_result = crossterm::execute!(
         writer,
         crossterm::terminal::LeaveAlternateScreen,
@@ -578,14 +580,9 @@ fn signal_crash_reason(sig: i32) -> String {
 fn handle_termination_signal(sig: i32) -> ! {
     mark_current_session_crashed(signal_crash_reason(sig));
 
-    let mut stderr = std::io::stderr();
-    let _ = write_terminal_protocol_cleanup(&mut stderr, &inherited_all_modes_state());
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(
-        stderr,
-        crossterm::terminal::LeaveAlternateScreen,
-        crossterm::cursor::Show
-    );
+    let _ = restore_signal_terminal(std::io::stderr(), || {
+        let _ = crossterm::terminal::disable_raw_mode();
+    });
 
     if let Some(session_id) = get_current_session() {
         print_session_resume_hint(&session_id);
@@ -852,8 +849,10 @@ mod tests {
     #[test]
     fn signal_cleanup_emits_full_disable_set_and_leaves_alt_screen() {
         let mut output = Vec::new();
-        write_signal_terminal_cleanup(&mut output).unwrap();
+        let raw_mode_disabled = std::cell::Cell::new(false);
+        restore_signal_terminal(&mut output, || raw_mode_disabled.set(true)).unwrap();
 
+        assert!(raw_mode_disabled.get());
         assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?2004l"));
         assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1004l"));
         assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1006l"));
