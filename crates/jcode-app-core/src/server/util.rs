@@ -43,9 +43,11 @@ pub(crate) async fn get_shared_mcp_pool(
     cell.get_or_init(|| async {
         // Composition root (F01 design 3.0): the pool receives the server's
         // activity-lease authority so in-flight MCP calls pin the daemon.
-        Arc::new(crate::mcp::SharedMcpPool::from_default_config_with_activity(
-            super::shutdown::activity_authority(),
-        ))
+        Arc::new(
+            crate::mcp::SharedMcpPool::from_default_config_with_activity(
+                super::shutdown::activity_authority(),
+            ),
+        )
     })
     .await
     .clone()
@@ -83,8 +85,11 @@ pub(crate) fn server_update_candidate(is_selfdev_session: bool) -> Option<(PathB
 /// newest candidate across flavors still preserves a deliberately-pinned self-dev
 /// build whenever that build is the freshest one on disk (the case the pin is
 /// meant to protect).
-pub(crate) fn reload_exec_target(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
-    let resolution = resolve_reload_target(is_selfdev_session, true);
+pub(crate) fn reload_exec_target(
+    is_selfdev_session: bool,
+    force: bool,
+) -> Option<(PathBuf, &'static str)> {
+    let resolution = resolve_reload_target(is_selfdev_session, force);
     resolution.log_decision("reload_exec_target");
     if let Some(refusal) = resolution.refusal_message() {
         crate::logging::error(&format!(
@@ -113,6 +118,22 @@ pub(crate) fn resolve_reload_target(
     let current_mtime = current_canonical.as_deref().and_then(binary_mtime);
 
     let candidates = collect_reload_target_candidates(is_selfdev_session, current_exe.as_deref());
+    resolve_reload_target_from_candidates(
+        force,
+        current_exe,
+        current_canonical,
+        current_mtime,
+        candidates,
+    )
+}
+
+fn resolve_reload_target_from_candidates(
+    force: bool,
+    current_exe: Option<PathBuf>,
+    current_canonical: Option<PathBuf>,
+    current_mtime: Option<SystemTime>,
+    candidates: Vec<ReloadTargetCandidate>,
+) -> ReloadTargetResolution {
     let candidate = pick_newest_target_candidate(
         candidates
             .iter()
@@ -125,9 +146,7 @@ pub(crate) fn resolve_reload_target(
     let mut chosen = None;
     let mut chosen_payload = None;
 
-    if force
-        && let Some(reason) = forced_stale_shared_server_refusal(&candidates)
-    {
+    if force && let Some(reason) = forced_stale_shared_server_refusal(&candidates) {
         rejection_reasons.push(reason.clone());
         refused = Some(reason);
     }
@@ -353,13 +372,25 @@ fn collect_reload_target_candidates(
     if let Ok(path) = build::stable_binary_path()
         && path.exists()
     {
-        candidates.push(target_candidate("channel", "stable", path, false, Vec::new()));
+        candidates.push(target_candidate(
+            "channel",
+            "stable",
+            path,
+            false,
+            Vec::new(),
+        ));
     }
     if let Some(path) = build::get_repo_dir()
         .and_then(|repo| build::find_dev_binary(&repo))
         .filter(|path| path.exists())
     {
-        candidates.push(target_candidate("candidate", "dev", path, false, Vec::new()));
+        candidates.push(target_candidate(
+            "candidate",
+            "dev",
+            path,
+            false,
+            Vec::new(),
+        ));
     }
     if let Some(path) = current_exe {
         candidates.push(target_candidate(
@@ -397,7 +428,10 @@ fn target_candidate(
 fn annotate_reload_candidates(
     mut candidates: Vec<ReloadTargetCandidate>,
 ) -> Vec<ReloadTargetCandidate> {
-    let newest_mtime = candidates.iter().filter_map(|candidate| candidate.mtime).max();
+    let newest_mtime = candidates
+        .iter()
+        .filter_map(|candidate| candidate.mtime)
+        .max();
     let payload_counts = candidates.iter().fold(
         std::collections::HashMap::<PathBuf, usize>::new(),
         |mut counts, candidate| {
@@ -1040,7 +1074,10 @@ mod reload_target_tests {
 
 #[cfg(test)]
 mod target_resolution_tests {
-    use super::{annotate_reload_candidates, forced_stale_shared_server_refusal, target_candidate};
+    use super::{
+        annotate_reload_candidates, forced_stale_shared_server_refusal,
+        resolve_reload_target_from_candidates, target_candidate,
+    };
     use std::path::Path;
     use std::time::{Duration, SystemTime};
 
@@ -1066,13 +1103,7 @@ mod target_resolution_tests {
         write_binary(&dev, t(300));
 
         let candidates = annotate_reload_candidates(vec![
-            target_candidate(
-                "channel",
-                "shared-server",
-                shared.clone(),
-                true,
-                Vec::new(),
-            ),
+            target_candidate("channel", "shared-server", shared.clone(), true, Vec::new()),
             target_candidate("candidate", "dev", dev.clone(), false, Vec::new()),
         ]);
 
@@ -1098,6 +1129,41 @@ mod target_resolution_tests {
         ]);
 
         assert!(forced_stale_shared_server_refusal(&candidates).is_none());
+    }
+
+    #[test]
+    fn non_forced_stale_shared_server_with_newer_candidate_resolves_exec_target() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let current = temp.path().join("running/jcode");
+        let shared = temp.path().join("versions/old-shared/jcode");
+        let stable = temp.path().join("versions/new-stable/jcode");
+        let dev = temp.path().join("target/selfdev/jcode");
+        write_binary(&current, t(100));
+        write_binary(&shared, t(100));
+        write_binary(&stable, t(300));
+        write_binary(&dev, t(400));
+
+        let candidates = annotate_reload_candidates(vec![
+            target_candidate("channel", "shared-server", shared, false, Vec::new()),
+            target_candidate("candidate", "stable", stable.clone(), true, Vec::new()),
+            target_candidate("candidate", "dev", dev, false, Vec::new()),
+        ]);
+
+        let resolution = resolve_reload_target_from_candidates(
+            false,
+            Some(current.clone()),
+            Some(current),
+            Some(t(100)),
+            candidates,
+        );
+
+        assert!(resolution.refusal_message().is_none());
+        assert!(resolution.has_strictly_newer_candidate_than_current());
+        assert_eq!(
+            resolution.chosen_target(),
+            Some((stable, "stable")),
+            "the exec stage must receive a target instead of entering reload_exec_failed"
+        );
     }
 }
 

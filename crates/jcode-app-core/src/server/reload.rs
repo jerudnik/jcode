@@ -80,8 +80,12 @@ pub(super) async fn await_reload_signal(
         };
 
         crate::logging::info(&format!(
-            "Server: reload signal received via channel request={} hash={} triggering_session={:?} prefer_selfdev_binary={}",
-            signal.request_id, signal.hash, signal.triggering_session, signal.prefer_selfdev_binary
+            "Server: reload signal received via channel request={} hash={} triggering_session={:?} prefer_selfdev_binary={} force={}",
+            signal.request_id,
+            signal.hash,
+            signal.triggering_session,
+            signal.prefer_selfdev_binary,
+            signal.force()
         ));
         super::reload_trace::record_value(
             &signal.request_id,
@@ -90,6 +94,7 @@ pub(super) async fn await_reload_signal(
                 "hash": signal.hash,
                 "triggering_session": signal.triggering_session,
                 "prefer_selfdev_binary": signal.prefer_selfdev_binary,
+                "force": signal.force(),
             }),
         );
         let reload_started = std::time::Instant::now();
@@ -175,7 +180,7 @@ pub(super) async fn await_reload_signal(
 
         let prefers_selfdev = signal.prefer_selfdev_binary;
 
-        if let Some((binary, label)) = super::reload_exec_target(prefers_selfdev) {
+        if let Some((binary, label)) = super::reload_exec_target(prefers_selfdev, signal.force()) {
             if binary.exists() {
                 let socket = super::socket_path();
                 crate::logging::info(&format!(
