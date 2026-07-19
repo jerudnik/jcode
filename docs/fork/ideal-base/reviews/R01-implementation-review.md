@@ -1,252 +1,145 @@
 # R01 implementation review (independent adversarial)
 
-- Reviewer model: claude-opus-4-8
-- Mode: independent adversarial reviewer, read-only except this report file.
-- Repo: `/Users/jrudnik/labs/jcode`, branch `main`.
-- Implementation commits reviewed: `7387597e1`, `418c92935`, `d7807e4ca`, `c5ab2c9d5`, `4ad36e517`.
-- Docs read: `terra_reload_version_report.md`, `terra_session_death_report.md`, `evidence/R01/IMPLEMENTATION.md`.
+**Reviewer model:** claude-opus-4-8
+**Mode:** read-only source + artifact investigation, plus independent rerun of the named acceptance gates. No implementation files changed.
+**Repository:** `/Users/jrudnik/labs/jcode`, branch `main`.
+**Implementation commits reviewed:** `7387597e1`, `418c92935`, `d7807e4ca`, `c5ab2c9d5`, `4ad36e517`.
+**Continues:** stallion's interrupted review (session lost server-side). Its verified results are re-checked below and adopted where independently reproduced.
 
-## Method
+---
 
-I read each commit diff (`git show`), read the resulting current sources, and re-ran
-the stated test commands myself with `scripts/dev_cargo.sh`. I then attacked the
-five adversarial vectors (a)-(e) directly against the code.
+## Verdict summary
 
-## Acceptance gate verification
+**FAIL** — one blocking regression in the reload feature's primary path (finding F2), plus one non-blocking Medium finding (F1, alias GC gap). The atomic-publish work (finding focus a/b) and recovery-eligibility broadening (focus d) are sound.
 
-All five gates were re-run / re-derived independently.
+---
 
-### Gate 5 (test suites) — VERIFIED PASS
+## Acceptance gates (independently rerun)
 
-Re-ran locally, not trusting the IMPLEMENTATION.md numbers:
+| Gate | Result |
+|---|---|
+| `jcode-build-support` suite | **PASS** 50 passed / 0 failed (incl. both atomic-publish gates: `concurrent_source_truncation_between_stage_and_rename_preserves_published_copy`, `failed_smoke_test_leaves_no_version_entry`) |
+| `target_resolution_tests::*` (both) | **PASS** 2/2 |
+| `recovery_intents_include_attached_non_headless_sessions` | **PASS** |
+| `session_alias_roundtrips_and_follows_resume_chain` | **PASS** |
+| `resolve_debug_session*` (6 matched) | **PASS** 6/6 incl. `resolve_debug_session_resolves_reconnect_alias_to_live_agent`, `resolve_debug_session_unknown_id_error_names_alias_and_active_sessions` |
 
-```
-scripts/dev_cargo.sh test -p jcode-build-support
-  => ok. 50 passed; 0 failed; 0 ignored   (incl. both atomic-publish gates)
-scripts/dev_cargo.sh test -p jcode-app-core
-  => ok. 1133 passed; 0 failed; 23 ignored
-```
+The full 1133-test app-core run was not re-executed end-to-end here (time budget); the focused gates and every named regression were independently reproduced green. Stallion's 1133/0 claim is consistent with these results and the unchanged surrounding code.
 
-Named regressions re-run in isolation, all `ok`:
+---
 
-- `server::util::target_resolution_tests::target_resolution_refuses_forced_stale_shared_server_when_newer_dev_exists`
-- `server::util::target_resolution_tests::target_resolution_allows_forced_shared_server_when_it_is_freshest`
-- `server::reload_recovery::tests::session_alias_roundtrips_and_follows_resume_chain`
-- `server::reload::r01_tests::recovery_intents_include_attached_non_headless_sessions`
-- `server::debug_command_exec::tests::resolve_debug_session_resolves_reconnect_alias_to_live_agent`
-- `server::debug_command_exec::tests::resolve_debug_session_unknown_id_error_names_alias_and_active_sessions`
+## BLOCKER F2 — exec-stage reload refusal uses hardcoded `force=true`, so a legitimate NON-force `jcode server reload` can drop live sessions and `exit(42)` instead of upgrading
 
-I also independently `cargo check`-ed the top-level `jcode` bin (the `commands.rs`
-diff in `d7807e4ca` is not covered by either tested crate): clean, `Finished`.
+**Severity: Blocking.** This is the suspected finding 2, now resolved as a *real* regression, not intended fail-closed behavior.
 
-### Gate 1 (concurrent source truncation cannot corrupt a published artifact) — PASS
+### The asymmetry (root cause)
 
-`copy_binary_to_staging_path` (`crates/jcode-build-support/src/lib.rs:322-393`) opens
-a per-attempt unique staged file with `create_new(true)` (pid + nanos + attempt),
-streams `source` into it, `set_permissions_executable`, `sync_all`, and rejects a
-zero-byte result before returning. `publish_staged_binary` (`lib.rs:410-426`) then
-`fs::rename`s the fully-formed staged file over `versions/<v>/jcode`. A source
-truncation after staging cannot reach the published copy because the published copy
-is a distinct, already-synced file. The regression test
-`atomic_publish_tests::concurrent_source_truncation_between_stage_and_rename_preserves_published_copy`
-asserts the published bytes equal the pre-truncation original and that smoke runs the
-`.jcode-publish-*` staged path, never the source or final path. Two concurrent
-publishers of the *same* version each stage a unique file and each rename a *complete,
-smoke-passed* copy over `dest`; last-writer-wins is benign because both are valid.
-`remove_dir` (not `remove_dir_all`) on the failure path (`lib.rs:314-316`) cannot
-delete a sibling's already-published `jcode`. Solid.
+- Preflight (`handle_reload`) resolves the target with the **real** force flag:
+  `crates/jcode-app-core/src/server/client_session.rs:734`
+  `let target_resolution = super::util::resolve_reload_target(prefer_selfdev_binary, force);`
+- The exec stage **hardcodes `force=true`** regardless of the request:
+  `crates/jcode-app-core/src/server/util.rs:86-87`
+  `pub(crate) fn reload_exec_target(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> { let resolution = resolve_reload_target(is_selfdev_session, true); ... }`
+- `ReloadSignal` (`crates/jcode-app-core/src/server/reload_state.rs:417-424`) does **not** carry `force`, so the reload worker (`reload.rs:176-178`) cannot pass the request's force into `reload_exec_target`.
+- The refusal is gated on force inside the resolver:
+  `crates/jcode-app-core/src/server/util.rs:128-133` — `if force && let Some(reason) = forced_stale_shared_server_refusal(&candidates) { refused = Some(reason); }`
+  and when `refused.is_some()`, the resolver **skips computing `chosen`** entirely (`util.rs:135` `if refused.is_none() { ... }`), so `reload_exec_target` returns `None` (`util.rs:89-94`).
+- `None` at the exec stage is now **fatal**: `reload.rs:223-231` writes `ReloadPhase::Failed("no reloadable binary found")` and `reload.rs:236` calls `super::shutdown::coordinator().reload_exec_failed().await` → historic bare `exit(42)` with no replacement process.
 
-### Gate 3 (failed smoke leaves no versions/<v> entry) — PASS
+The pre-`d7807e4ca` `reload_exec_target` **never returned `None`** on a downgrade/refusal — it fell back to re-execing the current binary (see `git show d7807e4ca^:.../util.rs`, all match arms return `Some(...)`). The new resolver introduces a `None` path that kills the daemon.
 
-On any pre-publish error `install_binary_at_version_in_builds_dir` removes the staged
-file and, when `dest` does not exist, removes the (now-empty) version dir
-(`lib.rs:305-319`). `atomic_publish_tests::failed_smoke_test_leaves_no_version_entry`
-asserts the version dir is absent after a failing smoke. No usable
-`versions/<v>/jcode` can survive a failed smoke. Matches the incident's root cause
-(the zero-byte hard-linked `a87c5f271/jcode`) being eliminated.
+Additionally, the client-side repair that previously made this exact scenario succeed was **removed** from the command in `d7807e4ca`:
+`src/cli/commands.rs:2177` now calls `client.reload_with_force(force)` directly; the prior `crate::build::repair_stale_shared_server_channel()` call (which repointed `shared-server -> stable` before reload) is gone. The repair still runs in the auto-reload (`server_events.rs:1560`), `/update` (`update.rs:1188`), and `hot_exec.rs:405` paths, but **not** in the explicit `jcode server reload` command — the "no-op /update, long-lived old daemon" case the repair function was written for (`lib.rs:1164-1180`).
 
-### Gate 2 (forced reload refuses / publishes, never silently returns old payload while a strictly newer valid dev binary exists) — PASS for the forced path
+### Why the non-force path reaches the fatal exec refusal
 
-`handle_reload` computes `resolve_reload_target(prefer_selfdev_binary, force)` up
-front and, for `force == true`, returns a client-visible `Error` refusal before any
-shutdown when `forced_stale_shared_server_refusal` fires
-(`client_session.rs:734-754`, `util.rs:128-133`, `util.rs:460-485`). The refusal
-names both paths, payloads, and mtimes. `target_resolution_refuses_forced_stale_shared_server_when_newer_dev_exists`
-proves the predicate. This satisfies the letter of gate 2 for the forced reload.
-(But see BLOCKING-1: the *same* refusal is also applied unconditionally at the exec
-stage, which is where it becomes dangerous.)
+For `force == false`, the preflight refusal check at `client_session.rs:741-754` never fires, because the refusal is force-gated (`util.rs:128`) and preflight passed `force = false`. Whether the reload proceeds is then decided solely by the non-force skip gate at `client_session.rs:762`:
+`if !force && !target_resolution.has_strictly_newer_candidate_than_current() { skip }`.
 
-### Gate 4 (alias resolves to resumed agent; stale-id error names resolved target) — PASS
+`has_strictly_newer_candidate_than_current` (`util.rs:228-238`) considers only the `exec_candidate` entries — the `preferred`/`alternate` results of `server_update_candidate` (`util.rs:333-339`). `forced_stale_shared_server_refusal` (`util.rs:460-484`) considers **all** candidates and keys off the `shared-server` label. These two decisions use different candidate sets and can disagree.
 
-`resolve_debug_session` resolves an explicit or fallback id through
-`resolve_session_alias` and returns the live resumed agent
-(`debug_command_exec.rs:71-103`). The stale-id error names the requested id, the
-resolved alias target, and the active-session list (`:88-100`). Both named tests
-pass. Alias chains are bounded (16 hops) with a `seen`-set cycle guard and a
-self-alias / empty-target break (`reload_recovery.rs:259-282`); `persist_session_alias`
-refuses self-aliases (`:239-241`).
+### Reproduction (release user, no repo required)
 
-## BLOCKING findings
+Field state — the canonical "current client, stale server" scenario from the incident report and the reason `repair_stale_shared_server_channel` exists:
 
-### BLOCKING-1 — The exec-stage refusal can kill a self-dev daemon (no replacement) during a routine non-forced `jcode server reload`, re-introducing the stranded-session class R01 exists to fix
+- Daemon process running old payload **X** (`current_exe` payload mtime 100).
+- `stable` channel advanced to newer release **Y** (mtime 300) — e.g. a newer release shipped.
+- `shared-server` channel still pinned to **X** (never advanced; `shared-server-version != stable`, `!= current`).
+- Client `current-version = Y` (client on newest, so `/update` is a no-op and never re-runs the install/advance path).
 
-The refusal is applied in **two** places with divergent `force`:
+Run `jcode server reload` (default, **non-force**):
 
-1. Preflight, with the request's real `force`:
-   `client_session.rs:734` `resolve_reload_target(prefer_selfdev_binary, force)`.
-   For a non-force request `force == false`, and `forced_stale_shared_server_refusal`
-   is only computed `if force` (`util.rs:128`). So a non-force preflight **never
-   refuses**; it proceeds whenever a strictly-newer exec candidate exists
-   (`client_session.rs:762`).
+1. `server_update_candidate(false)` returns `stable` **Y**, because `shared_server_channel_is_current_enough()` is false (`paths.rs:625-651`: `shared(X) != stable(Y)` and `!= current(Y)`). So an `exec_candidate` with payload Y (mtime 300) exists.
+2. Skip gate `has_strictly_newer_candidate_than_current()` = **true** (Y newer than current X) → reload **proceeds** past `client_session.rs:762`.
+3. `mark_remote_reload_started`, `Reloading` fan-out to live sessions, `send_reload_signal`, `Done` to the CLI (`client_session.rs:781-824`).
+4. Reload worker: `persist_reload_recovery_intents` + `graceful_shutdown_sessions` (live headless/swarm sessions are shut down), then `reload_exec_target(prefers_selfdev)` (`reload.rs:178`).
+5. `reload_exec_target` → `resolve_reload_target(_, true)`. Now `forced_stale_shared_server_refusal` runs: `shared-server` **X** exists and is the min-mtime `shared-server`-labeled candidate; `stable` **Y** is a different-payload candidate strictly newer → **refuses** → `None`.
+6. `reload.rs:223-236` → `Failed` → `reload_exec_failed()` → **`exit(42)` with no replacement**.
 
-2. Exec stage, with `force` **hardcoded to true**:
-   `reload_exec_target` (`util.rs:86-95`) calls
-   `resolve_reload_target(is_selfdev_session, true)` and returns `None` when the
-   refusal fires. `ReloadSignal` (`reload_state.rs:416-423`) carries no `force`
-   field, so the reload worker cannot know the original request was non-force.
-   `reload.rs:178` turns that `None` into the `else` branch
-   (`reload.rs:223-231`, "no reloadable binary found") and then
-   `super::shutdown::coordinator().reload_exec_failed().await` (`reload.rs:236`),
-   which drains and **exits the process (exit 42) with no replacement execed**.
+### Impact
 
-**Reproduction (composition of already-passing facts + reachability trace):**
+- The daemon performs graceful shutdown of live headless/swarm sessions and then **dies** with no handoff — the exact outcome `jcode server reload` was built (issue #291) to avoid ("instead of killing the daemon and dropping live headless/swarm sessions, we ask it to hand off").
+- The CLI `run_server_reload_command` observes `Reloading` then `Done`, so it enters `await_reload_handoff(30s)` (`commands.rs:2230`), times out, and reports the misleading "reload requested; the new server is still coming up." (`commands.rs:2238`) — not a clean skip and not a genuine failure surfaced to the user.
+- Not a strict infinite refuse-loop: the next client spawn launches a fresh daemon on `current = Y` via the launcher, and recovery intents may restore sessions. But this is a self-inflicted daemon kill on the graceful path, in the precise state the feature targets, and it is a regression from a path that previously **worked** (old code: client repair `shared-server -> Y`, then exec into Y).
 
-State: self-dev daemon currently running build `v0`; `shared-server` pinned to a
-promoted self-dev build `v1` (newer than `v0`); an unpromoted newer
-`target/selfdev/jcode` = `v2` present on disk (normal after a fresh rebuild).
-Invoke the default `jcode server reload` (no `--force`).
+### Note on the refusal's own intent
 
-- Preflight `resolve_reload_target(prefer=true, force=false)`: `refused = None`.
-  `has_strictly_newer_candidate_than_current()` compares `current=v0` against the
-  exec candidates `server_update_candidate(true)=shared-server v1` and
-  `server_update_candidate(false)=stable`. `v1 > v0` ⇒ true ⇒ preflight does **not**
-  skip and **does not** refuse; it sends the reload signal and drains sessions.
-- Exec `reload_exec_target(true)` = `resolve_reload_target(true, force=true)`.
-  `collect_reload_target_candidates` always adds the raw `dev` candidate
-  `target/selfdev/jcode = v2` (`util.rs:` dev branch, gated only by
-  `get_repo_dir()`/`find_dev_binary`, both present on a self-dev daemon).
-  `forced_stale_shared_server_refusal` finds `shared-server v1` is strictly older
-  than `dev v2` and returns `Some(...)` — exactly the case proven by
-  `target_resolution_refuses_forced_stale_shared_server_when_newer_dev_exists`.
-  `reload_exec_target` returns `None`. Note the aggravating detail: the `dev`
-  candidate is inserted with `exec_candidate=false` (`util.rs:358-363`), so it is
-  never eligible to be chosen as the exec target (the picker and
-  `has_strictly_newer_candidate_than_current` both filter on `exec_candidate`,
-  `util.rs:117-121,228-234`). Yet `forced_stale_shared_server_refusal` scans the
-  full candidate vector (`util.rs:128-130` passes `&candidates`), so a binary that
-  is explicitly *not* an exec candidate still vetoes the reload onto the approved
-  one.
-- `reload.rs:223-236`: daemon writes `Failed` and exits with no replacement.
+Even by its stated intent ("refuse instead of silently re-execing the *stale* payload", IMPLEMENTATION.md §2), the refusal is over-broad: `pick_newest_target_candidate` would have selected `stable` **Y** (the newest exec candidate), **not** the stale `shared-server` X. The daemon was never going to re-exec the stale payload here; the refusal blocks a legitimate upgrade to Y and returns `None` instead of falling back to the already-computed newest good target.
 
-The most damning detail: the `force`-gated refusal short-circuits
-`resolve_reload_target` *before* its own anti-stranding fallback can run. When
-`refused = Some(...)` (`util.rs:128-133`) the entire `if refused.is_none()` block
-(`util.rs:135`) is skipped, so `chosen` stays `None`. That skipped block is exactly
-where `resolve_reload_target` implements "a live downgrade beats a dead server with
-no replacement" — it falls back to the candidate (or current exe) rather than
-returning nothing (`util.rs:161-171`, `DowngradeBlockedUseCurrent`). The refusal
-thus defeats the very stranding-prevention the resolver was written to provide, and
-hands `reload_exec_target` a `None` that becomes a process exit. The prior
-`newest_reload_candidate` selection (now `#[cfg(test)]`-only, `util.rs:502-521`)
-execed the approved `shared-server v1` here — an **upgrade** from `v0`, daemon stays
-alive, sessions preserved. The new code instead exits. This is a strict
-availability regression on the default reload command, and it re-creates the
-"daemon severs all client sockets with no live successor" failure mode that
-`terra_session_death_report.md` and R01 are meant to prevent. The unpromoted
-transient `target/selfdev/jcode` is precisely the "transient local self-dev binary"
-that the incident report's fix proposal #1 says must **not** influence the shared
-daemon; here its mere presence on disk vetoes a reload onto the approved target and
-kills the daemon.
+### Suggested remediation (not implemented; for the owner)
 
-Why it is untested: `c5ab2c9d5` disabled the preflight refusal under `cfg!(test)`
-(`client_session.rs:741` `if !cfg!(test) && ...`), and no test exercises
-`reload_exec_target` returning `None` or the `reload.rs` exec-fail path with a
-refusal. The refusal tests only cover the pure `forced_stale_shared_server_refusal`
-function, not the exec wiring.
+Any one of:
+- Thread `force` through `ReloadSignal` so the exec stage uses the request's real force (symmetry with preflight).
+- When `forced_stale_shared_server_refusal` fires, fall back to the computed `chosen` (newest valid exec candidate) rather than returning `None`, so the daemon never dies with a valid newer target in hand.
+- Keep/restore the client-side `repair_stale_shared_server_channel()` in `run_server_reload_command` so the non-force path advances `shared-server -> stable` before signaling (the pre-`d7807e4ca` behavior).
+- Or apply the refusal at preflight for non-force too and convert it into a clean `skip` (Done, daemon lives), never reaching graceful shutdown + exec death.
 
-Blast radius: self-dev daemons (release daemons have no repo, so `get_repo_dir()`
-returns `None` and the `dev` candidate is absent — release users are not affected by
-this specific dev-based veto; see focus (e) below). Recovery is partial: a fresh
-daemon spawns on the next client connection using the approved binary and sessions
-are checkpointed, but the in-flight reload returns an error and all live TUIs are
-dropped mid-reload.
+---
 
-Suggested fix (any one):
-- Thread the original `force` into `ReloadSignal` and have `reload_exec_target` pass
-  it to `resolve_reload_target`, so a non-force reload never refuses at exec.
-- At the exec stage, on refusal fall back to the approved `shared-server`/current
-  exec candidate (keep the daemon alive) instead of returning `None` → exit.
-- Restrict `forced_stale_shared_server_refusal` to compare `shared-server` only
-  against *promotable/approved* candidates, never against the raw unpromoted
-  `target/selfdev/jcode`.
+## F1 — session-alias files have no garbage collection (confirmed; Medium, non-blocking)
 
-## Non-blocking findings
+Adopting and independently confirming stallion's finding 1.
 
-### N1 — Session-alias files are never garbage-collected (unbounded growth)
+- Alias records are written durably and per-source-session, overwriting in place:
+  `reload_recovery.rs:233-257` (`persist_session_alias`, `crate::storage::write_json` to `alias_path_for_session`), directory `session-aliases/` (`reload_recovery.rs:79-81`).
+- The GC sweep only reads `recovery_dir()` (`reload-recovery/`): `collect_garbage_at` at `reload_recovery.rs:137-138` iterates `recovery_dir()` exclusively; it never touches `alias_dir()`. Grep for alias cleanup/prune/expire in that module returns nothing.
+- Write call sites: resume binding (`client_lifecycle.rs:303`) and debug reconnect (`debug_command_exec.rs:734`, `:768`). Files are keyed by (sanitized) source session id and overwritten, so growth is bounded by the number of **distinct** source/client session ids seen over the daemon's lifetime, not by reload count. Still unbounded over time with no TTL and no `PENDING_RECORD_MAX_AGE` (7-day) sweep equivalent.
 
-`persist_session_alias` writes one `~/.jcode/session-aliases/<id>.json` per resumed
-source/client session (`reload_recovery.rs:233-256`). `collect_garbage`
-(`reload_recovery.rs:133-` ) scans only `recovery_dir()`, never `alias_dir()`.
-Every reconnect/resume across the process lifetime leaves a permanent small JSON
-file. Not corrupting and each is tiny, but it is a slow unbounded leak and stale
-alias files persist indefinitely (they can outlive their target agent; the stale-id
-error path (gate 4) handles that gracefully, so correctness holds). Recommend adding
-alias files to the GC sweep with an age/TTL bound. (Focus (c): chains are bounded
-and cycle-guarded, so no infinite loop or unbounded chain — only unbounded *file
-accumulation*.)
+**Severity: Medium.** No correctness impact (alias resolution is bounded to 16 hops with cycle detection, `reload_recovery.rs:259-281`), but a long-lived daemon accrues `session-aliases/*.json` indefinitely. The fix is small: extend `collect_garbage_at` to sweep `alias_dir()` by mtime against `PENDING_RECORD_MAX_AGE` (mirroring the orphan-backup path). Not blocking.
 
-### N2 — Expanded recovery eligibility is correctly scoped, but note the wait set is unchanged (good)
+---
 
-`persist_reload_recovery_intents` now includes `!is_headless && !event_txs.is_empty()`
-members regardless of `running` (`reload.rs:271-273`). The triggering CLI client is
-**not** wrongly rehydrated: it is still assigned `was_interrupted=false` and, absent
-a `ReloadContext`, `recovery_directive_for_session` returns `None`, so it is skipped
-(`reload.rs:291-318`; `selfdev/reload.rs:127-149`). The graceful-shutdown wait set
-still filters on `status == "running"` only (`reload.rs:393-400`), so the broader
-eligibility does not expand the wait set or risk a reload hang. `r01_tests` confirms
-attached-ready peers get intents while detached-ready and headless-attached do not.
-Focus (d) is satisfied. One product note: a truly-idle attached TUI now receives the
-generic "interrupted" continuation, which is intended per the incident proposal #3
-but is slightly misleading text for a session that was not generating.
+## Focus (a) — atomic-publish TOCTOU (two concurrent publishers, same version): PASS
 
-### N3 — Release-channel (non-selfdev) repair path preserved (focus e)
+`install_binary_at_version_in_builds_dir` (`lib.rs:282-320`) with `copy_binary_to_staging_path` (`lib.rs:322-393`) and `publish_staged_binary` (`lib.rs:410-426`) is safe under concurrent publishers of the same version:
 
-`d7807e4ca` removed the client-side `repair_stale_shared_server_channel()` call from
-`run_server_reload_command`, but the repair is still invoked on the release update
-paths that need it: `src/cli/hot_exec.rs:404-428` + `:184-186`/`:356-358`, and
-`crates/jcode-app-core/src/update.rs:1172,1187-1206`. The refusal logic that must
-keep working for release users (`lib.rs` `repair_stale_shared_server_channel`,
-`is_release_channel_marker`, `shared_server_binary_is_strictly_older_than`,
-now ~`lib.rs:1181-1269`) is unchanged and its tests pass
-(`repair_*` in `build-support`, 50/50). Removing the redundant repair from the manual
-`server reload` command is acceptable because release daemons resolve `shared-server`/
-`stable` and are not subject to the dev-candidate veto of BLOCKING-1. No release-user
-regression found.
+- Each publisher stages to a **unique** hidden temp path (`.jcode-publish-<pid>-<nanos>-<attempt>`, `lib.rs:395-408`) created with `create_new(true)` (`lib.rs:325-338`) — no staged-file collision; `AlreadyExists` retries a new name.
+- Bytes are copied (not hard-linked), `sync_all`'d, and a **zero-byte staged file is rejected** (`lib.rs:360-369`) — this directly fixes the incident's zero-byte hard-link artifact.
+- Smoke test runs on the **staged** path (`lib.rs:307`, `smoke_test_staged_binary_for_install`), then `std::fs::rename(staged, dest)` publishes atomically (`lib.rs:417`). The two staged copies are byte-identical (same source version); whichever renames last wins with an identical, valid binary. No zero-byte/partial file is ever visible at `versions/<v>/jcode`.
+- Failure cleanup is race-safe (`lib.rs:312-317`): remove staged file, and remove the version dir only `if !dest.exists()`. If publisher A succeeded, B's failure leaves A's `dest` intact (B does not remove the dir). If both fail, `remove_dir` on a non-empty or already-removed dir is swallowed (`let _ =`); worst case a leftover empty dir. No corruption.
 
-### N4 — `sanitize_session_id` collision (theoretical)
+The two shipped gates (`concurrent_source_truncation_between_stage_and_rename_preserves_published_copy`, `failed_smoke_test_leaves_no_version_entry`) exercise the stage-vs-source-truncation race and the failed-smoke cleanup, and both pass. Sound.
 
-Distinct ids that sanitize to the same string (e.g. `a/b` vs `a_b`) would share an
-alias file. Session ids are alphanumeric + timestamp + random, so collision is
-improbable; noting for completeness, not blocking.
+---
 
-## TOCTOU assessment (focus a) — clean
+## Focus (b) — `repair_stale_shared_server_channel` semantics unchanged: PASS
 
-The stage→smoke→rename pipeline uses unique per-attempt staged names, `create_new`
-exclusivity, `sync_all` before rename, a zero-byte guard, and an atomic rename; a
-concurrent same-version publisher can only replace the final path with another
-fully-validated copy. A torn/partial read of a concurrently-rebuilding source is
-caught by the staged smoke test (or the zero-byte guard) and never reaches
-`versions/<v>/jcode`. No interleaving corrupts a published artifact.
+The only R01 commit touching `jcode-build-support/src/lib.rs` is the atomic-publish commit `7387597e1`, and it does **not** touch the repair region. Byte-for-byte diff of the function body pre-R01 (`7387597e1^`) vs current HEAD is **identical** (verified). Release-channel gating (`is_release_channel_marker`, `lib.rs:1202-1209`, `:1230-1237`) and the strictly-newer-by-payload-mtime guard (`shared_server_binary_is_strictly_older_than`, `lib.rs:1248-1269`) are unchanged. `repair_repoints_stale_shared_server_to_newer_stable` and the surrounding suite pass. No regression for release-channel users at this function. (Note: this is orthogonal to F2, which concerns the *removal of the caller* in `run_server_reload_command`, not the function itself.)
 
-## Verdict rationale
+---
 
-Gates 1, 3, 4 are cleanly satisfied. Gate 2's forced-path refusal is satisfied and
-Gate 5's suites pass (independently re-run). However, the refusal was wired a second
-time at the exec stage with a hardcoded `force=true` that is unreachable-by-design
-from the tested preflight but **is** reachable from a routine non-forced
-`jcode server reload` on a self-dev daemon, where it converts an approved
-session-preserving reload into a daemon exit with no replacement — the exact
-stranded-session class this node exists to eliminate, and it is entirely untested.
-For a reload-robustness repair node, that is a blocking regression.
+## Focus (d) — recovery eligibility (attachment-based) wrongly including the triggering ephemeral CLI session: PASS (with note)
+
+The broadened eligibility filter (`reload.rs:271-273`): `member.status == "running" || (!member.is_headless && !member.event_txs.is_empty())`.
+
+- The triggering session is always appended as a candidate (`reload.rs:278-284`), but a **directive** is only persisted when `recovery_directive_for_session` returns `Some` (`reload.rs:292-318`), which requires either a persisted `reload_ctx` or `was_interrupted` (`tool/selfdev/reload.rs:127-149`). For the triggering session, `was_interrupted = is_headless || !is_triggering = false`, so an ephemeral CLI-triggered session with no reload context yields **no directive** and is skipped — it does not pollute recovery.
+- The shipped gate `recovery_intents_include_attached_non_headless_sessions` confirms: attached non-headless non-running → included; detached non-headless → excluded; headless-attached non-running → excluded. Independently reproduced green.
+- Minor residual: any attached non-headless member is now a *candidate* regardless of status, so a genuinely attached interactive peer with a reload context is correctly recovered; an attached ephemeral session without context is filtered at the directive stage. No wrongful inclusion of the triggering ephemeral CLI session. Not a blocker.
+
+---
+
+## Conclusion
+
+The atomic-publish repair (F1-incident fix), the reload-target diagnostics, resume-alias binding, and recovery broadening are well-built and independently pass their gates. However, the reload target commit `d7807e4ca` introduced a real regression: the exec stage refuses with a hardcoded `force=true` while `ReloadSignal` carries no force and the client-side channel repair was removed from `run_server_reload_command`. A default (non-force) `jcode server reload` in the stale-`shared-server`/newer-`stable` state — the exact scenario the feature targets — passes the non-force skip gate, performs graceful session shutdown, then hits the force-gated exec refusal, returns `None`, and `exit(42)`s the daemon with no handoff. This is a path that previously worked (client repair, then exec into stable) and now kills the daemon and its live sessions.
 
 VERDICT: FAIL
