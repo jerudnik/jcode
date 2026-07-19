@@ -44,6 +44,14 @@ pub(super) struct ReloadRecoveryRecord {
     pub delivered_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct SessionAliasRecord {
+    pub source_session_id: String,
+    pub target_session_id: String,
+    pub reason: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct GarbageCollectionStats {
     pub removed: usize,
@@ -68,8 +76,16 @@ fn recovery_dir() -> Result<PathBuf> {
     Ok(crate::storage::jcode_dir()?.join("reload-recovery"))
 }
 
+fn alias_dir() -> Result<PathBuf> {
+    Ok(crate::storage::jcode_dir()?.join("session-aliases"))
+}
+
 pub(super) fn path_for_session(session_id: &str) -> Result<PathBuf> {
     Ok(recovery_dir()?.join(format!("{}.json", sanitize_session_id(session_id))))
+}
+
+fn alias_path_for_session(session_id: &str) -> Result<PathBuf> {
+    Ok(alias_dir()?.join(format!("{}.json", sanitize_session_id(session_id))))
 }
 
 fn remove_record_files(path: &std::path::Path) -> Result<()> {
@@ -212,6 +228,56 @@ pub(super) fn persist_intent(
         path.display()
     ));
     Ok(())
+}
+
+pub(super) fn persist_session_alias(
+    source_session_id: &str,
+    target_session_id: &str,
+    reason: impl Into<String>,
+) -> Result<()> {
+    if source_session_id == target_session_id {
+        return Ok(());
+    }
+
+    let record = SessionAliasRecord {
+        source_session_id: source_session_id.to_string(),
+        target_session_id: target_session_id.to_string(),
+        reason: reason.into(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let path = alias_path_for_session(source_session_id)?;
+    crate::storage::write_json(&path, &record)?;
+    crate::logging::info(&format!(
+        "session alias store: persisted source={} target={} path={}",
+        source_session_id,
+        target_session_id,
+        path.display()
+    ));
+    Ok(())
+}
+
+pub(super) fn resolve_session_alias(session_id: &str) -> Result<Option<String>> {
+    let mut current = session_id.to_string();
+    let mut resolved = None;
+    let mut seen = std::collections::HashSet::new();
+
+    for _ in 0..16 {
+        if !seen.insert(current.clone()) {
+            break;
+        }
+        let path = alias_path_for_session(&current)?;
+        if !path.exists() {
+            break;
+        }
+        let record: SessionAliasRecord = crate::storage::read_json(&path)?;
+        if record.target_session_id.is_empty() || record.target_session_id == current {
+            break;
+        }
+        current = record.target_session_id;
+        resolved = Some(current.clone());
+    }
+
+    Ok(resolved)
 }
 
 pub(super) fn peek_for_session(session_id: &str) -> Result<Option<ReloadRecoveryRecord>> {
@@ -457,6 +523,26 @@ mod tests {
         );
         assert!(record.delivered_at.is_none());
         assert!(has_pending_for_session(session_id));
+        Ok(())
+    }
+
+    #[test]
+    fn session_alias_roundtrips_and_follows_resume_chain() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let _home = IsolatedHome::new();
+
+        persist_session_alias("source-client", "resumed-agent", "first resume")?;
+        persist_session_alias("resumed-agent", "second-agent", "second resume")?;
+
+        assert_eq!(
+            resolve_session_alias("source-client")?,
+            Some("second-agent".to_string())
+        );
+        assert_eq!(
+            resolve_session_alias("resumed-agent")?,
+            Some("second-agent".to_string())
+        );
+        assert_eq!(resolve_session_alias("unmapped")?, None);
         Ok(())
     }
 
