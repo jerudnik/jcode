@@ -4,7 +4,7 @@ use super::{persist_swarm_state_for, remove_persisted_swarm_state_for};
 use crate::agent::Agent;
 use crate::plan::{PlanItem, newly_ready_item_ids};
 use crate::protocol::{NotificationType, ServerEvent};
-use crate::session::Session;
+use crate::tool::subagent::{SubagentParent, run_subagent_worker};
 use anyhow::Result;
 use futures::future::try_join_all;
 use jcode_swarm_core::{
@@ -1742,49 +1742,40 @@ pub(super) async fn run_swarm_task(
         )
     };
     let parent_session_id = session_id.clone();
-    let mut session = Session::create(
-        Some(session_id),
-        Some(format!("{} (@{} swarm)", description, subagent_type)),
-    );
-    let child_session_id = session.id.clone();
-    session.model = Some(coordinator_model);
-    // Inherit the coordinator's exact auth identity so the forked worker keeps
-    // the same provider/auth route (OAuth vs API, openai-compatible profile)
-    // instead of silently falling back to the config default on persistence.
-    session.provider_key = provider_key;
-    session.route_api_method = route;
-    if let Some(dir) = working_dir {
-        session.working_dir = Some(dir.display().to_string());
-    }
-    session.save()?;
 
     log_swarm_lifecycle(
         "task_start",
         vec![
             ("parent_session_id", parent_session_id.clone()),
-            ("child_session_id", child_session_id.clone()),
             ("subagent_type", subagent_type.to_string()),
             ("description_chars", description.chars().count().to_string()),
             ("prompt_chars", prompt.chars().count().to_string()),
         ],
     );
 
-    let mut allowed: HashSet<String> = registry.tool_names().await.into_iter().collect();
-    for blocked in ["subagent", "task", "todo", "todowrite", "todoread"] {
-        allowed.remove(blocked);
-    }
-    crate::config::config()
-        .tools
-        .apply_to_allowed_set(&mut allowed);
-
-    let mut worker = Agent::new_with_session(provider, registry, session, Some(allowed));
-    match worker.run_once_capture(prompt).await {
+    let parent = SubagentParent {
+        session_id,
+        working_dir,
+        model: coordinator_model,
+        provider_key,
+        route_api_method: route,
+    };
+    match run_subagent_worker(
+        provider,
+        registry,
+        parent,
+        description,
+        subagent_type,
+        prompt,
+        None,
+    )
+    .await
+    {
         Ok(output) => {
             log_swarm_lifecycle(
                 "task_done",
                 vec![
                     ("parent_session_id", parent_session_id),
-                    ("child_session_id", child_session_id),
                     ("subagent_type", subagent_type.to_string()),
                     ("output_chars", output.chars().count().to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
@@ -1798,7 +1789,6 @@ pub(super) async fn run_swarm_task(
                 vec![
                     ("phase", "task_error".to_string()),
                     ("parent_session_id", parent_session_id),
-                    ("child_session_id", child_session_id),
                     ("subagent_type", subagent_type.to_string()),
                     ("error", error.to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
