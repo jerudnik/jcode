@@ -224,6 +224,36 @@ pub struct ExpandOutcome {
 ///
 /// Children may depend on each other and on the parent's own upstream
 /// dependencies (already-existing nodes), preserving acyclicity by construction.
+/// Maximum decomposition depth. A node whose parent chain is already this
+/// deep cannot be expanded further. Guards against runaway recursive
+/// decomposition (a real incident grew 2 seeds into 148 nodes at depth 4:
+/// each generation of workers re-decomposed context-overlapping subtasks
+/// whose value was below one model pass). Two levels - seed nodes plus one
+/// round of decomposition - covers legitimate fan-out; anything deeper is
+/// almost always context-duplicating shrapnel.
+pub const MAX_EXPANSION_DEPTH: usize = 2;
+
+/// Maximum children a single expansion may propose. Fan-out beyond this is
+/// almost always decomposition below the value of one model pass (subtasks
+/// sharing 90% of their context each pay full context-loading overhead).
+/// Sits just above [`GATE_COVERAGE_ENUMERATION_CAP`] so the wide-gate
+/// coverage semantics (enumeration relaxes above 20 audited children)
+/// remain reachable; the depth cap is the primary recursion guard.
+pub const MAX_EXPANSION_CHILDREN: usize = 24;
+
+fn node_depth(graph: &TaskGraph, node_id: &str) -> usize {
+    let mut depth = 0;
+    let mut current = graph.get(node_id).and_then(|node| node.parent.clone());
+    while let Some(parent_id) = current {
+        depth += 1;
+        if depth > 16 {
+            break; // defensive: corrupt parent cycle
+        }
+        current = graph.get(&parent_id).and_then(|node| node.parent.clone());
+    }
+    depth
+}
+
 pub fn expand_node(
     graph: &mut TaskGraph,
     node_id: &str,
@@ -234,6 +264,13 @@ pub fn expand_node(
         let node = graph
             .get(node_id)
             .ok_or_else(|| DagError::UnknownNode(node_id.to_string()))?;
+        let depth = node_depth(graph, node_id);
+        if depth >= MAX_EXPANSION_DEPTH {
+            return Err(DagError::GateMisuse(format!(
+                "node '{node_id}' is at decomposition depth {depth} (cap {MAX_EXPANSION_DEPTH}); \
+                 do the work directly instead of decomposing further"
+            )));
+        }
         if node.owner.as_deref() != Some(actor) {
             return Err(DagError::NotOwner {
                 node: node_id.to_string(),
@@ -256,6 +293,13 @@ pub fn expand_node(
             return Err(DagError::GateMisuse(
                 "expand requires at least one child".into(),
             ));
+        }
+        if children.len() > MAX_EXPANSION_CHILDREN {
+            return Err(DagError::GateMisuse(format!(
+                "expand of '{node_id}' proposes {} children (cap {MAX_EXPANSION_CHILDREN}); \
+                 decompose into fewer, context-disjoint subtasks or do the work directly",
+                children.len()
+            )));
         }
     }
 
