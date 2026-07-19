@@ -4,11 +4,11 @@
  "program_state": "railway_ready",
  "active_graph_id": null,
  "last_checkpoint": {
-  "node": "R01",
-  "state": "accepted",
-  "commit": "e3736e7fb",
-  "updated_at": "2026-07-19T05:57:00Z",
-  "summary": "R01+R03 accepted (D022). Reload path repaired and reviewed. Next: D021 subagent bridge, then daemon reload onto new build, then F07."
+  "node": "D021",
+  "state": "implemented_and_reloaded",
+  "commit": "607d3cbad",
+  "updated_at": "2026-07-19T06:21:00Z",
+  "summary": "D021 subagent bridge implemented and daemon reloaded onto 607d3cbad-dirty, activating accepted R01/R03 repairs. Next: F07."
  },
  "nodes": {
   "W0": {
