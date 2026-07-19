@@ -499,6 +499,7 @@ fn format_mtime(time: Option<SystemTime>) -> String {
         .unwrap_or_else(|| "unavailable".to_string())
 }
 
+#[cfg(test)]
 fn newest_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     newest_reload_candidate_inner(is_selfdev_session)
 }
@@ -516,6 +517,7 @@ fn binary_mtime(path: &Path) -> Option<SystemTime> {
 /// *strictly newer*, which is exactly the situation that makes
 /// `server_has_newer_binary` report an update (e.g. `/update` installed a newer
 /// release while the self-dev pin stayed on an older build).
+#[cfg(test)]
 fn newest_reload_candidate_inner(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     let ordered = [
         server_update_candidate(is_selfdev_session),
@@ -538,6 +540,7 @@ fn newest_reload_candidate_inner(is_selfdev_session: bool) -> Option<(PathBuf, &
 /// one when it is provably, strictly newer by mtime, so equal/unknown mtimes
 /// never demote the higher-preference flavor (protecting a self-dev pin on a
 /// tie). Canonical-path duplicates are collapsed to the first occurrence.
+#[cfg(test)]
 fn pick_newest_candidate(
     candidates: impl IntoIterator<
         Item = (
