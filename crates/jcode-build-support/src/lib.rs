@@ -27,7 +27,7 @@ pub use storage_helpers::{
     version_binary_path, write_build_progress,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use jcode_storage as storage;
 use serde::{Deserialize, Serialize};
@@ -275,28 +275,319 @@ pub fn rollback_pending_activation_for_session(session_id: &str) -> Result<Optio
 
 /// Install a binary at a specific immutable version path.
 pub fn install_binary_at_version(source: &std::path::Path, version: &str) -> Result<PathBuf> {
-    if !source.exists() {
-        anyhow::bail!("Binary not found at {:?}", source);
+    let builds_root = builds_dir()?;
+    install_binary_at_version_in_builds_dir(source, version, &builds_root)
+}
+
+fn install_binary_at_version_in_builds_dir(
+    source: &std::path::Path,
+    version: &str,
+    builds_root: &Path,
+) -> Result<PathBuf> {
+    let source_metadata = std::fs::metadata(source)
+        .with_context(|| format!("Binary not found at {}", source.display()))?;
+    if !source_metadata.is_file() {
+        anyhow::bail!("Binary is not a file at {}", source.display());
     }
 
-    let dest_dir = builds_dir()?.join("versions").join(version);
+    let dest_dir = builds_root.join("versions").join(version);
     storage::ensure_dir(&dest_dir)?;
 
     let dest = dest_dir.join(binary_name());
+    let staged = match copy_binary_to_staging_path(source, &dest_dir) {
+        Ok(staged) => staged,
+        Err(err) => {
+            let _ = std::fs::remove_dir(&dest_dir);
+            return Err(err);
+        }
+    };
 
-    // Remove existing file first to avoid ETXTBSY when replacing a running binary.
+    let install_result = (|| {
+        run_after_install_stage_hook(source, &staged);
+        smoke_test_staged_binary_for_install(source, &staged)?;
+        publish_staged_binary(&staged, &dest_dir, &dest)?;
+        Ok(dest.clone())
+    })();
+
+    if install_result.is_err() {
+        let _ = std::fs::remove_file(&staged);
+        if !dest.exists() {
+            let _ = std::fs::remove_dir(&dest_dir);
+        }
+    }
+
+    install_result
+}
+
+fn copy_binary_to_staging_path(source: &Path, dest_dir: &Path) -> Result<PathBuf> {
+    for attempt in 0..1000_u32 {
+        let staged = staged_binary_path(dest_dir, attempt);
+        let staged_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&staged);
+
+        let mut staged_file = match staged_file {
+            Ok(file) => file,
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("failed to create staged binary {}", staged.display())
+                });
+            }
+        };
+
+        let stage_result = (|| {
+            let mut source_file = std::fs::File::open(source)
+                .with_context(|| format!("failed to open source binary {}", source.display()))?;
+            std::io::copy(&mut source_file, &mut staged_file).with_context(|| {
+                format!(
+                    "failed to copy {} to staged binary {}",
+                    source.display(),
+                    staged.display()
+                )
+            })?;
+            crate::platform_support::set_permissions_executable(&staged).with_context(|| {
+                format!(
+                    "failed to mark staged binary executable: {}",
+                    staged.display()
+                )
+            })?;
+            staged_file
+                .sync_all()
+                .with_context(|| format!("failed to fsync staged binary {}", staged.display()))?;
+
+            let staged_len = staged_file
+                .metadata()
+                .with_context(|| format!("failed to stat staged binary {}", staged.display()))?
+                .len();
+            if staged_len == 0 {
+                anyhow::bail!(
+                    "Refusing to publish zero-byte staged binary {}",
+                    staged.display()
+                );
+            }
+
+            Ok(())
+        })();
+
+        if let Err(err) = stage_result {
+            let _ = std::fs::remove_file(&staged);
+            return Err(err).with_context(|| {
+                format!(
+                    "failed to prepare staged binary {} from {}",
+                    staged.display(),
+                    source.display()
+                )
+            });
+        }
+
+        sync_directory_best_effort(dest_dir);
+        return Ok(staged);
+    }
+
+    anyhow::bail!(
+        "failed to create a unique staged binary path in {}",
+        dest_dir.display()
+    )
+}
+
+fn staged_binary_path(dest_dir: &Path, attempt: u32) -> PathBuf {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    dest_dir.join(format!(
+        ".{}-publish-{}-{}-{}{}",
+        binary_stem(),
+        std::process::id(),
+        now,
+        attempt,
+        std::env::consts::EXE_SUFFIX
+    ))
+}
+
+fn publish_staged_binary(staged: &Path, dest_dir: &Path, dest: &Path) -> Result<()> {
+    #[cfg(windows)]
     if dest.exists() {
-        std::fs::remove_file(&dest)?;
+        std::fs::remove_file(dest)
+            .with_context(|| format!("failed to remove existing binary {}", dest.display()))?;
     }
 
-    // Prefer hard link (instant, zero I/O) over copy (71MB+ binary).
-    // Falls back to copy if hard link fails (e.g. cross-filesystem).
-    if std::fs::hard_link(source, &dest).is_err() {
-        std::fs::copy(source, &dest)?;
-    }
-    crate::platform_support::set_permissions_executable(&dest)?;
+    std::fs::rename(staged, dest).with_context(|| {
+        format!(
+            "failed to atomically publish {} to {}",
+            staged.display(),
+            dest.display()
+        )
+    })?;
+    sync_directory_best_effort(dest_dir);
+    Ok(())
+}
 
-    Ok(dest)
+fn smoke_test_staged_binary_for_install(_source: &Path, staged: &Path) -> Result<()> {
+    #[cfg(test)]
+    if source_is_current_test_exe(_source) {
+        return Ok(());
+    }
+
+    smoke_test_binary(staged)
+}
+
+#[cfg(test)]
+fn source_is_current_test_exe(source: &Path) -> bool {
+    let Ok(current_exe) = std::env::current_exe() else {
+        return false;
+    };
+    std::fs::canonicalize(source).ok() == std::fs::canonicalize(current_exe).ok()
+}
+
+fn sync_directory_best_effort(dir: &Path) {
+    if let Ok(file) = std::fs::File::open(dir) {
+        let _ = file.sync_all();
+    }
+}
+
+#[cfg(test)]
+type InstallStageHook = Box<dyn FnOnce(&Path, &Path) + Send + 'static>;
+
+#[cfg(test)]
+static INSTALL_STAGE_HOOK: std::sync::Mutex<Option<InstallStageHook>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+fn set_after_install_stage_hook(hook: impl FnOnce(&Path, &Path) + Send + 'static) {
+    *INSTALL_STAGE_HOOK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Box::new(hook));
+}
+
+#[cfg(test)]
+fn run_after_install_stage_hook(source: &Path, staged: &Path) {
+    let hook = INSTALL_STAGE_HOOK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take();
+    if let Some(hook) = hook {
+        hook(source, staged);
+    }
+}
+
+#[cfg(not(test))]
+fn run_after_install_stage_hook(_source: &Path, _staged: &Path) {}
+
+#[cfg(all(test, unix))]
+mod atomic_publish_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn atomic_publish_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn shell_quote(path: &Path) -> String {
+        format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+    }
+
+    fn write_smoke_script(path: &Path, log_path: Option<&Path>, succeeds: bool) {
+        let log_line = log_path
+            .map(|path| format!("printf '%s\\n' \"$0\" > {}\n", shell_quote(path)))
+            .unwrap_or_default();
+        let body = if succeeds {
+            format!(
+                "#!/bin/sh\n{log_line}if [ \"$1\" = 'version' ] && [ \"$2\" = '--json' ]; then\n  printf '%s\\n' '{{\"version\":\"test-version\",\"git_hash\":\"testhash\"}}'\n  exit 0\nfi\nexit 64\n"
+            )
+        } else {
+            format!("#!/bin/sh\n{log_line}printf '%s\\n' 'boom' >&2\nexit 65\n")
+        };
+        std::fs::write(path, body).expect("write smoke script");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .expect("chmod smoke script");
+    }
+
+    #[test]
+    fn concurrent_source_truncation_between_stage_and_rename_preserves_published_copy() {
+        let _guard = atomic_publish_test_lock();
+        let fixture = tempfile::tempdir().expect("fixture tempdir");
+        let builds_root = fixture.path().join("builds");
+        let source = fixture.path().join(binary_name());
+        let smoke_log = fixture.path().join("smoked-path");
+        write_smoke_script(&source, Some(&smoke_log), true);
+        let original = std::fs::read(&source).expect("read original script");
+        let version = "race-truncate-preserves-published-copy";
+
+        set_after_install_stage_hook({
+            let source = source.clone();
+            let staged_original = original.clone();
+            move |_source, staged| {
+                assert_eq!(
+                    std::fs::read(staged).expect("read staged script"),
+                    staged_original,
+                    "staged copy must be complete before the source is truncated"
+                );
+                std::fs::write(&source, b"").expect("truncate source after staging");
+            }
+        });
+
+        let versioned = install_binary_at_version_in_builds_dir(&source, version, &builds_root)
+            .expect("install succeeds");
+
+        assert_eq!(
+            std::fs::metadata(&source).expect("source metadata").len(),
+            0
+        );
+        assert!(
+            std::fs::metadata(&versioned)
+                .expect("version metadata")
+                .len()
+                > 0
+        );
+        assert_eq!(std::fs::read(&versioned).expect("read versioned"), original);
+
+        let smoked_path = std::fs::read_to_string(&smoke_log).expect("read smoke log");
+        let smoked_path = PathBuf::from(smoked_path.trim());
+        assert_ne!(
+            smoked_path, source,
+            "smoke test must not run the source path"
+        );
+        assert_ne!(
+            smoked_path, versioned,
+            "smoke test must run before the atomic rename into place"
+        );
+        assert_eq!(smoked_path.parent(), versioned.parent());
+        assert!(
+            smoked_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(".jcode-publish-")),
+            "smoke test should run the staged temp path in {}",
+            versioned.parent().unwrap().display()
+        );
+        assert!(versioned.starts_with(builds_root.join("versions")));
+    }
+
+    #[test]
+    fn failed_smoke_test_leaves_no_version_entry() {
+        let _guard = atomic_publish_test_lock();
+        let fixture = tempfile::tempdir().expect("fixture tempdir");
+        let builds_root = fixture.path().join("builds");
+        let source = fixture.path().join(binary_name());
+        write_smoke_script(&source, None, false);
+        let version = "failed-smoke-no-entry";
+        let version_dir = builds_root.join("versions").join(version);
+
+        let error = install_binary_at_version_in_builds_dir(&source, version, &builds_root)
+            .expect_err("failed smoke test should reject install");
+
+        assert!(error.to_string().contains("Binary smoke test failed"));
+        assert!(
+            !version_dir.exists(),
+            "failed smoke test must not leave a partial {} entry",
+            version_dir.display()
+        );
+    }
 }
 
 fn binary_source_metadata_path(binary: &Path) -> PathBuf {
