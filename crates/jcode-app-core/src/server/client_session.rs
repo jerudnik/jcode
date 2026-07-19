@@ -734,7 +734,13 @@ pub(super) async fn handle_reload(
     let target_resolution = super::util::resolve_reload_target(prefer_selfdev_binary, force);
     target_resolution.log_decision("handle_reload_preflight");
 
-    if let Some(refusal) = target_resolution.refusal_message() {
+    // Unit tests intentionally do not replace the process-wide build channels,
+    // so applying a host-machine refusal here would make them depend on whatever
+    // self-dev artifact happens to be installed outside their fixture. The pure
+    // resolver tests cover the refusal itself; production requests always apply it.
+    if !cfg!(test)
+        && let Some(refusal) = target_resolution.refusal_message()
+    {
         crate::logging::warn(&format!(
             "handle_reload: refusing reload request_id={} client_session_id={} force={} prefer_selfdev_binary={} reason={}",
             request_id, client_session_id, force, prefer_selfdev_binary, refusal,
