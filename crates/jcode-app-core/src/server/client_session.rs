@@ -716,33 +716,7 @@ pub(super) async fn handle_reload(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) {
-    // A non-forced reload (e.g. `jcode server reload`) is a graceful upgrade
-    // request: only reload when this server is provably running older code than
-    // an available reload candidate. This keeps us from downgrading a newer
-    // server (such as a self-dev daemon next to an older release client) and
-    // from re-entering the reload-loop family (#277), where a server that merely
-    // "differs" can never make the difference go away by reloading.
-    if !force && !super::server_has_newer_binary() {
-        crate::logging::info(&format!(
-            "handle_reload: skipping non-forced reload for client_session_id={} (no strictly-newer binary)",
-            client_session_id
-        ));
-        // Tell the requester this was a deliberate no-op (not a silent success)
-        // so callers like `jcode server reload` can report "already up to date"
-        // distinctly from an actual reload.
-        let _ = client_event_tx.send(ServerEvent::ReloadProgress {
-            step: "skip".to_string(),
-            message: "Server already running the newest binary; no reload needed.".to_string(),
-            success: Some(true),
-            output: None,
-        });
-        let _ = client_event_tx.send(ServerEvent::Done { id });
-        return;
-    }
-
     let request_id = crate::id::new_id("reload");
-    mark_remote_reload_started(&request_id);
-
     let (triggering_session, prefer_selfdev_binary) = match agent.try_lock() {
         Ok(agent_guard) => (
             Some(agent_guard.session_id().to_string()),
@@ -756,6 +730,49 @@ pub(super) async fn handle_reload(
             (Some(client_session_id.to_string()), false)
         }
     };
+
+    let target_resolution = super::util::resolve_reload_target(prefer_selfdev_binary, force);
+    target_resolution.log_decision("handle_reload_preflight");
+
+    if let Some(refusal) = target_resolution.refusal_message() {
+        crate::logging::warn(&format!(
+            "handle_reload: refusing reload request_id={} client_session_id={} force={} prefer_selfdev_binary={} reason={}",
+            request_id, client_session_id, force, prefer_selfdev_binary, refusal,
+        ));
+        let _ = client_event_tx.send(ServerEvent::Error {
+            id,
+            message: refusal.to_string(),
+            retry_after_secs: None,
+        });
+        return;
+    }
+
+    // A non-forced reload (e.g. `jcode server reload`) is a graceful upgrade
+    // request: only reload when this server is provably running older code than
+    // an available reload candidate. This keeps us from downgrading a newer
+    // server (such as a self-dev daemon next to an older release client) and
+    // from re-entering the reload-loop family (#277), where a server that merely
+    // "differs" can never make the difference go away by reloading.
+    if !force && !target_resolution.has_strictly_newer_candidate_than_current() {
+        let message = target_resolution.no_update_message();
+        crate::logging::info(&format!(
+            "handle_reload: skipping non-forced reload for client_session_id={} ({})",
+            client_session_id, message
+        ));
+        // Tell the requester this was a deliberate no-op (not a silent success)
+        // so callers like `jcode server reload` can report the exact candidate set
+        // distinctly from an actual reload.
+        let _ = client_event_tx.send(ServerEvent::ReloadProgress {
+            step: "skip".to_string(),
+            message,
+            success: Some(true),
+            output: None,
+        });
+        let _ = client_event_tx.send(ServerEvent::Done { id });
+        return;
+    }
+
+    mark_remote_reload_started(&request_id);
 
     let live_sessions = {
         let members = swarm_members.read().await;
