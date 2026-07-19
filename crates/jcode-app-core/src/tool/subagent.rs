@@ -108,7 +108,8 @@ impl Tool for SubagentTool {
                 "prompt": { "type": "string" },
                 "subagent_type": { "type": "string" },
                 "run_in_background": { "type": "boolean" },
-                "model": { "type": "string" }
+                "model": { "type": "string" },
+                "intent": super::intent_schema_property()
             },
             "required": ["description", "prompt"],
             "additionalProperties": false
