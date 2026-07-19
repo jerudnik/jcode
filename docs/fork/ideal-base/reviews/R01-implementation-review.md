@@ -142,4 +142,66 @@ The broadened eligibility filter (`reload.rs:271-273`): `member.status == "runni
 
 The atomic-publish repair (F1-incident fix), the reload-target diagnostics, resume-alias binding, and recovery broadening are well-built and independently pass their gates. However, the reload target commit `d7807e4ca` introduced a real regression: the exec stage refuses with a hardcoded `force=true` while `ReloadSignal` carries no force and the client-side channel repair was removed from `run_server_reload_command`. A default (non-force) `jcode server reload` in the stale-`shared-server`/newer-`stable` state — the exact scenario the feature targets — passes the non-force skip gate, performs graceful session shutdown, then hits the force-gated exec refusal, returns `None`, and `exit(42)`s the daemon with no handoff. This is a path that previously worked (client repair, then exec into stable) and now kills the daemon and its live sessions.
 
-VERDICT: FAIL
+VERDICT: FAIL (superseded — see re-review below)
+
+---
+
+## Re-review of BLOCKING-1 fix
+
+**Re-reviewer model:** claude-opus-4-8
+**Mode:** read-only source + evidence investigation, plus independent rerun of the four named regression tests and both full suites. No implementation files changed.
+**Fix commits reviewed:** `923bba4aa` (force propagated through `ReloadSignal` into `reload_exec_target`), `293384c53` (bounded session-alias GC), `d2d876ffc` (evidence). All three confirmed ancestors of `HEAD`.
+
+### (1) Kill-chain from BLOCKING-1 (F2) is closed
+
+Traced end to end on current `HEAD`:
+
+- `client_session::handle_reload` preflight resolves with the **real** force (`client_session.rs:734`, `resolve_reload_target(prefer_selfdev_binary, force)`), then signals with the **same** force via `send_reload_signal_with_force(hash, triggering_session, prefer_selfdev_binary, force)` (`client_session.rs:811-816`). No longer calls the force-agnostic `send_reload_signal`.
+- `ReloadSignal` now carries `force` (`reload_state.rs:421-422`, `#[cfg(not(test))] pub force: bool`) exposed via `ReloadSignal::force()` (`reload_state.rs:427-441`). Production build stores the field; the test build reads a per-request-id side table defaulting to `true`, so legacy fixtures that construct `ReloadSignal` without `force` keep their historical semantics.
+- `reload::await_reload_signal` records `signal.force()` into the reload trace (`reload.rs:97`) and passes it to the exec stage: `reload_exec_target(prefers_selfdev, signal.force())` (`reload.rs:183`).
+- `reload_exec_target(is_selfdev_session, force)` forwards to `resolve_reload_target(is_selfdev_session, force)` (`util.rs:88-92`) — **the hardcoded `true` is gone**.
+- The refusal remains force-gated (`util.rs:149`, `if force && let Some(reason) = forced_stale_shared_server_refusal(&candidates)`). For a non-forced request (`force == false`), the refusal branch is never entered, so `refused` stays `None` and the resolver proceeds to compute `chosen` from the newest exec candidate (`util.rs:154-210`). The exact BLOCKING-1 scenario (stale `shared-server` X / newer `stable` Y, non-force) now resolves `chosen = (stable, "stable")` and execs, instead of returning `None`.
+
+**Confirmed:** the only remaining hardcoded-`true` `resolve_reload_target` caller is `send_reload_signal`'s default (`reload_state.rs:542`), which fans out to the debug (`debug_command_exec.rs:646`), selfdev (`reload.rs:352`, `setup.rs:294`), and legacy paths — all pre-existing force-`true` semantics, none reachable from a non-force `jcode server reload`. Preflight and exec now consume the same `force`, so no request that passes preflight can be reinterpreted into an exec-stage refusal. Grep confirms the only exec-stage `reload_exec_target` call site (`reload.rs:183`) threads `signal.force()`. Kill-chain closed.
+
+### (2) Named regression tests (rerun individually, all PASS)
+
+| Test | Result |
+|---|---|
+| `server::reload_state::non_forced_reload_signal_retains_request_force` | **PASS** 1/1 |
+| `server::util::target_resolution_tests::non_forced_stale_shared_server_with_newer_candidate_resolves_exec_target` | **PASS** 1/1 |
+| `server::util::target_resolution_tests::target_resolution_refuses_forced_stale_shared_server_when_newer_dev_exists` | **PASS** 1/1 |
+| `server::reload_recovery::tests::garbage_collection_sweeps_stale_session_aliases` | **PASS** 1/1 |
+
+The exec-target test asserts `resolution.chosen_target() == Some((stable, "stable"))` in the non-force stale-shared/newer-stable state — the precise F2 outcome, now the tested contract. The forced-refusal test confirms the refusal is unchanged for `force == true`.
+
+### (3) Alias GC cannot delete FRESH aliases or delivered-recovery records prematurely — confirmed
+
+- The alias sweep (`collect_session_aliases_at`, `reload_recovery.rs:215-250`) removes a `*.json` **only** when `file_is_expired(&path, now)` is true, i.e. file mtime age `>= PENDING_RECORD_MAX_AGE` (7 days, `reload_recovery.rs:7`, `:119-125`). Fresh aliases are counted `retained` and kept. `persist_session_alias` writes via `storage::write_json` (`reload_recovery.rs:297-298`), which refreshes mtime on every re-persist, so an actively-resumed alias never ages out. The test proves a stale (mtime backdated past 7d) alias is removed while a fresh one and its resolution survive.
+- Alias GC is orthogonal to recovery-record GC (`collect_recovery_records_at`, `reload_recovery.rs:151-213`), which is unchanged by the fix. Delivered records were already removed there by design (`status == Delivered`, `:189`); the alias sweep touches only `alias_dir()` (`session-aliases/`), never `recovery_dir()`, so it cannot delete delivered-recovery records at all. No premature deletion.
+- One benign residual: `remove_record_files` also unlinks the `.bak` sibling. Alias writes do produce a `.bak` (via `write_json` on overwrite), so both primary and backup are cleaned together — correct, no orphaned `.bak`.
+
+### (4) No new inconsistency introduced
+
+- **Other `ReloadSignal` readers:** grep shows the only `force`/`force()` consumers are the trace (`reload.rs:97`), the log line (`reload.rs:88`), and the exec call (`reload.rs:183`). No other code branches on force.
+- **Serialization:** `ReloadSignal` derives only `Clone, Debug` (`reload_state.rs:416`) — no serde — so the `#[cfg(not(test))]` field cannot break any wire/disk format. The trace serializes `signal.force()` into a hand-built `json!` value, not the struct.
+- **Test-mode constructions** (`reload_tests.rs:53`, `:83`, `selfdev/tests.rs:398`, `:407`) omit the cfg-gated `force` field and compile cleanly; their `force()` defaults to `true`, preserving prior fixtures. The full suites confirm this compiles and passes.
+- **Debug `reload` path:** unchanged. `debug_command_exec.rs:646` still calls `send_reload_signal(hash, None, false)` (prefer_selfdev = false), which routes through the force-`true` default — its historical exec semantics are preserved; the debug path sets `prefer_selfdev`/reload-info independently and is unaffected by the force threading.
+- **selfdev/setup reload paths** (`selfdev/reload.rs:352`, `setup.rs:294`) use the runtime-identity / plain variants that also default force = `true`, exactly as before.
+- **Reload traces/serialization:** additive only (new `"force"` key), no removed or renamed fields.
+- **Minor nit (non-blocking):** the new unit test `non_forced_reload_signal_retains_request_force` (`reload_state.rs:1142-1159`) is placed just *after* the `#[cfg(test)] mod tests { ... }` closing brace (`:1141`) rather than inside it. It still compiles because `#[test]` items are only built under the test harness, and it passes, but it sits at module top level instead of within the tests module. Cosmetic; no functional impact.
+
+### (5) Suites — both PASS
+
+| Suite | Result |
+|---|---|
+| `scripts/dev_cargo.sh test -p jcode-build-support` | **PASS** 50 passed / 0 failed |
+| `scripts/dev_cargo.sh test -p jcode-app-core` | **PASS** 1136 passed / 0 failed / 23 ignored |
+
+Independently reproduced; consistent with FIX1.md's reported numbers.
+
+### Re-review verdict
+
+BLOCKING-1 (F2) is fully resolved: `force` is threaded symmetrically through `ReloadSignal` into `reload_exec_target`/`resolve_reload_target`, the exec stage no longer hardcodes `true`, and a non-forced `jcode server reload` in the stale-`shared-server`/newer-`stable` state now resolves the newer exec target rather than draining sessions and `exit(42)`ing. The F1 alias-GC gap is closed with a bounded 7-day mtime sweep that cannot evict fresh aliases or delivered records. No new blockers, no regressions in either suite. The single nit (test placement outside `mod tests`) is cosmetic.
+
+RE-REVIEW VERDICT: PASS (R01 accepted)
