@@ -252,6 +252,7 @@ async fn persist_reload_recovery_intents(
                     "session_id": session_id,
                     "status": member.status,
                     "is_headless": member.is_headless,
+                    "live_attached_connections": member.event_txs.len(),
                     "swarm_id": member.swarm_id,
                     "role": member.role,
                 })
@@ -267,7 +268,9 @@ async fn persist_reload_recovery_intents(
         );
         members
             .iter()
-            .filter(|(_, member)| member.status == "running")
+            .filter(|(_, member)| {
+                member.status == "running" || (!member.is_headless && !member.event_txs.is_empty())
+            })
             .map(|(session_id, member)| (session_id.clone(), member.is_headless))
             .collect()
     };
@@ -537,6 +540,110 @@ async fn graceful_shutdown_sessions_with_timeout(
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod r01_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    struct IsolatedHome {
+        prev_home: Option<std::ffi::OsString>,
+        _temp: tempfile::TempDir,
+    }
+
+    impl IsolatedHome {
+        fn new() -> Self {
+            let temp = tempfile::TempDir::new().expect("jcode home");
+            let prev_home = std::env::var_os("JCODE_HOME");
+            crate::env::set_var("JCODE_HOME", temp.path());
+            Self {
+                prev_home,
+                _temp: temp,
+            }
+        }
+    }
+
+    impl Drop for IsolatedHome {
+        fn drop(&mut self) {
+            if let Some(prev) = self.prev_home.take() {
+                crate::env::set_var("JCODE_HOME", prev);
+            } else {
+                crate::env::remove_var("JCODE_HOME");
+            }
+        }
+    }
+
+    fn member(
+        session_id: &str,
+        status: &str,
+        is_headless: bool,
+        live_attached: bool,
+    ) -> SwarmMember {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut event_txs = HashMap::new();
+        if live_attached {
+            let (attached_tx, _attached_rx) = tokio::sync::mpsc::unbounded_channel();
+            event_txs.insert("conn-live".to_string(), attached_tx);
+        }
+
+        SwarmMember {
+            session_id: session_id.to_string(),
+            event_tx,
+            event_txs,
+            working_dir: None,
+            swarm_id: Some("swarm-r01".to_string()),
+            swarm_enabled: true,
+            status: status.to_string(),
+            detail: None,
+            task_label: None,
+            subagent_type: None,
+            friendly_name: Some(session_id.to_string()),
+            report_back_to_session_id: None,
+            initial_prompt_delivered: None,
+            latest_completion_report: None,
+            role: "agent".to_string(),
+            joined_at: Instant::now(),
+            last_status_change: Instant::now(),
+            is_headless,
+            output_tail: None,
+            todo_progress: None,
+            todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_intents_include_attached_non_headless_sessions() {
+        let _lock = crate::storage::lock_test_env();
+        let _home = IsolatedHome::new();
+        let swarm_members = Arc::new(RwLock::new(HashMap::from([
+            (
+                "attached-ready".to_string(),
+                member("attached-ready", "ready", false, true),
+            ),
+            (
+                "detached-ready".to_string(),
+                member("detached-ready", "ready", false, false),
+            ),
+            (
+                "headless-attached-ready".to_string(),
+                member("headless-attached-ready", "ready", true, true),
+            ),
+        ])));
+
+        persist_reload_recovery_intents("reload-r01", &swarm_members, None).await;
+
+        assert!(crate::server::reload_recovery::has_pending_for_session(
+            "attached-ready"
+        ));
+        assert!(!crate::server::reload_recovery::has_pending_for_session(
+            "detached-ready"
+        ));
+        assert!(!crate::server::reload_recovery::has_pending_for_session(
+            "headless-attached-ready"
+        ));
     }
 }
 
