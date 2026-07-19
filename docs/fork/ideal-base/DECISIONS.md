@@ -502,3 +502,30 @@ provider 400s before any work; removed from config. Follow-up candidate: a
 provider-boundary JSON-schema sanitizer generalizing the Kimi flattener.
 
 **Reopen trigger:** F08 integrated gate finding a reload-path regression.
+
+## D023. D021 implemented; daemon reloaded onto reviewed selfdev build
+
+**Decision:** D021 is implemented at `607d3cbad` after `16646d9f4`
+registered a real `subagent` bridge and `6c633b785` aligned the schema with
+app-core tool conventions. The bridge delegates to the shared swarm-worker
+helper, keeps the child-worker recursive blocklist intact, and revives both
+provider-advertised Task/Agent calls and `/subagent`.
+
+Validation recorded in `evidence/D021/IMPLEMENTATION.md`: app-core suite
+passed (1138 passed, 0 failed, 23 ignored), selfdev build passed, and the
+registry round-trip test now checks the hardcoded Claude identity-tool names
+against app-core registry resolution. Post-reload live smoke in a fresh
+selfdev session confirmed `subagent` is registered alongside `swarm`.
+
+The daemon was then reloaded via `selfdev build-reload` onto
+`607d3cbad-dirty-03aa34bf0344` (dirty only because ignored/untracked drawio
+artifacts remain in the worktree). `jcode doctor` reports client/server SAME
+and shared-server now points at the new build. This activates the accepted
+R01/R03 reload/terminal repairs and D021.
+
+Route notes: a cancelled pre-reload D021 partial stash remains as
+`stash@{0}` for safety but is obsolete relative to the committed D021 work;
+do not resurrect it unless investigating the dispatch history.
+
+**Next:** resume the ideal-base railway at F07 (dead/hung MCP detection,
+cache eviction, bounded reconnect), with D021 available for future delegation.
