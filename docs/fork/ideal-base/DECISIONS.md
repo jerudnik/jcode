@@ -481,3 +481,24 @@ alongside its review round. Do not start while lizard holds those paths.
 removes advertised tools without a registry round-trip test. Follow-up
 candidate: a test asserting every advertised identity tool resolves in the
 registry (would have caught this).
+
+## D022. R01 and R03 accepted; reload subsystem repaired
+
+**Decision:** R01 accepted at `e3736e7fb` after a full FAIL->fix->re-review
+cycle: implementation by Sol (lizard), adversarial review by Opus 4.8 (hog,
+FAIL on BLOCKING-1: exec-stage refusal hardcoded force=true and could exit a
+drained daemon on a routine non-forced reload), fix by Sol (vole,
+`923bba4aa` force threading + `293384c53` alias GC), re-review by Opus 4.8
+(dragon, PASS). R03 accepted at `a0676f781`, first-round PASS by Opus 4.8
+(dromedary) with 4 non-blocking hardening notes (recorded in the review).
+
+Route incidents this cycle: stallion (first R01 reviewer) was cancelled by
+the coordinator based on a session listing that wrongly showed the live
+agent as absent during TUI attach churn (build-mismatch bounce). Lesson
+recorded: verify via logs before cancelling "zombie" jobs; the listing
+desync is an R01-adjacent observability bug. Separately, a broken tldraw
+MCP tool schema (project .mcp.json) bricked three consecutive Sol jobs with
+provider 400s before any work; removed from config. Follow-up candidate: a
+provider-boundary JSON-schema sanitizer generalizing the Kimi flattener.
+
+**Reopen trigger:** F08 integrated gate finding a reload-path regression.
