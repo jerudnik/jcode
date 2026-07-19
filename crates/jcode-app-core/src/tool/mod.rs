@@ -29,6 +29,7 @@ mod session_search;
 pub(crate) mod session_search_index;
 mod side_panel;
 mod skill;
+pub(crate) mod subagent;
 mod todo;
 mod webfetch;
 mod websearch;
@@ -257,7 +258,7 @@ impl Registry {
         tools
     }
 
-    pub async fn new(_provider: Arc<dyn Provider>) -> Self {
+    pub async fn new(provider: Arc<dyn Provider>) -> Self {
         let start = std::time::Instant::now();
         let skills_start = std::time::Instant::now();
         let skills = Self::shared_skills_registry();
@@ -288,6 +289,11 @@ impl Registry {
             &mut tools_map,
             "conversation_search",
             conversation_search::ConversationSearchTool::new(compaction),
+        );
+        Self::insert_tool(
+            &mut tools_map,
+            "subagent",
+            subagent::SubagentTool::new(provider, registry.clone()),
         );
         // Sponsored discovery is on by default (opt-out); when disabled the
         // tool is never registered and no discovery endpoint is ever
@@ -374,7 +380,19 @@ impl Registry {
     /// lower-level crates (e.g. config) can normalize tool names without
     /// depending on the tool subsystem; this method delegates to it.
     pub(crate) fn resolve_tool_name(name: &str) -> &str {
-        jcode_tool_types::resolve_tool_name(name)
+        match name {
+            // Claude Code OAuth identity names. Keep this compatibility seam
+            // aligned with claude_code_identity_tools in jcode-provider-anthropic.
+            "Agent" => "subagent",
+            "Bash" => "bash",
+            "Edit" => "edit",
+            "Glob" => "agentgrep",
+            "Grep" => "agentgrep",
+            "Read" => "read",
+            "ScheduleWakeup" => "schedule",
+            "Write" => "write",
+            other => jcode_tool_types::resolve_tool_name(other),
+        }
     }
 
     /// Suggest up to 3 available tool names that look similar to `name`.
