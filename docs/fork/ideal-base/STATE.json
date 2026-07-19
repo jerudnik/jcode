@@ -347,18 +347,18 @@
    "updated_at": null
   },
   "R01": {
-   "state": "pending",
+   "state": "in_progress",
    "commit": null,
    "evidence": [],
-   "summary": null,
-   "updated_at": null
+   "summary": "Dispatched to gpt-5.6-sol (session lizard, job_1784426556196).",
+   "updated_at": "2026-07-19T02:02:40Z"
   },
   "R03": {
-   "state": "pending",
+   "state": "in_progress",
    "commit": null,
    "evidence": [],
-   "summary": null,
-   "updated_at": null
+   "summary": "Dispatched to gpt-5.6-sol (session monkey, job_1784426556276).",
+   "updated_at": "2026-07-19T02:02:40Z"
   }
  }
 }
