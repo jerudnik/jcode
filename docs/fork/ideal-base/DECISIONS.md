@@ -443,3 +443,41 @@ upstream subsystems for sanity rather than mirror them; the reload/build
 subsystem is the first beneficiary.
 
 **Reopen trigger:** F08's integrated gate finding a reload-path regression.
+
+## D021. Advertised subagent/Task tool surface is dead (fix queued behind R01)
+
+**Finding (2026-07-19, this session):** The Agent-tool dispatch failure
+("Unknown tool: subagent") is an inherited surface/registry inconsistency,
+not a routing blip:
+
+1. The Claude identity toolset still advertises **Task/Agent**
+   (`crates/jcode-provider-anthropic/src/lib.rs` `claude_code_identity_tools`),
+   and runtimes map `Task <-> subagent`
+   (`crates/jcode-provider-claude-cli-runtime/src/lib.rs:1106,1136`,
+   `crates/jcode-provider-core/src/anthropic.rs:284,300`).
+2. But the backing tool was deliberately deregistered:
+   `crates/jcode-app-core/src/tool/tests.rs:84` asserts "the deprecated
+   direct subagent tool must not be exposed; use swarm instead."
+3. Every model call to Agent/Task therefore dies in
+   `registry.execute` -> "Unknown tool" (`crates/jcode-app-core/src/tool/mod.rs:567`).
+4. The `/subagent` slash command is equally dead: `handle_run_subagent`
+   (`crates/jcode-app-core/src/server/client_actions.rs:251`) still builds
+   `tool_name = "subagent"` and executes via the registry, so it can only
+   error. The tool was removed upstream but its three call surfaces were not.
+
+**Decided fix (bridge option):** register a thin `subagent` tool that
+delegates to the existing swarm spawn path (`run_swarm_task` in
+`crates/jcode-app-core/src/server/swarm.rs:1725` already has the exact
+shape: description + subagent_type + prompt -> forked worker session).
+This makes the advertised surface honest and revives `/subagent` for free.
+The alternative (stop advertising Task and delete `handle_run_subagent`)
+loses a capability models actively try to use.
+
+**Sequencing:** touches `crates/jcode-app-core`, which R01's worker
+(lizard) currently owns. Act immediately after R01 lands, before or
+alongside its review round. Do not start while lizard holds those paths.
+
+**Reopen trigger:** any provider identity-toolset change that adds or
+removes advertised tools without a registry round-trip test. Follow-up
+candidate: a test asserting every advertised identity tool resolves in the
+registry (would have caught this).
