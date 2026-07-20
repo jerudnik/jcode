@@ -36,6 +36,7 @@ default_tmpdir() {
 }
 SOCKET="${JCODE_SOCKET:-$(default_tmpdir | sed 's:/*$::')/jcode.sock}"
 RELOAD_MARKER="$JCODE_HOME/reload-info"
+SHUTDOWN_MARKER="$JCODE_HOME/state/shutdown-watchdog.json"
 
 POLL_SECS="${SENTINEL_POLL_SECS:-10}"
 # Consecutive failed probes before rescue. With POLL_SECS=10 this is a 30s
@@ -63,6 +64,20 @@ reload_in_flight() {
     local age
     age=$(( $(date +%s) - $(stat -f %m "$RELOAD_MARKER" 2>/dev/null || echo 0) ))
     (( age < 60 ))
+}
+
+intentional_shutdown() {
+    # The daemon records its exit reason in a durable marker. A *fresh*
+    # marker with an intentional reason (user stop / idle timeout) means the
+    # daemon meant to die: stand down instead of resurrecting it. Failure
+    # reasons (accept-loop-failure, reload-exec-failed) and stale/absent
+    # markers (hard crash writes nothing) fall through to rescue.
+    [[ -f "$SHUTDOWN_MARKER" ]] || return 1
+    local age
+    age=$(( $(date +%s) - $(stat -f %m "$SHUTDOWN_MARKER" 2>/dev/null || echo 0) ))
+    (( age < 120 )) || return 1
+    grep -qE '"reason":"(sigterm|persistent-idle|temporary-idle|temporary-owner-exit)"' \
+        "$SHUTDOWN_MARKER" 2>/dev/null
 }
 
 rescue_binary() {
@@ -102,6 +117,9 @@ while true; do
         consecutive_dead=$((consecutive_dead + 1))
         if reload_in_flight; then
             log "DEAD probe $consecutive_dead/$DEAD_THRESHOLD (reload marker fresh; holding off)"
+        elif intentional_shutdown; then
+            log "DEAD probe $consecutive_dead/$DEAD_THRESHOLD (intentional shutdown marker; standing down)"
+            consecutive_dead=0
         else
             log "DEAD probe $consecutive_dead/$DEAD_THRESHOLD socket=$SOCKET"
             if (( consecutive_dead >= DEAD_THRESHOLD )); then
