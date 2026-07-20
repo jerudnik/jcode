@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F08",
+    "node": "W1",
     "state": "accepted",
-    "commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
-    "updated_at": "2026-07-20T08:21:35Z",
-    "summary": "Accepted: integrated gate PASS verified by independent review; gate hardened per review findings (hung-server pgrep, socket FAIL enforcement)."
+    "commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
+    "updated_at": "2026-07-20T08:22:13Z",
+    "summary": "W1 synthesis: all 10 children accepted (F01-F08, R01, R03); runtime ownership and persistence closed; integrated gate green over 3 rounds with zero residue."
   },
   "nodes": {
     "W0": {
@@ -21,11 +21,13 @@
       "updated_at": "2026-07-18T06:32:51Z"
     },
     "W1": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W1"
+      ],
+      "summary": "W1 synthesis: all 10 children accepted (F01-F08, R01, R03); runtime ownership and persistence closed; integrated gate green over 3 rounds with zero residue.",
+      "updated_at": "2026-07-20T08:22:13Z"
     },
     "W2": {
       "state": "pending",
