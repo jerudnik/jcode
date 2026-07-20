@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F16",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T13:15:36Z",
-    "summary": "Delegated: promote hermetic real-process cases into required suites per F15 shortlist."
+    "state": "accepted",
+    "commit": "8971ed1db",
+    "updated_at": "2026-07-20T15:42:37Z",
+    "summary": "Accepted after FAIL->fix cycle: 3 lifecycle tests promoted with runtime binary resolution (incl. CI triple dirs), panic-safe teardown, latent test bugs fixed. REQUIRE_BINARY workflow export handed to F17."
   },
   "nodes": {
     "W0": {
@@ -229,11 +229,13 @@
       "updated_at": "2026-07-20T13:15:21Z"
     },
     "F16": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: promote hermetic real-process cases into required suites per F15 shortlist.",
-      "updated_at": "2026-07-20T13:15:36Z"
+      "state": "accepted",
+      "commit": "8971ed1db",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F16"
+      ],
+      "summary": "Accepted after FAIL->fix cycle: 3 lifecycle tests promoted with runtime binary resolution (incl. CI triple dirs), panic-safe teardown, latent test bugs fixed. REQUIRE_BINARY workflow export handed to F17.",
+      "updated_at": "2026-07-20T15:42:37Z"
     },
     "F17": {
       "state": "pending",
