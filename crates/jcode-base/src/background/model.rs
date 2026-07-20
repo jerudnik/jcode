@@ -192,6 +192,12 @@ pub struct BackgroundTaskInfo {
     pub task_id: String,
     pub output_file: PathBuf,
     pub status_file: PathBuf,
+    /// Set when the spawn was REFUSED (cap reached, shutdown drain): the
+    /// task never ran and this carries the self-documenting reason. Callers
+    /// must surface this instead of reporting a started task (F12 review
+    /// important-1: refusal must be explicit at the tool layer).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

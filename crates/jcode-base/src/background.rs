@@ -73,6 +73,34 @@ pub struct BackgroundTaskManager {
     /// Test-only cap override (0 = unset, use env/default). Avoids mutating
     /// process-global env vars from parallel tests.
     cap_override: std::sync::atomic::AtomicUsize,
+    /// In-flight spawn reservations (F12 review important-2): incremented
+    /// before the cap check, released when the task lands in the live map or
+    /// the spawn is refused, so concurrent spawns cannot all pass one free
+    /// slot (check-then-act TOCTOU).
+    in_flight_spawns: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// RAII reservation of one live-task slot during spawn setup. Dropped (and
+/// the counter released) either on refusal or after the task is inserted
+/// into the live map, at which point the map itself carries the count.
+struct SpawnSlot {
+    counter: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SpawnSlot {
+    fn reserve(counter: &Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self {
+            counter: Arc::clone(counter),
+        }
+    }
+}
+
+impl Drop for SpawnSlot {
+    fn drop(&mut self) {
+        self.counter
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl BackgroundTaskManager {
@@ -85,10 +113,9 @@ impl BackgroundTaskManager {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             store: Arc::new(store::TaskStatusStore::new(output_dir.clone())),
             output_dir,
-            activity: std::sync::RwLock::new(
-                jcode_core::activity::noop_activity_authority(),
-            ),
+            activity: std::sync::RwLock::new(jcode_core::activity::noop_activity_authority()),
             cap_override: std::sync::atomic::AtomicUsize::new(0),
+            in_flight_spawns: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -122,10 +149,8 @@ impl BackgroundTaskManager {
         &self,
         task_id: &str,
         tool_name: &str,
-    ) -> Result<
-        jcode_core::activity::ActivityLeaseGuard,
-        jcode_core::activity::ActivityLeaseError,
-    > {
+    ) -> Result<jcode_core::activity::ActivityLeaseGuard, jcode_core::activity::ActivityLeaseError>
+    {
         let authority = self
             .activity
             .read()
@@ -334,9 +359,7 @@ impl BackgroundTaskManager {
             .write_terminal(&status.task_id, move |_| terminal_status)
             .await
         {
-            crate::logging::error(&format!(
-                "Detached finalize persistence failed: {error:#}"
-            ));
+            crate::logging::error(&format!("Detached finalize persistence failed: {error:#}"));
         }
 
         let output_preview = if output.len() > 500 {
@@ -513,9 +536,7 @@ impl BackgroundTaskManager {
         let drained: Vec<RunningTask> = {
             let mut tasks = self.tasks.write().await;
             let ids: Vec<String> = tasks.keys().cloned().collect();
-            ids.into_iter()
-                .filter_map(|id| tasks.remove(&id))
-                .collect()
+            ids.into_iter().filter_map(|id| tasks.remove(&id)).collect()
         };
         let count = drained.len();
         for task in drained {
@@ -598,6 +619,7 @@ impl BackgroundTaskManager {
             task_id,
             output_file,
             status_file,
+            refused: None,
         }
     }
 
@@ -689,12 +711,20 @@ impl BackgroundTaskManager {
         let task_id = Self::generate_task_id();
         let output_path = self.output_dir.join(format!("{}.output", task_id));
         let status_path = self.output_dir.join(format!("{}.status.json", task_id));
-        // Global live-task cap: only tasks still in the live map count.
-        // Terminal pruning (completed/failed/cancelled) releases capacity.
-        // Fail closed like the drain refusal below: the task NEVER runs and
-        // the status file records an explicit self-documenting refusal.
+        // Global live-task cap: live-map tasks plus in-flight spawn
+        // reservations count (F12 review important-2: a bare map read lets
+        // concurrent spawns all pass one free slot). The RAII slot is held
+        // until the task lands in the live map. Terminal pruning
+        // (completed/failed/cancelled) releases capacity. Fail closed like
+        // the drain refusal below: the task NEVER runs and the status file
+        // records an explicit self-documenting refusal.
+        let spawn_slot = SpawnSlot::reserve(&self.in_flight_spawns);
         {
-            let live = self.tasks.read().await.len();
+            let live = self.tasks.read().await.len()
+                + self
+                    .in_flight_spawns
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                    .saturating_sub(1); // exclude our own reservation
             let cap = self.live_task_cap();
             if live >= cap {
                 let reason = format!(
@@ -719,6 +749,7 @@ impl BackgroundTaskManager {
                     task_id,
                     output_file: output_path,
                     status_file: status_path,
+                    refused: Some(reason),
                 };
             }
         }
@@ -748,6 +779,7 @@ impl BackgroundTaskManager {
                     task_id,
                     output_file: output_path,
                     status_file: status_path,
+                    refused: Some("Refused: daemon is shutting down".to_string()),
                 };
             }
         };
@@ -786,6 +818,7 @@ impl BackgroundTaskManager {
                 task_id,
                 output_file: output_path,
                 status_file: status_path,
+                refused: None,
             };
         }
         Self::publish_task_started_activity(
@@ -911,12 +944,15 @@ impl BackgroundTaskManager {
             .write()
             .await
             .insert(task_id.clone(), running_task);
+        // The live map now carries the count; release the spawn reservation.
+        drop(spawn_slot);
         let _ = registered_tx.send(());
 
         BackgroundTaskInfo {
             task_id,
             output_file: output_path,
             status_file: status_path,
+            refused: None,
         }
     }
 
@@ -1137,6 +1173,7 @@ impl BackgroundTaskManager {
             task_id,
             output_file: output_path,
             status_file: status_path,
+            refused: None,
         }
     }
 
@@ -1507,12 +1544,8 @@ impl BackgroundTaskManager {
             };
             drop(tasks);
 
-            persist_terminal_with_recovery(
-                Arc::clone(&self.store),
-                Arc::clone(&self.tasks),
-                spec,
-            )
-            .await;
+            persist_terminal_with_recovery(Arc::clone(&self.store), Arc::clone(&self.tasks), spec)
+                .await;
 
             Ok(true)
         } else {
@@ -1736,7 +1769,6 @@ impl BackgroundTaskManager {
         matches
     }
 }
-
 
 /// Owned terminal outcome of a task, used to (re)build the final status file
 /// against freshly loaded prior state on every persistence attempt (F04-B1).
