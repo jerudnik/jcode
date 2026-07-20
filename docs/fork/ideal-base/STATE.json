@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W2",
-    "state": "accepted",
-    "commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
-    "updated_at": "2026-07-20T13:08:01Z",
-    "summary": "W2 synthesis: all 7 children accepted (R04, F09-F14). Recovery reconciliation and global resource bounds closed; lifecycle matrix green over 2 rounds."
+    "node": "F15",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T13:08:39Z",
+    "summary": "Delegated: CI hermeticity audit + ignored-test classification."
   },
   "nodes": {
     "W0": {
@@ -220,11 +220,11 @@
       "updated_at": "2026-07-20T13:07:37Z"
     },
     "F15": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: CI hermeticity audit + ignored-test classification.",
+      "updated_at": "2026-07-20T13:08:39Z"
     },
     "F16": {
       "state": "pending",
