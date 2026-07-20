@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W1",
-    "state": "accepted",
-    "commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
-    "updated_at": "2026-07-20T08:22:13Z",
-    "summary": "W1 synthesis: all 10 children accepted (F01-F08, R01, R03); runtime ownership and persistence closed; integrated gate green over 3 rounds with zero residue."
+    "node": "F09",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T08:22:43Z",
+    "summary": "Delegated: selfdev pending-activation reconciliation (phased for stall-guard budget)."
   },
   "nodes": {
     "W0": {
@@ -164,11 +164,11 @@
       "updated_at": "2026-07-20T08:21:35Z"
     },
     "F09": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: selfdev pending-activation reconciliation (phased for stall-guard budget).",
+      "updated_at": "2026-07-20T08:22:43Z"
     },
     "F10": {
       "state": "pending",
