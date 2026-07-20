@@ -18,7 +18,7 @@ async fn start_inprocess_server(
 ) -> Result<(
     std::path::PathBuf,
     std::path::PathBuf,
-    tokio::task::JoinHandle<Result<()>>,
+    tokio::task::JoinHandle<Result<server::ServerExit>>,
 )> {
     let runtime_dir = short_runtime_dir(format!(
         "jcode-reload-mc-{label}-{}",
