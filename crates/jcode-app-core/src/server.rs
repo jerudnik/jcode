@@ -1198,6 +1198,21 @@ impl Server {
             }
         });
 
+        // F10: sweep durable disconnect-cleanup intent records left behind by
+        // aborted cleanups (e.g. agent-lock timeout) and mark those sessions
+        // terminal. Best-effort; never fails startup.
+        tokio::task::spawn_blocking(|| {
+            let reconciled =
+                client_disconnect_cleanup::reconcile_disconnect_cleanup_records(|sid| {
+                    crate::storage::observe_session_pid_markers(sid).active_marker_is_live()
+                });
+            if reconciled > 0 {
+                crate::logging::info(&format!(
+                    "Disconnect-cleanup reconcile marked {reconciled} session(s) terminal"
+                ));
+            }
+        });
+
         (runtime, main_handle, debug_handle)
     }
 
