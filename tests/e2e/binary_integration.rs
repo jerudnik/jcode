@@ -38,23 +38,69 @@ fn find_e2e_binary() -> Option<std::path::PathBuf> {
     None
 }
 
-/// Kill the daemon a PTY client spawned into `runtime_dir`, using the
-/// temporary-server metadata file (written because the tests export
-/// `JCODE_TEMP_SERVER=1`). Best-effort: the owner-pid monitor is the backstop.
+/// Kill any daemon the PTY client spawned for this fixture (gate 2: zero
+/// residue). Servers register their pid in `$JCODE_HOME/servers.json`, and
+/// each fixture uses a disposable home, so every pid in that file belongs to
+/// this test. The daemons cannot be marked temporary (the F03 shutdown
+/// coordinator refuses reloads on temporary servers, and reload is the flow
+/// under test), so explicit reaping is required.
 #[cfg(unix)]
-fn kill_spawned_server(runtime_dir: &std::path::Path) {
-    let metadata_path = runtime_dir.join("jcode.sock.server.json");
-    let Ok(raw) = std::fs::read_to_string(&metadata_path) else {
+fn kill_spawned_server(home_dir: &std::path::Path) {
+    let registry_path = home_dir.join("servers.json");
+    let Ok(raw) = std::fs::read_to_string(&registry_path) else {
         return;
     };
-    let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&raw) else {
+    let Ok(registry) = serde_json::from_str::<serde_json::Value>(&raw) else {
         return;
     };
-    if let Some(pid) = metadata.get("pid").and_then(|v| v.as_u64()) {
-        unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
+    // ServerRegistry serializes with #[serde(flatten)]: the file is a flat
+    // map of server name -> info.
+    let Some(servers) = registry.as_object() else {
+        return;
+    };
+    for info in servers.values() {
+        if let Some(pid) = info.get("pid").and_then(|v| v.as_u64()) {
+            if pid > 0 && pid as u32 != std::process::id() {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGKILL);
+                }
+            }
         }
     }
+}
+
+/// True when `binary` was built from the repo's current source state.
+///
+/// The self-dev re-exec path (`hot_exec`) launches `jcode self-dev --resume`
+/// WITHOUT `--no-build`, so a binary that is stale versus the working tree
+/// triggers a full cargo rebuild in the middle of the reload cycle (minutes,
+/// not seconds). PTY lifecycle tests must skip loudly in that state instead
+/// of timing out; CI runs from a clean tree with a fresh build, where this
+/// returns true.
+#[cfg(unix)]
+fn binary_matches_current_source(binary: &std::path::Path) -> bool {
+    let repo_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    match jcode::build::current_source_state(repo_dir) {
+        Ok(source) => jcode::build::dev_binary_matches_source(binary, &source),
+        Err(_) => false,
+    }
+}
+
+/// Skip guard for PTY self-dev reload tests: requires a binary AND that the
+/// binary matches current source (see `binary_matches_current_source`).
+#[cfg(unix)]
+fn require_selfdev_e2e_binary(test_name: &str) -> Option<std::path::PathBuf> {
+    let binary = require_e2e_binary(test_name)?;
+    if !binary_matches_current_source(&binary) {
+        eprintln!(
+            "SKIP {test_name}: {} is stale versus the current working tree; the self-dev \
+             re-exec path would trigger a full in-test rebuild. Rebuild the binary (or run \
+             from a clean tree) to execute this test.",
+            binary.display()
+        );
+        return None;
+    }
+    Some(binary)
 }
 
 /// Version string a jcode binary reports (matches `jcode_build_meta::VERSION`
@@ -400,7 +446,7 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
     let _env = setup_test_env()?;
 
     let Some(release_binary) =
-        require_e2e_binary("binary_integration_selfdev_reload_reconnects_quickly")
+        require_selfdev_e2e_binary("binary_integration_selfdev_reload_reconnects_quickly")
     else {
         return Ok(());
     };
@@ -435,12 +481,12 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
         .env("JCODE_HOME", &home_dir)
         .env("JCODE_RUNTIME_DIR", &runtime_dir)
         .env("JCODE_INSTALL_DIR", &install_dir)
-        // The client spawns the shared server daemon; these inherited vars
-        // make that daemon a temporary server owned by this test process, so
-        // it writes pid metadata (used by kill_spawned_server) and self-exits
-        // if teardown somehow misses it. Gate 2: zero fixture residue.
-        .env("JCODE_TEMP_SERVER", "1")
-        .env("JCODE_SERVER_OWNER_PID", std::process::id().to_string());
+        // Do NOT mark the spawned daemon temporary: the F03 shutdown
+        // coordinator refuses reloads on temporary servers, and reload is
+        // the behavior under test. kill_spawned_server reaps the daemon in
+        // teardown via its unique runtime-dir argv (gate 2: zero residue).
+        .env_remove("JCODE_TEMP_SERVER")
+        .env_remove("JCODE_SERVER_OWNER_PID");
 
     let mut child = spawn_pty_child(command)?;
 
@@ -498,7 +544,7 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
     )
     .await;
     kill_child(&mut child.child);
-    kill_spawned_server(&runtime_dir);
+    kill_spawned_server(&home_dir);
 
     if let Err(ref error) = test_result {
         eprintln!("self-dev reload e2e test error: {error:#}");
@@ -522,7 +568,7 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
     let _env = setup_test_env()?;
 
     let Some(release_binary) =
-        require_e2e_binary("binary_integration_selfdev_client_reload_resumes_session")
+        require_selfdev_e2e_binary("binary_integration_selfdev_client_reload_resumes_session")
     else {
         return Ok(());
     };
@@ -565,12 +611,12 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
         .env("JCODE_HOME", &home_dir)
         .env("JCODE_RUNTIME_DIR", &runtime_dir)
         .env("JCODE_INSTALL_DIR", &install_dir)
-        // The client spawns the shared server daemon; these inherited vars
-        // make that daemon a temporary server owned by this test process, so
-        // it writes pid metadata (used by kill_spawned_server) and self-exits
-        // if teardown somehow misses it. Gate 2: zero fixture residue.
-        .env("JCODE_TEMP_SERVER", "1")
-        .env("JCODE_SERVER_OWNER_PID", std::process::id().to_string());
+        // Do NOT mark the spawned daemon temporary: the F03 shutdown
+        // coordinator refuses reloads on temporary servers, and reload is
+        // the behavior under test. kill_spawned_server reaps the daemon in
+        // teardown via its unique runtime-dir argv (gate 2: zero residue).
+        .env_remove("JCODE_TEMP_SERVER")
+        .env_remove("JCODE_SERVER_OWNER_PID");
 
     let mut child = spawn_pty_child(command)?;
 
@@ -679,7 +725,7 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
     )
     .await;
     kill_child(&mut child.child);
-    kill_spawned_server(&runtime_dir);
+    kill_spawned_server(&home_dir);
 
     if let Err(ref error) = test_result {
         eprintln!("self-dev client reload e2e test error: {error:#}");
@@ -749,12 +795,12 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
         .env("JCODE_HOME", &home_dir)
         .env("JCODE_RUNTIME_DIR", &runtime_dir)
         .env("JCODE_INSTALL_DIR", &install_dir)
-        // The client spawns the shared server daemon; these inherited vars
-        // make that daemon a temporary server owned by this test process, so
-        // it writes pid metadata (used by kill_spawned_server) and self-exits
-        // if teardown somehow misses it. Gate 2: zero fixture residue.
-        .env("JCODE_TEMP_SERVER", "1")
-        .env("JCODE_SERVER_OWNER_PID", std::process::id().to_string());
+        // Do NOT mark the spawned daemon temporary: the F03 shutdown
+        // coordinator refuses reloads on temporary servers, and reload is
+        // the behavior under test. kill_spawned_server reaps the daemon in
+        // teardown via its unique runtime-dir argv (gate 2: zero residue).
+        .env_remove("JCODE_TEMP_SERVER")
+        .env_remove("JCODE_SERVER_OWNER_PID");
 
     let mut child = spawn_pty_child(command)?;
 
@@ -851,7 +897,7 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
     )
     .await;
     kill_child(&mut child.child);
-    kill_spawned_server(&runtime_dir);
+    kill_spawned_server(&home_dir);
 
     if let Err(ref error) = test_result {
         eprintln!("self-dev full reload e2e test error: {error:#}");
