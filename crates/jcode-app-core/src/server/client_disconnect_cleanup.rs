@@ -42,15 +42,20 @@ const LOCK_TIMEOUT_RETRY_DELAY: Duration = Duration::from_secs(30);
 #[cfg(test)]
 static TEST_LOCK_TIMEOUT_RETRY_DELAY_MS: AtomicU64 = AtomicU64::new(u64::MAX);
 
-fn lock_timeout_retry_delay() -> Duration {
+fn lock_timeout_retry_delay() -> Option<Duration> {
     #[cfg(test)]
     {
+        // In test builds the deferred retry is opt-in: a 30s background task
+        // outliving its test would fire inside another test's JCODE_HOME
+        // window and corrupt it (env vars are process-global).
         let millis = TEST_LOCK_TIMEOUT_RETRY_DELAY_MS.load(Ordering::SeqCst);
-        if millis != u64::MAX {
-            return Duration::from_millis(millis);
+        if millis == u64::MAX {
+            return None;
         }
+        return Some(Duration::from_millis(millis));
     }
-    LOCK_TIMEOUT_RETRY_DELAY
+    #[cfg(not(test))]
+    Some(LOCK_TIMEOUT_RETRY_DELAY)
 }
 
 /// One bounded deferred retry after a lock-timeout abort: wait, take the lock
@@ -59,8 +64,11 @@ fn lock_timeout_retry_delay() -> Duration {
 /// durable record. If the retry itself cannot persist, the record remains for
 /// startup reconciliation. Best-effort by construction.
 fn spawn_lock_timeout_retry(agent_arc: Arc<Mutex<crate::agent::Agent>>, session_id: String) {
+    let Some(delay) = lock_timeout_retry_delay() else {
+        return;
+    };
     tokio::spawn(async move {
-        tokio::time::sleep(lock_timeout_retry_delay()).await;
+        tokio::time::sleep(delay).await;
         let mut agent = agent_arc.lock().await;
         // The agent's session field is private; the durable truth is on disk
         // anyway (every terminal transition persists). If a terminal state

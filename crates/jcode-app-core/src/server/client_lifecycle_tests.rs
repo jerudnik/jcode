@@ -1245,6 +1245,9 @@ async fn lightweight_comm_request_skips_full_session_initialization() {
 
 #[tokio::test]
 async fn incompatible_initial_subscribe_preflights_before_full_session_initialization() {
+    // Serialize the process-global JCODE_HOME mutation done by
+    // IsolatedReloadRecoveryEnv against other env-sensitive tests.
+    let _lock = crate::storage::lock_test_env();
     let _env = IsolatedReloadRecoveryEnv::new();
     let (server_stream, client_stream) = crate::transport::Stream::pair().expect("socket pair");
     let forked = Arc::new(AtomicBool::new(false));
