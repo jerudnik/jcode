@@ -1,0 +1,4 @@
+burst: accepted=2 refused=14
+release-after-cancel: ok
+cancel-race: full cap (2) still admittable, no leak
+ALL INVARIANTS HELD
