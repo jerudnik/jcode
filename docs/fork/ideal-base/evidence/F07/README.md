@@ -69,3 +69,16 @@ Phase 2:
   tested `begin_connect`).
 - Unix-only fixtures; Windows compile-only.
 - Manager died-cooldown is per-session; pool cooldown is daemon-global.
+
+## Fix round (review blockers)
+
+First review FAILED (reviews/F07-implementation-review.md): BLOCKING-1
+stale-generation eviction could kill healthy replacement children;
+BLOCKING-2 health-deadline retry double-executed slow tools. Fixed at
+`58a806401`: identity-checked eviction (Arc::ptr_eq on shared DeathState)
+with healthy-handle re-fetch, RequestNotDelivered delivery gating on all
+auto-retries, ping-probe liveness before hung declaration, and the
+ensure_connected lost-wakeup guard. New fixture
+`stale_dead_clone_does_not_evict_healthy_replacement`. mcp suite 46
+passed; full lib 1194 passed. Re-review PASS (reviews/F07-re-review.md)
+with 5 minor non-blocking findings recorded.
