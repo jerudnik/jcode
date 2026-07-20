@@ -20,8 +20,7 @@ mod tests;
 
 pub use ops::{
     ExpandOutcome, GATE_COVERAGE_ENUMERATION_CAP, MAX_EXPANSION_CHILDREN, MAX_EXPANSION_DEPTH,
-    complete_node, expand_node, fail_node,
-    inject_from_gate, requeue_failed, seed, take_over_node,
+    complete_node, expand_node, fail_node, inject_from_gate, requeue_failed, seed, take_over_node,
 };
 pub use schedule::{
     LIGHT_MODE_SUGGESTED_WORKERS, assemble_input, dispatch, is_terminal, ready_nodes,

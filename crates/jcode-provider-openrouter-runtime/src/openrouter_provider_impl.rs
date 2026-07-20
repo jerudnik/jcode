@@ -101,9 +101,7 @@ impl Provider for OpenRouterProvider {
             .iter()
             .map(|t| {
                 let parameters = if kimi_endpoint {
-                    jcode_provider_openrouter::request::flatten_schema_for_moonshot(
-                        &t.input_schema,
-                    )
+                    jcode_provider_openrouter::request::flatten_schema_for_moonshot(&t.input_schema)
                 } else {
                     // Sanitized so bare `{"type":"object"}` MCP tool schemas
                     // do not 400 on strict endpoints (issue #446).
