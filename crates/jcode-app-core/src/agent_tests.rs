@@ -1683,6 +1683,37 @@ async fn gmail_is_exposed_by_default_and_can_be_explicitly_disabled() {
     crate::config::Config::invalidate_cache();
 }
 
+#[tokio::test]
+async fn validate_tool_allowed_resolves_aliases_against_policy_sets() {
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    // Worker-style allow-list holds internal names only, mirroring
+    // run_subagent_worker which seeds it from registry.tool_names().
+    agent.allowed_tools = Some(std::collections::HashSet::from([
+        "agentgrep".to_string(),
+        "bash".to_string(),
+    ]));
+
+    for alias in ["grep", "Grep", "Glob", "file_grep", "agentgrep", "bash"] {
+        agent
+            .validate_tool_allowed(alias)
+            .unwrap_or_else(|err| panic!("alias '{alias}' must resolve to an allowed tool: {err}"));
+    }
+    agent
+        .validate_tool_allowed("edit")
+        .expect_err("tools outside the allow-list must still be rejected");
+
+    // Disabled sets must also match through aliases.
+    agent.allowed_tools = None;
+    agent.disabled_tools.insert("agentgrep".to_string());
+    let err = agent
+        .validate_tool_allowed("grep")
+        .expect_err("alias of a disabled tool must be rejected");
+    assert!(err.to_string().contains("disabled"));
+}
+
 fn seed_transient_session_state(agent: &mut Agent) {
     agent.push_alert("pending alert".to_string());
     agent.queue_soft_interrupt(
