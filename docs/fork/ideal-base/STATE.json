@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F08",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T06:03:00Z",
-    "summary": "Delegated: integrated MCP+lifecycle adversarial gate (repeat matrices + residue report)."
+    "state": "implemented",
+    "commit": "06f49d2375591db55171a644a68ec0b3d05792f7",
+    "updated_at": "2026-07-20T08:17:08Z",
+    "summary": "Integrated gate PASS: 3 rounds of F03 matrix + shutdown/mcp/background suites, zero residue. Two defects found+fixed by the gate (hung-fixture deadline ordering, harness env). Awaiting verify review."
   },
   "nodes": {
     "W0": {
@@ -153,11 +153,13 @@
       "updated_at": "2026-07-20T06:02:02Z"
     },
     "F08": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: integrated MCP+lifecycle adversarial gate (repeat matrices + residue report).",
-      "updated_at": "2026-07-20T06:03:00Z"
+      "state": "implemented",
+      "commit": "06f49d2375591db55171a644a68ec0b3d05792f7",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F08"
+      ],
+      "summary": "Integrated gate PASS: 3 rounds of F03 matrix + shutdown/mcp/background suites, zero residue. Two defects found+fixed by the gate (hung-fixture deadline ordering, harness env). Awaiting verify review.",
+      "updated_at": "2026-07-20T08:17:08Z"
     },
     "F09": {
       "state": "pending",
