@@ -776,8 +776,7 @@ impl Server {
         // itself continues (its turns hold their own ProviderTurn leases).
         let (ttl_cancel_tx, ttl_cancel_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
-            const STARTUP_RECOVERY_TTL: std::time::Duration =
-                std::time::Duration::from_secs(60);
+            const STARTUP_RECOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(60);
             tokio::select! {
                 _ = tokio::time::sleep(STARTUP_RECOVERY_TTL) => {
                     crate::logging::warn(
@@ -2202,6 +2201,10 @@ impl Server {
             self.identity.display_name(),
             self.identity.version
         ));
+        // R04 startup beacon: a durable marker finalized on clean exit. An
+        // unfinalized beacon with a dead pid positively indicates a hard
+        // crash (SIGKILL/panic-abort/OOM), which no exit path can record.
+        shutdown::record_server_beacon_start(&self.identity.version);
         crate::logging::info(&format!("Server listening on {:?}", self.socket_path));
         crate::logging::info(&format!("Debug socket on {:?}", self.debug_socket_path));
 
@@ -2266,7 +2269,7 @@ impl Server {
                 }
                 runtime.shutdown().await;
                 let _ = debug_handle.await;
-                self.accept_loop_failure_terminal().await
+                self.accept_loop_exit_terminal("main").await
             }
             result = &mut debug_handle => {
                 if let Err(error) = result {
@@ -2274,7 +2277,7 @@ impl Server {
                 }
                 runtime.shutdown().await;
                 let _ = main_handle.await;
-                self.accept_loop_failure_terminal().await
+                self.accept_loop_exit_terminal("debug").await
             }
         };
 
@@ -2287,15 +2290,36 @@ impl Server {
         Ok(ServerExit { reason, code })
     }
 
-    /// Accept-loop failure path (F01 design 3.2.3 / I5): begin-and-wait the
-    /// coordinator to a terminal cleanup result before `run()` returns.
-    async fn accept_loop_failure_terminal(&self) -> shutdown::TerminalOutcome {
-        match shutdown::coordinator()
-            .begin_and_wait(shutdown::ExitReason::AcceptLoopFailure)
-            .await
-        {
-            Ok(outcome) => outcome,
-            Err(_refused) => shutdown::coordinator().wait_terminal().await,
+    /// Accept-loop exit path (R04). Every shutdown drain (terminations and
+    /// reload alike) cancels intake, and the intake token is the root of the
+    /// tokens the accept loops watch, so the loops exit during EVERY drain.
+    /// Classify before escalating: an exit after the coordinator has begun
+    /// is the drain's own doing and must await the terminal outcome, not
+    /// upgrade the reason (the R04 incident upgraded `reload ->
+    /// accept-loop-failure`, aborting the handoff and exiting 45 with no
+    /// successor). An exit while still Running is a genuine failure and
+    /// upgrades to `AcceptLoopFailure` (exit 45) as before.
+    async fn accept_loop_exit_terminal(&self, which: &str) -> shutdown::TerminalOutcome {
+        let coordinator = shutdown::coordinator();
+        match coordinator.classify_accept_loop_exit() {
+            shutdown::AcceptLoopExitDisposition::AwaitTerminal => {
+                crate::logging::info(&format!(
+                    "{which} accept loop exited during shutdown drain; awaiting terminal outcome"
+                ));
+                coordinator.wait_terminal().await
+            }
+            shutdown::AcceptLoopExitDisposition::Failure => {
+                crate::logging::error(&format!(
+                    "{which} accept loop exited while running; beginning accept-loop-failure shutdown"
+                ));
+                match coordinator
+                    .begin_and_wait(shutdown::ExitReason::AcceptLoopFailure)
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(_refused) => coordinator.wait_terminal().await,
+                }
+            }
         }
     }
 

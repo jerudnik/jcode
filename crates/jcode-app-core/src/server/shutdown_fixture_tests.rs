@@ -8,7 +8,8 @@
 //! residue) live in `docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh`.
 
 use super::shutdown::{
-    BeginOutcome, ExitReason, RefusalReason, ReloadRefused, ShutdownCoordinator, TerminalOutcome,
+    AcceptLoopExitDisposition, BeginOutcome, ExitReason, RefusalReason, ReloadRefused,
+    ShutdownCoordinator, TerminalOutcome,
 };
 use jcode_core::activity::{ActivityClass, ActivityLeaseAuthority};
 use std::time::Duration;
@@ -125,7 +126,9 @@ async fn concurrent_idle_claims_and_acquisitions_never_coexist() {
             // happened before... simplest checkable invariant: post-claim
             // acquisition MUST fail.
             assert!(
-                authority.acquire(ActivityClass::McpCall, "post-claim").is_err(),
+                authority
+                    .acquire(ActivityClass::McpCall, "post-claim")
+                    .is_err(),
                 "acquisition after an accepted idle claim must be refused"
             );
             // And the claim can only have been accepted with an empty table:
@@ -147,7 +150,10 @@ async fn drain_waits_for_release_then_cleans() {
     let (coordinator, authority) = ShutdownCoordinator::leaked_for_test();
     let token = acquire(&authority, ActivityClass::BackgroundTask);
 
-    assert_eq!(coordinator.begin(ExitReason::SigTerm), BeginOutcome::Accepted);
+    assert_eq!(
+        coordinator.begin(ExitReason::SigTerm),
+        BeginOutcome::Accepted
+    );
     // Coordinator is draining: acquisition refused (I6).
     assert!(authority.acquire(ActivityClass::McpCall, "late").is_err());
 
@@ -173,7 +179,10 @@ async fn drain_deadline_abandons_stuck_lease() {
     let (coordinator, authority) = ShutdownCoordinator::leaked_for_test();
     let _stuck = acquire(&authority, ActivityClass::SwarmWaiter); // never released
 
-    assert_eq!(coordinator.begin(ExitReason::SigTerm), BeginOutcome::Accepted);
+    assert_eq!(
+        coordinator.begin(ExitReason::SigTerm),
+        BeginOutcome::Accepted
+    );
     // SigTerm drain budget is 2s; cleanup follows. Allow margin.
     let outcome = tokio::time::timeout(Duration::from_secs(5), coordinator.wait_terminal())
         .await
@@ -193,7 +202,10 @@ async fn weaker_begin_is_superseded_stronger_upgrades_and_shortens() {
     let _hold = acquire(&authority, ActivityClass::DebugJob); // keep it draining
 
     // Reload drain budget (5s) is the driving deadline.
-    assert_eq!(coordinator.begin(ExitReason::TemporaryOwnerExit), BeginOutcome::Accepted);
+    assert_eq!(
+        coordinator.begin(ExitReason::TemporaryOwnerExit),
+        BeginOutcome::Accepted
+    );
     let deadline_before = coordinator
         .drain_deadline_for_test()
         .expect("draining has a deadline");
@@ -206,7 +218,10 @@ async fn weaker_begin_is_superseded_stronger_upgrades_and_shortens() {
     assert_eq!(coordinator.drain_deadline_for_test(), Some(deadline_before));
 
     // Stronger reason: accepted, reason replaced, deadline never extends.
-    assert_eq!(coordinator.begin(ExitReason::SigTerm), BeginOutcome::Accepted);
+    assert_eq!(
+        coordinator.begin(ExitReason::SigTerm),
+        BeginOutcome::Accepted
+    );
     assert_eq!(
         coordinator.driving_reason_for_test(),
         Some(ExitReason::SigTerm)
@@ -236,7 +251,12 @@ async fn pairwise_begin_races_produce_exactly_one_terminal_outcome() {
     // Every ordered pair of termination reasons raced concurrently: exactly
     // one terminal outcome, driven by one of the two reasons, cleanup once.
     use ExitReason::*;
-    let reasons = [SigTerm, ReloadExecFailed, AcceptLoopFailure, TemporaryOwnerExit];
+    let reasons = [
+        SigTerm,
+        ReloadExecFailed,
+        AcceptLoopFailure,
+        TemporaryOwnerExit,
+    ];
     for a in reasons {
         for b in reasons {
             let (coordinator, _authority) = ShutdownCoordinator::leaked_for_test();
@@ -250,7 +270,9 @@ async fn pairwise_begin_races_produce_exactly_one_terminal_outcome() {
             );
             let outcome = tokio::time::timeout(Duration::from_secs(4), coordinator.wait_terminal())
                 .await
-                .unwrap_or_else(|_| panic!("terminal outcome for pair ({a:?}, {b:?}): {r1:?}/{r2:?}"));
+                .unwrap_or_else(|_| {
+                    panic!("terminal outcome for pair ({a:?}, {b:?}): {r1:?}/{r2:?}")
+                });
             let TerminalOutcome::Cleaned { reason, .. } = outcome;
             assert!(
                 reason == a || reason == b,
@@ -259,10 +281,11 @@ async fn pairwise_begin_races_produce_exactly_one_terminal_outcome() {
             // Stronger racer wins when both were accepted as upgrades.
             if a != b {
                 let stronger = if a.priority() >= b.priority() { a } else { b };
-                if matches!(r1, BeginOutcome::Accepted)
-                    && matches!(r2, BeginOutcome::Accepted)
-                {
-                    assert_eq!(reason, stronger, "upgrade must let the stronger reason drive");
+                if matches!(r1, BeginOutcome::Accepted) && matches!(r2, BeginOutcome::Accepted) {
+                    assert_eq!(
+                        reason, stronger,
+                        "upgrade must let the stronger reason drive"
+                    );
                 }
             }
         }
@@ -292,7 +315,10 @@ async fn reload_refused_on_temporary_and_during_termination() {
 
     // Termination in progress: reload loses.
     let (coordinator, _authority) = ShutdownCoordinator::leaked_for_test();
-    assert_eq!(coordinator.begin(ExitReason::SigTerm), BeginOutcome::Accepted);
+    assert_eq!(
+        coordinator.begin(ExitReason::SigTerm),
+        BeginOutcome::Accepted
+    );
     assert!(matches!(
         coordinator.begin_reload_drain().await,
         Err(ReloadRefused::ShutdownInProgress(_))
@@ -308,10 +334,17 @@ async fn reload_drain_upgraded_by_sigterm_hands_completion_to_termination() {
     let drain = tokio::spawn(async move { coordinator.begin_reload_drain().await });
     tokio::time::sleep(Duration::from_millis(150)).await;
     // Reload must have closed acquisition already (F02-R2-I1 ordering).
-    assert!(authority.acquire(ActivityClass::McpCall, "during-reload").is_err());
+    assert!(
+        authority
+            .acquire(ActivityClass::McpCall, "during-reload")
+            .is_err()
+    );
 
     // SIGTERM upgrades mid-drain: reload aborts, termination completes.
-    assert_eq!(coordinator.begin(ExitReason::SigTerm), BeginOutcome::Accepted);
+    assert_eq!(
+        coordinator.begin(ExitReason::SigTerm),
+        BeginOutcome::Accepted
+    );
     let drain_result = tokio::time::timeout(Duration::from_secs(3), drain)
         .await
         .expect("reload drain returns after upgrade")
@@ -347,7 +380,10 @@ async fn reload_drain_reaches_handoff_when_leases_release() {
         .await
         .expect("drain completes after release")
         .unwrap();
-    assert!(result.is_ok(), "reload drain must reach Handoff: {result:?}");
+    assert!(
+        result.is_ok(),
+        "reload drain must reach Handoff: {result:?}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -358,12 +394,9 @@ async fn reload_exec_failure_reenters_termination_with_code_42() {
     assert!(drain.is_ok());
     drop(authority);
 
-    let outcome = tokio::time::timeout(
-        Duration::from_secs(4),
-        coordinator.reload_exec_failed(),
-    )
-    .await
-    .expect("exec-failure termination is bounded");
+    let outcome = tokio::time::timeout(Duration::from_secs(4), coordinator.reload_exec_failed())
+        .await
+        .expect("exec-failure termination is bounded");
     assert_eq!(
         outcome,
         TerminalOutcome::Cleaned {
@@ -399,4 +432,118 @@ async fn many_waiters_all_observe_the_single_terminal_outcome() {
             }
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// R04: reload drain vs accept-loop-exit race
+// ---------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn accept_loop_exit_during_reload_drain_does_not_upgrade_reason() {
+    // R04 incident replay: a drain-blocking lease (the streaming turn) parks
+    // the reload drain; the drain's own intake cancellation stops the accept
+    // loops. `run()` observes the accept-loop exit and must classify it as
+    // drain-induced (AwaitTerminal), leaving the driving reason Reload so
+    // the handoff proceeds when the lease releases.
+    let (coordinator, authority) = ShutdownCoordinator::leaked_for_test();
+    let token = acquire(&authority, ActivityClass::ProviderTurn);
+
+    let drain = tokio::spawn(async move { coordinator.begin_reload_drain().await });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        coordinator.driving_reason_for_test(),
+        Some(ExitReason::Reload),
+        "reload drain must be in progress"
+    );
+
+    // The accept-loop exit event `run()` would observe: classify it. It must
+    // NOT upgrade the reason (the incident called begin(AcceptLoopFailure)
+    // unconditionally here).
+    assert_eq!(
+        coordinator.classify_accept_loop_exit(),
+        AcceptLoopExitDisposition::AwaitTerminal,
+        "drain-cancelled accept-loop exit must await terminal, not upgrade"
+    );
+    assert_eq!(
+        coordinator.driving_reason_for_test(),
+        Some(ExitReason::Reload),
+        "driving reason must remain Reload after the accept-loop exit"
+    );
+
+    // Release the streaming turn: the reload drain reaches Handoff.
+    authority.release(token);
+    let result = tokio::time::timeout(Duration::from_secs(3), drain)
+        .await
+        .expect("drain completes after release")
+        .unwrap();
+    assert!(
+        result.is_ok(),
+        "reload drain must reach Handoff, not be refused: {result:?}"
+    );
+    assert_eq!(
+        coordinator.driving_reason_for_test(),
+        Some(ExitReason::Reload),
+        "handoff must still be driven by Reload"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn accept_loop_exit_during_termination_drain_awaits_terminal() {
+    // The same misclassification could upgrade e.g. TemporaryOwnerExit
+    // (priority 2) to AcceptLoopFailure (4) during its own drain. Any begun
+    // drain must classify as AwaitTerminal.
+    let (coordinator, authority) = ShutdownCoordinator::leaked_for_test();
+    let token = acquire(&authority, ActivityClass::McpCall);
+
+    assert_eq!(
+        coordinator.begin(ExitReason::TemporaryOwnerExit),
+        BeginOutcome::Accepted
+    );
+    assert_eq!(
+        coordinator.classify_accept_loop_exit(),
+        AcceptLoopExitDisposition::AwaitTerminal
+    );
+    assert_eq!(
+        coordinator.driving_reason_for_test(),
+        Some(ExitReason::TemporaryOwnerExit)
+    );
+
+    authority.release(token);
+    let outcome = tokio::time::timeout(Duration::from_secs(4), coordinator.wait_terminal())
+        .await
+        .expect("termination completes");
+    assert_eq!(
+        outcome,
+        TerminalOutcome::Cleaned {
+            reason: ExitReason::TemporaryOwnerExit,
+            code: super::EXIT_IDLE_TIMEOUT
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn accept_loop_exit_while_running_still_fails_with_code_45() {
+    // Genuine failure: the loop exits while the coordinator is Running.
+    // Classification must say Failure, and the failure path must still
+    // produce AcceptLoopFailure / exit 45.
+    let (coordinator, _authority) = ShutdownCoordinator::leaked_for_test();
+    assert_eq!(
+        coordinator.classify_accept_loop_exit(),
+        AcceptLoopExitDisposition::Failure,
+        "an accept-loop exit while Running is a genuine failure"
+    );
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(4),
+        coordinator.begin_and_wait(ExitReason::AcceptLoopFailure),
+    )
+    .await
+    .expect("bounded")
+    .expect("accept-loop-failure begin is never refused");
+    assert_eq!(
+        outcome,
+        TerminalOutcome::Cleaned {
+            reason: ExitReason::AcceptLoopFailure,
+            code: super::shutdown::EXIT_ACCEPT_LOOP_FAILURE
+        }
+    );
 }
