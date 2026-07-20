@@ -123,7 +123,6 @@ impl LeaseTable {
         true
     }
 
-
     fn labels(&self) -> Vec<String> {
         let mut labels: Vec<String> = self
             .active
@@ -177,7 +176,9 @@ impl IdleClock {
 // ---------------------------------------------------------------------------
 
 fn lock_poisoned_ok<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub(crate) struct ServerActivityLeaseAuthority {
@@ -214,7 +215,6 @@ impl ServerActivityLeaseAuthority {
     fn try_claim_idle_shutdown(&self) -> bool {
         lock_poisoned_ok(&self.table).try_claim_idle_shutdown()
     }
-
 }
 
 impl ActivityLeaseAuthority for ServerActivityLeaseAuthority {
@@ -299,7 +299,9 @@ pub(crate) fn debug_acquire_lease(class_name: &str) -> Result<u64, String> {
 
 /// Release a debug-held lease by token. Returns whether it existed.
 pub(crate) fn debug_release_lease(token: u64) -> bool {
-    lock_poisoned_ok(debug_held_leases()).remove(&token).is_some()
+    lock_poisoned_ok(debug_held_leases())
+        .remove(&token)
+        .is_some()
 }
 
 /// Snapshot for `shutdown:state`: coordinator phase, active leases, counts.
@@ -307,7 +309,10 @@ pub(crate) fn debug_shutdown_state() -> serde_json::Value {
     let coordinator = coordinator();
     let (phase, reason) = {
         let state = lock_poisoned_ok(&coordinator.state);
-        (format!("{:?}", state.phase), state.reason.map(|r| r.as_str()))
+        (
+            format!("{:?}", state.phase),
+            state.reason.map(|r| r.as_str()),
+        )
     };
     serde_json::json!({
         "phase": phase,
@@ -666,8 +671,7 @@ pub(crate) struct ShutdownConfig {
     /// Cancelled at `Draining` start to stop intake (design 3.2.3).
     pub(crate) intake_cancel: Option<tokio_util::sync::CancellationToken>,
     /// MCP pool cell: shut down pool-wide during cleanup when initialized.
-    pub(crate) mcp_pool:
-        Option<Arc<tokio::sync::OnceCell<Arc<crate::mcp::SharedMcpPool>>>>,
+    pub(crate) mcp_pool: Option<Arc<tokio::sync::OnceCell<Arc<crate::mcp::SharedMcpPool>>>>,
 }
 
 struct CoordinatorState {
@@ -938,6 +942,13 @@ impl ShutdownCoordinator {
             reason.as_str(),
             reason.exit_code()
         ));
+        // R04 beacon: mark this a clean exit. Test coordinators (watchdog
+        // disabled) skip durable markers; they share the test process pid
+        // and must not finalize a beacon a real daemon or a beacon test
+        // owns.
+        if self.watchdog_enabled {
+            finalize_server_beacon(reason);
+        }
         // send_replace, not send: `watch::Sender::send` DROPS the value when
         // no receiver exists yet. A fast executor (empty table, quick
         // cleanup) can finish before any `wait_terminal` subscriber appears;
@@ -965,8 +976,7 @@ impl ShutdownCoordinator {
                     self.authority.refuse_new();
                     state.phase = Phase::Draining;
                     state.reason = Some(ExitReason::Reload);
-                    state.drain_deadline =
-                        Some(Instant::now() + ExitReason::Reload.drain_budget());
+                    state.drain_deadline = Some(Instant::now() + ExitReason::Reload.drain_budget());
                 }
                 _ => {
                     return Err(ReloadRefused::ShutdownInProgress(
@@ -1045,6 +1055,116 @@ pub(crate) enum ReloadRefused {
 }
 
 // ---------------------------------------------------------------------------
+// Accept-loop exit classification (R04)
+// ---------------------------------------------------------------------------
+
+/// How `Server::run` must treat an accept-loop completion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AcceptLoopExitDisposition {
+    /// The coordinator has already begun a drain. Every drain (terminations
+    /// AND reload) cancels intake, and the intake token is the same root
+    /// token the accept loops child, so the loops exit on every drain. That
+    /// exit is expected: the caller must await the terminal outcome, not
+    /// upgrade the reason.
+    AwaitTerminal,
+    /// The loop exited while the coordinator was still Running: a genuine
+    /// accept-loop failure. The caller begins `AcceptLoopFailure` (exit 45).
+    Failure,
+}
+
+impl ShutdownCoordinator {
+    /// Classify an observed accept-loop exit (R04 incident: unconditionally
+    /// upgrading to `AcceptLoopFailure` misclassified every reload drain
+    /// whose accept loops wound down before the drain finished, aborting the
+    /// handoff and exiting 45 with no successor).
+    ///
+    /// Soundness: both `begin` and `begin_reload_drain` flip the phase off
+    /// `Running` under the state lock BEFORE calling `cancel_intake`, so any
+    /// accept-loop exit *caused by* a drain observes `has_begun() == true`
+    /// here. An exit observed while still Running therefore cannot be
+    /// drain-induced.
+    pub(crate) fn classify_accept_loop_exit(&self) -> AcceptLoopExitDisposition {
+        if self.has_begun() {
+            AcceptLoopExitDisposition::AwaitTerminal
+        } else {
+            AcceptLoopExitDisposition::Failure
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Startup beacon (R04): positive hard-crash detection
+// ---------------------------------------------------------------------------
+
+fn server_beacon_path() -> Option<PathBuf> {
+    crate::storage::jcode_dir()
+        .ok()
+        .map(|dir| dir.join("state").join("server-beacon.json"))
+}
+
+/// Best-effort durable startup marker (R04). Written once at server startup;
+/// finalized (ended_at + reason) when the coordinator publishes `Cleaned`.
+/// An unfinalized beacon whose pid is dead positively indicates a hard crash
+/// (SIGKILL, panic-abort, OOM), which no exit-path marker can record.
+pub(crate) fn record_server_beacon_start(version: &str) {
+    let Some(path) = server_beacon_path() else {
+        return;
+    };
+    write_beacon_start(&path, std::process::id(), version);
+}
+
+fn write_beacon_start(path: &std::path::Path, pid: u32, version: &str) {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let payload = serde_json::json!({
+        "pid": pid,
+        "started_at": chrono::Utc::now().to_rfc3339(),
+        "version": version,
+    });
+    let _ = std::fs::write(path, payload.to_string());
+}
+
+/// Finalize the beacon on clean coordinator exit. Best-effort, like
+/// `record_forced_exit_marker`. Only this process's own unfinalized beacon
+/// is touched: a pid mismatch (another daemon's beacon, or an in-process
+/// test coordinator that never wrote one) leaves the file alone. A reload
+/// handoff never finalizes: exec keeps the pid and the successor overwrites
+/// the beacon at its own startup.
+fn finalize_server_beacon(reason: ExitReason) {
+    let Some(path) = server_beacon_path() else {
+        return;
+    };
+    finalize_beacon(&path, std::process::id(), reason.as_str());
+}
+
+fn finalize_beacon(path: &std::path::Path, pid: u32, reason: &str) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
+    if value.get("pid").and_then(serde_json::Value::as_u64) != Some(u64::from(pid)) {
+        return;
+    }
+    if value.get("ended_at").is_some() {
+        return;
+    }
+    value["ended_at"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+    value["reason"] = serde_json::json!(reason);
+    let _ = std::fs::write(path, value.to_string());
+}
+
+/// Post-mortem classification: `true` iff the beacon is unfinalized (no
+/// `ended_at`) and its recorded pid is no longer alive: a positive
+/// hard-crash indicator, not merely the absence of a clean-exit record.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn beacon_indicates_hard_crash(beacon: &serde_json::Value, pid_alive: bool) -> bool {
+    beacon.get("ended_at").is_none() && !pid_alive
+}
+
+// ---------------------------------------------------------------------------
 // Cleanup list (design 3.4): only real APIs, each step bounded.
 // ---------------------------------------------------------------------------
 
@@ -1068,7 +1188,10 @@ async fn bounded_step<F>(name: &str, step: F)
 where
     F: std::future::Future<Output = ()>,
 {
-    if tokio::time::timeout(CLEANUP_STEP_BUDGET, step).await.is_err() {
+    if tokio::time::timeout(CLEANUP_STEP_BUDGET, step)
+        .await
+        .is_err()
+    {
         crate::logging::warn(&format!(
             "Shutdown cleanup step '{name}' exceeded its budget; continuing."
         ));
@@ -1208,9 +1331,15 @@ mod tests {
         // F02-B1: the claim must fail while ANY lease exists (client
         // connections included) and must close acquisition on success.
         let mut table = table_with(&[ActivityClass::ClientConnection]);
-        assert!(!table.try_claim_idle_shutdown(), "client connection blocks idle claim");
+        assert!(
+            !table.try_claim_idle_shutdown(),
+            "client connection blocks idle claim"
+        );
         let mut table = table_with(&[ActivityClass::McpCall]);
-        assert!(!table.try_claim_idle_shutdown(), "work lease blocks idle claim");
+        assert!(
+            !table.try_claim_idle_shutdown(),
+            "work lease blocks idle claim"
+        );
 
         let mut table = LeaseTable::default();
         assert!(table.try_claim_idle_shutdown());
@@ -1405,5 +1534,76 @@ mod tests {
             MCP_POOL_DISCONNECT_BUDGET + MCP_CHILD_REAP_GRACE < CLEANUP_STEP_BUDGET,
             "MCP cleanup needs scheduler/logging headroom inside the bounded step"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // R04 startup beacon
+    // -----------------------------------------------------------------------
+
+    fn read_beacon(path: &std::path::Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(path).expect("beacon exists"))
+            .expect("beacon is JSON")
+    }
+
+    #[test]
+    fn beacon_startup_writes_pid_version_and_started_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state").join("server-beacon.json");
+        write_beacon_start(&path, 4242, "1.2.3-test");
+        let beacon = read_beacon(&path);
+        assert_eq!(beacon["pid"], 4242);
+        assert_eq!(beacon["version"], "1.2.3-test");
+        assert!(beacon.get("started_at").is_some());
+        assert!(
+            beacon.get("ended_at").is_none(),
+            "startup beacon is unfinalized"
+        );
+    }
+
+    #[test]
+    fn beacon_clean_exit_finalizes_with_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("server-beacon.json");
+        write_beacon_start(&path, 4242, "1.2.3-test");
+        finalize_beacon(&path, 4242, ExitReason::SigTerm.as_str());
+        let beacon = read_beacon(&path);
+        assert_eq!(beacon["reason"], "sigterm");
+        assert!(beacon.get("ended_at").is_some());
+        // Startup fields survive finalization.
+        assert_eq!(beacon["pid"], 4242);
+        assert_eq!(beacon["version"], "1.2.3-test");
+    }
+
+    #[test]
+    fn beacon_finalize_ignores_other_pids_and_double_finalize() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("server-beacon.json");
+        write_beacon_start(&path, 4242, "1.2.3-test");
+        // A different pid (successor daemon / test process) must not
+        // finalize a beacon it does not own.
+        finalize_beacon(&path, 9999, "sigterm");
+        assert!(read_beacon(&path).get("ended_at").is_none());
+        // Missing file: inert.
+        finalize_beacon(&dir.path().join("missing.json"), 4242, "sigterm");
+        // Double finalize preserves the first reason.
+        finalize_beacon(&path, 4242, "sigterm");
+        finalize_beacon(&path, 4242, "reload-exec-failed");
+        assert_eq!(read_beacon(&path)["reason"], "sigterm");
+    }
+
+    #[test]
+    fn beacon_distinguishes_hard_crash_from_clean_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("server-beacon.json");
+        write_beacon_start(&path, 4242, "1.2.3-test");
+
+        // Unfinalized + dead pid: positive hard-crash indicator.
+        assert!(beacon_indicates_hard_crash(&read_beacon(&path), false));
+        // Unfinalized + live pid: daemon still running, not a crash.
+        assert!(!beacon_indicates_hard_crash(&read_beacon(&path), true));
+
+        // Finalized + dead pid: clean exit, not a crash.
+        finalize_beacon(&path, 4242, "persistent-idle");
+        assert!(!beacon_indicates_hard_crash(&read_beacon(&path), false));
     }
 }
