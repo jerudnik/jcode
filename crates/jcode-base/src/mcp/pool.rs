@@ -294,11 +294,57 @@ impl SharedMcpPool {
             &format!("pool/{server}/{tool}"),
         )
         .map_err(|refused| anyhow::anyhow!("MCP call refused: {refused}"))?;
-        let handles = self.handles.read().await;
-        let handle = handles
-            .get(server)
-            .with_context(|| format!("MCP server '{}' not connected", server))?;
-        handle.call_tool(tool, arguments).await
+        let handle = {
+            let handles = self.handles.read().await;
+            handles
+                .get(server)
+                .cloned()
+                .with_context(|| format!("MCP server '{}' not connected", server))?
+        };
+        if handle.is_dead() {
+            let reason = handle.death_reason();
+            self.evict_dead_server(server).await;
+            anyhow::bail!("MCP server '{server}' is dead: {reason}");
+        }
+        let result = handle.call_tool(tool, arguments).await;
+        if handle.is_dead() {
+            // The call itself detected death (EOF, write failure, or health
+            // deadline). Evict now so the next call reconnects cleanly.
+            self.evict_dead_server(server).await;
+        }
+        result
+    }
+
+    /// Remove a dead server from the pool caches and reap its child through
+    /// the tracker (F06 invariant: no leaked tracked children). Locks are
+    /// never held across the awaited reap.
+    pub(crate) async fn evict_dead_server(&self, name: &str) {
+        {
+            let mut handles = self.handles.write().await;
+            handles.remove(name);
+        }
+        let client = {
+            let mut clients = self.clients.lock().await;
+            clients.remove(name)
+        };
+        {
+            let mut refs = self.ref_counts.lock().await;
+            refs.remove(name);
+        }
+        if let Some(mut client) = client {
+            let pid = client.request_shutdown();
+            let report = self
+                .child_tracker
+                .reap_pids(&[pid], DEFAULT_MCP_REAP_GRACE)
+                .await;
+            if !report.unreaped.is_empty() {
+                crate::logging::warn(&format!(
+                    "MCP pool eviction of '{name}': child PID(s) still live after bounded reap: {:?}",
+                    report.unreaped
+                ));
+            }
+        }
+        crate::logging::warn(&format!("MCP pool: evicted dead server '{name}'"));
     }
 
     /// Reload config and reconnect all servers

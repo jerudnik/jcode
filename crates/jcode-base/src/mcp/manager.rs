@@ -415,18 +415,41 @@ impl McpManager {
         .map_err(|refused| anyhow::anyhow!("MCP call refused: {refused}"))?;
         // Fast path: already connected via pool handle.
         {
-            let handles = self.pool_handles.read().await;
-            if let Some(handle) = handles.get(server) {
+            let handle = self.pool_handles.read().await.get(server).cloned();
+            if let Some(handle) = handle {
+                if handle.is_dead() {
+                    let reason = handle.death_reason();
+                    self.evict_dead_pool_handle(server).await;
+                    anyhow::bail!("MCP server '{server}' is dead: {reason}");
+                }
                 let result = handle.call_tool(tool, arguments).await;
+                if handle.is_dead() {
+                    // The call detected death (EOF, write failure, or health
+                    // deadline): drop the stale cache and pool entry now.
+                    self.evict_dead_pool_handle(server).await;
+                }
                 meter_provenance_call(server, &result);
                 return result;
             }
         }
         // Fast path: already connected via owned client.
         {
-            let clients = self.owned_clients.read().await;
-            if let Some(client) = clients.get(server) {
-                let result = client.call_tool(tool, arguments).await;
+            let handle = self
+                .owned_clients
+                .read()
+                .await
+                .get(server)
+                .map(|client| client.handle());
+            if let Some(handle) = handle {
+                if handle.is_dead() {
+                    let reason = handle.death_reason();
+                    self.evict_dead_owned_client(server).await;
+                    anyhow::bail!("MCP server '{server}' is dead: {reason}");
+                }
+                let result = handle.call_tool(tool, arguments).await;
+                if handle.is_dead() {
+                    self.evict_dead_owned_client(server).await;
+                }
                 meter_provenance_call(server, &result);
                 return result;
             }
@@ -473,6 +496,30 @@ impl McpManager {
         }
 
         anyhow::bail!("MCP server '{}' not connected", server)
+    }
+
+    /// Drop this session's stale pool-handle cache entry for a dead server and
+    /// evict it from the shared pool (which reaps the child via the tracker).
+    async fn evict_dead_pool_handle(&self, server: &str) {
+        self.pool_handles.write().await.remove(server);
+        if let Some(pool) = &self.pool {
+            pool.evict_dead_server(server).await;
+            pool.release_handles(&self.session_id, &[server.to_string()])
+                .await;
+        }
+    }
+
+    /// Remove a dead owned client and reap its child through the tracker
+    /// (F06 invariant: no leaked tracked children). The lock is released
+    /// before the awaited reap.
+    async fn evict_dead_owned_client(&self, server: &str) {
+        let client = self.owned_clients.write().await.remove(server);
+        if let Some(mut client) = client {
+            crate::logging::warn(&format!(
+                "MCP manager: evicting dead owned server '{server}'"
+            ));
+            client.shutdown().await;
+        }
     }
 
     /// Ensure a configured server is connected, bounded by `timeout`. No-op if
@@ -702,6 +749,7 @@ mod tests {
 mod provenance_integration_tests {
     use super::*;
     use std::io::Write;
+    use std::time::Duration;
 
     /// Write a minimal stdio MCP server as a shell script: answers
     /// initialize, tools/list, and tools/call with canned JSON-RPC replies.
@@ -808,5 +856,185 @@ done
 
         manager.disconnect_all().await;
         drop(env_guard);
+    }
+
+    /// F07 phase 1: a SIGKILLed child mid-session must fail fast (well under
+    /// the 30s request timeout) with an error naming the server, and eviction
+    /// must leave no tracked children behind.
+    #[tokio::test]
+    async fn killed_child_fails_fast_and_is_evicted_from_tracker() {
+        let temp = tempfile::tempdir().unwrap();
+        let server_path = write_fake_mcp_server(temp.path());
+        let server_name = "f07-kill9-victim";
+
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            server_name.to_string(),
+            McpServerConfig {
+                command: server_path.to_string_lossy().to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: false,
+                transport: None,
+                url: None,
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager::with_config(config.clone());
+        let server_config = config.servers.get(server_name).unwrap().clone();
+        manager
+            .connect(server_name, &server_config)
+            .await
+            .expect("fake MCP server must connect");
+
+        let tracker = crate::mcp::client::McpChildTracker::process();
+        let pid = tracker
+            .tracked_children()
+            .into_iter()
+            .find(|child| child.server_name == server_name)
+            .expect("child must be tracked")
+            .pid;
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+
+        let started = std::time::Instant::now();
+        let result = manager
+            .call_tool(server_name, "create_card", serde_json::json!({}))
+            .await;
+        let elapsed = started.elapsed();
+        assert!(result.is_err(), "call to SIGKILLed child must fail");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "dead-child failure must be fast, took {elapsed:?}"
+        );
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains(server_name),
+            "death error must name the server: {msg}"
+        );
+
+        // Eviction reaped through the tracker: no tracked children remain.
+        assert!(
+            tracker
+                .tracked_children()
+                .into_iter()
+                .all(|child| child.server_name != server_name),
+            "evicted server must leave no tracked children"
+        );
+        assert!(
+            !manager
+                .connected_servers()
+                .await
+                .contains(&server_name.to_string()),
+            "dead server must be removed from the manager"
+        );
+    }
+
+    /// Write a fake MCP server that answers the handshake but silently reads
+    /// tools/call requests without ever replying (hung-child simulation).
+    fn write_hung_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("hung-mcp-server.sh");
+        let script = r##"#!/bin/bash
+while IFS= read -r line; do
+  id=$(echo "$line" | grep -o '"id":[0-9]*' | grep -o '[0-9]*' | head -1)
+  case "$line" in
+    *'"initialize"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"hung","version":"0.0.1"}}}'
+      ;;
+    *'"tools/list"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[{"name":"never_returns","description":"hangs","inputSchema":{"type":"object"}}]}}'
+      ;;
+    *'"tools/call"'*)
+      : # reads the request but never replies
+      ;;
+    *'"shutdown"'*)
+      exit 0
+      ;;
+  esac
+done
+"##;
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(script.as_bytes()).unwrap();
+        drop(file);
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    /// F07 phase 1: a hung child (alive, reads requests, never replies) is
+    /// declared dead at the health deadline, not the 30s total timeout.
+    #[tokio::test]
+    async fn hung_child_fails_at_health_deadline_and_is_evicted() {
+        let env_guard = crate::storage::lock_test_env();
+        crate::env::set_var(crate::mcp::client::MCP_HEALTH_DEADLINE_ENV, "500");
+
+        let temp = tempfile::tempdir().unwrap();
+        let server_path = write_hung_mcp_server(temp.path());
+        let server_name = "f07-hung-server";
+
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            server_name.to_string(),
+            McpServerConfig {
+                command: server_path.to_string_lossy().to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: false,
+                transport: None,
+                url: None,
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager::with_config(config.clone());
+        let server_config = config.servers.get(server_name).unwrap().clone();
+        manager
+            .connect(server_name, &server_config)
+            .await
+            .expect("hung fixture must complete the handshake");
+
+        let started = std::time::Instant::now();
+        let result = manager
+            .call_tool(server_name, "never_returns", serde_json::json!({}))
+            .await;
+        let elapsed = started.elapsed();
+
+        crate::env::remove_var(crate::mcp::client::MCP_HEALTH_DEADLINE_ENV);
+        drop(env_guard);
+
+        assert!(result.is_err(), "hung child must yield an error");
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains("health deadline exceeded"),
+            "error must cite the health deadline: {msg}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(400),
+            "must wait for the configured deadline, took {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "hung-child failure must honor the short deadline, took {elapsed:?}"
+        );
+
+        // Eviction reaped the still-live child through the tracker.
+        let tracker = crate::mcp::client::McpChildTracker::process();
+        assert!(
+            tracker
+                .tracked_children()
+                .into_iter()
+                .all(|child| child.server_name != server_name),
+            "evicted hung server must leave no tracked children"
+        );
+        assert!(
+            !manager
+                .connected_servers()
+                .await
+                .contains(&server_name.to_string())
+        );
     }
 }
