@@ -1371,7 +1371,29 @@ impl Agent {
                     continue;
                 }
 
-                self.validate_tool_allowed(&tc.name)?;
+                // A disallowed tool is a per-call policy failure, not a turn
+                // failure: surface it as an error tool-result so the model can
+                // pick another tool instead of aborting the whole turn.
+                if let Err(policy_err) = self.validate_tool_allowed(&tc.name) {
+                    let error_msg = policy_err.to_string();
+                    logging::warn(&error_msg);
+                    let _ = event_tx.send(ServerEvent::ToolDone {
+                        id: tc.id.clone(),
+                        name: tc.name.clone(),
+                        output: error_msg.clone(),
+                        error: Some(error_msg.clone()),
+                    });
+                    self.add_message(
+                        Role::User,
+                        vec![ContentBlock::ToolResult {
+                            tool_use_id: tc.id.clone(),
+                            content: error_msg,
+                            is_error: Some(true),
+                        }],
+                    );
+                    tool_results_dirty = true;
+                    continue;
+                }
 
                 let is_native_tool = JCODE_NATIVE_TOOLS.contains(&tc.name.as_str());
 

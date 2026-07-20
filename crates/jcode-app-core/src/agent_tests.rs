@@ -1714,6 +1714,72 @@ async fn validate_tool_allowed_resolves_aliases_against_policy_sets() {
     assert!(err.to_string().contains("disabled"));
 }
 
+#[tokio::test]
+async fn disallowed_tool_call_returns_error_result_instead_of_aborting_turn() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    // Turn 1: the model calls a tool outside the allow-list. Turn 2: it
+    // recovers and finishes. With the old `?` propagation the whole run
+    // errored out instead of feeding the policy error back to the model.
+    let provider: Arc<dyn Provider> = Arc::new(RetryEvidenceProvider {
+        attempts: Arc::new(Mutex::new(VecDeque::from(vec![
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseStart {
+                    id: "tc-denied-1".to_string(),
+                    name: "bash".to_string(),
+                }),
+                ScriptedProviderEvent::Event(StreamEvent::ToolInputDelta(
+                    "{\"command\":\"echo hi\"}".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseEnd),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("tool_use".to_string()),
+                }),
+            ]),
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::TextDelta(
+                    "recovered without bash".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }),
+            ]),
+        ]))),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+
+    let output = agent
+        .run_once_capture("try a disallowed tool")
+        .await
+        .expect("disallowed tool call must not abort the turn");
+    assert_eq!(output, "recovered without bash");
+
+    // The policy failure must be recorded as an error tool-result the model saw.
+    let saw_policy_error = agent.session.messages.iter().any(|message| {
+        message.content.iter().any(|block| {
+            matches!(
+                block,
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error: Some(true),
+                } if tool_use_id == "tc-denied-1" && content.contains("not allowed")
+            )
+        })
+    });
+    assert!(
+        saw_policy_error,
+        "policy denial must be persisted as an error tool-result"
+    );
+}
+
 fn seed_transient_session_state(agent: &mut Agent) {
     agent.push_alert("pending alert".to_string());
     agent.queue_soft_interrupt(
