@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F12",
-    "state": "accepted",
-    "commit": "a1c9075af",
-    "updated_at": "2026-07-20T11:59:07Z",
-    "summary": "Accepted after FAIL->FAIL->PASS cycle: slot-reserving race-safe caps for pooled MCP children and background tasks, env-configurable, explicit refusals at manager and tool layers, capacity release verified."
+    "node": "F13",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T11:59:28Z",
+    "summary": "Delegated: verify caps under concurrency, failures, cancellation, restart."
   },
   "nodes": {
     "W0": {
@@ -200,11 +200,11 @@
       "updated_at": "2026-07-20T11:59:07Z"
     },
     "F13": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: verify caps under concurrency, failures, cancellation, restart.",
+      "updated_at": "2026-07-20T11:59:28Z"
     },
     "F14": {
       "state": "pending",
