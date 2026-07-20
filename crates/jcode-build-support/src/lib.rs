@@ -273,6 +273,106 @@ pub fn rollback_pending_activation_for_session(session_id: &str) -> Result<Optio
     Ok(Some(pending.new_version))
 }
 
+/// Outcome of a stale pending-activation reconciliation pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingReconcileOutcome {
+    /// No pending activation record exists.
+    NoPending,
+    /// The record is younger than the minimum age; leave it alone.
+    StillFresh,
+    /// The initiating session is still alive; it owns the record.
+    InitiatorAlive,
+    /// Candidate verified; activation completed for the given version.
+    Completed(String),
+    /// Candidate missing or mismatched; symlinks rolled back for the version.
+    RolledBack(String),
+    /// A different live canary session exists; record cleared without
+    /// touching canary state or symlinks.
+    Skipped(String),
+}
+
+/// True only if the pending candidate's installed binary exists and its
+/// `.source.json` sidecar matches the pending record's identity. Missing
+/// files, read errors, or field mismatches all return false, never panic
+/// (same contract as [`dev_binary_matches_source`]).
+fn pending_candidate_is_valid(pending: &PendingActivation) -> bool {
+    let Ok(binary) = version_binary_path(&pending.new_version) else {
+        return false;
+    };
+    if !binary.is_file() {
+        return false;
+    }
+    let Some(metadata) = read_dev_binary_source_metadata(&binary) else {
+        return false;
+    };
+    if metadata.version_label != pending.new_version {
+        return false;
+    }
+    match pending.source_fingerprint.as_deref() {
+        Some(fingerprint) => metadata.source_fingerprint == fingerprint,
+        None => true,
+    }
+}
+
+/// Reconcile a pending activation whose initiating session died mid-cycle.
+///
+/// Only acts on records older than `min_age` whose initiator is no longer
+/// alive (per `session_is_alive`). A verified candidate is completed via
+/// [`complete_pending_activation_for_session`]; an unverifiable one is rolled
+/// back via [`rollback_pending_activation_for_session`]. If a *different*
+/// live session is currently canary-testing, the stale record is cleared
+/// without touching canary state or symlinks. Rollback only restores a
+/// symlink whose current target still points at the pending version, so a
+/// later publish is never clobbered.
+pub fn reconcile_stale_pending_activation(
+    min_age: chrono::Duration,
+    session_is_alive: impl Fn(&str) -> bool,
+) -> Result<PendingReconcileOutcome> {
+    let mut manifest = BuildManifest::load()?;
+    let Some(pending) = manifest.pending_activation.clone() else {
+        return Ok(PendingReconcileOutcome::NoPending);
+    };
+    if Utc::now() - pending.requested_at < min_age {
+        return Ok(PendingReconcileOutcome::StillFresh);
+    }
+    if session_is_alive(&pending.session_id) {
+        return Ok(PendingReconcileOutcome::InitiatorAlive);
+    }
+
+    // Canary guard: a different live session is actively canary-testing.
+    // Do not touch canary fields or symlinks; just drop the stale record.
+    if let Some(other) = manifest.canary_session.clone()
+        && other != pending.session_id
+        && session_is_alive(&other)
+    {
+        manifest.pending_activation = None;
+        manifest.save()?;
+        return Ok(PendingReconcileOutcome::Skipped(pending.new_version));
+    }
+
+    if pending_candidate_is_valid(&pending) {
+        complete_pending_activation_for_session(&pending.session_id)?;
+        return Ok(PendingReconcileOutcome::Completed(pending.new_version));
+    }
+
+    // Invalid candidate: roll back, but only restore symlinks whose current
+    // target still equals the pending version (someone may have published a
+    // newer build since; never clobber it).
+    let mut adjusted = pending.clone();
+    if read_current_version()?.as_deref() != Some(pending.new_version.as_str()) {
+        adjusted.previous_current_version = None;
+    }
+    if read_shared_server_version()?.as_deref() != Some(pending.new_version.as_str()) {
+        adjusted.previous_shared_server_version = None;
+    }
+    if adjusted != pending {
+        manifest.pending_activation = Some(adjusted);
+        manifest.save()?;
+    }
+    rollback_pending_activation_for_session(&pending.session_id)?;
+    Ok(PendingReconcileOutcome::RolledBack(pending.new_version))
+}
+
 /// Install a binary at a specific immutable version path.
 pub fn install_binary_at_version(source: &std::path::Path, version: &str) -> Result<PathBuf> {
     let builds_root = builds_dir()?;

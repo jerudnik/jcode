@@ -1180,6 +1180,24 @@ impl Server {
         // only after the replacement daemon is already accepting reconnects.
         self.recover_headless_sessions_on_startup().await;
 
+        // F09: reconcile a pending selfdev activation whose initiating session
+        // died mid-cycle. Best-effort; never fails startup.
+        tokio::task::spawn_blocking(|| {
+            match jcode_build_support::reconcile_stale_pending_activation(
+                chrono::Duration::minutes(10),
+                |sid| {
+                    crate::storage::observe_session_pid_markers(sid).active_marker_is_live()
+                },
+            ) {
+                Ok(outcome) => crate::logging::info(&format!(
+                    "Selfdev pending-activation reconcile: {outcome:?}"
+                )),
+                Err(err) => crate::logging::warn(&format!(
+                    "Selfdev pending-activation reconcile failed: {err:#}"
+                )),
+            }
+        });
+
         (runtime, main_handle, debug_handle)
     }
 
