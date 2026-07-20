@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F11",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T10:04:10Z",
-    "summary": "Delegated: independent verification of F09+F10 reconciliation under crash/restart/missing-file/live-owner cases."
+    "state": "accepted",
+    "commit": "77582db05",
+    "updated_at": "2026-07-20T10:33:37Z",
+    "summary": "Verify PASS: 18-cell combined recovery matrix, 17 covered (12 tests + 4 independent probes), no false rollback, no fabricated terminal state. 1 uncovered cell code-inspected safe."
   },
   "nodes": {
     "W0": {
@@ -182,11 +182,13 @@
       "updated_at": "2026-07-20T10:03:56Z"
     },
     "F11": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: independent verification of F09+F10 reconciliation under crash/restart/missing-file/live-owner cases.",
-      "updated_at": "2026-07-20T10:04:10Z"
+      "state": "accepted",
+      "commit": "77582db05",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F11"
+      ],
+      "summary": "Verify PASS: 18-cell combined recovery matrix, 17 covered (12 tests + 4 independent probes), no false rollback, no fabricated terminal state. 1 uncovered cell code-inspected safe.",
+      "updated_at": "2026-07-20T10:33:37Z"
     },
     "F12": {
       "state": "pending",
