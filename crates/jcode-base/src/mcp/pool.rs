@@ -723,12 +723,20 @@ impl SharedMcpPool {
                 // leaders (the `connecting` map, which this leader already
                 // occupies) so each in-flight connect reserves its slot.
                 let current = {
-                    let connected = self.clients.lock().await.len();
+                    // Read `connecting` BEFORE `clients` (F12 re-review): an
+                    // entry leaves `connecting` only after its client has
+                    // entered `clients` (finish_connect inserts, then the
+                    // guard drop removes). Reading connecting first means a
+                    // transitioning leader is seen in at least one of the two
+                    // maps; the reversed order could miss it in both and let
+                    // two leaders share one free slot. Over-counting (seen in
+                    // both maps) merely refuses conservatively.
                     let in_flight = self
                         .connecting
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .len();
+                    let connected = self.clients.lock().await.len();
                     // This leader's own entry is in `connecting`; exclude it
                     // so the check compares pre-existing usage to the cap.
                     connected + in_flight.saturating_sub(1)
