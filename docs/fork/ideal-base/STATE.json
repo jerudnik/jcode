@@ -365,6 +365,13 @@
    ],
    "summary": "Accepted first round. Terminal-mode ownership: guard armed through exec, InheritedTerminalGuard, full signal-path disables. Review: dromedary (Opus 4.8, PASS) with 4 non-blocking hardening notes.",
    "updated_at": "2026-07-19T05:57:00Z"
+  },
+  "R04": {
+   "state": "pending",
+   "commit": null,
+   "evidence": [],
+   "summary": null,
+   "updated_at": null
   }
  }
 }
