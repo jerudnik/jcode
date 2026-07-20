@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F07",
-    "state": "implemented",
-    "commit": "ba190325b664e86f3380dd97b127f02f27e54c03",
-    "updated_at": "2026-07-20T04:48:26Z",
-    "summary": "Dead/hung detection, eviction, one bounded reconnect, died-cooldown, cancellation-leak guard at 5c9ac8b42+d3fcba412; mcp 45/45, lib 1193/1193. Awaiting independent review (opus)."
+    "state": "in_progress",
+    "commit": "d3fcba412",
+    "updated_at": "2026-07-20T05:05:28Z",
+    "summary": "Review FAIL (413c35d1b): BLOCKING-1 stale-generation eviction kills healthy children; BLOCKING-2 health-deadline retry double-executes slow tools. Fix round delegated."
   },
   "nodes": {
     "W0": {
@@ -144,13 +144,13 @@
       "updated_at": "2026-07-18T21:50:00Z"
     },
     "F07": {
-      "state": "implemented",
-      "commit": "ba190325b664e86f3380dd97b127f02f27e54c03",
+      "state": "in_progress",
+      "commit": "d3fcba412",
       "evidence": [
         "docs/fork/ideal-base/evidence/F07"
       ],
-      "summary": "Dead/hung detection, eviction, one bounded reconnect, died-cooldown, cancellation-leak guard at 5c9ac8b42+d3fcba412; mcp 45/45, lib 1193/1193. Awaiting independent review (opus).",
-      "updated_at": "2026-07-20T04:48:26Z"
+      "summary": "Review FAIL (413c35d1b): BLOCKING-1 stale-generation eviction kills healthy children; BLOCKING-2 health-deadline retry double-executes slow tools. Fix round delegated.",
+      "updated_at": "2026-07-20T05:05:28Z"
     },
     "F08": {
       "state": "pending",
@@ -369,13 +369,13 @@
       "updated_at": "2026-07-19T05:57:00Z"
     },
     "R04": {
-      "state": "implemented",
-      "commit": "a45923ca85032ad4420b475b936893d2723685ae",
+      "state": "accepted",
+      "commit": "c71628498",
       "evidence": [
         "docs/fork/ideal-base/evidence/R04"
       ],
-      "summary": "Accept-loop exit classification + startup beacon implemented at c71628498; shutdown 42/42, server:: 485/485. Awaiting independent review (opus).",
-      "updated_at": "2026-07-20T04:16:20Z"
+      "summary": "Accepted after first-round PASS by independent opus review (3b4680277). 4 non-blocking follow-ups recorded in the review: beacon multi-server keying, hard-crash semantics wording, Handoff watchdog arm, doctor wiring.",
+      "updated_at": "2026-07-20T05:05:28Z"
     }
   }
 }
