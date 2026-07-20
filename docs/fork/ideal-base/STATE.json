@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F10",
-    "state": "accepted",
-    "commit": "4b66de27c",
-    "updated_at": "2026-07-20T10:03:56Z",
-    "summary": "Accepted: durable cleanup records + reason-aware startup reconcile + bounded deferred retry. Review PASS with findings 1-2 fixed in-cycle; finding 3 (tri-state liveness) shared follow-up with F09. server:: 490 green x3."
+    "node": "F11",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T10:04:10Z",
+    "summary": "Delegated: independent verification of F09+F10 reconciliation under crash/restart/missing-file/live-owner cases."
   },
   "nodes": {
     "W0": {
@@ -182,11 +182,11 @@
       "updated_at": "2026-07-20T10:03:56Z"
     },
     "F11": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: independent verification of F09+F10 reconciliation under crash/restart/missing-file/live-owner cases.",
+      "updated_at": "2026-07-20T10:04:10Z"
     },
     "F12": {
       "state": "pending",
