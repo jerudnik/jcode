@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F14",
+    "node": "W2",
     "state": "accepted",
-    "commit": "e47efacdb",
-    "updated_at": "2026-07-20T13:07:37Z",
-    "summary": "Accepted: rerunnable no-provider lifecycle matrix, 2 clean rounds (18/18 steps), verified by independent review. Follow-ups: network-denied demonstration, live exec-handoff reload in matrix."
+    "commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
+    "updated_at": "2026-07-20T13:08:01Z",
+    "summary": "W2 synthesis: all 7 children accepted (R04, F09-F14). Recovery reconciliation and global resource bounds closed; lifecycle matrix green over 2 rounds."
   },
   "nodes": {
     "W0": {
@@ -30,11 +30,13 @@
       "updated_at": "2026-07-20T08:22:13Z"
     },
     "W2": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W2"
+      ],
+      "summary": "W2 synthesis: all 7 children accepted (R04, F09-F14). Recovery reconciliation and global resource bounds closed; lifecycle matrix green over 2 rounds.",
+      "updated_at": "2026-07-20T13:08:01Z"
     },
     "W3": {
       "state": "pending",
