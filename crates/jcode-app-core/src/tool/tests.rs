@@ -1,8 +1,8 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use super::*;
-use crate::message::{Message, ToolDefinition};
 use crate::message::StreamEvent;
+use crate::message::{Message, ToolDefinition};
 use crate::provider::{EventStream, Provider};
 use async_stream::stream;
 use async_trait::async_trait;

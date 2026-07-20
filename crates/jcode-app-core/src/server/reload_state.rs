@@ -1139,21 +1139,21 @@ mod tests {
         );
     }
 }
-    #[test]
-    fn non_forced_reload_signal_retains_request_force() {
-        let request_id = send_reload_signal_with_force(
-            "non-forced-hash".to_string(),
-            Some("requesting-session".to_string()),
-            false,
-            false,
-        );
+#[test]
+fn non_forced_reload_signal_retains_request_force() {
+    let request_id = send_reload_signal_with_force(
+        "non-forced-hash".to_string(),
+        Some("requesting-session".to_string()),
+        false,
+        false,
+    );
 
-        assert_eq!(reload_signal_force(&request_id), Some(false));
-        let signal = reload_signal()
-            .1
-            .borrow()
-            .clone()
-            .expect("reload signal should be published");
-        assert_eq!(signal.request_id, request_id);
-        assert!(!signal.force());
-    }
+    assert_eq!(reload_signal_force(&request_id), Some(false));
+    let signal = reload_signal()
+        .1
+        .borrow()
+        .clone()
+        .expect("reload signal should be published");
+    assert_eq!(signal.request_id, request_id);
+    assert!(!signal.force());
+}
