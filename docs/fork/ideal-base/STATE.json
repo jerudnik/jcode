@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F13",
-    "state": "accepted",
-    "commit": "080bfc9d7",
-    "updated_at": "2026-07-20T12:47:47Z",
-    "summary": "Verify PASS: 16-way concurrent burst at cap admits exactly cap, zero leaked reservations across 50 cancelled setups, 10x looped probe identical; restart double-count impossible (in-memory-only counts + orphan sweep verified)."
+    "node": "F14",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T12:48:05Z",
+    "summary": "Building the no-provider real-process lifecycle matrix harness (composes F03/F08 fixtures + crash/restart/recovery cases)."
   },
   "nodes": {
     "W0": {
@@ -209,11 +209,11 @@
       "updated_at": "2026-07-20T12:47:47Z"
     },
     "F14": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Building the no-provider real-process lifecycle matrix harness (composes F03/F08 fixtures + crash/restart/recovery cases).",
+      "updated_at": "2026-07-20T12:48:05Z"
     },
     "F15": {
       "state": "pending",
