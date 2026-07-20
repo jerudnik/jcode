@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F09",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T08:22:43Z",
-    "summary": "Delegated: selfdev pending-activation reconciliation (phased for stall-guard budget)."
+    "state": "implemented",
+    "commit": "d5d388028",
+    "updated_at": "2026-07-20T08:54:22Z",
+    "summary": "Reconciliation implemented with 7-test fixture matrix (58 build-support tests green, app-core full suite 1147 green). Awaiting review."
   },
   "nodes": {
     "W0": {
@@ -164,11 +164,13 @@
       "updated_at": "2026-07-20T08:21:35Z"
     },
     "F09": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: selfdev pending-activation reconciliation (phased for stall-guard budget).",
-      "updated_at": "2026-07-20T08:22:43Z"
+      "state": "implemented",
+      "commit": "d5d388028",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F09"
+      ],
+      "summary": "Reconciliation implemented with 7-test fixture matrix (58 build-support tests green, app-core full suite 1147 green). Awaiting review.",
+      "updated_at": "2026-07-20T08:54:22Z"
     },
     "F10": {
       "state": "pending",
