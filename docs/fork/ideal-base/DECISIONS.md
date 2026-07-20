@@ -559,3 +559,17 @@ regression tests.
 **Reopen trigger:** F08 finding any exit mode in which a reload with held
 leases fails to hand off, or a genuine accept-loop crash that no longer
 exits 45.
+
+## D025. R05 injected: multi-client session contention; W3 CI boundary
+
+**Decision:** A live incident (2026-07-20 11:43, `evidence/R05/`) showed
+two TUI clients attached to one session fighting via stall-guard
+cancels, with stranded-interrupt recovery replaying 18 duplicate user
+messages. R05 is injected as a W4 child (dual-attach policy, queued
+duplicate collapse, truthful stall-guard labeling). W1/W2 closed fully;
+W3 is 2/7 with F17/F18/F21 blocked at an authorization boundary: their
+gates require real CI runs (pushing to the fork, consuming runners),
+which the coordinator does not do without explicit user authorization.
+
+**Reopen trigger:** any further duplicate-delivery or dual-attach
+incident before R05 lands.

@@ -788,6 +788,36 @@
   ],
   "W4": [
    {
+    "id": "R05",
+    "content": "Repair multi-client session contention (evidence/R05 incident 2026-07-20): two TUI clients attached to one session fight via stall-guard cancels, killing each other's turns; stranded soft-interrupt recovery re-queues user messages so duplicates accumulate and replay (18x duplicate delivery observed); the stall-guard cancellation is mislabeled 'Tool interrupted by server reload'. Fix: (a) duplicate-attach policy: newest client wins with explicit takeover banner on the older client, or at minimum a prominent 'N clients attached' warning on both; (b) collapse identical queued user messages at the turn boundary instead of replaying each copy; (c) label stall-guard cancels truthfully (trigger=stall_guard is already in the interrupt metadata).",
+    "kind": "implement",
+    "depends_on": [
+     "F03",
+     "F06"
+    ],
+    "priority": 88,
+    "owned_paths": [
+     "crates/jcode-app-core/src/server/client_session.rs",
+     "crates/jcode-app-core/src/server/client_lifecycle.rs",
+     "crates/jcode-app-core/src/agent/interrupts.rs",
+     "crates/jcode-tui/src/tui/app/remote/**",
+     "docs/fork/ideal-base/evidence/R05/**"
+    ],
+    "acceptance_gates": [
+     "Second attach to a live session either takes over with a banner or surfaces a dual-attach warning on both clients",
+     "N identical queued user messages deliver once, not N times",
+     "A stall-guard cancel is labeled as such, never as a server reload"
+    ],
+    "evidence": [
+     "dual-attach fixture",
+     "queued-duplicate collapse test",
+     "incident log excerpt"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W4"
+   },
+   {
     "id": "F22",
     "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
     "kind": "implement",
@@ -1827,6 +1857,36 @@
    "review_model": "opus",
    "class": "deterministic",
    "parent": "W3"
+  },
+  {
+   "id": "R05",
+   "content": "Repair multi-client session contention (evidence/R05 incident 2026-07-20): two TUI clients attached to one session fight via stall-guard cancels, killing each other's turns; stranded soft-interrupt recovery re-queues user messages so duplicates accumulate and replay (18x duplicate delivery observed); the stall-guard cancellation is mislabeled 'Tool interrupted by server reload'. Fix: (a) duplicate-attach policy: newest client wins with explicit takeover banner on the older client, or at minimum a prominent 'N clients attached' warning on both; (b) collapse identical queued user messages at the turn boundary instead of replaying each copy; (c) label stall-guard cancels truthfully (trigger=stall_guard is already in the interrupt metadata).",
+   "kind": "implement",
+   "depends_on": [
+    "F03",
+    "F06"
+   ],
+   "priority": 88,
+   "owned_paths": [
+    "crates/jcode-app-core/src/server/client_session.rs",
+    "crates/jcode-app-core/src/server/client_lifecycle.rs",
+    "crates/jcode-app-core/src/agent/interrupts.rs",
+    "crates/jcode-tui/src/tui/app/remote/**",
+    "docs/fork/ideal-base/evidence/R05/**"
+   ],
+   "acceptance_gates": [
+    "Second attach to a live session either takes over with a banner or surfaces a dual-attach warning on both clients",
+    "N identical queued user messages deliver once, not N times",
+    "A stall-guard cancel is labeled as such, never as a server reload"
+   ],
+   "evidence": [
+    "dual-attach fixture",
+    "queued-duplicate collapse test",
+    "incident log excerpt"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W4"
   },
   {
    "id": "F22",
