@@ -1135,6 +1135,15 @@ impl BashTool {
             )
             .await;
 
+        // Cap/drain refusal (F12): the task never ran. Surface the refusal
+        // explicitly instead of reporting a started task with a task ID.
+        if let Some(reason) = &info.refused {
+            return Err(anyhow::anyhow!(
+                "Background command refused: {reason} (command: {})",
+                params.command
+            ));
+        }
+
         let notify_msg = if wake {
             "The agent will be woken when the task completes."
         } else if notify {
