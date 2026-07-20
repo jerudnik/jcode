@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F10",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T09:01:42Z",
-    "summary": "Delegated: durable disconnect-cleanup intent + startup reconciliation."
+    "state": "accepted",
+    "commit": "4b66de27c",
+    "updated_at": "2026-07-20T10:03:56Z",
+    "summary": "Accepted: durable cleanup records + reason-aware startup reconcile + bounded deferred retry. Review PASS with findings 1-2 fixed in-cycle; finding 3 (tri-state liveness) shared follow-up with F09. server:: 490 green x3."
   },
   "nodes": {
     "W0": {
@@ -173,11 +173,13 @@
       "updated_at": "2026-07-20T09:01:28Z"
     },
     "F10": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: durable disconnect-cleanup intent + startup reconciliation.",
-      "updated_at": "2026-07-20T09:01:42Z"
+      "state": "accepted",
+      "commit": "4b66de27c",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F10"
+      ],
+      "summary": "Accepted: durable cleanup records + reason-aware startup reconcile + bounded deferred retry. Review PASS with findings 1-2 fixed in-cycle; finding 3 (tri-state liveness) shared follow-up with F09. server:: 490 green x3.",
+      "updated_at": "2026-07-20T10:03:56Z"
     },
     "F11": {
       "state": "pending",
