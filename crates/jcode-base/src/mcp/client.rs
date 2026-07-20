@@ -24,6 +24,73 @@ pub const MCP_OWNER_PID_ENV: &str = "JCODE_MCP_OWNER_PID";
 /// Default bound for a single-client shutdown outside the daemon coordinator.
 pub(crate) const DEFAULT_MCP_REAP_GRACE: Duration = Duration::from_millis(225);
 
+/// Per-request health deadline: a child that accepts a request but never
+/// replies within this bound is declared dead (hung-child detection). This is
+/// separate from (and defaults below) the 30s total request timeout.
+pub(crate) const DEFAULT_MCP_HEALTH_DEADLINE: Duration = Duration::from_millis(15_000);
+
+/// Env override (milliseconds) for the per-request health deadline.
+pub const MCP_HEALTH_DEADLINE_ENV: &str = "JCODE_MCP_HEALTH_DEADLINE_MS";
+
+/// Hard cap on any single request, regardless of health-deadline override.
+const MCP_REQUEST_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn health_deadline() -> Duration {
+    std::env::var(MCP_HEALTH_DEADLINE_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_MCP_HEALTH_DEADLINE)
+        .min(MCP_REQUEST_TOTAL_TIMEOUT)
+}
+
+/// Shared dead-flag for one MCP child. All handle clones (pool caches,
+/// per-session `pool_handles` clones) observe death through the same Arc, so
+/// stale caches cannot resurrect a dead child. First recorded reason wins.
+#[derive(Debug, Default)]
+pub(crate) struct DeathState {
+    dead: std::sync::atomic::AtomicBool,
+    reason: OnceLock<String>,
+}
+
+impl DeathState {
+    /// Mark dead. Returns true only for the first caller.
+    fn mark(&self, reason: String) -> bool {
+        let first = !self.dead.swap(true, Ordering::SeqCst);
+        let _ = self.reason.set(reason);
+        first
+    }
+
+    fn is_dead(&self) -> bool {
+        self.dead.load(Ordering::SeqCst)
+    }
+
+    fn reason(&self) -> String {
+        self.reason
+            .get()
+            .cloned()
+            .unwrap_or_else(|| "unknown cause".to_string())
+    }
+}
+
+/// Mark the handle dead and fail every pending request immediately by
+/// dropping its oneshot sender (receivers observe closure at once instead of
+/// burning the full request timeout).
+async fn mark_dead_and_fail_pending(
+    death: &DeathState,
+    pending: &Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>,
+    server_name: &str,
+    reason: String,
+) {
+    if death.mark(reason.clone()) {
+        crate::logging::warn(&format!("MCP [{server_name}]: marked dead: {reason}"));
+    }
+    let mut pending = pending.lock().await;
+    // Dropping the senders wakes all waiting receivers immediately.
+    pending.clear();
+}
+
 /// Debug/introspection record for one child process owned by this daemon.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TrackedMcpChild {
@@ -360,11 +427,34 @@ pub struct McpHandle {
     server_info: Arc<std::sync::RwLock<Option<ServerInfo>>>,
     capabilities: Arc<std::sync::RwLock<ServerCapabilities>>,
     tools: Arc<std::sync::RwLock<Vec<McpToolDef>>>,
+    death: Arc<DeathState>,
 }
 
 impl McpHandle {
+    /// Whether the child behind this handle has been declared dead.
+    pub fn is_dead(&self) -> bool {
+        self.death.is_dead()
+    }
+
+    /// Human-readable death reason (meaningful only when `is_dead`).
+    pub fn death_reason(&self) -> String {
+        self.death.reason()
+    }
+
+    fn death_error(&self) -> anyhow::Error {
+        anyhow::anyhow!(
+            "MCP server '{}' is dead: {}",
+            self.name,
+            self.death.reason()
+        )
+    }
+
     /// Send a request and wait for response
     pub async fn request(&self, method: &str, params: Option<Value>) -> Result<JsonRpcResponse> {
+        if self.death.is_dead() {
+            return Err(self.death_error());
+        }
+
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
         let request = JsonRpcRequest::new(id, method, params);
 
@@ -375,15 +465,44 @@ impl McpHandle {
         }
 
         let msg = serde_json::to_string(&request)? + "\n";
-        self.writer_tx
-            .send(msg)
-            .await
-            .context("Failed to send request")?;
+        if self.writer_tx.send(msg).await.is_err() {
+            self.pending.lock().await.remove(&id);
+            mark_dead_and_fail_pending(
+                &self.death,
+                &self.pending,
+                &self.name,
+                format!("MCP server '{}' writer channel closed", self.name),
+            )
+            .await;
+            return Err(self.death_error());
+        }
 
-        let response = tokio::time::timeout(std::time::Duration::from_secs(30), rx)
-            .await
-            .context("Request timeout")?
-            .context("Channel closed")?;
+        // Health deadline: a live child that never replies to this request is
+        // declared dead (hung-child detection). Bounded below the total 30s
+        // request timeout; see MCP_HEALTH_DEADLINE_ENV.
+        let deadline = health_deadline();
+        let response = match tokio::time::timeout(deadline, rx).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(_recv_closed)) => {
+                // Sender dropped: the reader/writer task failed all pending.
+                return Err(self.death_error());
+            }
+            Err(_elapsed) => {
+                self.pending.lock().await.remove(&id);
+                mark_dead_and_fail_pending(
+                    &self.death,
+                    &self.pending,
+                    &self.name,
+                    format!(
+                        "health deadline exceeded ({}ms waiting for '{}' response)",
+                        deadline.as_millis(),
+                        method
+                    ),
+                )
+                .await;
+                return Err(self.death_error());
+            }
+        };
 
         if let Some(err) = &response.error {
             anyhow::bail!("MCP error {}: {}", err.code, err.message);
@@ -533,15 +652,25 @@ impl McpClient {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let (writer_tx, mut writer_rx) = mpsc::channel::<String>(32);
+        let death: Arc<DeathState> = Arc::new(DeathState::default());
 
         // Spawn writer task
         let mut stdin = stdin;
+        let writer_death = Arc::clone(&death);
+        let writer_pending = Arc::clone(&pending);
+        let writer_name = name.clone();
         tokio::spawn(async move {
             while let Some(msg) = writer_rx.recv().await {
-                if stdin.write_all(msg.as_bytes()).await.is_err() {
-                    break;
-                }
-                if stdin.flush().await.is_err() {
+                let write_failed = stdin.write_all(msg.as_bytes()).await.is_err()
+                    || stdin.flush().await.is_err();
+                if write_failed {
+                    mark_dead_and_fail_pending(
+                        &writer_death,
+                        &writer_pending,
+                        &writer_name,
+                        format!("MCP server '{writer_name}' stdin write failed (child exited?)"),
+                    )
+                    .await;
                     break;
                 }
             }
@@ -549,6 +678,7 @@ impl McpClient {
 
         // Spawn reader task
         let pending_clone = Arc::clone(&pending);
+        let reader_death = Arc::clone(&death);
         let reader_name = name.clone();
         let mut reader = BufReader::new(stdout);
         tokio::spawn(async move {
@@ -558,6 +688,13 @@ impl McpClient {
                 match reader.read_line(&mut line).await {
                     Ok(0) => {
                         crate::logging::debug(&format!("MCP [{}]: stdout EOF", reader_name));
+                        mark_dead_and_fail_pending(
+                            &reader_death,
+                            &pending_clone,
+                            &reader_name,
+                            format!("MCP server '{reader_name}' exited (stdout EOF)"),
+                        )
+                        .await;
                         break;
                     }
                     Ok(_) => {
@@ -580,6 +717,13 @@ impl McpClient {
                     }
                     Err(e) => {
                         crate::logging::warn(&format!("MCP [{}] read error: {}", reader_name, e));
+                        mark_dead_and_fail_pending(
+                            &reader_death,
+                            &pending_clone,
+                            &reader_name,
+                            format!("MCP server '{reader_name}' stdout read error: {e}"),
+                        )
+                        .await;
                         break;
                     }
                 }
@@ -594,6 +738,7 @@ impl McpClient {
             server_info: Arc::new(std::sync::RwLock::new(None)),
             capabilities: Arc::new(std::sync::RwLock::new(ServerCapabilities::default())),
             tools: Arc::new(std::sync::RwLock::new(Vec::new())),
+            death,
         };
 
         let mut client = Self {
