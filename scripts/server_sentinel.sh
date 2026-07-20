@@ -45,6 +45,10 @@ DEAD_THRESHOLD="${SENTINEL_DEAD_THRESHOLD:-3}"
 # Never rescue more than once per window (seconds), so a crash-looping dev
 # build cannot be resurrected in a tight loop.
 RESCUE_COOLDOWN_SECS="${SENTINEL_RESCUE_COOLDOWN_SECS:-300}"
+# After this many consecutive failed rescues, escalate to the emergency
+# ladder (rollback to known-good binaries, then external-agent summon).
+ESCALATE_AFTER_RESCUES="${SENTINEL_ESCALATE_AFTER_RESCUES:-2}"
+EMERGENCY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/jcode_emergency.sh"
 
 log() {
     printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" | tee -a "$LOG" >&2
@@ -104,15 +108,17 @@ if [[ "${1:-}" == "--once" ]]; then
     else log "PROBE dead socket=$SOCKET"; exit 1; fi
 fi
 
-log "SENTINEL start socket=$SOCKET poll=${POLL_SECS}s threshold=$DEAD_THRESHOLD cooldown=${RESCUE_COOLDOWN_SECS}s"
+log "SENTINEL start socket=$SOCKET poll=${POLL_SECS}s threshold=$DEAD_THRESHOLD cooldown=${RESCUE_COOLDOWN_SECS}s escalate_after=$ESCALATE_AFTER_RESCUES"
 consecutive_dead=0
 last_rescue=0
+failed_rescues=0
 while true; do
     if probe; then
         if (( consecutive_dead > 0 )); then
             log "RECOVERED after $consecutive_dead dead probe(s)"
         fi
         consecutive_dead=0
+        failed_rescues=0
     else
         consecutive_dead=$((consecutive_dead + 1))
         if reload_in_flight; then
@@ -124,7 +130,18 @@ while true; do
             log "DEAD probe $consecutive_dead/$DEAD_THRESHOLD socket=$SOCKET"
             if (( consecutive_dead >= DEAD_THRESHOLD )); then
                 now=$(date +%s)
-                if (( now - last_rescue >= RESCUE_COOLDOWN_SECS )); then
+                if (( last_rescue > 0 )); then
+                    # Still dead a full threshold after a rescue: that rescue failed.
+                    failed_rescues=$((failed_rescues + 1))
+                    log "RESCUE_FAILED count=$failed_rescues/$ESCALATE_AFTER_RESCUES"
+                fi
+                if (( failed_rescues >= ESCALATE_AFTER_RESCUES )) && [[ -x "$EMERGENCY" ]]; then
+                    log "ESCALATE invoking $EMERGENCY auto"
+                    "$EMERGENCY" auto >>"$LOG" 2>&1 || true
+                    failed_rescues=0
+                    last_rescue=$now
+                    consecutive_dead=0
+                elif (( now - last_rescue >= RESCUE_COOLDOWN_SECS )); then
                     rescue && last_rescue=$now
                     consecutive_dead=0
                 else
