@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F08",
-    "state": "implemented",
-    "commit": "06f49d2375591db55171a644a68ec0b3d05792f7",
-    "updated_at": "2026-07-20T08:17:08Z",
-    "summary": "Integrated gate PASS: 3 rounds of F03 matrix + shutdown/mcp/background suites, zero residue. Two defects found+fixed by the gate (hung-fixture deadline ordering, harness env). Awaiting verify review."
+    "state": "accepted",
+    "commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
+    "updated_at": "2026-07-20T08:21:35Z",
+    "summary": "Accepted: integrated gate PASS verified by independent review; gate hardened per review findings (hung-server pgrep, socket FAIL enforcement)."
   },
   "nodes": {
     "W0": {
@@ -153,13 +153,13 @@
       "updated_at": "2026-07-20T06:02:02Z"
     },
     "F08": {
-      "state": "implemented",
-      "commit": "06f49d2375591db55171a644a68ec0b3d05792f7",
+      "state": "accepted",
+      "commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
       "evidence": [
         "docs/fork/ideal-base/evidence/F08"
       ],
-      "summary": "Integrated gate PASS: 3 rounds of F03 matrix + shutdown/mcp/background suites, zero residue. Two defects found+fixed by the gate (hung-fixture deadline ordering, harness env). Awaiting verify review.",
-      "updated_at": "2026-07-20T08:17:08Z"
+      "summary": "Accepted: integrated gate PASS verified by independent review; gate hardened per review findings (hung-server pgrep, socket FAIL enforcement).",
+      "updated_at": "2026-07-20T08:21:35Z"
     },
     "F09": {
       "state": "pending",
