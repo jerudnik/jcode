@@ -344,8 +344,16 @@ impl SharedMcpPool {
         };
         if handle.is_dead() {
             let reason = handle.death_reason();
-            self.evict_dead_server(server).await;
-            // Exactly one bounded reconnect, then one retry (no pool.reload()).
+            let evicted = self.evict_dead_server(server, &handle).await;
+            if !evicted {
+                // A healthy replacement already exists (another session
+                // reconnected): use it instead of erroring (BLOCKING-1).
+                if let Some(fresh) = self.get_handle(server).await {
+                    return fresh.call_tool(tool, arguments).await;
+                }
+            }
+            // Dead pre-send: the call was never delivered, so one bounded
+            // reconnect plus one retry cannot double-execute.
             return self
                 .reconnect_and_retry_once(server, tool, arguments, &reason)
                 .await;
@@ -354,14 +362,24 @@ impl SharedMcpPool {
         if handle.is_dead() {
             // The call itself detected death (EOF, write failure, or health
             // deadline). Evict now so the next call reconnects cleanly.
-            self.evict_dead_server(server).await;
-            if result.is_err() {
-                // Retry only failed calls: a call that succeeded before the
-                // child died must never re-execute (side effects).
-                let reason = handle.death_reason();
-                return self
-                    .reconnect_and_retry_once(server, tool, arguments, &reason)
-                    .await;
+            self.evict_dead_server(server, &handle).await;
+            match result {
+                Err(err) if super::client::error_permits_auto_retry(&err) => {
+                    // The request provably never reached the server: safe to
+                    // reconnect and retry without double execution.
+                    let reason = handle.death_reason();
+                    return self
+                        .reconnect_and_retry_once(server, tool, arguments, &reason)
+                        .await;
+                }
+                Err(err) => {
+                    // Delivered-but-failed (or ambiguous): reconnect the pool
+                    // eagerly so the NEXT call works, but never re-send this
+                    // call (F07 review BLOCKING-2: double side effects).
+                    self.reconnect_pool_only(server).await;
+                    return Err(err);
+                }
+                Ok(value) => return Ok(value),
             }
         }
         result
@@ -407,10 +425,23 @@ impl SharedMcpPool {
             // Evict and enter died-cooldown so calls inside the window fail
             // fast without spawning more children.
             let reason = handle.death_reason();
-            self.evict_dead_server(server).await;
+            self.evict_dead_server(server, &handle).await;
             self.record_died_cooldown(server, &reason).await;
         }
         result
+    }
+
+    /// Eager pool-only reconnect after a delivered-but-failed call (the call
+    /// itself is NOT retried; F07 review BLOCKING-2). Best-effort: failures
+    /// are recorded by `ensure_connected` and surface on the next call.
+    async fn reconnect_pool_only(&self, server: &str) {
+        let config = self.config.read().await.servers.get(server).cloned();
+        let Some(config) = config else { return };
+        if let Err(error_msg) = self.ensure_connected(server.to_string(), config).await {
+            crate::logging::warn(&format!(
+                "MCP pool: eager reconnect of '{server}' failed: {error_msg}"
+            ));
+        }
     }
 
     /// Record a died-after-reconnect cooldown entry so `recent_failure` (and
@@ -429,10 +460,24 @@ impl SharedMcpPool {
     /// Remove a dead server from the pool caches and reap its child through
     /// the tracker (F06 invariant: no leaked tracked children). Locks are
     /// never held across the awaited reap.
-    pub(crate) async fn evict_dead_server(&self, name: &str) {
+    ///
+    /// Identity-checked (F07 review BLOCKING-1): eviction happens only if the
+    /// pool's CURRENT handle is the same generation as `observed_dead`. A
+    /// session holding a stale dead clone after another session already
+    /// reconnected must not evict (and kill) the healthy replacement child.
+    /// Returns true when an eviction actually happened.
+    pub(crate) async fn evict_dead_server(&self, name: &str, observed_dead: &McpHandle) -> bool {
         {
             let mut handles = self.handles.write().await;
-            handles.remove(name);
+            match handles.get(name) {
+                Some(current) if current.same_generation(observed_dead) => {
+                    handles.remove(name);
+                }
+                Some(_healthy_replacement) => return false,
+                // No pooled handle: another caller already evicted this
+                // generation. Nothing further to do.
+                None => return false,
+            }
         }
         let client = {
             let mut clients = self.clients.lock().await;
@@ -456,6 +501,7 @@ impl SharedMcpPool {
             }
         }
         crate::logging::warn(&format!("MCP pool: evicted dead server '{name}'"));
+        true
     }
 
     /// Reload config and reconnect all servers
@@ -575,7 +621,27 @@ impl SharedMcpPool {
         match self.begin_connect(&name).await {
             ConnectAttempt::Connected => Ok(false),
             ConnectAttempt::Wait(notify) => {
-                notify.notified().await;
+                // Lost-wakeup guard (F07 review finding 3): `notify_waiters`
+                // only wakes ALREADY-registered waiters. Register first
+                // (enable), then confirm the connecting entry still exists;
+                // a fast leader may have dropped its guard between
+                // `begin_connect` releasing the map lock and our
+                // registration, in which case waiting would hang forever.
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let still_connecting = {
+                    let map = self
+                        .connecting
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    map.get(&name)
+                        .map(|current| Arc::ptr_eq(current, &notify))
+                        .unwrap_or(false)
+                };
+                if still_connecting {
+                    notified.await;
+                }
                 if self.handles.read().await.contains_key(&name) {
                     Ok(false)
                 } else {
@@ -817,5 +883,116 @@ done
             followup.is_err(),
             "'true' exits immediately, connect should fail cleanly"
         );
+    }
+
+    /// F07 review BLOCKING-1: a session holding a STALE dead handle clone
+    /// must not evict (and kill) the healthy replacement child that another
+    /// session already reconnected. Identity-checked eviction: same name,
+    /// different generation => no-op, and the caller's next call flows to
+    /// the healthy replacement.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stale_dead_clone_does_not_evict_healthy_replacement() {
+        use std::io::Write as _;
+        let temp = tempfile::tempdir().expect("tempdir");
+        let script = temp.path().join("stale-gen-mcp.sh");
+        let body = r##"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"stale-gen","version":"1"}}}'
+      ;;
+    *'"tools/list"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[{"name":"noop","description":"noop","inputSchema":{"type":"object"}}]}}'
+      ;;
+    *'"tools/call"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"content":[{"type":"text","text":"ok"}],"isError":false}}'
+      ;;
+    *'"shutdown"'*) exit 0 ;;
+  esac
+done
+"##;
+        std::fs::File::create(&script)
+            .and_then(|mut f| f.write_all(body.as_bytes()))
+            .expect("write fixture");
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let server = "stale-gen-fixture";
+        let config = McpServerConfig {
+            command: script.to_string_lossy().into_owned(),
+            args: vec![],
+            env: HashMap::new(),
+            shared: true,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+        };
+        let mut mcp_config = McpConfig::default();
+        mcp_config
+            .servers
+            .insert(server.to_string(), config.clone());
+        let pool = SharedMcpPool::new(mcp_config);
+
+        // Generation 1: connect and keep a "session B" stale clone.
+        pool.connect_server(server, &config)
+            .await
+            .expect("gen1 connect");
+        let stale_clone = pool.get_handle(server).await.expect("gen1 handle");
+        let gen1_pid = pool
+            .tracked_children()
+            .into_iter()
+            .find(|child| child.server_name == server)
+            .expect("gen1 tracked")
+            .pid;
+
+        // Kill gen1 and let session A's path evict + reconnect (gen 2).
+        unsafe {
+            libc::kill(gen1_pid as libc::pid_t, libc::SIGKILL);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(stale_clone.is_dead(), "gen1 clone must observe death");
+        let evicted = pool.evict_dead_server(server, &stale_clone).await;
+        assert!(evicted, "same-generation eviction proceeds");
+        pool.connect_server(server, &config)
+            .await
+            .expect("gen2 reconnect");
+        let gen2_pid = pool
+            .tracked_children()
+            .into_iter()
+            .find(|child| child.server_name == server)
+            .expect("gen2 tracked")
+            .pid;
+        assert_ne!(gen1_pid, gen2_pid, "fresh child after reconnect");
+
+        // Session B wakes up with its STALE dead clone and tries to evict.
+        // Identity check must refuse: the healthy gen2 child survives.
+        let evicted_again = pool.evict_dead_server(server, &stale_clone).await;
+        assert!(
+            !evicted_again,
+            "stale-generation eviction must no-op (BLOCKING-1)"
+        );
+        let still_tracked = pool
+            .tracked_children()
+            .into_iter()
+            .any(|child| child.server_name == server && child.pid == gen2_pid);
+        assert!(
+            still_tracked,
+            "healthy gen2 child must NOT be killed by a stale clone"
+        );
+
+        // And the full call path with the stale clone gone: a pooled call
+        // succeeds against gen2 without spawning a third child.
+        let result = pool
+            .call_tool(server, "noop", serde_json::json!({}))
+            .await
+            .expect("call against healthy replacement succeeds");
+        assert!(!result.is_error);
+
+        pool.disconnect_server(server).await;
     }
 }
