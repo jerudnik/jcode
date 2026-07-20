@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "R04",
+    "node": "F07",
     "state": "implemented",
-    "commit": "a45923ca85032ad4420b475b936893d2723685ae",
-    "updated_at": "2026-07-20T04:16:20Z",
-    "summary": "Accept-loop exit classification + startup beacon implemented at c71628498; shutdown 42/42, server:: 485/485. Awaiting independent review (opus)."
+    "commit": "ba190325b664e86f3380dd97b127f02f27e54c03",
+    "updated_at": "2026-07-20T04:48:26Z",
+    "summary": "Dead/hung detection, eviction, one bounded reconnect, died-cooldown, cancellation-leak guard at 5c9ac8b42+d3fcba412; mcp 45/45, lib 1193/1193. Awaiting independent review (opus)."
   },
   "nodes": {
     "W0": {
@@ -144,11 +144,13 @@
       "updated_at": "2026-07-18T21:50:00Z"
     },
     "F07": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated to implementation worker: dead/hung pooled MCP detection, eviction, cooldown, one bounded reconnect.",
-      "updated_at": "2026-07-20T03:59:10Z"
+      "state": "implemented",
+      "commit": "ba190325b664e86f3380dd97b127f02f27e54c03",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F07"
+      ],
+      "summary": "Dead/hung detection, eviction, one bounded reconnect, died-cooldown, cancellation-leak guard at 5c9ac8b42+d3fcba412; mcp 45/45, lib 1193/1193. Awaiting independent review (opus).",
+      "updated_at": "2026-07-20T04:48:26Z"
     },
     "F08": {
       "state": "pending",
