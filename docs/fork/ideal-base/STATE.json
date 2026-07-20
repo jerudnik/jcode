@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F07",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T03:59:10Z",
-    "summary": "Delegated to implementation worker: dead/hung pooled MCP detection, eviction, cooldown, one bounded reconnect."
+    "node": "R04",
+    "state": "implemented",
+    "commit": "a45923ca85032ad4420b475b936893d2723685ae",
+    "updated_at": "2026-07-20T04:16:20Z",
+    "summary": "Accept-loop exit classification + startup beacon implemented at c71628498; shutdown 42/42, server:: 485/485. Awaiting independent review (opus)."
   },
   "nodes": {
     "W0": {
@@ -367,11 +367,13 @@
       "updated_at": "2026-07-19T05:57:00Z"
     },
     "R04": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated to implementation worker: fix run() select misclassifying drain-cancelled accept loops as crashes; add startup beacon.",
-      "updated_at": "2026-07-20T03:59:09Z"
+      "state": "implemented",
+      "commit": "a45923ca85032ad4420b475b936893d2723685ae",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R04"
+      ],
+      "summary": "Accept-loop exit classification + startup beacon implemented at c71628498; shutdown 42/42, server:: 485/485. Awaiting independent review (opus).",
+      "updated_at": "2026-07-20T04:16:20Z"
     }
   }
 }
