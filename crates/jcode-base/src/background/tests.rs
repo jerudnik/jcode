@@ -1010,3 +1010,79 @@ async fn cancel_retains_tombstone_until_terminal_persistence_recovers() {
     }
     panic!("cancel tombstone never recovered");
 }
+
+/// F12 gates 1-3: at the live-task cap a new spawn is refused with an
+/// explicit self-documenting error (cap, count, env var) written to its
+/// status file, and terminal cleanup (cancel) releases capacity so the next
+/// spawn runs for real.
+#[tokio::test]
+async fn live_task_cap_refuses_then_releases_after_cancel() -> Result<()> {
+    let tmp = tempdir()?;
+    let manager = BackgroundTaskManager::with_output_dir(tmp.path().to_path_buf());
+    manager.set_cap_for_tests(1);
+
+    let long = manager
+        .spawn_with_notify("bash", None, "session-cap", false, false, |_p| async move {
+            sleep(Duration::from_secs(300)).await;
+            Ok(TaskResult::completed(Some(0)))
+        })
+        .await;
+    assert!(manager.is_live_task(&long.task_id));
+    let snapshot = manager.capacity_snapshot().await;
+    assert_eq!((snapshot.current, snapshot.cap), (1, 1));
+
+    // Second spawn at cap: refused explicitly, task never runs.
+    let refused = manager
+        .spawn_with_notify("bash", None, "session-cap", false, false, |_p| async move {
+            Ok(TaskResult::completed(Some(0)))
+        })
+        .await;
+    assert!(!manager.is_live_task(&refused.task_id));
+    let status = manager
+        .status(&refused.task_id)
+        .await
+        .ok_or_else(|| anyhow!("refused task must have a terminal status file"))?;
+    assert_eq!(status.status, BackgroundTaskStatus::Failed);
+    let error = status.error.unwrap_or_default();
+    assert!(
+        error.contains("background task cap reached (1/1"),
+        "refusal names cap and count: {error}"
+    );
+    assert!(
+        error.contains(MAX_BACKGROUND_TASKS_ENV),
+        "refusal names the env var: {error}"
+    );
+
+    // Gate 3: terminal cleanup (cancel) releases capacity.
+    assert!(manager.cancel(&long.task_id).await?);
+    for _ in 0..100 {
+        if !manager.is_live_task(&long.task_id) {
+            break;
+        }
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(manager.capacity_snapshot().await.current, 0);
+
+    let after = manager
+        .spawn_with_notify("bash", None, "session-cap", false, false, |_p| async move {
+            Ok(TaskResult::completed(Some(0)))
+        })
+        .await;
+    assert!(
+        manager.is_live_task(&after.task_id)
+            || manager
+                .status(&after.task_id)
+                .await
+                .is_some_and(|s| s.status == BackgroundTaskStatus::Completed),
+        "spawn after capacity release must actually run"
+    );
+    for _ in 0..200 {
+        if let Some(status) = manager.status(&after.task_id).await
+            && status.status == BackgroundTaskStatus::Completed
+        {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(10)).await;
+    }
+    Err(anyhow!("post-release task did not complete"))
+}

@@ -33,6 +33,28 @@ use model::{
     progress_event_record, progress_wait_reason, push_task_event, task_dir, terminal_event_record,
 };
 
+/// Env override for the live background-task cap.
+pub const MAX_BACKGROUND_TASKS_ENV: &str = "JCODE_MAX_BACKGROUND_TASKS";
+
+/// Default max live (running) background tasks for the whole process.
+const DEFAULT_MAX_BACKGROUND_TASKS: usize = 64;
+
+/// Effective live-task cap (env-overridable, default 64).
+fn max_background_tasks() -> usize {
+    std::env::var(MAX_BACKGROUND_TASKS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|cap| *cap > 0)
+        .unwrap_or(DEFAULT_MAX_BACKGROUND_TASKS)
+}
+
+/// Point-in-time `{current, cap}` reading of the live-task budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackgroundCapacitySnapshot {
+    pub current: usize,
+    pub cap: usize,
+}
+
 /// Manages background task execution
 pub struct BackgroundTaskManager {
     tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
@@ -48,6 +70,9 @@ pub struct BackgroundTaskManager {
     /// startup via [`Self::set_activity_authority`] (composition-root
     /// injection, keeping this crate free of server types).
     activity: std::sync::RwLock<Arc<dyn jcode_core::activity::ActivityLeaseAuthority>>,
+    /// Test-only cap override (0 = unset, use env/default). Avoids mutating
+    /// process-global env vars from parallel tests.
+    cap_override: std::sync::atomic::AtomicUsize,
 }
 
 impl BackgroundTaskManager {
@@ -63,7 +88,22 @@ impl BackgroundTaskManager {
             activity: std::sync::RwLock::new(
                 jcode_core::activity::noop_activity_authority(),
             ),
+            cap_override: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Effective live-task cap for this manager.
+    fn live_task_cap(&self) -> usize {
+        match self.cap_override.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => max_background_tasks(),
+            cap => cap,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_cap_for_tests(&self, cap: usize) {
+        self.cap_override
+            .store(cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Inject the daemon's activity-lease authority (F01 C5). Called once by
@@ -101,6 +141,10 @@ impl BackgroundTaskManager {
     /// Fail-closed refusal path (F02-B4 / F01 I6): the task never runs.
     /// Writes a terminal Failed status so callers polling the status file
     /// observe a definite outcome instead of silent unleased execution.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors persisted status fields at existing call sites"
+    )]
     async fn write_refused_status(
         &self,
         task_id: &str,
@@ -110,6 +154,7 @@ impl BackgroundTaskManager {
         status_path: &std::path::Path,
         notify: bool,
         wake: bool,
+        reason: &str,
     ) {
         let mut refused_status = TaskStatusFile {
             task_id: task_id.to_string(),
@@ -118,7 +163,7 @@ impl BackgroundTaskManager {
             session_id: session_id.to_string(),
             status: BackgroundTaskStatus::Failed,
             exit_code: None,
-            error: Some("Refused: daemon is shutting down".to_string()),
+            error: Some(reason.to_string()),
             started_at: chrono::Utc::now().to_rfc3339(),
             completed_at: Some(chrono::Utc::now().to_rfc3339()),
             duration_secs: Some(0.0),
@@ -134,7 +179,7 @@ impl BackgroundTaskManager {
         let event_status = refused_status.status.clone();
         push_task_event(
             &mut refused_status,
-            terminal_event_record(event_status, None, Some("Refused: daemon is shutting down")),
+            terminal_event_record(event_status, None, Some(reason)),
         );
         let _ = status_path; // path derives from task_id inside the store
         if let Err(error) = self
@@ -537,6 +582,14 @@ impl BackgroundTaskManager {
         count
     }
 
+    /// Observability: current live-task count against the global cap.
+    pub async fn capacity_snapshot(&self) -> BackgroundCapacitySnapshot {
+        BackgroundCapacitySnapshot {
+            current: self.tasks.read().await.len(),
+            cap: self.live_task_cap(),
+        }
+    }
+
     pub fn reserve_task_info(&self) -> BackgroundTaskInfo {
         let task_id = Self::generate_task_id();
         let output_file = self.output_path_for(&task_id);
@@ -636,6 +689,39 @@ impl BackgroundTaskManager {
         let task_id = Self::generate_task_id();
         let output_path = self.output_dir.join(format!("{}.output", task_id));
         let status_path = self.output_dir.join(format!("{}.status.json", task_id));
+        // Global live-task cap: only tasks still in the live map count.
+        // Terminal pruning (completed/failed/cancelled) releases capacity.
+        // Fail closed like the drain refusal below: the task NEVER runs and
+        // the status file records an explicit self-documenting refusal.
+        {
+            let live = self.tasks.read().await.len();
+            let cap = self.live_task_cap();
+            if live >= cap {
+                let reason = format!(
+                    "Refused: background task cap reached ({live}/{cap} live tasks). \
+                     Raise via {MAX_BACKGROUND_TASKS_ENV}."
+                );
+                crate::logging::warn(&format!(
+                    "Background task {tool_name}/{task_id} refused: {reason}"
+                ));
+                self.write_refused_status(
+                    &task_id,
+                    tool_name,
+                    display_name.clone(),
+                    session_id,
+                    &status_path,
+                    notify,
+                    wake,
+                    &reason,
+                )
+                .await;
+                return BackgroundTaskInfo {
+                    task_id,
+                    output_file: output_path,
+                    status_file: status_path,
+                };
+            }
+        }
         // Activity lease (F01 C5 / F02-B4): acquired at method entry, BEFORE
         // the future is spawned, so it exists before the task can execute.
         // Moved into the RunningTask record below, dropped at terminal
@@ -655,6 +741,7 @@ impl BackgroundTaskManager {
                     &status_path,
                     notify,
                     wake,
+                    "Refused: daemon is shutting down",
                 )
                 .await;
                 return BackgroundTaskInfo {

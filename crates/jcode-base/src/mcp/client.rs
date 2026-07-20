@@ -13,10 +13,27 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, oneshot};
 
-/// Max concurrent OWNED (non-shared) MCP child processes across the whole
-/// process. Shared servers are pool-deduped and not counted here.
+/// Default max concurrent OWNED (non-shared) MCP child processes across the
+/// whole process. Shared servers are pool-deduped and not counted here.
 pub(crate) const MAX_OWNED_MCP_CHILDREN: usize = 64;
 static OWNED_MCP_CHILDREN: AtomicUsize = AtomicUsize::new(0);
+
+/// Env override for the owned-child cap.
+pub const MCP_MAX_OWNED_CHILDREN_ENV: &str = "JCODE_MCP_MAX_OWNED_CHILDREN";
+
+/// Parse a positive usize cap from `env_var`, falling back to `default`.
+pub(crate) fn env_cap(env_var: &str, default: usize) -> usize {
+    std::env::var(env_var)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|cap| *cap > 0)
+        .unwrap_or(default)
+}
+
+/// Effective owned-child cap (env-overridable, default 64).
+pub(crate) fn max_owned_mcp_children() -> usize {
+    env_cap(MCP_MAX_OWNED_CHILDREN_ENV, MAX_OWNED_MCP_CHILDREN)
+}
 
 /// Environment contract used by owned MCP children to monitor their daemon.
 pub const MCP_OWNER_PID_ENV: &str = "JCODE_MCP_OWNER_PID";
@@ -424,11 +441,21 @@ pub struct OwnedChildPermit;
 impl OwnedChildPermit {
     /// Try to reserve a slot. Returns None if the cap is already reached.
     pub fn try_acquire() -> Option<Self> {
-        if try_reserve(&OWNED_MCP_CHILDREN, MAX_OWNED_MCP_CHILDREN) {
+        if try_reserve(&OWNED_MCP_CHILDREN, max_owned_mcp_children()) {
             Some(OwnedChildPermit)
         } else {
             None
         }
+    }
+
+    /// Self-documenting refusal message for an exhausted owned-child cap.
+    pub fn refusal_message(server_name: &str) -> String {
+        format!(
+            "owned MCP child cap reached ({current}/{cap}); not spawning '{server_name}'. \
+             Raise via {MCP_MAX_OWNED_CHILDREN_ENV}.",
+            current = Self::current(),
+            cap = max_owned_mcp_children(),
+        )
     }
 
     /// Current owned-child count (for tests/telemetry).

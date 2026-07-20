@@ -23,6 +23,24 @@ use tokio::sync::{Mutex, Notify, RwLock};
 
 const FAILED_CONNECT_RETRY_COOLDOWN: Duration = Duration::from_secs(30);
 
+/// Env override for the pooled-children cap.
+pub const MCP_MAX_CHILDREN_ENV: &str = "JCODE_MCP_MAX_CHILDREN";
+
+/// Default max pooled MCP child processes for the whole daemon.
+const MAX_POOLED_MCP_CHILDREN: usize = 32;
+
+/// Effective pooled-children cap (env-overridable, default 32).
+fn max_pooled_mcp_children() -> usize {
+    super::client::env_cap(MCP_MAX_CHILDREN_ENV, MAX_POOLED_MCP_CHILDREN)
+}
+
+/// Point-in-time `{current, cap}` reading of a bounded resource.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapacitySnapshot {
+    pub current: usize,
+    pub cap: usize,
+}
+
 #[derive(Clone)]
 struct FailedConnectRecord {
     message: String,
@@ -84,6 +102,9 @@ pub struct SharedMcpPool {
     /// so the daemon cannot idle-exit mid-call. Defaults to no-op; the
     /// daemon injects its real authority at the composition root.
     activity: std::sync::Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    /// Test-only cap override (0 = unset, use env/default). Avoids mutating
+    /// process-global env vars from parallel tests.
+    pooled_cap_override: std::sync::atomic::AtomicUsize,
 }
 
 impl SharedMcpPool {
@@ -106,7 +127,25 @@ impl SharedMcpPool {
             connecting: Arc::new(StdMutex::new(HashMap::new())),
             last_errors: RwLock::new(HashMap::new()),
             activity,
+            pooled_cap_override: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// Effective pooled-children cap for this pool.
+    fn pooled_cap(&self) -> usize {
+        match self
+            .pooled_cap_override
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            0 => max_pooled_mcp_children(),
+            cap => cap,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_pooled_cap_for_tests(&self, cap: usize) {
+        self.pooled_cap_override
+            .store(cap, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Create pool loading config from default locations
@@ -228,6 +267,14 @@ impl SharedMcpPool {
     /// Debug/introspection surface for owned child PID records.
     pub fn tracked_children(&self) -> Vec<TrackedMcpChild> {
         self.child_tracker.tracked_children()
+    }
+
+    /// Observability: current pooled-children count against the global cap.
+    pub async fn capacity_snapshot(&self) -> CapacitySnapshot {
+        CapacitySnapshot {
+            current: self.clients.lock().await.len(),
+            cap: self.pooled_cap(),
+        }
     }
 
     /// Owning daemon PID injected into every spawned MCP child.
@@ -664,6 +711,19 @@ impl SharedMcpPool {
                     drop(guard);
                     return Ok(false);
                 }
+                // Global pooled-children cap: only NEW spawns are gated
+                // (reuse of an existing handle returned above). Refusal is
+                // NOT recorded in `last_errors`, so freed capacity allows an
+                // immediate retry without the failure cooldown.
+                let current = self.clients.lock().await.len();
+                let cap = self.pooled_cap();
+                if current >= cap {
+                    drop(guard);
+                    return Err(format!(
+                        "pooled MCP child cap reached ({current}/{cap}); refusing to spawn \
+                         '{name}'. Raise via {MCP_MAX_CHILDREN_ENV}."
+                    ));
+                }
                 // `guard` is held across the connect await: if this future is
                 // cancelled mid-connect (e.g. an aborted tool call), its Drop
                 // removes the connecting entry and wakes waiters instead of
@@ -724,6 +784,108 @@ mod tests {
     use std::collections::HashMap;
     use std::io::Write;
     use std::sync::Arc;
+
+    /// Write a minimal stdio MCP fixture (initialize/tools-list/shutdown).
+    #[cfg(unix)]
+    fn write_pool_fixture(dir: &std::path::Path, file_name: &str) -> std::path::PathBuf {
+        let path = dir.join(file_name);
+        let body = r##"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"cap-fixture","version":"1"}}}'
+      ;;
+    *'"tools/list"'*)
+      printf '%s\n' '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[]}}'
+      ;;
+    *'"shutdown"'*) exit 0 ;;
+  esac
+done
+"##;
+        std::fs::File::create(&path)
+            .and_then(|mut f| f.write_all(body.as_bytes()))
+            .expect("write fixture");
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    fn fixture_config(path: &std::path::Path) -> McpServerConfig {
+        McpServerConfig {
+            command: path.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            env: HashMap::new(),
+            shared: true,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+        }
+    }
+
+    /// F12 gates 1-3: at the pooled-children cap a NEW spawn is refused with
+    /// an explicit self-documenting error (cap, count, env var), and
+    /// disconnecting a pooled child releases capacity for the next connect.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pooled_child_cap_refuses_then_releases_after_disconnect() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fixture = write_pool_fixture(temp.path(), "cap-mcp.sh");
+        let config = fixture_config(&fixture);
+
+        let pool = SharedMcpPool::new(McpConfig::default());
+        pool.set_pooled_cap_for_tests(1);
+
+        pool.connect_server("cap-first", &config)
+            .await
+            .expect("first pooled connect under cap");
+        let snapshot = pool.capacity_snapshot().await;
+        assert_eq!((snapshot.current, snapshot.cap), (1, 1));
+
+        // Reconnecting the SAME server is reuse, not a new spawn: no refusal.
+        pool.connect_server("cap-first", &config)
+            .await
+            .expect("reuse of connected server is not gated by the cap");
+
+        let refused = pool
+            .connect_server("cap-second", &config)
+            .await
+            .expect_err("second distinct server must be refused at cap");
+        let message = format!("{refused:#}");
+        assert!(
+            message.contains("pooled MCP child cap reached (1/1)"),
+            "refusal names cap and count: {message}"
+        );
+        assert!(
+            message.contains(super::MCP_MAX_CHILDREN_ENV),
+            "refusal names the env var: {message}"
+        );
+
+        // Gate 3: terminal cleanup releases capacity.
+        pool.disconnect_server("cap-first").await;
+        assert_eq!(pool.capacity_snapshot().await.current, 0);
+        pool.connect_server("cap-second", &config)
+            .await
+            .expect("capacity released after disconnect");
+        pool.disconnect_server("cap-second").await;
+    }
+
+    /// The pooled cap reads its default and the env override lazily. Raising
+    /// the cap via env is safe to observe concurrently (only ever raises).
+    #[test]
+    fn pooled_cap_env_override_parses() {
+        let _guard = crate::storage::lock_test_env();
+        crate::env::set_var(super::MCP_MAX_CHILDREN_ENV, "128");
+        assert_eq!(super::max_pooled_mcp_children(), 128);
+        crate::env::set_var(super::MCP_MAX_CHILDREN_ENV, "not-a-number");
+        assert_eq!(super::max_pooled_mcp_children(), 32);
+        crate::env::remove_var(super::MCP_MAX_CHILDREN_ENV);
+        assert_eq!(super::max_pooled_mcp_children(), 32);
+    }
 
     #[tokio::test]
     async fn begin_connect_deduplicates_concurrent_attempts() {

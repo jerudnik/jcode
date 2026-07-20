@@ -5,8 +5,7 @@
 //! (e.g., Playwright with browser state) are spawned per-session.
 
 use super::client::{
-    DEFAULT_MCP_REAP_GRACE, MAX_OWNED_MCP_CHILDREN, McpChildTracker, McpClient, McpHandle,
-    OwnedChildPermit,
+    DEFAULT_MCP_REAP_GRACE, McpChildTracker, McpClient, McpHandle, OwnedChildPermit,
 };
 use super::pool::SharedMcpPool;
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef, ToolCallResult};
@@ -211,11 +210,9 @@ impl McpManager {
 
             for (name, config) in owned_servers {
                 let Some(permit) = OwnedChildPermit::try_acquire() else {
-                    crate::logging::warn(&format!(
-                        "MCP: owned child cap {} reached; not spawning '{}'",
-                        MAX_OWNED_MCP_CHILDREN, name
-                    ));
-                    total_failures.push((name.clone(), "owned MCP child cap reached".to_string()));
+                    let refusal = OwnedChildPermit::refusal_message(name);
+                    crate::logging::warn(&format!("MCP: {refusal}"));
+                    total_failures.push((name.clone(), refusal));
                     continue;
                 };
                 let name = name.clone();
@@ -294,9 +291,7 @@ impl McpManager {
 
         // Owned (non-shared or no pool available)
         let Some(permit) = OwnedChildPermit::try_acquire() else {
-            return Err(anyhow!(
-                "owned MCP child cap {MAX_OWNED_MCP_CHILDREN} reached; not spawning '{name}'"
-            ));
+            return Err(anyhow!(OwnedChildPermit::refusal_message(name)));
         };
         let child_tracker = self
             .pool
