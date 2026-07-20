@@ -23,7 +23,18 @@ JCODE_HOME="${JCODE_HOME:-$HOME/.jcode}"
 STABLE_BIN="$JCODE_HOME/builds/stable/jcode"
 SHARED_BIN="$JCODE_HOME/builds/shared-server/jcode"
 LOG="$JCODE_HOME/sentinel.log"
-SOCKET="${JCODE_SOCKET:-${TMPDIR:-/tmp}/jcode.sock}"
+# Under launchd TMPDIR is unset; resolve the per-user temp dir the same way
+# the daemon does (macOS confstr) before falling back to /tmp.
+default_tmpdir() {
+    if [[ -n "${TMPDIR:-}" ]]; then echo "$TMPDIR"; return; fi
+    if command -v getconf >/dev/null 2>&1; then
+        local d
+        d="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
+        if [[ -n "$d" ]]; then echo "$d"; return; fi
+    fi
+    echo /tmp
+}
+SOCKET="${JCODE_SOCKET:-$(default_tmpdir | sed 's:/*$::')/jcode.sock}"
 RELOAD_MARKER="$JCODE_HOME/reload-info"
 
 POLL_SECS="${SENTINEL_POLL_SECS:-10}"
