@@ -791,12 +791,14 @@ impl Registry {
             // authority; every MCP call (pooled, owned, connect-on-first-
             // call) then pins the daemon against idle exit. Pool-less
             // managers are local/test harnesses and keep the no-op default.
-            Arc::new(RwLock::new(McpManager::with_shared_pool_for_dir_and_activity(
-                pool,
-                sid,
-                working_dir,
-                crate::server::shutdown::activity_authority(),
-            )))
+            Arc::new(RwLock::new(
+                McpManager::with_shared_pool_for_dir_and_activity(
+                    pool,
+                    sid,
+                    working_dir,
+                    crate::server::shutdown::activity_authority(),
+                ),
+            ))
         } else {
             Arc::new(RwLock::new(McpManager::new()))
         };

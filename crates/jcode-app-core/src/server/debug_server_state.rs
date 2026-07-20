@@ -77,7 +77,9 @@ pub(super) async fn maybe_handle_server_state_command(
             .parse()
             .map_err(|_| anyhow::anyhow!("release_lease requires a numeric token"))?;
         let released = super::shutdown::debug_release_lease(token);
-        return Ok(Some(serde_json::json!({ "released": released }).to_string()));
+        return Ok(Some(
+            serde_json::json!({ "released": released }).to_string(),
+        ));
     }
 
     if cmd == "sessions" {

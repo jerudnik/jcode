@@ -35,7 +35,11 @@ pub(crate) struct SubagentParent {
 }
 
 impl SubagentParent {
-    fn from_session(session: Session, working_dir: Option<PathBuf>, provider: &dyn Provider) -> Self {
+    fn from_session(
+        session: Session,
+        working_dir: Option<PathBuf>,
+        provider: &dyn Provider,
+    ) -> Self {
         Self {
             session_id: session.id,
             working_dir: working_dir.or_else(|| session.working_dir.map(PathBuf::from)),
@@ -117,7 +121,8 @@ impl Tool for SubagentTool {
     }
 
     async fn execute(&self, input: Value, ctx: ToolContext) -> Result<ToolOutput> {
-        let input: SubagentInput = serde_json::from_value(input).context("invalid subagent input")?;
+        let input: SubagentInput =
+            serde_json::from_value(input).context("invalid subagent input")?;
         let parent_session = Session::load(&ctx.session_id)
             .with_context(|| format!("failed to load parent session {}", ctx.session_id))?;
         let parent = SubagentParent::from_session(

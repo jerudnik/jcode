@@ -171,7 +171,9 @@ pub(crate) fn spawn_persistent_lifecycle_monitor(
             let now = Instant::now();
             idle_clock.update(quiescent, now);
             if quiescent && !was_quiescent {
-                crate::logging::info("Server quiescent (no clients, no active leases). Idle timer started.");
+                crate::logging::info(
+                    "Server quiescent (no clients, no active leases). Idle timer started.",
+                );
             } else if !quiescent && was_quiescent {
                 crate::logging::info("Server active again. Idle timer cancelled.");
             }
@@ -179,10 +181,7 @@ pub(crate) fn spawn_persistent_lifecycle_monitor(
             if idle_clock.should_exit(now, timeout) {
                 crate::logging::info(&format!(
                     "Persistent server quiescent {}s; shutting down.",
-                    idle_clock
-                        .idle_elapsed(now)
-                        .unwrap_or_default()
-                        .as_secs()
+                    idle_clock.idle_elapsed(now).unwrap_or_default().as_secs()
                 ));
                 match super::shutdown::coordinator()
                     .begin(super::shutdown::ExitReason::PersistentIdle)
