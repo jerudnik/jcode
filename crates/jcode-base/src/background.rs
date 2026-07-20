@@ -720,11 +720,17 @@ impl BackgroundTaskManager {
         // records an explicit self-documenting refusal.
         let spawn_slot = SpawnSlot::reserve(&self.in_flight_spawns);
         {
-            let live = self.tasks.read().await.len()
-                + self
-                    .in_flight_spawns
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                    .saturating_sub(1); // exclude our own reservation
+            // Load the reservation counter BEFORE the live map (F12
+            // re-review): a completing spawner inserts into `tasks` before
+            // dropping its slot, so counter-first ordering sees it in at
+            // least one place; map-first could miss it in both and share one
+            // free slot between two spawners. Double-counting merely refuses
+            // conservatively.
+            let reserved = self
+                .in_flight_spawns
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .saturating_sub(1); // exclude our own reservation
+            let live = self.tasks.read().await.len() + reserved;
             let cap = self.live_task_cap();
             if live >= cap {
                 let reason = format!(
@@ -818,7 +824,11 @@ impl BackgroundTaskManager {
                 task_id,
                 output_file: output_path,
                 status_file: status_path,
-                refused: None,
+                // F12 re-review: this task never runs; callers must not
+                // report a started task (same contract as cap refusal).
+                refused: Some(format!(
+                    "Refused: initial status persistence failed: {error:#}"
+                )),
             };
         }
         Self::publish_task_started_activity(

@@ -961,6 +961,11 @@ async fn run_swarm_plan_in_background(
             },
         )
         .await;
+    // Cap/drain refusal (F12): the plan task never ran; do not record the
+    // dead task id or report a running plan.
+    if let Some(reason) = &info.refused {
+        return Err(anyhow::anyhow!("Swarm plan refused: {reason}"));
+    }
     claim.record_task(&info.task_id);
 
     let delivery_note = if wake {
