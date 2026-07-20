@@ -789,7 +789,7 @@
   "W4": [
    {
     "id": "R05",
-    "content": "Repair multi-client session contention (evidence/R05 incident 2026-07-20): two TUI clients attached to one session fight via stall-guard cancels, killing each other's turns; stranded soft-interrupt recovery re-queues user messages so duplicates accumulate and replay (18x duplicate delivery observed); the stall-guard cancellation is mislabeled 'Tool interrupted by server reload'. Fix: (a) duplicate-attach policy: newest client wins with explicit takeover banner on the older client, or at minimum a prominent 'N clients attached' warning on both; (b) collapse identical queued user messages at the turn boundary instead of replaying each copy; (c) label stall-guard cancels truthfully (trigger=stall_guard is already in the interrupt metadata).",
+    "content": "Repair multi-client session contention (evidence/R05 incident 2026-07-20): two TUI clients attached to one session fight via stall-guard cancels, killing each other's turns; stranded soft-interrupt recovery re-queues user messages so duplicates accumulate and replay (18x duplicate delivery observed); the stall-guard cancellation is mislabeled 'Tool interrupted by server reload'. Fix: (a) duplicate-attach policy: newest client wins with explicit takeover banner on the older client, or at minimum a prominent 'N clients attached' warning on both; (b) collapse identical queued user messages at the turn boundary instead of replaying each copy; (c) label stall-guard cancels truthfully (trigger=stall_guard is already in the interrupt metadata); (d) working-dir integrity: a reconnecting client's Subscribe silently overwrote the session's 13-hour-old working_dir (/Users/jrudnik/labs/jcode -> /Users/jrudnik, env snapshot reason=working_dir at the incident second), silently rescoping swarm identity and relative-path behavior. A reconnect must not change an established session working_dir without explicit confirmation, or must at minimum surface the change loudly.",
     "kind": "implement",
     "depends_on": [
      "F03",
@@ -806,7 +806,8 @@
     "acceptance_gates": [
      "Second attach to a live session either takes over with a banner or surfaces a dual-attach warning on both clients",
      "N identical queued user messages deliver once, not N times",
-     "A stall-guard cancel is labeled as such, never as a server reload"
+     "A stall-guard cancel is labeled as such, never as a server reload",
+     "Reconnect preserves the session's established working_dir unless explicitly changed, and any change is surfaced"
     ],
     "evidence": [
      "dual-attach fixture",
@@ -1860,7 +1861,7 @@
   },
   {
    "id": "R05",
-   "content": "Repair multi-client session contention (evidence/R05 incident 2026-07-20): two TUI clients attached to one session fight via stall-guard cancels, killing each other's turns; stranded soft-interrupt recovery re-queues user messages so duplicates accumulate and replay (18x duplicate delivery observed); the stall-guard cancellation is mislabeled 'Tool interrupted by server reload'. Fix: (a) duplicate-attach policy: newest client wins with explicit takeover banner on the older client, or at minimum a prominent 'N clients attached' warning on both; (b) collapse identical queued user messages at the turn boundary instead of replaying each copy; (c) label stall-guard cancels truthfully (trigger=stall_guard is already in the interrupt metadata).",
+   "content": "Repair multi-client session contention (evidence/R05 incident 2026-07-20): two TUI clients attached to one session fight via stall-guard cancels, killing each other's turns; stranded soft-interrupt recovery re-queues user messages so duplicates accumulate and replay (18x duplicate delivery observed); the stall-guard cancellation is mislabeled 'Tool interrupted by server reload'. Fix: (a) duplicate-attach policy: newest client wins with explicit takeover banner on the older client, or at minimum a prominent 'N clients attached' warning on both; (b) collapse identical queued user messages at the turn boundary instead of replaying each copy; (c) label stall-guard cancels truthfully (trigger=stall_guard is already in the interrupt metadata); (d) working-dir integrity: a reconnecting client's Subscribe silently overwrote the session's 13-hour-old working_dir (/Users/jrudnik/labs/jcode -> /Users/jrudnik, env snapshot reason=working_dir at the incident second), silently rescoping swarm identity and relative-path behavior. A reconnect must not change an established session working_dir without explicit confirmation, or must at minimum surface the change loudly.",
    "kind": "implement",
    "depends_on": [
     "F03",
@@ -1877,7 +1878,8 @@
    "acceptance_gates": [
     "Second attach to a live session either takes over with a banner or surfaces a dual-attach warning on both clients",
     "N identical queued user messages deliver once, not N times",
-    "A stall-guard cancel is labeled as such, never as a server reload"
+    "A stall-guard cancel is labeled as such, never as a server reload",
+    "Reconnect preserves the session's established working_dir unless explicitly changed, and any change is surfaced"
    ],
    "evidence": [
     "dual-attach fixture",
