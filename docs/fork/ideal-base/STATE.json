@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F15",
-    "state": "accepted",
-    "commit": "bb53da147",
-    "updated_at": "2026-07-20T13:15:21Z",
-    "summary": "Accepted: 58 ignores classified (0 unclassified), CI rails mapped, flakiness root-cause table, promotion shortlist for F16. Review PASS with full recount reconciliation."
+    "node": "F16",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T13:15:36Z",
+    "summary": "Delegated: promote hermetic real-process cases into required suites per F15 shortlist."
   },
   "nodes": {
     "W0": {
@@ -229,11 +229,11 @@
       "updated_at": "2026-07-20T13:15:21Z"
     },
     "F16": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: promote hermetic real-process cases into required suites per F15 shortlist.",
+      "updated_at": "2026-07-20T13:15:36Z"
     },
     "F17": {
       "state": "pending",
