@@ -42,3 +42,15 @@ the mouse session, 12768), restoring one client per session.
 
 incident-log-excerpt.txt: STALLED/UNMATCHED/Recovering lines showing
 both connection ids issuing interleaved requests against the session.
+
+## Addendum: working-dir overwrite (same incident)
+
+Env snapshots for the fish session show working_dir stable at
+/Users/jrudnik/labs/jcode from 02:36 through 06:06 across attaches and
+reloads, then a `reason: working_dir` snapshot at 15:43:13 (the incident
+second) flipping it to /Users/jrudnik: the reconnecting launcher-spawned
+client (cwd = home) won the contention and its Subscribe overwrote the
+session's established working directory. Consequences observed: swarm
+identity silently rescoped to /Users/jrudnik (run_plan worker-membership
+failures), and any relative-path tooling would have retargeted home. A
+reconnect must not replace an established working_dir silently.
