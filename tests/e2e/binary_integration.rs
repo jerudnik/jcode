@@ -26,13 +26,29 @@ fn find_e2e_binary() -> Option<std::path::PathBuf> {
         );
     }
     let repo_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let binary_name = format!("jcode{}", std::env::consts::EXE_SUFFIX);
     for profile in ["release", "selfdev", "debug"] {
-        let candidate = repo_dir
-            .join("target")
-            .join(profile)
-            .join(format!("jcode{}", std::env::consts::EXE_SUFFIX));
+        let candidate = repo_dir.join("target").join(profile).join(&binary_name);
         if candidate.is_file() {
             return Some(candidate);
+        }
+    }
+    // CI builds with an explicit --target triple land in
+    // target/<triple>/release (F16 review BLOCKING-1: without this probe,
+    // fork-ci's aarch64-apple-darwin build is invisible and the promoted
+    // tests silently skip). Scan one directory level down for any
+    // <triple>/{release,debug}/jcode.
+    if let Ok(entries) = std::fs::read_dir(repo_dir.join("target")) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            for profile in ["release", "debug"] {
+                let candidate = entry.path().join(profile).join(&binary_name);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
         }
     }
     None
@@ -527,8 +543,10 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
                 cycle,
                 cycle_started.elapsed().as_secs_f64()
             );
-            assert_ne!(
-                server_id_after, server_id_before,
+            // ensure! (not assert!): panics unwind past the teardown below
+            // and leak the PTY child + daemon (F16 review important-1).
+            anyhow::ensure!(
+                server_id_after != server_id_before,
                 "self-dev reload cycle {} should replace the server process",
                 cycle
             );
@@ -683,8 +701,8 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing client version after reload"))?;
 
-        assert_ne!(
-            client_id_after, client_id_before,
+        anyhow::ensure!(
+            client_id_after != client_id_before,
             "client reload should reconnect with a different client id"
         );
         // When the starter and the reload target are built from the same
@@ -698,10 +716,10 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
             .map(|(path, _)| path)
             .unwrap_or_else(|| release_binary.clone());
         let expected_version = binary_reported_version(&reload_target)?;
-        assert_eq!(
-            version_after, expected_version,
+        anyhow::ensure!(
+            version_after == expected_version,
             "client reload should re-exec into the reload target binary \
-             (before: {version_before})"
+             (after: {version_after}, expected: {expected_version}, before: {version_before})"
         );
 
         let server_info_after =
@@ -711,8 +729,8 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
             .get("id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing server id after client reload"))?;
-        assert_eq!(
-            server_id_after, server_id_before,
+        anyhow::ensure!(
+            server_id_after == server_id_before,
             "client reload should not replace the server process"
         );
 
@@ -875,16 +893,16 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing client version after full reload"))?;
 
-        assert_ne!(
-            server_id_after, server_id_before,
+        anyhow::ensure!(
+            server_id_after != server_id_before,
             "full reload should replace the server process"
         );
-        assert_ne!(
-            client_id_after, client_id_before,
+        anyhow::ensure!(
+            client_id_after != client_id_before,
             "full reload should reconnect with a different client id"
         );
-        assert_ne!(
-            version_after, version_before,
+        anyhow::ensure!(
+            version_after != version_before,
             "full reload should switch binaries"
         );
 
