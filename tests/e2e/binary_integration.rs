@@ -137,6 +137,7 @@ fn require_e2e_binary(test_name: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+
 // ----------------------------------------------------------------------------
 // Reload/handoff robustness coverage map (for future contributors)
 //
