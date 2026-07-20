@@ -429,6 +429,36 @@
   ],
   "W2": [
    {
+    "id": "R04",
+    "content": "Repair the reload drain vs accept-loop-exit race (evidence/R04): Server::run's select treats the drain's intentional intake cancellation as an accept-loop crash and upgrades reload -> accept-loop-failure, aborting the exec handoff whenever a drain-blocking lease forces the reload to wait. Distinguish cancellation-driven accept-loop exit from real failure, and add a startup beacon so hard crashes are positively detectable (running marker at boot, finalized on clean exit).",
+    "kind": "implement",
+    "depends_on": [
+     "F03",
+     "F06"
+    ],
+    "priority": 90,
+    "owned_paths": [
+     "crates/jcode-app-core/src/server.rs",
+     "crates/jcode-app-core/src/server/runtime.rs",
+     "crates/jcode-app-core/src/server/shutdown.rs",
+     "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs",
+     "docs/fork/ideal-base/evidence/R04/**"
+    ],
+    "acceptance_gates": [
+     "A reload begun while a drain-blocking lease is held completes the exec handoff instead of upgrading to accept-loop-failure",
+     "A genuine accept-loop failure (loop exits while coordinator is Running) still upgrades and exits 45",
+     "Startup beacon: unclean death is detectable from durable state after SIGKILL"
+    ],
+    "evidence": [
+     "in-process fixture: reload drain with held lease keeps reason Reload",
+     "in-process fixture: accept-loop exit without begun shutdown still fails",
+     "incident log excerpt (already recorded)"
+    ],
+    "review_model": "opus",
+    "class": "deterministic",
+    "parent": "W2"
+   },
+   {
     "id": "F09",
     "content": "Add timestamped selfdev pending-activation reconciliation using initiating-session liveness and candidate identity.",
     "kind": "implement",
@@ -456,7 +486,9 @@
     "id": "F10",
     "content": "Persist disconnect-cleanup intent before live-session removal; retry after abort and reconcile at startup.",
     "kind": "implement",
-    "depends_on": [],
+    "depends_on": [
+     "R04"
+    ],
     "priority": 98,
     "owned_paths": [
      "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs",
@@ -1442,6 +1474,36 @@
    "parent": "W1"
   },
   {
+   "id": "R04",
+   "content": "Repair the reload drain vs accept-loop-exit race (evidence/R04): Server::run's select treats the drain's intentional intake cancellation as an accept-loop crash and upgrades reload -> accept-loop-failure, aborting the exec handoff whenever a drain-blocking lease forces the reload to wait. Distinguish cancellation-driven accept-loop exit from real failure, and add a startup beacon so hard crashes are positively detectable (running marker at boot, finalized on clean exit).",
+   "kind": "implement",
+   "depends_on": [
+    "F03",
+    "F06"
+   ],
+   "priority": 90,
+   "owned_paths": [
+    "crates/jcode-app-core/src/server.rs",
+    "crates/jcode-app-core/src/server/runtime.rs",
+    "crates/jcode-app-core/src/server/shutdown.rs",
+    "crates/jcode-app-core/src/server/shutdown_fixture_tests.rs",
+    "docs/fork/ideal-base/evidence/R04/**"
+   ],
+   "acceptance_gates": [
+    "A reload begun while a drain-blocking lease is held completes the exec handoff instead of upgrading to accept-loop-failure",
+    "A genuine accept-loop failure (loop exits while coordinator is Running) still upgrades and exits 45",
+    "Startup beacon: unclean death is detectable from durable state after SIGKILL"
+   ],
+   "evidence": [
+    "in-process fixture: reload drain with held lease keeps reason Reload",
+    "in-process fixture: accept-loop exit without begun shutdown still fails",
+    "incident log excerpt (already recorded)"
+   ],
+   "review_model": "opus",
+   "class": "deterministic",
+   "parent": "W2"
+  },
+  {
    "id": "F09",
    "content": "Add timestamped selfdev pending-activation reconciliation using initiating-session liveness and candidate identity.",
    "kind": "implement",
@@ -1469,7 +1531,9 @@
    "id": "F10",
    "content": "Persist disconnect-cleanup intent before live-session removal; retry after abort and reconcile at startup.",
    "kind": "implement",
-   "depends_on": [],
+   "depends_on": [
+    "R04"
+   ],
    "priority": 98,
    "owned_paths": [
     "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs",

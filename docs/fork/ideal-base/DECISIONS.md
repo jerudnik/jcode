@@ -529,3 +529,33 @@ do not resurrect it unless investigating the dispatch history.
 
 **Next:** resume the ideal-base railway at F07 (dead/hung MCP detection,
 cache eviction, bounded reconnect), with D021 available for future delegation.
+
+## D024. R04 injected: reload drain vs accept-loop-exit race; safety net added
+
+**Decision:** A live incident (2026-07-19 23:02 local, `evidence/R04/`)
+showed that any reload issued while a drain-blocking lease is active
+aborts the exec handoff: the drain's intake cancellation stops the accept
+loops, `Server::run`'s select misreads that as a crash, upgrades
+`reload -> accept-loop-failure`, and the daemon exits 45 with no
+successor. D022's reopen trigger fired early via live use rather than
+F08. R04 is injected as a W2 child (W1 is at its 10-child budget and F10
+already owns `server/**`, so F10 now depends on R04 to serialize
+ownership). R04's F03/F06 dependencies are accepted, so it is immediately
+delegable alongside F07 without path overlap.
+
+Independent of daemon code, two coordinator-owned safety nets were added
+under `scripts/` and validated in sandboxes: `server_sentinel.sh` (launchd
+agent; socket liveness probe, shared-server rescue, quit-vs-crash
+discrimination via the durable shutdown marker) and `jcode_emergency.sh`
+(rollback to smoke-tested stable/nix binaries, then rate-limited external
+agent summon). These reduce the blast radius of future reload-seam work;
+they are not a substitute for the R04 fix.
+
+Also landed on main while unblocking scouting: alias resolution in
+`validate_tool_allowed` (9e786069e) and disallowed-tool calls surfaced as
+tool-result errors instead of turn aborts (a55dec21f). Both carry
+regression tests.
+
+**Reopen trigger:** F08 finding any exit mode in which a reload with held
+leases fails to hand off, or a genuine accept-loop crash that no longer
+exits 45.
