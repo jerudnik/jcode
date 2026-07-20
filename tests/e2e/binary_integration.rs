@@ -684,12 +684,15 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
 
         child.send_command("/client-reload")?;
 
+        // Generous bound (matches the other promoted lifecycle waits): the
+        // re-exec + resume + reconnect sequence is functional coverage; wall
+        // time on loaded runners regularly exceeds the old 20s budget.
         let client_id_after = wait_for_selfdev_client_reload_cycle(
             &debug_socket_path,
             &session_id,
             &client_id_before,
             &server_id_before,
-            Duration::from_secs(20),
+            Duration::from_secs(30),
         )
         .await?;
 
