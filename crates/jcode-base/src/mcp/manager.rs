@@ -436,7 +436,15 @@ impl McpManager {
             if let Some(handle) = handle {
                 if handle.is_dead() {
                     let reason = handle.death_reason();
-                    self.evict_dead_pool_handle(server).await;
+                    self.evict_dead_pool_handle(server, &handle).await;
+                    // A healthy replacement may already exist in the pool
+                    // (another session reconnected); use it (BLOCKING-1).
+                    if let Some(fresh) = self.refetch_pool_handle(server).await {
+                        let result = fresh.call_tool(tool, arguments).await;
+                        meter_provenance_call(server, &result);
+                        return result;
+                    }
+                    // Dead pre-send: never delivered, retry cannot double-execute.
                     let result = self
                         .reconnect_and_retry_once(server, tool, arguments, &reason)
                         .await;
@@ -447,16 +455,24 @@ impl McpManager {
                 if handle.is_dead() {
                     // The call detected death (EOF, write failure, or health
                     // deadline): drop the stale cache and pool entry now.
-                    self.evict_dead_pool_handle(server).await;
-                    if result.is_err() {
-                        // Retry only failed calls: one that succeeded before
-                        // the child died must never re-execute (side effects).
-                        let reason = handle.death_reason();
-                        let result = self
-                            .reconnect_and_retry_once(server, tool, arguments, &reason)
-                            .await;
-                        meter_provenance_call(server, &result);
-                        return result;
+                    self.evict_dead_pool_handle(server, &handle).await;
+                    match result {
+                        Err(err) if super::client::error_permits_auto_retry(&err) => {
+                            // Never delivered: safe to reconnect and retry.
+                            let reason = handle.death_reason();
+                            let result = self
+                                .reconnect_and_retry_once(server, tool, arguments, &reason)
+                                .await;
+                            meter_provenance_call(server, &result);
+                            return result;
+                        }
+                        other => {
+                            // Delivered-but-failed or succeeded-then-died:
+                            // never re-send (BLOCKING-2). Eviction already
+                            // cleared the caches; the next call reconnects.
+                            meter_provenance_call(server, &other);
+                            return other;
+                        }
                     }
                 }
                 meter_provenance_call(server, &result);
@@ -474,7 +490,7 @@ impl McpManager {
             if let Some(handle) = handle {
                 if handle.is_dead() {
                     let reason = handle.death_reason();
-                    self.evict_dead_owned_client(server).await;
+                    self.evict_dead_owned_client(server, &handle).await;
                     let result = self
                         .reconnect_and_retry_once(server, tool, arguments, &reason)
                         .await;
@@ -483,14 +499,20 @@ impl McpManager {
                 }
                 let result = handle.call_tool(tool, arguments.clone()).await;
                 if handle.is_dead() {
-                    self.evict_dead_owned_client(server).await;
-                    if result.is_err() {
-                        let reason = handle.death_reason();
-                        let result = self
-                            .reconnect_and_retry_once(server, tool, arguments, &reason)
-                            .await;
-                        meter_provenance_call(server, &result);
-                        return result;
+                    self.evict_dead_owned_client(server, &handle).await;
+                    match result {
+                        Err(err) if super::client::error_permits_auto_retry(&err) => {
+                            let reason = handle.death_reason();
+                            let result = self
+                                .reconnect_and_retry_once(server, tool, arguments, &reason)
+                                .await;
+                            meter_provenance_call(server, &result);
+                            return result;
+                        }
+                        other => {
+                            meter_provenance_call(server, &other);
+                            return other;
+                        }
                     }
                 }
                 meter_provenance_call(server, &result);
@@ -577,8 +599,8 @@ impl McpManager {
         if handle.is_dead() {
             let reason = handle.death_reason();
             match route {
-                Route::Pooled => self.evict_dead_pool_handle(server).await,
-                Route::Owned => self.evict_dead_owned_client(server).await,
+                Route::Pooled => self.evict_dead_pool_handle(server, &handle).await,
+                Route::Owned => self.evict_dead_owned_client(server, &handle).await,
             }
             self.record_died_cooldown(server, &reason).await;
         }
@@ -655,20 +677,55 @@ impl McpManager {
 
     /// Drop this session's stale pool-handle cache entry for a dead server and
     /// evict it from the shared pool (which reaps the child via the tracker).
-    async fn evict_dead_pool_handle(&self, server: &str) {
+    async fn evict_dead_pool_handle(&self, server: &str, observed_dead: &super::client::McpHandle) {
+        // Drop this session's stale cache unconditionally, but only evict the
+        // POOL entry if the pool's current handle is the same dead generation
+        // (F07 review BLOCKING-1: a stale clone must not kill the healthy
+        // replacement another session already reconnected).
         self.pool_handles.write().await.remove(server);
         if let Some(pool) = &self.pool {
-            pool.evict_dead_server(server).await;
-            pool.release_handles(&self.session_id, &[server.to_string()])
-                .await;
+            let evicted = pool.evict_dead_server(server, observed_dead).await;
+            if evicted {
+                pool.release_handles(&self.session_id, &[server.to_string()])
+                    .await;
+            }
         }
+    }
+
+    /// Re-fetch the pool's current handle for `server` (if any) and cache it
+    /// for this session. Used after an identity-mismatch eviction no-op: the
+    /// pool already holds a healthy replacement.
+    async fn refetch_pool_handle(&self, server: &str) -> Option<super::client::McpHandle> {
+        let pool = self.pool.as_ref()?;
+        let handle = pool.get_handle(server).await?;
+        if handle.is_dead() {
+            return None;
+        }
+        self.pool_handles
+            .write()
+            .await
+            .insert(server.to_string(), handle.clone());
+        Some(handle)
     }
 
     /// Remove a dead owned client and reap its child through the tracker
     /// (F06 invariant: no leaked tracked children). The lock is released
-    /// before the awaited reap.
-    async fn evict_dead_owned_client(&self, server: &str) {
-        let client = self.owned_clients.write().await.remove(server);
+    /// before the awaited reap. Identity-checked like the pool path: a stale
+    /// handle must not shut down a healthy replacement client.
+    async fn evict_dead_owned_client(
+        &self,
+        server: &str,
+        observed_dead: &super::client::McpHandle,
+    ) {
+        let client = {
+            let mut owned = self.owned_clients.write().await;
+            match owned.get(server) {
+                Some(current) if current.handle().same_generation(observed_dead) => {
+                    owned.remove(server)
+                }
+                _ => None,
+            }
+        };
         if let Some(mut client) = client {
             crate::logging::warn(&format!(
                 "MCP manager: evicting dead owned server '{server}'"
@@ -1057,6 +1114,12 @@ done
         unsafe {
             libc::kill(pid as libc::pid_t, libc::SIGKILL);
         }
+        // Wait for the reader task to observe EOF and mark the handle dead.
+        // This makes the next call take the pre-send dead-flag path, which is
+        // provably-undelivered and therefore eligible for the one bounded
+        // auto-retry (BLOCKING-2 retry gating: a kill RACING an in-flight
+        // call is ambiguous-delivery and would legitimately NOT be retried).
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         let started = std::time::Instant::now();
         let result = manager
@@ -1178,6 +1241,10 @@ done
             .await
             .expect("crash-loop fixture completes the handshake before dying");
         assert_eq!(spawn_count(&counter), 1, "one spawn from initial connect");
+        // Let the reader observe EOF so the first call takes the pre-send
+        // dead-flag path (provably undelivered => eligible for the one
+        // bounded reconnect under BLOCKING-2 retry gating).
+        tokio::time::sleep(Duration::from_millis(500)).await;
 
         // First call: the dead child is evicted, ONE reconnect happens (spawn
         // 2), the retried call fails because the fresh child dies too, and a
