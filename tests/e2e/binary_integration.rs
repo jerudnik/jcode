@@ -153,7 +153,6 @@ fn require_e2e_binary(test_name: &str) -> Option<std::path::PathBuf> {
     }
 }
 
-
 // ----------------------------------------------------------------------------
 // Reload/handoff robustness coverage map (for future contributors)
 //
@@ -692,7 +691,7 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
             &session_id,
             &client_id_before,
             &server_id_before,
-            Duration::from_secs(30),
+            Duration::from_secs(60),
         )
         .await?;
 

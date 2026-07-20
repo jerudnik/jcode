@@ -1429,7 +1429,13 @@ fn expansion_depth_cap_blocks_recursive_decomposition() {
     // F01-R incident guard (2 seeds -> 148 nodes at depth 4).
     let mut g = dag(Mode::Deep, vec![spec("root", NodeKind::Explore)]);
     dispatch(&mut g, "root", "w0");
-    expand_node(&mut g, "root", "w0", vec![spec("root.a", NodeKind::Explore)]).unwrap();
+    expand_node(
+        &mut g,
+        "root",
+        "w0",
+        vec![spec("root.a", NodeKind::Explore)],
+    )
+    .unwrap();
 
     dispatch(&mut g, "root.a", "w1");
     expand_node(
@@ -1465,7 +1471,10 @@ fn expansion_width_cap_blocks_shrapnel_fanout() {
     let err = expand_node(&mut g, "root", "w0", children)
         .expect_err("over-wide expansion must be rejected");
     let message = format!("{err:?}");
-    assert!(message.contains("children (cap"), "unexpected error: {message}");
+    assert!(
+        message.contains("children (cap"),
+        "unexpected error: {message}"
+    );
 
     // At the cap is fine.
     let children: Vec<NodeSpec> = (0..MAX_EXPANSION_CHILDREN)
