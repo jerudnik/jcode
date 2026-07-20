@@ -50,7 +50,7 @@ residue_check() {
         # Orphaned fixture children from MCP tests (fake/crash-loop/stale-gen
         # servers). pgrep by script name; empty is a pass.
         local orphans
-        orphans=$(pgrep -lf 'fake-mcp-server|crash-loop-mcp-server|stale-gen-mcp|slow-mcp\.sh|owner-aware-mcp' 2>/dev/null || true)
+        orphans=$(pgrep -lf 'fake-mcp-server|crash-loop-mcp-server|hung-mcp-server|stale-gen-mcp|slow-mcp\.sh|owner-aware-mcp' 2>/dev/null || true)
         if [[ -n "$orphans" ]]; then
             echo "FAIL orphaned MCP fixture children:"; echo "$orphans"
             FAIL=1
@@ -61,7 +61,8 @@ residue_check() {
         local socks
         socks=$(find "${TMPDIR:-/tmp}" -maxdepth 2 -name 'jcode-smoke*.sock' -mmin -30 2>/dev/null | head -5)
         if [[ -n "$socks" ]]; then
-            echo "WARN recent smoke sockets (may belong to a live run):"; echo "$socks"
+            echo "FAIL fresh smoke sockets left behind:"; echo "$socks"
+            FAIL=1
         else
             echo "PASS no fresh smoke-test sockets"
         fi
