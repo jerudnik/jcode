@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F07",
-    "state": "accepted",
-    "commit": "58a806401",
-    "updated_at": "2026-07-20T06:02:02Z",
-    "summary": "Accepted after FAIL->fix->PASS cycle: detection+eviction (5c9ac8b42), reconnect+cooldown (d3fcba412), blocker fixes (58a806401). Re-review PASS with 5 minor findings recorded."
+    "node": "F08",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T06:03:00Z",
+    "summary": "Delegated: integrated MCP+lifecycle adversarial gate (repeat matrices + residue report)."
   },
   "nodes": {
     "W0": {
@@ -153,11 +153,11 @@
       "updated_at": "2026-07-20T06:02:02Z"
     },
     "F08": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: integrated MCP+lifecycle adversarial gate (repeat matrices + residue report).",
+      "updated_at": "2026-07-20T06:03:00Z"
     },
     "F09": {
       "state": "pending",
