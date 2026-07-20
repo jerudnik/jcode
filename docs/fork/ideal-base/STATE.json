@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F07",
-    "state": "in_progress",
-    "commit": "d3fcba412",
-    "updated_at": "2026-07-20T05:05:28Z",
-    "summary": "Review FAIL (413c35d1b): BLOCKING-1 stale-generation eviction kills healthy children; BLOCKING-2 health-deadline retry double-executes slow tools. Fix round delegated."
+    "state": "accepted",
+    "commit": "58a806401",
+    "updated_at": "2026-07-20T06:02:02Z",
+    "summary": "Accepted after FAIL->fix->PASS cycle: detection+eviction (5c9ac8b42), reconnect+cooldown (d3fcba412), blocker fixes (58a806401). Re-review PASS with 5 minor findings recorded."
   },
   "nodes": {
     "W0": {
@@ -144,13 +144,13 @@
       "updated_at": "2026-07-18T21:50:00Z"
     },
     "F07": {
-      "state": "in_progress",
-      "commit": "d3fcba412",
+      "state": "accepted",
+      "commit": "58a806401",
       "evidence": [
         "docs/fork/ideal-base/evidence/F07"
       ],
-      "summary": "Review FAIL (413c35d1b): BLOCKING-1 stale-generation eviction kills healthy children; BLOCKING-2 health-deadline retry double-executes slow tools. Fix round delegated.",
-      "updated_at": "2026-07-20T05:05:28Z"
+      "summary": "Accepted after FAIL->fix->PASS cycle: detection+eviction (5c9ac8b42), reconnect+cooldown (d3fcba412), blocker fixes (58a806401). Re-review PASS with 5 minor findings recorded.",
+      "updated_at": "2026-07-20T06:02:02Z"
     },
     "F08": {
       "state": "pending",
