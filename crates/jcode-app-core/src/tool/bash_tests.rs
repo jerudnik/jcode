@@ -534,11 +534,20 @@ async fn test_background_command_progress_marker_updates_status_and_stays_out_of
         "expected progress to be recorded for {task_id}"
     );
 
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-    let output = crate::background::global()
-        .output(&task_id)
-        .await
-        .expect("output should exist");
+    // Poll for completion output instead of a fixed sleep: under load (e.g.
+    // the F08 integrated gate or a parallel build) 250ms is not enough for
+    // the task to flush and complete, and the assertion below saw "".
+    let mut output = String::new();
+    for _ in 0..100 {
+        output = crate::background::global()
+            .output(&task_id)
+            .await
+            .expect("output should exist");
+        if output.contains("done") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     assert!(output.contains("done"), "output was: {output}");
     assert!(
         !output.contains("JCODE_PROGRESS"),
