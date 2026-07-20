@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F13",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T11:59:28Z",
-    "summary": "Delegated: verify caps under concurrency, failures, cancellation, restart."
+    "state": "accepted",
+    "commit": "080bfc9d7",
+    "updated_at": "2026-07-20T12:47:47Z",
+    "summary": "Verify PASS: 16-way concurrent burst at cap admits exactly cap, zero leaked reservations across 50 cancelled setups, 10x looped probe identical; restart double-count impossible (in-memory-only counts + orphan sweep verified)."
   },
   "nodes": {
     "W0": {
@@ -200,11 +200,13 @@
       "updated_at": "2026-07-20T11:59:07Z"
     },
     "F13": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: verify caps under concurrency, failures, cancellation, restart.",
-      "updated_at": "2026-07-20T11:59:28Z"
+      "state": "accepted",
+      "commit": "080bfc9d7",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F13"
+      ],
+      "summary": "Verify PASS: 16-way concurrent burst at cap admits exactly cap, zero leaked reservations across 50 cancelled setups, 10x looped probe identical; restart double-count impossible (in-memory-only counts + orphan sweep verified).",
+      "updated_at": "2026-07-20T12:47:47Z"
     },
     "F14": {
       "state": "pending",
