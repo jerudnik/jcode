@@ -1,0 +1,18 @@
+== residue after round1-lease-matrix (2026-07-20T08:01:55Z)
+PASS no orphaned MCP fixture children
+PASS no fresh smoke-test sockets
+== residue after round1-mcp-suite (2026-07-20T08:02:32Z)
+PASS no orphaned MCP fixture children
+PASS no fresh smoke-test sockets
+== residue after round2-lease-matrix (2026-07-20T08:07:52Z)
+PASS no orphaned MCP fixture children
+PASS no fresh smoke-test sockets
+== residue after round2-mcp-suite (2026-07-20T08:08:30Z)
+PASS no orphaned MCP fixture children
+PASS no fresh smoke-test sockets
+== residue after round3-lease-matrix (2026-07-20T08:14:49Z)
+PASS no orphaned MCP fixture children
+PASS no fresh smoke-test sockets
+== residue after round3-mcp-suite (2026-07-20T08:15:27Z)
+PASS no orphaned MCP fixture children
+PASS no fresh smoke-test sockets
