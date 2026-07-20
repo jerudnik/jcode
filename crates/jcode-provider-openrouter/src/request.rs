@@ -124,8 +124,17 @@ pub fn flatten_schema_for_moonshot(schema: &Value) -> Value {
                         }
                     }
                 }
-                "items" | "additionalProperties" | "anyOf" | "oneOf" | "allOf" | "not"
-                | "if" | "then" | "else" | "prefixItems" | "contains" => walk(value),
+                "items"
+                | "additionalProperties"
+                | "anyOf"
+                | "oneOf"
+                | "allOf"
+                | "not"
+                | "if"
+                | "then"
+                | "else"
+                | "prefixItems"
+                | "contains" => walk(value),
                 _ => {}
             }
         }

@@ -971,10 +971,7 @@ fn repair_never_downgrades_when_stable_is_older() {
 
 // --- reconcile_stale_pending_activation (F09) ---
 
-fn install_pending_fixture(
-    current_version: &str,
-    shared_version: &str,
-) -> (String, String) {
+fn install_pending_fixture(current_version: &str, shared_version: &str) -> (String, String) {
     let exe = std::env::current_exe().expect("current exe");
     install_binary_at_version(&exe, current_version).expect("install current");
     install_binary_at_version(&exe, shared_version).expect("install shared");
@@ -999,7 +996,11 @@ fn write_candidate_with_sidecar(version: &str, fingerprint: &str) -> PathBuf {
     path
 }
 
-fn stale_pending(session_id: &str, new_version: &str, fingerprint: Option<&str>) -> PendingActivation {
+fn stale_pending(
+    session_id: &str,
+    new_version: &str,
+    fingerprint: Option<&str>,
+) -> PendingActivation {
     PendingActivation {
         session_id: session_id.to_string(),
         new_version: new_version.to_string(),
@@ -1013,10 +1014,9 @@ fn stale_pending(session_id: &str, new_version: &str, fingerprint: Option<&str>)
 const RECONCILE_MIN_AGE_MINUTES: i64 = 10;
 
 fn reconcile_none_alive() -> PendingReconcileOutcome {
-    reconcile_stale_pending_activation(
-        chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES),
-        |_| false,
-    )
+    reconcile_stale_pending_activation(chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES), |_| {
+        false
+    })
     .expect("reconcile")
 }
 
@@ -1048,10 +1048,7 @@ fn reconcile_dead_session_valid_candidate_completes() {
         assert_eq!(manifest.canary.as_deref(), Some("cand-1"));
         assert_eq!(manifest.canary_status, Some(CanaryStatus::Passed));
         // Symlinks untouched by completion.
-        assert_eq!(
-            read_current_version().unwrap().as_deref(),
-            Some("cand-1")
-        );
+        assert_eq!(read_current_version().unwrap().as_deref(), Some("cand-1"));
     });
 }
 
@@ -1137,7 +1134,9 @@ fn reconcile_fresh_record_is_untouched_even_with_dead_session() {
         let mut pending = stale_pending("dead-session", "cand-4", None);
         pending.requested_at = Utc::now();
         let mut manifest = BuildManifest::default();
-        manifest.set_pending_activation(pending).expect("set pending");
+        manifest
+            .set_pending_activation(pending)
+            .expect("set pending");
 
         assert_eq!(reconcile_none_alive(), PendingReconcileOutcome::StillFresh);
         assert!(BuildManifest::load().unwrap().pending_activation.is_some());
@@ -1163,7 +1162,10 @@ fn reconcile_preserves_live_canary_from_other_session() {
             |sid| sid == "live-other",
         )
         .expect("reconcile");
-        assert_eq!(outcome, PendingReconcileOutcome::Skipped("cand-5".to_string()));
+        assert_eq!(
+            outcome,
+            PendingReconcileOutcome::Skipped("cand-5".to_string())
+        );
 
         let manifest = BuildManifest::load().expect("load");
         assert!(manifest.pending_activation.is_none(), "record cleared");
