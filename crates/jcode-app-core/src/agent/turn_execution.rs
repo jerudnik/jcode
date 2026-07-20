@@ -559,13 +559,19 @@ impl Agent {
     }
 
     pub(super) fn validate_tool_allowed(&self, name: &str) -> Result<()> {
+        // Resolve aliases (e.g. `grep`/`Grep` -> `agentgrep`, `Task` ->
+        // `subagent`) before checking policy sets, which hold internal
+        // names. Registry::execute already resolves; without this, an
+        // allow-listed worker session would reject aliased calls that the
+        // registry itself would accept.
+        let resolved = crate::tool::Registry::resolve_tool_name(name);
         if let Some(allowed) = self.allowed_tools.as_ref()
-            && !allowed.contains(name)
+            && !allowed.contains(resolved)
         {
-            return Err(anyhow::anyhow!("Tool '{}' is not allowed", name));
+            return Err(anyhow::anyhow!("Tool '{}' is not allowed", resolved));
         }
-        if self.disabled_tools.contains(name) {
-            return Err(anyhow::anyhow!("Tool '{}' is disabled", name));
+        if self.disabled_tools.contains(resolved) {
+            return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved));
         }
         Ok(())
     }
