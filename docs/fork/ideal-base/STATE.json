@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F12",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T10:33:50Z",
-    "summary": "Delegated: global caps + observability for MCP children and background tasks."
+    "state": "accepted",
+    "commit": "a1c9075af",
+    "updated_at": "2026-07-20T11:59:07Z",
+    "summary": "Accepted after FAIL->FAIL->PASS cycle: slot-reserving race-safe caps for pooled MCP children and background tasks, env-configurable, explicit refusals at manager and tool layers, capacity release verified."
   },
   "nodes": {
     "W0": {
@@ -191,11 +191,13 @@
       "updated_at": "2026-07-20T10:33:37Z"
     },
     "F12": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: global caps + observability for MCP children and background tasks.",
-      "updated_at": "2026-07-20T10:33:50Z"
+      "state": "accepted",
+      "commit": "a1c9075af",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F12"
+      ],
+      "summary": "Accepted after FAIL->FAIL->PASS cycle: slot-reserving race-safe caps for pooled MCP children and background tasks, env-configurable, explicit refusals at manager and tool layers, capacity release verified.",
+      "updated_at": "2026-07-20T11:59:07Z"
     },
     "F13": {
       "state": "pending",
