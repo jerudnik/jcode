@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F15",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T13:08:39Z",
-    "summary": "Delegated: CI hermeticity audit + ignored-test classification."
+    "state": "accepted",
+    "commit": "bb53da147",
+    "updated_at": "2026-07-20T13:15:21Z",
+    "summary": "Accepted: 58 ignores classified (0 unclassified), CI rails mapped, flakiness root-cause table, promotion shortlist for F16. Review PASS with full recount reconciliation."
   },
   "nodes": {
     "W0": {
@@ -220,11 +220,13 @@
       "updated_at": "2026-07-20T13:07:37Z"
     },
     "F15": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Delegated: CI hermeticity audit + ignored-test classification.",
-      "updated_at": "2026-07-20T13:08:39Z"
+      "state": "accepted",
+      "commit": "bb53da147",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F15"
+      ],
+      "summary": "Accepted: 58 ignores classified (0 unclassified), CI rails mapped, flakiness root-cause table, promotion shortlist for F16. Review PASS with full recount reconciliation.",
+      "updated_at": "2026-07-20T13:15:21Z"
     },
     "F16": {
       "state": "pending",
