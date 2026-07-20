@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F11",
-    "state": "accepted",
-    "commit": "77582db05",
-    "updated_at": "2026-07-20T10:33:37Z",
-    "summary": "Verify PASS: 18-cell combined recovery matrix, 17 covered (12 tests + 4 independent probes), no false rollback, no fabricated terminal state. 1 uncovered cell code-inspected safe."
+    "node": "F12",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-20T10:33:50Z",
+    "summary": "Delegated: global caps + observability for MCP children and background tasks."
   },
   "nodes": {
     "W0": {
@@ -191,11 +191,11 @@
       "updated_at": "2026-07-20T10:33:37Z"
     },
     "F12": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Delegated: global caps + observability for MCP children and background tasks.",
+      "updated_at": "2026-07-20T10:33:50Z"
     },
     "F13": {
       "state": "pending",
