@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F14",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-20T12:48:05Z",
-    "summary": "Building the no-provider real-process lifecycle matrix harness (composes F03/F08 fixtures + crash/restart/recovery cases)."
+    "state": "accepted",
+    "commit": "e47efacdb",
+    "updated_at": "2026-07-20T13:07:37Z",
+    "summary": "Accepted: rerunnable no-provider lifecycle matrix, 2 clean rounds (18/18 steps), verified by independent review. Follow-ups: network-denied demonstration, live exec-handoff reload in matrix."
   },
   "nodes": {
     "W0": {
@@ -209,11 +209,13 @@
       "updated_at": "2026-07-20T12:47:47Z"
     },
     "F14": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Building the no-provider real-process lifecycle matrix harness (composes F03/F08 fixtures + crash/restart/recovery cases).",
-      "updated_at": "2026-07-20T12:48:05Z"
+      "state": "accepted",
+      "commit": "e47efacdb",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F14"
+      ],
+      "summary": "Accepted: rerunnable no-provider lifecycle matrix, 2 clean rounds (18/18 steps), verified by independent review. Follow-ups: network-denied demonstration, live exec-handoff reload in matrix.",
+      "updated_at": "2026-07-20T13:07:37Z"
     },
     "F15": {
       "state": "pending",
