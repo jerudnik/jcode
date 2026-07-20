@@ -51,3 +51,21 @@ functional/latency split already mitigate. Residue checks clean; one
 8-hour-old orphaned fixture daemon from a killed F08 gate run (predating
 F16) was found and reaped, recorded as a known hazard of killing gate
 scripts mid-run rather than an F16 fixture defect.
+
+## Review round (F16 review FAIL -> fixed)
+
+Review found BLOCKING-1: fork-ci builds with an explicit --target triple
+(target/<triple>/release), invisible to find_e2e_binary, so in CI the
+promoted tests would silently SKIP-and-pass. Fixed at 8971ed1db: the
+probe scans target/*/{release,debug} one level down. Exporting
+JCODE_E2E_REQUIRE_BINARY=1 in the workflow belongs to F17 (owns CI
+rails) and is recorded as its input.
+
+important-1 (teardown not panic-safe: assertions unwound past
+kill_child/kill_spawned_server, leaking PTY child + daemon) fixed in the
+same commit: assertions inside async test blocks converted to
+anyhow::ensure! so failures flow through the error path, which prints
+diagnostics and still reaps.
+
+Post-fix validation: 4 passed, 0 failed, 3 ignored against
+target/selfdev/jcode; zero fixture residue.
