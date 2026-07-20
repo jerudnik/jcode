@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="jcode-architecture">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ============ FRONT-ENDS (thin clients) ============ -->
+        <mxCell id="clients" value="Front-ends  (thin, stateless — just attach &amp; render)" style="swimlane;startSize=34;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="60" y="80" width="380" height="360" as="geometry" />
+        </mxCell>
+        <mxCell id="tui" value="TUI&#xa;(terminal UI)&#xa;jcode-tui" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="clients">
+          <mxGeometry x="30" y="55" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="cli" value="CLI&#xa;jcode run / debug&#xa;src/cli" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="clients">
+          <mxGeometry x="200" y="55" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="acp" value="ACP adapter&#xa;(editor / IDE bridge)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="clients">
+          <mxGeometry x="30" y="145" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="mcp" value="mcp-serve&#xa;(re-publishes tools&#xa;over MCP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="clients">
+          <mxGeometry x="200" y="145" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="clientnote" value="These processes hold NO agent state.&#xa;They render what the daemon streams." style="text;html=1;align=center;fillColor=none;strokeColor=none;fontSize=11;fontStyle=2;fontColor=#3b5a86;" vertex="1" parent="clients">
+          <mxGeometry x="30" y="240" width="320" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ============ DAEMON ============ -->
+        <mxCell id="daemon" value="jcode serve  —  the DAEMON  (owns all state; the agent harness + control plane)" style="swimlane;startSize=34;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="620" y="60" width="700" height="600" as="geometry" />
+        </mxCell>
+
+        <!-- Harness sub-box -->
+        <mxCell id="harness" value="Harness  (the agent loop)" style="swimlane;startSize=26;whiteSpace=wrap;html=1;fillColor=#e9f4e6;strokeColor=#82b366;fontStyle=1;fontSize=12;verticalAlign=top;" vertex="1" parent="daemon">
+          <mxGeometry x="30" y="55" width="310" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="loop" value="Agent loop&#xa;message → provider → tool calls&#xa;→ execute → feed back → repeat&#xa;jcode-app-core / jcode-agent-runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="harness">
+          <mxGeometry x="20" y="40" width="270" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sessions" value="Sessions + history&#xa;context / compaction / memory" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="harness">
+          <mxGeometry x="20" y="125" width="270" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="registry" value="Tool registry&#xa;bash · read · edit · glob · grep · …&#xa;+ MCP tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="harness">
+          <mxGeometry x="20" y="195" width="270" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Control plane sub-box -->
+        <mxCell id="control" value="Control plane  (server layer)" style="swimlane;startSize=26;whiteSpace=wrap;html=1;fillColor=#e9f4e6;strokeColor=#82b366;fontStyle=1;fontSize=12;verticalAlign=top;" vertex="1" parent="daemon">
+          <mxGeometry x="360" y="55" width="310" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="lifecycle" value="Session lifecycle&#xa;reload / exec-handoff&#xa;jcode-app-core/src/server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="control">
+          <mxGeometry x="20" y="40" width="270" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="swarm" value="Swarm coordinator&#xa;spawns forked worker agents&#xa;jcode-swarm-core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="control">
+          <mxGeometry x="20" y="120" width="270" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="mcpmgr" value="MCP child manager&#xa;owns / reaps external tool servers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="control">
+          <mxGeometry x="20" y="200" width="270" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Provider layer (spans daemon bottom) -->
+        <mxCell id="provider" value="Provider layer  —  one trait, ~20 hand-rolled adapters (NO vendor SDKs; just reqwest)" style="swimlane;startSize=26;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=12;verticalAlign=top;" vertex="1" parent="daemon">
+          <mxGeometry x="30" y="380" width="640" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="ptrait" value="trait Provider&#xa;(jcode-provider-core)&#xa;the one seam" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=11;fontStyle=1;" vertex="1" parent="provider">
+          <mxGeometry x="20" y="40" width="150" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="padapt" value="jcode-provider-anthropic / openai / gemini /&#xa;copilot / cursor / openrouter / antigravity / bedrock&#xa;&#xa;each: request shaping · SSE stream parsing ·&#xa;OAuth · tool-schema translation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f7f2fb;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="provider">
+          <mxGeometry x="195" y="40" width="420" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ============ EXTERNAL ============ -->
+        <mxCell id="llm" value="LLM APIs&#xa;Anthropic · OpenAI&#xa;Gemini · …" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="620" y="720" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="tools" value="External MCP tool servers&#xa;serena · graphiti · …" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="720" width="240" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- one binary note -->
+        <mxCell id="binnote" value="ONE Rust binary.&#xa;src/main.rs is a multiplexer:&#xa;the same executable becomes&#xa;the daemon, a TUI, the CLI,&#xa;the ACP adapter, or mcp-serve&#xa;depending on the subcommand." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;fontStyle=0;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="500" width="380" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- ============ EDGES ============ -->
+        <mxCell id="e1" value="Unix socket&#xa;JSON-RPC" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=11;fontStyle=1;strokeColor=#6c8ebf;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" edge="1" parent="1" source="clients" target="daemon">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="HTTPS (reqwest)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=11;strokeColor=#9673a6;strokeWidth=2;exitX=0.35;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="provider" target="llm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="stdio / spawn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=11;strokeColor=#666666;strokeWidth=2;exitX=1;exitY=0.9;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="daemon" target="tools">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
