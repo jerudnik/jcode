@@ -17,6 +17,7 @@ use super::protocol::{McpConfig, McpServerConfig, McpToolDef};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify, RwLock};
 
@@ -28,9 +29,41 @@ struct FailedConnectRecord {
     failed_at: Instant,
 }
 
+type ConnectingMap = Arc<StdMutex<HashMap<String, Arc<Notify>>>>;
+
+/// RAII ownership of one entry in the `connecting` map. The leader holds this
+/// for the duration of its connect attempt; dropping it (normal return OR
+/// future cancellation, e.g. an aborted tool call mid-reconnect) removes the
+/// entry and wakes waiters, so a cancelled leader can never wedge subsequent
+/// `ensure_connected` calls for the same server.
+struct ConnectingEntryGuard {
+    map: ConnectingMap,
+    name: String,
+    notify: Arc<Notify>,
+}
+
+impl Drop for ConnectingEntryGuard {
+    fn drop(&mut self) {
+        {
+            let mut map = self
+                .map
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if map
+                .get(&self.name)
+                .map(|current| Arc::ptr_eq(current, &self.notify))
+                .unwrap_or(false)
+            {
+                map.remove(&self.name);
+            }
+        }
+        self.notify.notify_waiters();
+    }
+}
+
 enum ConnectAttempt {
     Connected,
-    Leader(Arc<Notify>),
+    Leader(ConnectingEntryGuard),
     Wait(Arc<Notify>),
 }
 
@@ -45,7 +78,7 @@ pub struct SharedMcpPool {
     handles: RwLock<HashMap<String, McpHandle>>,
     config: RwLock<McpConfig>,
     ref_counts: Mutex<HashMap<String, usize>>,
-    connecting: Mutex<HashMap<String, Arc<Notify>>>,
+    connecting: ConnectingMap,
     last_errors: RwLock<HashMap<String, FailedConnectRecord>>,
     /// Activity-lease authority (F01 C7): in-flight pool calls hold a lease
     /// so the daemon cannot idle-exit mid-call. Defaults to no-op; the
@@ -70,7 +103,7 @@ impl SharedMcpPool {
             handles: RwLock::new(HashMap::new()),
             config: RwLock::new(config),
             ref_counts: Mutex::new(HashMap::new()),
-            connecting: Mutex::new(HashMap::new()),
+            connecting: Arc::new(StdMutex::new(HashMap::new())),
             last_errors: RwLock::new(HashMap::new()),
             activity,
         }
@@ -296,23 +329,101 @@ impl SharedMcpPool {
         .map_err(|refused| anyhow::anyhow!("MCP call refused: {refused}"))?;
         let handle = {
             let handles = self.handles.read().await;
-            handles
-                .get(server)
-                .cloned()
-                .with_context(|| format!("MCP server '{}' not connected", server))?
+            handles.get(server).cloned()
+        };
+        let Some(handle) = handle else {
+            // A recent death/connect failure fails fast here instead of
+            // burning a fresh connect attempt every call (died-cooldown).
+            if let Some(record) = self.recent_failure(server).await {
+                anyhow::bail!(
+                    "MCP server '{server}' unavailable: {} (reconnect suppressed briefly)",
+                    record.message
+                );
+            }
+            anyhow::bail!("MCP server '{server}' not connected");
         };
         if handle.is_dead() {
             let reason = handle.death_reason();
             self.evict_dead_server(server).await;
-            anyhow::bail!("MCP server '{server}' is dead: {reason}");
+            // Exactly one bounded reconnect, then one retry (no pool.reload()).
+            return self
+                .reconnect_and_retry_once(server, tool, arguments, &reason)
+                .await;
         }
-        let result = handle.call_tool(tool, arguments).await;
+        let result = handle.call_tool(tool, arguments.clone()).await;
         if handle.is_dead() {
             // The call itself detected death (EOF, write failure, or health
             // deadline). Evict now so the next call reconnects cleanly.
             self.evict_dead_server(server).await;
+            if result.is_err() {
+                // Retry only failed calls: a call that succeeded before the
+                // child died must never re-execute (side effects).
+                let reason = handle.death_reason();
+                return self
+                    .reconnect_and_retry_once(server, tool, arguments, &reason)
+                    .await;
+            }
         }
         result
+    }
+
+    /// One bounded reconnect after a dead-handle eviction, then one retry of
+    /// the failed call on the fresh handle. Recovery never goes through
+    /// `reload()`. Uses the pool's current config for the server (no stale
+    /// caching). If the reconnect fails, `ensure_connected` has already
+    /// recorded a failure so subsequent calls fail fast for the cooldown
+    /// window; if the retried call dies too (crash loop), a died-cooldown
+    /// record is written so the next call within the window fails fast
+    /// without spawning another child.
+    async fn reconnect_and_retry_once(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+        death_reason: &str,
+    ) -> Result<super::protocol::ToolCallResult> {
+        let config = self.config.read().await.servers.get(server).cloned();
+        let Some(config) = config else {
+            anyhow::bail!(
+                "MCP server '{server}' is dead ({death_reason}) and no longer configured; \
+                 cannot reconnect"
+            );
+        };
+        crate::logging::info(&format!(
+            "MCP pool: reconnecting to dead server '{server}' once ({death_reason})"
+        ));
+        if let Err(error_msg) = self.ensure_connected(server.to_string(), config).await {
+            anyhow::bail!(
+                "MCP server '{server}' died ({death_reason}) and reconnect failed: {error_msg}"
+            );
+        }
+        let handle = self
+            .get_handle(server)
+            .await
+            .with_context(|| format!("MCP server '{server}' reconnected but exposed no handle"))?;
+        let result = handle.call_tool(tool, arguments).await;
+        if handle.is_dead() {
+            // Died again right after a successful reconnect: crash loop.
+            // Evict and enter died-cooldown so calls inside the window fail
+            // fast without spawning more children.
+            let reason = handle.death_reason();
+            self.evict_dead_server(server).await;
+            self.record_died_cooldown(server, &reason).await;
+        }
+        result
+    }
+
+    /// Record a died-after-reconnect cooldown entry so `recent_failure` (and
+    /// therefore `ensure_connected` + the call_tool fast-fail) suppresses
+    /// reconnect attempts for `FAILED_CONNECT_RETRY_COOLDOWN`.
+    async fn record_died_cooldown(&self, server: &str, reason: &str) {
+        self.last_errors.write().await.insert(
+            server.to_string(),
+            FailedConnectRecord {
+                message: format!("died shortly after reconnect: {reason}"),
+                failed_at: Instant::now(),
+            },
+        );
     }
 
     /// Remove a dead server from the pool caches and reap its child through
@@ -381,21 +492,34 @@ impl SharedMcpPool {
     }
 
     async fn begin_connect(&self, name: &str) -> ConnectAttempt {
-        let mut connecting = self.connecting.lock().await;
-        if let Some(notify) = connecting.get(name) {
-            return ConnectAttempt::Wait(Arc::clone(notify));
-        }
-
+        // Handle check first: an existing handle means no connect is needed.
         if self.handles.read().await.contains_key(name) {
             return ConnectAttempt::Connected;
         }
 
+        let mut connecting = self
+            .connecting
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(notify) = connecting.get(name) {
+            return ConnectAttempt::Wait(Arc::clone(notify));
+        }
+
         let notify = Arc::new(Notify::new());
         connecting.insert(name.to_string(), Arc::clone(&notify));
-        ConnectAttempt::Leader(notify)
+        ConnectAttempt::Leader(ConnectingEntryGuard {
+            map: Arc::clone(&self.connecting),
+            name: name.to_string(),
+            notify,
+        })
     }
 
-    async fn finish_connect(&self, name: &str, notify: Arc<Notify>, result: Result<McpClient>) {
+    async fn finish_connect(
+        &self,
+        name: &str,
+        guard: ConnectingEntryGuard,
+        result: Result<McpClient>,
+    ) {
         match result {
             Ok(client) => {
                 let handle = client.handle();
@@ -424,18 +548,8 @@ impl SharedMcpPool {
             }
         }
 
-        {
-            let mut connecting = self.connecting.lock().await;
-            if connecting
-                .get(name)
-                .map(|current| Arc::ptr_eq(current, &notify))
-                .unwrap_or(false)
-            {
-                connecting.remove(name);
-            }
-        }
-
-        notify.notify_waiters();
+        // Removes the connecting entry and wakes waiters (RAII drop).
+        drop(guard);
     }
 
     async fn ensure_connected(
@@ -477,7 +591,17 @@ impl SharedMcpPool {
                     Err(error)
                 }
             }
-            ConnectAttempt::Leader(notify) => {
+            ConnectAttempt::Leader(guard) => {
+                // Re-check under leadership: another leader may have finished
+                // connecting between our handle check and map insertion.
+                if self.handles.read().await.contains_key(&name) {
+                    drop(guard);
+                    return Ok(false);
+                }
+                // `guard` is held across the connect await: if this future is
+                // cancelled mid-connect (e.g. an aborted tool call), its Drop
+                // removes the connecting entry and wakes waiters instead of
+                // leaving them blocked forever.
                 let result = McpClient::connect_with_tracker(
                     name.clone(),
                     &config,
@@ -488,7 +612,7 @@ impl SharedMcpPool {
                     Ok(_) => Ok(true),
                     Err(error) => Err(format!("{:#}", error)),
                 };
-                self.finish_connect(&name, notify, result).await;
+                self.finish_connect(&name, guard, result).await;
                 outcome
             }
         }
@@ -543,7 +667,7 @@ mod tests {
         let second = pool.begin_connect("demo").await;
 
         let first_notify = match first {
-            ConnectAttempt::Leader(notify) => notify,
+            ConnectAttempt::Leader(guard) => Arc::clone(&guard.notify),
             _ => panic!("first attempt should lead"),
         };
         let second_notify = match second {
@@ -630,6 +754,68 @@ done
             pool.tracked_children()
                 .into_iter()
                 .all(|child| child.pid != tracked.pid)
+        );
+    }
+
+    /// F07 phase 2 cancellation-leak guard: a leader connect future aborted
+    /// mid-connect must release the `connecting` entry (drop guard) so a
+    /// subsequent ensure_connected for the same server completes instead of
+    /// hanging forever behind a never-notified waiter.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelled_leader_connect_does_not_wedge_later_connects() {
+        use std::io::Write as _;
+        let temp = tempfile::tempdir().expect("tempdir");
+        // Slow fixture: never answers initialize, so the leader connect is
+        // guaranteed to be in-flight when we abort it.
+        let slow = temp.path().join("slow-mcp.sh");
+        std::fs::File::create(&slow)
+            .and_then(|mut f| f.write_all(b"#!/bin/sh\nsleep 30\n"))
+            .expect("write slow fixture");
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&slow).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&slow, perms).unwrap();
+
+        let base_config = McpServerConfig {
+            command: slow.to_string_lossy().into_owned(),
+            args: vec![],
+            env: HashMap::new(),
+            shared: true,
+            transport: None,
+            url: None,
+            enabled: None,
+            disabled: None,
+        };
+
+        let pool = Arc::new(SharedMcpPool::new(McpConfig::default()));
+        let leader_pool = Arc::clone(&pool);
+        let leader_config = base_config.clone();
+        let leader = tokio::spawn(async move {
+            let _ = leader_pool
+                .connect_server("cancel-victim", &leader_config)
+                .await;
+        });
+        // Let the leader claim the connecting entry and start its connect.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        leader.abort();
+        let _ = leader.await; // drop of the leader future has completed
+
+        // A follow-up connect must complete (here: fail fast on a dead
+        // command) rather than hang waiting on the aborted leader's Notify.
+        let fast_config = McpServerConfig {
+            command: "true".to_string(),
+            ..base_config
+        };
+        let followup = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            pool.connect_server("cancel-victim", &fast_config),
+        )
+        .await
+        .expect("ensure_connected after cancelled leader must not hang");
+        assert!(
+            followup.is_err(),
+            "'true' exits immediately, connect should fail cleanly"
         );
     }
 }

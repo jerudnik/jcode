@@ -661,8 +661,8 @@ impl McpClient {
         let writer_name = name.clone();
         tokio::spawn(async move {
             while let Some(msg) = writer_rx.recv().await {
-                let write_failed = stdin.write_all(msg.as_bytes()).await.is_err()
-                    || stdin.flush().await.is_err();
+                let write_failed =
+                    stdin.write_all(msg.as_bytes()).await.is_err() || stdin.flush().await.is_err();
                 if write_failed {
                     mark_dead_and_fail_pending(
                         &writer_death,
@@ -982,7 +982,10 @@ mod tests {
         while !ready.exists() && Instant::now() < ready_deadline {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        assert!(ready.exists(), "child must install its TERM trap before reap");
+        assert!(
+            ready.exists(),
+            "child must install its TERM trap before reap"
+        );
         let pid = child.id();
         tracker.register("term-resistant-test".to_string(), pid);
 
