@@ -265,8 +265,17 @@ async fn binary_integration_reload_handoff() -> Result<()> {
         .env("JCODE_RUNTIME_DIR", &runtime_dir)
         .env("JCODE_INSTALL_DIR", &install_dir)
         .env("JCODE_DEBUG_CONTROL", "1")
-        .env("JCODE_TEMP_SERVER", "1")
-        .env("JCODE_SERVER_OWNER_PID", std::process::id().to_string())
+        // The disposable home has no credentials; let the server boot a
+        // deferred-auth MultiProvider so this lifecycle test does not need
+        // any provider login.
+        .env("JCODE_DEFERRED_AUTH_BOOTSTRAP", "1")
+        // Do NOT mark this server temporary: the shutdown coordinator
+        // refuses reloads for temporary servers (ReloadRefused::TemporaryServer),
+        // which is exactly the flow under test. Cleanup still works because
+        // exec-based reload preserves the pid, so kill_child reaps the
+        // replacement server.
+        .env_remove("JCODE_TEMP_SERVER")
+        .env_remove("JCODE_SERVER_OWNER_PID")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr_file))
@@ -284,6 +293,11 @@ async fn binary_integration_reload_handoff() -> Result<()> {
             .to_string();
 
         let mut client = wait_for_server_client(&socket_path).await?;
+        // Handshake hardening: the server rejects stateful requests (like
+        // Reload) from clients that never subscribed, so establish a session
+        // first. Without this the reload request is refused with
+        // "Client must Subscribe..." and the server identity never changes.
+        client.subscribe().await?;
         client.reload().await?;
 
         let disconnect_deadline = Instant::now() + Duration::from_secs(10);
@@ -302,36 +316,60 @@ async fn binary_integration_reload_handoff() -> Result<()> {
             "old client connection never disconnected during reload"
         );
 
-        let marker_deadline = Instant::now() + Duration::from_secs(20);
-        while jcode::server::reload_marker_active(Duration::from_secs(30)) {
-            if Instant::now() >= marker_deadline {
-                anyhow::bail!("reload marker remained active too long after restart");
+        // NOTE: do not consult `jcode::server::reload_marker_active()` here.
+        // That helper reads the *test process*'s JCODE_RUNTIME_DIR (the
+        // TestEnvGuard home), not the spawned server's runtime dir, so it
+        // races the exec-based handoff. Instead poll the debug socket until
+        // the server identity changes: exec keeps the pid but every new
+        // server process generates a fresh id.
+        let handoff_deadline = Instant::now() + Duration::from_secs(30);
+        let mut server_id_after = server_id_before.clone();
+        let mut server_info_after_json = serde_json::Value::Null;
+        while Instant::now() < handoff_deadline {
+            let ready = wait_for_server_ready(&socket_path, &debug_socket_path).await;
+            if ready.is_err() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            let info = match tokio::time::timeout(
+                Duration::from_secs(2),
+                debug_run_command(debug_socket_path.clone(), "server:info", None),
+            )
+            .await
+            {
+                Ok(Ok(info)) => info,
+                _ => {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
+            let json: serde_json::Value = match serde_json::from_str(&info) {
+                Ok(json) => json,
+                Err(_) => continue,
+            };
+            if let Some(id) = json.get("id").and_then(|v| v.as_str())
+                && id != server_id_before
+            {
+                server_id_after = id.to_string();
+                server_info_after_json = json;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        wait_for_server_ready(&socket_path, &debug_socket_path).await?;
+        if server_id_after == server_id_before {
+            anyhow::bail!(
+                "server identity did not change after exec-based reload (still {server_id_before})"
+            );
+        }
         let _client = wait_for_server_client(&socket_path).await?;
-
-        let server_info_after =
-            debug_run_command(debug_socket_path.clone(), "server:info", None).await?;
-        let server_info_after_json: serde_json::Value = serde_json::from_str(&server_info_after)?;
-        let server_id_after = server_info_after_json
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow::anyhow!("missing server id after reload"))?;
-
-        assert_ne!(
-            server_id_after, server_id_before,
-            "server identity should change after exec-based reload"
-        );
-        assert!(
-            server_info_after_json
-                .get("uptime_secs")
-                .and_then(|v| v.as_u64())
-                .is_some(),
-            "replacement server should answer debug state queries after reload"
-        );
+        if server_info_after_json
+            .get("uptime_secs")
+            .and_then(|v| v.as_u64())
+            .is_none()
+        {
+            anyhow::bail!("replacement server should answer debug state queries after reload");
+        }
 
         Ok::<_, anyhow::Error>(())
     }
@@ -341,6 +379,9 @@ async fn binary_integration_reload_handoff() -> Result<()> {
     if let Err(ref error) = test_result {
         if let Ok(stderr) = std::fs::read_to_string(&stderr_path) {
             eprintln!("spawned server stderr:\n{}", stderr);
+        }
+        if let Some(log_excerpt) = latest_log_excerpt(&home_dir) {
+            eprintln!("spawned server logs (tail):\n{}", log_excerpt);
         }
         eprintln!("reload e2e test error: {error:#}");
     }
@@ -386,6 +427,9 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
         .arg("--provider")
         .arg("antigravity")
         .arg("self-dev")
+        // Never rebuild inside the test: launch the binary that exists. The
+        // repo may be dirty and the test env has no toolchain guarantees.
+        .arg("--no-build")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env_remove("JCODE_TEST_SESSION")
         .env("JCODE_HOME", &home_dir)
@@ -513,6 +557,9 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
         .arg("--provider")
         .arg("antigravity")
         .arg("self-dev")
+        // Never rebuild inside the test: launch the binary that exists. The
+        // repo may be dirty and the test env has no toolchain guarantees.
+        .arg("--no-build")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env_remove("JCODE_TEST_SESSION")
         .env("JCODE_HOME", &home_dir)
@@ -694,6 +741,9 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
         .arg("--provider")
         .arg("antigravity")
         .arg("self-dev")
+        // Never rebuild inside the test: launch the binary that exists. The
+        // repo may be dirty and the test env has no toolchain guarantees.
+        .arg("--no-build")
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env_remove("JCODE_TEST_SESSION")
         .env("JCODE_HOME", &home_dir)
