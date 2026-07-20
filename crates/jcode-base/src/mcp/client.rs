@@ -35,6 +35,34 @@ pub const MCP_HEALTH_DEADLINE_ENV: &str = "JCODE_MCP_HEALTH_DEADLINE_MS";
 /// Hard cap on any single request, regardless of health-deadline override.
 const MCP_REQUEST_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Bound for the liveness ping probe sent when a request exceeds the health
+/// deadline. A server that answers the ping is alive-but-slow: the original
+/// request keeps waiting until the total timeout instead of being declared
+/// hung (F07 review BLOCKING-2: slow tools must not be killed mid-execution).
+const MCP_PING_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Marker attached to failures where the request provably never reached the
+/// server (dead-flag pre-send, writer channel closed before send). Only these
+/// failures are safe to auto-retry after a reconnect; anything that failed
+/// after the request was written may have executed server-side, and re-sending
+/// would double side effects (F07 review BLOCKING-2).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RequestNotDelivered;
+
+impl std::fmt::Display for RequestNotDelivered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("request was never delivered to the MCP server")
+    }
+}
+
+impl std::error::Error for RequestNotDelivered {}
+
+/// True iff `err` carries the [`RequestNotDelivered`] marker, i.e. an
+/// automatic retry cannot double-execute the call.
+pub(crate) fn error_permits_auto_retry(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<RequestNotDelivered>().is_some()
+}
+
 fn health_deadline() -> Duration {
     std::env::var(MCP_HEALTH_DEADLINE_ENV)
         .ok()
@@ -441,6 +469,14 @@ impl McpHandle {
         self.death.reason()
     }
 
+    /// Identity check: two handles are the same generation iff they share
+    /// one `DeathState`. Eviction must verify this so a session holding a
+    /// stale dead clone cannot evict (and kill) a healthy replacement child
+    /// that another session already reconnected (F07 review BLOCKING-1).
+    pub(crate) fn same_generation(&self, other: &McpHandle) -> bool {
+        Arc::ptr_eq(&self.death, &other.death)
+    }
+
     fn death_error(&self) -> anyhow::Error {
         anyhow::anyhow!(
             "MCP server '{}' is dead: {}",
@@ -452,7 +488,9 @@ impl McpHandle {
     /// Send a request and wait for response
     pub async fn request(&self, method: &str, params: Option<Value>) -> Result<JsonRpcResponse> {
         if self.death.is_dead() {
-            return Err(self.death_error());
+            // Never delivered: safe for callers to auto-retry on a fresh
+            // handle without risking double execution.
+            return Err(anyhow::Error::new(RequestNotDelivered).context(self.death_error()));
         }
 
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
@@ -474,33 +512,59 @@ impl McpHandle {
                 format!("MCP server '{}' writer channel closed", self.name),
             )
             .await;
-            return Err(self.death_error());
+            // The write never happened: still safe to auto-retry.
+            return Err(anyhow::Error::new(RequestNotDelivered).context(self.death_error()));
         }
 
-        // Health deadline: a live child that never replies to this request is
-        // declared dead (hung-child detection). Bounded below the total 30s
-        // request timeout; see MCP_HEALTH_DEADLINE_ENV.
+        // From here on the request may have reached the server; failures must
+        // NOT carry the retry marker (re-sending could double side effects).
+        //
+        // Health deadline: if no response arrives in time, probe liveness
+        // with a protocol ping before declaring the child hung. An
+        // alive-and-responsive server merely running a slow tool keeps its
+        // request waiting until the total timeout (F07 review BLOCKING-2).
         let deadline = health_deadline();
-        let response = match tokio::time::timeout(deadline, rx).await {
+        let mut rx = rx;
+        let response = match tokio::time::timeout(deadline, &mut rx).await {
             Ok(Ok(response)) => response,
             Ok(Err(_recv_closed)) => {
                 // Sender dropped: the reader/writer task failed all pending.
                 return Err(self.death_error());
             }
             Err(_elapsed) => {
-                self.pending.lock().await.remove(&id);
-                mark_dead_and_fail_pending(
-                    &self.death,
-                    &self.pending,
-                    &self.name,
-                    format!(
-                        "health deadline exceeded ({}ms waiting for '{}' response)",
-                        deadline.as_millis(),
-                        method
-                    ),
-                )
-                .await;
-                return Err(self.death_error());
+                if self.probe_liveness().await {
+                    // Alive but slow: wait out the remaining total budget.
+                    let remaining = MCP_REQUEST_TOTAL_TIMEOUT.saturating_sub(deadline);
+                    match tokio::time::timeout(remaining, &mut rx).await {
+                        Ok(Ok(response)) => response,
+                        Ok(Err(_recv_closed)) => return Err(self.death_error()),
+                        Err(_elapsed) => {
+                            self.pending.lock().await.remove(&id);
+                            anyhow::bail!(
+                                "MCP request '{}' to '{}' timed out after {}s (server alive; \
+                                 not retried to avoid double execution)",
+                                method,
+                                self.name,
+                                MCP_REQUEST_TOTAL_TIMEOUT.as_secs()
+                            );
+                        }
+                    }
+                } else {
+                    self.pending.lock().await.remove(&id);
+                    mark_dead_and_fail_pending(
+                        &self.death,
+                        &self.pending,
+                        &self.name,
+                        format!(
+                            "health deadline exceeded ({}ms waiting for '{}' response; \
+                             liveness probe failed)",
+                            deadline.as_millis(),
+                            method
+                        ),
+                    )
+                    .await;
+                    return Err(self.death_error());
+                }
             }
         };
 
@@ -509,6 +573,38 @@ impl McpHandle {
         }
 
         Ok(response)
+    }
+
+    /// Protocol-level liveness probe: send a `ping` request and wait briefly
+    /// for ANY response (a JSON-RPC "method not found" error still proves the
+    /// event loop is alive). Only silence or transport failure counts as
+    /// hung. Single-threaded servers blocked inside a long tool call will
+    /// fail the probe; that is the accepted limit of hung-detection, and the
+    /// retry gate still prevents double execution for them.
+    async fn probe_liveness(&self) -> bool {
+        if self.death.is_dead() {
+            return false;
+        }
+        let id = self.request_id.fetch_add(1, Ordering::SeqCst);
+        let request = JsonRpcRequest::new(id, "ping", None);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(id, tx);
+        let Ok(msg) = serde_json::to_string(&request) else {
+            self.pending.lock().await.remove(&id);
+            return false;
+        };
+        if self.writer_tx.send(msg + "\n").await.is_err() {
+            self.pending.lock().await.remove(&id);
+            return false;
+        }
+        match tokio::time::timeout(MCP_PING_PROBE_TIMEOUT, rx).await {
+            Ok(Ok(_response)) => true,
+            Ok(Err(_recv_closed)) => false,
+            Err(_elapsed) => {
+                self.pending.lock().await.remove(&id);
+                false
+            }
+        }
     }
 
     /// Call a tool
