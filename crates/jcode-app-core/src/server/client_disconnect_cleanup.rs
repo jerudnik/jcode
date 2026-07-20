@@ -266,8 +266,7 @@ pub(super) fn reconcile_disconnect_cleanup_records(
                     } else {
                         session
                             .mark_crashed_and_persist(Some(
-                                "Disconnect cleanup interrupted; reconciled at startup"
-                                    .to_string(),
+                                "Disconnect cleanup interrupted; reconciled at startup".to_string(),
                             ))
                             .map(|_| ())
                     };

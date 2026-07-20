@@ -747,7 +747,10 @@ async fn test_background_command_without_timeout_keeps_running_past_default_fore
     );
 
     let mut final_status = None;
-    for _ in 0..30 {
+    // Generous poll budget: the command sleeps 250ms, but under parallel
+    // module load completion can take considerably longer (pre-existing
+    // flake at 30x25ms).
+    for _ in 0..200 {
         let status = crate::background::global()
             .status(&task_id)
             .await

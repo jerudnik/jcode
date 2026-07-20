@@ -715,14 +715,47 @@ impl SharedMcpPool {
                 // (reuse of an existing handle returned above). Refusal is
                 // NOT recorded in `last_errors`, so freed capacity allows an
                 // immediate retry without the failure cooldown.
-                let current = self.clients.lock().await.len();
+                //
+                // TOCTOU fix (F12 review BLOCKING-1): concurrent leaders for
+                // DIFFERENT servers each hold their own per-name guard, so a
+                // bare clients.len() read lets N leaders all pass one free
+                // slot. Count connected clients PLUS in-flight connect
+                // leaders (the `connecting` map, which this leader already
+                // occupies) so each in-flight connect reserves its slot.
+                let current = {
+                    let connected = self.clients.lock().await.len();
+                    let in_flight = self
+                        .connecting
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .len();
+                    // This leader's own entry is in `connecting`; exclude it
+                    // so the check compares pre-existing usage to the cap.
+                    connected + in_flight.saturating_sub(1)
+                };
                 let cap = self.pooled_cap();
                 if current >= cap {
-                    drop(guard);
-                    return Err(format!(
+                    let message = format!(
                         "pooled MCP child cap reached ({current}/{cap}); refusing to spawn \
                          '{name}'. Raise via {MCP_MAX_CHILDREN_ENV}."
-                    ));
+                    );
+                    // Give concurrent Wait-path callers the real reason
+                    // instead of the vague no-handle fallback (F12 review
+                    // important-3), without triggering the 30s failure
+                    // cooldown: cap refusals are erased on the next
+                    // successful connect and recent_failure only suppresses
+                    // when no handle exists.
+                    self.last_errors.write().await.insert(
+                        name.clone(),
+                        FailedConnectRecord {
+                            message: message.clone(),
+                            failed_at: Instant::now()
+                                .checked_sub(FAILED_CONNECT_RETRY_COOLDOWN)
+                                .unwrap_or_else(Instant::now),
+                        },
+                    );
+                    drop(guard);
+                    return Err(message);
                 }
                 // `guard` is held across the connect await: if this future is
                 // cancelled mid-connect (e.g. an aborted tool call), its Drop

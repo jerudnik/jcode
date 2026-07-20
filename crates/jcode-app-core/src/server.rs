@@ -1182,12 +1182,10 @@ impl Server {
 
         // F09: reconcile a pending selfdev activation whose initiating session
         // died mid-cycle. Best-effort; never fails startup.
-        tokio::task::spawn_blocking(|| {
-            match jcode_build_support::reconcile_stale_pending_activation(
+        tokio::task::spawn_blocking(
+            || match jcode_build_support::reconcile_stale_pending_activation(
                 chrono::Duration::minutes(10),
-                |sid| {
-                    crate::storage::observe_session_pid_markers(sid).active_marker_is_live()
-                },
+                |sid| crate::storage::observe_session_pid_markers(sid).active_marker_is_live(),
             ) {
                 Ok(outcome) => crate::logging::info(&format!(
                     "Selfdev pending-activation reconcile: {outcome:?}"
@@ -1195,8 +1193,8 @@ impl Server {
                 Err(err) => crate::logging::warn(&format!(
                     "Selfdev pending-activation reconcile failed: {err:#}"
                 )),
-            }
-        });
+            },
+        );
 
         // F10: sweep durable disconnect-cleanup intent records left behind by
         // aborted cleanups (e.g. agent-lock timeout) and mark those sessions
