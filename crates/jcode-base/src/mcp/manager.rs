@@ -1330,7 +1330,6 @@ done
     #[tokio::test]
     async fn hung_child_fails_at_health_deadline_and_is_evicted() {
         let env_guard = crate::storage::lock_test_env();
-        crate::env::set_var(crate::mcp::client::MCP_HEALTH_DEADLINE_ENV, "500");
 
         let temp = tempfile::tempdir().unwrap();
         let server_path = write_hung_mcp_server(temp.path());
@@ -1356,6 +1355,12 @@ done
             .connect(server_name, &server_config)
             .await
             .expect("hung fixture must complete the handshake");
+
+        // Shorten the deadline only AFTER the handshake: under load (e.g.
+        // the F08 integrated gate running builds in parallel) a 500ms
+        // deadline can starve the initialize itself, failing connect
+        // instead of exercising the hung-call path.
+        crate::env::set_var(crate::mcp::client::MCP_HEALTH_DEADLINE_ENV, "500");
 
         let started = std::time::Instant::now();
         let result = manager
