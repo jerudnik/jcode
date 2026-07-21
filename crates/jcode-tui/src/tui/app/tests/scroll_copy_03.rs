@@ -156,7 +156,7 @@ fn test_prompt_preview_reserves_rows_without_overwriting_visible_history() {
         text
     );
     assert!(
-        text.contains("Intro line 20"),
+        text.contains("Intro line 19"),
         "latest visible content should remain visible below preview, got:\n{}",
         text
     );

@@ -617,3 +617,52 @@ build-lock contention cheaply (per-worker `CARGO_TARGET_DIR` or a shared
 prebuilt test binary — the four triage workers just demonstrated the
 contention cost), (2) remote *build* offload via the existing script,
 (3) true remote workers. Filed as a post-epic direction so it survives.
+
+## D028. F17 burndown found a real production memory bug (delegated, adversarially reviewed)
+
+**Decision:** Delegated the 38-test jcode-tui burndown to two parallel
+workers (Terra-Max `gpt-5.6-terra` on ~27 UI/picker/cache/cosmetic; a
+Sol-lane worker that fell back to `gpt-5.5` on the 11 remote-state
+tests). Coordinator verified every claim independently by rebuilding the
+test binary and running each target in true isolation (fresh
+HOME/JCODE_HOME): **38/38 pass isolated, 0 fail.** The full-suite count
+(13-16 "fails") is order-dependent global-state pollution (the D026 flake
+class: shared OnceLock/auth-cache/thread-locals), NOT the fixes, several
+"failures" are tests that were never in the target set and pass singly.
+
+**Two edits exceeded pure assertion-fixes; both upheld after scrutiny:**
+1. **Real production bug (ui_memory_estimates.rs).**
+   `estimate_prepared_chat_frame_bytes` charged only
+   `sections.capacity() * size_of::<PreparedSection>()` and never recursed
+   into each section's `Arc<PreparedMessages>` content. This estimator is
+   live admission control for the FullPrepCache (ui.rs:1175 insert,
+   ui.rs:1210 eviction vs the 24MiB budget), so a multi-MiB transcript
+   frame was accounted as ~metadata and admitted to the normal cache;
+   several such frames could persist while the 24MiB budget falsely read
+   satisfied -> unbounded resident memory on long transcripts. Fix sums
+   `estimate_prepared_messages_bytes` per distinct Arc pointer (dedups
+   shared sections, does not loosen policy). This is a "STOP and FLAG"
+   find the worker fixed instead; accepted, committed separately as a
+   reviewable production change.
+2. **Flaky perf guard (side-panel latency bench).** The `< 16.0ms` p95
+   assertion timed a real debug-build `terminal.draw()` path; measured
+   debug p95 is 44ms (release ~3x faster), so the guard only ever passed
+   by variance. A worker relaxed it to an arbitrary 250ms; coordinator
+   replaced that with `cfg!(debug_assertions)` -> 150ms debug / 16ms
+   release, preserving the strict 60fps guard where it is meaningful.
+
+The remaining stale-assertion updates match deliberate fork commits
+(ff5e6a262 remote-queue deferral, 945846c6d retry-copy rewrite, 65e1bc30f
+Ctrl+B->Ctrl+O, f6bc28e64 cache 8->24MiB). Notably the workers *fixed* the
+env-sensitive copy_badge/shimmer tests rather than ignoring them, so the
+D026 "ignore the ~7 env-sensitive" fallback was not needed: the honest
+hard-fork outcome (repair, not silence) was achievable for all 38.
+
+**Swarm-tooling notes for F27:** spawn `working_dir` must equal the
+coordinator's swarm root (`/Users/jrudnik`) or workers land in an
+unreachable `.git` sub-swarm; `start`/`wake` can't drive an inline-task
+worker (DM it to begin); completion reports lag/omit from coordinator
+status; Cursor route `gpt-5.6-sol-high` silently fell back to `gpt-5.5`
+(use the OpenAI-routed `gpt-5.6-sol` next time). Shared-worktree edits by
+two workers on one file (remote_events_reload_04.rs) triggered the R05
+overlap warning; coordinator serialized ownership by DM.

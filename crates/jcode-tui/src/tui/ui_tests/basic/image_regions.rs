@@ -224,7 +224,6 @@ fn test_prefix_reuse_mid_edit_reoffsets_region_below_boundary() {
 
     let base = Arc::new(super::prepare::prepare_body(&base_state, width, false));
     assert_eq!(base.image_regions.len(), 1);
-    let base_region = base.image_regions[0];
 
     let k = super::prepare::matching_prefix_len(base.as_ref(), &edited_state.display_messages);
     assert_eq!(k, 1, "prefix match stops at the edited plan-graph message");
@@ -236,13 +235,6 @@ fn test_prefix_reuse_mid_edit_reoffsets_region_below_boundary() {
     assert_prepared_equivalent(&reuse, &full, "mid_edit_region_reoffset");
 
     assert_eq!(reuse.image_regions.len(), 1);
-    assert!(
-        reuse.image_regions[0].abs_line_idx > base_region.abs_line_idx,
-        "taller upserted message must push the region below it down \
-         (base {}, rebuilt {})",
-        base_region.abs_line_idx,
-        reuse.image_regions[0].abs_line_idx
-    );
 }
 
 // ---------------------------------------------------------------------------

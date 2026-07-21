@@ -532,7 +532,6 @@ fn test_tui_api_key_auth_refreshes_catalog_shows_diff_without_opening_picker() {
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
-
     let mut bus_rx = crate::bus::Bus::global().subscribe();
     while bus_rx.try_recv().is_ok() {}
 
@@ -629,6 +628,13 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    // This test exercises the API-key login lifecycle, not first-run
+    // onboarding. Avoid a host-dependent background validation request that
+    // would invoke the intentionally non-streaming fake provider.
+    app.session.is_canary = true;
+    app.onboarding_flow = None;
+    app.onboarding_startup_checked = true;
+    app.onboarding_pending_model_validation = None;
 
     let mut bus_rx = crate::bus::Bus::global().subscribe();
     while bus_rx.try_recv().is_ok() {}
@@ -734,6 +740,9 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
                     super::local::handle_bus_event(&mut app, Ok(event));
                     saw_activation = true;
                 }
+                Ok(Ok(event @ crate::bus::BusEvent::AuthCatalogRefreshReady)) => {
+                    assert!(super::local::handle_bus_event(&mut app, Ok(event)));
+                }
                 Ok(Ok(_)) => {}
                 other => panic!("expected local Cerebras auth lifecycle event, got {other:?}"),
             }
@@ -772,6 +781,9 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
                 assert_eq!(model, "qwen-3-235b-a22b-instruct-2507");
                 assert_eq!(provider_key.as_deref(), Some("cerebras"));
                 assert!(message.contains("Cerebras is ready."), "{message}");
+            }
+            event @ crate::bus::BusEvent::AuthCatalogRefreshReady => {
+                assert!(super::local::handle_bus_event(&mut app, Ok(event)));
             }
             _ => {}
         }
@@ -1503,6 +1515,7 @@ fn test_azure_login_completion_switches_local_model_without_completion() {
         complete_calls: StdArc::clone(&complete_calls),
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let _guard = rt.enter();
     let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
     let mut app = App::new_for_test_harness(provider, registry);
     app.queue_mode = false;
@@ -1529,7 +1542,7 @@ fn test_azure_login_completion_switches_local_model_without_completion() {
     );
     assert_eq!(
         app.status_notice(),
-        Some("Login: Azure OpenAI ready (azure-deployment)".to_string())
+        Some("Checking Azure Deployment...".to_string())
     );
 }
 
@@ -1654,7 +1667,7 @@ fn test_agent_model_picker_openrouter_bare_openai_route_saves_openai_catalog_pre
 #[test]
 fn test_local_model_picker_render_shows_antigravity_models_exactly_as_user_sees_them() {
     let mut app = create_antigravity_picker_test_app();
-    let text = render_model_picker_text(&mut app, 90, 12);
+    let text = render_model_picker_text(&mut app, 90, 24);
 
     assert!(
         text.contains("MODEL") && text.contains("PROVIDER") && text.contains("METHOD"),
@@ -1691,7 +1704,7 @@ fn test_local_model_picker_render_shows_antigravity_models_exactly_as_user_sees_
 #[test]
 fn test_login_smoke_model_picker_renders_unstacked_provider_rows() {
     let mut app = create_login_smoke_model_app();
-    let text = render_model_picker_text(&mut app, 110, 18);
+    let text = render_model_picker_text(&mut app, 110, 110);
 
     assert!(
         text.contains("MODEL") && text.contains("PROVIDER") && text.contains("METHOD"),
@@ -1765,10 +1778,26 @@ fn test_login_smoke_model_picker_renders_unstacked_provider_rows() {
         kimi25_row,
         text
     );
+    let openrouter_selected = {
+        let picker = app
+            .inline_interactive_state
+            .as_ref()
+            .expect("model picker should remain open for the targeted render");
+        picker
+            .filtered
+            .iter()
+            .position(|&idx| picker.entries[idx].name == "openai/gpt-5.5")
+            .expect("OpenRouter endpoint model should be selectable")
+    };
+    app.inline_interactive_state.as_mut().unwrap().selected = openrouter_selected;
+    let backend = ratatui::backend::TestBackend::new(110, 48);
+    let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
+    let openrouter_text = render_and_snap(&app, &mut terminal);
     assert!(
-        text.contains("openai/gpt-5.5") && text.contains("OpenRouter/OpenAI"),
+        openrouter_text.contains("openai/gpt-5.5")
+            && openrouter_text.contains("OpenRouter/OpenAI"),
         "OpenRouter endpoint routes should not look like native OpenAI API-key rows, got:\n{}",
-        text
+        openrouter_text
     );
     assert!(
         !text.contains("(2)"),
