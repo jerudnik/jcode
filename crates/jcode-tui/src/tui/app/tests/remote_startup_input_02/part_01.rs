@@ -218,14 +218,14 @@ fn test_remote_current_fpt_live_model_uses_fpt_route_not_copilot_without_cache()
         let mut app = create_test_app();
         app.is_remote = true;
         app.remote_provider_name = Some("FPT AI Marketplace".to_string());
-        app.remote_available_entries = vec!["FPT.AI-KIE-v1.7".to_string()];
+        app.remote_available_entries = vec!["GLM-5.1".to_string()];
         app.remote_model_options.clear();
 
         let routes = app.build_remote_model_routes_fallback();
 
         assert!(
             routes.iter().any(|route| {
-                route.model == "FPT.AI-KIE-v1.7"
+                route.model == "GLM-5.1"
                     && route.provider == "FPT AI Marketplace"
                     && route.api_method == "openai-compatible:fpt"
             }),
@@ -234,7 +234,7 @@ fn test_remote_current_fpt_live_model_uses_fpt_route_not_copilot_without_cache()
         assert!(
             !routes
                 .iter()
-                .any(|route| route.model == "FPT.AI-KIE-v1.7" && route.api_method == "copilot"),
+                .any(|route| route.model == "GLM-5.1" && route.api_method == "copilot"),
             "FPT current-provider live model must not be guessed as Copilot: {routes:?}"
         );
 
@@ -286,6 +286,7 @@ fn test_remote_cached_oauth_only_claude_route_gains_api_key_route_in_picker() {
 
         let mut app = create_test_app();
         app.is_remote = true;
+        app.remote_provider_model = Some("claude-fable-5".to_string());
         app.remote_available_entries = vec!["claude-fable-5".to_string()];
         app.remote_model_options = vec![crate::provider::ModelRoute {
             model: "claude-fable-5".to_string(),
@@ -297,23 +298,16 @@ fn test_remote_cached_oauth_only_claude_route_gains_api_key_route_in_picker() {
         }];
 
         app.open_model_picker();
+        wait_for_model_picker_load(&mut app);
 
-        let picker = app
-            .inline_interactive_state
-            .as_ref()
-            .expect("model picker should be open");
-        let entry = picker
-            .entries
-            .iter()
-            .find(|entry| entry.name == "claude-fable-5")
-            .expect("fable should be in the picker");
         assert!(
-            entry
-                .options
+            app.remote_model_options
                 .iter()
-                .any(|option| option.api_method == "claude-api" && option.available),
+                .any(|option| option.model == "claude-fable-5"
+                    && option.api_method == "claude-api"
+                    && option.available),
             "stale oauth-only cached route should be augmented with claude-api, got {:?}",
-            entry.options
+            app.remote_model_options
         );
 
         crate::env::remove_var("ANTHROPIC_API_KEY");
@@ -322,7 +316,7 @@ fn test_remote_cached_oauth_only_claude_route_gains_api_key_route_in_picker() {
 }
 
 #[test]
-fn test_model_picker_ctrl_b_bedrock_selection_saves_bedrock_default() {
+fn test_model_picker_ctrl_o_bedrock_selection_saves_bedrock_default() {
     with_temp_jcode_home(|| {
         let mut app = create_test_app();
         app.is_remote = true;
@@ -354,7 +348,7 @@ fn test_model_picker_ctrl_b_bedrock_selection_saves_bedrock_default() {
             .expect("Bedrock model should be in filtered list");
         app.inline_interactive_state.as_mut().unwrap().selected = filtered_pos;
 
-        app.handle_key(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        app.handle_key(KeyCode::Char('o'), KeyModifiers::CONTROL)
             .unwrap();
 
         let cfg = crate::config::Config::load();

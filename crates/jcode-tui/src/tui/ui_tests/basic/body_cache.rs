@@ -605,9 +605,12 @@ fn test_full_prep_cache_state_retains_oversized_hot_entry() {
         swarm_members_signature: 0,
     inline_images_visible: true,
     };
-    let prepared = make_oversized_prepared_chat_frame("full-oversized-");
+    let prepared = make_prepared_chat_frame_with_content_bytes(
+        25 * 1024 * 1024,
+        "full-oversized-",
+    );
 
-    assert!(estimate_prepared_chat_frame_bytes(&prepared) <= FULL_PREP_CACHE_MAX_BYTES);
+    assert!(estimate_prepared_chat_frame_bytes(&prepared) > FULL_PREP_CACHE_MAX_BYTES);
 
     let mut cache = FullPrepCacheState::default();
     cache.insert(key.clone(), prepared.clone());
@@ -642,8 +645,14 @@ fn test_full_prep_cache_state_keeps_two_oversized_width_entries_hot() {
         width: 139,
         ..key_a.clone()
     };
-    let prepared_a = make_oversized_prepared_chat_frame("full-oversized-a-");
-    let prepared_b = make_oversized_prepared_chat_frame("full-oversized-b-");
+    let prepared_a = make_prepared_chat_frame_with_content_bytes(
+        25 * 1024 * 1024,
+        "full-oversized-a-",
+    );
+    let prepared_b = make_prepared_chat_frame_with_content_bytes(
+        25 * 1024 * 1024,
+        "full-oversized-b-",
+    );
 
     let mut cache = FullPrepCacheState::default();
     cache.insert(key_a.clone(), prepared_a.clone());

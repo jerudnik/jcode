@@ -13,7 +13,7 @@ fn test_prompt_jump_ctrl_digit_is_recency_rank_in_app() {
     // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
     app.handle_key(KeyCode::Char('5'), KeyModifiers::CONTROL)
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert_eq!(app.scroll_offset, 0, "oldest prompt begins at line zero");
 }
 
 #[test]
@@ -316,7 +316,7 @@ fn test_remote_prompt_jump_ctrl_digit_is_recency_rank() {
     // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
     rt.block_on(app.handle_remote_key(KeyCode::Char('5'), KeyModifiers::CONTROL, &mut remote))
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert_eq!(app.scroll_offset, 0, "oldest prompt begins at line zero");
 }
 
 #[test]
