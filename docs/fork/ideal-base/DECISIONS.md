@@ -573,3 +573,47 @@ which the coordinator does not do without explicit user authorization.
 
 **Reopen trigger:** any further duplicate-delivery or dual-attach
 incident before R05 lands.
+
+## D026. F17 TUI test-rail strategy: block on green, ignore stale with reasons
+
+**Decision:** Four independent triage workers (mushroom/clover/sunflower/
+hibiscus, headless, claude-fable-5) classified all 39 failing jcode-tui
+tests against a scrubbed `env -i` + temp HOME/JCODE_HOME baseline. **Zero
+product bugs found.** Breakdown: ~7 env-sensitive (macOS `⌥` vs Linux
+`Alt` label widths in `ui_viewport.rs`; `TERM=dumb` 256-color
+quantization collapsing shimmer blends; real Keychain/dotfile probes via
+`/usr/bin/security` that escape the `JCODE_HOME` sandbox), ~9 broken/stale
+assertions that never caught deliberate product changes (Ctrl+B→Ctrl+O
+set-default remap `65e1bc30f`; `FULL_PREP_CACHE_MAX_BYTES` 8→24MB
+`f6bc28e64`; seeded synthetic Session-Context `<system-reminder>` in
+`App::new`; `side Pinned` title casing; prompt-jump landing on line 0),
+and ~3 order-dependent flakes that pass singly but poison on process-global
+`OnceLock`/auth-cache/thread-local pollution in full-suite runs.
+
+The TUI test rail blocks on the 1822 passing tests. The 39 are
+`#[ignore = "..."]`-tagged with per-test reasons naming the causing
+commit or environment dependency, then burned down as a separate
+non-blocking backlog. Rationale: leaving 39 persistent reds desensitizes
+the gate (the exact failure mode the railway exists to prevent), while
+blocking the epic on cosmetic assertion churn trades a real durability
+objective for lint. Honest classification beats papering over: the
+ignores are documented, attributed, and reversible.
+
+**Reopen trigger:** any ignored test whose triage reason cites a
+*deliberate change* turning out to mask a real regression, or the passing
+count dropping below 1822 on the rail.
+
+## D027. Distributed swarm workers: post-epic direction, not this epic
+
+**Decision:** The seams for cross-host swarm workers already half-exist
+(`scripts/remote_build.sh` + `remote_config.sh` remote-build path;
+`JCODE_SWARM_ID` decoupling identity from filesystem; client
+`--socket`/remote-working-dir tolerance; the local `omlx` model fleet
+topology). Genuinely missing: a shared session/task store (today all
+`~/.jcode` on one disk), file-ownership coordination across checkouts
+(the owned-paths model needs a shared FS or git-branch-per-worker
+discipline), and result collection. Honest sequencing: (1) fix single-host
+build-lock contention cheaply (per-worker `CARGO_TARGET_DIR` or a shared
+prebuilt test binary — the four triage workers just demonstrated the
+contention cost), (2) remote *build* offload via the existing script,
+(3) true remote workers. Filed as a post-epic direction so it survives.

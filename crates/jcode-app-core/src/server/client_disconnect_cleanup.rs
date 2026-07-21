@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::await_holding_lock))]
 use super::{
     ClientConnectionInfo, ClientDebugState, FileTouchService, SessionInterruptQueues, SwarmEvent,
     SwarmEventType, SwarmMember, VersionedPlan, record_swarm_event, remove_background_tool_signal,
@@ -37,11 +38,13 @@ fn agent_lock_timeout() -> Duration {
 /// Delay before the one bounded in-process retry after a lock-timeout abort
 /// (F10 "retry after abort"). Long enough for a transiently-stuck turn to
 /// finish; short enough that the session does not sit phantom-live for long.
+#[cfg_attr(test, allow(dead_code))]
 const LOCK_TIMEOUT_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 #[cfg(test)]
 static TEST_LOCK_TIMEOUT_RETRY_DELAY_MS: AtomicU64 = AtomicU64::new(u64::MAX);
 
+#[cfg_attr(test, allow(clippy::needless_return))]
 fn lock_timeout_retry_delay() -> Option<Duration> {
     #[cfg(test)]
     {
@@ -209,12 +212,12 @@ fn remove_disconnect_cleanup_record(session_id: &str) {
     let Some(path) = disconnect_cleanup_record_path(session_id) else {
         return;
     };
-    if let Err(error) = std::fs::remove_file(&path) {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            crate::logging::warn(&format!(
-                "Failed to remove disconnect-cleanup record for session {session_id}: {error}"
-            ));
-        }
+    if let Err(error) = std::fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        crate::logging::warn(&format!(
+            "Failed to remove disconnect-cleanup record for session {session_id}: {error}"
+        ));
     }
 }
 

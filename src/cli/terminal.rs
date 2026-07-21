@@ -751,8 +751,10 @@ mod tests {
     fn failed_exec_handoff_restores_all_inherited_modes() {
         reset_cleanup_records();
         GUARD_DROP_RESTORES.with(|c| c.set(0));
-        let mut run_result = crate::tui::RunResult::default();
-        run_result.reload_session = Some("session_exec_failure".into());
+        let run_result = crate::tui::RunResult {
+            reload_session: Some("session_exec_failure".into()),
+            ..Default::default()
+        };
         let guard = TuiRuntimeGuard::new(TuiRuntimeState {
             mouse_capture: true,
             keyboard_enhanced: true,
@@ -791,10 +793,11 @@ mod tests {
             "runtime_guard_construction",
         ] {
             reset_cleanup_records();
-            let result: Result<()> = (|| {
+            let run_boundary = || -> Result<()> {
                 let _handoff = InheritedTerminalGuard::new(all_modes());
                 Err(anyhow::anyhow!("injected failure at {boundary}"))
-            })();
+            };
+            let result = run_boundary();
             assert!(result.is_err());
             assert_eq!(
                 cleanup_records(),
