@@ -1,39 +1,8 @@
+use super::test_support::with_temp_jcode_home;
 use super::{
     App, antigravity_input_requires_state_validation, jcode_subscription_tier_label,
     save_tui_openai_compatible_api_base, save_tui_openai_compatible_key,
 };
-
-fn with_temp_jcode_home<T>(f: impl FnOnce() -> T) -> T {
-    let _env_guard = crate::storage::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let saved_env = [
-        "JCODE_HOME",
-        "JCODE_OPENAI_COMPAT_API_BASE",
-        "JCODE_OPENAI_COMPAT_API_KEY_NAME",
-        "JCODE_OPENAI_COMPAT_ENV_FILE",
-        "JCODE_OPENAI_COMPAT_SETUP_URL",
-        "JCODE_OPENAI_COMPAT_DEFAULT_MODEL",
-        "JCODE_OPENAI_COMPAT_LOCAL_ENABLED",
-        "OPENAI_COMPAT_API_KEY",
-    ]
-    .map(|key| (key, std::env::var_os(key)));
-
-    crate::env::set_var("JCODE_HOME", temp.path());
-    for (key, _) in saved_env.iter().skip(1) {
-        crate::env::remove_var(key);
-    }
-
-    let result = f();
-
-    for (key, value) in saved_env {
-        if let Some(value) = value {
-            crate::env::set_var(key, value);
-        } else {
-            crate::env::remove_var(key);
-        }
-    }
-    result
-}
 
 #[test]
 fn antigravity_auto_callback_code_skips_manual_callback_parser() {

@@ -1,13 +1,9 @@
 use super::*;
 use crate::tui::session_picker;
 use crate::tui::ui::tools_ui;
-use std::sync::{Mutex, OnceLock};
 
-fn viewport_snapshot_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn viewport_snapshot_test_lock() -> crate::tui::app::test_support::TestRenderScope {
+    crate::tui::app::test_support::lock_test_render_state()
 }
 
 #[test]

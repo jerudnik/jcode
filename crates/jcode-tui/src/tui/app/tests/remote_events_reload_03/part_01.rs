@@ -31,7 +31,7 @@ fn test_handle_server_event_service_tier_changed_mentions_next_request_when_stre
 
 #[test]
 fn test_reload_handoff_active_when_server_reload_flag_set() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::TempDir::new().expect("create temp dir");
     let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
     crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
@@ -52,7 +52,7 @@ fn test_reload_handoff_active_when_server_reload_flag_set() {
 
 #[test]
 fn test_reload_handoff_inactive_without_flag_or_marker() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::TempDir::new().expect("create temp dir");
     let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
     crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
@@ -70,7 +70,7 @@ fn test_reload_handoff_inactive_without_flag_or_marker() {
 
 #[test]
 fn test_reload_handoff_active_when_reload_marker_present() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::TempDir::new().expect("create temp dir");
     let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
     crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
@@ -98,7 +98,7 @@ fn test_reload_handoff_active_when_reload_marker_present() {
 
 #[test]
 fn test_reload_handoff_active_when_socket_ready_marker_present() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::TempDir::new().expect("create temp dir");
     let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
     crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
@@ -476,7 +476,7 @@ fn test_reload_persisted_background_tasks_note_mentions_running_task() {
 
 #[test]
 fn test_finalize_reload_reconnect_mentions_persisted_background_task() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let mut app = create_test_app();
     let session_id = crate::id::new_id("ses_reload_bg");
     let reload_ctx = crate::tool::selfdev::ReloadContext {
@@ -526,7 +526,7 @@ fn test_finalize_reload_reconnect_mentions_persisted_background_task() {
 
 #[test]
 fn test_finalize_reload_reconnect_is_session_scoped_across_reconnect_order() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let mut app_a = create_test_app();
     let mut app_b = create_test_app();
     let session_a = crate::id::new_id("ses_reload_a");
@@ -596,7 +596,7 @@ fn test_finalize_reload_reconnect_is_session_scoped_across_reconnect_order() {
 
 #[test]
 fn test_finalize_reload_reconnect_supports_repeated_reload_cycles_for_same_session() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let session_id = crate::id::new_id("ses_reload_loop");
 
     for cycle in 0..3 {
@@ -703,7 +703,7 @@ fn test_handle_server_event_history_restores_side_panel_snapshot() {
 
 #[test]
 fn test_handle_server_event_history_restores_active_resume_processing_state() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let mut app = App::new_for_remote(Some("ses_resume_active".to_string()));
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
@@ -804,7 +804,7 @@ fn test_handle_server_event_side_panel_state_updates_snapshot() {
 
 #[test]
 fn test_remote_swarm_status_does_not_clobber_newer_session_history_on_disk() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());

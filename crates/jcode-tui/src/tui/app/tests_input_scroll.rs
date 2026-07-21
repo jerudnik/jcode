@@ -347,4 +347,3 @@ fn test_remote_cmd_enter_queues_while_processing() {
     assert_eq!(app.queued_messages().len(), 1);
     assert_eq!(app.queued_messages()[0], "hi");
 }
-

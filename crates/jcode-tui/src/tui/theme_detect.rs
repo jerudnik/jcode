@@ -14,15 +14,35 @@
 //! adapts colors for light backgrounds at frame time.
 
 use jcode_tui_style::ThemeMode;
+#[cfg(test)]
+use std::sync::Mutex;
+#[cfg(not(test))]
 use std::sync::OnceLock;
 
+#[cfg(test)]
+static DETECTED: Mutex<Option<ThemeMode>> = Mutex::new(None);
+#[cfg(not(test))]
 static DETECTED: OnceLock<ThemeMode> = OnceLock::new();
+
+fn detected_theme_or_init(resolve: impl FnOnce() -> ThemeMode) -> ThemeMode {
+    #[cfg(test)]
+    {
+        let mut detected = DETECTED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *detected.get_or_insert_with(resolve)
+    }
+    #[cfg(not(test))]
+    {
+        *DETECTED.get_or_init(resolve)
+    }
+}
 
 /// Resolve and install the global theme mode. Idempotent; the first call does
 /// the (potentially blocking, sub-second) terminal query and later calls are
 /// free. Must be called before entering raw mode / the alternate screen.
 pub fn init_theme_mode() -> ThemeMode {
-    let mode = *DETECTED.get_or_init(resolve_theme_mode);
+    let mode = detected_theme_or_init(resolve_theme_mode);
     jcode_tui_style::set_theme_mode(mode);
     mode
 }
@@ -40,8 +60,9 @@ pub fn init_theme_mode_for_resume(inherited_theme: Option<&str>) -> ThemeMode {
         "light" => Some(ThemeMode::Light),
         _ => None,
     });
-    let mode = *DETECTED
-        .get_or_init(|| inherited_theme.unwrap_or_else(resolve_theme_mode_without_terminal_query));
+    let mode = detected_theme_or_init(|| {
+        inherited_theme.unwrap_or_else(resolve_theme_mode_without_terminal_query)
+    });
     jcode_tui_style::set_theme_mode(mode);
     mode
 }
@@ -51,6 +72,15 @@ pub fn current_theme_label() -> &'static str {
         ThemeMode::Dark => "dark",
         ThemeMode::Light => "light",
     }
+}
+
+/// Clear test-only theme detection state after an environment/config scope.
+#[cfg(test)]
+pub(crate) fn reset_detected_theme_for_tests() {
+    *DETECTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    jcode_tui_style::set_theme_mode(ThemeMode::Dark);
 }
 
 fn resolve_theme_mode() -> ThemeMode {
@@ -146,7 +176,8 @@ fn terminal_background_query_supported(
 
 #[cfg(test)]
 mod tests {
-    use super::terminal_background_query_supported;
+    use super::{DETECTED, reset_detected_theme_for_tests, terminal_background_query_supported};
+    use jcode_tui_style::ThemeMode;
 
     #[test]
     fn skips_terminals_without_osc_query_support() {
@@ -172,5 +203,24 @@ mod tests {
             None,
             Some("iTerm2")
         ));
+    }
+
+    #[test]
+    fn reset_detected_theme_clears_test_cache_and_style() {
+        let _env_lock = crate::tui::app::test_support::lock_test_env();
+        *DETECTED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ThemeMode::Light);
+        jcode_tui_style::set_theme_mode(ThemeMode::Light);
+
+        reset_detected_theme_for_tests();
+
+        assert!(
+            DETECTED
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+        );
+        assert_eq!(jcode_tui_style::theme_mode(), ThemeMode::Dark);
     }
 }

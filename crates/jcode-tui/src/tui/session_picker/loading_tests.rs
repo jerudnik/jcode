@@ -90,7 +90,7 @@ fn trivial_hidden_only_snapshot_detector_keeps_system_plus_visible_message() {
 
 #[test]
 fn cached_grouped_sessions_round_trip_from_disk() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _scan_limit = EnvVarGuard::set_str("JCODE_SESSION_PICKER_MAX_SESSIONS", "100");
@@ -153,7 +153,7 @@ fn cached_grouped_sessions_round_trip_from_disk() {
 
 #[test]
 fn load_sessions_includes_claude_code_sessions_from_external_home() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -211,7 +211,7 @@ fn load_sessions_includes_claude_code_sessions_from_external_home() {
 
 #[test]
 fn load_claude_code_preview_reads_transcript_messages() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -256,7 +256,7 @@ fn load_claude_code_preview_reads_transcript_messages() {
 
 #[test]
 fn load_sessions_includes_modern_codex_sessions() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -430,7 +430,7 @@ fn load_claude_code_preview_reads_only_tail_of_large_transcript() {
 
 #[test]
 fn load_sessions_prefers_custom_title_over_generated_title() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -467,7 +467,7 @@ fn load_sessions_prefers_custom_title_over_generated_title() {
 
 #[test]
 fn load_sessions_prefers_todo_group_over_generated_title() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let session_id = "session_todotitle_1770000000000";
@@ -519,7 +519,7 @@ fn load_sessions_prefers_todo_group_over_generated_title() {
 
 #[test]
 fn load_sessions_keeps_custom_title_over_todo_group() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let session_id = "session_customtodotitle_1770000000000";
@@ -571,7 +571,7 @@ fn load_sessions_keeps_custom_title_over_todo_group() {
 
 #[test]
 fn load_sessions_includes_saved_sessions_beyond_scan_limit() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _scan_limit = EnvVarGuard::set_str("JCODE_SESSION_PICKER_MAX_SESSIONS", "50");
@@ -629,7 +629,7 @@ fn load_sessions_includes_saved_sessions_beyond_scan_limit() {
 
 #[test]
 fn load_sessions_preserves_snapshot_saved_when_journal_meta_omits_saved() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -717,7 +717,7 @@ fn raw_content_system_reminder_detection_handles_arrays_strings_and_unicode() {
 
 #[test]
 fn session_matches_query_searches_jcode_transcript_contents() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -755,7 +755,7 @@ fn session_matches_query_searches_jcode_transcript_contents() {
 
 #[test]
 fn session_matches_query_searches_external_codex_transcript_contents() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -786,7 +786,7 @@ fn session_matches_query_searches_external_codex_transcript_contents() {
 
 #[test]
 fn load_sessions_surfaces_external_cursor_transcript() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     // The session list cache is process-global; clear it before and after so this
@@ -982,7 +982,7 @@ fn benchmark_real_resume_loading_reports_timings() {
 
 #[test]
 fn benchmark_resume_loading_reports_timings() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -1044,7 +1044,7 @@ fn benchmark_resume_loading_reports_timings() {
 #[test]
 fn onboarding_scoped_loader_returns_only_codex_sessions() {
     use crate::tui::app::onboarding_flow::ExternalCli;
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -1097,7 +1097,7 @@ fn onboarding_scoped_loader_returns_only_codex_sessions() {
 
 #[test]
 fn parallel_fill_skips_many_recent_empty_sessions_to_reach_scan_limit() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _scan_limit = EnvVarGuard::set_str("JCODE_SESSION_PICKER_MAX_SESSIONS", "50");
@@ -1162,7 +1162,7 @@ fn parallel_fill_skips_many_recent_empty_sessions_to_reach_scan_limit() {
 
 #[test]
 fn hidden_debug_sessions_do_not_consume_default_resume_budget() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let _scan_limit = EnvVarGuard::set_str("JCODE_SESSION_PICKER_MAX_SESSIONS", "50");
@@ -1227,7 +1227,7 @@ fn hidden_debug_sessions_do_not_consume_default_resume_budget() {
 
 #[test]
 fn session_matches_picker_query_requires_all_tokens_order_independent() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 

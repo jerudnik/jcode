@@ -1,5 +1,6 @@
 #[test]
 fn test_mouse_scroll_over_tool_side_panel_keeps_typing_in_chat() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
     app.diff_pane_scroll = 5;
@@ -183,7 +184,9 @@ fn test_pinned_content_uses_left_splitter_instead_of_rounded_box() {
                 "file_path": "src/demo.rs",
                 "content": "fn demo() {}\n"
             }),
-            intent: None, thought_signature: None, }),
+            intent: None,
+            thought_signature: None,
+        }),
     }];
     app.bump_display_messages_version();
 
@@ -223,7 +226,9 @@ fn test_file_diff_uses_left_splitter_instead_of_rounded_box() {
                 "file_path": file_path.display().to_string(),
                 "content": "fn demo() {\n    println!(\"hi\");\n}\n"
             }),
-            intent: None, thought_signature: None, }),
+            intent: None,
+            thought_signature: None,
+        }),
     }];
     app.bump_display_messages_version();
 

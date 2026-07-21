@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn state_persists_show_count() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let temp = tempfile::tempdir().expect("tempdir");
         let prev = std::env::var_os("JCODE_HOME");
         crate::env::set_var("JCODE_HOME", temp.path());

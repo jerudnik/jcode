@@ -5,9 +5,9 @@ use crate::tool::Registry;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Mutex as StdMutex;
 use std::sync::RwLock as StdRwLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex as StdMutex, MutexGuard as StdMutexGuard};
 
 #[derive(Default)]
 struct AuthChangeMockState {
@@ -140,7 +140,7 @@ impl Provider for AuthChangeMockProvider {
     }
 }
 
-fn lock_env() -> StdMutexGuard<'static, ()> {
+fn lock_env() -> crate::storage::TestEnvLease {
     // Serialize on the *shared* process-wide test env lock, not a private one:
     // these tests mutate JCODE_HOME (and other process-global env vars), so they
     // must mutually exclude every other env-mutating test (e.g. the reload
@@ -153,7 +153,7 @@ fn lock_env() -> StdMutexGuard<'static, ()> {
 struct EnvGuard {
     saved: Vec<(&'static str, Option<String>)>,
     _temp_home: tempfile::TempDir,
-    _lock: StdMutexGuard<'static, ()>,
+    _lock: crate::storage::TestEnvLease,
 }
 
 impl EnvGuard {

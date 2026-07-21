@@ -1,6 +1,6 @@
 #[test]
 fn test_metadata_only_history_preserves_fast_restored_startup_state() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());

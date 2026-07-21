@@ -440,21 +440,13 @@ impl Provider for CountingModelRoutesProvider {
 
 #[test]
 fn test_model_picker_reuses_cached_entries_until_invalidated() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let calls = StdArc::new(AtomicUsize::new(0));
     let provider: Arc<dyn Provider> = Arc::new(CountingModelRoutesProvider {
         calls: StdArc::clone(&calls),
         route_count: 2,
         delay: Duration::ZERO,
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
 
     app.open_model_picker();
     wait_for_model_picker_load(&mut app);
@@ -481,21 +473,13 @@ fn test_model_picker_reuses_cached_entries_until_invalidated() {
 
 #[test]
 fn test_shift_tab_model_favorite_hotkey_preserves_input_line() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let calls = StdArc::new(AtomicUsize::new(0));
     let provider: Arc<dyn Provider> = Arc::new(CountingModelRoutesProvider {
         calls: StdArc::clone(&calls),
         route_count: 2,
         delay: Duration::ZERO,
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
 
     app.set_input_for_test("do not drop this draft");
     let cursor = app.cursor_pos();
@@ -510,10 +494,6 @@ fn test_shift_tab_model_favorite_hotkey_preserves_input_line() {
 
 #[test]
 fn test_tui_api_key_auth_refreshes_catalog_shows_diff_without_opening_picker() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider = AuthUxStateSpaceProvider {
         authed: StdArc::new(AtomicBool::new(false)),
         refreshes: StdArc::new(AtomicUsize::new(0)),
@@ -528,10 +508,8 @@ fn test_tui_api_key_auth_refreshes_catalog_shows_diff_without_opening_picker() {
     let refreshes = provider.refreshes.clone();
     let provider: Arc<dyn Provider> = Arc::new(provider);
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
+    let session_id = app.session.id.clone();
     let mut bus_rx = crate::bus::Bus::global().subscribe();
     while bus_rx.try_recv().is_ok() {}
 
@@ -552,7 +530,17 @@ fn test_tui_api_key_auth_refreshes_catalog_shows_diff_without_opening_picker() {
     let activation = rt.block_on(async {
         loop {
             match tokio::time::timeout(Duration::from_secs(2), bus_rx.recv()).await {
-                Ok(Ok(event @ crate::bus::BusEvent::ProviderModelActivated { .. })) => break event,
+                Ok(Ok(event))
+                    if matches!(
+                        &event,
+                        crate::bus::BusEvent::ProviderModelActivated {
+                            session_id: event_session_id,
+                            ..
+                        } if event_session_id == &session_id
+                    ) =>
+                {
+                    break event;
+                }
                 Ok(Ok(_)) => continue,
                 other => panic!("expected ProviderModelActivated event, got {other:?}"),
             }
@@ -590,7 +578,7 @@ fn test_tui_api_key_auth_refreshes_catalog_shows_diff_without_opening_picker() {
 
 #[test]
 fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let _guard = AzureLoginEnvGuard::save(&[
         "CEREBRAS_API_KEY",
         "JCODE_OPENROUTER_API_BASE",
@@ -605,10 +593,6 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
         "JCODE_ACTIVE_PROVIDER",
         "JCODE_FORCE_PROVIDER",
     ]);
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let fake_provider = AuthUxStateSpaceProvider {
         authed: StdArc::new(AtomicBool::new(false)),
         refreshes: StdArc::new(AtomicUsize::new(0)),
@@ -624,10 +608,7 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
     let set_model_requests = fake_provider.set_model_requests.clone();
     let provider: Arc<dyn Provider> = Arc::new(fake_provider);
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
     // This test exercises the API-key login lifecycle, not first-run
     // onboarding. Avoid a host-dependent background validation request that
     // would invoke the intentionally non-streaming fake provider.
@@ -740,10 +721,15 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
                     super::local::handle_bus_event(&mut app, Ok(event));
                     saw_activation = true;
                 }
-                Ok(Ok(event @ crate::bus::BusEvent::AuthCatalogRefreshReady)) => {
-                    assert!(super::local::handle_bus_event(&mut app, Ok(event)));
+                Ok(Ok(event)) => {
+                    if matches!(
+                        &event,
+                        crate::bus::BusEvent::AuthCatalogRefreshReady { session_id }
+                            if session_id == &app.session.id
+                    ) {
+                        assert!(super::local::handle_bus_event(&mut app, Ok(event)));
+                    }
                 }
-                Ok(Ok(_)) => {}
                 other => panic!("expected local Cerebras auth lifecycle event, got {other:?}"),
             }
         }
@@ -782,10 +768,15 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
                 assert_eq!(provider_key.as_deref(), Some("cerebras"));
                 assert!(message.contains("Cerebras is ready."), "{message}");
             }
-            event @ crate::bus::BusEvent::AuthCatalogRefreshReady => {
-                assert!(super::local::handle_bus_event(&mut app, Ok(event)));
+            event => {
+                if matches!(
+                    &event,
+                    crate::bus::BusEvent::AuthCatalogRefreshReady { session_id }
+                        if session_id == &app.session.id
+                ) {
+                    assert!(super::local::handle_bus_event(&mut app, Ok(event)));
+                }
             }
-            _ => {}
         }
     }
 
@@ -918,10 +909,6 @@ fn test_tui_cerebras_paste_key_lifecycle_has_no_degraded_success_messages() {
 
 #[test]
 fn test_tui_openai_compatible_empty_catalog_does_not_switch_to_profile_default() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let refreshes = StdArc::new(AtomicUsize::new(0));
     let set_model_attempts = StdArc::new(AtomicUsize::new(0));
     let provider: Arc<dyn Provider> = Arc::new(EmptyPostLoginCatalogProvider {
@@ -929,31 +916,36 @@ fn test_tui_openai_compatible_empty_catalog_does_not_switch_to_profile_default()
         set_model_attempts: StdArc::clone(&set_model_attempts),
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
+    let session_id = app.session.id.clone();
+    let provider_label = "EmptyCatalogTest";
 
     let mut bus_rx = crate::bus::Bus::global().subscribe();
     while bus_rx.try_recv().is_ok() {}
 
     let _guard = rt.enter();
     app.start_openai_compatible_post_login_activation(
-        "cerebras".to_string(),
-        "Cerebras".to_string(),
+        "empty-catalog-test".to_string(),
+        provider_label.to_string(),
     );
 
     let activity = rt.block_on(async {
         loop {
             match tokio::time::timeout(Duration::from_secs(2), bus_rx.recv()).await {
-                Ok(Ok(crate::bus::BusEvent::ProviderModelActivated { .. })) => {
+                Ok(Ok(crate::bus::BusEvent::ProviderModelActivated {
+                    session_id: event_session_id,
+                    ..
+                })) if event_session_id == session_id => {
                     panic!("empty catalog must not activate a provider model")
                 }
-                Ok(Ok(crate::bus::BusEvent::LoginCompleted(login))) => {
+                Ok(Ok(crate::bus::BusEvent::LoginCompleted(login)))
+                    if login.provider == provider_label =>
+                {
                     panic!("empty local catalog must not publish final login failure: {login:?}")
                 }
                 Ok(Ok(crate::bus::BusEvent::UiActivity(activity)))
-                    if activity.message.contains("Model Discovery Still Updating") =>
+                    if activity.session_id.as_deref() == Some(session_id.as_str())
+                        && activity.message.contains("Model Discovery Still Updating") =>
                 {
                     break activity;
                 }
@@ -978,10 +970,6 @@ fn test_tui_openai_compatible_empty_catalog_does_not_switch_to_profile_default()
 
 #[test]
 fn test_tui_openai_compatible_local_refresh_failure_is_pending_not_final_failure() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let refreshes = StdArc::new(AtomicUsize::new(0));
     let set_model_attempts = StdArc::new(AtomicUsize::new(0));
     let provider: Arc<dyn Provider> = Arc::new(FailingPostLoginCatalogProvider {
@@ -989,33 +977,38 @@ fn test_tui_openai_compatible_local_refresh_failure_is_pending_not_final_failure
         set_model_attempts: StdArc::clone(&set_model_attempts),
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
+    let session_id = app.session.id.clone();
+    let provider_label = "FailingCatalogTest";
 
     let mut bus_rx = crate::bus::Bus::global().subscribe();
     while bus_rx.try_recv().is_ok() {}
 
     let _guard = rt.enter();
     app.start_openai_compatible_post_login_activation(
-        "cerebras".to_string(),
-        "Cerebras".to_string(),
+        "failing-catalog-test".to_string(),
+        provider_label.to_string(),
     );
 
     let activity = rt.block_on(async {
         loop {
             match tokio::time::timeout(Duration::from_secs(2), bus_rx.recv()).await {
-                Ok(Ok(crate::bus::BusEvent::ProviderModelActivated { .. })) => {
+                Ok(Ok(crate::bus::BusEvent::ProviderModelActivated {
+                    session_id: event_session_id,
+                    ..
+                })) if event_session_id == session_id => {
                     panic!("failing local refresh must not activate a provider model")
                 }
-                Ok(Ok(crate::bus::BusEvent::LoginCompleted(login))) => {
+                Ok(Ok(crate::bus::BusEvent::LoginCompleted(login)))
+                    if login.provider == provider_label =>
+                {
                     panic!(
                         "local refresh failure must not publish a final login failure while server auth-change recovery can still finish: {login:?}"
                     )
                 }
                 Ok(Ok(crate::bus::BusEvent::UiActivity(activity)))
-                    if activity.message.contains("Model Discovery Still Updating") =>
+                    if activity.session_id.as_deref() == Some(session_id.as_str())
+                        && activity.message.contains("Model Discovery Still Updating") =>
                 {
                     break activity;
                 }
@@ -1045,21 +1038,13 @@ fn test_tui_openai_compatible_local_refresh_failure_is_pending_not_final_failure
 
 #[test]
 fn test_model_picker_opens_simplified_state_before_async_routes_complete() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let calls = StdArc::new(AtomicUsize::new(0));
     let provider: Arc<dyn Provider> = Arc::new(CountingModelRoutesProvider {
         calls: StdArc::clone(&calls),
         route_count: 2,
         delay: Duration::from_millis(75),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
 
     app.open_model_picker();
 
@@ -1087,18 +1072,10 @@ fn test_model_picker_opens_simplified_state_before_async_routes_complete() {
 
 #[test]
 fn test_model_picker_state_space_preserves_provider_labels_after_route_hydration() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider: Arc<dyn Provider> = Arc::new(MixedModelRoutesProvider {
         model: StdArc::new(StdMutex::new("gpt-5.5".to_string())),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
     app.recent_authenticated_provider = Some(("chutes".to_string(), Instant::now()));
 
     app.open_model_picker();
@@ -1157,21 +1134,13 @@ fn test_model_picker_state_space_preserves_provider_labels_after_route_hydration
 
 #[test]
 fn test_model_picker_does_not_cache_single_model_fallback() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let calls = StdArc::new(AtomicUsize::new(0));
     let provider: Arc<dyn Provider> = Arc::new(CountingModelRoutesProvider {
         calls: StdArc::clone(&calls),
         route_count: 1,
         delay: Duration::ZERO,
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
 
     app.open_model_picker();
     wait_for_model_picker_load(&mut app);
@@ -1217,10 +1186,6 @@ fn test_local_model_picker_selection_failure_keeps_picker_open_and_shows_next_st
 
 #[test]
 fn test_login_completed_spawns_auth_refresh_when_runtime_is_available() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let started = StdArc::new(AtomicBool::new(false));
     let completed = StdArc::new(AtomicBool::new(false));
     let provider: Arc<dyn Provider> = Arc::new(AsyncAuthRefreshingMockProvider {
@@ -1229,10 +1194,7 @@ fn test_login_completed_spawns_auth_refresh_when_runtime_is_available() {
         delay: Duration::from_millis(150),
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
 
     let _guard = rt.enter();
     let start = Instant::now();
@@ -1261,17 +1223,14 @@ fn test_login_completed_spawns_auth_refresh_when_runtime_is_available() {
 
 #[test]
 fn test_model_picker_waits_for_async_post_login_catalog_activation() {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let logged_in = StdArc::new(StdMutex::new(false));
+    let auth_gate = StdArc::new((StdMutex::new(false), std::sync::Condvar::new()));
     let provider: Arc<dyn Provider> = Arc::new(AuthRefreshingMockProvider {
         logged_in: StdArc::clone(&logged_in),
+        auth_gate: Some(StdArc::clone(&auth_gate)),
     });
+    let mut app = create_test_app_with_provider(provider);
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
     let mut bus_rx = crate::bus::Bus::global().subscribe();
 
     {
@@ -1294,16 +1253,24 @@ fn test_model_picker_waits_for_async_post_login_catalog_activation() {
             .detail
             .contains("updating model list")
     );
-    assert!(
-        !picker.entries.iter().any(|entry| entry.name == "gpt-5.4"),
-        "the stale pre-import catalog must not be presented as ready"
+    assert_eq!(
+        picker.entries[0].options[0].api_method, "current",
+        "the pre-import model may remain as the current-model placeholder, but its stale catalog route must not be presented as ready"
     );
+
+    let (released, wake) = &*auth_gate;
+    *released.lock().unwrap() = true;
+    wake.notify_one();
 
     let ready = rt.block_on(async {
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 let event = bus_rx.recv().await.expect("auth catalog event");
-                if matches!(event, crate::bus::BusEvent::AuthCatalogRefreshReady) {
+                if matches!(
+                    &event,
+                    crate::bus::BusEvent::AuthCatalogRefreshReady { session_id }
+                        if session_id == &app.session.id
+                ) {
                     break event;
                 }
             }
@@ -1339,13 +1306,39 @@ fn test_model_picker_waits_for_async_post_login_catalog_activation() {
 #[test]
 fn test_login_completed_surfaces_new_provider_models_in_local_model_picker() {
     let mut app = create_auth_refresh_test_app();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mut bus_rx = crate::bus::Bus::global().subscribe();
 
-    app.handle_login_completed(crate::bus::LoginCompleted {
-        provider: "copilot".to_string(),
-        success: true,
-        message: "Authenticated as **octocat** via GitHub Copilot.\n\nCopilot models are now available in `/model`."
-            .to_string(),
+    {
+        let _guard = rt.enter();
+        app.handle_login_completed(crate::bus::LoginCompleted {
+            provider: "copilot".to_string(),
+            success: true,
+            message: "Authenticated as **octocat** via GitHub Copilot.\n\nCopilot models are now available in `/model`."
+                .to_string(),
+        });
+    }
+
+    let ready = rt.block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let event = bus_rx.recv().await.expect("auth catalog event");
+                if matches!(
+                    &event,
+                    crate::bus::BusEvent::AuthCatalogRefreshReady { session_id }
+                        if session_id == &app.session.id
+                ) {
+                    break event;
+                }
+            }
+        })
+        .await
+        .expect("post-login activation should finish")
     });
+    assert!(crate::tui::app::local::handle_bus_event(
+        &mut app,
+        Ok(ready)
+    ));
 
     app.open_model_picker();
     wait_for_model_picker_load(&mut app);
@@ -1478,7 +1471,7 @@ impl Drop for AzureLoginEnvGuard {
 
 #[test]
 fn test_azure_login_completion_switches_local_model_without_completion() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let _guard = AzureLoginEnvGuard::save(&[
         "AZURE_OPENAI_ENDPOINT",
         "AZURE_OPENAI_MODEL",
@@ -1502,10 +1495,6 @@ fn test_azure_login_completion_switches_local_model_without_completion() {
     crate::env::set_var("AZURE_OPENAI_API_KEY", "test-key");
     crate::env::set_var("AZURE_OPENAI_USE_ENTRA", "0");
 
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let model = StdArc::new(StdMutex::new("old-model".to_string()));
     let auth_changed = StdArc::new(AtomicUsize::new(0));
     let complete_calls = StdArc::new(AtomicUsize::new(0));
@@ -1516,10 +1505,7 @@ fn test_azure_login_completion_switches_local_model_without_completion() {
     });
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
     app.provider_session_id = Some("stale-upstream".to_string());
     app.session.provider_session_id = Some("stale-upstream".to_string());
     app.session.model = Some("old-model".to_string());
@@ -1666,6 +1652,7 @@ fn test_agent_model_picker_openrouter_bare_openai_route_saves_openai_catalog_pre
 
 #[test]
 fn test_local_model_picker_render_shows_antigravity_models_exactly_as_user_sees_them() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_antigravity_picker_test_app();
     let text = render_model_picker_text(&mut app, 90, 24);
 
@@ -1703,6 +1690,7 @@ fn test_local_model_picker_render_shows_antigravity_models_exactly_as_user_sees_
 
 #[test]
 fn test_login_smoke_model_picker_renders_unstacked_provider_rows() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_login_smoke_model_app();
     let text = render_model_picker_text(&mut app, 110, 110);
 
@@ -1794,8 +1782,7 @@ fn test_login_smoke_model_picker_renders_unstacked_provider_rows() {
     let mut terminal = ratatui::Terminal::new(backend).expect("failed to create test terminal");
     let openrouter_text = render_and_snap(&app, &mut terminal);
     assert!(
-        openrouter_text.contains("openai/gpt-5.5")
-            && openrouter_text.contains("OpenRouter/OpenAI"),
+        openrouter_text.contains("openai/gpt-5.5") && openrouter_text.contains("OpenRouter/OpenAI"),
         "OpenRouter endpoint routes should not look like native OpenAI API-key rows, got:\n{}",
         openrouter_text
     );
@@ -2359,10 +2346,7 @@ fn test_finish_turn_auto_poke_queues_confidence_summary_when_todos_done() {
         let summary = &app.hidden_queued_system_messages[0];
         assert!(super::commands::is_poke_message(summary));
         assert!(super::commands::is_todo_confidence_summary_message(summary));
-        assert_eq!(
-            summary,
-            crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE
-        );
+        assert_eq!(summary, crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE);
         assert!(!summary.chars().any(|ch| ch.is_ascii_digit()));
         assert!(summary.contains("completion confidence"));
         assert!(!summary.to_ascii_lowercase().contains("gate"));

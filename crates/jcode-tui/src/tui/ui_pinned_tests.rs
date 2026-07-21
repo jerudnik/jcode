@@ -1,13 +1,7 @@
 use super::*;
-use std::sync::{Mutex, OnceLock};
 
 fn clear_side_panel_render_caches() {
     super::clear_side_panel_render_caches();
-}
-
-fn mermaid_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 fn with_mermaid_placeholder_mode<T>(f: impl FnOnce() -> T) -> T {
@@ -18,9 +12,7 @@ fn with_mermaid_placeholder_mode<T>(f: impl FnOnce() -> T) -> T {
         }
     }
 
-    let _guard = mermaid_test_lock()
-        .lock()
-        .expect("mermaid placeholder test lock");
+    let _guard = crate::tui::app::test_support::lock_test_render_state();
     crate::tui::mermaid::set_video_export_mode(true);
     let _reset = ResetVideoExportMode;
     let result = f();
@@ -28,7 +20,7 @@ fn with_mermaid_placeholder_mode<T>(f: impl FnOnce() -> T) -> T {
 }
 
 fn with_serialized_mermaid_state<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = mermaid_test_lock().lock().expect("mermaid test lock");
+    let _guard = crate::tui::app::test_support::lock_test_render_state();
     f()
 }
 

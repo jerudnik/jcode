@@ -7544,11 +7544,11 @@ fn single_session_session_switcher_filter_supports_fuzzy_abbreviations() {
     );
     app.apply_session_switcher_cards(vec![
         test_session_card("session_alpha", "alpha-notes", "active"),
-        test_session_card("session_ticket", "ticket-workspace", "closed"),
+        test_session_card("session_ticket", "quartz-ticket-workspace", "closed"),
     ]);
 
     assert_eq!(
-        app.handle_key(KeyInput::Character("tkw".to_string())),
+        app.handle_key(KeyInput::Character("qtkw".to_string())),
         KeyOutcome::Redraw
     );
     let switcher = app
@@ -7558,9 +7558,9 @@ fn single_session_session_switcher_filter_supports_fuzzy_abbreviations() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert_eq!(app.session_switcher.filter, "tkw");
-    assert!(switcher.contains("filter: tkw"), "{switcher}");
-    assert!(switcher.contains("ticket-workspace"), "{switcher}");
+    assert_eq!(app.session_switcher.filter, "qtkw");
+    assert!(switcher.contains("filter: qtkw"), "{switcher}");
+    assert!(switcher.contains("quartz-ticket-workspace"), "{switcher}");
     assert!(!switcher.contains("alpha-notes"), "{switcher}");
 }
 

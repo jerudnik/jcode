@@ -2,6 +2,13 @@ use super::state_ui::RestoredReloadInput;
 use super::*;
 use crate::tui::{backend, keybind};
 
+#[derive(Clone, Copy)]
+enum NewSessionActivity {
+    RegisterActivePid,
+    #[cfg(test)]
+    SkipActivePidRegistration,
+}
+
 impl App {
     pub(super) fn apply_restored_reload_input(&mut self, restored: RestoredReloadInput) {
         self.input = restored.input;
@@ -686,6 +693,8 @@ impl App {
             productivity_refreshing: false,
             last_overnight_card_refresh: None,
             workspace_client: crate::tui::workspace_client::WorkspaceClientState::default(),
+            #[cfg(test)]
+            _test_env_lock: None,
         };
 
         for notice in app.provider.drain_startup_notices() {
@@ -696,12 +705,22 @@ impl App {
     }
 
     pub fn new(provider: Arc<dyn Provider>, registry: Registry) -> Self {
+        Self::new_with_session_activity(provider, registry, NewSessionActivity::RegisterActivePid)
+    }
+
+    fn new_with_session_activity(
+        provider: Arc<dyn Provider>,
+        registry: Registry,
+        session_activity: NewSessionActivity,
+    ) -> Self {
         let t0 = std::time::Instant::now();
         let skills = SkillRegistry::shared_snapshot();
         let t_skills = t0.elapsed();
         let mcp_manager = Arc::new(RwLock::new(McpManager::new()));
         let mut session = Session::create(None, None);
-        session.mark_active();
+        if matches!(session_activity, NewSessionActivity::RegisterActivePid) {
+            session.mark_active();
+        }
         session.model = Some(provider.model());
         session.provider_key = crate::session::derive_session_provider_key(provider.name());
         session.ensure_initial_session_context_message();
@@ -1100,6 +1119,8 @@ impl App {
             productivity_refreshing: false,
             last_overnight_card_refresh: None,
             workspace_client: crate::tui::workspace_client::WorkspaceClientState::default(),
+            #[cfg(test)]
+            _test_env_lock: None,
         };
 
         for notice in app.provider.drain_startup_notices() {
@@ -1109,8 +1130,13 @@ impl App {
         app
     }
 
+    #[cfg(test)]
     pub fn new_for_test_harness(provider: Arc<dyn Provider>, registry: Registry) -> Self {
-        let mut app = Self::new(provider, registry);
+        let mut app = Self::new_with_session_activity(
+            provider,
+            registry,
+            NewSessionActivity::SkipActivePidRegistration,
+        );
         app.runtime_mode = AppRuntimeMode::TestHarness;
         app.is_remote = false;
         app.is_replay = false;
@@ -1210,6 +1236,13 @@ impl App {
     }
 
     pub fn new_for_remote_with_options(resume_session: Option<String>, fresh_spawn: bool) -> Self {
+        // Remote constructor tests read JCODE_HOME-derived session, config, and
+        // auth state just like the main test harness. Retain the shared lease
+        // for the resulting App so direct remote-test construction cannot race
+        // scoped environment writers.
+        #[cfg(test)]
+        let test_env_lock = super::test_support::test_app_env_read_lease();
+
         let provider: Arc<dyn Provider> =
             Arc::new(InertRuntimeProvider::new(AppRuntimeMode::RemoteClient));
         let registry = Registry::empty();
@@ -1238,6 +1271,10 @@ impl App {
         }
 
         app.resume_session_id = resume_session;
+        #[cfg(test)]
+        {
+            app._test_env_lock = test_env_lock;
+        }
         app
     }
 

@@ -1,5 +1,50 @@
 use super::*;
 
+#[test]
+fn test_env_read_lease_is_send_sync_and_leases_are_reentrant() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<TestEnvReadLease>();
+
+    macro_rules! assert_not_impl {
+        ($ty:ty, $trait:path) => {
+            const _: fn() = || {
+                trait AmbiguousIfImpl<A> {
+                    fn check() {}
+                }
+                impl<T: ?Sized> AmbiguousIfImpl<()> for T {}
+                impl<T: ?Sized + $trait> AmbiguousIfImpl<u8> for T {}
+                let _ = <$ty as AmbiguousIfImpl<_>>::check;
+            };
+        };
+    }
+    assert_not_impl!(TestEnvWriteLease, Send);
+    assert_not_impl!(TestEnvWriteLease, Sync);
+
+    let read = lock_test_env_read();
+    let nested_read = lock_test_env_read();
+    drop(nested_read);
+    drop(read);
+
+    let write = lock_test_env_write();
+    let nested_write = lock_test_env_write();
+    drop(nested_write);
+    drop(write);
+}
+
+#[test]
+#[should_panic(expected = "cannot acquire a test environment read lease")]
+fn test_env_read_rejects_write_downgrade() {
+    let _write = lock_test_env_write();
+    let _read = lock_test_env_read();
+}
+
+#[test]
+#[should_panic(expected = "cannot acquire a test environment write lease")]
+fn test_env_write_rejects_read_upgrade() {
+    let _read = lock_test_env_read();
+    let _write = lock_test_env_write();
+}
+
 #[cfg(unix)]
 #[test]
 fn harden_secret_file_permissions_sets_owner_only_modes() {

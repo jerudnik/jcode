@@ -96,6 +96,8 @@ mod state_ui_runtime;
 mod state_ui_storage;
 mod support;
 mod swarm_hint;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod todos_view;
 mod tui_lifecycle;
 mod tui_lifecycle_runtime;
@@ -1478,6 +1480,10 @@ pub struct App {
     /// Per-client Niri-style workspace navigation state. Previously a process
     /// global; now owned per App instance.
     workspace_client: super::workspace_client::WorkspaceClientState,
+    /// Keeps the process-global test environment stable for the lifetime of a
+    /// test app. Test helpers attach a shared read lease after construction.
+    #[cfg(test)]
+    _test_env_lock: Option<crate::storage::TestEnvReadLease>,
 }
 
 /// Inert provider used by runtime modes whose output is supplied by another source.
