@@ -433,9 +433,11 @@ pub enum BusEvent {
     CompactionFinished,
     /// Provider's available models list may have changed
     ModelsUpdated,
-    /// Synchronous provider activation after a login/import has completed, so
-    /// the model picker can stop hiding the stale pre-auth catalog.
-    AuthCatalogRefreshReady,
+    /// Provider activation after a login/import has completed for this session,
+    /// so its model picker can stop hiding the stale pre-auth catalog.
+    AuthCatalogRefreshReady {
+        session_id: String,
+    },
     /// A background provider setup task selected a model for this session.
     ProviderModelActivated {
         session_id: String,

@@ -1150,7 +1150,7 @@ mod tests {
 
     #[test]
     fn render_auth_doctor_markdown_includes_recovery_steps() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let markdown = render_auth_doctor_markdown(Some("openai"));
         assert!(markdown.contains("OpenAI (openai)"));
         assert!(markdown.contains("Next steps"));

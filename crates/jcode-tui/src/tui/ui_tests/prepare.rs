@@ -619,7 +619,7 @@ fn test_prepare_messages_shows_live_batch_progress_in_chat_history() {
 
 #[test]
 fn test_prepare_messages_places_live_batch_after_committed_assistant_text() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     clear_test_render_state_for_tests();
     let state = TestState {
         display_messages: vec![
@@ -1178,7 +1178,7 @@ fn test_render_tool_message_batch_subcall_lines_alignment_unset() {
 
 #[test]
 fn test_prepare_messages_renders_reasoning_role_dim_italic_without_sentinel() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     clear_test_render_state_for_tests();
 
     // A collapsing reasoning message carries sentinel-wrapped dim/italic markup.
@@ -1239,7 +1239,7 @@ fn test_prepare_messages_renders_reasoning_role_dim_italic_without_sentinel() {
 
 #[test]
 fn test_prepare_messages_renders_anchored_reasoning_message_in_flow() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     clear_test_render_state_for_tests();
 
     // Anchored reasoning traces are ordinary display messages in the body:

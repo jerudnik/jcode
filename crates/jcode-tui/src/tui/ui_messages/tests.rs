@@ -15,15 +15,6 @@ fn leading_spaces(text: &str) -> usize {
     text.chars().take_while(|c| *c == ' ').count()
 }
 
-fn system_glyph_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    use std::sync::{Mutex, OnceLock};
-
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 #[test]
 fn render_system_message_forces_system_color_on_all_spans() {
     let msg = DisplayMessage::system("**Reload complete** - continuing.");
@@ -157,7 +148,7 @@ fn render_system_message_centered_mode_left_aligns_with_padding() {
 
 #[test]
 fn render_system_message_uses_width_stable_titles_on_kitty() {
-    let _guard = system_glyph_env_lock();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let prev_term_program = std::env::var("TERM_PROGRAM").ok();
     let prev_term = std::env::var("TERM").ok();
     crate::env::set_var("TERM_PROGRAM", "kitty");

@@ -2,7 +2,7 @@ use super::*;
 use crate::bus::BackgroundTaskStatus;
 use std::ffi::OsStr;
 
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+fn lock_env() -> crate::storage::TestEnvLease {
     crate::storage::lock_test_env()
 }
 

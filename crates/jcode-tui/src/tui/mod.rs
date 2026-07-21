@@ -1391,6 +1391,14 @@ fn idle_donut_active_with_policy(
         return false;
     }
 
+    // Composer input always takes precedence over a decorative empty-state
+    // animation, including while the onboarding welcome is active. On short
+    // terminals the donut would otherwise consume the rows needed to edit the
+    // prompt.
+    if !state.input().is_empty() {
+        return false;
+    }
+
     // The onboarding welcome screen draws the same live donut, but it also
     // shows a welcome/login card so `display_messages()` is not empty.  Keep the
     // animation loop running smoothly while that screen is up (even past the

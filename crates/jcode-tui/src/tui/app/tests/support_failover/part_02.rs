@@ -108,25 +108,18 @@ impl Provider for SwitchableMockProvider {
 }
 
 fn create_switchable_test_app(initial_provider: &str) -> (App, StdArc<StdMutex<String>>) {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let active_provider = StdArc::new(StdMutex::new(initial_provider.to_string()));
     let provider: Arc<dyn Provider> = Arc::new(SwitchableMockProvider {
         active_provider: active_provider.clone(),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let app = create_test_app_with_provider(provider);
     (app, active_provider)
 }
 
 #[derive(Clone)]
 struct AuthRefreshingMockProvider {
     logged_in: StdArc<StdMutex<bool>>,
+    auth_gate: Option<StdArc<(StdMutex<bool>, std::sync::Condvar)>>,
 }
 
 #[async_trait::async_trait]
@@ -197,6 +190,13 @@ impl Provider for AuthRefreshingMockProvider {
     }
 
     fn on_auth_changed(&self) {
+        if let Some(gate) = &self.auth_gate {
+            let (released, wake) = &**gate;
+            let released = wake
+                .wait_while(released.lock().unwrap(), |released| !*released)
+                .unwrap();
+            drop(released);
+        }
         *self.logged_in.lock().unwrap() = true;
     }
 
@@ -240,19 +240,11 @@ impl Provider for AsyncAuthRefreshingMockProvider {
 }
 
 fn create_auth_refresh_test_app() -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider: Arc<dyn Provider> = Arc::new(AuthRefreshingMockProvider {
         logged_in: StdArc::new(StdMutex::new(false)),
+        auth_gate: None,
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
 #[derive(Clone)]
@@ -323,23 +315,13 @@ impl Provider for AntigravityMockProvider {
 }
 
 fn create_antigravity_picker_test_app() -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider: Arc<dyn Provider> = Arc::new(AntigravityMockProvider {
         model: StdArc::new(StdMutex::new("default".to_string())),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
 fn render_model_picker_text(app: &mut App, width: u16, height: u16) -> String {
-    let _render_lock = scroll_render_test_lock();
     if app.display_messages.is_empty() {
         app.display_messages = vec![DisplayMessage::system("seed render state")];
         app.bump_display_messages_version();
@@ -449,17 +431,8 @@ impl Provider for LoginSmokeModelProvider {
 }
 
 fn create_login_smoke_model_app() -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider: Arc<dyn Provider> = Arc::new(LoginSmokeModelProvider);
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
 #[derive(Clone)]
@@ -506,17 +479,8 @@ impl Provider for FailingModelSwitchProvider {
 }
 
 fn create_failing_model_switch_test_app() -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider: Arc<dyn Provider> = Arc::new(FailingModelSwitchProvider);
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
 fn write_test_config(contents: &str) {
@@ -536,12 +500,7 @@ fn create_fast_test_app() -> App {
     let provider: Arc<dyn Provider> = Arc::new(FastMockProvider {
         service_tier: StdArc::new(StdMutex::new(None)),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
 fn create_gemini_test_app() -> App {
@@ -573,12 +532,7 @@ fn create_gemini_test_app() -> App {
     }
 
     let provider: Arc<dyn Provider> = Arc::new(GeminiMockProvider);
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
 /// Provider exposing the same model via both a (broken) API key and a working
@@ -643,20 +597,12 @@ impl Provider for DualMethodMockProvider {
 }
 
 fn create_dual_method_test_app() -> (App, StdArc<StdMutex<Option<String>>>) {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let applied = StdArc::new(StdMutex::new(None));
     let provider: Arc<dyn Provider> = Arc::new(DualMethodMockProvider {
         api_method: StdArc::new(StdMutex::new("claude-api".to_string())),
         applied: applied.clone(),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let mut app = create_test_app_with_provider(provider);
     // The active route is the (broken) API key.
     app.session.route_api_method = Some("claude-api".to_string());
     (app, applied)
@@ -689,9 +635,7 @@ fn test_apply_fallback_offer_switches_route_and_resends() {
     with_temp_jcode_home(|| {
         let (mut app, applied) = create_dual_method_test_app();
 
-        app.handle_turn_error(
-            "Anthropic API error (401 Unauthorized): invalid x-api-key",
-        );
+        app.handle_turn_error("Anthropic API error (401 Unauthorized): invalid x-api-key");
         assert!(app.pending_fallback_offer.is_some());
 
         let consumed = app.apply_pending_fallback_offer();

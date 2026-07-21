@@ -596,7 +596,7 @@ fn test_account_openai_compatible_settings_renders_provider_settings() {
 
 #[test]
 fn test_account_default_provider_command_saves_config() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let mut app = create_test_app();
     app.input = "/account default-provider openai".to_string();
     app.submit_input();

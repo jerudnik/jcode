@@ -1593,7 +1593,16 @@ impl App {
         let max = self.scroll_max_estimate();
         if !self.auto_scroll_paused {
             let rendered_max = super::super::ui::last_max_scroll();
-            let current_abs = max.saturating_sub(self.scroll_offset);
+            // Tail follow can intentionally animate a large append over several
+            // frames. The extent is `max`, but the reader is looking at the
+            // last resolved frame. Freeze that actual position before stepping
+            // upward, otherwise the first notch can land on the already-visible
+            // animated tail and appear to do nothing.
+            let current_abs = if rendered_max > 0 {
+                super::super::ui::last_resolved_chat_scroll().min(rendered_max)
+            } else {
+                max.saturating_sub(self.scroll_offset)
+            };
             self.scroll_offset = current_abs.saturating_sub(amount);
             if rendered_max > 0 {
                 self.scroll_offset = self.scroll_offset.min(rendered_max.saturating_sub(amount));

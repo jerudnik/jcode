@@ -316,6 +316,7 @@ fn test_model_picker_copilot_models_have_copilot_route() {
 
 #[test]
 fn test_model_picker_remote_comtegra_model_uses_comtegra_route_not_copilot() {
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     let prev_key = std::env::var("COMTEGRA_API_KEY").ok();
     crate::env::set_var("COMTEGRA_API_KEY", "test-key");
 
@@ -358,7 +359,7 @@ fn test_model_picker_remote_comtegra_model_uses_comtegra_route_not_copilot() {
 
 #[test]
 fn test_model_picker_remote_bedrock_model_has_bedrock_route_when_configured() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let prev_home = std::env::var("JCODE_HOME").ok();
     let prev_key = std::env::var(crate::provider::bedrock::API_KEY_ENV).ok();
     let prev_region = std::env::var(crate::provider::bedrock::REGION_ENV).ok();

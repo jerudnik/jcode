@@ -24,6 +24,25 @@ fn test_local_bus_dictation_completion_ignores_other_session() {
 }
 
 #[test]
+fn test_local_auth_catalog_refresh_ignores_other_session() {
+    let mut app = create_test_app();
+    app.auth_catalog_refresh_pending = true;
+
+    let handled = crate::tui::app::local::handle_bus_event(
+        &mut app,
+        Ok(crate::bus::BusEvent::AuthCatalogRefreshReady {
+            session_id: "session_other".to_string(),
+        }),
+    );
+
+    assert!(!handled);
+    assert!(
+        app.auth_catalog_refresh_pending,
+        "another session's catalog event must not expose this app's stale catalog"
+    );
+}
+
+#[test]
 fn test_remote_bus_dictation_completion_ignores_other_session() {
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -254,6 +273,7 @@ fn test_handle_server_event_history_session_change_clears_streaming_preview_diag
     // session_changed branch (remote/server_events.rs) calls
     // clear_streaming_render_state() (app/input.rs), which clears the
     // streaming preview slot.
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
@@ -340,6 +360,7 @@ fn test_handle_server_event_history_same_session_rewind_reapply_clears_streaming
     // registered streaming preview diagram, otherwise a preview registered
     // mid-stream keeps rendering a mermaid block from a message that was just
     // rewound away (it sits at index 0 of get_active_diagrams in Margin mode).
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
@@ -364,12 +385,11 @@ fn test_handle_server_event_history_same_session_rewind_reapply_clears_streaming
     );
     // The client-side /rewind path arms a pending notice before the server's
     // History redelivery arrives (remote/key_handling.rs).
-    app.pending_remote_rewind_notice =
-        Some(crate::tui::app::PendingRemoteRewindNotice {
-            undo: false,
-            message_index: Some(1),
-            changed_messages: 2,
-        });
+    app.pending_remote_rewind_notice = Some(crate::tui::app::PendingRemoteRewindNotice {
+        undo: false,
+        message_index: Some(1),
+        changed_messages: 2,
+    });
 
     // Truncated payload after the rewind: same session id, fewer messages.
     app.handle_server_event(
@@ -441,7 +461,8 @@ fn test_handle_server_event_history_same_session_rewind_reapply_clears_streaming
 }
 
 #[test]
-fn test_handle_server_event_history_same_session_midstream_duplicate_is_dropped_and_keeps_preview() {
+fn test_handle_server_event_history_same_session_midstream_duplicate_is_dropped_and_keeps_preview()
+{
     // Multi-client rewind fan-out pin (server side has NO fan-out: a /rewind
     // History redelivery is written only to the rewinding connection's socket,
     // per-client event channel, server/client_lifecycle.rs:521 and
@@ -454,6 +475,7 @@ fn test_handle_server_event_history_same_session_midstream_duplicate_is_dropped_
     // NOT be cleared (the c7612068 preview-clear only runs on the forced
     // re-apply path, which only the rewinding client arms by resetting
     // has_loaded_history in backend.rs rewind()/rewind_undo()).
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
@@ -528,9 +550,9 @@ fn test_handle_server_event_history_same_session_midstream_duplicate_is_dropped_
         "unsolicited same-session History must not replace a bootstrapped mid-stream transcript"
     );
     assert!(
-        !app.display_messages()
-            .iter()
-            .any(|m| m.content.contains("truncated payload from another client's rewind")),
+        !app.display_messages().iter().any(|m| m
+            .content
+            .contains("truncated payload from another client's rewind")),
         "unsolicited same-session History payload should be dropped, not applied"
     );
     // Live stream state preserved: preview and streaming text survive.
@@ -652,15 +674,11 @@ fn test_handle_server_event_history_same_session_rewind_then_late_done_does_not_
 
     // The stale Done from the rewound-away turn arrives AFTER the truncated
     // History (mpsc forwarder ordering).
-    app.handle_server_event(
-        crate::protocol::ServerEvent::Done { id: 7 },
-        &mut remote,
-    );
+    app.handle_server_event(crate::protocol::ServerEvent::Done { id: 7 }, &mut remote);
 
     assert!(!app.is_processing, "late Done should settle the turn");
     assert!(
-        !app
-            .display_messages()
+        !app.display_messages()
             .iter()
             .any(|m| m.content.contains("rewound-away assistant text")),
         "late Done must not resurrect assistant text that the rewind removed"
@@ -733,7 +751,7 @@ fn test_handle_server_event_history_session_change_clears_pending_interleaves() 
 
 #[test]
 fn test_handle_post_connect_marker_without_reload_context_does_not_queue_selfdev_continuation() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());
@@ -792,7 +810,7 @@ fn test_handle_post_connect_marker_without_reload_context_does_not_queue_selfdev
 
 #[test]
 fn test_handle_post_connect_defers_reload_followup_to_server_history_payload() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());
@@ -848,7 +866,7 @@ fn test_handle_post_connect_defers_reload_followup_to_server_history_payload() {
 
 #[test]
 fn test_handle_post_connect_clears_deferred_dispatch_before_reload_followup() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());
@@ -915,7 +933,7 @@ fn test_handle_post_connect_clears_deferred_dispatch_before_reload_followup() {
 fn test_handle_post_connect_requests_client_reload_after_server_reload_even_without_newer_binary() {
     use std::time::{Duration, SystemTime};
 
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());
@@ -1332,7 +1350,9 @@ fn test_handle_server_event_interrupted_clears_stream_state_and_sets_idle() {
         id: "tool_1".to_string(),
         name: "bash".to_string(),
         input: serde_json::Value::Null,
-        intent: None, thought_signature: None, });
+        intent: None,
+        thought_signature: None,
+    });
     app.interleave_message = Some("queued interrupt".to_string());
     app.pending_soft_interrupts
         .push("pending soft interrupt".to_string());

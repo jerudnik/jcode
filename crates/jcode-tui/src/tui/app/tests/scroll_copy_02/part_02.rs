@@ -84,7 +84,7 @@ fn test_expand_badge_shortcut_toggles_inline_diff_and_pulses_key() {
 #[test]
 fn test_alt_shift_i_toggles_inline_images_and_persists() {
     let _render_lock = scroll_render_test_lock();
-    let _env_guard = crate::storage::lock_test_env();
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp.path());
@@ -120,7 +120,10 @@ fn test_alt_shift_i_toggles_inline_images_and_persists() {
         KeyCode::Char('I'),
         KeyModifiers::ALT | KeyModifiers::SHIFT,
     ));
-    assert!(app.inline_images_visible, "second toggle should show images");
+    assert!(
+        app.inline_images_visible,
+        "second toggle should show images"
+    );
     assert!(crate::tui::app::ui_prefs::inline_images_visible());
 
     if let Some(prev_home) = prev_home {
@@ -225,7 +228,9 @@ fn make_edit_badge_test_app(
                     "old_string": old_string,
                     "new_string": new_string,
                 }),
-                intent: None, thought_signature: None, },
+                intent: None,
+                thought_signature: None,
+            },
         ),
     ];
     app.bump_display_messages_version();
@@ -429,7 +434,9 @@ fn test_expand_badge_shortcut_opens_full_inline_from_non_inline_mode() {
                 "old_string": "old line\n",
                 "new_string": "new line\n",
             }),
-            intent: None, thought_signature: None, },
+            intent: None,
+            thought_signature: None,
+        },
     ));
     app.bump_display_messages_version();
     app.diff_mode = crate::config::DiffDisplayMode::Off;
@@ -458,7 +465,9 @@ fn test_expand_badge_shortcut_uses_display_messages_when_edit_count_is_stale() {
                 "old_string": "old line\n",
                 "new_string": "new line\n",
             }),
-            intent: None, thought_signature: None, },
+            intent: None,
+            thought_signature: None,
+        },
     ));
     app.bump_display_messages_version();
     app.diff_mode = crate::config::DiffDisplayMode::Off;
@@ -705,7 +714,8 @@ fn test_click_on_inline_image_label_line_cycles_level() {
         "expected a Fit image region anchored under the label line"
     );
 
-    let prepared = std::sync::Arc::new(PreparedChatFrame::from_single(std::sync::Arc::new(section)));
+    let prepared =
+        std::sync::Arc::new(PreparedChatFrame::from_single(std::sync::Arc::new(section)));
     let visible_end = prepared.wrapped_plain_line_count();
     let content_area = Rect::new(0, 0, chat_width, visible_end as u16 + 1);
 
@@ -863,8 +873,8 @@ const REPRO_TINY_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAA
 /// path actually used in production, not the isolated `build_section` helper.
 #[test]
 fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
-    use crate::tui::ui::inline_image_ui::ImageExpandLevel;
     use crate::message::{ContentBlock, Role};
+    use crate::tui::ui::inline_image_ui::ImageExpandLevel;
 
     let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
@@ -978,8 +988,7 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
             }
         }
     }
-    let (badge_col, badge_row) =
-        badge.expect("image label cell should be visible in the frame");
+    let (badge_col, badge_row) = badge.expect("image label cell should be visible in the frame");
 
     assert_eq!(
         app.image_expand_level(image_id),

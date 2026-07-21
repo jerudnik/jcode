@@ -577,12 +577,12 @@ mod debug_execution_tests {
     use std::sync::Arc;
     use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    fn lock_env() -> crate::storage::TestEnvLease {
         crate::storage::lock_test_env()
     }
 
     struct EnvVarGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: crate::storage::TestEnvLease,
         key: &'static str,
         previous: Option<OsString>,
     }

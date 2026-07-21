@@ -521,6 +521,7 @@ mod tests {
 
     #[tokio::test]
     async fn dictation_command_trims_trailing_newlines() {
+        let _env_lease = crate::tui::app::test_support::lock_test_env_read();
         let text = run_dictation_command("printf 'hello from test\\n'", 5)
             .await
             .expect("dictation command should succeed");

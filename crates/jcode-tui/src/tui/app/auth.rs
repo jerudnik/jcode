@@ -2412,13 +2412,15 @@ impl App {
             ),
         ));
         let provider = Arc::clone(&self.provider);
+        let session_id = self.session.id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 provider.on_auth_changed();
                 // Hot provider initialization is complete even if live catalog
                 // prefetches are still running. Wake the picker now so it can use
                 // the newly available routes instead of the pre-login snapshot.
-                crate::bus::Bus::global().publish(crate::bus::BusEvent::AuthCatalogRefreshReady);
+                crate::bus::Bus::global()
+                    .publish(crate::bus::BusEvent::AuthCatalogRefreshReady { session_id });
             });
         } else {
             provider.on_auth_changed();

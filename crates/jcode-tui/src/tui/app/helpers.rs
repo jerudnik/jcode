@@ -1380,6 +1380,14 @@ fn gather_ambient_info_inner(ambient_enabled: bool) -> Option<AmbientWidgetData>
         .as_ref()
         .map(|m| m.queue().items().to_vec())
         .unwrap_or_default();
+    ambient_widget_data_from(state, &queue_items, ambient_enabled)
+}
+
+fn ambient_widget_data_from(
+    state: crate::ambient::AmbientState,
+    queue_items: &[crate::ambient::ScheduledItem],
+    ambient_enabled: bool,
+) -> Option<AmbientWidgetData> {
     let queue_count = queue_items.len();
     let next_queue_item = queue_items.iter().min_by_key(|item| item.scheduled_for);
     let reminder_items: Vec<_> = queue_items
