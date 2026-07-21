@@ -1,6 +1,6 @@
 #[test]
 fn test_fast_default_on_saves_config_and_updates_session() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp.path());
@@ -29,7 +29,7 @@ fn test_fast_default_on_saves_config_and_updates_session() {
 
 #[test]
 fn test_fast_status_shows_saved_default() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp.path());
@@ -186,30 +186,31 @@ fn test_mask_email_censors_local_part() {
 
 #[test]
 fn test_subscription_command_shows_jcode_status_scaffold() {
-    let _guard = crate::storage::lock_test_env();
-    crate::subscription_catalog::clear_runtime_env();
-    crate::env::remove_var(crate::subscription_catalog::JCODE_API_KEY_ENV);
-    crate::env::remove_var(crate::subscription_catalog::JCODE_API_BASE_ENV);
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        crate::subscription_catalog::clear_runtime_env();
+        crate::env::remove_var(crate::subscription_catalog::JCODE_API_KEY_ENV);
+        crate::env::remove_var(crate::subscription_catalog::JCODE_API_BASE_ENV);
 
-    let mut app = create_test_app();
-    app.input = "/subscription".to_string();
-    app.submit_input();
+        let mut app = create_test_app();
+        app.input = "/subscription".to_string();
+        app.submit_input();
 
-    let msg = app
-        .display_messages()
-        .last()
-        .expect("missing /subscription response");
-    assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("Jcode Subscription Status"));
-    assert!(msg.content.contains("/login jcode"));
-    assert!(msg.content.contains("Claude Opus 4.8"));
-    assert!(msg.content.contains("GPT-5.5"));
-    assert!(msg.content.contains("Claude Fable 5"));
-    assert!(msg.content.contains("GPT-5.6 Sol"));
-    assert!(msg.content.contains("Plus"));
-    assert!(msg.content.contains("Flagship"));
-    assert!(msg.content.contains("$10/mo"));
-    assert!(msg.content.contains("$1000/mo"));
+        let msg = app
+            .display_messages()
+            .last()
+            .expect("missing /subscription response");
+        assert_eq!(msg.role, "system");
+        assert!(msg.content.contains("Jcode Subscription Status"));
+        assert!(msg.content.contains("/login jcode"));
+        assert!(msg.content.contains("Claude Opus 4.8"));
+        assert!(msg.content.contains("GPT-5.5"));
+        assert!(msg.content.contains("Claude Fable 5"));
+        assert!(msg.content.contains("GPT-5.6 Sol"));
+        assert!(msg.content.contains("Plus"));
+        assert!(msg.content.contains("Flagship"));
+        assert!(msg.content.contains("$10/mo"));
+        assert!(msg.content.contains("$1000/mo"));
+    });
 }
 
 #[test]

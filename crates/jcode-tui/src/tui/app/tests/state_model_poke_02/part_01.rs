@@ -92,6 +92,7 @@ fn test_tool_side_panel_focus_supports_image_zoom_keys() {
 
 #[test]
 fn test_mouse_horizontal_scroll_over_tool_side_panel_pans_without_focus_change() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
     app.diff_pane_scroll_x = 0;
@@ -133,6 +134,7 @@ fn test_mouse_horizontal_scroll_over_tool_side_panel_pans_without_focus_change()
 
 #[test]
 fn test_ctrl_mouse_scroll_over_tool_side_panel_zooms_images() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     app.diff_mode = crate::config::DiffDisplayMode::Inline;
     app.side_panel_image_zoom_percent = 100;
@@ -174,6 +176,7 @@ fn test_ctrl_mouse_scroll_over_tool_side_panel_zooms_images() {
 
 #[test]
 fn test_mouse_scroll_events_are_classified_as_scroll_only() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     app.diff_mode = crate::config::DiffDisplayMode::File;
 
@@ -208,6 +211,7 @@ fn test_mouse_scroll_events_are_classified_as_scroll_only() {
 
 #[test]
 fn test_handterm_native_scroll_command_updates_chat_offset() {
+    let _render_lock = scroll_render_test_lock();
     // Use an app with real scrollable content and draw it, so the renderer
     // records a non-zero max scroll. Since the phantom-offset fix,
     // scroll_down treats a rendered max of 0 (e.g. an undrawn or empty
@@ -243,7 +247,7 @@ fn test_handterm_native_scroll_client_roundtrips_over_socket() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
 
-    let _lock = crate::storage::lock_test_env();
+    let _lock = crate::tui::app::test_support::lock_test_env();
     let dir = tempfile::tempdir().expect("tempdir");
     let socket_path = dir.path().join("handterm-scroll.sock");
     let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
@@ -452,6 +456,7 @@ fn test_mouse_scroll_over_focused_diagram_can_noop_at_top() {
 
 #[test]
 fn test_dragging_diagram_border_resizes_immediately_without_animation() {
+    let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
     app.diagram_mode = crate::config::DiagramDisplayMode::Pinned;
     app.diagram_pane_enabled = true;
@@ -1079,7 +1084,7 @@ fn test_autocomplete_adds_space_for_nested_argument_commands() {
 
 #[test]
 fn test_goals_show_suggestions_include_goal_ids() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let project = temp.path().join("repo");
     std::fs::create_dir_all(&project).expect("project dir");

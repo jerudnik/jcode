@@ -22,8 +22,9 @@ fn test_agents_review_picker_saves_config_override() {
             .expect("review picker should include at least one model option");
         app.inline_interactive_state.as_mut().unwrap().selected = selected;
         let selected_model_idx = app.inline_interactive_state.as_ref().unwrap().filtered[selected];
-        app.inline_interactive_state.as_mut().unwrap().entries[selected_model_idx].options[0]
-            .available = true;
+        let entry = &mut app.inline_interactive_state.as_mut().unwrap().entries[selected_model_idx];
+        entry.selected_option = 0;
+        entry.options[0].available = true;
 
         let expected = {
             let picker = app.inline_interactive_state.as_ref().unwrap();
@@ -53,11 +54,9 @@ fn test_agents_review_picker_saves_config_override() {
             } else if route.api_method == "bedrock" {
                 format!("bedrock:{}", base)
             } else if route.api_method == "openrouter" && route.provider != "auto" {
-                if base.contains('/') {
-                    format!("{}@{}", base, route.provider)
-                } else {
-                    format!("anthropic/{}@{}", base, route.provider)
-                }
+                let model = crate::provider::openrouter_catalog_model_id(&base)
+                    .unwrap_or_else(|| base.clone());
+                format!("{}@{}", model, route.provider)
             } else {
                 base
             }

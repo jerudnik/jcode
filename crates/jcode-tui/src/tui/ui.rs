@@ -1348,6 +1348,16 @@ pub fn last_layout_snapshot() -> Option<LayoutSnapshot> {
 
 #[cfg(test)]
 pub(crate) fn clear_test_render_state_for_tests() {
+    if let Some(cache) = BODY_CACHE.get() {
+        *cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = BodyCacheState::default();
+    }
+    if let Some(cache) = FULL_PREP_CACHE.get() {
+        *cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = FullPrepCacheState::default();
+    }
     set_last_max_scroll(0);
     set_pinned_pane_total_lines(0);
     set_last_diff_pane_effective_scroll(0);

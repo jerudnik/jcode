@@ -1330,6 +1330,7 @@ mod tests {
         let scroll = super::resolve_tail_follow_scroll(400, 30);
         assert!(scroll >= 400 - 30, "lag capped to viewport: {scroll}");
         assert!(crate::tui::ui::tail_catchup_active());
+        crate::tui::ui::set_tail_catchup_active(false);
     }
 
     #[test]

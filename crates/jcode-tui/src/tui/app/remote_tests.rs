@@ -38,41 +38,15 @@ impl Provider for MockProvider {
 }
 
 fn create_test_app() -> crate::tui::app::App {
-    ensure_test_jcode_home_if_unset();
-    // `has_notification()` (via `unfocused_redraw_warranted`) consults a
-    // process-wide ambient-info cache that another test may have populated
-    // from its own JCODE_HOME (scheduled reminders read as a notification).
-    // Reset it so these tests observe only their own state.
-    crate::tui::app::helpers::clear_ambient_info_cache_for_tests();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
-    let rt = tokio::runtime::Runtime::new().expect("runtime");
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = crate::tui::app::App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
-}
-
-/// Point JCODE_HOME at a per-process temp dir when the environment does not
-/// already pin one, so tests never read the developer's real `~/.jcode`
-/// state (e.g. a populated ambient queue turns `has_notification()` on and
-/// breaks the unfocused-redraw assertions). Mirrors the helper of the same
-/// name used by the main app test suite.
-fn ensure_test_jcode_home_if_unset() {
-    use std::sync::OnceLock;
-
-    static TEST_HOME: OnceLock<std::path::PathBuf> = OnceLock::new();
-
-    if std::env::var_os("JCODE_HOME").is_some() {
-        return;
-    }
-
-    let path = TEST_HOME.get_or_init(|| {
-        let path = std::env::temp_dir().join(format!("jcode-test-home-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&path);
-        path
-    });
-    crate::env::set_var("JCODE_HOME", path);
+    crate::tui::app::test_support::create_test_app_with(provider, |app| {
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+        // These tests exercise the normal remote session chrome/run loop, not
+        // first-run onboarding. Make that precondition explicit so host auth
+        // state cannot select the onboarding-only donut branch.
+        app.onboarding_flow = None;
+    })
 }
 
 #[test]
@@ -180,6 +154,17 @@ fn idle_donut_pauses_while_unfocused() {
     let redraw = app.set_client_focused(true);
     assert!(redraw, "regaining focus should request a redraw");
     assert!(app.client_focused());
+}
+
+#[test]
+fn idle_donut_yields_to_composer_input() {
+    let mut app = create_test_app();
+    app.input = "draft prompt".to_string();
+
+    assert!(
+        !crate::tui::idle_donut_active(&app),
+        "typed input must reserve the short-terminal composer rows instead of showing the idle donut"
+    );
 }
 
 #[test]
@@ -439,7 +424,7 @@ fn reload_handoff_inactive_without_flag_or_marker() {
     // runtime dir. Point the runtime dir at an empty tempdir so a real
     // `jcode.reload` left by a live self-dev reload on this machine cannot
     // leak into the assertion.
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::TempDir::new().expect("create temp dir");
     let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
     crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
@@ -715,7 +700,7 @@ fn process_remote_followups_pauses_auto_reload_after_repeated_attempts() {
 
 #[test]
 fn handle_post_connect_dispatches_reload_followup_even_if_history_snapshot_looks_busy() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("create temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp_home.path());

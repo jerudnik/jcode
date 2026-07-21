@@ -975,11 +975,9 @@ mod tests {
     use crate::auth::{AuthState, AuthStatus, ProviderAuth};
     use crate::message::Message;
     use crate::provider::{EventStream, Provider};
-    use crate::tool::Registry;
     use anyhow::Result;
     use async_trait::async_trait;
     use std::sync::Arc;
-    use std::sync::OnceLock;
 
     struct MockProvider;
 
@@ -1006,28 +1004,9 @@ mod tests {
         }
     }
 
-    fn ensure_test_jcode_home_if_unset() {
-        static TEST_HOME: OnceLock<std::path::PathBuf> = OnceLock::new();
-
-        if std::env::var_os("JCODE_HOME").is_some() {
-            return;
-        }
-
-        let path = TEST_HOME.get_or_init(|| {
-            let path = std::env::temp_dir().join(format!("jcode-test-home-{}", std::process::id()));
-            let _ = std::fs::create_dir_all(&path);
-            path
-        });
-        crate::env::set_var("JCODE_HOME", path);
-    }
-
     fn create_test_app() -> crate::tui::app::App {
-        ensure_test_jcode_home_if_unset();
-
         let provider: Arc<dyn Provider> = Arc::new(MockProvider);
-        let rt = tokio::runtime::Runtime::new().expect("test runtime");
-        let registry = rt.block_on(Registry::new(provider.clone()));
-        crate::tui::app::App::new_for_test_harness(provider, registry)
+        crate::tui::app::test_support::create_test_app_with(provider, |_| {})
     }
 
     #[test]
@@ -1381,7 +1360,7 @@ mod tests {
 
     #[test]
     fn header_provider_auth_tag_reports_active_credential_for_openai() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let prev = std::env::var_os("JCODE_RUNTIME_PROVIDER");
         crate::env::remove_var("JCODE_RUNTIME_PROVIDER");
         let auth = AuthStatus {
@@ -1401,7 +1380,7 @@ mod tests {
 
     #[test]
     fn header_provider_auth_tag_honors_runtime_selection_and_oauth_first() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let prev = std::env::var_os("JCODE_RUNTIME_PROVIDER");
 
         let both = AuthStatus {
@@ -1451,7 +1430,7 @@ mod tests {
 
     #[test]
     fn build_persistent_header_prefers_configured_model_during_remote_connect() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let prev_model = std::env::var_os("JCODE_MODEL");
         let prev_provider = std::env::var_os("JCODE_PROVIDER");
         crate::env::set_var("JCODE_MODEL", "gpt-5.4");
@@ -1482,39 +1461,43 @@ mod tests {
 
     #[test]
     fn build_header_lines_omits_placeholder_provider_label_when_unknown() {
-        let mut app = crate::tui::app::App::new_for_remote(None);
-        app.set_remote_startup_phase(crate::tui::app::RemoteStartupPhase::LoadingSession);
+        crate::tui::app::test_support::with_temp_jcode_home(|| {
+            let mut app = crate::tui::app::App::new_for_remote(None);
+            app.set_remote_startup_phase(crate::tui::app::RemoteStartupPhase::LoadingSession);
 
-        // The model line lives in the persistent header now; the startup phase
-        // label renders there without a bogus "(unknown)" provider tag.
-        let lines = build_persistent_header(&app, 80);
-        let rendered = lines
-            .iter()
-            .flat_map(|line| line.spans.iter())
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
+            // The model line lives in the persistent header now; the startup phase
+            // label renders there without a bogus "(unknown)" provider tag.
+            let lines = build_persistent_header(&app, 80);
+            let rendered = lines
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
 
-        assert!(rendered.contains("loading session…"), "{rendered}");
-        assert!(!rendered.contains("(unknown)"));
-        assert!(!rendered.contains("(remote)"));
+            assert!(rendered.contains("loading session…"), "{rendered}");
+            assert!(!rendered.contains("(unknown)"));
+            assert!(!rendered.contains("(remote)"));
+        });
     }
 
     #[test]
     fn build_header_lines_hides_secondary_placeholder_during_brief_connecting_phase() {
-        let app = crate::tui::app::App::new_for_remote(None);
+        crate::tui::app::test_support::with_temp_jcode_home(|| {
+            let app = crate::tui::app::App::new_for_remote(None);
 
-        let lines = build_header_lines(&app, 80);
-        let rendered = lines
-            .iter()
-            .flat_map(|line| line.spans.iter())
-            .map(|span| span.content.as_ref())
-            .collect::<String>();
+            let lines = build_header_lines(&app, 80);
+            let rendered = lines
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
 
-        assert!(
-            !rendered.contains("connecting to server…"),
-            "brief connecting placeholder should not render the secondary detail line"
-        );
-        assert!(!rendered.contains("(remote)"));
+            assert!(
+                !rendered.contains("connecting to server…"),
+                "brief connecting placeholder should not render the secondary detail line"
+            );
+            assert!(!rendered.contains("(remote)"));
+        });
     }
 
     #[test]
@@ -1557,7 +1540,7 @@ mod tests {
 
     #[test]
     fn auth_status_line_marks_active_credential_when_both_configured() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let prev = std::env::var_os("JCODE_RUNTIME_PROVIDER");
         let auth = AuthStatus {
             anthropic: ProviderAuth {

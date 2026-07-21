@@ -370,7 +370,7 @@ mod tests {
     use super::*;
     use std::ffi::OsString;
 
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    fn lock_env() -> crate::storage::TestEnvLease {
         crate::storage::lock_test_env()
     }
 
