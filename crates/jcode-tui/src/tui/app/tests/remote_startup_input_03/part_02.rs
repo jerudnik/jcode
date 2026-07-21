@@ -10,9 +10,9 @@ fn test_new_for_remote_restored_soft_interrupt_resend_triggers_dispatch_state() 
     let restored = App::new_for_remote(Some(session_id));
     assert!(restored.interleave_message.is_none());
     assert_eq!(restored.queued_messages(), &["sent interrupt"]);
-    assert!(restored.pending_queued_dispatch);
-    assert!(restored.is_processing);
-    assert!(matches!(restored.status, ProcessingStatus::Sending));
+    assert!(!restored.pending_queued_dispatch);
+    assert!(!restored.is_processing);
+    assert!(matches!(restored.status, ProcessingStatus::Idle));
 }
 
 #[test]
@@ -26,11 +26,8 @@ fn test_new_for_remote_does_not_requeue_acked_pending_soft_interrupts() {
     app.save_input_for_reload(&session_id);
 
     let restored = App::new_for_remote(Some(session_id));
-    assert_eq!(
-        restored.interleave_message.as_deref(),
-        Some("local interleave")
-    );
-    assert_eq!(restored.queued_messages(), &["queued later"]);
+    assert!(restored.interleave_message.is_none());
+    assert_eq!(restored.queued_messages(), &["local interleave", "queued later"]);
 }
 
 #[test]

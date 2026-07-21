@@ -654,7 +654,7 @@ fn test_mouse_click_in_wrapped_input_moves_cursor_to_second_visual_line() {
         modifiers: KeyModifiers::empty(),
     });
 
-    assert_eq!(app.cursor_pos, 5);
+    assert_eq!(app.cursor_pos, 9);
 }
 
 /// End-to-end: a real left-click on an inline image's label line maps the

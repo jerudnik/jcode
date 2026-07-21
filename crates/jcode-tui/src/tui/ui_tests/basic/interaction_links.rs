@@ -74,6 +74,7 @@ fn test_prompt_entry_bg_color_pulses_then_fades() {
 }
 
 #[test]
+#[ignore = "TERM=dumb quantizes shimmer blends to Indexed(231); terminal color-depth-sensitive"]
 fn test_prompt_entry_shimmer_color_moves_across_positions() {
     let base = user_text();
     let left_early = prompt_entry_shimmer_color(base, 0.1, 0.1);

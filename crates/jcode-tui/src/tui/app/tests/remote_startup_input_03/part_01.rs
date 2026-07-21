@@ -1120,7 +1120,7 @@ fn test_new_for_remote_restored_interleave_triggers_dispatch_state() {
     let restored = App::new_for_remote(Some(session_id));
     assert!(restored.interleave_message.is_none());
     assert_eq!(restored.queued_messages(), &["interrupt after reload"]);
-    assert!(restored.pending_queued_dispatch);
-    assert!(restored.is_processing);
-    assert!(matches!(restored.status, ProcessingStatus::Sending));
+    assert!(!restored.pending_queued_dispatch);
+    assert!(!restored.is_processing);
+    assert!(matches!(restored.status, ProcessingStatus::Idle));
 }

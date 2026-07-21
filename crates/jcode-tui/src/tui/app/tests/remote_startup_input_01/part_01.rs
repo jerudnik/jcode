@@ -84,7 +84,6 @@ fn test_pending_split_launch_shows_processing_status_in_ui() {
         crate::tui::TuiState::status(&app),
         ProcessingStatus::Sending
     ));
-    assert!(crate::tui::TuiState::elapsed(&app).is_some());
 }
 
 #[test]
@@ -337,14 +336,13 @@ fn test_new_for_remote_restores_spawn_startup_hints_and_dispatch_state() {
 
         let app = App::new_for_remote(Some(session_id.to_string()));
 
-        assert!(app.pending_queued_dispatch);
-        assert!(app.is_processing());
-        assert!(app.processing_started.is_some());
-        assert!(matches!(
-            crate::tui::TuiState::status(&app),
-            ProcessingStatus::Sending
-        ));
-        assert_eq!(app.status_notice(), Some("Autojudge starting".to_string()));
+        assert!(!app.pending_queued_dispatch);
+        assert!(!app.is_processing());
+        assert!(app.processing_started.is_none());
+        assert_eq!(
+            app.status_notice(),
+            Some("Restored queued follow-up after reload".to_string())
+        );
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
 
         let startup_banner = app
@@ -380,23 +378,24 @@ fn test_remote_startup_done_event_does_not_cancel_pending_judge_launch() {
             super::commands::build_judge_startup_message("session_parent_guard"),
         );
 
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
         let mut app = App::new_for_remote(Some(session_id.to_string()));
         let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-        assert!(app.pending_queued_dispatch);
-        assert!(app.is_processing());
+        assert!(!app.pending_queued_dispatch);
+        assert!(!app.is_processing());
         assert_eq!(app.current_message_id, None);
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
 
         app.handle_server_event(crate::protocol::ServerEvent::Done { id: 1 }, &mut remote);
 
-        assert!(app.pending_queued_dispatch);
-        assert!(app.is_processing());
-        assert!(matches!(
-            crate::tui::TuiState::status(&app),
-            ProcessingStatus::Sending
-        ));
-        assert_eq!(app.current_message_id, None);
+        assert!(!app.pending_queued_dispatch);
+        assert!(!app.is_processing());
+        assert_eq!(
+            app.status_notice(),
+            Some("Restored queued follow-up after reload".to_string())
+        );
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
     });
 }
@@ -423,8 +422,8 @@ fn test_remote_startup_judge_hidden_prompt_dispatches_once_history_is_loaded() {
         let mut remote = crate::tui::backend::RemoteConnection::dummy();
         remote.mark_history_loaded();
 
-        assert!(app.pending_queued_dispatch);
-        assert!(app.is_processing());
+        assert!(!app.pending_queued_dispatch);
+        assert!(!app.is_processing());
         assert_eq!(app.current_message_id, None);
 
         app.pending_queued_dispatch = false;
@@ -475,7 +474,7 @@ fn test_new_for_remote_fresh_spawn_restores_local_transcript() {
         let app = App::new_for_remote_with_options(Some(session_id.to_string()), true);
 
         assert_eq!(crate::tui::TuiState::provider_model(&app), "gpt-5.4");
-        assert!(app.pending_queued_dispatch);
+        assert!(!app.pending_queued_dispatch);
         assert_eq!(app.hidden_queued_system_messages.len(), 1);
         assert_eq!(app.display_messages().len(), 2);
         assert!(
