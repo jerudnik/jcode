@@ -75,11 +75,12 @@ fn kill_spawned_server(home_dir: &std::path::Path) {
         return;
     };
     for info in servers.values() {
-        if let Some(pid) = info.get("pid").and_then(|v| v.as_u64()) {
-            if pid > 0 && pid as u32 != std::process::id() {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGKILL);
-                }
+        if let Some(pid) = info.get("pid").and_then(|v| v.as_u64())
+            && pid > 0
+            && pid as u32 != std::process::id()
+        {
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
             }
         }
     }
