@@ -1,6 +1,6 @@
 #[test]
 fn test_local_error_copy_badge_shortcut_supported() {
-    let _render_lock = scroll_render_test_lock();
+    let (_render_lock, _clipboard) = scroll_copy_test_guards();
     let (mut app, mut terminal) = create_error_copy_test_app();
 
     let initial = render_and_snap(&app, &mut terminal);
@@ -25,7 +25,7 @@ fn test_local_error_copy_badge_shortcut_supported() {
 
 #[test]
 fn test_local_tool_error_copy_badge_shortcut_supported() {
-    let _render_lock = scroll_render_test_lock();
+    let (_render_lock, _clipboard) = scroll_copy_test_guards();
     let (mut app, mut terminal) = create_tool_error_copy_test_app();
 
     let initial = render_and_snap(&app, &mut terminal);
@@ -50,7 +50,7 @@ fn test_local_tool_error_copy_badge_shortcut_supported() {
 
 #[test]
 fn test_local_tool_failed_output_copy_badge_shortcut_supported() {
-    let _render_lock = scroll_render_test_lock();
+    let (_render_lock, _clipboard) = scroll_copy_test_guards();
     let (mut app, mut terminal) = create_tool_failed_output_copy_test_app();
 
     let initial = render_and_snap(&app, &mut terminal);
@@ -75,7 +75,7 @@ fn test_local_tool_failed_output_copy_badge_shortcut_supported() {
 
 #[test]
 fn test_local_blockquote_copy_badge_shortcut_supported() {
-    let _render_lock = scroll_render_test_lock();
+    let (_render_lock, _clipboard) = scroll_copy_test_guards();
     let (mut app, mut terminal) = create_blockquote_copy_test_app();
 
     let initial = render_and_snap(&app, &mut terminal);
@@ -1412,4 +1412,3 @@ fn test_changelog_overlay_mouse_drag_release_copies_text() {
         Some("Copied selection") | Some("Failed to copy selection") | Some("Selection is empty")
     ));
 }
-

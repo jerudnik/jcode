@@ -180,6 +180,12 @@ pub trait TuiState {
     fn scroll_offset(&self) -> usize;
     /// Whether auto-scroll to bottom is paused (user scrolled up during streaming)
     fn auto_scroll_paused(&self) -> bool;
+    /// Whether the tail-follow viewport is still animating toward the bottom.
+    /// Kept on the state interface so redraw scheduling is deterministic for
+    /// alternate state implementations and tests.
+    fn tail_catchup_active(&self) -> bool {
+        crate::tui::ui::tail_catchup_active()
+    }
     /// When older compacted history is being loaded in, this is the reader's
     /// captured distance (in wrapped lines) from the bottom of the transcript.
     /// The renderer uses it to keep the viewport anchored to the same content as
@@ -234,6 +240,11 @@ pub trait TuiState {
         self.elapsed()
     }
     fn status(&self) -> ProcessingStatus;
+    /// Whether an in-process self-development build is currently reporting
+    /// progress in the status line.
+    fn build_progress_active(&self) -> bool {
+        crate::build::read_build_progress().is_some()
+    }
     fn command_suggestions(&self) -> Vec<(String, &'static str)>;
     fn command_suggestion_selected(&self) -> usize {
         0
@@ -1464,7 +1475,7 @@ fn full_frame_status_animation_active_with_policy(
     // active redraw loop while visible.
     matches!(state.status(), ProcessingStatus::RunningTool(_))
         || rate_limit_countdown_redraw_active(state)
-        || crate::build::read_build_progress().is_some()
+        || state.build_progress_active()
 }
 
 fn primary_status_spinner_fast_path_available_with_policy(
@@ -1549,7 +1560,7 @@ pub(crate) fn redraw_interval_with_policy(
     // anchored traces are static transcript messages now. The tail-follow
     // catch-up slide still needs smooth frames and must skip the deep-idle
     // short-circuits below.
-    if ui::tail_catchup_active() {
+    if state.tail_catchup_active() {
         return match policy.tier {
             crate::perf::PerformanceTier::Minimal => fast_interval,
             _ => animation_interval,
@@ -1579,7 +1590,7 @@ pub(crate) fn redraw_interval_with_policy(
         && !state.copy_selection_edge_autoscroll_active()
         && !state.remote_startup_phase_active()
         && !rate_limit_countdown_redraw_active(state)
-        && crate::build::read_build_progress().is_none()
+        && !state.build_progress_active()
     {
         return REDRAW_DEEP_IDLE;
     }
@@ -1597,7 +1608,7 @@ pub(crate) fn redraw_interval_with_policy(
         && !state.remote_startup_phase_active()
         && !rate_limit_countdown_redraw_active(state)
         && !cache_cold_countdown_redraw_active(state)
-        && crate::build::read_build_progress().is_none()
+        && !state.build_progress_active()
         && !state.onboarding_welcome_active()
         && !swarm_spinner_redraw_active(state)
         && !session_picker_spinner_redraw_active(state)
@@ -1698,7 +1709,7 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
         && !state.remote_startup_phase_active()
         && !rate_limit_countdown_redraw_active(state)
         && !cache_cold_countdown_redraw_active(state)
-        && crate::build::read_build_progress().is_none()
+        && !state.build_progress_active()
         && !state.onboarding_welcome_active()
         && !swarm_spinner_redraw_active(state)
         && !session_picker_spinner_redraw_active(state)
@@ -1724,7 +1735,7 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
 
     if state.is_processing()
         || !state.streaming_text().is_empty()
-        || ui::tail_catchup_active()
+        || state.tail_catchup_active()
         || state.status_notice().is_some()
         || state.learn_hint().is_some()
         || state.has_pending_mouse_scroll_animation()

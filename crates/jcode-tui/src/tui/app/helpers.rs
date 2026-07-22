@@ -204,10 +204,6 @@ pub(super) fn ctrl_bracket_fallback_to_esc(code: &mut KeyCode, modifiers: &mut K
         KeyCode::Esc => {
             *code = KeyCode::Char('[');
         }
-        KeyCode::Char('5') => {
-            // Legacy tty mapping for Ctrl+]
-            *code = KeyCode::Char(']');
-        }
         _ => {}
     }
 }
@@ -385,6 +381,11 @@ pub(super) fn format_tokens(tokens: u64) -> String {
 /// Copy text to clipboard, trying wl-copy first (Wayland), then OSC 52 (works
 /// over SSH / Docker / tmux), then arboard as a final fallback.
 pub(super) fn copy_to_clipboard(text: &str) -> bool {
+    #[cfg(test)]
+    if let Some(result) = super::test_support::test_clipboard_result() {
+        return result;
+    }
+
     if let Ok(mut child) = std::process::Command::new("wl-copy")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())

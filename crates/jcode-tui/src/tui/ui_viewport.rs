@@ -58,7 +58,19 @@ const TAIL_CATCHUP_MAX_STEP: usize = 3;
 /// frame's resolved position by a bounded step so the new content slides into
 /// view. Disabled on tiers without decorative animations.
 fn resolve_tail_follow_scroll(max_scroll: usize, viewport_height: usize) -> usize {
-    if !crate::perf::tui_policy().enable_decorative_animations {
+    resolve_tail_follow_scroll_with_animations(
+        max_scroll,
+        viewport_height,
+        crate::perf::tui_policy().enable_decorative_animations,
+    )
+}
+
+fn resolve_tail_follow_scroll_with_animations(
+    max_scroll: usize,
+    viewport_height: usize,
+    animations_enabled: bool,
+) -> usize {
+    if !animations_enabled {
         super::set_tail_catchup_active(false);
         return max_scroll;
     }
