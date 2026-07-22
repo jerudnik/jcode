@@ -189,6 +189,8 @@ impl Agent {
         new_session.ensure_initial_session_context_message();
 
         self.session = new_session;
+        #[cfg(any(test, feature = "test-support"))]
+        self.track_test_active_pid_marker();
         self.reset_runtime_state_for_session_change();
         self.provider_session_id = None;
         self.current_evidence_turn_id = None;
@@ -645,6 +647,8 @@ impl Agent {
 
         let mark_active_start = Instant::now();
         self.session.mark_active();
+        #[cfg(any(test, feature = "test-support"))]
+        self.track_test_active_pid_marker();
         let mark_active_ms = mark_active_start.elapsed().as_millis();
         self.sync_memory_dedup_state_from_session();
 

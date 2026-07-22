@@ -293,10 +293,10 @@ fn test_table_cjk_alignment() {
 
 #[test]
 fn test_mermaid_block_detection() {
-    // Mermaid rendering is temporarily disabled by default, so Mermaid fences
-    // should safely fall back to normal code blocks unless explicitly opted in.
+    // Workspace feature unification may enable Mermaid rendering. Force it off
+    // only on this test thread so the code-block fallback remains deterministic.
     let md = "```mermaid\nflowchart LR\n    A --> B\n```";
-    let lines = render_markdown(md);
+    let lines = with_mermaid_rendering_override(Some(false), || render_markdown(md));
     let text: String = lines
         .iter()
         .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
