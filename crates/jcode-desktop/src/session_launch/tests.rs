@@ -12,7 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 #[path = "tests/fake_server.rs"]
 mod fake_server;
 #[cfg(unix)]
-use fake_server::{accept_first_requesting_client, read_fake_server_request};
+use fake_server::{accept_first_requesting_client, read_fake_server_request, unique_socket_path};
 
 #[cfg(unix)]
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -449,14 +449,7 @@ fn desktop_session_worker_slots_are_bounded_and_released() -> Result<()> {
 #[test]
 fn desktop_worker_roundtrips_message_with_fake_server() -> Result<()> {
     let _guard = lock_test_env();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-smoke-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let socket_path = unique_socket_path("sm");
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     let previous_socket = std::env::var_os("JCODE_SOCKET");
@@ -501,18 +494,8 @@ fn desktop_worker_roundtrips_message_with_fake_server() -> Result<()> {
 #[test]
 fn desktop_worker_emits_reloaded_before_real_done_after_fake_reload() -> Result<()> {
     let _guard = lock_test_env();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-old-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
+    let socket_path = unique_socket_path("ro");
+    let new_socket_path = unique_socket_path("rn");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&new_socket_path);
     let listener = UnixListener::bind(&socket_path)?;
@@ -572,18 +555,8 @@ fn desktop_worker_emits_reloaded_before_real_done_after_fake_reload() -> Result<
 #[test]
 fn desktop_worker_rejects_reconnect_session_id_mismatch() -> Result<()> {
     let _guard = lock_test_env();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-mismatch-old-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-mismatch-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
+    let socket_path = unique_socket_path("mo");
+    let new_socket_path = unique_socket_path("mn");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&new_socket_path);
     let listener = UnixListener::bind(&socket_path)?;
@@ -633,14 +606,7 @@ fn desktop_worker_rejects_reconnect_session_id_mismatch() -> Result<()> {
 #[test]
 fn desktop_worker_rejects_malformed_server_event_lines() -> Result<()> {
     let _guard = lock_test_env();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-malformed-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let socket_path = unique_socket_path("mf");
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     let previous_socket = std::env::var_os("JCODE_SOCKET");
@@ -725,22 +691,9 @@ fn drain_session_events_treats_cancel_completion_as_terminal() -> Result<()> {
 #[cfg(unix)]
 #[test]
 fn validate_reload_socket_path_requires_owned_socket_in_current_directory() -> Result<()> {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let current_socket = std::env::temp_dir().join(format!(
-        "jcode-desktop-reload-validate-current-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket = std::env::temp_dir().join(format!(
-        "jcode-desktop-reload-validate-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let non_socket = std::env::temp_dir().join(format!(
-        "jcode-desktop-reload-validate-file-{}-{nonce}",
-        std::process::id(),
-    ));
+    let current_socket = unique_socket_path("vc");
+    let new_socket = unique_socket_path("vn");
+    let non_socket = unique_socket_path("vf");
     let _ = std::fs::remove_file(&current_socket);
     let _ = std::fs::remove_file(&new_socket);
     let _ = std::fs::remove_file(&non_socket);
@@ -770,14 +723,7 @@ fn validate_reload_socket_path_requires_owned_socket_in_current_directory() -> R
 #[test]
 fn workspace_send_message_uses_shared_server_instead_of_prompt_argv() -> Result<()> {
     let _guard = lock_test_env();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-workspace-send-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let socket_path = unique_socket_path("ws");
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     let previous_socket = std::env::var_os("JCODE_SOCKET");
@@ -807,18 +753,8 @@ fn workspace_send_message_uses_shared_server_instead_of_prompt_argv() -> Result<
 #[test]
 fn desktop_workers_reconnect_independently_across_same_fake_reload() -> Result<()> {
     let _guard = lock_test_env();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-multi-reload-old-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-multi-reload-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
+    let socket_path = unique_socket_path("xo");
+    let new_socket_path = unique_socket_path("xn");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&new_socket_path);
     let listener = UnixListener::bind(&socket_path)?;
