@@ -64,6 +64,33 @@ fn auth_status_default_all_not_configured() {
 }
 
 #[test]
+fn auth_cache_home_key_tracks_standard_fallback_inputs() {
+    let _lock = crate::storage::lock_test_env();
+    let saved = ["JCODE_HOME", "HOME", "XDG_CONFIG_HOME"].map(|key| (key, std::env::var_os(key)));
+    let temp = tempfile::TempDir::new().expect("create temp dir");
+    let home_a = temp.path().join("home-a");
+    let home_b = temp.path().join("home-b");
+    let xdg_a = temp.path().join("xdg-a");
+    let xdg_b = temp.path().join("xdg-b");
+
+    crate::env::remove_var("JCODE_HOME");
+    crate::env::set_var("HOME", &home_a);
+    crate::env::set_var("XDG_CONFIG_HOME", &xdg_a);
+    let first = auth_cache_home_key();
+
+    crate::env::set_var("HOME", &home_b);
+    assert_ne!(first, auth_cache_home_key());
+
+    crate::env::set_var("HOME", &home_a);
+    crate::env::set_var("XDG_CONFIG_HOME", &xdg_b);
+    assert_ne!(first, auth_cache_home_key());
+
+    for (key, previous) in saved {
+        restore_env_var(key, previous);
+    }
+}
+
+#[test]
 fn auth_status_check_fast_includes_bedrock_probe() {
     let _lock = crate::storage::lock_test_env();
     let prev_bedrock_enable = std::env::var_os("JCODE_BEDROCK_ENABLE");
@@ -936,4 +963,22 @@ fn browser_suppressed_inside_test_harness_without_env_overrides() {
         super::browser_suppressed(false),
         "browser opens must be suppressed in test binaries even without --no-browser/env vars"
     );
+}
+
+#[test]
+fn cargo_test_binary_detection_supports_custom_target_directories() {
+    use std::path::Path;
+
+    assert!(super::browser_policy::is_cargo_test_binary_path(Path::new(
+        "/tmp/jcode-f17-target/debug/deps/jcode_tui-4e58b743eb75f292",
+    )));
+    assert!(super::browser_policy::is_cargo_test_binary_path(Path::new(
+        r"C:\build-cache\debug\deps\jcode_tui-4e58b743eb75f292.exe",
+    )));
+    assert!(!super::browser_policy::is_cargo_test_binary_path(
+        Path::new("/opt/jcode/deps/jcode",)
+    ));
+    assert!(!super::browser_policy::is_cargo_test_binary_path(
+        Path::new("/tmp/jcode-f17-target/debug/jcode",)
+    ));
 }

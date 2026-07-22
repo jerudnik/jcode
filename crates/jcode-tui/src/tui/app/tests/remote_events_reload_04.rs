@@ -1117,20 +1117,22 @@ fn test_remote_header_provider_name_resolves_named_omlx_and_uses_configured_fall
 
 #[test]
 fn test_replay_saved_provider_key_wins_over_conflicting_model_inference() {
-    let mut session = crate::session::Session::create_with_id(
-        "replay-provider-precedence".to_string(),
-        None,
-        None,
-    );
-    session.provider_key = Some("omlx".to_string());
-    session.model = Some("claude-sonnet-4-20250514".to_string());
+    crate::tui::app::test_support::with_temp_jcode_home(|| {
+        let mut session = crate::session::Session::create_with_id(
+            "replay-provider-precedence".to_string(),
+            None,
+            None,
+        );
+        session.provider_key = Some("omlx".to_string());
+        session.model = Some("claude-sonnet-4-20250514".to_string());
 
-    let app = App::new_for_replay_silent(session);
-    assert_eq!(app.remote_provider_name.as_deref(), Some("omlx"));
-    assert_eq!(
-        app.remote_provider_model.as_deref(),
-        Some("claude-sonnet-4-20250514")
-    );
+        let app = App::new_for_replay_silent(session);
+        assert_eq!(app.remote_provider_name.as_deref(), Some("omlx"));
+        assert_eq!(
+            app.remote_provider_model.as_deref(),
+            Some("claude-sonnet-4-20250514")
+        );
+    });
 }
 
 #[test]

@@ -5,12 +5,14 @@ use super::test_support::{lock_test_env, with_temp_jcode_home};
 include!("tests/support_failover/part_01.rs");
 include!("tests/support_failover/part_02.rs");
 include!("tests/commands_accounts_01/part_01.rs");
+include!("tests/commands_accounts_01/part_03.rs");
 include!("tests/commands_accounts_01/part_02.rs");
 include!("tests/commands_accounts_02/part_01.rs");
 include!("tests/commands_accounts_02/part_02.rs");
 include!("tests/state_model_poke_01/part_01.rs");
 include!("tests/state_model_poke_01/part_02.rs");
 include!("tests/state_model_poke_02/part_01.rs");
+include!("tests/state_model_poke_02/part_03.rs");
 include!("tests/state_model_poke_02/part_02.rs");
 include!("tests/state_model_poke_03.rs");
 include!("tests/remote_startup_input_01/part_01.rs");
@@ -22,6 +24,7 @@ include!("tests/remote_startup_input_03/part_02.rs");
 include!("tests/remote_startup_input_04.rs");
 include!("tests/image_placeholder_commands.rs");
 include!("tests/remote_events_reload_01/part_01.rs");
+include!("tests/remote_events_reload_01/part_03.rs");
 include!("tests/remote_events_reload_01/part_02.rs");
 include!("tests/remote_events_reload_02/part_01.rs");
 include!("tests/remote_events_reload_02/part_02.rs");
@@ -35,7 +38,9 @@ include!("tests/scroll_copy_01/part_01.rs");
 include!("tests/scroll_copy_01/part_02.rs");
 include!("tests/scroll_copy_02/part_01.rs");
 include!("tests/scroll_copy_02/part_02.rs");
+include!("tests/scroll_copy_02/part_03.rs");
 include!("tests/scroll_copy_03.rs");
+include!("tests/scroll_copy_03/swarm_expand.rs");
 include!("tests/input_copy_selection.rs");
 include!("tests/onboarding_flow.rs");
 include!("tests/onboarding_golden.rs");
@@ -45,6 +50,7 @@ include!("tests/reasoning_region.rs");
 include!("tests/smoothness_benchmark.rs");
 include!("tests/hotkey_feedback_e2e.rs");
 include!("tests/todo_card.rs");
+include!("tests/clear_context_usage.rs");
 
 #[test]
 fn assistant_status_command_shows_metadata_and_recovery() {
@@ -1612,53 +1618,4 @@ fn oversized_pasted_submit_is_rejected_and_preserves_input() {
             .any(|message| message.role == "system"
                 && message.content.contains("Message is too large to send"))
     );
-}
-
-fn seed_stale_clear_usage(app: &mut App) {
-    app.streaming.streaming_input_tokens = 40_000;
-    app.streaming.streaming_output_tokens = 2_000;
-    app.streaming.streaming_cache_read_tokens = Some(30_000);
-    app.streaming.streaming_cache_creation_tokens = Some(5_000);
-    app.streaming.streaming_context_stale = true;
-    app.streaming.streaming_usage_call_reset_pending = true;
-    app.kv_cache.current_api_usage_recorded = true;
-}
-
-fn assert_clear_usage_reset(app: &App) {
-    assert_eq!(app.current_stream_context_tokens(), None);
-    assert_eq!(app.streaming.streaming_input_tokens, 0);
-    assert_eq!(app.streaming.streaming_output_tokens, 0);
-    assert_eq!(app.streaming.streaming_cache_read_tokens, None);
-    assert_eq!(app.streaming.streaming_cache_creation_tokens, None);
-    assert!(!app.streaming.streaming_context_stale);
-    assert!(!app.streaming.streaming_usage_call_reset_pending);
-    assert!(!app.kv_cache.current_api_usage_recorded);
-}
-
-#[test]
-fn local_clear_resets_provider_reported_context_usage() {
-    let mut app = create_test_app();
-    seed_stale_clear_usage(&mut app);
-
-    assert!(super::commands::handle_session_command(&mut app, "/clear"));
-
-    assert_clear_usage_reset(&app);
-}
-
-#[test]
-fn remote_clear_resets_provider_reported_context_usage() {
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    remote.mark_history_loaded();
-    app.is_remote = true;
-    seed_stale_clear_usage(&mut app);
-    app.input = "/clear".to_string();
-    app.cursor_pos = app.input.len();
-
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-        .expect("remote /clear should succeed");
-
-    assert_clear_usage_reset(&app);
 }

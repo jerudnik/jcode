@@ -18,6 +18,9 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::ReceiverStream;
 
+#[path = "agent_tests/active_pid.rs"]
+mod active_pid;
+
 struct DelayedProvider {
     open_delay: Duration,
     first_event_delay: Duration,
@@ -1563,34 +1566,6 @@ async fn interrupt_signal_notified_completes_after_fire() {
         .await
         .expect("notified() task timed out after fire()")
         .expect("task panicked");
-}
-
-#[tokio::test]
-async fn new_agent_registers_active_pid_and_clear_swaps_it() {
-    let _guard = crate::storage::lock_test_env();
-    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
-    let registry = Registry::new(provider.clone()).await;
-    let mut agent = Agent::new(provider, registry);
-
-    let first_session_id = agent.session_id().to_string();
-    assert!(
-        crate::session::active_session_ids().contains(&first_session_id),
-        "fresh agent session should be tracked as active"
-    );
-
-    agent.clear();
-
-    let second_session_id = agent.session_id().to_string();
-    let active = crate::session::active_session_ids();
-    assert_ne!(first_session_id, second_session_id);
-    assert!(
-        active.contains(&second_session_id),
-        "replacement session should be tracked as active"
-    );
-    assert!(
-        !active.contains(&first_session_id),
-        "cleared session should no longer be tracked as active"
-    );
 }
 
 #[tokio::test]

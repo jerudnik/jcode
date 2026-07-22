@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Shared, scoped support for TUI app tests that touch process-global state.
 //!
 //! `JCODE_HOME`, authentication state, configuration caches, and several render
@@ -7,7 +9,6 @@
 use super::App;
 use crate::provider::Provider;
 use crate::tool::Registry;
-use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -77,10 +78,6 @@ fn test_env_scope_clears_key(key: &OsStr) -> bool {
         || EXPLICIT_SCOPED_ENV_KEYS.contains(&key)
 }
 
-thread_local! {
-    static TEST_ENV_SCOPE_DEPTH: Cell<usize> = const { Cell::new(0) };
-}
-
 /// Acquire the exclusive environment lease for a test that mutates process
 /// environment variables or their dependent caches.
 pub(crate) fn lock_test_env() -> TestEnvWriteScope {
@@ -118,9 +115,7 @@ pub(crate) struct TestRenderScope {
     _env: TestEnvWriteScope,
 }
 
-/// Thread-bound TUI writer scope. Besides retaining the storage lease, this
-/// tracks nesting so App constructors on the same thread do not attempt the
-/// intentionally forbidden write-to-read downgrade.
+/// Thread-bound TUI writer scope.
 pub(crate) struct TestEnvWriteScope {
     _lease: crate::storage::TestEnvWriteLease,
 }
@@ -128,14 +123,7 @@ pub(crate) struct TestEnvWriteScope {
 impl TestEnvWriteScope {
     fn new() -> Self {
         let lease = crate::storage::lock_test_env_write();
-        TEST_ENV_SCOPE_DEPTH.with(|depth| depth.set(depth.get() + 1));
         Self { _lease: lease }
-    }
-}
-
-impl Drop for TestEnvWriteScope {
-    fn drop(&mut self) {
-        TEST_ENV_SCOPE_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
     }
 }
 
@@ -145,11 +133,11 @@ pub(crate) fn lock_test_env_read() -> crate::storage::TestEnvReadLease {
     crate::storage::lock_test_env_read()
 }
 
-/// Acquire an App-owned read lease unless the current thread already owns a
-/// scoped writer. Read-after-write acquisition is intentionally forbidden by
-/// the storage primitive because the read lease is transferable across threads.
-pub(crate) fn test_app_env_read_lease() -> Option<crate::storage::TestEnvReadLease> {
-    (!test_env_scope_active()).then(lock_test_env_read)
+/// Acquire the transferable environment lease retained by a test App. Under a
+/// same-thread writer this becomes a child lease that safely keeps exclusive
+/// exclusion alive if the App escapes or is moved into background work.
+pub(crate) fn test_app_env_lease() -> Option<crate::storage::TestEnvFixtureLease> {
+    Some(crate::storage::lock_test_env_fixture())
 }
 
 /// Reset global caches whose contents depend on process-global environment
@@ -172,14 +160,14 @@ pub(crate) fn reset_tui_test_globals() {
     crate::tui::info_widget::clear_widget_placements_for_tests();
 }
 
-/// Construct a test app under a shared environment lease and retain that lease
-/// for the returned app's full lifetime. An enclosing temporary-home scope
-/// already owns the required write lease, so the App does not add a nested one.
+/// Construct a test app with environment exclusion retained for the returned
+/// App's full lifetime. Under an enclosing temporary-home writer, the App keeps
+/// a transferable writer-child lease rather than a shared read lease.
 pub(crate) fn create_test_app_with(
     provider: Arc<dyn Provider>,
     configure: impl FnOnce(&mut App),
 ) -> App {
-    let env_lock = test_app_env_read_lease();
+    let env_lock = test_app_env_lease();
     // Test workers are reused. A render test that finishes mid tail-catchup can
     // otherwise leave this thread-local animation flag set for the next app
     // fixture, making an idle app appear to have live redraw work.
@@ -232,10 +220,6 @@ impl TestEnvScope {
         reset_tui_test_globals();
         scope
     }
-}
-
-fn test_env_scope_active() -> bool {
-    TEST_ENV_SCOPE_DEPTH.with(|depth| depth.get() > 0)
 }
 
 impl Drop for TestEnvScope {

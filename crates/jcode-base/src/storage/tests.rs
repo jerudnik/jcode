@@ -4,6 +4,7 @@ use super::*;
 fn test_env_read_lease_is_send_sync_and_leases_are_reentrant() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<TestEnvReadLease>();
+    assert_send_sync::<TestEnvFixtureLease>();
 
     macro_rules! assert_not_impl {
         ($ty:ty, $trait:path) => {
@@ -36,6 +37,59 @@ fn test_env_read_lease_is_send_sync_and_leases_are_reentrant() {
 fn test_env_read_rejects_write_downgrade() {
     let _write = lock_test_env_write();
     let _read = lock_test_env_read();
+}
+
+#[test]
+fn fixture_lease_retains_writer_exclusion_without_reentrancy() {
+    let write = lock_test_env_write();
+    let fixture = lock_test_env_fixture();
+    drop(write);
+
+    assert!(
+        current_test_env_write_lease().is_none(),
+        "fixture children must not retain writer reentrancy"
+    );
+    let lock = test_env_lock_inner();
+    let state = lock
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    assert!(
+        state.active_writer,
+        "escaped fixture must retain exclusive writer exclusion"
+    );
+    drop(state);
+    drop(fixture);
+
+    let read = lock_test_env_read();
+    drop(read);
+}
+
+#[test]
+fn opportunistic_fixture_lease_skips_foreign_writer_child_without_blocking() {
+    let write = lock_test_env_write();
+    let fixture = lock_test_env_fixture();
+    assert!(
+        try_lock_test_env_fixture().is_some(),
+        "the owning writer thread may retain a writer-child lease"
+    );
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || {
+        let skipped = try_lock_test_env_fixture().is_none();
+        tx.send(skipped).expect("report lease attempt");
+        drop(fixture);
+    });
+    assert!(
+        rx.recv_timeout(std::time::Duration::from_secs(1))
+            .expect("foreign attempt must return promptly"),
+        "foreign opportunistic access must defer while a writer child excludes it"
+    );
+    thread.join().expect("fixture thread");
+    drop(write);
+
+    let read = lock_test_env_read();
+    drop(read);
 }
 
 #[test]
