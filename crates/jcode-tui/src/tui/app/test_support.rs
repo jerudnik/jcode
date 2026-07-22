@@ -9,6 +9,7 @@
 use super::App;
 use crate::provider::Provider;
 use crate::tool::Registry;
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -113,6 +114,29 @@ pub(crate) fn lock_test_render_state() -> TestRenderScope {
 pub(crate) struct TestRenderScope {
     _render: MutexGuard<'static, ()>,
     _env: TestEnvWriteScope,
+}
+
+thread_local! {
+    static TEST_CLIPBOARD_RESULT: Cell<Option<bool>> = const { Cell::new(None) };
+}
+
+pub(crate) struct TestClipboardScope {
+    previous: Option<bool>,
+}
+
+pub(crate) fn scoped_test_clipboard_result(result: bool) -> TestClipboardScope {
+    let previous = TEST_CLIPBOARD_RESULT.with(|slot| slot.replace(Some(result)));
+    TestClipboardScope { previous }
+}
+
+pub(crate) fn test_clipboard_result() -> Option<bool> {
+    TEST_CLIPBOARD_RESULT.with(Cell::get)
+}
+
+impl Drop for TestClipboardScope {
+    fn drop(&mut self) {
+        TEST_CLIPBOARD_RESULT.with(|slot| slot.set(self.previous));
+    }
 }
 
 /// Thread-bound TUI writer scope.
