@@ -255,6 +255,16 @@ fn scroll_render_test_lock() -> crate::tui::app::test_support::TestRenderScope {
     crate::tui::app::test_support::lock_test_render_state()
 }
 
+fn scroll_copy_test_guards() -> (
+    crate::tui::app::test_support::TestRenderScope,
+    crate::tui::app::test_support::TestClipboardScope,
+) {
+    (
+        scroll_render_test_lock(),
+        crate::tui::app::test_support::scoped_test_clipboard_result(true),
+    )
+}
+
 /// Render app to TestBackend and return the buffer text.
 fn render_and_snap(
     app: &App,
@@ -956,6 +966,7 @@ fn test_prompt_jump_ctrl_brackets() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_prompt_jump_ctrl_esc_fallback_on_macos() {
+    let _render_lock = scroll_render_test_lock();
     let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
 
     render_and_snap(&app, &mut terminal);

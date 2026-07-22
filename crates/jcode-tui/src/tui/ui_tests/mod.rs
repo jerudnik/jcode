@@ -118,6 +118,7 @@ struct TestState {
     pending_soft_interrupts: Vec<String>,
     interleave_message: Option<String>,
     status: ProcessingStatus,
+    build_progress_active: bool,
     queue_mode: bool,
     active_skill: Option<String>,
     centered_mode: bool,
@@ -132,6 +133,7 @@ struct TestState {
     onboarding_preview: bool,
     suggestions: Vec<(String, String)>,
     compacted_hidden_user_prompts: usize,
+    tail_catchup_active: bool,
     side_pane_images: Vec<crate::session::RenderedImage>,
     pin_images: bool,
     inline_images_visible: bool,
@@ -199,6 +201,9 @@ impl crate::tui::TuiState for TestState {
     fn auto_scroll_paused(&self) -> bool {
         false
     }
+    fn tail_catchup_active(&self) -> bool {
+        self.tail_catchup_active
+    }
     fn provider_name(&self) -> String {
         "mock".to_string()
     }
@@ -237,6 +242,9 @@ impl crate::tui::TuiState for TestState {
     }
     fn status(&self) -> ProcessingStatus {
         self.status.clone()
+    }
+    fn build_progress_active(&self) -> bool {
+        self.build_progress_active
     }
     fn command_suggestions(&self) -> Vec<(String, &'static str)> {
         Vec::new()

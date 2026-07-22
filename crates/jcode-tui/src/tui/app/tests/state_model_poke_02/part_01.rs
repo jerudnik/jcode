@@ -247,7 +247,7 @@ fn test_handterm_native_scroll_client_roundtrips_over_socket() {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixListener;
 
-    let _lock = crate::tui::app::test_support::lock_test_env();
+    let _render_lock = scroll_render_test_lock();
     let dir = tempfile::tempdir().expect("tempdir");
     let socket_path = dir.path().join("handterm-scroll.sock");
     let listener = UnixListener::bind(&socket_path).expect("bind unix listener");
