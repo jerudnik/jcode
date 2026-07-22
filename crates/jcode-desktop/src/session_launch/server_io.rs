@@ -123,7 +123,10 @@ pub(super) fn connect_server_with_retry_path(
     let mut last_error = None;
     while started.elapsed() < timeout {
         match UnixStream::connect(socket_path) {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => match stream.set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY)) {
+                Ok(()) => return Ok(stream),
+                Err(error) => last_error = Some(error),
+            },
             Err(error) => last_error = Some(error),
         }
         std::thread::sleep(SERVER_CONNECT_RETRY_DELAY);
@@ -321,10 +324,6 @@ pub(super) fn read_session_id_from_events(
     event_tx: Option<&DesktopSessionEventSender>,
     complete_request_id: Option<u64>,
 ) -> Result<Option<String>> {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY))
-        .context("failed to configure server socket timeout")?;
     let started = Instant::now();
     let mut line = String::new();
     while started.elapsed() < timeout {
@@ -377,10 +376,6 @@ pub(super) fn read_session_id_from_state(
     event_tx: Option<&DesktopSessionEventSender>,
     state_request_id: u64,
 ) -> Result<String> {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY))
-        .context("failed to configure server socket timeout")?;
     let started = Instant::now();
     let mut line = String::new();
     while started.elapsed() < timeout {
@@ -431,10 +426,6 @@ pub(super) fn read_model_changed(
     event_tx: Option<&DesktopSessionEventSender>,
     request_id: u64,
 ) -> Result<()> {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY))
-        .context("failed to configure server socket timeout")?;
     let started = Instant::now();
     let mut line = String::new();
     while started.elapsed() < timeout {
@@ -485,10 +476,6 @@ pub(super) fn read_model_catalog(
     event_tx: Option<&DesktopSessionEventSender>,
     request_id: u64,
 ) -> Result<()> {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY))
-        .context("failed to configure server socket timeout")?;
     let started = Instant::now();
     let mut line = String::new();
     while started.elapsed() < timeout {
@@ -542,10 +529,6 @@ pub(super) fn read_control_response(
     expected_event_types: &[&str],
     action_label: &str,
 ) -> Result<()> {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY))
-        .context("failed to configure server socket timeout")?;
     let started = Instant::now();
     let mut line = String::new();
     while started.elapsed() < timeout {
@@ -619,10 +602,6 @@ pub(super) fn drain_session_events(
     command_rx: &Receiver<DesktopSessionCommand>,
     terminal_request_id: u64,
 ) -> Result<DrainOutcome> {
-    reader
-        .get_ref()
-        .set_read_timeout(Some(SERVER_CONNECT_RETRY_DELAY))
-        .context("failed to configure server socket timeout")?;
     let mut line = String::new();
     let mut pending_cancel_requests = Vec::<PendingCancelRequest>::new();
     loop {
