@@ -303,6 +303,47 @@ pub struct Agent {
     inline_tail: inline_tail::InlineTailBuffer,
     /// Best-effort Herdr lifecycle reporter. Disabled unless Herdr env vars are present.
     herdr_reporter: crate::herdr::HerdrReporter,
+    /// Removes only the exact active PID marker created by this test Agent.
+    #[cfg(any(test, feature = "test-support"))]
+    _test_active_pid_marker: TestActivePidMarkerGuard,
+    /// Retains process-global environment exclusion for the full lifetime of an
+    /// Agent fixture. Production builds omit this.
+    #[cfg(any(test, feature = "test-support"))]
+    _test_env_lock: crate::storage::TestEnvFixtureLease,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Default)]
+struct TestActivePidMarkerGuard {
+    owned: Option<(String, crate::storage::SessionPidMarkerObservations)>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl TestActivePidMarkerGuard {
+    fn track(&mut self, session_id: &str) {
+        self.cleanup();
+        self.owned = Some((
+            session_id.to_string(),
+            crate::storage::observe_session_pid_markers(session_id),
+        ));
+    }
+
+    fn cleanup(&mut self) {
+        let Some((session_id, observed)) = self.owned.take() else {
+            return;
+        };
+        crate::storage::remove_session_pid_markers_if_unchanged(&session_id, &observed);
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for TestActivePidMarkerGuard {
+    fn drop(&mut self) {
+        // Test fixtures do not run the full server disconnect lifecycle. The
+        // identity-checked removal cannot unlink a successor marker that was
+        // replaced after this Agent registered its own.
+        self.cleanup();
+    }
 }
 
 impl Agent {
@@ -323,6 +364,8 @@ impl Agent {
         allowed_tools: Option<HashSet<String>>,
         disabled_tools: HashSet<String>,
     ) -> Self {
+        #[cfg(any(test, feature = "test-support"))]
+        let test_env_lock = crate::storage::lock_test_env_fixture();
         let skills = SkillRegistry::shared_snapshot();
         let initial_provider_model = provider.model();
         let agent = Self {
@@ -358,6 +401,10 @@ impl Agent {
             inline_output_tap: false,
             inline_tail: inline_tail::InlineTailBuffer::default(),
             herdr_reporter: crate::herdr::HerdrReporter::from_env(),
+            #[cfg(any(test, feature = "test-support"))]
+            _test_active_pid_marker: TestActivePidMarkerGuard::default(),
+            #[cfg(any(test, feature = "test-support"))]
+            _test_env_lock: test_env_lock,
         };
         crate::tool::set_session_tool_policy(
             &agent.session.id,
@@ -419,6 +466,8 @@ impl Agent {
             tool_selection.disabled_tools,
         );
         agent.session.mark_active();
+        #[cfg(any(test, feature = "test-support"))]
+        agent.track_test_active_pid_marker();
         agent.session.model = Some(agent.provider.model());
         agent.session.provider_key =
             crate::session::derive_session_provider_key(agent.provider.name());
@@ -458,6 +507,8 @@ impl Agent {
             tool_selection.disabled_tools,
         );
         agent.session.mark_active();
+        #[cfg(any(test, feature = "test-support"))]
+        agent.track_test_active_pid_marker();
         if agent.session.provider_key.is_none() {
             agent.session.provider_key =
                 crate::session::derive_session_provider_key(agent.provider.name());
@@ -495,6 +546,11 @@ impl Agent {
             false,
         );
         agent
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    fn track_test_active_pid_marker(&mut self) {
+        self._test_active_pid_marker.track(&self.session.id);
     }
 
     fn seed_compaction_from_session(&mut self) {
@@ -933,6 +989,8 @@ impl Agent {
 
     pub(crate) fn mark_active_with_client_pid(&mut self, pid: u32) {
         self.session.mark_active_with_pid(pid);
+        #[cfg(any(test, feature = "test-support"))]
+        self.track_test_active_pid_marker();
         self.persist_session_best_effort("client pid refresh");
     }
 

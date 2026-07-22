@@ -1,13 +1,8 @@
 pub mod account_picker;
 pub(crate) mod app;
 
-#[derive(Clone)]
-pub struct ContextSnapshot {
-    pub info: Option<crate::prompt::ContextInfo>,
-    pub revision: u64,
-    pub fresh: bool,
-}
-
+mod context_snapshot;
+pub use context_snapshot::ContextSnapshot;
 pub mod backend;
 pub(crate) mod color_support;
 mod core;
@@ -56,27 +51,13 @@ use ratatui::prelude::Frame;
 use ratatui::text::Line;
 use std::time::Duration;
 
-pub(crate) fn scheduled_notification_text(
-    info: Option<&info_widget::AmbientWidgetData>,
-) -> Option<String> {
-    let info = info?;
-    if info.reminder_count == 0 {
-        return None;
-    }
-    let next = info.next_reminder_wake.as_deref()?;
-    let suffix = if info.reminder_count > 1 {
-        format!(" · {} queued", info.reminder_count)
-    } else {
-        String::new()
-    };
-    Some(format!("⏰ next scheduled task {}{}", next, suffix))
-}
-
+mod notification_text;
 pub(crate) use self::core::DisplayMessageRoleExt;
 pub use jcode_tui_core::{
     CopySelectionPane, CopySelectionPoint, CopySelectionRange, CopySelectionStatus,
 };
 pub use jcode_tui_messages::DisplayMessage;
+pub(crate) use notification_text::scheduled_notification_text;
 
 fn keyboard_enhancement_flags() -> crossterm::event::KeyboardEnhancementFlags {
     use crossterm::event::KeyboardEnhancementFlags;

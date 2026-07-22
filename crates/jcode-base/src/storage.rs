@@ -108,6 +108,16 @@ struct TestEnvWriteLeaseInner {
     lock: Arc<TestEnvLockInner>,
 }
 
+/// Thread-local writer ownership used only for writer reentrancy.
+///
+/// Fixture child leases retain `inner` directly, not this owner token. Once all
+/// thread-bound writer guards are dropped, the thread can no longer reacquire
+/// the writer through TLS even if escaped fixtures still retain exclusion.
+#[cfg(any(test, feature = "test-support"))]
+struct TestEnvWriteOwner {
+    inner: Arc<TestEnvWriteLeaseInner>,
+}
+
 #[cfg(any(test, feature = "test-support"))]
 impl Drop for TestEnvWriteLeaseInner {
     fn drop(&mut self) {
@@ -142,8 +152,27 @@ pub struct TestEnvReadLease {
 #[cfg(any(test, feature = "test-support"))]
 #[derive(Clone)]
 pub struct TestEnvWriteLease {
-    inner: Arc<TestEnvWriteLeaseInner>,
+    owner: Arc<TestEnvWriteOwner>,
     _not_send_or_sync: PhantomData<Rc<()>>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone)]
+enum TestEnvFixtureLeaseInner {
+    Read { _lease: TestEnvReadLease },
+    WriterChild { _lease: Arc<TestEnvWriteLeaseInner> },
+}
+
+/// A transferable lease retained by a long-lived test fixture.
+///
+/// Outside an environment writer this is a normal shared read lease. When the
+/// fixture is constructed synchronously on the thread that owns the writer, it
+/// becomes a writer-child lease: it does not grant mutation or writer
+/// reentrancy, but keeps exclusive exclusion active until the fixture drops.
+#[cfg(any(test, feature = "test-support"))]
+#[derive(Clone)]
+pub struct TestEnvFixtureLease {
+    _inner: TestEnvFixtureLeaseInner,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -158,8 +187,9 @@ impl TestEnvReadLease {
 #[cfg(any(test, feature = "test-support"))]
 impl TestEnvWriteLease {
     fn new(lock: Arc<TestEnvLockInner>) -> Self {
+        let inner = Arc::new(TestEnvWriteLeaseInner { lock });
         Self {
-            inner: Arc::new(TestEnvWriteLeaseInner { lock }),
+            owner: Arc::new(TestEnvWriteOwner { inner }),
             _not_send_or_sync: PhantomData,
         }
     }
@@ -178,7 +208,7 @@ fn test_env_lock_inner() -> Arc<TestEnvLockInner> {
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_ENV_READ_LEASE: RefCell<Weak<TestEnvReadLeaseInner>> = const { RefCell::new(Weak::new()) };
-    static TEST_ENV_WRITE_LEASE: RefCell<Weak<TestEnvWriteLeaseInner>> = const { RefCell::new(Weak::new()) };
+    static TEST_ENV_WRITE_OWNER: RefCell<Weak<TestEnvWriteOwner>> = const { RefCell::new(Weak::new()) };
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -192,9 +222,9 @@ fn current_test_env_read_lease() -> Option<TestEnvReadLease> {
 
 #[cfg(any(test, feature = "test-support"))]
 fn current_test_env_write_lease() -> Option<TestEnvWriteLease> {
-    TEST_ENV_WRITE_LEASE.with(|slot| {
-        slot.borrow().upgrade().map(|inner| TestEnvWriteLease {
-            inner,
+    TEST_ENV_WRITE_OWNER.with(|slot| {
+        slot.borrow().upgrade().map(|owner| TestEnvWriteLease {
+            owner,
             _not_send_or_sync: PhantomData,
         })
     })
@@ -243,11 +273,10 @@ fn acquire_test_env_write(lock: Arc<TestEnvLockInner>) -> TestEnvWriteLease {
 /// process-global state.
 #[cfg(any(test, feature = "test-support"))]
 pub fn lock_test_env_read() -> TestEnvReadLease {
-    if current_test_env_write_lease().is_some() {
-        panic!(
-            "cannot acquire a test environment read lease while this thread holds a write lease"
-        );
-    }
+    assert!(
+        current_test_env_write_lease().is_none(),
+        "cannot acquire a test environment read lease while this thread holds a write lease"
+    );
     if let Some(lease) = current_test_env_read_lease() {
         return lease;
     }
@@ -255,6 +284,69 @@ pub fn lock_test_env_read() -> TestEnvReadLease {
     let lease = acquire_test_env_read(test_env_lock_inner());
     TEST_ENV_READ_LEASE.with(|slot| *slot.borrow_mut() = Arc::downgrade(&lease.inner));
     lease
+}
+
+/// Acquire a transferable lease for a long-lived test fixture.
+///
+/// A fixture built under a same-thread writer retains that writer's exclusion
+/// without retaining its thread-local reentrancy capability. An escaped fixture
+/// therefore keeps new readers and writers blocked, while the original thread
+/// cannot silently reacquire writer ownership after its scoped guard drops.
+#[cfg(any(test, feature = "test-support"))]
+pub fn lock_test_env_fixture() -> TestEnvFixtureLease {
+    if let Some(writer) = current_test_env_write_lease() {
+        TestEnvFixtureLease {
+            _inner: TestEnvFixtureLeaseInner::WriterChild {
+                _lease: Arc::clone(&writer.owner.inner),
+            },
+        }
+    } else {
+        TestEnvFixtureLease {
+            _inner: TestEnvFixtureLeaseInner::Read {
+                _lease: lock_test_env_read(),
+            },
+        }
+    }
+}
+
+/// Try to retain process-global environment access for opportunistic test work.
+///
+/// Same-thread writers receive a writer-child lease, and existing readers nest
+/// normally. If another thread owns (or is waiting for) the writer, return
+/// `None` instead of blocking. This is intended for best-effort background work
+/// that may safely defer until the next opportunity; blocking there can
+/// deadlock when the caller itself retains an escaped writer-child fixture.
+#[cfg(any(test, feature = "test-support"))]
+pub fn try_lock_test_env_fixture() -> Option<TestEnvFixtureLease> {
+    if let Some(writer) = current_test_env_write_lease() {
+        return Some(TestEnvFixtureLease {
+            _inner: TestEnvFixtureLeaseInner::WriterChild {
+                _lease: Arc::clone(&writer.owner.inner),
+            },
+        });
+    }
+    if let Some(lease) = current_test_env_read_lease() {
+        return Some(TestEnvFixtureLease {
+            _inner: TestEnvFixtureLeaseInner::Read { _lease: lease },
+        });
+    }
+
+    let lock = test_env_lock_inner();
+    let mut state = lock
+        .state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.active_writer || state.waiting_writers > 0 {
+        return None;
+    }
+    state.active_readers += 1;
+    drop(state);
+
+    let lease = TestEnvReadLease::new(lock);
+    TEST_ENV_READ_LEASE.with(|slot| *slot.borrow_mut() = Arc::downgrade(&lease.inner));
+    Some(TestEnvFixtureLease {
+        _inner: TestEnvFixtureLeaseInner::Read { _lease: lease },
+    })
 }
 
 /// Acquire an exclusive lease for a test that mutates process-global
@@ -266,14 +358,13 @@ pub fn lock_test_env_write() -> TestEnvWriteLease {
     if let Some(lease) = current_test_env_write_lease() {
         return lease;
     }
-    if current_test_env_read_lease().is_some() {
-        panic!(
-            "cannot acquire a test environment write lease while this thread holds a read lease"
-        );
-    }
+    assert!(
+        current_test_env_read_lease().is_none(),
+        "cannot acquire a test environment write lease while this thread holds a read lease"
+    );
 
     let lease = acquire_test_env_write(test_env_lock_inner());
-    TEST_ENV_WRITE_LEASE.with(|slot| *slot.borrow_mut() = Arc::downgrade(&lease.inner));
+    TEST_ENV_WRITE_OWNER.with(|slot| *slot.borrow_mut() = Arc::downgrade(&lease.owner));
     lease
 }
 

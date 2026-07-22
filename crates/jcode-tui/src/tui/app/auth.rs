@@ -1,3 +1,7 @@
+mod callback_input;
+pub(super) use callback_input::{
+    antigravity_input_requires_state_validation, looks_like_oauth_callback_input,
+};
 #[path = "auth_account_commands.rs"]
 mod auth_account_commands;
 #[path = "auth_account_picker.rs"]
@@ -2958,19 +2962,6 @@ fn save_tui_openai_compatible_key(
         )?;
     }
     Ok(resolved)
-}
-
-fn looks_like_oauth_callback_input(input: &str) -> bool {
-    let input = input.trim();
-    input.starts_with("http://")
-        || input.starts_with("https://")
-        || input.starts_with('?')
-        || input.contains("code=")
-        || input.contains("state=")
-}
-
-fn antigravity_input_requires_state_validation(input: &str, expected_state: Option<&str>) -> bool {
-    expected_state.is_some() && looks_like_oauth_callback_input(input)
 }
 
 #[cfg(test)]
