@@ -167,6 +167,11 @@ pub(crate) fn test_app_env_lease() -> Option<crate::storage::TestEnvFixtureLease
 /// Reset global caches whose contents depend on process-global environment
 /// state. Call only while holding the exclusive environment write lease.
 pub(crate) fn reset_tui_test_globals() {
+    // Force synchronous mermaid rendering for the whole test process: the
+    // detached deferred worker otherwise calls register_active_diagram from a
+    // background thread that can run after a render test resets ACTIVE_DIAGRAMS,
+    // polluting the next test regardless of --test-threads.
+    crate::tui::mermaid::set_synchronous_render_mode(true);
     crate::config::invalidate_config_cache();
     crate::auth::claude::set_active_account_override(None);
     crate::auth::codex::set_active_account_override(None);
@@ -196,6 +201,11 @@ pub(crate) fn create_test_app_with(
     // otherwise leave this thread-local animation flag set for the next app
     // fixture, making an idle app appear to have live redraw work.
     crate::tui::ui::set_tail_catchup_active(false);
+    // Force synchronous mermaid rendering so the detached deferred worker never
+    // registers a diagram after a sibling test resets ACTIVE_DIAGRAMS. Set here
+    // too (not only in the render lock) so render tests that build an app
+    // without the render lock are covered.
+    crate::tui::mermaid::set_synchronous_render_mode(true);
 
     let runtime = tokio::runtime::Runtime::new().expect("test runtime");
     let registry = runtime.block_on(Registry::new(provider.clone()));

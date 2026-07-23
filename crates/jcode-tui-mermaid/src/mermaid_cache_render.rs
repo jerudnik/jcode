@@ -745,8 +745,7 @@ fn write_output_png_cached_fonts(
     svg::write_output_png_cached_fonts(svg, output, render_cfg, theme)
 }
 
-/// Render a mermaid code block to PNG (cached)
-/// Now accepts optional terminal_width for adaptive sizing
+/// Render a mermaid code block to PNG (cached).
 pub fn render_mermaid(content: &str) -> RenderResult {
     render_mermaid_sized(content, None)
 }
@@ -765,8 +764,13 @@ pub fn render_mermaid_untracked(content: &str, terminal_width: Option<u16>) -> R
 
 pub(super) fn bump_deferred_render_epoch() {
     DEFERRED_RENDER_EPOCH.fetch_add(1, Ordering::Relaxed);
+    bump_debug_stats(|s| s.deferred_epoch_bumps += 1);
+}
+
+/// Apply `f` to the debug stats under the lock, ignoring poisoning.
+fn bump_debug_stats(f: impl FnOnce(&mut MermaidDebugStats)) {
     if let Ok(mut state) = MERMAID_DEBUG.lock() {
-        state.stats.deferred_epoch_bumps += 1;
+        f(&mut state.stats);
     }
 }
 
@@ -810,15 +814,11 @@ fn deferred_render_worker(rx: mpsc::Receiver<DeferredRenderTask>) {
         };
 
         let Some(register_active) = register_active else {
-            if let Ok(mut state) = MERMAID_DEBUG.lock() {
-                state.stats.deferred_worker_skips += 1;
-            }
+            bump_debug_stats(|s| s.deferred_worker_skips += 1);
             continue;
         };
 
-        if let Ok(mut state) = MERMAID_DEBUG.lock() {
-            state.stats.deferred_worker_renders += 1;
-        }
+        bump_debug_stats(|s| s.deferred_worker_renders += 1);
 
         let profile = task.render_key.2;
         let _ = with_preferred_aspect_ratio(profile.preferred_aspect_ratio(), || {
@@ -949,9 +949,7 @@ fn render_mermaid_deferred_inner(
                     if register_active {
                         existing_request.register_active = true;
                     }
-                    if let Ok(mut state) = MERMAID_DEBUG.lock() {
-                        state.stats.deferred_deduped += 1;
-                    }
+                    bump_debug_stats(|s| s.deferred_deduped += 1);
                     false
                 } else {
                     match pending.entry(render_key) {
@@ -959,9 +957,7 @@ fn render_mermaid_deferred_inner(
                             if register_active {
                                 occupied.get_mut().register_active = true;
                             }
-                            if let Ok(mut state) = MERMAID_DEBUG.lock() {
-                                state.stats.deferred_deduped += 1;
-                            }
+                            bump_debug_stats(|s| s.deferred_deduped += 1);
                             false
                         }
                         Entry::Vacant(vacant) => {
@@ -971,9 +967,7 @@ fn render_mermaid_deferred_inner(
                                 content: content.to_string(),
                                 stream_scope,
                             });
-                            if let Ok(mut state) = MERMAID_DEBUG.lock() {
-                                state.stats.deferred_enqueued += 1;
-                            }
+                            bump_debug_stats(|s| s.deferred_enqueued += 1);
                             true
                         }
                     }
@@ -989,6 +983,12 @@ fn render_mermaid_deferred_inner(
         };
 
     if should_enqueue {
+        // Synchronous render mode (tests): render inline so the detached
+        // worker's register_active_diagram cannot fire after a test's reset.
+        if is_synchronous_render_mode() {
+            let result = render_mermaid_sized_internal(content, terminal_width, register_active);
+            return Some(result);
+        }
         let task = DeferredRenderTask {
             content: content.to_string(),
             terminal_width,
