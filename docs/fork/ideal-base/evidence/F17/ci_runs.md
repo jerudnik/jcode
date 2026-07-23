@@ -238,19 +238,30 @@ looked like saturation.
    `current_exe`/spawn hook), so no two live `App` contexts share these globals
    in production.
 
-**Validation.** On a Linux repro box (x86_64, 22c): **0/80 serial rounds**
-flaked with the fix, vs the clean tree reproducing the exact
+**Validation.** On a Linux repro box (x86_64, 22c): **0/95 serial rounds**
+flaked with the fix (80 at 86acc7ae1 + 15 at the moved-gate refinement
+cdb2ee303), vs the clean tree reproducing the exact
 `side_panel_visibility_change_resets_diagram_fit_context` flake (1/40). The
 `smoothness_benchmark_*` failures seen on that box are a machine-load artifact
 (fail identically on clean and fixed binaries, interleaved) and do not occur on
 GitHub CI.
 
-**Provenance run of record: Fork CI `30023191393`** (`pull_request`,
-`86acc7ae1`) concluded **success** (22m50s). All three blocking rails green:
-Quality Guardrails (ratchet held after offsetting the +14 LOC in
-`mermaid_cache_render.rs` with a `bump_debug_stats` helper), Linux Tests
-(serial `jcode-tui` executed, zero failures), and Build & Test (macOS)
-(serial `jcode-tui` executed). Follow-up **F28** hardens the lock discipline so
+**Review refinement.** An independent reviewer (empty-context) returned
+ACCEPT-WITH-CAVEATS with zero production risk, and flagged that the gate
+originally sat after the `PENDING_RENDER_REQUESTS` insert and `deferred_enqueued`
+bump, leaving a stale pending entry on the inline path. `cdb2ee303` moves the
+`is_synchronous_render_mode()` short-circuit to the top of
+`render_mermaid_deferred_inner` (before any deferred-queue bookkeeping), so no
+pending entry is created; behavior otherwise identical
+(`render_mermaid_sized_internal` handles hash/cache/complexity/registration).
+
+**Provenance run of record: Fork CI `30026766050`** (`pull_request`,
+`cdb2ee303`) concluded **success**. All three blocking rails green:
+Quality Guardrails (ratchet held; the +14 LOC in `mermaid_cache_render.rs` was
+offset with a `bump_debug_stats` helper), Linux Tests 26m24s (serial `jcode-tui`
+executed, zero failures), and Build & Test macOS 45m14s (serial `jcode-tui`
+executed). The prior run `30023191393` @ `86acc7ae1` was also fully green (same
+fix, pre-review-refinement). Follow-up **F28** hardens the lock discipline so
 parallelism can be restored.
 
 ## 6. actionlint

@@ -3,16 +3,18 @@
 Node F17: make Linux, macOS, app-core, and deterministic TUI test rails
 blocking (CI semantics) on push/PR, and run jcode-tui rather than compile-only.
 
-Head of record: `86acc7ae1` (branch `ci-validation`, PR #16 -> `main`,
+Head of record: `cdb2ee303` (branch `ci-validation`, PR #16 -> `main`,
 repo `jerudnik/jcode`). This is the commit of the fully-green Fork CI run
-(30023191393, 22m50s) with the serial jcode-tui rails and the mermaid
-deferred-worker synchronization fix. The earlier "green" run at `081c61300`
-was a non-deterministic pass: the same suite flaked RED on `55757322a`
-(`test_side_panel_visibility_change_resets_diagram_fit_context`), exposing an
-async pollution race that `--test-threads=1` alone did not close. `86acc7ae1`
-fixes the race at its source (synchronous render mode in tests) and caps the
-jcode-tui rails at one thread; validated 0/80 serial rounds on a Linux repro
-box vs the clean tree reproducing the exact flake (1/40).
+(30026766050: Quality Guardrails, Linux Tests 26m24s, Build & Test macOS
+45m14s) with the serial jcode-tui rails and the mermaid deferred-worker
+synchronization fix (gate moved to function entry per independent review, so
+no stale pending-queue entry is created on the inline path). The earlier
+"green" run at `081c61300` was a non-deterministic pass: the same suite flaked
+RED on `55757322a` (`test_side_panel_visibility_change_resets_diagram_fit_
+context`), exposing an async pollution race that `--test-threads=1` alone did
+not close. The fix closes the race at its source (synchronous render mode in
+tests) and caps the jcode-tui rails at one thread; validated 0/95 serial rounds
+on a Linux repro box vs the clean tree reproducing the exact flake (1/40).
 
 | File | What it proves |
 |---|---|
@@ -25,7 +27,8 @@ box vs the clean tree reproducing the exact flake (1/40).
 | `assignment.md` | Original F17 assignment brief. |
 
 Key run IDs:
-- Provenance (green, of record): `30023191393` Fork CI pull_request @ 86acc7ae1.
+- Provenance (green, of record): `30026766050` Fork CI pull_request @ cdb2ee303.
+- Prior green (same fix, pre-review-refinement): `30023191393` @ 86acc7ae1.
 - Prior green (non-deterministic, superseded): `29998586620` @ 081c61300.
 - Flake recurrence (RED, motivated the real fix): jcode-tui @ 55757322a.
 - Prior provenance (RED, root-caused): `29985424892` @ a5f3bf6a8.
@@ -34,7 +37,8 @@ Key run IDs:
 - Superseded provenance: `29981592316` (flaky test, fixed in a5f3bf6a8).
 
 Related commits:
-- `86acc7ae1` fix(F17): synchronous render mode + serial jcode-tui rails (green).
+- `cdb2ee303` refactor(F17): move sync-render gate to fn entry (of record).
+- `86acc7ae1` fix(F17): synchronous render mode + serial jcode-tui rails.
 - `081c61300` test(jcode-base): fix two env-lock pollution races.
 - `be45954fc` test(auth): isolate JCODE_HOME in unranked-provider test.
 - `a5f3bf6a8` test(jcode-tui): close two parallel-suite hermeticity races (F17).
