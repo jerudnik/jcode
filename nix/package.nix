@@ -43,6 +43,10 @@ let
       # consumed by the `cargo test` check.
       ../assets
       (lib.fileset.maybeMissing ../tests)
+      # Mobile web UI assets served by `jcode mobile-server`. Installed to
+      # $out/share/jcode/web/jcode-mobile so the binary resolves them from its
+      # own install prefix (never the caller's CWD). See postInstall below.
+      ../web/jcode-mobile
     ];
   };
 
@@ -121,6 +125,19 @@ craneLib.buildPackage (
     # The full workspace test suite assumes a writable $HOME/.jcode, network,
     # and terminal; it is exercised in CI `checks`, not in the package build.
     doCheck = false;
+
+    # Ship the mobile web UI assets into the FHS share path so the installed
+    # binary resolves them from its own prefix. `jcode mobile-server` looks for
+    # $out/share/jcode/web/jcode-mobile relative to the executable (see
+    # resolve_mobile_web_root in src/cli/commands/mobile_server.rs).
+    postInstall = ''
+      mkdir -p "$out/share/jcode/web"
+      cp -r ${src}/web/jcode-mobile "$out/share/jcode/web/jcode-mobile"
+      # Files copied from the read-only Nix store keep their 0444 perms, which
+      # makes crane's later reference-stripping sed pass fail with EACCES. Make
+      # the installed copy writable so post-build fixup can rewrite it.
+      chmod -R u+w "$out/share/jcode/web/jcode-mobile"
+    '';
 
     meta = {
       description = "Coding agent harness with a blazing-fast TUI, multi-model support, swarm coordination, and tool orchestration";
