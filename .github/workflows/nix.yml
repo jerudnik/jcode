@@ -61,7 +61,7 @@ jobs:
 
       - name: Check workflow syntax (fork-owned workflows)
         # Only lint the workflows this fork owns. Upstream's files (ci.yml,
-        # release.yml, windows-smoke.yml, freebsd-smoke.yml, require-issue.yml)
+        # release.yml, freebsd-smoke.yml, require-issue.yml)
         # are kept byte-close to vendor/upstream -- linting them here would
         # force body edits that reintroduce rebase conflicts.
         run: |

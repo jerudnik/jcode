@@ -104,7 +104,7 @@ The `distro/nix` layer owns every file under `.github/workflows/`:
 | `sync.yml` | 6h upstream mirror + rail rebase (rerere self-healing) | schedule, manual |
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, after sync, manual |
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `distro/nix` | weekly, manual |
-| `ci.yml`, `freebsd-smoke.yml`, `windows-smoke.yml`, `release.yml`, `require-issue.yml` | Upstream's workflows, kept byte-close to `vendor/upstream`; dispatch-only or trigger-neutered | manual dispatch (before upstreaming patches) |
+| `ci.yml`, `freebsd-smoke.yml`, `release.yml`, `require-issue.yml` | Upstream's workflows, kept byte-close to `vendor/upstream`; dispatch-only or trigger-neutered | manual dispatch (before upstreaming patches) |
 
 `main` must not modify `.github/workflows/` -- that recreates the per-sync
 conflict problem the layering exists to solve. `scripts/fork-health.sh` fails
