@@ -1,0 +1,122 @@
+diff --git a/.github/workflows/fork-ci.yml b/.github/workflows/fork-ci.yml
+index 96f20ceba..54d43d411 100644
+--- a/.github/workflows/fork-ci.yml
++++ b/.github/workflows/fork-ci.yml
+@@ -6,14 +6,9 @@ name: Fork CI
+ # its Windows/FreeBSD/cross-check matrix is upstream's concern.
+ #
+ # Tiering:
+-#   blocking on push : quality guardrails (also the Linux cargo-check
+-#                      mergeability canary), macOS build + integration tests
+-#   advisory on push : macOS lib-test execution (hermeticity unaudited on
+-#                      macOS, see docs/fork/patch-ledger.md), full Linux
+-#                      test execution (hosted-runner timing flakes must not
+-#                      block the rails and must not breed fix-commits)
+-#   blocking weekly  : the same Linux test job, via the schedule trigger, so
+-#                      real Linux rot is caught within a week
++#   blocking on push/PR: quality guardrails, macOS build and test execution,
++#                        and full Linux test execution
++#   scheduled runs    : repeat the same blocking Linux coverage weekly
+ #
+ # Owned by the distro/nix layer: `main` must carry no .github/workflows
+ # diffs (enforced by scripts/fork-health.sh).
+@@ -29,7 +24,7 @@ on:
+   pull_request:
+     branches: [main]
+   schedule:
+-    # Weekly full-strictness run: the linux-tests job is blocking here.
++    # Weekly repeat of the blocking Linux test coverage.
+     - cron: "0 8 * * 1"
+   workflow_dispatch:
+ 
+@@ -272,20 +267,20 @@ jobs:
+           python3 .github/scripts/run_with_timeout.py 900 \
+             cargo test --target aarch64-apple-darwin --workspace --lib --bins --no-run
+ 
+-      # Advisory: macOS lib suites have not been audited for hermeticity the
+-      # way the Linux ones were (docs/fork/patch-ledger.md, "CI executes
+-      # workspace lib tests"). Promote to blocking by deleting
+-      # continue-on-error once a clean week of runs shows they are stable.
+-      # jcode-tui stays compile-only on both rails (stale upstream too).
+-      - name: Run workspace library tests (advisory)
+-        continue-on-error: true
++      # Workspace coverage excludes jcode-tui and jcode-app-core because each
++      # runs in an explicit blocking step with its own timeout attribution.
++      - name: Run workspace library tests
+         run: |
+           python3 .github/scripts/run_with_timeout.py 900 \
+             cargo test --target aarch64-apple-darwin \
+             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
+ 
+-      - name: Run jcode-app-core library tests (advisory)
+-        continue-on-error: true
++      - name: Run jcode-tui library tests
++        run: |
++          python3 .github/scripts/run_with_timeout.py 1800 \
++            cargo test --target aarch64-apple-darwin -p jcode-tui --lib
++
++      - name: Run jcode-app-core library tests
+         run: |
+           python3 .github/scripts/run_with_timeout.py 1800 \
+             cargo test --target aarch64-apple-darwin -p jcode-app-core --lib
+@@ -302,19 +297,17 @@ jobs:
+             cargo test --target aarch64-apple-darwin --test provider_matrix
+ 
+       - name: Run e2e tests
++        env:
++          JCODE_E2E_REQUIRE_BINARY: "1"
++          JCODE_E2E_BINARY: ${{ github.workspace }}/target/aarch64-apple-darwin/release/jcode
+         run: |
+           python3 .github/scripts/run_with_timeout.py 600 \
+             cargo test --target aarch64-apple-darwin --test e2e
+ 
+   linux-tests:
+-    name: Linux Tests (${{ github.event_name == 'schedule' && 'blocking weekly' || 'advisory' }})
++    name: Linux Tests
+     runs-on: ubuntu-latest
+     timeout-minutes: 90
+-    # Advisory on push/PR: hosted ubuntu runners have produced repeated
+-    # timing-sensitive e2e failures whose "fixes" only grew fork divergence.
+-    # The weekly scheduled run is blocking so genuine Linux regressions still
+-    # surface with bounded delay.
+-    continue-on-error: ${{ github.event_name != 'schedule' }}
+     steps:
+       - uses: actions/checkout@v4
+ 
+@@ -346,15 +339,19 @@ jobs:
+           python3 .github/scripts/run_with_timeout.py 900 \
+             cargo test --target x86_64-unknown-linux-gnu --workspace --lib --bins --no-run
+ 
+-      # The Linux lib suites were audited for hermeticity on clean runners
+-      # (docs/fork/patch-ledger.md). jcode-tui is compile-only by design;
+-      # jcode-app-core runs separately so timeout attribution stays legible.
++      # Workspace coverage excludes jcode-tui and jcode-app-core because each
++      # runs in an explicit blocking step with its own timeout attribution.
+       - name: Run workspace library tests
+         run: |
+           python3 .github/scripts/run_with_timeout.py 900 \
+             cargo test --target x86_64-unknown-linux-gnu \
+             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
+ 
++      - name: Run jcode-tui library tests
++        run: |
++          python3 .github/scripts/run_with_timeout.py 1800 \
++            cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib
++
+       - name: Run jcode-app-core library tests
+         run: |
+           python3 .github/scripts/run_with_timeout.py 1800 \
+@@ -371,7 +368,13 @@ jobs:
+           python3 .github/scripts/run_with_timeout.py 600 \
+             cargo test --target x86_64-unknown-linux-gnu --test provider_matrix
+ 
++      - name: Build jcode binary for e2e
++        run: cargo build --target x86_64-unknown-linux-gnu --bin jcode
++
+       - name: Run e2e tests
++        env:
++          JCODE_E2E_REQUIRE_BINARY: "1"
++          JCODE_E2E_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/jcode
+         run: |
+           python3 .github/scripts/run_with_timeout.py 600 \
+             cargo test --target x86_64-unknown-linux-gnu --test e2e
