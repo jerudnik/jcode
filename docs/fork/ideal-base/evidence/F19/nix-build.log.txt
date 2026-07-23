@@ -1,0 +1,47 @@
+# F19 nix build log (aarch64-darwin, truncated); 137 lines total
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+evaluation warning: No output hash provided for git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.6#b01b804008ab0662fa14e6b60b10bff61716e6f1
+evaluation warning: No output hash provided for git+https://github.com/1jehuang/mermaid-rs-renderer.git?tag=v0.3.1#2f993bd79a55235eb59a34d807852276ba25bea7
+evaluation warning: No output hash provided for git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.6#b01b804008ab0662fa14e6b60b10bff61716e6f1
+evaluation warning: No output hash provided for git+https://github.com/1jehuang/mermaid-rs-renderer.git?tag=v0.3.1#2f993bd79a55235eb59a34d807852276ba25bea7
+this derivation will be built:
+  /nix/store/wh5nb15m4p4p034kkc75xxdxcj3an25p-jcode-0.46.0.drv
+building '/nix/store/wh5nb15m4p4p034kkc75xxdxcj3an25p-jcode-0.46.0.drv'...
+jcode> Running phase: unpackPhase
+jcode> unpacking source archive /nix/store/94vx39axbkbc2a5nynjdfh7sbjwcchaw-source
+jcode> source root is source
+jcode> Running phase: patchPhase
+jcode> moving Cargo.lock to Cargo.lock.orig, then will use /nix/store/8zixb75rl8k2q915bnf845ydchj32c7h-Cargo.lock as Cargo.lock
+jcode> Executing configureCargoCommonVars
+jcode> decompressing cargo artifacts from /nix/store/6jz0kqsnjii1bx5l4aji5gbnkv1y3sg7-jcode-deps-0.46.0/target.tar.zst to target
+jcode> Running phase: updateAutotoolsGnuConfigScriptsPhase
+jcode> Running phase: configurePhase
+jcode> will append /nix/var/nix/builds/nix-18373-43377502/source/.cargo-home/config.toml with contents of /nix/store/5wh1091wqgd2fi82v6sagyn6rrb3amra-vendor-cargo-deps/config.toml
+jcode> default configurePhase, nothing to do
+jcode> Running phase: buildPhase
+# ... [elided crate compilation] ...
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/index.html
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/style.css
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_commands.mjs
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_commands.test.mjs
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_state.mjs
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_state.test.mjs
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_workspace_store.mjs
+jcode> /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_workspace_store.test.mjs
+jcode> stripping references done
+jcode> signing files:
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/bin/jcode
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_workspace_store.mjs
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/index.html
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_state.mjs
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_workspace_store.test.mjs
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_commands.test.mjs
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_commands.mjs
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/style.css
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/surface_state.test.mjs
+jcode> signing: /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile/app.js
+jcode> signing done
+jcode> Running phase: fixupPhase
+jcode> checking for references to /nix/var/nix/builds/nix-18373-43377502/ in /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0...
+jcode> patching script interpreter paths in /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0
+jcode> stripping (with command strip and flags -S) in  /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/bin
