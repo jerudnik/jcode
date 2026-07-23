@@ -16,8 +16,15 @@ fn test_redraw_interval_uses_low_frequency_during_remote_startup_phase() {
     // harness reuses a worker thread. Redraw policy must use the supplied
     // TuiState rather than inheriting that unrelated prior frame.
     crate::tui::ui::set_tail_catchup_active(true);
-    let idle_interval = crate::tui::redraw_interval(&idle);
-    let startup_interval = crate::tui::redraw_interval(&startup);
+    // Pin a Full-tier policy so the assertion is deterministic regardless of
+    // ambient machine load: crate::perf::profile() is a load-sensitive
+    // OnceLock, and on a saturated host it can latch a degraded tier that
+    // changes redraw cadence. redraw_interval_with_policy takes the policy
+    // explicitly, removing the global-load dependency (F17 hermeticity).
+    let mut full_policy = crate::perf::tui_policy();
+    full_policy.tier = crate::perf::PerformanceTier::Full;
+    let idle_interval = crate::tui::redraw_interval_with_policy(&idle, &full_policy);
+    let startup_interval = crate::tui::redraw_interval_with_policy(&startup, &full_policy);
     crate::tui::ui::set_tail_catchup_active(false);
 
     assert_eq!(idle_interval, crate::tui::REDRAW_DEEP_IDLE);
