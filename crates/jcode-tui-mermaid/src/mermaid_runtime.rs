@@ -366,6 +366,18 @@ pub fn is_video_export_mode() -> bool {
     VIDEO_EXPORT_MODE.load(Ordering::Relaxed)
 }
 
+/// Enable synchronous render mode: deferred mermaid renders execute inline on
+/// the calling thread instead of the detached worker. The TUI test render lock
+/// turns this on so background registration cannot outlive a test's reset.
+pub fn set_synchronous_render_mode(enabled: bool) {
+    SYNCHRONOUS_RENDER_MODE.store(enabled, Ordering::Relaxed);
+}
+
+/// Check if synchronous render mode is active.
+pub fn is_synchronous_render_mode() -> bool {
+    SYNCHRONOUS_RENDER_MODE.load(Ordering::Relaxed)
+}
+
 /// Look up a cached PNG for the given mermaid content hash.
 /// Returns (path, width, height) if a cached render exists on disk.
 pub fn get_cached_png(hash: u64) -> Option<(PathBuf, u32, u32)> {

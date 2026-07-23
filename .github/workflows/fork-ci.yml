@@ -275,10 +275,21 @@ jobs:
             cargo test --target aarch64-apple-darwin \
             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
 
+      # jcode-tui runs single-threaded: the suite shares process-global TUI
+      # view state (mermaid ACTIVE_DIAGRAMS, render/frame caches) and ambient
+      # env (JCODE_HOME) behind a test-env/render lock that a minority of tests
+      # apply inconsistently, so high parallelism produces cross-test pollution
+      # and timing flakes. This is a test-harness artifact, not a product race:
+      # the runtime is multi-process (each swarm agent is its own OS process via
+      # current_exe/spawn hook), so no two live App contexts ever share these
+      # globals in production. Serial is reliably green and still runs every test
+      # and catches injected regressions. Follow-up F28 hardens the lock
+      # discipline so parallelism can be restored.
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target aarch64-apple-darwin -p jcode-tui --lib
+            cargo test --target aarch64-apple-darwin -p jcode-tui --lib \
+            -- --test-threads=1
 
       - name: Run jcode-app-core library tests
         run: |
@@ -347,10 +358,14 @@ jobs:
             cargo test --target x86_64-unknown-linux-gnu \
             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
 
+      # Single-threaded for the same test-harness-hermeticity reason as the
+      # macOS jcode-tui step above (see that comment). Runtime is multi-process,
+      # so this is not masking a product race.
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib
+            cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib \
+            -- --test-threads=1
 
       - name: Run jcode-app-core library tests
         run: |
