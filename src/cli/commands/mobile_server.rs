@@ -177,19 +177,92 @@ pub(crate) fn run_mobile_server_serve_internal(port: u16, bind: &str) -> Result<
     Ok(())
 }
 
+/// Relative path, from an installation prefix, to the packaged mobile assets.
+/// Follows the FHS `share/` convention so a binary at `<prefix>/bin/jcode`
+/// finds its data at `<prefix>/share/jcode/web/jcode-mobile`.
+const SHARE_REL: &str = "share/jcode/web/jcode-mobile";
+/// Legacy exe-adjacent layout (`<bindir>/web/jcode-mobile`), kept for any
+/// tree-style install that co-locates assets next to the binary.
+const EXE_ADJACENT_REL: &str = "web/jcode-mobile";
+/// In-repo source location, used only as a developer convenience.
+const SOURCE_REL: &str = "web/jcode-mobile";
+
+/// Resolve the directory that holds the mobile web assets.
+///
+/// Resolution is packaging-first so an *installed* binary never depends on the
+/// caller's current working directory:
+///   1. `JCODE_MOBILE_WEB_ROOT` explicit override (packagers / tests).
+///   2. `<prefix>/share/jcode/web/jcode-mobile` derived from the executable
+///      (the FHS install layout produced by `nix/package.nix`).
+///   3. `<bindir>/web/jcode-mobile` (legacy exe-adjacent tree install).
+///   4. `<cwd>/web/jcode-mobile` (developer fallback ONLY, and only when the
+///      binary itself is running from inside a source checkout).
+///
+/// Crucially the CWD candidate is last and gated, so it cannot mask assets
+/// missing from a real install: an installed binary launched from a checkout
+/// still serves its own packaged assets, and a broken install fails loudly
+/// instead of silently serving whatever happens to sit in `./web/jcode-mobile`.
 fn mobile_web_root() -> Result<PathBuf> {
-    let cwd_candidate = std::env::current_dir()?.join("web/jcode-mobile");
-    if cwd_candidate.join("index.html").is_file() {
-        return Ok(cwd_candidate);
+    let exe = std::env::current_exe().context("resolve current jcode executable")?;
+    let cwd = std::env::current_dir().ok();
+    let env_override = std::env::var_os("JCODE_MOBILE_WEB_ROOT").map(PathBuf::from);
+    resolve_mobile_web_root(&exe, cwd.as_deref(), env_override.as_deref(), |p| {
+        p.join("index.html").is_file()
+    })
+    .with_context(|| {
+        format!(
+            "could not locate mobile web assets; looked for {SHARE_REL} beside the \
+             installed binary ({}). Reinstall the package or set JCODE_MOBILE_WEB_ROOT.",
+            exe.display()
+        )
+    })
+}
+
+/// Pure resolver behind [`mobile_web_root`], parameterised on the executable
+/// path, optional CWD, optional env override, and an `exists` predicate so it
+/// is fully unit-testable without touching the filesystem or real env.
+fn resolve_mobile_web_root(
+    exe: &Path,
+    cwd: Option<&Path>,
+    env_override: Option<&Path>,
+    exists: impl Fn(&Path) -> bool,
+) -> Result<PathBuf> {
+    // 1. Explicit override wins unconditionally.
+    if let Some(root) = env_override {
+        if exists(root) {
+            return Ok(root.to_path_buf());
+        }
+        bail!(
+            "JCODE_MOBILE_WEB_ROOT={} does not contain index.html",
+            root.display()
+        );
     }
-    let exe_candidate = std::env::current_exe()?
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("web/jcode-mobile");
-    if exe_candidate.join("index.html").is_file() {
-        return Ok(exe_candidate);
+
+    let bindir = exe.parent().unwrap_or_else(|| Path::new("."));
+    // 2. FHS share path: <prefix>/share/jcode/web/jcode-mobile, where <prefix>
+    //    is the parent of <bindir> (i.e. bindir is <prefix>/bin).
+    if let Some(prefix) = bindir.parent() {
+        let share = prefix.join(SHARE_REL);
+        if exists(&share) {
+            return Ok(share);
+        }
     }
-    bail!("could not find web/jcode-mobile from current directory or executable directory")
+    // 3. Legacy exe-adjacent tree install.
+    let adjacent = bindir.join(EXE_ADJACENT_REL);
+    if exists(&adjacent) {
+        return Ok(adjacent);
+    }
+    // 4. Developer fallback: CWD, but ONLY when the running binary lives inside
+    //    that same checkout. This makes `cargo run` / `target/debug/jcode` work
+    //    from the repo while guaranteeing an installed binary can never fall
+    //    through to an unrelated `./web/jcode-mobile` and mask a broken install.
+    if let Some(cwd) = cwd {
+        let source = cwd.join(SOURCE_REL);
+        if exists(&source) && exe.starts_with(cwd) {
+            return Ok(source);
+        }
+    }
+    bail!("no mobile web asset directory found")
 }
 
 fn handle_connection(mut stream: TcpStream, web_root: &Path) -> Result<()> {
@@ -333,5 +406,97 @@ fn terminate_process(pid: u32) -> Result<()> {
     {
         let _ = pid;
         bail!("mobile-server stop is not implemented on this platform yet")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Build an `exists` predicate that returns true only for the given paths.
+    fn exists_set(paths: &[&str]) -> impl Fn(&Path) -> bool {
+        let set: HashSet<PathBuf> = paths.iter().map(PathBuf::from).collect();
+        move |p: &Path| set.contains(p)
+    }
+
+    #[test]
+    fn share_path_wins_for_installed_binary() {
+        // /opt/jcode/bin/jcode -> /opt/jcode/share/jcode/web/jcode-mobile
+        let exe = Path::new("/opt/jcode/bin/jcode");
+        let cwd = Path::new("/somewhere/else");
+        let share = "/opt/jcode/share/jcode/web/jcode-mobile";
+        let got = resolve_mobile_web_root(exe, Some(cwd), None, exists_set(&[share])).unwrap();
+        assert_eq!(got, PathBuf::from(share));
+    }
+
+    #[test]
+    fn cwd_cannot_mask_missing_packaged_assets_for_installed_binary() {
+        // Installed binary outside any checkout; only the CWD has assets. The
+        // resolver must NOT serve them (that would mask a broken install).
+        let exe = Path::new("/usr/local/bin/jcode");
+        let cwd = Path::new("/home/dev/project");
+        let cwd_assets = "/home/dev/project/web/jcode-mobile";
+        let err =
+            resolve_mobile_web_root(exe, Some(cwd), None, exists_set(&[cwd_assets])).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("no mobile web asset directory found")
+        );
+    }
+
+    #[test]
+    fn cwd_fallback_allowed_only_when_binary_lives_in_checkout() {
+        // `cargo run` case: target/debug/jcode inside the checkout, assets in CWD.
+        let exe = Path::new("/home/dev/project/target/debug/jcode");
+        let cwd = Path::new("/home/dev/project");
+        let cwd_assets = "/home/dev/project/web/jcode-mobile";
+        let got = resolve_mobile_web_root(exe, Some(cwd), None, exists_set(&[cwd_assets])).unwrap();
+        assert_eq!(got, PathBuf::from(cwd_assets));
+    }
+
+    #[test]
+    fn env_override_wins_and_is_validated() {
+        let exe = Path::new("/opt/jcode/bin/jcode");
+        let override_ok = "/custom/assets";
+        let got = resolve_mobile_web_root(
+            exe,
+            None,
+            Some(Path::new(override_ok)),
+            exists_set(&[override_ok]),
+        )
+        .unwrap();
+        assert_eq!(got, PathBuf::from(override_ok));
+
+        // An override that does not exist is a hard error, never a silent fallthrough.
+        let err = resolve_mobile_web_root(
+            exe,
+            None,
+            Some(Path::new("/custom/missing")),
+            exists_set(&["/opt/jcode/share/jcode/web/jcode-mobile"]),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("JCODE_MOBILE_WEB_ROOT"));
+    }
+
+    #[test]
+    fn exe_adjacent_layout_is_supported() {
+        // Tree install: <bindir>/web/jcode-mobile beside the binary.
+        let exe = Path::new("/apps/jcode/jcode");
+        let adjacent = "/apps/jcode/web/jcode-mobile";
+        let got = resolve_mobile_web_root(exe, None, None, exists_set(&[adjacent])).unwrap();
+        assert_eq!(got, PathBuf::from(adjacent));
+    }
+
+    #[test]
+    fn share_path_preferred_over_cwd_even_inside_checkout() {
+        // If a real install layout exists, it wins over the CWD dev fallback.
+        let exe = Path::new("/home/dev/project/target/debug/jcode");
+        let cwd = Path::new("/home/dev/project");
+        let share = "/home/dev/project/target/share/jcode/web/jcode-mobile";
+        let cwd_assets = "/home/dev/project/web/jcode-mobile";
+        let got = resolve_mobile_web_root(exe, Some(cwd), None, exists_set(&[share, cwd_assets]))
+            .unwrap();
+        assert_eq!(got, PathBuf::from(share));
     }
 }
