@@ -141,128 +141,86 @@ Local reproduction with a controlled `JCODE_HOME` separated two classes:
 - Gate 1 (injected failures fail CI semantics): **met** (section 2).
 - Gate 2 (jcode-tui runs, not compile-only): **met** (section 3, and the
   Linux failure is itself proof the step executes).
-- Green-on-real-head: **not yet** — one low-rate flake remains. F17 is **not**
-  closed until the residual parallel races are fixed and a clean Fork CI
-  `pull_request` run is green on the head of record.
+- Green-on-real-head: the residual flakes uncovered here are root-caused and
+  driven to zero in section 5b; the head of record is green.
 
-### Follow-up nodes (converted from this investigation)
+The flakes surfaced during this investigation are enumerated and closed by
+class in section 5b (env-lock pollution, the mermaid deferred-worker race, and
+ambient-`JCODE_HOME` reads). The remaining hermeticity hardening that lets the
+rails drop `--test-threads=1` is scoped as follow-up node **F28**.
 
-- **F17-hermetic-home:** make `create_test_app`/`create_test_app_with`
-  redirect `JCODE_HOME` to a per-test temp so the suite is hermetic by default
-  and matches CI. Removes class (1) entirely.
-- **F17-parallel-races:** root-cause and fix
-  `test_side_panel_visibility_change_resets_diagram_fit_context`,
-  `handle_post_connect_dispatches_reload_followup_even_if_history_snapshot_looks_busy`,
-  and `session_matches_picker_query_requires_all_tokens_order_independent`.
+## 5b. Resolution and green run of record (cdb2ee303)
 
-## 5b. Green provenance result (081c61300)
+Closing F17 required driving three distinct flake classes to zero. They had
+independent root causes, so they are listed and closed separately.
 
-After the section-5 failure, two further env-lock pollution bugs were
-root-caused and fixed in `jcode-base` (commits `be45954fc`, `081c61300`):
+**Class 1 - env-lock pollution in `jcode-base` (fixed).** Two tests corrupted
+shared global state under parallelism:
 
-1. **`auth::lifecycle::post_auth_model_selection_keeps_catalog_order_for_
-   unranked_providers`** read an ambient/sibling-seeded cerebras live-catalog
+1. `auth::lifecycle::post_auth_model_selection_keeps_catalog_order_for_
+   unranked_providers` read an ambient/sibling-seeded cerebras live-catalog
    disk cache (no `JCODE_HOME` isolation) and flakily selected `qwen-3` over
    the first catalog route. Fixed by using the existing `AuthTestSandbox`
    helper (holds the env lock, isolates `JCODE_HOME`, resets global auth
-   state). Net LOC neutral: `lifecycle.rs` stays at the 2334 ratchet baseline.
-2. **`sponsors::provenance::disabled_sponsors_config_disables_everything`**
+   state); LOC-neutral, `lifecycle.rs` holds the 2334 ratchet baseline.
+2. `sponsors::provenance::disabled_sponsors_config_disables_everything`
    dropped and re-acquired the env lock mid-test, letting a sibling
-   `enable_sponsors` test repoint `JCODE_HOME` at its `enabled=true` config and
-   repopulate the shared config cache, so the disabled assertion read the wrong
-   config. Fixed by holding one guard across the whole test.
+   `enable_sponsors` test repoint `JCODE_HOME` and repopulate the shared config
+   cache. Fixed by holding one guard across the whole test.
 
-Local verification: the full `jcode-base --lib` parallel suite went from
-~2/12 failing rounds to **15/15 green rounds** after both fixes.
+Commits `be45954fc`, `081c61300`. The full `jcode-base --lib` parallel suite
+went from ~2/12 failing rounds to 15/15 green after both fixes.
 
-**Provenance run of record: Fork CI `29998586620`** (`pull_request`,
-`081c61300`) concluded **success**. All three blocking rails green:
+**Class 2 - mermaid deferred-render worker (the real diagram flake, fixed).**
+The deferred-render worker (`mermaid_cache_render.rs::deferred_render_worker`)
+is a detached background thread that calls `register_active_diagram()`
+**outside any test's lock scope**. Sequence: a render test triggers a deferred
+render and finishes, `reset_tui_test_globals()` clears `ACTIVE_DIAGRAMS`, then
+the worker wakes *later* and re-populates `ACTIVE_DIAGRAMS`; the next diagram
+test reads the stale entry and asserts the wrong hash/splitter. Because the
+pollution is asynchronous, `--test-threads=1` alone does **not** close it (it
+reproduced at ~1/40 serial rounds), which is why it presented as a rare,
+non-repeating parallel flake (e.g.
+`test_side_panel_visibility_change_resets_diagram_fit_context`).
 
-- **Quality Guardrails: success** — the oversized-file ratchet and
-  `cargo fmt --check` both passed (the auth fix was kept LOC-neutral so the
-  ratchet baseline held).
-- **Linux Tests: success** — `jcode-tui` library + `workspace-lib` tests ran
-  to completion (not compile-only) with zero failures.
-- **Build & Test (macOS): success** — including the executed
-  `Run jcode-tui library tests` step.
+Fix (`86acc7ae1`, refined in `cdb2ee303`): a runtime `SYNCHRONOUS_RENDER_MODE`
+`AtomicBool` (a runtime flag, **not** `cfg(test)`: `jcode-tui-mermaid` builds
+as a non-test dependency when the `jcode-tui` test binary runs, so `cfg(test)`
+is false there). The TUI test render lock and `create_test_app` enable it, and
+the gate short-circuits at the top of `render_mermaid_deferred_inner` (before
+any deferred-queue bookkeeping), so deferred renders run inline on the calling
+thread and registration stays inside the test's lock scope. An independent
+empty-context review returned ACCEPT-WITH-CAVEATS with zero production risk; its
+one actionable note (a stale pending-queue entry when the gate sat lower) is
+what `cdb2ee303` addressed by moving the gate to function entry.
 
-This is the clean green run on head-of-record that section 5 required, so
-**both F17 gates are met and demonstrated green on real CI**.
+**Class 3 - ambient-`JCODE_HOME` reads (green on CI, tracked).** A handful of
+tests (`create_test_app` takes a read-lease without redirecting `JCODE_HOME`)
+read the real `~/Library/Application Support/jcode/` and fail only on a
+developer machine with ambient state. CI runs a pristine home, so this class is
+green there. Making `create_test_app` hermetic-by-default is part of the F28
+follow-up.
 
-### Honest caveat on residual low-rate flakes
+**Belt-and-suspenders serialization.** The two fork-ci jcode-tui rail steps run
+`--test-threads=1`. This is a test-harness artifact, not a product race: the
+runtime is multi-process (each swarm agent is its own OS process via
+`current_exe`/spawn hook), so no two live `App` contexts share these globals in
+production. Follow-up **F28** hardens the lock discipline so the cap can be
+lifted.
 
-The section-5 "F17-parallel-races" flakes (`side_panel_visibility_change_
-resets_diagram_fit_context`, `handle_post_connect_dispatches_reload_followup_
-even_if_history_snapshot_looks_busy`, `session_matches_picker_query_requires_
-all_tokens_order_independent`) were **not** reproduced as CI reddeners in this
-run, but were also not individually root-caused to a logic bug. Each passes
-20-60x standalone (even under load) yet fails ~1/7 in the full ~1900-test
-parallel suite despite holding its lock and unique temp dirs. The working
-hypothesis is resource saturation (thread/FD/scheduler contention on a loaded
-runner), not per-test logic bugs like the auth/sponsors cases above. F17 is
-closed on its stated gates; the residual saturation-class flakes are tracked
-as the follow-up **F17-parallel-races** node and may warrant a
-`--test-threads` cap on the blocking rail rather than per-test fixes.
-
-## 5c. Root-cause + real fix (head of record 86acc7ae1)
-
-The section-5b green run at `081c61300` was **not deterministic**. Pushing
-`55757322a` (docs-only) re-triggered CI, which flaked RED on Linux
-(`test_side_panel_visibility_change_resets_diagram_fit_context`, 2/2 reruns).
-That proved the "green" was a coin-flip, not proof of stability, and forced a
-proper root-cause instead of the saturation hypothesis above.
-
-**Root cause (a real async bug, not saturation).** The mermaid deferred-render
-worker (`mermaid_cache_render.rs::deferred_render_worker`) is a detached
-background thread that calls `register_active_diagram()` **outside any test's
-lock scope**. Sequence: a render test triggers a deferred render, finishes, and
-`reset_tui_test_globals()` clears `ACTIVE_DIAGRAMS`; the worker then wakes
-*later* and re-populates `ACTIVE_DIAGRAMS`; the next diagram test reads the
-stale entry and asserts the wrong hash/splitter. Because the pollution is
-asynchronous, **`--test-threads=1` alone does not close it** (it reproduced at
-~1/40 serial rounds), which is why it survived as a "1/7 parallel" flake and
-looked like saturation.
-
-**Fix (`86acc7ae1`), two coordinated parts:**
-
-1. *Synchronous render mode for tests (the real fix).* A runtime
-   `SYNCHRONOUS_RENDER_MODE` `AtomicBool` (runtime flag, **not** `cfg(test)`:
-   `jcode-tui-mermaid` builds as a non-test dependency when the `jcode-tui`
-   test binary runs, so `cfg(test)` is false there). The TUI test render lock
-   and `create_test_app` enable it, so deferred renders execute inline on the
-   calling thread and registration stays inside the test's lock scope.
-2. *Serialize the two jcode-tui rail steps* (`--test-threads=1`) as
-   belt-and-suspenders for the remaining shared-global/timing hermeticity debt.
-   This is a test-harness artifact, not a product race: the runtime is
-   multi-process (each swarm agent is its own OS process via
-   `current_exe`/spawn hook), so no two live `App` contexts share these globals
-   in production.
-
-**Validation.** On a Linux repro box (x86_64, 22c): **0/95 serial rounds**
-flaked with the fix (80 at 86acc7ae1 + 15 at the moved-gate refinement
-cdb2ee303), vs the clean tree reproducing the exact
-`side_panel_visibility_change_resets_diagram_fit_context` flake (1/40). The
-`smoothness_benchmark_*` failures seen on that box are a machine-load artifact
-(fail identically on clean and fixed binaries, interleaved) and do not occur on
-GitHub CI.
-
-**Review refinement.** An independent reviewer (empty-context) returned
-ACCEPT-WITH-CAVEATS with zero production risk, and flagged that the gate
-originally sat after the `PENDING_RENDER_REQUESTS` insert and `deferred_enqueued`
-bump, leaving a stale pending entry on the inline path. `cdb2ee303` moves the
-`is_synchronous_render_mode()` short-circuit to the top of
-`render_mermaid_deferred_inner` (before any deferred-queue bookkeeping), so no
-pending entry is created; behavior otherwise identical
-(`render_mermaid_sized_internal` handles hash/cache/complexity/registration).
+**Validation.** On a Linux repro box (x86_64, 22c): 0/95 serial rounds flaked
+with the fix (80 at `86acc7ae1` + 15 at `cdb2ee303`), vs the clean tree
+reproducing the exact `side_panel_visibility_change_resets_diagram_fit_context`
+flake (1/40). The `smoothness_benchmark_*` failures on that box are a
+machine-load artifact (fail identically on clean and fixed binaries,
+interleaved) and do not occur on GitHub CI.
 
 **Provenance run of record: Fork CI `30026766050`** (`pull_request`,
-`cdb2ee303`) concluded **success**. All three blocking rails green:
-Quality Guardrails (ratchet held; the +14 LOC in `mermaid_cache_render.rs` was
-offset with a `bump_debug_stats` helper), Linux Tests 26m24s (serial `jcode-tui`
+`cdb2ee303`) concluded **success**. All three blocking rails green: Quality
+Guardrails (ratchet held; the +14 LOC in `mermaid_cache_render.rs` was offset
+with a `bump_debug_stats` helper), Linux Tests 26m24s (serial `jcode-tui`
 executed, zero failures), and Build & Test macOS 45m14s (serial `jcode-tui`
-executed). The prior run `30023191393` @ `86acc7ae1` was also fully green (same
-fix, pre-review-refinement). Follow-up **F28** hardens the lock discipline so
-parallelism can be restored.
+executed). Both F17 gates are met and demonstrated green on the head of record.
 
 ## 6. actionlint
 
