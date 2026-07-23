@@ -8,7 +8,10 @@ Acceptance gates (from `WORK_GRAPH.json`):
 2. jcode-tui deterministic tests run rather than compile-only.
 
 Repository: `jerudnik/jcode`. Workflow: `.github/workflows/fork-ci.yml`.
-Head of record: **`a5f3bf6a8`** (branch `ci-validation`, PR #16 → `main`).
+Head of record: **`081c61300`** (branch `ci-validation`, PR #16 → `main`) —
+the commit of the green provenance run (section 5b). `fork-ci.yml` is
+byte-identical from `a5f3bf6a8` through `081c61300`; the historical run/diff
+references below to `a5f3bf6a8` describe the same rails.
 
 ## 1. What "blocking" means here (honest scope)
 
