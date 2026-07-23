@@ -204,6 +204,55 @@ closed on its stated gates; the residual saturation-class flakes are tracked
 as the follow-up **F17-parallel-races** node and may warrant a
 `--test-threads` cap on the blocking rail rather than per-test fixes.
 
+## 5c. Root-cause + real fix (head of record 86acc7ae1)
+
+The section-5b green run at `081c61300` was **not deterministic**. Pushing
+`55757322a` (docs-only) re-triggered CI, which flaked RED on Linux
+(`test_side_panel_visibility_change_resets_diagram_fit_context`, 2/2 reruns).
+That proved the "green" was a coin-flip, not proof of stability, and forced a
+proper root-cause instead of the saturation hypothesis above.
+
+**Root cause (a real async bug, not saturation).** The mermaid deferred-render
+worker (`mermaid_cache_render.rs::deferred_render_worker`) is a detached
+background thread that calls `register_active_diagram()` **outside any test's
+lock scope**. Sequence: a render test triggers a deferred render, finishes, and
+`reset_tui_test_globals()` clears `ACTIVE_DIAGRAMS`; the worker then wakes
+*later* and re-populates `ACTIVE_DIAGRAMS`; the next diagram test reads the
+stale entry and asserts the wrong hash/splitter. Because the pollution is
+asynchronous, **`--test-threads=1` alone does not close it** (it reproduced at
+~1/40 serial rounds), which is why it survived as a "1/7 parallel" flake and
+looked like saturation.
+
+**Fix (`86acc7ae1`), two coordinated parts:**
+
+1. *Synchronous render mode for tests (the real fix).* A runtime
+   `SYNCHRONOUS_RENDER_MODE` `AtomicBool` (runtime flag, **not** `cfg(test)`:
+   `jcode-tui-mermaid` builds as a non-test dependency when the `jcode-tui`
+   test binary runs, so `cfg(test)` is false there). The TUI test render lock
+   and `create_test_app` enable it, so deferred renders execute inline on the
+   calling thread and registration stays inside the test's lock scope.
+2. *Serialize the two jcode-tui rail steps* (`--test-threads=1`) as
+   belt-and-suspenders for the remaining shared-global/timing hermeticity debt.
+   This is a test-harness artifact, not a product race: the runtime is
+   multi-process (each swarm agent is its own OS process via
+   `current_exe`/spawn hook), so no two live `App` contexts share these globals
+   in production.
+
+**Validation.** On a Linux repro box (x86_64, 22c): **0/80 serial rounds**
+flaked with the fix, vs the clean tree reproducing the exact
+`side_panel_visibility_change_resets_diagram_fit_context` flake (1/40). The
+`smoothness_benchmark_*` failures seen on that box are a machine-load artifact
+(fail identically on clean and fixed binaries, interleaved) and do not occur on
+GitHub CI.
+
+**Provenance run of record: Fork CI `30023191393`** (`pull_request`,
+`86acc7ae1`) concluded **success** (22m50s). All three blocking rails green:
+Quality Guardrails (ratchet held after offsetting the +14 LOC in
+`mermaid_cache_render.rs` with a `bump_debug_stats` helper), Linux Tests
+(serial `jcode-tui` executed, zero failures), and Build & Test (macOS)
+(serial `jcode-tui` executed). Follow-up **F28** hardens the lock discipline so
+parallelism can be restored.
+
 ## 6. actionlint
 
 `actionlint 1.7.7` on `.github/workflows/fork-ci.yml`: **0 findings, exit 0**.
