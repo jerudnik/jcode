@@ -88,17 +88,37 @@ jobs:
             exit 1
           fi
 
+  matrix:
+    name: select build matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      include: ${{ steps.pick.outputs.include }}
+    steps:
+      # Pull requests build + smoke-launch the real package (acceptance gate:
+      # relevant path changes must run `nix build` and prove
+      # `result/bin/jcode --version`). We restrict PRs to x86_64-linux: it is the
+      # fork's CI validation platform, runs on fast hosted ubuntu, and reads the
+      # public Cachix cache so it does not rebuild ~900 crates from source. The
+      # full push/dispatch matrix additionally covers aarch64-darwin (the
+      # maintainer machines) where cache misses are expensive on hosted macOS and
+      # a per-PR rebuild is not worth the wall-clock cost.
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            include='[{"system":"x86_64-linux","runner":"ubuntu-latest"}]'
+          else
+            include='[{"system":"x86_64-linux","runner":"ubuntu-latest"},{"system":"aarch64-darwin","runner":"macos-latest"}]'
+          fi
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
   build:
     name: build (${{ matrix.system }})
-    if: github.event_name != 'pull_request'
+    needs: matrix
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - system: x86_64-linux
-            runner: ubuntu-latest
-          - system: aarch64-darwin
-            runner: macos-latest
+        include: ${{ fromJSON(needs.matrix.outputs.include) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
@@ -134,6 +154,10 @@ jobs:
       - name: Build package
         run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs
 
-      - name: Smoke test binary
+      - name: Smoke test binary (launch gate)
+        # Prove the packaged binary launches. This is the F18 acceptance gate for
+        # every build event, PRs included: we build the real package (doCheck
+        # stays false -- the non-hermetic workspace suite is owned by ci.yml, not
+        # the sandbox) and verify it actually runs.
         run: |
           ./result/bin/jcode --version
