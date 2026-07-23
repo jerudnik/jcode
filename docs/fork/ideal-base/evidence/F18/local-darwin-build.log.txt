@@ -1,0 +1,86 @@
+# Local aarch64-darwin nix build log (F18 evidence, truncated)
+# Full build: nix build .#packages.aarch64-darwin.jcode --print-build-logs --accept-flake-config --builders '' --max-jobs 8
+# 1394 lines total; head 40 + tail 40 retained (crate compile noise elided).
+# ---- HEAD ----
+these 4 derivations will be built:
+  /nix/store/idbyag4qh7lmm08zpcgs0yw3948cfzcm-Cargo.toml.drv
+  /nix/store/mx6nwlzyjvr5pnrhhcdmjqzaa6aksqrd-source.drv
+  /nix/store/fzvnryi7rih3iacb5n5i10kwzxjqngiv-jcode-deps-0.46.0.drv
+  /nix/store/n409116yxvmy1zb14azq7jigab754jql-jcode-0.46.0.drv
+building '/nix/store/idbyag4qh7lmm08zpcgs0yw3948cfzcm-Cargo.toml.drv'...
+building '/nix/store/mx6nwlzyjvr5pnrhhcdmjqzaa6aksqrd-source.drv'...
+building '/nix/store/fzvnryi7rih3iacb5n5i10kwzxjqngiv-jcode-deps-0.46.0.drv'...
+jcode-deps> cargoArtifacts not set, will not reuse any cargo artifacts
+jcode-deps> Running phase: unpackPhase
+jcode-deps> unpacking source archive /nix/store/vs9w72rzwd4nxx2gy9r0y84fp73va9rc-source
+jcode-deps> source root is source
+jcode-deps> Running phase: patchPhase
+jcode-deps> moving Cargo.lock to Cargo.lock.orig, then will use /nix/store/8zixb75rl8k2q915bnf845ydchj32c7h-Cargo.lock as Cargo.lock
+jcode-deps> Executing configureCargoCommonVars
+jcode-deps> Running phase: updateAutotoolsGnuConfigScriptsPhase
+jcode-deps> Running phase: configurePhase
+jcode-deps> will append /nix/var/nix/builds/nix-59872-1928113270/source/.cargo-home/config.toml with contents of /nix/store/5wh1091wqgd2fi82v6sagyn6rrb3amra-vendor-cargo-deps/config.toml
+jcode-deps> default configurePhase, nothing to do
+jcode-deps> Running phase: buildPhase
+jcode-deps> +++ command cargo --version
+jcode-deps> cargo 1.96.0 (30a34c682 2026-05-25)
+jcode-deps> +++ command cargo check --release --locked --all-targets
+jcode-deps>    Compiling proc-macro2 v1.0.106
+jcode-deps>    Compiling unicode-ident v1.0.22
+jcode-deps>    Compiling quote v1.0.45
+jcode-deps>    Compiling libc v0.2.180
+jcode-deps>    Compiling serde_core v1.0.228
+jcode-deps>     Checking cfg-if v1.0.4
+jcode-deps>     Checking memchr v2.7.6
+jcode-deps>    Compiling libm v0.2.15
+jcode-deps>     Checking log v0.4.29
+jcode-deps>    Compiling autocfg v1.5.0
+jcode-deps>     Checking itoa v1.0.17
+jcode-deps>    Compiling serde v1.0.228
+jcode-deps>    Compiling find-msvc-tools v0.1.7
+jcode-deps>    Compiling shlex v1.3.0
+jcode-deps>    Compiling num-traits v0.2.19
+jcode-deps>    Compiling version_check v0.9.5
+jcode-deps>     Checking once_cell v1.21.4
+# ... [1314 lines of crate compilation elided] ...
+# ---- TAIL ----
+jcode>    Compiling jcode-tui-account-picker v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-account-picker)
+jcode>    Compiling jcode-tui-usage-overlay v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-usage-overlay)
+jcode>    Compiling jcode-tui-session-picker v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-session-picker)
+jcode>    Compiling jcode-tui-core v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-core)
+jcode>    Compiling jcode-tui-tool-display v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-tool-display)
+jcode>    Compiling jcode-fuzzy v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-fuzzy)
+jcode>    Compiling jcode-tui-anim v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-anim)
+jcode>    Compiling jcode-provider-antigravity-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-antigravity-runtime)
+jcode>    Compiling jcode-provider-copilot-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-copilot-runtime)
+jcode>    Compiling jcode-provider-anthropic-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-anthropic-runtime)
+jcode>    Compiling jcode-tui-permissions v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui-permissions)
+jcode>    Compiling jcode-provider-cursor-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-cursor-runtime)
+jcode>    Compiling jcode-provider-gemini-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-gemini-runtime)
+jcode>    Compiling jcode-provider-openrouter-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-openrouter-runtime)
+jcode>    Compiling jcode-provider-openai-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-openai-runtime)
+jcode>    Compiling jcode-app-core v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-app-core)
+jcode>    Compiling jcode-provider-claude-cli-runtime v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-claude-cli-runtime)
+jcode>    Compiling jcode-provider-doctor v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-provider-doctor)
+jcode>    Compiling jcode-tui v0.1.0 (/nix/var/nix/builds/nix-59872-1928113271/source/crates/jcode-tui)
+jcode>    Compiling jcode v0.46.0 (/nix/var/nix/builds/nix-59872-1928113271/source)
+jcode>     Finished `release` profile [optimized] target(s) in 5m 46s
+jcode> searching for bins/libs to install from cargo build log at cargoBuildLogMzs7.json
+jcode> installing /nix/var/nix/builds/nix-59872-1928113271/source/target/release/jcode in postBuildInstallFromCargoBuildLogOutTempOAF/bin
+jcode> searching for bins/libs complete
+jcode> buildPhase completed in 5 minutes 49 seconds
+jcode> Running phase: installPhase
+jcode> actually installing contents of postBuildInstallFromCargoBuildLogOutTempOAF to /nix/store/zlap7aqw887rfwphzzd10ywnq05b7gmd-jcode-0.46.0
+jcode> stripping references to Rust toolchain
+jcode> Rust toolchain at: /nix/store/iywn852j3pnz291ywvil7rxhibqn8953-rust-default-1.96.0
+jcode> stripping Rust toolchain references done
+jcode> stripping references to cargoVendorDir from:
+jcode> /nix/store/zlap7aqw887rfwphzzd10ywnq05b7gmd-jcode-0.46.0/bin/jcode
+jcode> stripping references done
+jcode> signing files:
+jcode> signing: /nix/store/zlap7aqw887rfwphzzd10ywnq05b7gmd-jcode-0.46.0/bin/jcode
+jcode> signing done
+jcode> Running phase: fixupPhase
+jcode> checking for references to /nix/var/nix/builds/nix-59872-1928113271/ in /nix/store/zlap7aqw887rfwphzzd10ywnq05b7gmd-jcode-0.46.0...
+jcode> patching script interpreter paths in /nix/store/zlap7aqw887rfwphzzd10ywnq05b7gmd-jcode-0.46.0
+jcode> stripping (with command strip and flags -S) in  /nix/store/zlap7aqw887rfwphzzd10ywnq05b7gmd-jcode-0.46.0/bin
