@@ -876,6 +876,13 @@ fn render_mermaid_deferred_inner(
     let hash = hash_content(content);
     let (node_count, edge_count) = estimate_diagram_size(content);
 
+    // Synchronous render mode (tests): render inline before any deferred-queue
+    // bookkeeping so a background worker cannot register a diagram post-reset.
+    if is_synchronous_render_mode() {
+        let result = render_mermaid_sized_internal(content, terminal_width, register_active);
+        return Some(result);
+    }
+
     if node_count > MAX_NODES || edge_count > MAX_EDGES {
         return Some(RenderResult::Error(format!(
             "Diagram too complex ({} nodes, {} edges). Max: {} nodes, {} edges.",
@@ -983,12 +990,6 @@ fn render_mermaid_deferred_inner(
         };
 
     if should_enqueue {
-        // Synchronous render mode (tests): render inline so the detached
-        // worker's register_active_diagram cannot fire after a test's reset.
-        if is_synchronous_render_mode() {
-            let result = render_mermaid_sized_internal(content, terminal_width, register_active);
-            return Some(result);
-        }
         let task = DeferredRenderTask {
             content: content.to_string(),
             terminal_width,
@@ -1071,7 +1072,6 @@ fn render_mermaid_sized_internal(
             state.stats.last_hash = Some(format!("{:016x}", hash));
         }
         if register_active {
-            // Register as active diagram (for pinned widget display)
             register_active_diagram(hash, cached.width, cached.height, None);
         }
         return RenderResult::Image {
