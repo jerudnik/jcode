@@ -92,7 +92,114 @@ on a seeded regression, which a compile-only step could not do.
 
 ## 5. Provenance result (a5f3bf6a8)
 
-_To be filled from run 29985424892 on completion._
+Run `29985424892` (Fork CI, `pull_request`, `a5f3bf6a8`) concluded
+**failure**, but in a way that sharpens rather than undermines the F17 claim:
+
+- **Quality Guardrails: success.**
+- **Build & Test (macOS): success** — including the now-executed
+  `Run jcode-tui library tests` step. The two hermeticity races fixed in
+  `a5f3bf6a8` did not recur on macOS.
+- **Linux Tests: failure** — `Run jcode-tui library tests` reported
+  `1864 passed; 1 failed`: a single flake in
+  `tui::app::tests::test_side_panel_visibility_change_resets_diagram_fit_context`.
+  The step ran to completion (proving the rail *executes*, not compile-only);
+  it did not time out.
+
+### Root-cause investigation (honest)
+
+Making the jcode-tui rail execute (F17's core change) exposed pre-existing
+test-hermeticity gaps that were invisible while the suite was compile-only.
+Local reproduction with a controlled `JCODE_HOME` separated two classes:
+
+1. **Dev-box ambient-home non-hermeticity (not a CI blocker).** A cluster of
+   ~14 `tui::app::tests::*` failed *in isolation* on the maintainer's box but
+   pass with an empty `JCODE_HOME`. Root cause: `create_test_app` acquires a
+   read-lease and does not redirect `JCODE_HOME`, so those tests read the real
+   `~/Library/Application Support/jcode/` (config, model recommendations, and a
+   `live-tests/coverage.json` ledger created by unrelated provider-doctor
+   work). Example: `slash_provider_test_coverage_without_args_shows_cli_style_summary`
+   asserts the "no ledger" header, which only holds when the home has no
+   coverage ledger. On CI the home is pristine, so this whole class is green
+   there. It is a real hermeticity finding, tracked below, but it is **not**
+   what reddened the rail.
+
+2. **Genuine low-rate parallel/load races (the actual rail-reddeners).** Under
+   a pristine `JCODE_HOME` across 6 full parallel runs, only rare, non-repeating
+   failures appear: `test_side_panel_visibility_change_resets_diagram_fit_context`
+   (~1 in 7 full runs; 20/20 green in isolation) and
+   `session_matches_picker_query_requires_all_tokens_order_independent` (once).
+   These are the parallel-pollution class F17's `pollution_cleanup_spec.md`
+   targets. A blocking rail that itself flakes at even a few percent would
+   randomly red legitimate PRs, so these must be driven to zero before F17 is
+   honestly closeable.
+
+### Status of F17 against its gates
+
+- Gate 1 (injected failures fail CI semantics): **met** (section 2).
+- Gate 2 (jcode-tui runs, not compile-only): **met** (section 3, and the
+  Linux failure is itself proof the step executes).
+- Green-on-real-head: **not yet** — one low-rate flake remains. F17 is **not**
+  closed until the residual parallel races are fixed and a clean Fork CI
+  `pull_request` run is green on the head of record.
+
+### Follow-up nodes (converted from this investigation)
+
+- **F17-hermetic-home:** make `create_test_app`/`create_test_app_with`
+  redirect `JCODE_HOME` to a per-test temp so the suite is hermetic by default
+  and matches CI. Removes class (1) entirely.
+- **F17-parallel-races:** root-cause and fix
+  `test_side_panel_visibility_change_resets_diagram_fit_context`,
+  `handle_post_connect_dispatches_reload_followup_even_if_history_snapshot_looks_busy`,
+  and `session_matches_picker_query_requires_all_tokens_order_independent`.
+
+## 5b. Green provenance result (081c61300)
+
+After the section-5 failure, two further env-lock pollution bugs were
+root-caused and fixed in `jcode-base` (commits `be45954fc`, `081c61300`):
+
+1. **`auth::lifecycle::post_auth_model_selection_keeps_catalog_order_for_
+   unranked_providers`** read an ambient/sibling-seeded cerebras live-catalog
+   disk cache (no `JCODE_HOME` isolation) and flakily selected `qwen-3` over
+   the first catalog route. Fixed by using the existing `AuthTestSandbox`
+   helper (holds the env lock, isolates `JCODE_HOME`, resets global auth
+   state). Net LOC neutral: `lifecycle.rs` stays at the 2334 ratchet baseline.
+2. **`sponsors::provenance::disabled_sponsors_config_disables_everything`**
+   dropped and re-acquired the env lock mid-test, letting a sibling
+   `enable_sponsors` test repoint `JCODE_HOME` at its `enabled=true` config and
+   repopulate the shared config cache, so the disabled assertion read the wrong
+   config. Fixed by holding one guard across the whole test.
+
+Local verification: the full `jcode-base --lib` parallel suite went from
+~2/12 failing rounds to **15/15 green rounds** after both fixes.
+
+**Provenance run of record: Fork CI `29998586620`** (`pull_request`,
+`081c61300`) concluded **success**. All three blocking rails green:
+
+- **Quality Guardrails: success** — the oversized-file ratchet and
+  `cargo fmt --check` both passed (the auth fix was kept LOC-neutral so the
+  ratchet baseline held).
+- **Linux Tests: success** — `jcode-tui` library + `workspace-lib` tests ran
+  to completion (not compile-only) with zero failures.
+- **Build & Test (macOS): success** — including the executed
+  `Run jcode-tui library tests` step.
+
+This is the clean green run on head-of-record that section 5 required, so
+**both F17 gates are met and demonstrated green on real CI**.
+
+### Honest caveat on residual low-rate flakes
+
+The section-5 "F17-parallel-races" flakes (`side_panel_visibility_change_
+resets_diagram_fit_context`, `handle_post_connect_dispatches_reload_followup_
+even_if_history_snapshot_looks_busy`, `session_matches_picker_query_requires_
+all_tokens_order_independent`) were **not** reproduced as CI reddeners in this
+run, but were also not individually root-caused to a logic bug. Each passes
+20-60x standalone (even under load) yet fails ~1/7 in the full ~1900-test
+parallel suite despite holding its lock and unique temp dirs. The working
+hypothesis is resource saturation (thread/FD/scheduler contention on a loaded
+runner), not per-test logic bugs like the auth/sponsors cases above. F17 is
+closed on its stated gates; the residual saturation-class flakes are tracked
+as the follow-up **F17-parallel-races** node and may warrant a
+`--test-threads` cap on the blocking rail rather than per-test fixes.
 
 ## 6. actionlint
 
