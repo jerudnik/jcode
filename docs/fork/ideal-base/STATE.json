@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F17",
+    "node": "F18",
     "state": "accepted",
-    "commit": "cdb2ee303fbece2cf4ab6d0558f137055055c204",
-    "updated_at": "2026-07-23T18:46:23Z",
-    "summary": "F17 accepted: fork-ci test rails promoted advisory->blocking and jcode-tui runs (not compile-only); serialized (--test-threads=1) and root-caused the mermaid deferred-worker ACTIVE_DIAGRAMS pollution race, fixed via runtime synchronous-render mode. Green of record: Fork CI 30026766050 @ cdb2ee303 (Quality Guardrails, Linux 26m24s, macOS 45m14s). Validated 0/95 serial rounds on Linux repro box; independent review ACCEPT-WITH-CAVEATS, zero production risk. Follow-up F28 hardens lock discipline to restore parallelism."
+    "commit": "ca5f38bde",
+    "updated_at": "2026-07-23T21:54:04Z",
+    "summary": "PRs now run a real nix build + result/bin/jcode --version (x86_64-linux) on pull_request; doCheck stays false, cache push stays off. Green run 30045621841."
   },
   "nodes": {
     "W0": {
@@ -247,11 +247,15 @@
       "updated_at": "2026-07-23T18:46:23Z"
     },
     "F18": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "ca5f38bde",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F18/README.md",
+        "docs/fork/ideal-base/evidence/F18/ci-pr-run.md",
+        "docs/fork/ideal-base/evidence/F18/local-darwin-version.txt"
+      ],
+      "summary": "PRs now run a real nix build + result/bin/jcode --version (x86_64-linux) on pull_request; doCheck stays false, cache push stays off. Green run 30045621841.",
+      "updated_at": "2026-07-23T21:54:04Z"
     },
     "F19": {
       "state": "pending",
