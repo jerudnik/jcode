@@ -966,6 +966,10 @@ fn render_background_task_messages_prefer_display_name() {
 
 #[test]
 fn render_system_message_uses_scheduled_task_card() {
+    // Holds the shared env lock so a concurrent test mutating TERM_PROGRAM/TERM
+    // (render_system_message_uses_width_stable_titles_on_kitty) cannot flip the
+    // width-stable-glyph branch between this test's render and assert reads.
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let msg = DisplayMessage::system(
         "[Scheduled task]\nA scheduled task for this session is now due.\n\nTask: Follow up on the scheduler test\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nBranch: master\n\nBackground: Verify the scheduled task card styling\nSuccess criteria: The due task renders clearly\nScheduled by session: session_test",
     );
@@ -990,6 +994,9 @@ fn render_system_message_uses_scheduled_task_card() {
 
 #[test]
 fn render_tool_message_uses_scheduled_card() {
+    // Same width-stable-glyph race as render_system_message_uses_scheduled_task_card:
+    // hold the env lock so a concurrent TERM_PROGRAM/TERM writer cannot flip the branch.
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let msg = DisplayMessage {
         role: "tool".to_string(),
         content: "Scheduled task 'Follow up on the scheduler test' for in 1m (id: sched_abc123)\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nTarget: resume session session_test".to_string(),
