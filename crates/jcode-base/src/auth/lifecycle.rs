@@ -1793,6 +1793,17 @@ mod tests {
     fn post_auth_model_selection_keeps_catalog_order_for_unranked_providers() {
         // OpenAI-compatible / namespaced providers have no curated flagship
         // order; the fallback must preserve live-catalog order for them.
+        //
+        // Isolate JCODE_HOME under the shared env lock so this test does not
+        // read a cerebras live-catalog disk cache left in the ambient home (or
+        // written by a sibling test such as
+        // post_auth_model_selection_prefers_newest_live_release_for_unranked_provider,
+        // which seeds a `qwen-3-235b` cache). Without this the parallel suite
+        // intermittently selected qwen instead of the first catalog route.
+        let _env = EnvGuard::new(&["JCODE_HOME"]);
+        let temp = tempfile::tempdir().expect("tempdir");
+        crate::env::set_var("JCODE_HOME", temp.path());
+
         let activation = AuthActivationResult {
             provider_id: Some("cerebras".to_string()),
             provider_label: Some("Cerebras".to_string()),
