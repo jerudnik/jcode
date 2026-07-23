@@ -5,16 +5,12 @@ blocking (CI semantics) on push/PR, and run jcode-tui rather than compile-only.
 
 Head of record: `cdb2ee303` (branch `ci-validation`, PR #16 -> `main`,
 repo `jerudnik/jcode`). This is the commit of the fully-green Fork CI run
-(30026766050: Quality Guardrails, Linux Tests 26m24s, Build & Test macOS
-45m14s) with the serial jcode-tui rails and the mermaid deferred-worker
-synchronization fix (gate moved to function entry per independent review, so
-no stale pending-queue entry is created on the inline path). The earlier
-"green" run at `081c61300` was a non-deterministic pass: the same suite flaked
-RED on `55757322a` (`test_side_panel_visibility_change_resets_diagram_fit_
-context`), exposing an async pollution race that `--test-threads=1` alone did
-not close. The fix closes the race at its source (synchronous render mode in
-tests) and caps the jcode-tui rails at one thread; validated 0/95 serial rounds
-on a Linux repro box vs the clean tree reproducing the exact flake (1/40).
+`30026766050` (Quality Guardrails, Linux Tests 26m24s, Build & Test macOS
+45m14s), with the serial jcode-tui rails and the mermaid deferred-worker
+synchronization fix. The suite's flakes were root-caused to three independent
+classes (env-lock pollution, an async deferred-render-worker race, and
+ambient-`JCODE_HOME` reads) and driven to zero; see `ci_runs.md` section 5b for
+the per-class resolution and the 0/95 serial-round validation.
 
 | File | What it proves |
 |---|---|
