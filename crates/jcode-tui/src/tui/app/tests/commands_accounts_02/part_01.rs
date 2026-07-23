@@ -63,7 +63,16 @@ fn test_usage_report_updates_display_only_card_without_system_message() {
     assert!(msg.content.contains("5h"));
     assert!(msg.content.contains("82%"));
     assert!(msg.content.contains("plan: pro"));
-    assert!(app.materialized_provider_messages().is_empty());
+    let provider_messages = app.materialized_provider_messages();
+    assert_eq!(provider_messages.len(), 1, "expected only the session scaffold");
+    assert!(
+        matches!(
+            provider_messages[0].content.first(),
+            Some(crate::message::ContentBlock::Text { text, .. })
+                if text.contains("<system-reminder>\n# Session Context")
+        ),
+        "usage reporting must not add a provider message: {provider_messages:?}"
+    );
 }
 
 #[test]
@@ -587,7 +596,7 @@ fn test_account_openai_compatible_settings_renders_provider_settings() {
 
 #[test]
 fn test_account_default_provider_command_saves_config() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let mut app = create_test_app();
     app.input = "/account default-provider openai".to_string();
     app.submit_input();

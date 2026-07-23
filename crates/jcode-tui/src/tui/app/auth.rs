@@ -1,3 +1,7 @@
+mod callback_input;
+pub(super) use callback_input::{
+    antigravity_input_requires_state_validation, looks_like_oauth_callback_input,
+};
 #[path = "auth_account_commands.rs"]
 mod auth_account_commands;
 #[path = "auth_account_picker.rs"]
@@ -2412,13 +2416,15 @@ impl App {
             ),
         ));
         let provider = Arc::clone(&self.provider);
+        let session_id = self.session.id.clone();
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
                 provider.on_auth_changed();
                 // Hot provider initialization is complete even if live catalog
                 // prefetches are still running. Wake the picker now so it can use
                 // the newly available routes instead of the pre-login snapshot.
-                crate::bus::Bus::global().publish(crate::bus::BusEvent::AuthCatalogRefreshReady);
+                crate::bus::Bus::global()
+                    .publish(crate::bus::BusEvent::AuthCatalogRefreshReady { session_id });
             });
         } else {
             provider.on_auth_changed();
@@ -2956,19 +2962,6 @@ fn save_tui_openai_compatible_key(
         )?;
     }
     Ok(resolved)
-}
-
-fn looks_like_oauth_callback_input(input: &str) -> bool {
-    let input = input.trim();
-    input.starts_with("http://")
-        || input.starts_with("https://")
-        || input.starts_with('?')
-        || input.contains("code=")
-        || input.contains("state=")
-}
-
-fn antigravity_input_requires_state_validation(input: &str, expected_state: Option<&str>) -> bool {
-    expected_state.is_some() && looks_like_oauth_callback_input(input)
 }
 
 #[cfg(test)]

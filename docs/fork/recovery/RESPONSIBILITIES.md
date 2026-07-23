@@ -1,5 +1,10 @@
 # Responsibility index
 
+> **Historical recovery authority map.** It remains useful for responsibility
+> boundaries, but pilot and implementation status statements below are dated
+> checkpoints. Recovery is complete; use
+> [`../normalization/STATUS.md`](../normalization/STATUS.md) for current state.
+
 Status: Phase 1 adjudicated on 2026-07-15
 
 This index defines behavior and governance responsibilities, not file ownership. It was adjudicated from fixed refs fork `7ff4fc6be8dcf0410f2f61994752fdf5ee93e6e4`, upstream `802f6909825809e882d9c2d575b7e478dce57d3b`, and merge base `631935dd1d3b2e31e167e2b12ad463e54bcf4b8d`.

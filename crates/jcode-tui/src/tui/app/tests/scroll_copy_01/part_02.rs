@@ -9,11 +9,15 @@ fn test_prompt_jump_ctrl_digit_is_recency_rank_in_app() {
     let (prompt_up_code, prompt_up_mods) = prompt_up_key(&app);
     app.handle_key(prompt_up_code, prompt_up_mods).unwrap();
     assert!(app.scroll_offset > 0);
+    let oldest_prompt = crate::tui::ui::last_user_prompt_positions()
+        .first()
+        .copied()
+        .expect("rendered prompt position");
 
     // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
     app.handle_key(KeyCode::Char('5'), KeyModifiers::CONTROL)
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert_eq!(app.scroll_offset, oldest_prompt);
 }
 
 #[test]
@@ -234,6 +238,7 @@ fn test_remote_prompt_jump_ctrl_brackets() {
 #[cfg(target_os = "macos")]
 #[test]
 fn test_remote_prompt_jump_ctrl_esc_fallback_on_macos() {
+    let _render_lock = scroll_render_test_lock();
     let (mut app, mut terminal) = create_scroll_test_app(100, 30, 1, 20);
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();
@@ -312,11 +317,15 @@ fn test_remote_prompt_jump_ctrl_digit_is_recency_rank() {
     rt.block_on(app.handle_remote_key(prompt_up_code, prompt_up_mods, &mut remote))
         .unwrap();
     assert!(app.scroll_offset > 0);
+    let oldest_prompt = crate::tui::ui::last_user_prompt_positions()
+        .first()
+        .copied()
+        .expect("rendered prompt position");
 
     // Ctrl+5 now means "5th most-recent prompt" (clamped to oldest).
     rt.block_on(app.handle_remote_key(KeyCode::Char('5'), KeyModifiers::CONTROL, &mut remote))
         .unwrap();
-    assert!(app.scroll_offset > 0);
+    assert_eq!(app.scroll_offset, oldest_prompt);
 }
 
 #[test]
@@ -355,6 +364,7 @@ fn test_remote_ctrl_c_still_arms_quit_when_idle() {
 #[test]
 fn test_local_copy_badge_shortcut_accepts_alt_uppercase_encoding() {
     let _render_lock = scroll_render_test_lock();
+    let _clipboard = crate::tui::app::test_support::scoped_test_clipboard_result(true);
     let (mut app, mut terminal) = create_copy_test_app();
 
     render_and_snap(&app, &mut terminal);
@@ -380,6 +390,7 @@ fn test_local_copy_badge_shortcut_accepts_alt_uppercase_encoding() {
 #[test]
 fn test_remote_copy_badge_shortcut_supported() {
     let _render_lock = scroll_render_test_lock();
+    let _clipboard = crate::tui::app::test_support::scoped_test_clipboard_result(true);
     let (mut app, mut terminal) = create_copy_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();

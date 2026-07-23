@@ -529,6 +529,9 @@ async fn gateway_e2e_pair_ws_history_send_cancel_reconnect_and_stale_ack_isolati
 
 #[test]
 fn test_authorize_ws_device_valid_token() {
+    let _lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp home");
+    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let mut registry = DeviceRegistry::default();
     let token = registry.pair_device("dev-1".to_string(), "iPhone".to_string(), None);
 
@@ -539,6 +542,9 @@ fn test_authorize_ws_device_valid_token() {
 
 #[test]
 fn test_authorize_ws_device_rejects_unknown_and_revoked_with_401() {
+    let _lock = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp home");
+    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let mut registry = DeviceRegistry::default();
     let token = registry.pair_device("dev-1".to_string(), "iPhone".to_string(), None);
 

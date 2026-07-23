@@ -113,6 +113,14 @@
               pkgs.cargo-watch
               pkgs.rust-analyzer
               pkgs.nixfmt
+              pkgs.python3
+              pkgs.ripgrep
+              pkgs.actionlint
+              pkgs.git
+              pkgs.just
+              pkgs.jq
+              pkgs.shellcheck
+              pkgs.curl
               pkgs.pkg-config
               pkgs.cmake
               pkgs.perl

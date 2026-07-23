@@ -2,6 +2,7 @@ use crate::build;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::sync::OnceCell;
 
 /// Default embedding idle unload threshold (15 minutes).
@@ -39,9 +40,17 @@ pub(crate) fn embedding_idle_unload_secs() -> u64 {
 pub(crate) async fn get_shared_mcp_pool(
     cell: &OnceCell<Arc<crate::mcp::SharedMcpPool>>,
 ) -> Arc<crate::mcp::SharedMcpPool> {
-    cell.get_or_init(|| async { Arc::new(crate::mcp::SharedMcpPool::from_default_config()) })
-        .await
-        .clone()
+    cell.get_or_init(|| async {
+        // Composition root (F01 design 3.0): the pool receives the server's
+        // activity-lease authority so in-flight MCP calls pin the daemon.
+        Arc::new(
+            crate::mcp::SharedMcpPool::from_default_config_with_activity(
+                super::shutdown::activity_authority(),
+            ),
+        )
+    })
+    .await
+    .clone()
 }
 
 pub(crate) fn server_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
@@ -76,73 +85,460 @@ pub(crate) fn server_update_candidate(is_selfdev_session: bool) -> Option<(PathB
 /// newest candidate across flavors still preserves a deliberately-pinned self-dev
 /// build whenever that build is the freshest one on disk (the case the pin is
 /// meant to protect).
-pub(crate) fn reload_exec_target(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
-    let candidate = newest_reload_candidate(is_selfdev_session)?;
-    // On Linux a self-dev rebuild rewrites the running binary in place (a dirty
-    // build reuses the same `versions/<hash>` path), which unlinks the running
-    // inode. `current_exe()` then resolves `/proc/self/exe` to a path with a
-    // trailing " (deleted)" marker that is NOT a real file. If we keep that
-    // marker we (a) fail the "same binary" fast-path below, (b) read no mtime so
-    // the freshly-built candidate looks like a downgrade, and (c) fall back to
-    // re-execing the bogus " (deleted)" path, which does not exist -> the server
-    // exits without a replacement and strands every connected client. Strip the
-    // marker so we compare against (and can re-exec) the real on-disk path.
-    let current_exe = std::env::current_exe().ok().map(strip_deleted_suffix);
+pub(crate) fn reload_exec_target(
+    is_selfdev_session: bool,
+    force: bool,
+) -> Option<(PathBuf, &'static str)> {
+    let resolution = resolve_reload_target(is_selfdev_session, force);
+    resolution.log_decision("reload_exec_target");
+    if let Some(refusal) = resolution.refusal_message() {
+        crate::logging::error(&format!(
+            "reload target resolution refused before exec: {refusal}"
+        ));
+        return None;
+    }
+    resolution.chosen_target()
+}
 
-    // Identity/mtime comparisons must look through release wrapper scripts to
-    // the payload that actually runs (see `build::resolve_binary_payload`):
-    // the running exe is the `.bin` payload while channel candidates are tiny
-    // wrapper scripts, and comparing wrapper-vs-payload mtimes turned every
-    // release install into a phantom "downgrade"/"update". The exec target
-    // stays the original candidate path (the wrapper), which is what sets up
-    // `LD_LIBRARY_PATH` correctly.
-    let candidate_canonical = build::resolve_binary_payload(&candidate.0);
+/// Resolve the binary the server should reload into and preserve enough context
+/// for callers to either exec it or refuse/skips actionably.
+///
+/// This is the shared target-selection API for reload callers. `reload_exec_target`
+/// keeps the legacy `Option<(PathBuf, label)>` shape for the reload worker and
+/// debug/selfdev call sites, while stateful request handlers can inspect the
+/// structured result first and return a client-visible refusal before shutdown.
+pub(crate) fn resolve_reload_target(
+    is_selfdev_session: bool,
+    force: bool,
+) -> ReloadTargetResolution {
+    let current_exe = std::env::current_exe().ok().map(strip_deleted_suffix);
     let current_canonical = current_exe
         .as_ref()
         .map(|p| build::resolve_binary_payload(p));
-
     let current_mtime = current_canonical.as_deref().and_then(binary_mtime);
-    let candidate_mtime = binary_mtime(candidate_canonical.as_path());
 
-    match guarded_reload_target(
-        candidate.clone(),
-        candidate_canonical.as_path(),
-        current_exe.as_deref(),
-        current_canonical.as_deref(),
+    let candidates = collect_reload_target_candidates(is_selfdev_session, current_exe.as_deref());
+    resolve_reload_target_from_candidates(
+        force,
+        current_exe,
+        current_canonical,
         current_mtime,
-        candidate_mtime,
-    ) {
-        ReloadTargetDecision::UseCandidate(target) => Some(target),
-        ReloadTargetDecision::DowngradeBlockedUseCurrent(target) => {
-            // Never strand clients by re-execing a binary that is gone from disk.
-            // If the running exe was unlinked (e.g. an in-place rebuild) but the
-            // candidate still exists, prefer the candidate over refusing to
-            // reload. The candidate may be older, but a live downgrade beats a
-            // dead server with no replacement.
-            if !target.0.exists() && candidate_canonical.exists() {
-                crate::logging::warn(&format!(
-                    "reload downgrade guard: current binary {:?} is missing on disk; falling back to candidate {:?} to avoid stranding clients",
-                    target.0, candidate.0,
-                ));
-                return Some(candidate);
+        candidates,
+    )
+}
+
+fn resolve_reload_target_from_candidates(
+    force: bool,
+    current_exe: Option<PathBuf>,
+    current_canonical: Option<PathBuf>,
+    current_mtime: Option<SystemTime>,
+    candidates: Vec<ReloadTargetCandidate>,
+) -> ReloadTargetResolution {
+    let candidate = pick_newest_target_candidate(
+        candidates
+            .iter()
+            .filter(|candidate| candidate.exec_candidate)
+            .cloned(),
+    );
+
+    let mut rejection_reasons = Vec::new();
+    let mut refused = None;
+    let mut chosen = None;
+    let mut chosen_payload = None;
+
+    if force && let Some(reason) = forced_stale_shared_server_refusal(&candidates) {
+        rejection_reasons.push(reason.clone());
+        refused = Some(reason);
+    }
+
+    if refused.is_none() {
+        if let Some(candidate) = candidate {
+            // Identity/mtime comparisons must look through release wrapper scripts to
+            // the payload that actually runs (see `build::resolve_binary_payload`):
+            // the running exe is the `.bin` payload while channel candidates are tiny
+            // wrapper scripts, and comparing wrapper-vs-payload mtimes turned every
+            // release install into a phantom "downgrade"/"update". The exec target
+            // stays the original candidate path (the wrapper), which is what sets up
+            // `LD_LIBRARY_PATH` correctly.
+            let decision = guarded_reload_target(
+                (candidate.path.clone(), candidate.label),
+                candidate.payload.as_path(),
+                current_exe.as_deref(),
+                current_canonical.as_deref(),
+                current_mtime,
+                candidate.mtime,
+            );
+            match decision {
+                ReloadTargetDecision::UseCandidate(target) => {
+                    chosen_payload = Some(candidate.payload.clone());
+                    chosen = Some(target);
+                }
+                ReloadTargetDecision::DowngradeBlockedUseCurrent(target) => {
+                    // Never strand clients by re-execing a binary that is gone from disk.
+                    // If the running exe was unlinked (e.g. an in-place rebuild) but the
+                    // candidate still exists, prefer the candidate over refusing to
+                    // reload. The candidate may be older, but a live downgrade beats a
+                    // dead server with no replacement.
+                    if !target.0.exists() && candidate.payload.exists() {
+                        crate::logging::warn(&format!(
+                            "reload downgrade guard: current binary {:?} is missing on disk; falling back to candidate {:?} to avoid stranding clients",
+                            target.0, candidate.path,
+                        ));
+                        chosen_payload = Some(candidate.payload.clone());
+                        chosen = Some((candidate.path.clone(), candidate.label));
+                    } else {
+                        crate::logging::warn(&format!(
+                            "reload downgrade guard: refusing to exec into older candidate; re-execing current binary {:?} instead",
+                            target.0,
+                        ));
+                        chosen_payload = current_canonical.clone();
+                        chosen = Some(target);
+                    }
+                }
+                ReloadTargetDecision::DowngradeUnverifiable(target) => {
+                    crate::logging::warn(&format!(
+                        "reload downgrade guard: older candidate {:?} detected but current exe is unavailable; proceeding with candidate",
+                        target.0,
+                    ));
+                    chosen_payload = Some(candidate.payload.clone());
+                    chosen = Some(target);
+                }
             }
-            crate::logging::warn(&format!(
-                "reload downgrade guard: refusing to exec into older candidate; re-execing current binary {:?} instead",
-                target.0,
-            ));
-            Some(target)
+        } else {
+            rejection_reasons.push("no reload target candidates were found".to_string());
         }
-        ReloadTargetDecision::DowngradeUnverifiable(target) => {
-            crate::logging::warn(&format!(
-                "reload downgrade guard: older candidate {:?} detected but current exe is unavailable; proceeding with candidate",
-                target.0,
+    }
+
+    ReloadTargetResolution {
+        force,
+        current_exe,
+        current_payload: current_canonical,
+        current_mtime,
+        chosen,
+        chosen_payload,
+        candidates,
+        rejection_reasons,
+        refused,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReloadTargetResolution {
+    force: bool,
+    current_exe: Option<PathBuf>,
+    current_payload: Option<PathBuf>,
+    current_mtime: Option<SystemTime>,
+    chosen: Option<(PathBuf, &'static str)>,
+    chosen_payload: Option<PathBuf>,
+    candidates: Vec<ReloadTargetCandidate>,
+    rejection_reasons: Vec<String>,
+    refused: Option<String>,
+}
+
+impl ReloadTargetResolution {
+    pub(crate) fn chosen_target(&self) -> Option<(PathBuf, &'static str)> {
+        self.chosen.clone()
+    }
+
+    pub(crate) fn refusal_message(&self) -> Option<&str> {
+        self.refused.as_deref()
+    }
+
+    pub(crate) fn has_strictly_newer_candidate_than_current(&self) -> bool {
+        newer_binary_available(
+            self.current_mtime,
+            self.current_payload.as_deref(),
+            self.candidates
+                .iter()
+                .filter(|candidate| candidate.exec_candidate)
+                .map(|candidate| (candidate.payload.clone(), candidate.mtime)),
+        )
+    }
+
+    pub(crate) fn no_update_message(&self) -> String {
+        format!(
+            "Server reload skipped: no strictly newer approved reload target by mtime. {}{}",
+            self.candidate_summary(),
+            self.rejection_summary_suffix()
+        )
+    }
+
+    pub(crate) fn log_decision(&self, context: &str) {
+        let candidates = self
+            .candidates
+            .iter()
+            .map(|candidate| {
+                serde_json::json!({
+                    "purpose": candidate.purpose,
+                    "label": candidate.label,
+                    "path": candidate.path.display().to_string(),
+                    "payload": candidate.payload.display().to_string(),
+                    "mtime_unix_ms": system_time_unix_ms(candidate.mtime),
+                    "exists": candidate.path.exists() || candidate.payload.exists(),
+                    "exec_candidate": candidate.exec_candidate,
+                    "rejection_reasons": candidate.rejection_reasons,
+                })
+            })
+            .collect::<Vec<_>>();
+        crate::logging::info(&format!(
+            "RELOAD_TARGET_DECISION {}",
+            serde_json::json!({
+                "context": context,
+                "force": self.force,
+                "chosen_path": self.chosen.as_ref().map(|(path, _)| path.display().to_string()),
+                "chosen_label": self.chosen.as_ref().map(|(_, label)| *label),
+                "chosen_payload": self.chosen_payload.as_ref().map(|path| path.display().to_string()),
+                "current_exe": self.current_exe.as_ref().map(|path| path.display().to_string()),
+                "current_payload": self.current_payload.as_ref().map(|path| path.display().to_string()),
+                "current_mtime_unix_ms": system_time_unix_ms(self.current_mtime),
+                "candidates": candidates,
+                "rejection_reasons": self.rejection_reasons,
+                "refused": self.refused,
+            })
+        ));
+    }
+
+    fn candidate_summary(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(current) = self.current_payload.as_ref() {
+            parts.push(format!(
+                "current-exe={} mtime={}",
+                current.display(),
+                format_mtime(self.current_mtime)
             ));
-            Some(target)
+        }
+        parts.extend(self.candidates.iter().map(|candidate| {
+            format!(
+                "{}:{}={} payload={} mtime={}",
+                candidate.purpose,
+                candidate.label,
+                candidate.path.display(),
+                candidate.payload.display(),
+                format_mtime(candidate.mtime)
+            )
+        }));
+        format!("Candidates: {}.", parts.join("; "))
+    }
+
+    fn rejection_summary_suffix(&self) -> String {
+        if self.rejection_reasons.is_empty() {
+            String::new()
+        } else {
+            format!(" Rejections: {}.", self.rejection_reasons.join("; "))
         }
     }
 }
 
-fn binary_mtime(path: &Path) -> Option<std::time::SystemTime> {
+#[derive(Debug, Clone)]
+struct ReloadTargetCandidate {
+    purpose: &'static str,
+    label: &'static str,
+    path: PathBuf,
+    payload: PathBuf,
+    mtime: Option<SystemTime>,
+    exec_candidate: bool,
+    rejection_reasons: Vec<String>,
+}
+
+fn collect_reload_target_candidates(
+    is_selfdev_session: bool,
+    current_exe: Option<&Path>,
+) -> Vec<ReloadTargetCandidate> {
+    let mut candidates = Vec::new();
+    let mut seen_purposes = HashSet::new();
+
+    for (purpose, candidate) in [
+        ("preferred", server_update_candidate(is_selfdev_session)),
+        ("alternate", server_update_candidate(!is_selfdev_session)),
+    ] {
+        if let Some((path, label)) = candidate
+            && seen_purposes.insert((purpose, path.clone()))
+        {
+            candidates.push(target_candidate(purpose, label, path, true, Vec::new()));
+        }
+    }
+
+    if let Ok(path) = build::shared_server_binary_path()
+        && path.exists()
+    {
+        candidates.push(target_candidate(
+            "channel",
+            "shared-server",
+            path,
+            false,
+            Vec::new(),
+        ));
+    }
+    if let Ok(path) = build::stable_binary_path()
+        && path.exists()
+    {
+        candidates.push(target_candidate(
+            "channel",
+            "stable",
+            path,
+            false,
+            Vec::new(),
+        ));
+    }
+    if let Some(path) = build::get_repo_dir()
+        .and_then(|repo| build::find_dev_binary(&repo))
+        .filter(|path| path.exists())
+    {
+        candidates.push(target_candidate(
+            "candidate",
+            "dev",
+            path,
+            false,
+            Vec::new(),
+        ));
+    }
+    if let Some(path) = current_exe {
+        candidates.push(target_candidate(
+            "current",
+            "current-exe",
+            path.to_path_buf(),
+            false,
+            Vec::new(),
+        ));
+    }
+
+    annotate_reload_candidates(candidates)
+}
+
+fn target_candidate(
+    purpose: &'static str,
+    label: &'static str,
+    path: PathBuf,
+    exec_candidate: bool,
+    rejection_reasons: Vec<String>,
+) -> ReloadTargetCandidate {
+    let payload = build::resolve_binary_payload(&path);
+    let mtime = binary_mtime(payload.as_path());
+    ReloadTargetCandidate {
+        purpose,
+        label,
+        path,
+        payload,
+        mtime,
+        exec_candidate,
+        rejection_reasons,
+    }
+}
+
+fn annotate_reload_candidates(
+    mut candidates: Vec<ReloadTargetCandidate>,
+) -> Vec<ReloadTargetCandidate> {
+    let newest_mtime = candidates
+        .iter()
+        .filter_map(|candidate| candidate.mtime)
+        .max();
+    let payload_counts = candidates.iter().fold(
+        std::collections::HashMap::<PathBuf, usize>::new(),
+        |mut counts, candidate| {
+            *counts.entry(candidate.payload.clone()).or_default() += 1;
+            counts
+        },
+    );
+
+    for candidate in &mut candidates {
+        if !candidate.path.exists() && !candidate.payload.exists() {
+            candidate
+                .rejection_reasons
+                .push("path and resolved payload are missing".to_string());
+        }
+        if candidate.mtime.is_none() {
+            candidate
+                .rejection_reasons
+                .push("resolved payload mtime is unavailable".to_string());
+        }
+        if let (Some(newest), Some(mtime)) = (newest_mtime, candidate.mtime)
+            && mtime < newest
+        {
+            candidate.rejection_reasons.push(format!(
+                "older than another candidate by mtime (candidate={}, newest={})",
+                format_mtime(Some(mtime)),
+                format_mtime(Some(newest))
+            ));
+        }
+        if payload_counts.get(&candidate.payload).copied().unwrap_or(0) > 1 {
+            candidate
+                .rejection_reasons
+                .push("duplicates another candidate after payload resolution".to_string());
+        }
+    }
+
+    candidates
+}
+
+fn pick_newest_target_candidate(
+    candidates: impl IntoIterator<Item = ReloadTargetCandidate>,
+) -> Option<ReloadTargetCandidate> {
+    let mut best: Option<ReloadTargetCandidate> = None;
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    for candidate in candidates {
+        if !seen.insert(candidate.payload.clone()) {
+            continue;
+        }
+        let replace = match (&best, candidate.mtime) {
+            (None, _) => true,
+            (Some(best), Some(new_mtime)) => best.mtime.is_none_or(|best| new_mtime > best),
+            (Some(_), None) => false,
+        };
+        if replace {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+fn forced_stale_shared_server_refusal(candidates: &[ReloadTargetCandidate]) -> Option<String> {
+    let shared = candidates
+        .iter()
+        .filter(|candidate| candidate.label == "shared-server")
+        .filter(|candidate| candidate.path.exists() || candidate.payload.exists())
+        .filter_map(|candidate| candidate.mtime.map(|mtime| (candidate, mtime)))
+        .min_by_key(|(_, mtime)| *mtime)?;
+
+    let newer = candidates
+        .iter()
+        .filter(|candidate| candidate.payload != shared.0.payload)
+        .filter(|candidate| candidate.path.exists() || candidate.payload.exists())
+        .filter_map(|candidate| candidate.mtime.map(|mtime| (candidate, mtime)))
+        .filter(|(_, mtime)| *mtime > shared.1)
+        .max_by_key(|(_, mtime)| *mtime)?;
+
+    Some(format!(
+        "forced reload refused: shared-server target {} (payload {}, mtime {}) is stale while {} target {} (payload {}, mtime {}) is strictly newer. Publish or promote the intended build to shared-server, or run a non-forced reload to select an approved newer target.",
+        shared.0.path.display(),
+        shared.0.payload.display(),
+        format_mtime(Some(shared.1)),
+        newer.0.label,
+        newer.0.path.display(),
+        newer.0.payload.display(),
+        format_mtime(Some(newer.1)),
+    ))
+}
+
+fn system_time_unix_ms(time: Option<SystemTime>) -> Option<u64> {
+    time.and_then(|time| {
+        time.duration_since(SystemTime::UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+    })
+}
+
+fn format_mtime(time: Option<SystemTime>) -> String {
+    system_time_unix_ms(time)
+        .map(|millis| format!("{millis}ms-since-epoch"))
+        .unwrap_or_else(|| "unavailable".to_string())
+}
+
+#[cfg(test)]
+fn newest_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
+    newest_reload_candidate_inner(is_selfdev_session)
+}
+
+fn binary_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
@@ -155,7 +551,8 @@ fn binary_mtime(path: &Path) -> Option<std::time::SystemTime> {
 /// *strictly newer*, which is exactly the situation that makes
 /// `server_has_newer_binary` report an update (e.g. `/update` installed a newer
 /// release while the self-dev pin stayed on an older build).
-fn newest_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
+#[cfg(test)]
+fn newest_reload_candidate_inner(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     let ordered = [
         server_update_candidate(is_selfdev_session),
         server_update_candidate(!is_selfdev_session),
@@ -177,6 +574,7 @@ fn newest_reload_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'stati
 /// one when it is provably, strictly newer by mtime, so equal/unknown mtimes
 /// never demote the higher-preference flavor (protecting a self-dev pin on a
 /// tie). Canonical-path duplicates are collapsed to the first occurrence.
+#[cfg(test)]
 fn pick_newest_candidate(
     candidates: impl IntoIterator<
         Item = (
@@ -671,6 +1069,101 @@ mod reload_target_tests {
             decision,
             ReloadTargetDecision::DowngradeUnverifiable(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod target_resolution_tests {
+    use super::{
+        annotate_reload_candidates, forced_stale_shared_server_refusal,
+        resolve_reload_target_from_candidates, target_candidate,
+    };
+    use std::path::Path;
+    use std::time::{Duration, SystemTime};
+
+    fn t(secs: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(secs)
+    }
+
+    fn write_binary(path: &Path, mtime: SystemTime) {
+        std::fs::create_dir_all(path.parent().expect("parent dir")).expect("create parent");
+        std::fs::write(path, "binary").expect("write binary");
+        std::fs::File::open(path)
+            .expect("open binary")
+            .set_modified(mtime)
+            .expect("set mtime");
+    }
+
+    #[test]
+    fn target_resolution_refuses_forced_stale_shared_server_when_newer_dev_exists() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let shared = temp.path().join("versions/old-shared/jcode");
+        let dev = temp.path().join("target/selfdev/jcode");
+        write_binary(&shared, t(100));
+        write_binary(&dev, t(300));
+
+        let candidates = annotate_reload_candidates(vec![
+            target_candidate("channel", "shared-server", shared.clone(), true, Vec::new()),
+            target_candidate("candidate", "dev", dev.clone(), false, Vec::new()),
+        ]);
+
+        let refusal = forced_stale_shared_server_refusal(&candidates).expect("stale refusal");
+        assert!(refusal.contains("forced reload refused"));
+        assert!(refusal.contains("shared-server"));
+        assert!(refusal.contains(shared.to_string_lossy().as_ref()));
+        assert!(refusal.contains(dev.to_string_lossy().as_ref()));
+        assert!(refusal.contains("strictly newer"));
+    }
+
+    #[test]
+    fn target_resolution_allows_forced_shared_server_when_it_is_freshest() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let shared = temp.path().join("versions/new-shared/jcode");
+        let stable = temp.path().join("versions/old-stable/jcode");
+        write_binary(&shared, t(300));
+        write_binary(&stable, t(100));
+
+        let candidates = annotate_reload_candidates(vec![
+            target_candidate("channel", "shared-server", shared, true, Vec::new()),
+            target_candidate("channel", "stable", stable, false, Vec::new()),
+        ]);
+
+        assert!(forced_stale_shared_server_refusal(&candidates).is_none());
+    }
+
+    #[test]
+    fn non_forced_stale_shared_server_with_newer_candidate_resolves_exec_target() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let current = temp.path().join("running/jcode");
+        let shared = temp.path().join("versions/old-shared/jcode");
+        let stable = temp.path().join("versions/new-stable/jcode");
+        let dev = temp.path().join("target/selfdev/jcode");
+        write_binary(&current, t(100));
+        write_binary(&shared, t(100));
+        write_binary(&stable, t(300));
+        write_binary(&dev, t(400));
+
+        let candidates = annotate_reload_candidates(vec![
+            target_candidate("channel", "shared-server", shared, false, Vec::new()),
+            target_candidate("candidate", "stable", stable.clone(), true, Vec::new()),
+            target_candidate("candidate", "dev", dev, false, Vec::new()),
+        ]);
+
+        let resolution = resolve_reload_target_from_candidates(
+            false,
+            Some(current.clone()),
+            Some(current),
+            Some(t(100)),
+            candidates,
+        );
+
+        assert!(resolution.refusal_message().is_none());
+        assert!(resolution.has_strictly_newer_candidate_than_current());
+        assert_eq!(
+            resolution.chosen_target(),
+            Some((stable, "stable")),
+            "the exec stage must receive a target instead of entering reload_exec_failed"
+        );
     }
 }
 

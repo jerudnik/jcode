@@ -22,7 +22,7 @@ impl SharedEnvLock {
     /// process env state, so a panic in one test must not cascade into a
     /// flood of unrelated `PoisonError` failures across every other test
     /// that takes this lock.
-    fn lock(&self) -> std::sync::MutexGuard<'static, ()> {
+    fn lock(&self) -> jcode_base::storage::TestEnvLease {
         jcode_base::storage::lock_test_env()
     }
 }
@@ -71,23 +71,8 @@ impl Drop for CatalogActivationGuard {
     }
 }
 
-fn test_config_dir(temp: &TempDir) -> std::path::PathBuf {
-    #[cfg(target_os = "macos")]
-    {
-        temp.path().join("Library").join("Application Support")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        temp.path().join("AppData").join("Roaming")
-    }
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        temp.path().to_path_buf()
-    }
-}
-
-fn write_test_api_key(temp: &TempDir, env_file: &str, env_key: &str, value: &str) {
-    let config_dir = test_config_dir(temp).join("jcode");
+fn write_test_api_key(env_file: &str, env_key: &str, value: &str) {
+    let config_dir = jcode_base::storage::app_config_dir().expect("temporary app config dir");
     std::fs::create_dir_all(&config_dir).expect("create test config dir");
     std::fs::write(config_dir.join(env_file), format!("{env_key}={value}\n"))
         .expect("write test api key");
@@ -883,6 +868,7 @@ fn test_configured_api_base_rejects_insecure_http_remote() {
 fn autodetects_single_saved_openai_compatible_profile() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -892,7 +878,6 @@ fn autodetects_single_saved_openai_compatible_profile() {
         jcode_base::provider_catalog::OPENCODE_PROFILE,
     );
     write_test_api_key(
-        &temp,
         &opencode.env_file,
         &opencode.api_key_env,
         "test-opencode-key",
@@ -908,6 +893,7 @@ fn autodetects_single_saved_openai_compatible_profile() {
 fn autodetects_single_saved_local_openai_compatible_profile() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -916,7 +902,7 @@ fn autodetects_single_saved_local_openai_compatible_profile() {
     let lmstudio = jcode_base::provider_catalog::resolve_openai_compatible_profile(
         jcode_base::provider_catalog::LMSTUDIO_PROFILE,
     );
-    let config_dir = test_config_dir(&temp).join("jcode");
+    let config_dir = jcode_base::storage::app_config_dir().expect("temporary app config dir");
     std::fs::create_dir_all(&config_dir).expect("create test config dir");
     std::fs::write(
         config_dir.join(&lmstudio.env_file),
@@ -941,6 +927,7 @@ fn openrouter_transport_state_distinguishes_runtime_identities() {
     // autodetect tests do, so this test does not read whatever provider
     // profile happens to be configured on the host machine.
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -1004,6 +991,7 @@ fn openrouter_transport_state_distinguishes_runtime_identities() {
 fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -1016,17 +1004,11 @@ fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
         jcode_base::provider_catalog::CHUTES_PROFILE,
     );
     write_test_api_key(
-        &temp,
         &opencode.env_file,
         &opencode.api_key_env,
         "test-opencode-key",
     );
-    write_test_api_key(
-        &temp,
-        &chutes.env_file,
-        &chutes.api_key_env,
-        "test-chutes-key",
-    );
+    write_test_api_key(&chutes.env_file, &chutes.api_key_env, "test-chutes-key");
 
     assert_eq!(configured_api_base(), DEFAULT_API_BASE);
     assert_eq!(configured_api_key_name(), DEFAULT_API_KEY_NAME);
@@ -1038,6 +1020,7 @@ fn does_not_guess_when_multiple_saved_openai_compatible_profiles_exist() {
 fn autodetected_profile_seeds_default_model_and_cache_namespace() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -1046,7 +1029,7 @@ fn autodetected_profile_seeds_default_model_and_cache_namespace() {
     let zai = jcode_base::provider_catalog::resolve_openai_compatible_profile(
         jcode_base::provider_catalog::ZAI_PROFILE,
     );
-    write_test_api_key(&temp, &zai.env_file, &zai.api_key_env, "test-zai-key");
+    write_test_api_key(&zai.env_file, &zai.api_key_env, "test-zai-key");
 
     let provider = OpenRouterProvider::new().expect("provider");
     assert_eq!(provider.model.blocking_read().clone(), "glm-4.5");
@@ -1062,6 +1045,7 @@ fn autodetected_profile_seeds_default_model_and_cache_namespace() {
 fn activated_zai_alias_survives_openrouter_compat_env_laundering() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -1088,6 +1072,7 @@ fn activated_zai_alias_survives_openrouter_compat_env_laundering() {
 fn explicit_openrouter_override_does_not_probe_zai_alias() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -1110,6 +1095,7 @@ fn explicit_openrouter_override_does_not_probe_zai_alias() {
 fn named_profile_does_not_probe_zai_catalog_alias() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
@@ -1595,6 +1581,7 @@ fn direct_deepseek_chat_request_sends_reasoning_effort() {
 fn openai_compatible_model_catalog_refresh_calls_models_endpoint_and_updates_display() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp home");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _namespace = EnvVarGuard::set(
@@ -1680,6 +1667,7 @@ fn openai_compatible_model_catalog_refresh_calls_models_endpoint_and_updates_dis
 fn built_in_openai_compatible_static_models_drop_out_after_live_catalog() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp home");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _namespace = EnvVarGuard::set(
@@ -1850,12 +1838,13 @@ fn named_profile_context_window_survives_provider_qualified_model() {
 fn named_openai_compatible_loads_api_key_from_env_file() {
     let _lock = ENV_LOCK.lock();
     let temp = TempDir::new().expect("create temp dir");
+    let _jcode_home = EnvVarGuard::set("JCODE_HOME", temp.path());
     let _xdg = EnvVarGuard::set("XDG_CONFIG_HOME", temp.path());
     let _home = EnvVarGuard::set("HOME", temp.path());
     let _appdata = EnvVarGuard::set("APPDATA", temp.path().join("AppData").join("Roaming"));
     let _namespace = EnvVarGuard::remove("JCODE_OPENROUTER_CACHE_NAMESPACE");
     let _api_key = EnvVarGuard::remove("CUSTOM_API_KEY");
-    write_test_api_key(&temp, "custom.env", "CUSTOM_API_KEY", "from-env-file");
+    write_test_api_key("custom.env", "CUSTOM_API_KEY", "from-env-file");
 
     let config = jcode_base::config::NamedProviderConfig {
         base_url: "https://compat.example.test/v1".to_string(),

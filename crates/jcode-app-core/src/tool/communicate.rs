@@ -961,6 +961,11 @@ async fn run_swarm_plan_in_background(
             },
         )
         .await;
+    // Cap/drain refusal (F12): the plan task never ran; do not record the
+    // dead task id or report a running plan.
+    if let Some(reason) = &info.refused {
+        return Err(anyhow::anyhow!("Swarm plan refused: {reason}"));
+    }
     claim.record_task(&info.task_id);
 
     let delivery_note = if wake {
@@ -2298,8 +2303,8 @@ impl Tool for CommunicateTool {
                 },
                 "mode": {
                     "type": "string",
-                    "enum": ["all", "any"],
-                    "description": "For await_members: wait for all targeted members or wake when any targeted member matches."
+                    "enum": ["all", "any", "deep", "light"],
+                    "description": "For await_members, use all or any. For task_graph, use deep for recursive gates and typed artifacts or light for flat fan-out."
                 },
                 "target_status": {
                     "type": "array",

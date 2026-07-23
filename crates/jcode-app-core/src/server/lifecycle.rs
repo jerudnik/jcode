@@ -9,7 +9,6 @@ const SERVER_SCOPE_ENV: &str = "JCODE_SERVER_SCOPE";
 const OWNER_PID_ENV: &str = "JCODE_SERVER_OWNER_PID";
 const TEMP_IDLE_SECS_ENV: &str = "JCODE_TEMP_SERVER_IDLE_SECS";
 const DEFAULT_TEMP_IDLE_SECS: u64 = 30 * 60;
-const TEMP_SERVER_EXIT_CODE: i32 = super::EXIT_IDLE_TIMEOUT;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TemporaryServerPolicy {
@@ -78,22 +77,15 @@ fn env_truthy(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Pure exit decision for the persistent monitor (unit-testable): exit only
-/// once no client has been connected for at least `idle_timeout_secs`.
-///
-/// We deliberately do NOT accelerate exit for "orphaned" (getppid()==1) servers:
-/// the daemon is spawned by the interactive client itself via a single setsid()
-/// (no separate launcher), so it reparents to init the instant the user quits
-/// normally. Treating that as orphaned would collapse the warm-reconnect window
-/// to the orphan grace for every ordinary session. Faster abandoned-daemon
-/// cleanup would need a real spawner-liveness heartbeat, not raw getppid().
-fn persistent_should_exit(
-    client_count: usize,
-    idle_elapsed_secs: u64,
-    idle_timeout_secs: u64,
-) -> bool {
-    client_count == 0 && idle_elapsed_secs >= idle_timeout_secs
-}
+// The pure idle-exit decision now lives in `super::shutdown::IdleClock`
+// (quiescence-epoch semantics, F01 design 4.2): idle exit requires zero
+// clients AND zero drain-blocking leases continuously for the full window.
+//
+// We deliberately do NOT accelerate exit for "orphaned" (getppid()==1)
+// servers: the daemon is spawned by the interactive client itself via a
+// single setsid() (no separate launcher), so it reparents to init the
+// instant the user quits normally. Treating that as orphaned would collapse
+// the warm-reconnect window to the orphan grace for every ordinary session.
 
 pub(crate) fn metadata_path(socket_path: &Path) -> PathBuf {
     let filename = socket_path
@@ -155,33 +147,60 @@ pub(crate) fn cleanup_temporary_metadata(socket_path: &Path) {
 /// Lifecycle monitor for the persistent (non-temporary) shared server. Runs
 /// ALWAYS - debug control (JCODE_DEBUG_CONTROL / self-dev) must NEVER disable
 /// it, which is exactly what let an orphaned self-dev daemon spin forever.
-/// Exits after `idle_timeout_secs` of no clients.
+/// Requests shutdown through the coordinator after a continuous quiescence
+/// epoch (zero clients AND zero drain-blocking leases for the entire idle
+/// window, F01 design 4.2).
 pub(crate) fn spawn_persistent_lifecycle_monitor(
     client_count: Arc<RwLock<usize>>,
-    server_name: String,
+    _server_name: String,
     idle_timeout_secs: u64,
 ) {
     tokio::spawn(async move {
-        let mut idle_since: Option<Instant> = None;
+        let mut idle_clock = super::shutdown::IdleClock::default();
         let mut check_interval = tokio::time::interval(Duration::from_secs(10));
+        let timeout = Duration::from_secs(idle_timeout_secs);
+        let mut was_quiescent = false;
         loop {
             check_interval.tick().await;
-            let count = *client_count.read().await;
-            if count == 0 {
-                let since = *idle_since.get_or_insert_with(Instant::now);
-                let elapsed = since.elapsed().as_secs();
-                if persistent_should_exit(count, elapsed, idle_timeout_secs) {
-                    crate::logging::info(&format!(
-                        "Persistent server idle {elapsed}s with no clients; shutting down."
-                    ));
-                    crate::registry::unregister_server_bounded(&server_name).await;
-                    std::process::exit(super::EXIT_IDLE_TIMEOUT);
+            if super::shutdown::coordinator().has_begun() {
+                return;
+            }
+            let clients = *client_count.read().await;
+            let leases = super::shutdown::lease_authority().drain_blocking_count();
+            let quiescent = clients == 0 && leases == 0;
+            let now = Instant::now();
+            idle_clock.update(quiescent, now);
+            if quiescent && !was_quiescent {
+                crate::logging::info(
+                    "Server quiescent (no clients, no active leases). Idle timer started.",
+                );
+            } else if !quiescent && was_quiescent {
+                crate::logging::info("Server active again. Idle timer cancelled.");
+            }
+            was_quiescent = quiescent;
+            if idle_clock.should_exit(now, timeout) {
+                crate::logging::info(&format!(
+                    "Persistent server quiescent {}s; shutting down.",
+                    idle_clock.idle_elapsed(now).unwrap_or_default().as_secs()
+                ));
+                match super::shutdown::coordinator()
+                    .begin(super::shutdown::ExitReason::PersistentIdle)
+                {
+                    super::shutdown::BeginOutcome::Refused(
+                        super::shutdown::RefusalReason::NotQuiescent,
+                    ) => {
+                        // F02-B1: something acquired a lease between our
+                        // snapshot and the atomic claim. Not idle after all;
+                        // restart the window and keep watching.
+                        crate::logging::info(
+                            "Idle shutdown claim lost to new activity; restarting idle window.",
+                        );
+                        idle_clock.update(false, now);
+                        was_quiescent = false;
+                        continue;
+                    }
+                    _ => return,
                 }
-            } else {
-                if idle_since.is_some() {
-                    crate::logging::info("Client connected. Idle timer cancelled.");
-                }
-                idle_since = None;
             }
         }
     });
@@ -189,17 +208,22 @@ pub(crate) fn spawn_persistent_lifecycle_monitor(
 
 pub(crate) fn spawn_temporary_lifecycle_monitor(
     client_count: Arc<RwLock<usize>>,
-    socket_path: PathBuf,
-    debug_socket_path: PathBuf,
-    server_name: String,
+    _socket_path: PathBuf,
+    _debug_socket_path: PathBuf,
+    _server_name: String,
     policy: TemporaryServerPolicy,
 ) {
     tokio::spawn(async move {
-        let mut idle_since: Option<Instant> = None;
+        let mut idle_clock = super::shutdown::IdleClock::default();
         let mut check_interval = tokio::time::interval(Duration::from_secs(10));
+        let timeout = Duration::from_secs(policy.idle_timeout_secs);
+        let mut was_quiescent = false;
 
         loop {
             check_interval.tick().await;
+            if super::shutdown::coordinator().has_begun() {
+                return;
+            }
 
             if let Some(owner_pid) = policy.owner_pid
                 && owner_pid != std::process::id()
@@ -209,50 +233,48 @@ pub(crate) fn spawn_temporary_lifecycle_monitor(
                     "Temporary server owner pid {} is gone. Shutting down.",
                     owner_pid
                 ));
-                shutdown_temporary_server(&server_name, &socket_path, &debug_socket_path).await;
+                super::shutdown::coordinator()
+                    .begin(super::shutdown::ExitReason::TemporaryOwnerExit);
+                return;
             }
 
-            let count = *client_count.read().await;
-            if count == 0 {
-                if idle_since.is_none() {
-                    idle_since = Some(Instant::now());
-                    crate::logging::info(&format!(
-                        "Temporary server has no clients. It will exit after {} seconds idle.",
-                        policy.idle_timeout_secs
-                    ));
-                }
-
-                if let Some(since) = idle_since
-                    && since.elapsed().as_secs() >= policy.idle_timeout_secs
+            let clients = *client_count.read().await;
+            let leases = super::shutdown::lease_authority().drain_blocking_count();
+            let quiescent = clients == 0 && leases == 0;
+            let now = Instant::now();
+            idle_clock.update(quiescent, now);
+            if quiescent && !was_quiescent {
+                crate::logging::info(&format!(
+                    "Temporary server quiescent. It will exit after {} seconds idle.",
+                    policy.idle_timeout_secs
+                ));
+            } else if !quiescent && was_quiescent {
+                crate::logging::info("Temporary server active again. Idle timer cancelled.");
+            }
+            was_quiescent = quiescent;
+            if idle_clock.should_exit(now, timeout) {
+                crate::logging::info(&format!(
+                    "Temporary server quiescent for {} seconds. Shutting down.",
+                    idle_clock.idle_elapsed(now).unwrap_or_default().as_secs()
+                ));
+                match super::shutdown::coordinator()
+                    .begin(super::shutdown::ExitReason::TemporaryIdle)
                 {
-                    crate::logging::info(&format!(
-                        "Temporary server idle for {} seconds. Shutting down.",
-                        since.elapsed().as_secs()
-                    ));
-                    shutdown_temporary_server(&server_name, &socket_path, &debug_socket_path).await;
+                    super::shutdown::BeginOutcome::Refused(
+                        super::shutdown::RefusalReason::NotQuiescent,
+                    ) => {
+                        crate::logging::info(
+                            "Idle shutdown claim lost to new activity; restarting idle window.",
+                        );
+                        idle_clock.update(false, now);
+                        was_quiescent = false;
+                        continue;
+                    }
+                    _ => return,
                 }
-            } else {
-                if idle_since.is_some() {
-                    crate::logging::info(
-                        "Temporary server client connected. Idle timer cancelled.",
-                    );
-                }
-                idle_since = None;
             }
         }
     });
-}
-
-async fn shutdown_temporary_server(
-    server_name: &str,
-    socket_path: &Path,
-    debug_socket_path: &Path,
-) -> ! {
-    crate::registry::unregister_server_bounded(server_name).await;
-    crate::transport::remove_socket(socket_path);
-    crate::transport::remove_socket(debug_socket_path);
-    cleanup_temporary_metadata(socket_path);
-    std::process::exit(TEMP_SERVER_EXIT_CODE);
 }
 
 #[cfg(unix)]
@@ -363,14 +385,6 @@ mod tests {
             metadata_path(Path::new("/tmp/example/jcode.sock")),
             PathBuf::from("/tmp/example/jcode.sock.server.json")
         );
-    }
-
-    #[test]
-    fn persistent_exit_decision_respects_clients_and_idle_threshold() {
-        assert!(!persistent_should_exit(1, 99999, 300)); // client present: never
-        assert!(!persistent_should_exit(0, 299, 300)); // idle but under timeout
-        assert!(persistent_should_exit(0, 300, 300)); // idle past timeout
-        assert!(persistent_should_exit(0, 100_000, 300)); // long idle
     }
 
     #[cfg(unix)]

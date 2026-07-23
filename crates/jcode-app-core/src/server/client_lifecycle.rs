@@ -298,6 +298,17 @@ fn server_reload_starting() -> bool {
     )
 }
 
+fn record_resume_session_alias(source_session_id: &str, target_session_id: &str, reason: &str) {
+    if let Err(error) =
+        super::reload_recovery::persist_session_alias(source_session_id, target_session_id, reason)
+    {
+        crate::logging::warn(&format!(
+            "Failed to persist resume session alias source={} target={}: {}",
+            source_session_id, target_session_id, error
+        ));
+    }
+}
+
 fn compaction_server_event(event: crate::compaction::CompactionEvent) -> ServerEvent {
     ServerEvent::Compaction {
         trigger: event.trigger,
@@ -1499,6 +1510,11 @@ pub(super) async fn handle_client(
                         )
                         .await;
                         if client_session_id == target_session_id {
+                            record_resume_session_alias(
+                                &pre_resume_session_id,
+                                &target_session_id,
+                                "target-aware subscribe resume",
+                            );
                             handle_subscribe(
                                 id,
                                 subscribe_working_dir,
@@ -1761,6 +1777,8 @@ pub(super) async fn handle_client(
                 client_has_local_history,
                 allow_session_takeover,
             } => {
+                let pre_resume_session_id = client_session_id.clone();
+                let target_session_id = session_id.clone();
                 let resume_working_dir = {
                     let agent_guard = agent.lock().await;
                     agent_guard.working_dir().map(str::to_string)
@@ -1815,6 +1833,13 @@ pub(super) async fn handle_client(
                 .await;
                 if let Some(snapshot) = try_available_models_snapshot(&agent) {
                     last_available_models_snapshot = Some(snapshot);
+                }
+                if client_session_id == target_session_id {
+                    record_resume_session_alias(
+                        &pre_resume_session_id,
+                        &target_session_id,
+                        "explicit resume session",
+                    );
                 }
             }
 
@@ -3183,6 +3208,18 @@ pub(super) async fn process_message_streaming_mpsc(
     system_reminder: Option<String>,
     event_tx: tokio::sync::mpsc::UnboundedSender<ServerEvent>,
 ) -> Result<()> {
+    // Activity lease (F01 design 3.3): this is the common provider-turn
+    // boundary for every caller family (client message tasks, client
+    // actions, swarm assignment, spawned/headless initial turns, Jade relay,
+    // live wake turns, startup reload-recovery continuations). Acquiring at
+    // the top of the future covers all of them by construction, including
+    // the wait for the per-session agent mutex. A ShuttingDown refusal means
+    // the daemon is draining: no new turn may start.
+    let _lease = super::shutdown::acquire_lease(
+        jcode_core::activity::ActivityClass::ProviderTurn,
+        "streaming-turn",
+    )
+    .map_err(|refused| anyhow::anyhow!("turn refused: {refused}"))?;
     let mut agent = agent.lock().await;
     let session_id = agent.session_id().to_string();
     let result = agent

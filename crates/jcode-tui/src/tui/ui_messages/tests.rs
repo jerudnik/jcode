@@ -15,15 +15,6 @@ fn leading_spaces(text: &str) -> usize {
     text.chars().take_while(|c| *c == ' ').count()
 }
 
-fn system_glyph_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    use std::sync::{Mutex, OnceLock};
-
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 #[test]
 fn render_system_message_forces_system_color_on_all_spans() {
     let msg = DisplayMessage::system("**Reload complete** - continuing.");
@@ -157,7 +148,7 @@ fn render_system_message_centered_mode_left_aligns_with_padding() {
 
 #[test]
 fn render_system_message_uses_width_stable_titles_on_kitty() {
-    let _guard = system_glyph_env_lock();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let prev_term_program = std::env::var("TERM_PROGRAM").ok();
     let prev_term = std::env::var("TERM").ok();
     crate::env::set_var("TERM_PROGRAM", "kitty");
@@ -975,6 +966,10 @@ fn render_background_task_messages_prefer_display_name() {
 
 #[test]
 fn render_system_message_uses_scheduled_task_card() {
+    // Holds the shared env lock so a concurrent test mutating TERM_PROGRAM/TERM
+    // (render_system_message_uses_width_stable_titles_on_kitty) cannot flip the
+    // width-stable-glyph branch between this test's render and assert reads.
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let msg = DisplayMessage::system(
         "[Scheduled task]\nA scheduled task for this session is now due.\n\nTask: Follow up on the scheduler test\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nBranch: master\n\nBackground: Verify the scheduled task card styling\nSuccess criteria: The due task renders clearly\nScheduled by session: session_test",
     );
@@ -999,6 +994,9 @@ fn render_system_message_uses_scheduled_task_card() {
 
 #[test]
 fn render_tool_message_uses_scheduled_card() {
+    // Same width-stable-glyph race as render_system_message_uses_scheduled_task_card:
+    // hold the env lock so a concurrent TERM_PROGRAM/TERM writer cannot flip the branch.
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let msg = DisplayMessage {
         role: "tool".to_string(),
         content: "Scheduled task 'Follow up on the scheduler test' for in 1m (id: sched_abc123)\nWorking directory: /home/jeremy/jcode\nRelevant files: src/tui/ui_messages.rs\nTarget: resume session session_test".to_string(),

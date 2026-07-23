@@ -111,7 +111,13 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
                 server_new_ms,
                 serve_start.elapsed().as_millis()
             ));
-            server.run().await?;
+            // The sole normal daemon termination site (F01 design 3.2.1):
+            // `Server::run` returns only after the shutdown coordinator's
+            // cleanup completed (Cleaned) and the daemon-lock guard dropped.
+            // The only other authorized exit is the coordinator-armed
+            // watchdog (forced exit).
+            let exit = server.run().await?;
+            std::process::exit(exit.code);
         }
         Some(Command::Acp) => {
             acp::run_acp_command(

@@ -1,13 +1,8 @@
 pub mod account_picker;
 pub(crate) mod app;
 
-#[derive(Clone)]
-pub struct ContextSnapshot {
-    pub info: Option<crate::prompt::ContextInfo>,
-    pub revision: u64,
-    pub fresh: bool,
-}
-
+mod context_snapshot;
+pub use context_snapshot::ContextSnapshot;
 pub mod backend;
 pub(crate) mod color_support;
 mod core;
@@ -56,27 +51,13 @@ use ratatui::prelude::Frame;
 use ratatui::text::Line;
 use std::time::Duration;
 
-pub(crate) fn scheduled_notification_text(
-    info: Option<&info_widget::AmbientWidgetData>,
-) -> Option<String> {
-    let info = info?;
-    if info.reminder_count == 0 {
-        return None;
-    }
-    let next = info.next_reminder_wake.as_deref()?;
-    let suffix = if info.reminder_count > 1 {
-        format!(" · {} queued", info.reminder_count)
-    } else {
-        String::new()
-    };
-    Some(format!("⏰ next scheduled task {}{}", next, suffix))
-}
-
+mod notification_text;
 pub(crate) use self::core::DisplayMessageRoleExt;
 pub use jcode_tui_core::{
     CopySelectionPane, CopySelectionPoint, CopySelectionRange, CopySelectionStatus,
 };
 pub use jcode_tui_messages::DisplayMessage;
+pub(crate) use notification_text::scheduled_notification_text;
 
 fn keyboard_enhancement_flags() -> crossterm::event::KeyboardEnhancementFlags {
     use crossterm::event::KeyboardEnhancementFlags;
@@ -199,6 +180,12 @@ pub trait TuiState {
     fn scroll_offset(&self) -> usize;
     /// Whether auto-scroll to bottom is paused (user scrolled up during streaming)
     fn auto_scroll_paused(&self) -> bool;
+    /// Whether the tail-follow viewport is still animating toward the bottom.
+    /// Kept on the state interface so redraw scheduling is deterministic for
+    /// alternate state implementations and tests.
+    fn tail_catchup_active(&self) -> bool {
+        crate::tui::ui::tail_catchup_active()
+    }
     /// When older compacted history is being loaded in, this is the reader's
     /// captured distance (in wrapped lines) from the bottom of the transcript.
     /// The renderer uses it to keep the viewport anchored to the same content as
@@ -253,6 +240,11 @@ pub trait TuiState {
         self.elapsed()
     }
     fn status(&self) -> ProcessingStatus;
+    /// Whether an in-process self-development build is currently reporting
+    /// progress in the status line.
+    fn build_progress_active(&self) -> bool {
+        crate::build::read_build_progress().is_some()
+    }
     fn command_suggestions(&self) -> Vec<(String, &'static str)>;
     fn command_suggestion_selected(&self) -> usize {
         0
@@ -1391,6 +1383,14 @@ fn idle_donut_active_with_policy(
         return false;
     }
 
+    // Composer input always takes precedence over a decorative empty-state
+    // animation, including while the onboarding welcome is active. On short
+    // terminals the donut would otherwise consume the rows needed to edit the
+    // prompt.
+    if !state.input().is_empty() {
+        return false;
+    }
+
     // The onboarding welcome screen draws the same live donut, but it also
     // shows a welcome/login card so `display_messages()` is not empty.  Keep the
     // animation loop running smoothly while that screen is up (even past the
@@ -1475,7 +1475,7 @@ fn full_frame_status_animation_active_with_policy(
     // active redraw loop while visible.
     matches!(state.status(), ProcessingStatus::RunningTool(_))
         || rate_limit_countdown_redraw_active(state)
-        || crate::build::read_build_progress().is_some()
+        || state.build_progress_active()
 }
 
 fn primary_status_spinner_fast_path_available_with_policy(
@@ -1560,7 +1560,7 @@ pub(crate) fn redraw_interval_with_policy(
     // anchored traces are static transcript messages now. The tail-follow
     // catch-up slide still needs smooth frames and must skip the deep-idle
     // short-circuits below.
-    if ui::tail_catchup_active() {
+    if state.tail_catchup_active() {
         return match policy.tier {
             crate::perf::PerformanceTier::Minimal => fast_interval,
             _ => animation_interval,
@@ -1590,7 +1590,7 @@ pub(crate) fn redraw_interval_with_policy(
         && !state.copy_selection_edge_autoscroll_active()
         && !state.remote_startup_phase_active()
         && !rate_limit_countdown_redraw_active(state)
-        && crate::build::read_build_progress().is_none()
+        && !state.build_progress_active()
     {
         return REDRAW_DEEP_IDLE;
     }
@@ -1608,7 +1608,7 @@ pub(crate) fn redraw_interval_with_policy(
         && !state.remote_startup_phase_active()
         && !rate_limit_countdown_redraw_active(state)
         && !cache_cold_countdown_redraw_active(state)
-        && crate::build::read_build_progress().is_none()
+        && !state.build_progress_active()
         && !state.onboarding_welcome_active()
         && !swarm_spinner_redraw_active(state)
         && !session_picker_spinner_redraw_active(state)
@@ -1709,7 +1709,7 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
         && !state.remote_startup_phase_active()
         && !rate_limit_countdown_redraw_active(state)
         && !cache_cold_countdown_redraw_active(state)
-        && crate::build::read_build_progress().is_none()
+        && !state.build_progress_active()
         && !state.onboarding_welcome_active()
         && !swarm_spinner_redraw_active(state)
         && !session_picker_spinner_redraw_active(state)
@@ -1735,7 +1735,7 @@ pub(crate) fn periodic_redraw_required(state: &dyn TuiState) -> bool {
 
     if state.is_processing()
         || !state.streaming_text().is_empty()
-        || ui::tail_catchup_active()
+        || state.tail_catchup_active()
         || state.status_notice().is_some()
         || state.learn_hint().is_some()
         || state.has_pending_mouse_scroll_animation()

@@ -83,6 +83,16 @@ pub(super) async fn maybe_start_async_debug_job(
             return Err(anyhow::anyhow!("swarm_message_async: requires content"));
         }
 
+        // Activity lease (F01 C4 / F02-B4 / F02-R2-I2): acquired BEFORE the
+        // job record is created or its task spawned. Debug connections do
+        // not count as clients, so the job itself pins the daemon while it
+        // runs. A ShuttingDown refusal fails the request with no residual
+        // Queued record: no new work may start silently during drain (I6).
+        let lease = super::shutdown::acquire_lease(
+            jcode_core::activity::ActivityClass::DebugJob,
+            "debug-swarm-message",
+        )
+        .map_err(|refused| anyhow::anyhow!("debug job refused: {refused}"))?;
         let job_id = create_job(&agent, &debug_jobs, format!("swarm_message:{}", msg)).await;
 
         let jobs = Arc::clone(&debug_jobs);
@@ -90,6 +100,7 @@ pub(super) async fn maybe_start_async_debug_job(
         let msg = msg.to_string();
         let job_id_inner = job_id.clone();
         tokio::spawn(async move {
+            let _lease = lease;
             mark_job_running(&jobs, &job_id_inner).await;
 
             let result = super::run_swarm_message(agent.clone(), &msg).await;
@@ -112,6 +123,12 @@ pub(super) async fn maybe_start_async_debug_job(
             return Err(anyhow::anyhow!("message_async: requires content"));
         }
 
+        // Activity lease (F01 C4 / F02-B4 / F02-R2-I2): see above.
+        let lease = super::shutdown::acquire_lease(
+            jcode_core::activity::ActivityClass::DebugJob,
+            "debug-message",
+        )
+        .map_err(|refused| anyhow::anyhow!("debug job refused: {refused}"))?;
         let job_id = create_job(&agent, &debug_jobs, format!("message:{}", msg)).await;
 
         let jobs = Arc::clone(&debug_jobs);
@@ -119,6 +136,7 @@ pub(super) async fn maybe_start_async_debug_job(
         let msg = msg.to_string();
         let job_id_inner = job_id.clone();
         tokio::spawn(async move {
+            let _lease = lease;
             mark_job_running(&jobs, &job_id_inner).await;
 
             let result = {

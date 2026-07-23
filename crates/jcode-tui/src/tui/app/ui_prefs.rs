@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn inline_images_visibility_round_trips_through_disk() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let temp = tempfile::tempdir().expect("tempdir");
         let prev_home = std::env::var_os("JCODE_HOME");
         crate::env::set_var("JCODE_HOME", temp.path());
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn save_preserves_unknown_future_fields_via_load_modify_write() {
-        let _guard = crate::storage::lock_test_env();
+        let _guard = crate::tui::app::test_support::lock_test_env();
         let temp = tempfile::tempdir().expect("tempdir");
         let prev_home = std::env::var_os("JCODE_HOME");
         crate::env::set_var("JCODE_HOME", temp.path());

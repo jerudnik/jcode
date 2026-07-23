@@ -189,6 +189,8 @@ impl Agent {
         new_session.ensure_initial_session_context_message();
 
         self.session = new_session;
+        #[cfg(any(test, feature = "test-support"))]
+        self.track_test_active_pid_marker();
         self.reset_runtime_state_for_session_change();
         self.provider_session_id = None;
         self.current_evidence_turn_id = None;
@@ -559,13 +561,19 @@ impl Agent {
     }
 
     pub(super) fn validate_tool_allowed(&self, name: &str) -> Result<()> {
+        // Resolve aliases (e.g. `grep`/`Grep` -> `agentgrep`, `Task` ->
+        // `subagent`) before checking policy sets, which hold internal
+        // names. Registry::execute already resolves; without this, an
+        // allow-listed worker session would reject aliased calls that the
+        // registry itself would accept.
+        let resolved = crate::tool::Registry::resolve_tool_name(name);
         if let Some(allowed) = self.allowed_tools.as_ref()
-            && !allowed.contains(name)
+            && !allowed.contains(resolved)
         {
-            return Err(anyhow::anyhow!("Tool '{}' is not allowed", name));
+            return Err(anyhow::anyhow!("Tool '{}' is not allowed", resolved));
         }
-        if self.disabled_tools.contains(name) {
-            return Err(anyhow::anyhow!("Tool '{}' is disabled", name));
+        if self.disabled_tools.contains(resolved) {
+            return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved));
         }
         Ok(())
     }
@@ -639,6 +647,8 @@ impl Agent {
 
         let mark_active_start = Instant::now();
         self.session.mark_active();
+        #[cfg(any(test, feature = "test-support"))]
+        self.track_test_active_pid_marker();
         let mark_active_ms = mark_active_start.elapsed().as_millis();
         self.sync_memory_dedup_state_from_session();
 

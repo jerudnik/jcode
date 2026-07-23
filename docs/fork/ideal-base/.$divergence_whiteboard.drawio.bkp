@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="divergence-whiteboard">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Divergence &amp; Honesty — whiteboard (take turns)" style="text;html=1;align=left;fillColor=none;strokeColor=none;fontSize=20;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ================= COLUMN 1: why hold on to upstream? ================= -->
+        <mxCell id="q1" value="Q1  Why hold on to upstream at all?" style="swimlane;startSize=34;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=14;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="460" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="q1keep" value="KEEP taking from upstream:&#xa;• provider adapters (new model routes)&#xa;• bug fixes to shared plumbing&#xa;• breadth we don't want to maintain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q1">
+          <mxGeometry x="20" y="50" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="q1drop" value="STOP mirroring:&#xa;• pay-for-inference / subscription core&#xa;• telemetry that isn't honest&#xa;• contribution provenance we can't verify&#xa;• architectural assumptions (localhost pin)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q1">
+          <mxGeometry x="20" y="155" width="420" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="q1cost" value="COST of staying merge-compatible:&#xa;every honesty/architecture change must&#xa;survive the next upstream pull&#xa;→ tax grows as we diverge" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q1">
+          <mxGeometry x="20" y="275" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="q1open" value="OPEN QUESTION: hard fork vs. cherry-pick&#xa;(write your take here →)" style="text;html=1;align=left;fillColor=none;strokeColor=none;fontSize=12;fontStyle=2;fontColor=#3b5a86;" vertex="1" parent="q1">
+          <mxGeometry x="20" y="380" width="420" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ================= COLUMN 2: honesty surfaces ================= -->
+        <mxCell id="q2" value="Q2  What does &quot;honesty&quot; actually mean here?" style="swimlane;startSize=34;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=14;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="560" y="90" width="480" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="h1" value="1. TELEMETRY honesty&#xa;what is collected, when, where it goes,&#xa;default on/off, can the user see &amp; kill it" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q2">
+          <mxGeometry x="20" y="50" width="440" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="h2" value="2. PROVENANCE honesty&#xa;who wrote what (human vs agent vs upstream),&#xa;recorded verifiably — not claimed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q2">
+          <mxGeometry x="20" y="145" width="440" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="h3" value="3. IDENTITY honesty (the one we lived tonight)&#xa;the system knows &amp; can report what model /&#xa;session / route is actually running" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q2">
+          <mxGeometry x="20" y="240" width="440" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="h4" value="4. STATE honesty&#xa;no silent stale artifacts (the reload bug):&#xa;what's published / running / durable is legible" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q2">
+          <mxGeometry x="20" y="335" width="440" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="h5" value="5. PROVENANCE of INFERENCE&#xa;which provider/route served each turn,&#xa;honestly (vs upstream's pay-for-inference opacity)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=12;align=left;spacingLeft=8;" vertex="1" parent="q2">
+          <mxGeometry x="20" y="430" width="440" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="h6" value="(add / reorder — which of these is load-bearing&#xa;for YOUR open-source vision?)" style="text;html=1;align=left;fillColor=none;strokeColor=none;fontSize=12;fontStyle=2;fontColor=#6b4a86;" vertex="1" parent="q2">
+          <mxGeometry x="20" y="525" width="440" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- ================= COLUMN 3: the cart-before-horse error ================= -->
+        <mxCell id="q3" value="Q3  The cart-before-horse error" style="swimlane;startSize=34;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=14;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="90" width="460" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="q3what" value="What went wrong (name it plainly):&#xa;(you write — what was the cart, what was&#xa;the horse?)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=12;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="q3">
+          <mxGeometry x="20" y="50" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="q3fix" value="What honesty-first would have done instead:&#xa;(fill together)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=12;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="q3">
+          <mxGeometry x="20" y="160" width="420" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="q3next" value="Smallest honest next step:&#xa;(one thing, reversible, verifiable)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=12;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="q3">
+          <mxGeometry x="20" y="270" width="420" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- edges: honesty underpins divergence -->
+        <mxCell id="edge1" value="honesty is the reason to diverge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;fontStyle=2;strokeColor=#9673a6;strokeWidth=2;dashed=1;" edge="1" parent="1" source="q2" target="q1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="edge2" value="error taught us the order" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;fontStyle=2;strokeColor=#d79b00;strokeWidth=2;dashed=1;" edge="1" parent="1" source="q3" target="q2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

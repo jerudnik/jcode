@@ -176,31 +176,28 @@ impl Provider for OpenRouterSpecCaptureProvider {
 }
 
 fn create_test_app() -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    create_test_app_with_provider(provider)
 }
 
-fn create_named_provider_test_app(name: &'static str, model: &'static str) -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
+fn create_test_app_with_provider(
+    provider: Arc<dyn Provider>,
+) -> App {
+    crate::tui::app::test_support::create_test_app_with(provider, |app| {
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    })
+}
 
+fn create_named_provider_test_app(
+    name: &'static str,
+    model: &'static str,
+) -> App {
     let provider: Arc<dyn Provider> = Arc::new(NamedMockProvider { name, model });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    crate::tui::app::test_support::create_test_app_with(provider, |app| {
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    })
 }
 
 fn wait_for_model_picker_load(app: &mut App) {
@@ -215,34 +212,28 @@ fn wait_for_model_picker_load(app: &mut App) {
     }
 }
 
-fn create_refresh_summary_test_app(summary: crate::provider::ModelCatalogRefreshSummary) -> App {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
+fn create_refresh_summary_test_app(
+    summary: crate::provider::ModelCatalogRefreshSummary,
+) -> App {
     let provider: Arc<dyn Provider> = Arc::new(RefreshSummaryProvider { summary });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
-    app
+    crate::tui::app::test_support::create_test_app_with(provider, |app| {
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    })
 }
 
-fn create_openrouter_spec_capture_test_app() -> (App, StdArc<StdMutex<Vec<String>>>) {
-    ensure_test_jcode_home_if_unset();
-    clear_persisted_test_ui_state();
-    crate::tui::ui::clear_test_render_state_for_tests();
-
+fn create_openrouter_spec_capture_test_app() -> (
+    App,
+    StdArc<StdMutex<Vec<String>>>,
+) {
     let set_model_calls = StdArc::new(StdMutex::new(Vec::new()));
     let provider: Arc<dyn Provider> = Arc::new(OpenRouterSpecCaptureProvider {
         set_model_calls: set_model_calls.clone(),
     });
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let registry = rt.block_on(crate::tool::Registry::new(provider.clone()));
-    let mut app = App::new_for_test_harness(provider, registry);
-    app.queue_mode = false;
-    app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    let app = crate::tui::app::test_support::create_test_app_with(provider, |app| {
+        app.queue_mode = false;
+        app.diff_mode = crate::config::DiffDisplayMode::Inline;
+    });
     (app, set_model_calls)
 }
 
@@ -324,58 +315,6 @@ fn test_side_panel_snapshot(page_id: &str, title: &str) -> crate::side_panel::Si
     }
 }
 
-fn ensure_test_jcode_home_if_unset() {
-    use std::sync::OnceLock;
-
-    static TEST_HOME: OnceLock<std::path::PathBuf> = OnceLock::new();
-
-    if std::env::var_os("JCODE_HOME").is_some() {
-        return;
-    }
-
-    let path = TEST_HOME.get_or_init(|| {
-        let path = std::env::temp_dir().join(format!("jcode-test-home-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&path);
-        path
-    });
-    crate::env::set_var("JCODE_HOME", path);
-}
-
-fn clear_persisted_test_ui_state() {
-    if let Ok(home) = crate::storage::jcode_dir() {
-        let ambient_dir = home.join("ambient");
-        let _ = std::fs::remove_file(ambient_dir.join("queue.json"));
-        let _ = std::fs::remove_file(ambient_dir.join("state.json"));
-        let _ = std::fs::remove_file(ambient_dir.join("directives.json"));
-        let _ = std::fs::remove_file(ambient_dir.join("visible_cycle.json"));
-    }
-    crate::tui::app::helpers::clear_ambient_info_cache_for_tests();
-    crate::auth::AuthStatus::invalidate_cache();
-}
-
-fn with_temp_jcode_home<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = crate::storage::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
-    crate::auth::claude::set_active_account_override(None);
-    crate::auth::codex::set_active_account_override(None);
-    crate::auth::AuthStatus::invalidate_cache();
-    clear_persisted_test_ui_state();
-
-    let result = f();
-
-    crate::auth::claude::set_active_account_override(None);
-    crate::auth::codex::set_active_account_override(None);
-    crate::auth::AuthStatus::invalidate_cache();
-    crate::tui::app::helpers::clear_ambient_info_cache_for_tests();
-    if let Some(prev_home) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
-    result
-}
 
 fn create_jcode_repo_fixture() -> tempfile::TempDir {
     let temp = tempfile::TempDir::new().expect("temp repo");

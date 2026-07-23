@@ -251,8 +251,9 @@ pub use inline_image::{
 pub use runtime::force_test_kitty_picker;
 pub use runtime::{
     error_lines_for, get_cached_png, get_font_size, image_protocol_available, init_picker,
-    is_video_export_mode, protocol_type, register_external_image, register_inline_image,
-    set_video_export_mode, with_image_protocol_override,
+    is_synchronous_render_mode, is_video_export_mode, protocol_type, register_external_image,
+    register_inline_image, set_synchronous_render_mode, set_video_export_mode,
+    with_image_protocol_override,
 };
 pub use viewport_render::{
     InlineFitReadiness, inline_fit_readiness, invalidate_render_state, prewarm_inline_fit_state,
@@ -407,6 +408,11 @@ const DEFAULT_PICKER_FONT_SIZE: (u16, u16) = (8, 16);
 /// terminal image protocol (used by the video export pipeline so it can
 /// embed cached PNGs into the SVG frames).
 static VIDEO_EXPORT_MODE: AtomicBool = AtomicBool::new(false);
+
+/// When enabled (by the TUI test render lock), deferred mermaid renders run
+/// synchronously on the calling thread instead of the detached worker, so
+/// register_active_diagram cannot fire after a test resets ACTIVE_DIAGRAMS.
+static SYNCHRONOUS_RENDER_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Global picker for terminal capability detection
 /// Initialized once on first use

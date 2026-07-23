@@ -1,3 +1,4 @@
+#![cfg_attr(test, allow(clippy::await_holding_lock))]
 use super::{
     ClientConnectionInfo, ClientDebugState, FileTouchService, SessionInterruptQueues, SwarmEvent,
     SwarmEventType, SwarmMember, VersionedPlan, record_swarm_event, remove_background_tool_signal,
@@ -32,6 +33,74 @@ fn agent_lock_timeout() -> Duration {
         }
     }
     AGENT_LOCK_TIMEOUT
+}
+
+/// Delay before the one bounded in-process retry after a lock-timeout abort
+/// (F10 "retry after abort"). Long enough for a transiently-stuck turn to
+/// finish; short enough that the session does not sit phantom-live for long.
+#[cfg_attr(test, allow(dead_code))]
+const LOCK_TIMEOUT_RETRY_DELAY: Duration = Duration::from_secs(30);
+
+#[cfg(test)]
+static TEST_LOCK_TIMEOUT_RETRY_DELAY_MS: AtomicU64 = AtomicU64::new(u64::MAX);
+
+#[cfg_attr(test, allow(clippy::needless_return))]
+fn lock_timeout_retry_delay() -> Option<Duration> {
+    #[cfg(test)]
+    {
+        // In test builds the deferred retry is opt-in: a 30s background task
+        // outliving its test would fire inside another test's JCODE_HOME
+        // window and corrupt it (env vars are process-global).
+        let millis = TEST_LOCK_TIMEOUT_RETRY_DELAY_MS.load(Ordering::SeqCst);
+        if millis == u64::MAX {
+            return None;
+        }
+        return Some(Duration::from_millis(millis));
+    }
+    #[cfg(not(test))]
+    Some(LOCK_TIMEOUT_RETRY_DELAY)
+}
+
+/// One bounded deferred retry after a lock-timeout abort: wait, take the lock
+/// (untimed; the stuck turn either finished or we queue behind it), and if the
+/// session is still non-terminal persist a crashed state, then drop the
+/// durable record. If the retry itself cannot persist, the record remains for
+/// startup reconciliation. Best-effort by construction.
+fn spawn_lock_timeout_retry(agent_arc: Arc<Mutex<crate::agent::Agent>>, session_id: String) {
+    let Some(delay) = lock_timeout_retry_delay() else {
+        return;
+    };
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        let mut agent = agent_arc.lock().await;
+        // The agent's session field is private; the durable truth is on disk
+        // anyway (every terminal transition persists). If a terminal state
+        // was persisted while we waited, just clear the record.
+        let disk_status = crate::session::Session::load(&session_id)
+            .map(|session| session.status)
+            .unwrap_or(crate::session::SessionStatus::Active);
+        if !matches!(disk_status, crate::session::SessionStatus::Active) {
+            // The stuck turn completed and something else persisted terminal
+            // state (or a successor took over and closed it): just clear.
+            remove_disconnect_cleanup_record(&session_id);
+            return;
+        }
+        match agent.mark_crashed(Some(
+            "Disconnect cleanup retried after agent-lock timeout".to_string(),
+        )) {
+            Ok(()) => {
+                crate::logging::info(&format!(
+                    "Session {session_id} disconnect cleanup completed on deferred retry"
+                ));
+                remove_disconnect_cleanup_record(&session_id);
+            }
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "Session {session_id} deferred cleanup retry failed; leaving durable record: {error}"
+                ));
+            }
+        }
+    });
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +159,140 @@ impl CleanupClientConnectionOutcome {
             TerminalPersistenceOutcome::Failed | TerminalPersistenceOutcome::SkippedLockTimeout
         )
     }
+}
+
+/// Durable intent record written before destructive disconnect cleanup.
+///
+/// If cleanup aborts (e.g. agent-lock timeout) the record stays on disk as
+/// evidence of unfinished cleanup; startup reconciliation sweeps these and
+/// marks the sessions terminal.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct DisconnectCleanupRecord {
+    session_id: String,
+    reason: String,
+    recorded_at: String,
+    pid: u32,
+}
+
+fn disconnect_cleanup_dir() -> Option<std::path::PathBuf> {
+    crate::storage::jcode_dir()
+        .ok()
+        .map(|dir| dir.join("state").join("disconnect-cleanup"))
+}
+
+fn disconnect_cleanup_record_path(session_id: &str) -> Option<std::path::PathBuf> {
+    disconnect_cleanup_dir().map(|dir| dir.join(format!("{session_id}.json")))
+}
+
+/// Best-effort: persist the cleanup intent before removing the live session.
+fn write_disconnect_cleanup_record(session_id: &str, reason: &str) {
+    let Some(path) = disconnect_cleanup_record_path(session_id) else {
+        return;
+    };
+    let record = DisconnectCleanupRecord {
+        session_id: session_id.to_string(),
+        reason: reason.to_string(),
+        recorded_at: chrono::Utc::now().to_rfc3339(),
+        pid: std::process::id(),
+    };
+    let result = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .unwrap_or(Ok(()))
+        .and_then(|_| std::fs::write(&path, serde_json::to_vec(&record).unwrap_or_default()));
+    if let Err(error) = result {
+        crate::logging::warn(&format!(
+            "Failed to write disconnect-cleanup record for session {session_id}: {error}"
+        ));
+    }
+}
+
+/// Best-effort: drop the intent record once terminal state is persisted.
+fn remove_disconnect_cleanup_record(session_id: &str) {
+    let Some(path) = disconnect_cleanup_record_path(session_id) else {
+        return;
+    };
+    if let Err(error) = std::fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        crate::logging::warn(&format!(
+            "Failed to remove disconnect-cleanup record for session {session_id}: {error}"
+        ));
+    }
+}
+
+/// Startup reconciliation: sweep leftover disconnect-cleanup records. For each
+/// record whose session is not currently live, mark the session terminal
+/// (crashed) if still active, then delete the record. Live sessions are left
+/// alone. Best-effort; never fails.
+pub(super) fn reconcile_disconnect_cleanup_records(
+    session_is_live: impl Fn(&str) -> bool,
+) -> usize {
+    use crate::session::{Session, SessionStatus};
+
+    let Some(dir) = disconnect_cleanup_dir() else {
+        return 0;
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return 0;
+    };
+    let mut reconciled = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(session_id) = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        if session_is_live(&session_id) {
+            continue;
+        }
+        // Reason-aware terminal mapping (F10 review finding 1): a record for
+        // a clean idle disconnect reconciles to Closed, not Crashed, so
+        // attention lists are not polluted with false failures. Interrupted
+        // mid-processing or reload-window disconnects reconcile to Crashed.
+        let record_reason = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<DisconnectCleanupRecord>(&text).ok())
+            .map(|record| record.reason);
+        let reconcile_to_closed = record_reason.as_deref() == Some("client_disconnected");
+        match Session::load(&session_id) {
+            Ok(mut session) => {
+                if matches!(session.status, SessionStatus::Active) {
+                    let persist_result = if reconcile_to_closed {
+                        session.mark_closed_and_persist().map(|_| ())
+                    } else {
+                        session
+                            .mark_crashed_and_persist(Some(
+                                "Disconnect cleanup interrupted; reconciled at startup".to_string(),
+                            ))
+                            .map(|_| ())
+                    };
+                    if let Err(error) = persist_result {
+                        crate::logging::warn(&format!(
+                            "Disconnect-cleanup reconcile failed to persist terminal state for session {session_id}: {error}"
+                        ));
+                        // Keep the record so a later startup can retry.
+                        continue;
+                    }
+                    reconciled += 1;
+                }
+                remove_disconnect_cleanup_record(&session_id);
+            }
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "Disconnect-cleanup reconcile dropping record for unloadable session {session_id}: {error}"
+                ));
+                remove_disconnect_cleanup_record(&session_id);
+            }
+        }
+    }
+    reconciled
 }
 
 fn disconnect_disposition(disconnected_while_processing: bool) -> DisconnectDisposition {
@@ -175,6 +378,18 @@ pub(super) async fn cleanup_client_connection(
     let mut terminal_persistence = TerminalPersistenceOutcome::NotRequired;
     {
         let mut sessions_guard = sessions.write().await;
+        if sessions_guard.contains_key(client_session_id) {
+            // F10: persist cleanup intent BEFORE removing the live session so an
+            // aborted cleanup leaves durable evidence for startup reconciliation.
+            write_disconnect_cleanup_record(
+                client_session_id,
+                match disposition {
+                    DisconnectDisposition::Closed => "client_disconnected",
+                    DisconnectDisposition::Crashed => "client_disconnected_while_processing",
+                    DisconnectDisposition::Reloading => "server_reload_disconnect",
+                },
+            );
+        }
         if let Some(agent_arc) = sessions_guard.remove(client_session_id) {
             drop(sessions_guard);
             let lock_result = tokio::time::timeout(agent_lock_timeout(), agent_arc.lock()).await;
@@ -267,9 +482,21 @@ pub(super) async fn cleanup_client_connection(
                         "Session {} cleanup timed out waiting for agent lock (stuck task); skipping graceful shutdown",
                         client_session_id
                     ));
+                    // F10 "retry after abort": one bounded deferred retry so a
+                    // transiently-stuck lock does not strand the session as
+                    // phantom-live until the next daemon restart. The durable
+                    // record stays until the retry (or startup reconcile)
+                    // persists a terminal state.
+                    spawn_lock_timeout_retry(Arc::clone(&agent_arc), client_session_id.to_string());
                 }
             }
         }
+    }
+
+    if terminal_persistence == TerminalPersistenceOutcome::Persisted {
+        // Cleanup completed durably: drop the intent record. Failed/timed-out
+        // paths intentionally leave it for startup reconciliation.
+        remove_disconnect_cleanup_record(client_session_id);
     }
 
     {
@@ -857,6 +1084,154 @@ mod tests {
         );
         assert!(outcome.runtime_cleanup_completed);
         assert!(harness.swarm_members.read().await.get(session_id).is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn disconnect_lock_timeout_leaves_durable_cleanup_record() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        TEST_AGENT_LOCK_TIMEOUT_MS.store(0, Ordering::SeqCst);
+        let session_id = "session_f10_lock_timeout_record";
+        let (harness, agent) = CleanupHarness::new(session_id).await?;
+        let held_agent_lock = agent.lock().await;
+
+        let result = harness.cleanup(session_id, false).await;
+        TEST_AGENT_LOCK_TIMEOUT_MS.store(u64::MAX, Ordering::SeqCst);
+        drop(held_agent_lock);
+        let outcome = result?;
+
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::SkippedLockTimeout
+        );
+        let record_path = super::disconnect_cleanup_record_path(session_id)
+            .ok_or_else(|| anyhow::anyhow!("cleanup record dir unavailable"))?;
+        assert!(
+            record_path.exists(),
+            "aborted cleanup must leave a durable intent record"
+        );
+        let record: super::DisconnectCleanupRecord =
+            serde_json::from_slice(&std::fs::read(&record_path)?)?;
+        assert_eq!(record.session_id, session_id);
+        assert_eq!(record.pid, std::process::id());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn disconnect_happy_path_removes_cleanup_record() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_f10_happy_path_record";
+        let (harness, _agent) = CleanupHarness::new(session_id).await?;
+
+        let outcome = harness.cleanup(session_id, false).await?;
+
+        assert_eq!(
+            outcome.terminal_persistence,
+            TerminalPersistenceOutcome::Persisted
+        );
+        let record_path = super::disconnect_cleanup_record_path(session_id)
+            .ok_or_else(|| anyhow::anyhow!("cleanup record dir unavailable"))?;
+        assert!(
+            !record_path.exists(),
+            "successful cleanup must delete the intent record"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_reconcile_marks_stale_session_terminal_and_deletes_record() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_f10_reconcile_stale";
+        let mut session = Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("f10 reconcile fixture".to_string()),
+        );
+        session.mark_active();
+        session.save()?;
+        super::write_disconnect_cleanup_record(session_id, "client_disconnected_while_processing");
+        let record_path = super::disconnect_cleanup_record_path(session_id)
+            .ok_or_else(|| anyhow::anyhow!("cleanup record dir unavailable"))?;
+        assert!(record_path.exists());
+
+        let reconciled = super::reconcile_disconnect_cleanup_records(|_| false);
+
+        assert_eq!(reconciled, 1);
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Crashed { .. }
+        ));
+        assert!(
+            !record_path.exists(),
+            "reconciliation must delete the record after persisting terminal state"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_reconcile_maps_clean_disconnect_reason_to_closed() -> Result<()> {
+        // F10 review finding 1: a record for a clean idle disconnect must
+        // reconcile to Closed, not Crashed, so attention lists stay clean.
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_f10_reconcile_clean";
+        let mut session = Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("f10 clean-disconnect fixture".to_string()),
+        );
+        session.mark_active();
+        session.save()?;
+        super::write_disconnect_cleanup_record(session_id, "client_disconnected");
+        let record_path = super::disconnect_cleanup_record_path(session_id)
+            .ok_or_else(|| anyhow::anyhow!("cleanup record dir unavailable"))?;
+
+        let reconciled = super::reconcile_disconnect_cleanup_records(|_| false);
+
+        assert_eq!(reconciled, 1);
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Closed
+        ));
+        assert!(!record_path.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn startup_reconcile_leaves_live_sessions_alone() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let home = tempfile::TempDir::new()?;
+        let _home_guard = EnvGuard::set("JCODE_HOME", home.path());
+        let session_id = "session_f10_reconcile_live";
+        let mut session = Session::create_with_id(
+            session_id.to_string(),
+            None,
+            Some("f10 live fixture".to_string()),
+        );
+        session.mark_active();
+        session.save()?;
+        super::write_disconnect_cleanup_record(session_id, "client_disconnected");
+        let record_path = super::disconnect_cleanup_record_path(session_id)
+            .ok_or_else(|| anyhow::anyhow!("cleanup record dir unavailable"))?;
+
+        let reconciled = super::reconcile_disconnect_cleanup_records(|sid| sid == session_id);
+
+        assert_eq!(reconciled, 0);
+        assert!(matches!(
+            Session::load(session_id)?.status,
+            SessionStatus::Active
+        ));
+        assert!(
+            record_path.exists(),
+            "records for live sessions must be left untouched"
+        );
         Ok(())
     }
 

@@ -1078,10 +1078,9 @@ pub fn model_switch_request_for_provider_id(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::MutexGuard;
 
     struct EnvGuard {
-        _lock: MutexGuard<'static, ()>,
+        _lock: crate::storage::TestEnvLease,
         saved: Vec<(&'static str, Option<String>)>,
     }
 
@@ -1792,8 +1791,9 @@ mod tests {
 
     #[test]
     fn post_auth_model_selection_keeps_catalog_order_for_unranked_providers() {
-        // OpenAI-compatible / namespaced providers have no curated flagship
-        // order; the fallback must preserve live-catalog order for them.
+        // Sandbox JCODE_HOME: unranked providers read a live-catalog disk cache,
+        // so an ambient/sibling cerebras cache otherwise flakily picked qwen-3.
+        let _sandbox = crate::auth::test_sandbox::AuthTestSandbox::new().expect("sandbox");
         let activation = AuthActivationResult {
             provider_id: Some("cerebras".to_string()),
             provider_label: Some("Cerebras".to_string()),

@@ -42,6 +42,10 @@ mod reload_recovery;
 mod reload_state;
 mod reload_trace;
 mod runtime;
+pub(crate) mod shutdown;
+#[cfg(test)]
+mod shutdown_fixture_tests;
+pub use shutdown::ExitReason;
 mod socket;
 mod swarm;
 mod swarm_mutation_state;
@@ -526,6 +530,15 @@ const HEAP_RETENTION_CHECK_SECS: u64 = 120;
 /// Exit code when server shuts down due to idle timeout
 pub const EXIT_IDLE_TIMEOUT: i32 = 44;
 
+/// Typed exit information returned by [`Server::run`] after the shutdown
+/// coordinator's cleanup completed (F01 design 3.2.1). The top-level runner
+/// maps `code` to the sole normal `std::process::exit` call.
+#[derive(Clone, Copy, Debug)]
+pub struct ServerExit {
+    pub reason: shutdown::ExitReason,
+    pub code: i32,
+}
+
 /// Server state
 pub struct Server {
     provider: Arc<dyn Provider>,
@@ -737,6 +750,46 @@ impl Server {
             sessions_to_restore.len(),
             sessions_to_restore
         ));
+
+        // Activity lease (F01 design 3.3.1 / F02-B4): one bounded
+        // StartupRecovery lease covers the enumeration/scheduling window
+        // (non-empty candidate set only). Restored turns that actually run
+        // acquire their own ProviderTurn lease at the common boundary; they
+        // do not inherit this one. On ShuttingDown refusal recovery is
+        // aborted: sessions stay durable and the successor daemon recovers
+        // them (no silent unleased work during drain, I6). The guard is
+        // dropped by the TTL watchdog below or on function return.
+        let recovery_lease = match self::shutdown::acquire_lease(
+            jcode_core::activity::ActivityClass::StartupRecovery,
+            "headless-startup-recovery",
+        ) {
+            Ok(lease) => lease,
+            Err(refused) => {
+                crate::logging::info(&format!(
+                    "Headless startup recovery skipped during shutdown drain ({refused})."
+                ));
+                return;
+            }
+        };
+        // Hard TTL (F01 design 3.3.1 / F02-I2): a hung recovery must not pin
+        // idle shutdown indefinitely. The TTL task drops the guard; recovery
+        // itself continues (its turns hold their own ProviderTurn leases).
+        let (ttl_cancel_tx, ttl_cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            const STARTUP_RECOVERY_TTL: std::time::Duration = std::time::Duration::from_secs(60);
+            tokio::select! {
+                _ = tokio::time::sleep(STARTUP_RECOVERY_TTL) => {
+                    crate::logging::warn(
+                        "StartupRecovery lease TTL expired; releasing (recovery continues unleased; its turns hold ProviderTurn leases).",
+                    );
+                }
+                _ = ttl_cancel_rx => {}
+            }
+            drop(recovery_lease);
+        });
+        // Dropped on function return: cancels the TTL task, which drops the
+        // guard promptly.
+        let _ttl_cancel = ttl_cancel_tx;
 
         if let Some(delay) = startup_headless_recovery_test_delay() {
             crate::logging::info(&format!(
@@ -1127,6 +1180,37 @@ impl Server {
         // only after the replacement daemon is already accepting reconnects.
         self.recover_headless_sessions_on_startup().await;
 
+        // F09: reconcile a pending selfdev activation whose initiating session
+        // died mid-cycle. Best-effort; never fails startup.
+        tokio::task::spawn_blocking(
+            || match jcode_build_support::reconcile_stale_pending_activation(
+                chrono::Duration::minutes(10),
+                |sid| crate::storage::observe_session_pid_markers(sid).active_marker_is_live(),
+            ) {
+                Ok(outcome) => crate::logging::info(&format!(
+                    "Selfdev pending-activation reconcile: {outcome:?}"
+                )),
+                Err(err) => crate::logging::warn(&format!(
+                    "Selfdev pending-activation reconcile failed: {err:#}"
+                )),
+            },
+        );
+
+        // F10: sweep durable disconnect-cleanup intent records left behind by
+        // aborted cleanups (e.g. agent-lock timeout) and mark those sessions
+        // terminal. Best-effort; never fails startup.
+        tokio::task::spawn_blocking(|| {
+            let reconciled =
+                client_disconnect_cleanup::reconcile_disconnect_cleanup_records(|sid| {
+                    crate::storage::observe_session_pid_markers(sid).active_marker_is_live()
+                });
+            if reconciled > 0 {
+                crate::logging::info(&format!(
+                    "Disconnect-cleanup reconcile marked {reconciled} session(s) terminal"
+                ));
+            }
+        });
+
         (runtime, main_handle, debug_handle)
     }
 
@@ -1201,25 +1285,18 @@ impl Server {
             .await;
         });
 
-        // Log when we receive SIGTERM for debugging
+        // SIGTERM converges on the shutdown coordinator (F01 design 3.5):
+        // the coordinator drains leases briefly, runs the one bounded
+        // cleanup list, arms its own watchdog, and publishes Cleaned; the
+        // top-level runner performs the process exit.
         #[cfg(unix)]
         {
-            let sigterm_server_name = self.identity.name.clone();
             tokio::spawn(async move {
                 use tokio::signal::unix::{SignalKind, signal};
                 if let Ok(mut sigterm) = signal(SignalKind::terminate()) {
                     sigterm.recv().await;
                     crate::logging::info("Server received SIGTERM, shutting down");
-                    // Watchdog: guarantee exit even if cleanup stalls or the
-                    // runtime is momentarily saturated. An OS-scheduled thread
-                    // fires independent of tokio worker availability.
-                    std::thread::spawn(|| {
-                        std::thread::sleep(std::time::Duration::from_secs(3));
-                        crate::logging::warn("Shutdown watchdog fired; forcing exit.");
-                        std::process::exit(0);
-                    });
-                    crate::registry::unregister_server_bounded(&sigterm_server_name).await;
-                    std::process::exit(0);
+                    shutdown::coordinator().begin(shutdown::ExitReason::SigTerm);
                 }
             });
         }
@@ -2088,8 +2165,13 @@ impl Server {
         }
     }
 
-    /// Start the server (both main and debug sockets)
-    pub async fn run(&self) -> Result<()> {
+    /// Start the server (both main and debug sockets).
+    ///
+    /// Runs until the shutdown coordinator publishes a terminal outcome
+    /// (`Cleaned`), then returns the typed exit information. The caller (the
+    /// top-level runner in `src/cli/dispatch.rs`) performs the sole normal
+    /// process-termination call with the returned code (F01 design 3.2.1).
+    pub async fn run(&self) -> Result<ServerExit> {
         // Ensure socket directory exists (for named sockets like /run/user/1000/jcode/)
         if let Some(parent) = self.socket_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -2150,6 +2232,10 @@ impl Server {
             self.identity.display_name(),
             self.identity.version
         ));
+        // R04 startup beacon: a durable marker finalized on clean exit. An
+        // unfinalized beacon with a dead pid positively indicates a hard
+        // crash (SIGKILL/panic-abort/OOM), which no exit path can record.
+        shutdown::record_server_beacon_start(&self.identity.version);
         crate::logging::info(&format!("Server listening on {:?}", self.socket_path));
         crate::logging::info(&format!("Debug socket on {:?}", self.debug_socket_path));
 
@@ -2168,23 +2254,53 @@ impl Server {
 
         let server_start_time = Instant::now();
 
-        self.spawn_background_tasks(server_start_time, temporary_server_policy);
+        self.spawn_background_tasks(server_start_time, temporary_server_policy.clone());
         let (runtime, main_handle, debug_handle) = self
             .finish_startup_after_bind(main_listener, debug_listener, server_start_time)
             .await;
 
-        // If either listener exits unexpectedly, stop accepting work and wait
-        // for every owned connection task before returning. The normal daemon
-        // path runs until process shutdown or exec-based reload.
+        // Configure the single shutdown authority (F01 design 3.2). The
+        // spawned exit authorities above (idle monitors, SIGTERM handler,
+        // reload task) all converge on it; configuring after spawn is safe
+        // because none can fire within their first poll interval and begin()
+        // tolerates a not-yet-configured coordinator by skipping sidecar
+        // cleanup only.
+        shutdown::coordinator().configure(shutdown::ShutdownConfig {
+            server_name: self.identity.name.clone(),
+            socket_path: self.socket_path.clone(),
+            debug_socket_path: self.debug_socket_path.clone(),
+            temporary: temporary_server_policy.is_some(),
+            intake_cancel: Some(runtime.intake_cancel_token()),
+            mcp_pool: Some(Arc::clone(&self.mcp_pool)),
+        });
+        // Composition-root injection (F01 design 3.0): non-detached
+        // background tasks acquire activity leases through the neutral
+        // jcode-core seam, without jcode-base depending on server types.
+        crate::background::global().set_activity_authority(shutdown::activity_authority());
+
+        // The daemon runs until the coordinator publishes a terminal outcome
+        // (idle exit, SIGTERM, reload exec failure) or a listener fails. The
+        // executor never exits the process (F01 design 3.2.1): `run()`
+        // returns typed exit information, the guards (daemon lock) drop on
+        // scope unwind AFTER cleanup, and the top-level runner performs the
+        // one normal termination call.
         let mut main_handle = main_handle;
         let mut debug_handle = debug_handle;
-        tokio::select! {
+        let terminal = tokio::select! {
+            outcome = shutdown::coordinator().wait_terminal() => {
+                // Coordinator-initiated exit: cleanup already ran (Cleaned).
+                runtime.shutdown().await;
+                let _ = main_handle.await;
+                let _ = debug_handle.await;
+                outcome
+            }
             result = &mut main_handle => {
                 if let Err(error) = result {
                     crate::logging::error(&format!("Main accept loop failed: {error}"));
                 }
                 runtime.shutdown().await;
                 let _ = debug_handle.await;
+                self.accept_loop_exit_terminal("main").await
             }
             result = &mut debug_handle => {
                 if let Err(error) = result {
@@ -2192,9 +2308,50 @@ impl Server {
                 }
                 runtime.shutdown().await;
                 let _ = main_handle.await;
+                self.accept_loop_exit_terminal("debug").await
+            }
+        };
+
+        let shutdown::TerminalOutcome::Cleaned { reason, code } = terminal;
+        crate::logging::info(&format!(
+            "Server run complete: reason={}, exit_code={}",
+            reason.as_str(),
+            code
+        ));
+        Ok(ServerExit { reason, code })
+    }
+
+    /// Accept-loop exit path (R04). Every shutdown drain (terminations and
+    /// reload alike) cancels intake, and the intake token is the root of the
+    /// tokens the accept loops watch, so the loops exit during EVERY drain.
+    /// Classify before escalating: an exit after the coordinator has begun
+    /// is the drain's own doing and must await the terminal outcome, not
+    /// upgrade the reason (the R04 incident upgraded `reload ->
+    /// accept-loop-failure`, aborting the handoff and exiting 45 with no
+    /// successor). An exit while still Running is a genuine failure and
+    /// upgrades to `AcceptLoopFailure` (exit 45) as before.
+    async fn accept_loop_exit_terminal(&self, which: &str) -> shutdown::TerminalOutcome {
+        let coordinator = shutdown::coordinator();
+        match coordinator.classify_accept_loop_exit() {
+            shutdown::AcceptLoopExitDisposition::AwaitTerminal => {
+                crate::logging::info(&format!(
+                    "{which} accept loop exited during shutdown drain; awaiting terminal outcome"
+                ));
+                coordinator.wait_terminal().await
+            }
+            shutdown::AcceptLoopExitDisposition::Failure => {
+                crate::logging::error(&format!(
+                    "{which} accept loop exited while running; beginning accept-loop-failure shutdown"
+                ));
+                match coordinator
+                    .begin_and_wait(shutdown::ExitReason::AcceptLoopFailure)
+                    .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(_refused) => coordinator.wait_terminal().await,
+                }
             }
         }
-        Ok(())
     }
 
     /// Spawn the WebSocket gateway if enabled in config.

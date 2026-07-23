@@ -82,6 +82,69 @@ pub fn sanitize_tool_parameters_schema(schema: &Value) -> Value {
     sanitized
 }
 
+/// Flatten a tool-parameters schema for Moonshot/Kimi endpoints.
+///
+/// Moonshot's "flavored" JSON-schema validator rejects `anyOf` alongside a
+/// parent `type`: "when using anyOf, type should be defined in anyOf items
+/// instead of the parent schema". jcode's `swarm` tool uses exactly that
+/// shape (a top-level object schema whose `anyOf` branches add per-action
+/// `required` constraints).
+///
+/// Strategy: MERGE each `anyOf` branch into the parent schema and drop the
+/// `anyOf`. The parent keeps its full `properties`/`type`; the branch-only
+/// constraints (`required` narrowing by action) are lost, which is safe:
+/// they were validation hints, not shape information, and jcode's tool
+/// executor re-validates required fields at execution time anyway. The
+/// resulting schema is strictly more permissive, never less.
+pub fn flatten_schema_for_moonshot(schema: &Value) -> Value {
+    fn walk(node: &mut Value) {
+        let Some(obj) = node.as_object_mut() else {
+            if let Some(items) = node.as_array_mut() {
+                for item in items {
+                    walk(item);
+                }
+            }
+            return;
+        };
+
+        // A parent that has BOTH `type` (or `properties`) and `anyOf`/`oneOf`
+        // violates Moonshot's rule: drop the union, keeping the parent shape.
+        let has_shape = obj.contains_key("type") || obj.contains_key("properties");
+        if has_shape {
+            obj.remove("anyOf");
+            obj.remove("oneOf");
+        }
+
+        for (key, value) in obj.iter_mut() {
+            match key.as_str() {
+                "properties" | "patternProperties" | "$defs" | "definitions" => {
+                    if let Some(map) = value.as_object_mut() {
+                        for sub in map.values_mut() {
+                            walk(sub);
+                        }
+                    }
+                }
+                "items"
+                | "additionalProperties"
+                | "anyOf"
+                | "oneOf"
+                | "allOf"
+                | "not"
+                | "if"
+                | "then"
+                | "else"
+                | "prefixItems"
+                | "contains" => walk(value),
+                _ => {}
+            }
+        }
+    }
+
+    let mut flattened = sanitize_tool_parameters_schema(schema);
+    walk(&mut flattened);
+    flattened
+}
+
 /// Build OpenAI-compatible chat `messages` for OpenRouter/direct compatible providers.
 ///
 /// This stays in the OpenRouter leaf crate so provider-specific message normalization,
@@ -658,5 +721,57 @@ mod sanitize_schema_tests {
     fn type_arrays_including_object_are_sanitized() {
         let sanitized = sanitize_tool_parameters_schema(&json!({"type": ["object", "null"]}));
         assert_eq!(sanitized["properties"], json!({}));
+    }
+}
+
+#[cfg(test)]
+mod moonshot_flatten_tests {
+    use super::*;
+
+    #[test]
+    fn flattens_top_level_any_of_beside_type() {
+        // The exact shape Moonshot rejects: object schema + anyOf branches
+        // (jcode's swarm tool). The parent shape survives; the union goes.
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": { "type": "string" },
+                "label": { "type": "string" }
+            },
+            "anyOf": [
+                { "type": "object", "required": ["action", "label"],
+                  "properties": { "action": { "enum": ["spawn"] } } },
+                { "type": "object", "required": ["action"],
+                  "properties": { "action": { "enum": ["list"] } } }
+            ]
+        });
+        let flat = flatten_schema_for_moonshot(&schema);
+        assert!(flat.get("anyOf").is_none(), "anyOf must be removed: {flat}");
+        assert_eq!(flat["type"], "object");
+        assert!(flat["properties"]["action"].is_object());
+    }
+
+    #[test]
+    fn preserves_type_free_unions_and_nested_shapes() {
+        // A pure union (no parent type) is valid moonshot-flavored schema
+        // and must be preserved; nested violating shapes are still fixed.
+        let schema = serde_json::json!({
+            "anyOf": [
+                { "type": "string" },
+                { "type": "object", "properties": {
+                    "inner": {
+                        "type": "array",
+                        "anyOf": [ { "minItems": 1 } ]
+                    }
+                }}
+            ]
+        });
+        let flat = flatten_schema_for_moonshot(&schema);
+        assert!(flat.get("anyOf").is_some(), "type-free union preserved");
+        let inner = &flat["anyOf"][1]["properties"]["inner"];
+        assert!(
+            inner.get("anyOf").is_none(),
+            "nested type+anyOf must be flattened: {inner}"
+        );
     }
 }

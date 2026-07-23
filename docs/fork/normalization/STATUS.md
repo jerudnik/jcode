@@ -1,72 +1,95 @@
 # Current fork normalization status
 
-Recorded: 2026-07-17
+> **Frozen historical checkpoint.** This was the final normalization operating
+> checkpoint. Use [`../ideal-base/BASELINE.md`](../ideal-base/BASELINE.md) and
+> [`../ideal-base/STATE.json`](../ideal-base/STATE.json) for active ideal-base
+> execution. Do not refresh the dated facts below in place.
+
+Recorded: 2026-07-18
 
 This is the current operating checkpoint for the recovery-to-normalization
-program. It supersedes pre-promotion starting facts in `BASELINE.md` and
-`COORDINATOR_BRIEF.md` where they conflict, without rewriting those historical
-records.
+program. It supersedes pre-promotion and pre-cleanup facts in `BASELINE.md`,
+`COORDINATOR_BRIEF.md`, and earlier versions of this file without rewriting
+those historical records.
 
 ## Current source and runtime
 
-- Canonical checkout: `/Users/jrudnik/labs/jcode`
-- Canonical branch: `main`
-- Promoted source/documentation checkpoint before this amendment:
-  `42aa9cc64183741efb000a6d58c2c920de77e146`
-- Fork remote `main` before this amendment: the same `42aa9cc64` checkpoint
-- Product/runtime commit: `8962bccb32eede3b6746c42bfe6d265df29e4471`
-- Runtime label: `8962bccb3-release`
+- Canonical checkout: `/Users/jrudnik/labs/jcode`.
+- Canonical branch: `main`.
+- Post-promotion parent before the known-good baseline:
+  `152ececcc57c153731685ff398352a4494bd679b`.
+- Known-good baseline commit:
+  `41e86f3c9f21d942d87161151f9cbe75077b2c6a`.
+- Product/runtime commit:
+  `8962bccb32eede3b6746c42bfe6d265df29e4471`.
+- Runtime label: `8962bccb3-release`.
 - Runtime SHA-256:
-  `6cf81221e8c0cee86ae714d2f1fc9fb55fe8715f45ee8082dc2ecf034a2515fc`
-- Runtime channels: `current`, `stable`, and `shared-server` all select the exact
-  immutable release
-- Preserved user state: modified `docs/fork/recovery/ORCHESTRATOR_PROMPT.md`
-  with diff SHA-256 `8e8e6a92dad180b3925bc0b2a3b7b951bc6a6f5c9e4f8a57c9f522d03ad85c00`,
-  plus untracked `opencode.json`
+  `6cf81221e8c0cee86ae714d2f1fc9fb55fe8715f45ee8082dc2ecf034a2515fc`.
+- `current`, `stable`, and `shared-server` all select that exact immutable
+  release. No runtime reload or promotion was performed during this checkpoint.
+- Self-development manifest: stable projection normalized to the release, with
+  no canary and no pending activation.
+- Preserved prompt disposition: `docs/fork/recovery/ORCHESTRATOR_PROMPT.md` is
+  restored to its tracked baseline and retained as historical recovery evidence
+  and an architectural example. Dozens of documentation records reference it.
+- Removed local residue: untracked `opencode.json`, auxiliary worktrees, and
+  rebuildable Cargo output after validation.
 
-The signed recovery source and sign-off commits are preserved on the recovery
-line and in rollback archives. They are not ancestors of curated `main`; commit
-`c786be6c3` imported the forensic record into the curated history.
+The signed recovery source and sign-off commits remain preserved on the recovery
+line, under archive refs, and in verified rollback archives. They are not
+ancestors of curated `main`; commit `c786be6c3` imported the forensic record
+into curated history.
 
 ## Milestone and gate disposition
 
-| Surface                                 | Status                           | Evidence and boundary                                                                                                              |
-| --------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| N0 safety inventory                     | Complete                         | Verified all-ref and stash bundles plus committed N0 evidence                                                                      |
-| N1 curated integration                  | Complete                         | Curated tree and recovery-equivalence evidence preserved                                                                           |
-| N2 W7 and promotion                     | Complete with post-signoff delta | Original signoff at `62b3946b6`; final operational fixes at `1c368592f` and `8962bccb3` are explicitly recorded in `N2_SIGNOFF.md` |
-| Runtime promotion                       | Complete                         | Exact release, channels, daemon identity, subscribed ping, and no-op reload verified                                               |
-| N3 documentation and task normalization | In progress                      | Current status and archival boundaries are now explicit; issue #15 owns post-soak cleanup                                          |
-| N4 full isolated runtime matrix         | Open                             | The committed live package proves bounded runtime promotion, not every D6 tool/MCP/swarm/provider scenario                         |
-| N5 host normalization                   | Soak-gated                       | Thirty worktrees and local rollback assets remain retained through 2026-07-24                                                      |
-| N6/D9 final sign-off                    | Open                             | No claim that two fresh reviewers signed every D0-D9 gate at one final commit and host manifest                                    |
+| Surface | Status | Evidence and boundary |
+|---|---|---|
+| N0 safety inventory | Complete | Verified all-ref and stash bundles plus committed N0 evidence. |
+| N1 curated integration | Complete | Curated tree and recovery-equivalence evidence preserved. |
+| N2 W7 and promotion | Complete with recorded post-signoff fixes | Original signoff at `62b3946b6`; operational fixes at `1c368592f` and `8962bccb3` are recorded in `N2_SIGNOFF.md`. |
+| Runtime promotion | Complete | Exact release, channel identity, daemon identity, subscribed ping, and reload behavior verified. |
+| N3 documentation and task normalization | Complete for the current baseline | Historical ledgers remain evidence; current state and remaining seams are in `KNOWN_GOOD_BASELINE.md`. |
+| N4 isolated runtime matrix | Complete for core runtime | Final sealed campaign passed 321/321 checks with no provider requests, leaked sandbox processes or sockets, or live-state mutation. Provider-specific turns remain authorization-gated. |
+| N5 host normalization | Complete for source/build residue | One canonical worktree remains; rebuildable Cargo output is removed after validation. Refs, stashes, bundles, sealed evidence, and private archives remain preserved. |
+| N6/D9 final sign-off | Core-runtime complete; unqualified sign-off open | Regular TUI/CLI feature work may proceed. Real-provider validation and the ranked MCP/headless lifecycle seams remain explicit boundaries. |
 
-The honest label is **promoted runtime validated, normalization incomplete**.
-Neither “fully runtime-validated” nor unqualified D0-D9 completion is claimed.
+The honest label is **core-runtime validated and ready for regular TUI/CLI
+feature development**. It is not an unqualified claim that every provider,
+mobile, WebSocket, packaging, or unattended-swarm path is closed.
 
-## Private GitHub branch archive
+## Known-good evidence
 
-GitHub stores Git objects and refs, not linked worktree directories. To make the
-later local cleanup safer, all 41 local branch tips and the detached
-`/private/tmp/jcode-up` worktree tip were copied exactly to the private repository:
+The authoritative current inventory is
+[`KNOWN_GOOD_BASELINE.md`](KNOWN_GOOD_BASELINE.md). The sealed stress package is
+at `~/labs/.recovery/jcode/2026-07-17-runtime-stress/`; its `SHA256SUMS` file has
+SHA-256
+`24366cbb5d58c22b5b3ef24ad19b434aa61cb1ddfda763770f823f6fd5c61ae4`.
+The bounded operational cleanup and final-source live validation are preserved
+at `~/labs/.recovery/jcode/2026-07-18-known-good-baseline/`.
+
+## Private archive and local preservation
+
+The private recovery repository remains:
 
 <https://github.com/jerudnik/jcode-recovery-archive>
 
-The archive is private. A branch-history gitleaks scan reported 19 test/example
-patterns, all already reachable from public fork `main`; no newly unpublished
-finding was introduced by the archive. Exact local and remote manifests are in
-[`evidence/2026-07-17-post-promotion-checkpoint/`](evidence/2026-07-17-post-promotion-checkpoint/).
+It preserves branch history but does not replace local rollback bundles,
+stashes, sealed evidence, or recovery archives. Those assets remain local and
+unchanged. No stash, bundle, recovery ref, or private archive was deleted or
+uploaded during this checkpoint.
 
-This remote copy does not authorize deletion. Worktree directories, caches,
-ignored/untracked files, stash objects, and rollback bundle payloads remain local
-through the soak. Stashes and bundles require a separate privacy review before
-any cloud upload because they may contain user-owned content not represented by
-normal branch history.
+## Next engineering checkpoint
 
-## Next authorized checkpoint
+The next high-value work is not more recovery cleanup. It is the bounded
+lifecycle remediation already outlined in
+`docs/proposals/swarm-lifecycle-remediation.md`:
 
-Issue [jerudnik/jcode#15](https://github.com/jerudnik/jcode/issues/15) is the
-earliest cleanup gate on 2026-07-24. After fresh runtime and archive verification,
-produce an exact deletion manifest, obtain approval for that manifest, remove
-obsolete worktrees rather than relocating them, and move only still-active
-worktrees with `git worktree move`.
+1. explicitly reap owned MCP children on every daemon exit path and give
+   `mcp-serve` an owner-liveness fallback;
+2. make daemon idle exit respect active headless, swarm, debug-job, background,
+   and MCP work;
+3. evict and reconnect dead shared MCP children.
+
+Each item has a deterministic no-provider acceptance gate in
+`KNOWN_GOOD_BASELINE.md`. No push, runtime promotion, real-provider request, or
+archive deletion is authorized by this status update.

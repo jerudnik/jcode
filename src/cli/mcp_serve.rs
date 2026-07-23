@@ -26,7 +26,7 @@ use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-use crate::server;
+use crate::{mcp::MCP_OWNER_PID_ENV, server};
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -35,12 +35,102 @@ const JSONRPC_PARSE_ERROR: i64 = -32700;
 const JSONRPC_INVALID_REQUEST: i64 = -32600;
 const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
 const JSONRPC_INTERNAL_ERROR: i64 = -32603;
+const OWNER_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OwnerPollResult {
+    Live,
+    Dead,
+    Unknown,
+}
+
+fn should_exit_for_owner(owner_pid: Option<u32>, result: OwnerPollResult) -> bool {
+    owner_pid.is_some() && result == OwnerPollResult::Dead
+}
+
+fn owner_pid_from_env() -> Result<Option<u32>> {
+    let Some(raw) = std::env::var_os(MCP_OWNER_PID_ENV) else {
+        return Ok(None);
+    };
+    let raw = raw.to_string_lossy();
+    let pid = raw
+        .parse::<u32>()
+        .with_context(|| format!("{MCP_OWNER_PID_ENV} must be a positive process ID"))?;
+    if pid == 0 {
+        anyhow::bail!("{MCP_OWNER_PID_ENV} must be a positive process ID");
+    }
+    Ok(Some(pid))
+}
+
+#[cfg(unix)]
+fn poll_owner(pid: u32) -> OwnerPollResult {
+    let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if result == 0 {
+        return OwnerPollResult::Live;
+    }
+    match std::io::Error::last_os_error().raw_os_error() {
+        Some(libc::ESRCH) => OwnerPollResult::Dead,
+        Some(libc::EPERM) => OwnerPollResult::Live,
+        _ => OwnerPollResult::Unknown,
+    }
+}
+
+#[cfg(windows)]
+fn poll_owner(pid: u32) -> OwnerPollResult {
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    const ERROR_INVALID_PARAMETER: u32 = 87;
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return if GetLastError() == ERROR_INVALID_PARAMETER {
+                OwnerPollResult::Dead
+            } else {
+                OwnerPollResult::Unknown
+            };
+        }
+        let mut exit_code = 0;
+        let queried = GetExitCodeProcess(handle, &mut exit_code) != 0;
+        CloseHandle(handle);
+        if !queried {
+            OwnerPollResult::Unknown
+        } else if exit_code == STILL_ACTIVE {
+            OwnerPollResult::Live
+        } else {
+            OwnerPollResult::Dead
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn poll_owner(_pid: u32) -> OwnerPollResult {
+    OwnerPollResult::Unknown
+}
+
+async fn wait_for_owner_exit(owner_pid: Option<u32>) {
+    let Some(owner_pid) = owner_pid else {
+        std::future::pending::<()>().await;
+        return;
+    };
+
+    loop {
+        if should_exit_for_owner(Some(owner_pid), poll_owner(owner_pid)) {
+            return;
+        }
+        tokio::time::sleep(OWNER_POLL_INTERVAL).await;
+    }
+}
 
 /// Entry point for `jcode mcp-serve`.
 pub async fn run_mcp_serve_command(session: Option<String>, cwd: Option<String>) -> Result<()> {
     let mut server = McpServe {
         session,
         cwd,
+        owner_pid: owner_pid_from_env()?,
         stdout: tokio::io::stdout(),
     };
     server.run().await
@@ -51,6 +141,8 @@ struct McpServe {
     session: Option<String>,
     /// Working dir used when auto-creating a coordinator session.
     cwd: Option<String>,
+    /// Daemon/editor process that owns this stdio MCP server, when supplied.
+    owner_pid: Option<u32>,
     stdout: tokio::io::Stdout,
 }
 
@@ -59,10 +151,21 @@ impl McpServe {
         let stdin = tokio::io::stdin();
         let mut reader = BufReader::new(stdin);
         let mut line = String::new();
+        let owner_exit = wait_for_owner_exit(self.owner_pid);
+        tokio::pin!(owner_exit);
 
         loop {
             line.clear();
-            let n = reader.read_line(&mut line).await?;
+            let n = tokio::select! {
+                _ = &mut owner_exit => {
+                    crate::logging::info(&format!(
+                        "mcp-serve: owner PID {:?} exited; shutting down",
+                        self.owner_pid
+                    ));
+                    return Ok(());
+                }
+                result = reader.read_line(&mut line) => result?,
+            };
             if n == 0 {
                 return Ok(()); // client closed stdin
             }
@@ -358,5 +461,13 @@ mod tests {
         let def = json!({ "name": "x", "parameters": { "type": "object", "k": 1 } });
         let mcp = tool_def_to_mcp(&def);
         assert_eq!(mcp["inputSchema"]["k"], 1);
+    }
+
+    #[test]
+    fn owner_liveness_decision_is_fail_safe_and_only_exits_on_dead() {
+        assert!(!should_exit_for_owner(None, OwnerPollResult::Dead));
+        assert!(!should_exit_for_owner(Some(42), OwnerPollResult::Live));
+        assert!(!should_exit_for_owner(Some(42), OwnerPollResult::Unknown));
+        assert!(should_exit_for_owner(Some(42), OwnerPollResult::Dead));
     }
 }

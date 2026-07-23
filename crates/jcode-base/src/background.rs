@@ -20,6 +20,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Duration, Instant as TokioInstant, MissedTickBehavior};
 
 mod model;
+mod store;
 
 pub use model::{
     BackgroundCleanupResult, BackgroundTaskEventKind, BackgroundTaskEventRecord,
@@ -32,10 +33,74 @@ use model::{
     progress_event_record, progress_wait_reason, push_task_event, task_dir, terminal_event_record,
 };
 
+/// Env override for the live background-task cap.
+pub const MAX_BACKGROUND_TASKS_ENV: &str = "JCODE_MAX_BACKGROUND_TASKS";
+
+/// Default max live (running) background tasks for the whole process.
+const DEFAULT_MAX_BACKGROUND_TASKS: usize = 64;
+
+/// Effective live-task cap (env-overridable, default 64).
+fn max_background_tasks() -> usize {
+    std::env::var(MAX_BACKGROUND_TASKS_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|cap| *cap > 0)
+        .unwrap_or(DEFAULT_MAX_BACKGROUND_TASKS)
+}
+
+/// Point-in-time `{current, cap}` reading of the live-task budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackgroundCapacitySnapshot {
+    pub current: usize,
+    pub cap: usize,
+}
+
 /// Manages background task execution
 pub struct BackgroundTaskManager {
     tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
     output_dir: PathBuf,
+    /// Crash-durable serialized status persistence (F04/F05). Every status-file
+    /// write goes through this store: fsynced same-directory temp + rename +
+    /// parent fsync, cross-instance per-task serialization, terminal
+    /// precedence, and surfaced errors.
+    store: Arc<store::TaskStatusStore>,
+    /// Activity-lease authority (F01 C5): non-detached tasks hold a lease
+    /// for their tracked lifetime so the daemon cannot idle-exit while they
+    /// run. Defaults to no-op; the daemon injects its real authority at
+    /// startup via [`Self::set_activity_authority`] (composition-root
+    /// injection, keeping this crate free of server types).
+    activity: std::sync::RwLock<Arc<dyn jcode_core::activity::ActivityLeaseAuthority>>,
+    /// Test-only cap override (0 = unset, use env/default). Avoids mutating
+    /// process-global env vars from parallel tests.
+    cap_override: std::sync::atomic::AtomicUsize,
+    /// In-flight spawn reservations (F12 review important-2): incremented
+    /// before the cap check, released when the task lands in the live map or
+    /// the spawn is refused, so concurrent spawns cannot all pass one free
+    /// slot (check-then-act TOCTOU).
+    in_flight_spawns: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// RAII reservation of one live-task slot during spawn setup. Dropped (and
+/// the counter released) either on refusal or after the task is inserted
+/// into the live map, at which point the map itself carries the count.
+struct SpawnSlot {
+    counter: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl SpawnSlot {
+    fn reserve(counter: &Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self {
+            counter: Arc::clone(counter),
+        }
+    }
+}
+
+impl Drop for SpawnSlot {
+    fn drop(&mut self) {
+        self.counter
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl BackgroundTaskManager {
@@ -46,7 +111,108 @@ impl BackgroundTaskManager {
         std::fs::create_dir_all(&output_dir).ok();
         Self {
             tasks: Arc::new(RwLock::new(HashMap::new())),
+            store: Arc::new(store::TaskStatusStore::new(output_dir.clone())),
             output_dir,
+            activity: std::sync::RwLock::new(jcode_core::activity::noop_activity_authority()),
+            cap_override: std::sync::atomic::AtomicUsize::new(0),
+            in_flight_spawns: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+
+    /// Effective live-task cap for this manager.
+    fn live_task_cap(&self) -> usize {
+        match self.cap_override.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => max_background_tasks(),
+            cap => cap,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_cap_for_tests(&self, cap: usize) {
+        self.cap_override
+            .store(cap, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Inject the daemon's activity-lease authority (F01 C5). Called once by
+    /// the server at startup, before it accepts work.
+    pub fn set_activity_authority(
+        &self,
+        authority: Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    ) {
+        *self
+            .activity
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = authority;
+    }
+
+    fn acquire_task_lease(
+        &self,
+        task_id: &str,
+        tool_name: &str,
+    ) -> Result<jcode_core::activity::ActivityLeaseGuard, jcode_core::activity::ActivityLeaseError>
+    {
+        let authority = self
+            .activity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        jcode_core::activity::ActivityLeaseGuard::acquire(
+            &authority,
+            jcode_core::activity::ActivityClass::BackgroundTask,
+            &format!("{tool_name}/{task_id}"),
+        )
+    }
+
+    /// Fail-closed refusal path (F02-B4 / F01 I6): the task never runs.
+    /// Writes a terminal Failed status so callers polling the status file
+    /// observe a definite outcome instead of silent unleased execution.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors persisted status fields at existing call sites"
+    )]
+    async fn write_refused_status(
+        &self,
+        task_id: &str,
+        tool_name: &str,
+        display_name: Option<String>,
+        session_id: &str,
+        status_path: &std::path::Path,
+        notify: bool,
+        wake: bool,
+        reason: &str,
+    ) {
+        let mut refused_status = TaskStatusFile {
+            task_id: task_id.to_string(),
+            tool_name: tool_name.to_string(),
+            display_name,
+            session_id: session_id.to_string(),
+            status: BackgroundTaskStatus::Failed,
+            exit_code: None,
+            error: Some(reason.to_string()),
+            started_at: chrono::Utc::now().to_rfc3339(),
+            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+            duration_secs: Some(0.0),
+            pid: None,
+            owner_pid: Some(std::process::id()),
+            owner_instance: Some(model::process_instance_token().to_string()),
+            detached: false,
+            notify,
+            wake,
+            progress: None,
+            event_history: Vec::new(),
+        };
+        let event_status = refused_status.status.clone();
+        push_task_event(
+            &mut refused_status,
+            terminal_event_record(event_status, None, Some(reason)),
+        );
+        let _ = status_path; // path derives from task_id inside the store
+        if let Err(error) = self
+            .store
+            .write_terminal(task_id, move |_| refused_status)
+            .await
+        {
+            crate::logging::error(&format!("Refused-status persistence failed: {error:#}"));
         }
     }
 
@@ -125,14 +291,15 @@ impl BackgroundTaskManager {
         })
     }
 
+    /// Lenient path read for directory sweeps: malformed files are logged
+    /// (never silently ignored, F04) and yield None so a sweep can continue.
     async fn read_status_file(&self, path: &std::path::Path) -> Option<TaskStatusFile> {
-        let content = fs::read_to_string(path).await.ok()?;
-        serde_json::from_str(&content).ok()
-    }
-
-    async fn write_status_file(&self, path: &std::path::Path, status: &TaskStatusFile) {
-        if let Ok(json) = serde_json::to_string_pretty(status) {
-            let _ = fs::write(path, json).await;
+        match self.store.read_path(path).await {
+            Ok(status) => status,
+            Err(error) => {
+                crate::logging::warn(&format!("Background status sweep read failed: {error:#}"));
+                None
+            }
         }
     }
 
@@ -185,7 +352,15 @@ impl BackgroundTaskManager {
             terminal_event_record(final_status.clone(), exit_code, final_error.as_deref()),
         );
 
-        self.write_status_file(status_path, &status).await;
+        let _ = status_path;
+        let terminal_status = status.clone();
+        if let Err(error) = self
+            .store
+            .write_terminal(&status.task_id, move |_| terminal_status)
+            .await
+        {
+            crate::logging::error(&format!("Detached finalize persistence failed: {error:#}"));
+        }
 
         let output_preview = if output.len() > 500 {
             format!("{}...", crate::util::truncate_str(&output, 500))
@@ -278,7 +453,15 @@ impl BackgroundTaskManager {
             &mut status,
             terminal_event_record(BackgroundTaskStatus::Failed, None, Some(&error)),
         );
-        self.write_status_file(status_path, &status).await;
+        let _ = status_path;
+        let terminal_status = status.clone();
+        if let Err(error) = self
+            .store
+            .write_terminal(&status.task_id, move |_| terminal_status)
+            .await
+        {
+            crate::logging::error(&format!("Orphan finalize persistence failed: {error:#}"));
+        }
 
         let output_path = self.output_path_for(&status.task_id);
         let output = fs::read_to_string(&output_path).await.unwrap_or_default();
@@ -304,8 +487,9 @@ impl BackgroundTaskManager {
         status
     }
 
-    /// Startup/reload sweep: mark orphaned non-detached `Running` status
-    /// files as `Failed` with a "server reloaded" note.
+    /// Startup/reload sweep: remove stale interrupted-write temp files, then
+    /// mark orphaned non-detached `Running` status files as `Failed` with a
+    /// "server reloaded" note.
     ///
     /// Only owner-tagged files are considered, using the liveness rules of
     /// [`Self::status_is_reconcilable_orphan`]. Files without owner metadata
@@ -315,6 +499,7 @@ impl BackgroundTaskManager {
     /// from another live process's task. Returns how many files were
     /// reconciled.
     pub async fn reconcile_orphaned_tasks(&self) -> usize {
+        self.store.cleanup_stale_temp_files().await;
         let mut reconciled = 0;
         let Ok(mut entries) = fs::read_dir(&self.output_dir).await else {
             return reconciled;
@@ -339,6 +524,93 @@ impl BackgroundTaskManager {
         reconciled
     }
 
+    /// Shutdown finalize (F01 design 3.4 step 6): atomically mark every LIVE
+    /// non-detached task as failed-by-shutdown and abort its future.
+    ///
+    /// Called by the daemon's shutdown coordinator during cleanup so that a
+    /// voluntary exit leaves no `Running` status files behind and the
+    /// next-boot orphan reconcile ([`Self::reconcile_orphaned_tasks`]) is
+    /// unnecessary for voluntary exits. Detached tasks are untouched: they
+    /// outlive the daemon by design. Returns how many tasks were finalized.
+    pub async fn finalize_non_detached(&self, reason: &str) -> usize {
+        let drained: Vec<RunningTask> = {
+            let mut tasks = self.tasks.write().await;
+            let ids: Vec<String> = tasks.keys().cloned().collect();
+            ids.into_iter().filter_map(|id| tasks.remove(&id)).collect()
+        };
+        let count = drained.len();
+        for task in drained {
+            if let Some(original) = &task.original_abort {
+                original.abort();
+            }
+            task.handle.abort();
+            let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
+            let mut final_status = TaskStatusFile {
+                task_id: task.task_id,
+                tool_name: task.tool_name,
+                display_name: task.display_name,
+                session_id: task.session_id,
+                status: BackgroundTaskStatus::Failed,
+                exit_code: None,
+                error: Some(format!("Daemon shutdown ({reason})")),
+                started_at: task.started_at_rfc3339,
+                completed_at: Some(chrono::Utc::now().to_rfc3339()),
+                duration_secs: Some(task.started_at.elapsed().as_secs_f64()),
+                pid: None,
+                owner_pid: Some(std::process::id()),
+                owner_instance: Some(model::process_instance_token().to_string()),
+                detached: false,
+                notify: notify_flag,
+                wake: wake_flag,
+                progress: None,
+                event_history: Vec::new(),
+            };
+            let event_status = final_status.status.clone();
+            let event_exit_code = final_status.exit_code;
+            let event_error = final_status.error.clone();
+            push_task_event(
+                &mut final_status,
+                terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
+            );
+            let task_id_for_write = final_status.task_id.clone();
+            if let Err(error) = self
+                .store
+                .write_terminal(&task_id_for_write, move |_| final_status)
+                .await
+            {
+                // Explicit failure policy (F04-R2-B1): with a durable
+                // Running record on disk, the next-boot orphan sweep is the
+                // recovery authority and this log suffices (the daemon is
+                // exiting; no retry loop can outlive it). Without one (an
+                // adopted task whose permitted initial write failed AND
+                // whose terminal write now failed while storage is broken),
+                // the record is irrecoverably lost; state that loudly as
+                // accepted data loss rather than pretending otherwise.
+                if task.durable_record {
+                    crate::logging::error(&format!(
+                        "Shutdown finalize persistence failed for {task_id_for_write} \
+                         (initial Running record exists; next-boot orphan sweep will reconcile): {error:#}"
+                    ));
+                } else {
+                    crate::logging::error(&format!(
+                        "DATA LOSS: shutdown finalize persistence failed for adopted task \
+                         {task_id_for_write} with no durable record (initial write also failed); \
+                         the task outcome cannot be recovered: {error:#}"
+                    ));
+                }
+            }
+        }
+        count
+    }
+
+    /// Observability: current live-task count against the global cap.
+    pub async fn capacity_snapshot(&self) -> BackgroundCapacitySnapshot {
+        BackgroundCapacitySnapshot {
+            current: self.tasks.read().await.len(),
+            cap: self.live_task_cap(),
+        }
+    }
+
     pub fn reserve_task_info(&self) -> BackgroundTaskInfo {
         let task_id = Self::generate_task_id();
         let output_file = self.output_path_for(&task_id);
@@ -347,6 +619,7 @@ impl BackgroundTaskManager {
             task_id,
             output_file,
             status_file,
+            refused: None,
         }
     }
 
@@ -388,7 +661,11 @@ impl BackgroundTaskManager {
             progress: None,
             event_history: Vec::new(),
         };
-        self.write_status_file(&info.status_file, &status).await;
+        if let Err(error) = self.store.write_initial(&status).await {
+            crate::logging::error(&format!(
+                "Detached task initial status persistence failed: {error:#}"
+            ));
+        }
         Self::publish_task_started_activity(
             &info.task_id,
             tool_name,
@@ -434,6 +711,84 @@ impl BackgroundTaskManager {
         let task_id = Self::generate_task_id();
         let output_path = self.output_dir.join(format!("{}.output", task_id));
         let status_path = self.output_dir.join(format!("{}.status.json", task_id));
+        // Global live-task cap: live-map tasks plus in-flight spawn
+        // reservations count (F12 review important-2: a bare map read lets
+        // concurrent spawns all pass one free slot). The RAII slot is held
+        // until the task lands in the live map. Terminal pruning
+        // (completed/failed/cancelled) releases capacity. Fail closed like
+        // the drain refusal below: the task NEVER runs and the status file
+        // records an explicit self-documenting refusal.
+        let spawn_slot = SpawnSlot::reserve(&self.in_flight_spawns);
+        {
+            // Load the reservation counter BEFORE the live map (F12
+            // re-review): a completing spawner inserts into `tasks` before
+            // dropping its slot, so counter-first ordering sees it in at
+            // least one place; map-first could miss it in both and share one
+            // free slot between two spawners. Double-counting merely refuses
+            // conservatively.
+            let reserved = self
+                .in_flight_spawns
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .saturating_sub(1); // exclude our own reservation
+            let live = self.tasks.read().await.len() + reserved;
+            let cap = self.live_task_cap();
+            if live >= cap {
+                let reason = format!(
+                    "Refused: background task cap reached ({live}/{cap} live tasks). \
+                     Raise via {MAX_BACKGROUND_TASKS_ENV}."
+                );
+                crate::logging::warn(&format!(
+                    "Background task {tool_name}/{task_id} refused: {reason}"
+                ));
+                self.write_refused_status(
+                    &task_id,
+                    tool_name,
+                    display_name.clone(),
+                    session_id,
+                    &status_path,
+                    notify,
+                    wake,
+                    &reason,
+                )
+                .await;
+                return BackgroundTaskInfo {
+                    task_id,
+                    output_file: output_path,
+                    status_file: status_path,
+                    refused: Some(reason),
+                };
+            }
+        }
+        // Activity lease (F01 C5 / F02-B4): acquired at method entry, BEFORE
+        // the future is spawned, so it exists before the task can execute.
+        // Moved into the RunningTask record below, dropped at terminal
+        // pruning. A ShuttingDown refusal fails closed: the task NEVER runs
+        // (I6: no new work starts silently during drain).
+        let activity_lease = match self.acquire_task_lease(&task_id, tool_name) {
+            Ok(lease) => Some(lease),
+            Err(refused) => {
+                crate::logging::warn(&format!(
+                    "Background task {tool_name}/{task_id} refused during shutdown drain: {refused}"
+                ));
+                self.write_refused_status(
+                    &task_id,
+                    tool_name,
+                    display_name.clone(),
+                    session_id,
+                    &status_path,
+                    notify,
+                    wake,
+                    "Refused: daemon is shutting down",
+                )
+                .await;
+                return BackgroundTaskInfo {
+                    task_id,
+                    output_file: output_path,
+                    status_file: status_path,
+                    refused: Some("Refused: daemon is shutting down".to_string()),
+                };
+            }
+        };
         let started_at_rfc3339 = chrono::Utc::now().to_rfc3339();
 
         // Write initial status file
@@ -457,8 +812,24 @@ impl BackgroundTaskManager {
             progress: None,
             event_history: Vec::new(),
         };
-        if let Ok(json) = serde_json::to_string_pretty(&initial_status) {
-            let _ = std::fs::write(&status_path, json);
+        // F04-B1: successful initial persistence is a PREREQUISITE for
+        // starting non-detached work. Without a durable `Running` file, a
+        // process death mid-task would leave no record for the next-boot
+        // orphan sweep to reconcile. Fail closed: the task never runs.
+        if let Err(error) = self.store.write_initial(&initial_status).await {
+            crate::logging::error(&format!(
+                "Initial status persistence failed for task {task_id}; refusing to start: {error:#}"
+            ));
+            return BackgroundTaskInfo {
+                task_id,
+                output_file: output_path,
+                status_file: status_path,
+                // F12 re-review: this task never runs; callers must not
+                // report a started task (same contract as cap refusal).
+                refused: Some(format!(
+                    "Refused: initial status persistence failed: {error:#}"
+                )),
+            };
         }
         Self::publish_task_started_activity(
             &task_id,
@@ -471,6 +842,8 @@ impl BackgroundTaskManager {
         let output_path_clone = output_path.clone();
         let status_path_clone = status_path.clone();
         let task_id_clone = task_id.clone();
+        let task_id_clone2 = task_id.clone();
+        let task_id_clone3 = task_id.clone();
         let tool_name_owned = tool_name.to_string();
         let display_name_owned = display_name.clone();
         let session_id_owned = session_id.to_string();
@@ -478,6 +851,7 @@ impl BackgroundTaskManager {
         let started_at_rfc3339_for_task = started_at_rfc3339.clone();
         let (delivery_flags_tx, delivery_flags_rx) = watch::channel((notify, wake));
         let tasks_for_prune = Arc::clone(&self.tasks);
+        let store_for_task = Arc::clone(&self.store);
         let (registered_tx, registered_rx) = tokio::sync::oneshot::channel::<()>();
 
         // Spawn the background task
@@ -500,56 +874,35 @@ impl BackgroundTaskManager {
             };
 
             let (notify_flag, wake_flag) = *delivery_flags_rx.borrow();
-            let prior_status = tokio::fs::read_to_string(&status_path_clone)
-                .await
-                .ok()
-                .and_then(|content| serde_json::from_str::<TaskStatusFile>(&content).ok());
-            let prior_progress = prior_status
-                .as_ref()
-                .and_then(|status| status.progress.clone());
-            let prior_event_history = prior_status
-                .map(|status| status.event_history)
-                .unwrap_or_default();
-
-            // Update status file
-            let mut final_status = TaskStatusFile {
-                task_id: task_id_clone.clone(),
-                tool_name: tool_name_owned.clone(),
-                display_name: display_name_owned.clone(),
-                session_id: session_id_owned.clone(),
-                status: status.clone(),
-                exit_code,
-                error: error.clone(),
-                started_at: started_at_rfc3339_for_task,
-                completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                duration_secs: Some(duration_secs),
-                pid: None,
-                owner_pid: Some(std::process::id()),
-                owner_instance: Some(model::process_instance_token().to_string()),
-                detached: false,
-                notify: notify_flag,
-                wake: wake_flag,
-                progress: prior_progress,
-                event_history: prior_event_history,
-            };
-            push_task_event(
-                &mut final_status,
-                terminal_event_record(status.clone(), exit_code, error.as_deref()),
-            );
-            if let Ok(json) = serde_json::to_string_pretty(&final_status) {
-                let _ = tokio::fs::write(&status_path_clone, json).await;
-            }
-
-            // Drop this task from the live map now that its terminal status is
-            // persisted. Order matters: pruning only after the status-file
-            // write keeps "in the live map while the status file says Running"
-            // equivalent to "a task future is actually executing", which the
-            // run_plan duplicate-driver guard and self-dev build reconciliation
-            // rely on. Awaiting registration first means a task that finishes
-            // instantly cannot race the insert below and leave a permanent
-            // phantom entry in the map.
+            // Terminal write through the store with in-process recovery
+            // (F04/F04-B1): serialized, atomic, first-terminal-wins. On
+            // success the live-map entry is pruned; on persistence failure
+            // the entry is retained as a visible tombstone and a detached
+            // retry loop prunes once the write finally lands. Awaiting
+            // registration first means an instantly finishing task cannot
+            // race the insert below and leave a permanent phantom entry.
             let _ = registered_rx.await;
-            tasks_for_prune.write().await.remove(&task_id_clone);
+            let _ = &status_path_clone;
+            let _ = task_id_clone3;
+            persist_terminal_with_recovery(
+                store_for_task,
+                tasks_for_prune,
+                TerminalSpec {
+                    task_id: task_id_clone2,
+                    tool_name: tool_name_owned.clone(),
+                    display_name: display_name_owned.clone(),
+                    session_id: session_id_owned.clone(),
+                    status: status.clone(),
+                    exit_code,
+                    error: error.clone(),
+                    started_at: started_at_rfc3339_for_task,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    duration_secs,
+                    notify: notify_flag,
+                    wake: wake_flag,
+                },
+            )
+            .await;
 
             // Read output preview for notification
             let output_preview = tokio::fs::read_to_string(&output_path_clone)
@@ -592,18 +945,24 @@ impl BackgroundTaskManager {
             started_at_rfc3339,
             delivery_flags: delivery_flags_tx,
             handle,
+            original_abort: None,
+            activity_lease,
+            durable_record: true,
         };
 
         self.tasks
             .write()
             .await
             .insert(task_id.clone(), running_task);
+        // The live map now carries the count; release the spawn reservation.
+        drop(spawn_slot);
         let _ = registered_tx.send(());
 
         BackgroundTaskInfo {
             task_id,
             output_file: output_path,
             status_file: status_path,
+            refused: None,
         }
     }
 
@@ -659,9 +1018,22 @@ impl BackgroundTaskManager {
             progress: None,
             event_history: Vec::new(),
         };
-        if let Ok(json) = serde_json::to_string_pretty(&initial_status) {
-            let _ = std::fs::write(&status_path, json);
-        }
+        // Adoption cannot fail closed on initial-persistence failure: the
+        // future is ALREADY running (a promoted foreground command). Track
+        // it regardless so shutdown finalize can abort it; the terminal
+        // recovery loop (persist_terminal_with_recovery) will eventually
+        // produce a durable record. Only a process death in the window
+        // between a failed initial write and terminal recovery loses the
+        // record, which is no worse than the pre-adoption foreground state.
+        let durable_record = match self.store.write_initial(&initial_status).await {
+            Ok(()) => true,
+            Err(error) => {
+                crate::logging::error(&format!(
+                    "Initial status persistence failed for adopted task {task_id} (tracking anyway): {error:#}"
+                ));
+                false
+            }
+        };
         Self::publish_task_started_activity(
             &task_id,
             tool_name,
@@ -673,6 +1045,7 @@ impl BackgroundTaskManager {
         let output_path_clone = output_path.clone();
         let status_path_clone = status_path.clone();
         let task_id_clone = task_id.clone();
+        let task_id_clone2 = task_id.clone();
         let tool_name_owned = tool_name.to_string();
         let session_id_owned = session_id.to_string();
         let started_at = Instant::now();
@@ -680,8 +1053,13 @@ impl BackgroundTaskManager {
         let display_name_owned = initial_status.display_name.clone();
         let (delivery_flags_tx, delivery_flags_rx) = watch::channel((notify, wake));
         let tasks_for_prune = Arc::clone(&self.tasks);
+        let store_for_task = Arc::clone(&self.store);
         let (registered_tx, registered_rx) = tokio::sync::oneshot::channel::<()>();
 
+        // F02-R2-B2: keep abort authority over the ORIGINAL future. Aborting
+        // only the wrapper would drop-detach this JoinHandle and leave the
+        // underlying work running.
+        let original_abort = handle.abort_handle();
         let wrapper_handle = tokio::spawn(async move {
             let tool_result = handle.await;
             let duration_secs = started_at.elapsed().as_secs_f64();
@@ -712,50 +1090,30 @@ impl BackgroundTaskManager {
             }
 
             let (notify_flag, wake_flag) = *delivery_flags_rx.borrow();
-            let prior_status = tokio::fs::read_to_string(&status_path_clone)
-                .await
-                .ok()
-                .and_then(|content| serde_json::from_str::<TaskStatusFile>(&content).ok());
-            let prior_progress = prior_status
-                .as_ref()
-                .and_then(|status| status.progress.clone());
-            let prior_event_history = prior_status
-                .map(|status| status.event_history)
-                .unwrap_or_default();
-
-            let mut final_status = TaskStatusFile {
-                task_id: task_id_clone.clone(),
-                tool_name: tool_name_owned.clone(),
-                display_name: display_name_owned.clone(),
-                session_id: session_id_owned.clone(),
-                status: status.clone(),
-                exit_code,
-                error: error.clone(),
-                started_at: started_at_rfc3339,
-                completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                duration_secs: Some(duration_secs),
-                pid: None,
-                owner_pid: Some(std::process::id()),
-                owner_instance: Some(model::process_instance_token().to_string()),
-                detached: false,
-                notify: notify_flag,
-                wake: wake_flag,
-                progress: prior_progress,
-                event_history: prior_event_history,
-            };
-            push_task_event(
-                &mut final_status,
-                terminal_event_record(status.clone(), exit_code, error.as_deref()),
-            );
-            if let Ok(json) = serde_json::to_string_pretty(&final_status) {
-                let _ = tokio::fs::write(&status_path_clone, json).await;
-            }
-
-            // Prune the live-map entry only after the terminal status file is
-            // persisted (and after registration below, so instant completions
-            // cannot race the insert and leave a phantom entry).
+            // Terminal write via store with in-process recovery (F04-B1);
+            // prune only after persistence succeeds (helper), registration
+            // awaited first so instant completions cannot leave phantoms.
             let _ = registered_rx.await;
-            tasks_for_prune.write().await.remove(&task_id_clone);
+            let _ = &status_path_clone;
+            persist_terminal_with_recovery(
+                store_for_task,
+                tasks_for_prune,
+                TerminalSpec {
+                    task_id: task_id_clone2,
+                    tool_name: tool_name_owned.clone(),
+                    display_name: display_name_owned.clone(),
+                    session_id: session_id_owned.clone(),
+                    status: status.clone(),
+                    exit_code,
+                    error: error.clone(),
+                    started_at: started_at_rfc3339,
+                    completed_at: chrono::Utc::now().to_rfc3339(),
+                    duration_secs,
+                    notify: notify_flag,
+                    wake: wake_flag,
+                },
+            )
+            .await;
 
             let output_preview = if output_text.len() > 500 {
                 format!("{}...", crate::util::truncate_str(&output_text, 500))
@@ -794,6 +1152,25 @@ impl BackgroundTaskManager {
             started_at_rfc3339: initial_status.started_at.clone(),
             delivery_flags: delivery_flags_tx,
             handle: wrapper_handle,
+            original_abort: Some(original_abort),
+            // Acquired at adoption: pre-adoption execution was covered by
+            // the foreground owner's own lease (F01 design 3.3.3 C5).
+            // Refusal during drain is NOT silent unleased new work (F02-B4):
+            // the future already runs, and adopting it into the live map is
+            // what lets the shutdown cleanup's finalize_non_detached abort
+            // and finalize it. The refusal is logged; the task holds no
+            // lease and cannot pin the daemon.
+            activity_lease: match self.acquire_task_lease(&task_id, tool_name) {
+                Ok(lease) => Some(lease),
+                Err(refused) => {
+                    crate::logging::warn(&format!(
+                        "Adopted task {tool_name}/{task_id} unleased during shutdown drain \
+                         ({refused}); shutdown finalize will abort it."
+                    ));
+                    None
+                }
+            },
+            durable_record,
         };
 
         self.tasks
@@ -806,6 +1183,7 @@ impl BackgroundTaskManager {
             task_id,
             output_file: output_path,
             status_file: status_path,
+            refused: None,
         }
     }
 
@@ -1026,35 +1404,53 @@ impl BackgroundTaskManager {
         progress: BackgroundTaskProgress,
         event_kind: BackgroundTaskEventKind,
     ) -> Result<Option<TaskStatusFile>> {
-        let status_path = self.status_path_for(task_id);
-        let Some(mut status) = self.read_status_file(&status_path).await else {
-            return Ok(None);
-        };
-
+        // Serialized read-modify-write via the store (F04): a concurrent
+        // terminal write cannot be lost, and two progress updates cannot
+        // interleave their read/write cycles.
         let progress = progress.normalize();
-        if let Some(existing) = status.progress.as_ref() {
-            if progress_equivalent(existing, &progress) {
-                return Ok(Some(status));
-            }
+        let progress_for_mutate = progress.clone();
+        let outcome = self
+            .store
+            .mutate(task_id, move |status| {
+                if let Some(existing) = status.progress.as_ref() {
+                    if progress_equivalent(existing, &progress_for_mutate) {
+                        return false;
+                    }
+                    let existing_is_more_determinate = existing.percent.is_some()
+                        || matches!((existing.current, existing.total), (_, Some(total)) if total > 0);
+                    let new_is_less_determinate = progress_for_mutate.percent.is_none()
+                        && !matches!(
+                            (progress_for_mutate.current, progress_for_mutate.total),
+                            (_, Some(total)) if total > 0
+                        );
+                    if existing_is_more_determinate
+                        && new_is_less_determinate
+                        && matches!(
+                            progress_for_mutate.source,
+                            BackgroundTaskProgressSource::ParsedOutput
+                        )
+                    {
+                        return false;
+                    }
+                }
+                status.progress = Some(progress_for_mutate.clone());
+                push_task_event(
+                    status,
+                    progress_event_record(event_kind, progress_for_mutate.clone()),
+                );
+                true
+            })
+            .await?;
 
-            let existing_is_more_determinate = existing.percent.is_some()
-                || matches!((existing.current, existing.total), (_, Some(total)) if total > 0);
-            let new_is_less_determinate = progress.percent.is_none()
-                && !matches!((progress.current, progress.total), (_, Some(total)) if total > 0);
-            if existing_is_more_determinate
-                && new_is_less_determinate
-                && matches!(progress.source, BackgroundTaskProgressSource::ParsedOutput)
-            {
-                return Ok(Some(status));
-            }
-        }
-
-        status.progress = Some(progress.clone());
-        push_task_event(
-            &mut status,
-            progress_event_record(event_kind, progress.clone()),
-        );
-        self.write_status_file(&status_path, &status).await;
+        let status = match outcome {
+            // Applied: the mutation persisted this progress value; publish.
+            store::MutateOutcome::Applied(status) => status,
+            // Unchanged (no-op skip) or terminal truth preserved: nothing
+            // new happened; no bus event (F04-I1).
+            store::MutateOutcome::Unchanged(status)
+            | store::MutateOutcome::TerminalPreserved(status) => return Ok(Some(status)),
+            store::MutateOutcome::Missing => return Ok(None),
+        };
 
         Bus::global().publish(BusEvent::BackgroundTaskProgress(
             BackgroundTaskProgressEvent {
@@ -1079,27 +1475,37 @@ impl BackgroundTaskManager {
         wake: bool,
     ) -> Result<Option<TaskStatusFile>> {
         let (notify, wake) = normalize_delivery(notify, wake);
-        let status_path = self.status_path_for(task_id);
-        let Some(mut status) = self.read_status_file(&status_path).await else {
-            return Ok(None);
+        // Serialized mutate (F04): delivery flags are non-terminal fields,
+        // so this applies even to a task that just went terminal, without
+        // being able to disturb the terminal truth.
+        let outcome = self
+            .store
+            .mutate(task_id, move |status| {
+                status.notify = notify;
+                status.wake = wake;
+                let event_status = status.status.clone();
+                let event_exit_code = status.exit_code;
+                let event_progress = status.progress.clone();
+                push_task_event(
+                    status,
+                    BackgroundTaskEventRecord {
+                        kind: BackgroundTaskEventKind::DeliveryUpdated,
+                        timestamp: Utc::now().to_rfc3339(),
+                        message: Some(format!("notify={}, wake={}", notify, wake)),
+                        status: Some(event_status),
+                        exit_code: event_exit_code,
+                        progress: event_progress,
+                    },
+                );
+                true
+            })
+            .await?;
+        let status = match outcome {
+            store::MutateOutcome::Applied(status)
+            | store::MutateOutcome::TerminalPreserved(status)
+            | store::MutateOutcome::Unchanged(status) => status,
+            store::MutateOutcome::Missing => return Ok(None),
         };
-        status.notify = notify;
-        status.wake = wake;
-        let event_status = status.status.clone();
-        let event_exit_code = status.exit_code;
-        let event_progress = status.progress.clone();
-        push_task_event(
-            &mut status,
-            BackgroundTaskEventRecord {
-                kind: BackgroundTaskEventKind::DeliveryUpdated,
-                timestamp: Utc::now().to_rfc3339(),
-                message: Some(format!("notify={}, wake={}", notify, wake)),
-                status: Some(event_status),
-                exit_code: event_exit_code,
-                progress: event_progress,
-            },
-        );
-        self.write_status_file(&status_path, &status).await;
 
         if let Some(task) = self.tasks.read().await.get(task_id) {
             let _ = task.delivery_flags.send((notify, wake));
@@ -1121,42 +1527,35 @@ impl BackgroundTaskManager {
         task_id: &str,
         _graceful_timeout: std::time::Duration,
     ) -> Result<bool> {
-        let mut tasks = self.tasks.write().await;
-        if let Some(task) = tasks.remove(task_id) {
+        let tasks = self.tasks.read().await;
+        if let Some(task) = tasks.get(task_id) {
+            // Abort IN PLACE (F04-R2-B1): the entry STAYS in the live map as
+            // a tombstone until terminal persistence succeeds, so a failed
+            // write can never leave a cancelled task with neither a map
+            // entry nor a durable record. The recovery helper prunes on
+            // success (immediately or from its retry loop).
+            if let Some(original) = &task.original_abort {
+                original.abort();
+            }
             task.handle.abort();
-
-            // Update status file
-            let (notify_flag, wake_flag) = *task.delivery_flags.borrow();
-            let mut final_status = TaskStatusFile {
-                task_id: task.task_id,
-                tool_name: task.tool_name,
-                display_name: task.display_name,
-                session_id: task.session_id,
+            let spec = TerminalSpec {
+                task_id: task.task_id.clone(),
+                tool_name: task.tool_name.clone(),
+                display_name: task.display_name.clone(),
+                session_id: task.session_id.clone(),
                 status: BackgroundTaskStatus::Failed,
                 exit_code: None,
                 error: Some("Cancelled by user".to_string()),
-                started_at: task.started_at_rfc3339,
-                completed_at: Some(chrono::Utc::now().to_rfc3339()),
-                duration_secs: Some(task.started_at.elapsed().as_secs_f64()),
-                pid: None,
-                owner_pid: Some(std::process::id()),
-                owner_instance: Some(model::process_instance_token().to_string()),
-                detached: false,
-                notify: notify_flag,
-                wake: wake_flag,
-                progress: None,
-                event_history: Vec::new(),
+                started_at: task.started_at_rfc3339.clone(),
+                completed_at: chrono::Utc::now().to_rfc3339(),
+                duration_secs: task.started_at.elapsed().as_secs_f64(),
+                notify: task.delivery_flags.borrow().0,
+                wake: task.delivery_flags.borrow().1,
             };
-            let event_status = final_status.status.clone();
-            let event_exit_code = final_status.exit_code;
-            let event_error = final_status.error.clone();
-            push_task_event(
-                &mut final_status,
-                terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
-            );
-            if let Ok(json) = serde_json::to_string_pretty(&final_status) {
-                let _ = fs::write(&task.status_path, json).await;
-            }
+            drop(tasks);
+
+            persist_terminal_with_recovery(Arc::clone(&self.store), Arc::clone(&self.tasks), spec)
+                .await;
 
             Ok(true)
         } else {
@@ -1203,7 +1602,16 @@ impl BackgroundTaskManager {
                 &mut status,
                 terminal_event_record(event_status, event_exit_code, event_error.as_deref()),
             );
-            self.write_status_file(&status_path, &status).await;
+            let detached_task_id = status.task_id.clone();
+            if let Err(error) = self
+                .store
+                .write_terminal(&detached_task_id, move |_| status)
+                .await
+            {
+                crate::logging::error(&format!(
+                    "Detached cancel terminal persistence failed: {error:#}"
+                ));
+            }
             Ok(true)
         }
     }
@@ -1369,6 +1777,127 @@ impl BackgroundTaskManager {
 
         matches.sort_by(|a, b| a.task_id.cmp(&b.task_id));
         matches
+    }
+}
+
+/// Owned terminal outcome of a task, used to (re)build the final status file
+/// against freshly loaded prior state on every persistence attempt (F04-B1).
+#[derive(Clone)]
+struct TerminalSpec {
+    task_id: String,
+    tool_name: String,
+    display_name: Option<String>,
+    session_id: String,
+    status: BackgroundTaskStatus,
+    exit_code: Option<i32>,
+    error: Option<String>,
+    started_at: String,
+    completed_at: String,
+    duration_secs: f64,
+    notify: bool,
+    wake: bool,
+}
+
+fn build_terminal_status(prior: Option<TaskStatusFile>, spec: &TerminalSpec) -> TaskStatusFile {
+    // The freshly loaded durable state is authoritative for mutable delivery
+    // flags. This closes the update_delivery-vs-completion and retry-window
+    // race where a stale TerminalSpec snapshot could otherwise overwrite a
+    // delivery change that already persisted (F04-R3-I1 / F05).
+    let (notify, wake, prior_progress, prior_event_history) = prior
+        .map(|status| {
+            (
+                status.notify,
+                status.wake,
+                status.progress,
+                status.event_history,
+            )
+        })
+        .unwrap_or_else(|| (spec.notify, spec.wake, None, Vec::new()));
+    let mut final_status = TaskStatusFile {
+        task_id: spec.task_id.clone(),
+        tool_name: spec.tool_name.clone(),
+        display_name: spec.display_name.clone(),
+        session_id: spec.session_id.clone(),
+        status: spec.status.clone(),
+        exit_code: spec.exit_code,
+        error: spec.error.clone(),
+        started_at: spec.started_at.clone(),
+        completed_at: Some(spec.completed_at.clone()),
+        duration_secs: Some(spec.duration_secs),
+        pid: None,
+        owner_pid: Some(std::process::id()),
+        owner_instance: Some(model::process_instance_token().to_string()),
+        detached: false,
+        notify,
+        wake,
+        progress: prior_progress,
+        event_history: prior_event_history,
+    };
+    push_task_event(
+        &mut final_status,
+        terminal_event_record(spec.status.clone(), spec.exit_code, spec.error.as_deref()),
+    );
+    final_status
+}
+
+/// Persist a terminal state with in-process durable recovery (F04-B1).
+///
+/// On immediate success the live-map entry is pruned. On failure the entry
+/// is RETAINED (a visible tombstone, never a phantom "pruned but Running on
+/// disk" state) and a detached retry loop keeps attempting persistence with
+/// backoff, pruning only once the write lands. Across a process death the
+/// initial `Running` file (a spawn prerequisite since F04-B1) is reconciled
+/// by the next-boot orphan sweep.
+async fn persist_terminal_with_recovery(
+    store: Arc<store::TaskStatusStore>,
+    tasks: Arc<RwLock<HashMap<String, RunningTask>>>,
+    spec: TerminalSpec,
+) {
+    let spec_for_first = spec.clone();
+    match store
+        .write_terminal(&spec.task_id, move |prior| {
+            build_terminal_status(prior, &spec_for_first)
+        })
+        .await
+    {
+        Ok(_) => {
+            tasks.write().await.remove(&spec.task_id);
+        }
+        Err(error) => {
+            crate::logging::error(&format!(
+                "Terminal persistence failed for task {}; retaining live-map tombstone and retrying: {error:#}",
+                spec.task_id
+            ));
+            tokio::spawn(async move {
+                let mut delay = std::time::Duration::from_millis(250);
+                loop {
+                    tokio::time::sleep(delay).await;
+                    let spec_for_retry = spec.clone();
+                    match store
+                        .write_terminal(&spec.task_id, move |prior| {
+                            build_terminal_status(prior, &spec_for_retry)
+                        })
+                        .await
+                    {
+                        Ok(_) => {
+                            crate::logging::info(&format!(
+                                "Terminal persistence recovered for task {}",
+                                spec.task_id
+                            ));
+                            tasks.write().await.remove(&spec.task_id);
+                            return;
+                        }
+                        Err(error) => {
+                            crate::logging::warn(&format!(
+                                "Terminal persistence retry failed for task {}: {error:#}",
+                                spec.task_id
+                            ));
+                            delay = (delay * 2).min(std::time::Duration::from_secs(60));
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 

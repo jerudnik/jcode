@@ -236,7 +236,7 @@ fn test_chat_drag_into_composer_clamps_to_chat_pane() {
     render_and_snap(&app, &mut terminal);
 
     // Anchor on a chat transcript cell.
-    let (chat_col, chat_row, _) = (0..24u16)
+    let (chat_col, chat_row, chat_point) = (0..24u16)
         .flat_map(|row| (0..80u16).map(move |col| (col, row)))
         .find_map(|(col, row)| {
             crate::tui::ui::copy_point_from_screen(col, row)
@@ -244,6 +244,16 @@ fn test_chat_drag_into_composer_clamps_to_chat_pane() {
                 .map(|p| (col, row, p))
         })
         .expect("a chat cell to anchor on");
+    let (chat_drag_col, chat_drag_row) = (0..24u16)
+        .flat_map(|row| (0..80u16).map(move |col| (col, row)))
+        .find_map(|(col, row)| {
+            crate::tui::ui::copy_point_from_screen(col, row)
+                .filter(|point| {
+                    point.pane == crate::tui::CopySelectionPane::Chat && *point != chat_point
+                })
+                .map(|_| (col, row))
+        })
+        .expect("a distinct chat cell for the drag");
 
     // Composer row to drag into.
     let input_points = input_pane_screen_points(80, 24);
@@ -269,8 +279,8 @@ fn test_chat_drag_into_composer_clamps_to_chat_pane() {
     app.handle_copy_selection_mouse_with(
         MouseEvent {
             kind: MouseEventKind::Drag(MouseButton::Left),
-            column: chat_col.saturating_add(5),
-            row: chat_row,
+            column: chat_drag_col,
+            row: chat_drag_row,
             modifiers: KeyModifiers::empty(),
         },
         |_| true,

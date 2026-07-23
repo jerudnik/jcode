@@ -1,5 +1,9 @@
 # Fork recovery workspace
 
+> Active ideal-base execution now lives under
+> [`../ideal-base/`](../ideal-base/). This recovery namespace remains frozen in
+> place for forensic integrity.
+
 > **Archived forensic record.** Recovery completed on 2026-07-16. The accepted
 > implementation head is `51168d16e9c708ae4afff09a6fc6402642d17782`, and the
 > joint-signoff head is `17586246afb11cd54e1db12a0beec05fd29a0612`. The
@@ -7,7 +11,7 @@
 > recovery commits are preserved as historical branch identity rather than as
 > ancestors of current `main`. The dated status paragraphs below remain
 > append-only history. Use [`../normalization/STATUS.md`](../normalization/STATUS.md)
-> for the current source, runtime, soak, and cleanup checkpoint.
+> for the current source, runtime, cleanup, and remaining-seam checkpoint.
 
 Previous status checkpoint: Phase 2 evidence ledger complete; Phase 3 bounded pilot remains blocked with two prerequisite nodes after independently verified R04 and R12 integration, 2026-07-15.
 
@@ -35,8 +39,9 @@ Older documents remain useful evidence, but their status labels and measurements
 - [`SEAM_LEDGER_TEMPLATE.md`](./SEAM_LEDGER_TEMPLATE.md): required structure for one authoritative seam record and its two independent reviews.
 - [`PROGRESS.md`](./PROGRESS.md): phase gates, checkpoints, and blockers. The coordinator alone edits this file.
 - [`ORCHESTRATOR_PROMPT.md`](./ORCHESTRATOR_PROMPT.md): historical launch prompt
-  for the completed recovery session. Its preserved local user edit is not
-  current repository authority and must not be reused without revalidation.
+  for the completed recovery session. It is restored to its tracked baseline,
+  is not current repository authority, and must not be reused without
+  revalidation.
 - [`seams/README.md`](./seams/README.md): seam-directory ownership and merge-back rules.
 - [`reviews/`](./reviews/): preserved independent reviews for cross-cutting recovery changes.
 - [`evidence/`](./evidence/): byte-exact validation, R09, build-identity, and infrastructure evidence with SHA-256 manifests.

@@ -1,5 +1,10 @@
 # Fork recovery progress
 
+> **Archived append-only phase record.** The phase table near the top captures an
+> intermediate checkpoint. Recovery reached final joint PASS on 2026-07-16 in
+> the closure amendment below. Use
+> [`../normalization/STATUS.md`](../normalization/STATUS.md) for current state.
+
 The coordinator owns this file. Append checkpoints instead of rewriting history.
 
 ## Phase status

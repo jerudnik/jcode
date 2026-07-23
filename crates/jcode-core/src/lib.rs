@@ -1,3 +1,4 @@
+pub mod activity;
 pub mod env;
 pub mod fs;
 pub mod id;

@@ -113,6 +113,11 @@ pub(super) struct ServerRuntime {
     await_members_runtime: AwaitMembersRuntime,
     swarm_mutation_runtime: SwarmMutationRuntime,
     tasks: Arc<RuntimeTaskScope>,
+    /// C1 ClientConnection lease guards, one per counted connection
+    /// (F01 design 3.1 / F02-B1). Kept in lockstep with `client_count` so
+    /// the lease table is the atomic source of truth for the idle claim:
+    /// `try_claim_idle_shutdown` sees clients and work in one table.
+    client_leases: Arc<std::sync::Mutex<Vec<jcode_core::activity::ActivityLeaseGuard>>>,
 }
 
 impl ServerRuntime {
@@ -143,6 +148,7 @@ impl ServerRuntime {
             soft_interrupt_queues: Arc::clone(&server.soft_interrupt_queues),
             await_members_runtime: server.await_members_runtime.clone(),
             swarm_mutation_runtime: server.swarm_mutation_runtime.clone(),
+            client_leases: Arc::new(std::sync::Mutex::new(Vec::new())),
             tasks: Arc::new(RuntimeTaskScope::default()),
         }
     }
@@ -161,7 +167,12 @@ impl ServerRuntime {
                 };
                 match accepted {
                     Ok((stream, _)) => {
-                        runtime.increment_client_count().await;
+                        if !runtime.try_admit_client().await {
+                            // Shutdown drain won the race after accept: fail
+                            // closed by dropping the connection uncounted.
+                            drop(stream);
+                            continue;
+                        }
                         if !runtime
                             .spawn_client_task(stream, "Client error", true)
                             .await
@@ -227,7 +238,10 @@ impl ServerRuntime {
                             None => break,
                         },
                     };
-                    runtime.increment_client_count().await;
+                    if !runtime.try_admit_client().await {
+                        drop(gw_client);
+                        continue;
+                    }
                     crate::logging::info(&format!(
                         "Gateway client connected: {} ({})",
                         gw_client.device_name, gw_client.device_id
@@ -304,7 +318,36 @@ impl ServerRuntime {
         self.tasks.shutdown().await;
     }
 
-    async fn increment_client_count(&self) {
+    /// The intake cancellation token: cancelled by the shutdown coordinator
+    /// at Draining start so accept loops stop accepting (F01 design 3.2.3).
+    pub(super) fn intake_cancel_token(&self) -> CancellationToken {
+        self.tasks.cancellation.clone()
+    }
+
+    /// Admit a counted client connection (F02-B1 / F02-R2-B1).
+    ///
+    /// The `ClientConnection` lease is the admission gate: on `ShuttingDown`
+    /// refusal (an idle claim or drain won the race after accept), the
+    /// connection is NOT counted and the caller must drop it. This preserves
+    /// the strict guard-to-count pairing the atomic idle claim relies on:
+    /// every counted connection holds exactly one guard.
+    async fn try_admit_client(&self) -> bool {
+        let guard = match super::shutdown::acquire_lease(
+            jcode_core::activity::ActivityClass::ClientConnection,
+            "client-connection",
+        ) {
+            Ok(guard) => guard,
+            Err(refused) => {
+                crate::logging::info(&format!(
+                    "Client connection refused during shutdown drain: {refused}"
+                ));
+                return false;
+            }
+        };
+        self.client_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(guard);
         *self.client_count.write().await += 1;
         crate::runtime_memory_log::emit_event(
             crate::runtime_memory_log::RuntimeMemoryLogEvent::new(
@@ -312,9 +355,14 @@ impl ServerRuntime {
                 "client_count_incremented",
             ),
         );
+        true
     }
 
     async fn decrement_client_count(&self) {
+        self.client_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .pop();
         *self.client_count.write().await -= 1;
         crate::runtime_memory_log::emit_event(
             crate::runtime_memory_log::RuntimeMemoryLogEvent::new(

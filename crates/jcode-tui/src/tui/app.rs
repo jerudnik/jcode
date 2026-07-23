@@ -27,6 +27,7 @@ use crossterm::event::{
 use debug::DebugTrace;
 use futures::StreamExt;
 use helpers::*;
+use inert_runtime::InertRuntimeProvider;
 use jcode_tui_messages::DisplayMessage;
 use ratatui::DefaultTerminal;
 use std::cell::RefCell;
@@ -57,6 +58,7 @@ mod commands_overnight;
 mod commands_plan;
 mod commands_review;
 mod commands_swarm;
+mod construction;
 mod conversation_state;
 mod copy_selection;
 mod debug;
@@ -67,6 +69,7 @@ mod handterm_native_scroll;
 pub(crate) mod helpers;
 mod hotkey_feedback;
 mod idle_heap_release;
+mod inert_runtime;
 mod inline_interactive;
 mod input;
 mod input_help;
@@ -96,6 +99,8 @@ mod state_ui_runtime;
 mod state_ui_storage;
 mod support;
 mod swarm_hint;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod todos_view;
 mod tui_lifecycle;
 mod tui_lifecycle_runtime;
@@ -1478,55 +1483,12 @@ pub struct App {
     /// Per-client Niri-style workspace navigation state. Previously a process
     /// global; now owned per App instance.
     workspace_client: super::workspace_client::WorkspaceClientState,
-}
-
-/// Inert provider used by runtime modes whose output is supplied by another source.
-///
-/// Remote clients render server events. Replay renders recorded events. Neither mode may call a
-/// live provider from the TUI process.
-struct InertRuntimeProvider {
-    runtime_mode: AppRuntimeMode,
-}
-
-impl InertRuntimeProvider {
-    fn new(runtime_mode: AppRuntimeMode) -> Self {
-        Self { runtime_mode }
-    }
-
-    fn provider_label(&self) -> &'static str {
-        match self.runtime_mode {
-            AppRuntimeMode::RemoteClient => "remote",
-            AppRuntimeMode::Replay => "replay",
-            AppRuntimeMode::TestHarness => "test-harness",
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl Provider for InertRuntimeProvider {
-    fn name(&self) -> &str {
-        self.provider_label()
-    }
-    fn model(&self) -> String {
-        "unknown".to_string()
-    }
-
-    async fn complete(
-        &self,
-        _messages: &[Message],
-        _tools: &[crate::message::ToolDefinition],
-        _system: &str,
-        _session_id: Option<&str>,
-    ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = Result<StreamEvent>> + Send>>> {
-        Err(anyhow::anyhow!(
-            "{} runtime does not allow live provider completion from the TUI",
-            self.provider_label()
-        ))
-    }
-
-    fn fork(&self) -> Arc<dyn Provider> {
-        Arc::new(InertRuntimeProvider::new(self.runtime_mode))
-    }
+    /// Keeps the process-global test environment stable for the lifetime of a
+    /// test app. Test helpers attach a transferable fixture lease after
+    /// construction; under a scoped writer it retains writer exclusion without
+    /// carrying writer reentrancy.
+    #[cfg(test)]
+    _test_env_lock: Option<crate::storage::TestEnvFixtureLease>,
 }
 
 impl App {

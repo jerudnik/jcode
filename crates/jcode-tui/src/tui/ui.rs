@@ -1347,32 +1347,11 @@ pub fn last_layout_snapshot() -> Option<LayoutSnapshot> {
 }
 
 #[cfg(test)]
-pub(crate) fn clear_test_render_state_for_tests() {
-    set_last_max_scroll(0);
-    set_pinned_pane_total_lines(0);
-    set_last_diff_pane_effective_scroll(0);
-    set_last_diff_pane_max_scroll(0);
-    set_last_total_wrapped_lines(0);
-    set_last_resolved_chat_scroll(0);
-    update_user_prompt_positions(&[]);
-    TEST_LAST_LAYOUT.with(|snapshot| {
-        *snapshot.borrow_mut() = None;
-    });
-    TEST_LAST_STATUS_AREA.with(|snapshot| {
-        *snapshot.borrow_mut() = None;
-    });
-    set_visible_copy_targets(Vec::new());
-    clear_copy_viewport_snapshot();
+mod test_support;
+#[cfg(test)]
+pub(crate) use test_support::clear_test_render_state_for_tests;
 
-    TEST_PROMPT_VIEWPORT_STATE.with(|state| {
-        *state.borrow_mut() = PromptViewportState::default();
-    });
-}
-
-/// Test-only: render just the onboarding welcome screen into `area`, using the
-/// exact same code path the live UI uses. Lets onboarding golden/snapshot tests
-/// capture the rendered copy without reaching into the private `onboarding`
-/// submodule.
+/// Test-only: render the onboarding welcome screen through the live UI path.
 #[cfg(test)]
 pub(crate) fn draw_onboarding_welcome_for_tests(
     frame: &mut ratatui::Frame,

@@ -1,5 +1,10 @@
 # Seam ledger template
 
+> **Historical recovery template.** Do not create new recovery seam work from
+> this template unless recovery is explicitly reopened. Use
+> [`../ideal-base/EXECUTION_PROTOCOL.md`](../ideal-base/EXECUTION_PROTOCOL.md) for
+> current node artifacts and review rules.
+
 Create one directory per seam:
 
 ```text

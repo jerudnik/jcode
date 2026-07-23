@@ -1,5 +1,14 @@
 # Normal quality debt register
 
+> **Frozen normalization policy record.** The active quality and security gates
+> are materialized in
+> [`../ideal-base/WORK_GRAPH.json`](../ideal-base/WORK_GRAPH.json). Do not refresh
+> the dated measurements below in place.
+
+> **Policy current, measurements historical.** The no-growth and ownership rules
+> remain active. Numeric counts below were measured at the fixed N2 product head
+> on 2026-07-16 and must be rerun before being cited as current-tree counts.
+
 Measured: 2026-07-16
 
 Product head: `9fada332799586293ee5d41c6a653ed05efc3821`
@@ -21,7 +30,7 @@ No baseline file changed during normalization. The accepted Phase 6 starting
 point remains panic `31 -> 48`, swallowed-error `2987 -> 3074`, production-size
 red, and test-size red.
 
-## Exact current state
+## Exact N2 measurement
 
 | Metric | Baseline | Current | Affected state | Gate | Evidence |
 |---|---:|---:|---|---:|---|

@@ -80,8 +80,12 @@ pub(super) async fn await_reload_signal(
         };
 
         crate::logging::info(&format!(
-            "Server: reload signal received via channel request={} hash={} triggering_session={:?} prefer_selfdev_binary={}",
-            signal.request_id, signal.hash, signal.triggering_session, signal.prefer_selfdev_binary
+            "Server: reload signal received via channel request={} hash={} triggering_session={:?} prefer_selfdev_binary={} force={}",
+            signal.request_id,
+            signal.hash,
+            signal.triggering_session,
+            signal.prefer_selfdev_binary,
+            signal.force()
         ));
         super::reload_trace::record_value(
             &signal.request_id,
@@ -90,6 +94,7 @@ pub(super) async fn await_reload_signal(
                 "hash": signal.hash,
                 "triggering_session": signal.triggering_session,
                 "prefer_selfdev_binary": signal.prefer_selfdev_binary,
+                "force": signal.force(),
             }),
         );
         let reload_started = std::time::Instant::now();
@@ -113,6 +118,28 @@ pub(super) async fn await_reload_signal(
                 "Server: JCODE_TEST_SESSION set, skipping process exec for reload test",
             );
             continue;
+        }
+
+        // Claim the shutdown coordinator for reload (F01 design 3.2.3):
+        // stops intake, refuses new lease acquisition, and drains
+        // drain-blocking work up to the reload budget. A temporary server
+        // or an in-progress termination refuses the reload with a typed
+        // outcome instead of racing it.
+        match super::shutdown::coordinator().begin_reload_drain().await {
+            Ok(()) => {}
+            Err(refused) => {
+                crate::logging::warn(&format!(
+                    "Server: reload refused by shutdown coordinator: {refused:?}"
+                ));
+                crate::server::write_reload_state_with_runtime_identity(
+                    &signal.request_id,
+                    &signal.hash,
+                    crate::server::ReloadPhase::Failed,
+                    Some(format!("reload refused: {refused:?}")),
+                    signal.runtime_identity.clone(),
+                );
+                continue;
+            }
         }
 
         persist_reload_recovery_intents(
@@ -153,7 +180,7 @@ pub(super) async fn await_reload_signal(
 
         let prefers_selfdev = signal.prefer_selfdev_binary;
 
-        if let Some((binary, label)) = super::reload_exec_target(prefers_selfdev) {
+        if let Some((binary, label)) = super::reload_exec_target(prefers_selfdev, signal.force()) {
             if binary.exists() {
                 let socket = super::socket_path();
                 crate::logging::info(&format!(
@@ -207,7 +234,12 @@ pub(super) async fn await_reload_signal(
                 signal.runtime_identity.clone(),
             );
         }
-        std::process::exit(42);
+        // Exec failed: re-enter the termination path so the historic bare
+        // exit(42) finally gets full sidecar cleanup (F01 design 3.2.3).
+        // The coordinator publishes Cleaned{code:42}; Server::run returns;
+        // the top-level runner performs the process exit.
+        let _ = super::shutdown::coordinator().reload_exec_failed().await;
+        return;
     }
 }
 
@@ -225,6 +257,7 @@ async fn persist_reload_recovery_intents(
                     "session_id": session_id,
                     "status": member.status,
                     "is_headless": member.is_headless,
+                    "live_attached_connections": member.event_txs.len(),
                     "swarm_id": member.swarm_id,
                     "role": member.role,
                 })
@@ -240,7 +273,9 @@ async fn persist_reload_recovery_intents(
         );
         members
             .iter()
-            .filter(|(_, member)| member.status == "running")
+            .filter(|(_, member)| {
+                member.status == "running" || (!member.is_headless && !member.event_txs.is_empty())
+            })
             .map(|(session_id, member)| (session_id.clone(), member.is_headless))
             .collect()
     };
@@ -510,6 +545,110 @@ async fn graceful_shutdown_sessions_with_timeout(
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod r01_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    struct IsolatedHome {
+        prev_home: Option<std::ffi::OsString>,
+        _temp: tempfile::TempDir,
+    }
+
+    impl IsolatedHome {
+        fn new() -> Self {
+            let temp = tempfile::TempDir::new().expect("jcode home");
+            let prev_home = std::env::var_os("JCODE_HOME");
+            crate::env::set_var("JCODE_HOME", temp.path());
+            Self {
+                prev_home,
+                _temp: temp,
+            }
+        }
+    }
+
+    impl Drop for IsolatedHome {
+        fn drop(&mut self) {
+            if let Some(prev) = self.prev_home.take() {
+                crate::env::set_var("JCODE_HOME", prev);
+            } else {
+                crate::env::remove_var("JCODE_HOME");
+            }
+        }
+    }
+
+    fn member(
+        session_id: &str,
+        status: &str,
+        is_headless: bool,
+        live_attached: bool,
+    ) -> SwarmMember {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut event_txs = HashMap::new();
+        if live_attached {
+            let (attached_tx, _attached_rx) = tokio::sync::mpsc::unbounded_channel();
+            event_txs.insert("conn-live".to_string(), attached_tx);
+        }
+
+        SwarmMember {
+            session_id: session_id.to_string(),
+            event_tx,
+            event_txs,
+            working_dir: None,
+            swarm_id: Some("swarm-r01".to_string()),
+            swarm_enabled: true,
+            status: status.to_string(),
+            detail: None,
+            task_label: None,
+            subagent_type: None,
+            friendly_name: Some(session_id.to_string()),
+            report_back_to_session_id: None,
+            initial_prompt_delivered: None,
+            latest_completion_report: None,
+            role: "agent".to_string(),
+            joined_at: Instant::now(),
+            last_status_change: Instant::now(),
+            is_headless,
+            output_tail: None,
+            todo_progress: None,
+            todo_items: Vec::new(),
+            runtime: crate::protocol::SwarmMemberRuntime::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_intents_include_attached_non_headless_sessions() {
+        let _lock = crate::storage::lock_test_env();
+        let _home = IsolatedHome::new();
+        let swarm_members = Arc::new(RwLock::new(HashMap::from([
+            (
+                "attached-ready".to_string(),
+                member("attached-ready", "ready", false, true),
+            ),
+            (
+                "detached-ready".to_string(),
+                member("detached-ready", "ready", false, false),
+            ),
+            (
+                "headless-attached-ready".to_string(),
+                member("headless-attached-ready", "ready", true, true),
+            ),
+        ])));
+
+        persist_reload_recovery_intents("reload-r01", &swarm_members, None).await;
+
+        assert!(crate::server::reload_recovery::has_pending_for_session(
+            "attached-ready"
+        ));
+        assert!(!crate::server::reload_recovery::has_pending_for_session(
+            "detached-ready"
+        ));
+        assert!(!crate::server::reload_recovery::has_pending_for_session(
+            "headless-attached-ready"
+        ));
     }
 }
 

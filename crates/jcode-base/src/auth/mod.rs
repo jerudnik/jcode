@@ -2,6 +2,7 @@ pub mod account_store;
 pub mod active_method;
 pub mod antigravity;
 pub mod azure;
+mod browser_policy;
 pub mod claude;
 pub mod codex;
 mod commands;
@@ -37,30 +38,41 @@ pub use status_types::{
 };
 
 pub use active_method::{ActiveCredential, ResolvedProviderAuth, resolve_dual_credential_auth};
+pub use browser_policy::{browser_suppressed, running_in_test_harness};
 
 use crate::provider_catalog::LoginProviderAuthStateKey;
 use crate::provider_catalog::LoginProviderDescriptor;
+use browser_policy::env_truthy;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, RwLock};
 use std::time::Instant;
 
-/// Cached auth status plus the `JCODE_HOME` it was computed under.
+/// Cached auth status plus the credential-home inputs it was computed under.
 ///
-/// Auth probes read credential files relative to `JCODE_HOME`. Tests swap
-/// `JCODE_HOME` to per-test temp dirs, and a status computed under one home
-/// must never be served for another (issue #361: parallel provider tests
-/// intermittently observed another test's auth snapshot through this global
-/// cache). In production the home never changes, so the key check is free.
-type CachedAuthStatus = (AuthStatus, Instant, Option<std::ffi::OsString>);
+/// Auth probes use the resolved jcode directory plus standard home/config
+/// fallbacks. Tests swap these inputs independently, so a status computed under
+/// one credential root must never be served for another (issue #361).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AuthCacheHomeKey {
+    jcode_dir: Option<std::path::PathBuf>,
+    home: Option<std::ffi::OsString>,
+    xdg_config_home: Option<std::ffi::OsString>,
+}
+
+type CachedAuthStatus = (AuthStatus, Instant, AuthCacheHomeKey);
 
 static AUTH_STATUS_CACHE: std::sync::LazyLock<RwLock<Option<CachedAuthStatus>>> =
     std::sync::LazyLock::new(|| RwLock::new(None));
 static AUTH_STATUS_FAST_CACHE: std::sync::LazyLock<RwLock<Option<CachedAuthStatus>>> =
     std::sync::LazyLock::new(|| RwLock::new(None));
 
-fn auth_cache_home_key() -> Option<std::ffi::OsString> {
-    std::env::var_os("JCODE_HOME")
+fn auth_cache_home_key() -> AuthCacheHomeKey {
+    AuthCacheHomeKey {
+        jcode_dir: crate::storage::jcode_dir().ok(),
+        home: std::env::var_os("HOME"),
+        xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
+    }
 }
 
 const AUTH_STATUS_CACHE_TTL_SECS: u64 = 30;
@@ -76,48 +88,6 @@ static COMMAND_EXISTS_CACHE: std::sync::LazyLock<Mutex<HashMap<String, bool>>> =
 enum AuthProbeMode {
     Full,
     Fast,
-}
-
-pub fn browser_suppressed(cli_no_browser: bool) -> bool {
-    cli_no_browser
-        || env_truthy("NO_BROWSER")
-        || env_truthy("JCODE_NO_BROWSER")
-        || running_in_test_harness()
-}
-
-/// True when the current process is a Rust test binary (`cargo test` /
-/// `cargo nextest`). Test binaries always run from `target/**/deps/`, a
-/// location no installed or self-dev jcode binary ever runs from.
-///
-/// Used to keep tests from opening real browser windows (OAuth login pages,
-/// files) on the developer's desktop: many login/onboarding flows are
-/// exercised by TUI tests, and without this guard each test run could pop
-/// multiple browser tabs. Set `JCODE_ALLOW_BROWSER_IN_TESTS=1` to opt out
-/// (e.g. for an intentionally interactive live test).
-pub fn running_in_test_harness() -> bool {
-    static IN_TEST_HARNESS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *IN_TEST_HARNESS.get_or_init(|| {
-        if env_truthy("JCODE_ALLOW_BROWSER_IN_TESTS") {
-            return false;
-        }
-        std::env::current_exe()
-            .ok()
-            .map(|exe| {
-                let path = exe.to_string_lossy().replace('\\', "/");
-                path.contains("/target/") && path.contains("/deps/")
-            })
-            .unwrap_or(false)
-    })
-}
-
-fn env_truthy(key: &str) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            let trimmed = value.trim();
-            !trimmed.is_empty() && trimmed != "0" && !trimmed.eq_ignore_ascii_case("false")
-        })
-        .unwrap_or(false)
 }
 
 fn auth_timing_logging_enabled() -> bool {

@@ -31,6 +31,9 @@ SERVER COMMANDS (server: prefix or no prefix):
   clear                    - Clear conversation history
   agent:info               - Get comprehensive agent internal state
   agent:memory             - Get process + session memory breakdown
+  shutdown:state           - Coordinator phase + activity-lease snapshot
+  shutdown:hold_lease:<class> - Hold an activity lease (F03 fixtures)
+  shutdown:release_lease:<token> - Release a held fixture lease
   allocator                - Get allocator info and jemalloc stats, if available
   allocator:purge          - Release retained heap (jemalloc arena purge / glibc malloc_trim)
   allocator:decay:<ms>     - Set jemalloc dirty/muzzy decay for all arenas to <ms>

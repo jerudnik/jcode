@@ -1,0 +1,32 @@
+{
+ "node_id": "F01-R-watchdog-review-lines",
+ "worker_session": "session_koala_1784359094608_205bc6586f127189",
+ "worker_name": "koala",
+ "model": "gpt-5.6-sol",
+ "artifact": {
+  "confidence": "high",
+  "edge_cases_considered": [
+   "Distinguished the review artifact's own required correction from the underlying F01 design specification and the pre-existing SIGTERM source comment.",
+   "Verified the review artifact provenance from the introducing commit rather than relying only on the mutable working tree.",
+   "Included both the forced-exit outcome contract and the broader residue/cleanup contract lines."
+  ],
+  "evidence": [
+   "docs/fork/ideal-base/reviews/F01-architecture-critique.md:195-213 states the watchdog contradiction and requires a coordinator-owned watchdog, a distinct forced-exit outcome, cleanup below the hard deadline, forced-path tests, and an exact residue contract.",
+   "docs/fork/ideal-base/reviews/F01-architecture-critique.md:215-240 specifies missing cleanup APIs and the complete residue fixture set.",
+   "docs/fork/ideal-base/reviews/F01-architecture-critique.md:284 and :303-304 summarize that the watchdog may bypass cleanup and require reconciliation with I2/I5/I7/A0 plus a complete residue set.",
+   "docs/fork/ideal-base/evidence/F01/design.md:140-178 defines the sole coordinator, phase ordering, cleanup list, and OS-thread watchdog hard bound.",
+   "docs/fork/ideal-base/evidence/F01/design.md:252-269 defines I2/I5/I7, including watchdog-enforced bounds and watchdog preemption as the only cleanup skip.",
+   "docs/fork/ideal-base/evidence/F01/design.md:277-281 requires runtime exit plus zero residue.",
+   "docs/fork/ideal-base/ACCEPTANCE_STANDARD.md:7-15 requires one bounded authority, zero descendants, and coherent-or-removed sidecars.",
+   "crates/jcode-app-core/src/server.rs:1213-1219 is the source comment and implementation stating the watchdog guarantees exit if cleanup stalls and then forces process exit.",
+   "Review artifact source: commit 7563a123709d92e0e0505d44cb1d43e0af705743, subject 'docs: add F01 architecture critique', path docs/fork/ideal-base/reviews/F01-architecture-critique.md. The artifact itself says it reviewed commit 93c59a218 at lines 3-6."
+  ],
+  "findings": "Exact review lines are 195-213 for the coordinator-owned forced-exit watchdog and outcome/residue contract, and 215-240 for cleanup/residue expectations. The strongest exact wording is lines 209-213: make the watchdog owned and armed by the single coordinator, define forced-exit separately from successful Exited, budget drain plus cleanup below the deadline, and test the forced path against an exact residue contract. Supporting spec/comment lines are design.md 140-178, 252-269, 277-281; ACCEPTANCE_STANDARD.md 7-15; and server.rs 1213-1219.",
+  "open_questions": [],
+  "validation": "Used numbered reads from the working tree and independently re-read the same ranges via git show from commit 7563a123709d92e0e0505d44cb1d43e0af705743. Used git log/blame to establish provenance. No edits were made.",
+  "what_i_did_not_check": [
+   "I did not assess whether the current uncommitted F02 implementation satisfies these contracts, because the task requested line location only.",
+   "I did not inspect unrelated watchdogs such as request-handler or heap-retention watchdogs beyond excluding them as irrelevant."
+  ]
+ }
+}

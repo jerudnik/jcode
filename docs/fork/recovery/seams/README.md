@@ -1,5 +1,9 @@
 # Seam records
 
+> **Historical seam index.** Early table cells are superseded by the Phase 6
+> rollup and final overlay amendments later in this file. Do not use this index to
+> dispatch new work.
+
 Each reviewed responsibility receives one directory named `<ID>-<slug>`.
 
 - Full review: `opus-review.md`, `grok-review.md`, and Terra-authored `ledger.md`.

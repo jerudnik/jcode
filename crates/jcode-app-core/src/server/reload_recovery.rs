@@ -44,6 +44,14 @@ pub(super) struct ReloadRecoveryRecord {
     pub delivered_at: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(super) struct SessionAliasRecord {
+    pub source_session_id: String,
+    pub target_session_id: String,
+    pub reason: String,
+    pub created_at: String,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct GarbageCollectionStats {
     pub removed: usize,
@@ -68,8 +76,16 @@ fn recovery_dir() -> Result<PathBuf> {
     Ok(crate::storage::jcode_dir()?.join("reload-recovery"))
 }
 
+fn alias_dir() -> Result<PathBuf> {
+    Ok(crate::storage::jcode_dir()?.join("session-aliases"))
+}
+
 pub(super) fn path_for_session(session_id: &str) -> Result<PathBuf> {
     Ok(recovery_dir()?.join(format!("{}.json", sanitize_session_id(session_id))))
+}
+
+fn alias_path_for_session(session_id: &str) -> Result<PathBuf> {
+    Ok(alias_dir()?.join(format!("{}.json", sanitize_session_id(session_id))))
 }
 
 fn remove_record_files(path: &std::path::Path) -> Result<()> {
@@ -120,12 +136,24 @@ pub(super) fn collect_garbage() -> Result<GarbageCollectionStats> {
 
 fn collect_garbage_at(now: SystemTime) -> Result<GarbageCollectionStats> {
     let dir = recovery_dir()?;
-    if !dir.exists() {
-        return Ok(GarbageCollectionStats::default());
+    let mut stats = GarbageCollectionStats::default();
+    if dir.exists() {
+        collect_recovery_records_at(&dir, now, &mut stats)?;
     }
 
-    let mut stats = GarbageCollectionStats::default();
-    for entry in std::fs::read_dir(&dir)? {
+    let aliases = alias_dir()?;
+    if aliases.exists() {
+        collect_session_aliases_at(&aliases, now, &mut stats)?;
+    }
+    Ok(stats)
+}
+
+fn collect_recovery_records_at(
+    dir: &std::path::Path,
+    now: SystemTime,
+    stats: &mut GarbageCollectionStats,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
         let entry = match entry {
             Ok(entry) => entry,
             Err(_) => {
@@ -181,7 +209,44 @@ fn collect_garbage_at(now: SystemTime) -> Result<GarbageCollectionStats> {
             }
         }
     }
-    Ok(stats)
+    Ok(())
+}
+
+fn collect_session_aliases_at(
+    dir: &std::path::Path,
+    now: SystemTime,
+    stats: &mut GarbageCollectionStats,
+) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => {
+                stats.errors += 1;
+                continue;
+            }
+        };
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        if !file_is_expired(&path, now) {
+            stats.retained += 1;
+            continue;
+        }
+
+        match remove_record_files(&path) {
+            Ok(()) => stats.removed += 1,
+            Err(error) => {
+                stats.errors += 1;
+                crate::logging::warn(&format!(
+                    "session alias store: failed to collect {}: {}",
+                    path.display(),
+                    error
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn persist_intent(
@@ -212,6 +277,56 @@ pub(super) fn persist_intent(
         path.display()
     ));
     Ok(())
+}
+
+pub(super) fn persist_session_alias(
+    source_session_id: &str,
+    target_session_id: &str,
+    reason: impl Into<String>,
+) -> Result<()> {
+    if source_session_id == target_session_id {
+        return Ok(());
+    }
+
+    let record = SessionAliasRecord {
+        source_session_id: source_session_id.to_string(),
+        target_session_id: target_session_id.to_string(),
+        reason: reason.into(),
+        created_at: chrono::Utc::now().to_rfc3339(),
+    };
+    let path = alias_path_for_session(source_session_id)?;
+    crate::storage::write_json(&path, &record)?;
+    crate::logging::info(&format!(
+        "session alias store: persisted source={} target={} path={}",
+        source_session_id,
+        target_session_id,
+        path.display()
+    ));
+    Ok(())
+}
+
+pub(super) fn resolve_session_alias(session_id: &str) -> Result<Option<String>> {
+    let mut current = session_id.to_string();
+    let mut resolved = None;
+    let mut seen = std::collections::HashSet::new();
+
+    for _ in 0..16 {
+        if !seen.insert(current.clone()) {
+            break;
+        }
+        let path = alias_path_for_session(&current)?;
+        if !path.exists() {
+            break;
+        }
+        let record: SessionAliasRecord = crate::storage::read_json(&path)?;
+        if record.target_session_id.is_empty() || record.target_session_id == current {
+            break;
+        }
+        current = record.target_session_id;
+        resolved = Some(current.clone());
+    }
+
+    Ok(resolved)
 }
 
 pub(super) fn peek_for_session(session_id: &str) -> Result<Option<ReloadRecoveryRecord>> {
@@ -461,6 +576,26 @@ mod tests {
     }
 
     #[test]
+    fn session_alias_roundtrips_and_follows_resume_chain() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let _home = IsolatedHome::new();
+
+        persist_session_alias("source-client", "resumed-agent", "first resume")?;
+        persist_session_alias("resumed-agent", "second-agent", "second resume")?;
+
+        assert_eq!(
+            resolve_session_alias("source-client")?,
+            Some("second-agent".to_string())
+        );
+        assert_eq!(
+            resolve_session_alias("resumed-agent")?,
+            Some("second-agent".to_string())
+        );
+        assert_eq!(resolve_session_alias("unmapped")?, None);
+        Ok(())
+    }
+
+    #[test]
     fn peek_for_missing_session_is_none() -> Result<()> {
         let _lock = crate::storage::lock_test_env();
         let _home = IsolatedHome::new();
@@ -601,6 +736,34 @@ mod tests {
             !path_for_session("session-delivered")?
                 .with_extension("bak")
                 .exists()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn garbage_collection_sweeps_stale_session_aliases() -> Result<()> {
+        let _lock = crate::storage::lock_test_env();
+        let _home = IsolatedHome::new();
+        let now = SystemTime::now();
+        let stale = alias_path_for_session("stale-source")?;
+        let fresh = alias_path_for_session("fresh-source")?;
+
+        persist_session_alias("stale-source", "stale-target", "old resume")?;
+        persist_session_alias("fresh-source", "fresh-target", "recent resume")?;
+        let old_mtime = now - PENDING_RECORD_MAX_AGE - std::time::Duration::from_secs(1);
+        std::fs::File::open(&stale)?.set_modified(old_mtime)?;
+
+        let stats = collect_garbage_at(now)?;
+
+        assert_eq!(stats.removed, 1);
+        assert_eq!(stats.retained, 1);
+        assert_eq!(stats.errors, 0);
+        assert!(!stale.exists());
+        assert!(fresh.exists());
+        assert_eq!(resolve_session_alias("stale-source")?, None);
+        assert_eq!(
+            resolve_session_alias("fresh-source")?,
+            Some("fresh-target".to_string())
         );
         Ok(())
     }

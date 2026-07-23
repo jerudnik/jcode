@@ -88,6 +88,7 @@ pub struct StreamBuffer {
     base_cps: f32,
     backlog_gain: f32,
     max_step: Duration,
+    reveal_step_override: Option<Duration>,
     jitter: JitterRecorder,
 }
 
@@ -114,6 +115,7 @@ impl StreamBuffer {
             base_cps: BASE_REVEAL_CPS,
             backlog_gain: REVEAL_BACKLOG_GAIN,
             max_step: MAX_REVEAL_STEP,
+            reveal_step_override: None,
             jitter: JitterRecorder::default(),
         }
     }
@@ -124,25 +126,25 @@ impl StreamBuffer {
     /// closes (in order) before the answer text reveals.
     pub fn push_text(&mut self, text: &str) -> Vec<StreamOp> {
         if text.is_empty() {
-            return self.reveal_now(Instant::now());
+            return self.reveal_now(self.arrival_time());
         }
         if self.reasoning_open && !text.trim().is_empty() {
             self.queue.push_back(QueuedOp::CloseReasoning);
             self.reasoning_open = false;
         }
         self.push_chunk(StreamKind::Text, text);
-        self.reveal_now(Instant::now())
+        self.reveal_now(self.arrival_time())
     }
 
     /// Push reasoning text into the buffer, returning any paced ops ready to
     /// apply now. Marks the reasoning region open until a close marker is queued.
     pub fn push_reasoning(&mut self, text: &str) -> Vec<StreamOp> {
         if text.is_empty() {
-            return self.reveal_now(Instant::now());
+            return self.reveal_now(self.arrival_time());
         }
         self.reasoning_open = true;
         self.push_chunk(StreamKind::Reasoning, text);
-        self.reveal_now(Instant::now())
+        self.reveal_now(self.arrival_time())
     }
 
     /// Queue a reasoning-region close marker (no-op when no reasoning is open in
@@ -153,7 +155,7 @@ impl StreamBuffer {
             self.queue.push_back(QueuedOp::CloseReasoning);
             self.reasoning_open = false;
         }
-        self.reveal_now(Instant::now())
+        self.reveal_now(self.arrival_time())
     }
 
     /// Force flush the entire backlog (call on message end, commit, or
@@ -173,7 +175,20 @@ impl StreamBuffer {
     /// delta arrived this frame. Finalization paths should still call [`flush`]
     /// to avoid leaving content buffered at message boundaries.
     pub fn flush_smooth_frame(&mut self) -> Vec<StreamOp> {
-        self.reveal_now(Instant::now())
+        let now = self
+            .reveal_step_override
+            .map_or_else(Instant::now, |step| self.last_reveal + step);
+        self.reveal_now(now)
+    }
+
+    /// Override elapsed time per redraw frame for deterministic render
+    /// benchmarks. Content arrivals do not advance this synthetic clock;
+    /// production callers should leave it unset.
+    #[doc(hidden)]
+    pub fn set_reveal_step_override(&mut self, step: Option<Duration>) {
+        self.reveal_step_override = step;
+        self.last_reveal = Instant::now();
+        self.carry = 0.0;
     }
 
     /// Check if the backlog is empty (no chunks and no markers).
@@ -265,6 +280,17 @@ impl StreamBuffer {
         reveal = reveal.min(self.backlog_chars);
         self.carry -= reveal as f32;
         self.drain_ops(reveal, false)
+    }
+
+    /// Event arrivals happen between redraw frames. Under the deterministic
+    /// benchmark clock they therefore observe zero elapsed frame time instead
+    /// of advancing the clock once for both the arrival and the next redraw.
+    fn arrival_time(&self) -> Instant {
+        if self.reveal_step_override.is_some() {
+            self.last_reveal
+        } else {
+            Instant::now()
+        }
     }
 
     /// Drain up to `char_count` chunk characters from the front of the queue (on
@@ -574,6 +600,24 @@ mod tests {
         assert!(buf.push_text("").is_empty());
         assert!(buf.push_reasoning("").is_empty());
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn deterministic_clock_advances_only_on_redraw_frames() {
+        let mut buf = StreamBuffer::new();
+        buf.set_reveal_step_override(Some(Duration::from_millis(16)));
+
+        assert!(
+            buf.push_text("abcdef").is_empty(),
+            "an arrival between frames must not advance synthetic time"
+        );
+        let first_frame = buf.flush_smooth_frame();
+        assert!(op_chars(&first_frame) > 0);
+        assert!(
+            buf.push_text("ghij").is_empty(),
+            "a second arrival must wait for the next simulated frame"
+        );
+        assert!(op_chars(&buf.flush_smooth_frame()) > 0);
     }
 
     #[test]

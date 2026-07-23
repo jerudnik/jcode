@@ -1,0 +1,419 @@
+{
+  "schema_version": 1,
+  "program": "ideal-durable-tui-cli-foundation",
+  "program_state": "railway_ready",
+  "active_graph_id": null,
+  "last_checkpoint": {
+    "node": "F17",
+    "state": "accepted",
+    "commit": "cdb2ee303fbece2cf4ab6d0558f137055055c204",
+    "updated_at": "2026-07-23T18:46:23Z",
+    "summary": "F17 accepted: fork-ci test rails promoted advisory->blocking and jcode-tui runs (not compile-only); serialized (--test-threads=1) and root-caused the mermaid deferred-worker ACTIVE_DIAGRAMS pollution race, fixed via runtime synchronous-render mode. Green of record: Fork CI 30026766050 @ cdb2ee303 (Quality Guardrails, Linux 26m24s, macOS 45m14s). Validated 0/95 serial rounds on Linux repro box; independent review ACCEPT-WITH-CAVEATS, zero production risk. Follow-up F28 hardens lock discipline to restore parallelism."
+  },
+  "nodes": {
+    "W0": {
+      "state": "accepted",
+      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.1"
+      ],
+      "summary": "W0 wave complete: baseline revalidated (W0.1), source census accepted with graph amendments D008 (W0.2), plan quarantined/cleared and projections verified (W0.3).",
+      "updated_at": "2026-07-18T06:32:51Z"
+    },
+    "W1": {
+      "state": "accepted",
+      "commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W1"
+      ],
+      "summary": "W1 synthesis: all 10 children accepted (F01-F08, R01, R03); runtime ownership and persistence closed; integrated gate green over 3 rounds with zero residue.",
+      "updated_at": "2026-07-20T08:22:13Z"
+    },
+    "W2": {
+      "state": "accepted",
+      "commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W2"
+      ],
+      "summary": "W2 synthesis: all 7 children accepted (R04, F09-F14). Recovery reconciliation and global resource bounds closed; lifecycle matrix green over 2 rounds.",
+      "updated_at": "2026-07-20T13:08:01Z"
+    },
+    "W3": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W4": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W5": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W0.1": {
+      "state": "accepted",
+      "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.1"
+      ],
+      "summary": "Baseline revalidated: railway OK, protected hash intact, one worktree, stashes/refs preserved. Drift 1 (railway commits atop seed) benign. Drift 2 (stale selfdev pending_activation from dead session peacock, canary 923c6353e-dirty active as current/shared-server) preserved as F09 fixture per D006.",
+      "updated_at": "2026-07-18T06:14:28Z"
+    },
+    "W0.2": {
+      "state": "accepted",
+      "commit": "fb00ab840",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.2"
+      ],
+      "summary": "Source census: 25/25 files and 11/11 dirs exist; no wholly stale seam; all F-nodes retained. Amendments proposed: GN-1 fix F06 stale glob (mcp-serve at src/cli/mcp_serve.rs), GN-2 add jcode-selfdev-types to F09, GN-5 add explicit F04 surfaced-failure gate; scope guards GN-3 (reuse OwnedChildPermit), GN-4 (startup sweep pre-exists). Spot-checked by coordinator: background.rs:133 non-atomic swallow, mobile_server.rs CWD-first, release.yml:436 StrictHostKeyChecking=no, telemetry_state.rs uncompiled, zero *mcp* matches under src/cli/commands.",
+      "updated_at": "2026-07-18T06:29:44Z"
+    },
+    "W0.3": {
+      "state": "accepted",
+      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W0.3"
+      ],
+      "summary": "Stale historical swarm plan (94 nodes) snapshotted and cleared; stray resurrected workers stopped and one diff stashed (D007). Ownership/dependency projection validated: next runnable is W1/F01; F02-F04 background.rs overlap serialized by dependency chain.",
+      "updated_at": "2026-07-18T06:32:51Z"
+    },
+    "F01": {
+      "state": "accepted",
+      "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F01",
+        "docs/fork/ideal-base/evidence/F01-R",
+        "docs/fork/ideal-base/reviews/F01-architecture-re-review.md"
+      ],
+      "summary": "F01 accepted at design revision 4 (a70db3700). Independent gate PASS at review round 3 (1a37ba109, gpt-5.6-sol high). Three FAIL rounds resolved: crate seam, coordinator protocol, turn boundary, quiescence epoch, watchdog handoff, termination ownership.",
+      "updated_at": "2026-07-18T09:38:30Z"
+    },
+    "F02": {
+      "state": "accepted",
+      "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F02",
+        "docs/fork/ideal-base/reviews/F02-implementation-review.md"
+      ],
+      "summary": "F02 accepted at 2b5607882 after 3-round independent review (PASS round 3). Both gates met: atomic idle claim over unified lease table; all exit modes through the bounded coordinator. Fixture transcript regenerated from exact-commit build, 3/3 passes.",
+      "updated_at": "2026-07-18T12:15:00Z"
+    },
+    "F03": {
+      "state": "accepted",
+      "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F03",
+        "docs/fork/ideal-base/reviews/F03-verification-review.md"
+      ],
+      "summary": "F03 accepted: independent review PASS at d8c223d29 (both gates met). 23 in-process coordinator fixtures + 41/41 runtime matrix (strengthened post-review per F03-I1/I2). Found+fixed watch-send lost-publication bug.",
+      "updated_at": "2026-07-18T16:59:00Z"
+    },
+    "F04": {
+      "state": "accepted",
+      "commit": "9c4c99897b88456257525d359f11fa357669c134",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F04",
+        "docs/fork/ideal-base/reviews/F04-implementation-review.md"
+      ],
+      "summary": "F04 accepted at 9c4c99897 after 3-round review (PASS round 3). TaskStatusStore: atomic, serialized, terminal-precedent, failure-surfacing; fail-closed spawn prerequisite; cancel tombstones; explicit finalize data-loss policy. 10-item F05 handoff recorded.",
+      "updated_at": "2026-07-18T19:04:00Z"
+    },
+    "F05": {
+      "state": "accepted",
+      "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F05",
+        "docs/fork/ideal-base/reviews/F05-verification-review.md"
+      ],
+      "summary": "F05 accepted at 9f4d34d11. Sol-high implementation via task DAG; Opus 4.8 first-round PASS (0 blockers). fsync durability, stale-temp sweep, collision policy, full verification matrix. 1186/1186 green.",
+      "updated_at": "2026-07-18T20:12:00Z"
+    },
+    "F06": {
+      "state": "accepted",
+      "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F06",
+        "docs/fork/ideal-base/reviews/F06-implementation-review.md"
+      ],
+      "summary": "F06 accepted at 84dc0aa2b. Sol-high implementation; Opus 4.8 first-round PASS (0 blockers), both gates reproduced with real-process tests. PID-reuse follow-ups noted for F07/F08.",
+      "updated_at": "2026-07-18T21:50:00Z"
+    },
+    "F07": {
+      "state": "accepted",
+      "commit": "58a806401",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F07"
+      ],
+      "summary": "Accepted after FAIL->fix->PASS cycle: detection+eviction (5c9ac8b42), reconnect+cooldown (d3fcba412), blocker fixes (58a806401). Re-review PASS with 5 minor findings recorded.",
+      "updated_at": "2026-07-20T06:02:02Z"
+    },
+    "F08": {
+      "state": "accepted",
+      "commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F08"
+      ],
+      "summary": "Accepted: integrated gate PASS verified by independent review; gate hardened per review findings (hung-server pgrep, socket FAIL enforcement).",
+      "updated_at": "2026-07-20T08:21:35Z"
+    },
+    "F09": {
+      "state": "accepted",
+      "commit": "d5d388028",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F09"
+      ],
+      "summary": "Accepted after first-round PASS. 3 important follow-ups recorded: manifest lock for cross-process races, tri-state liveness, binary-content identity check.",
+      "updated_at": "2026-07-20T09:01:28Z"
+    },
+    "F10": {
+      "state": "accepted",
+      "commit": "4b66de27c",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F10"
+      ],
+      "summary": "Accepted: durable cleanup records + reason-aware startup reconcile + bounded deferred retry. Review PASS with findings 1-2 fixed in-cycle; finding 3 (tri-state liveness) shared follow-up with F09. server:: 490 green x3.",
+      "updated_at": "2026-07-20T10:03:56Z"
+    },
+    "F11": {
+      "state": "accepted",
+      "commit": "77582db05",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F11"
+      ],
+      "summary": "Verify PASS: 18-cell combined recovery matrix, 17 covered (12 tests + 4 independent probes), no false rollback, no fabricated terminal state. 1 uncovered cell code-inspected safe.",
+      "updated_at": "2026-07-20T10:33:37Z"
+    },
+    "F12": {
+      "state": "accepted",
+      "commit": "a1c9075af",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F12"
+      ],
+      "summary": "Accepted after FAIL->FAIL->PASS cycle: slot-reserving race-safe caps for pooled MCP children and background tasks, env-configurable, explicit refusals at manager and tool layers, capacity release verified.",
+      "updated_at": "2026-07-20T11:59:07Z"
+    },
+    "F13": {
+      "state": "accepted",
+      "commit": "080bfc9d7",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F13"
+      ],
+      "summary": "Verify PASS: 16-way concurrent burst at cap admits exactly cap, zero leaked reservations across 50 cancelled setups, 10x looped probe identical; restart double-count impossible (in-memory-only counts + orphan sweep verified).",
+      "updated_at": "2026-07-20T12:47:47Z"
+    },
+    "F14": {
+      "state": "accepted",
+      "commit": "e47efacdb",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F14"
+      ],
+      "summary": "Accepted: rerunnable no-provider lifecycle matrix, 2 clean rounds (18/18 steps), verified by independent review. Follow-ups: network-denied demonstration, live exec-handoff reload in matrix.",
+      "updated_at": "2026-07-20T13:07:37Z"
+    },
+    "F15": {
+      "state": "accepted",
+      "commit": "bb53da147",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F15"
+      ],
+      "summary": "Accepted: 58 ignores classified (0 unclassified), CI rails mapped, flakiness root-cause table, promotion shortlist for F16. Review PASS with full recount reconciliation.",
+      "updated_at": "2026-07-20T13:15:21Z"
+    },
+    "F16": {
+      "state": "accepted",
+      "commit": "8971ed1db",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F16"
+      ],
+      "summary": "Accepted after FAIL->fix cycle: 3 lifecycle tests promoted with runtime binary resolution (incl. CI triple dirs), panic-safe teardown, latent test bugs fixed. REQUIRE_BINARY workflow export handed to F17.",
+      "updated_at": "2026-07-20T15:42:37Z"
+    },
+    "F17": {
+      "state": "accepted",
+      "commit": "cdb2ee303fbece2cf4ab6d0558f137055055c204",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F17"
+      ],
+      "summary": "F17 accepted: fork-ci test rails promoted advisory->blocking and jcode-tui runs (not compile-only); serialized (--test-threads=1) and root-caused the mermaid deferred-worker ACTIVE_DIAGRAMS pollution race, fixed via runtime synchronous-render mode. Green of record: Fork CI 30026766050 @ cdb2ee303 (Quality Guardrails, Linux 26m24s, macOS 45m14s). Validated 0/95 serial rounds on Linux repro box; independent review ACCEPT-WITH-CAVEATS, zero production risk. Follow-up F28 hardens lock discipline to restore parallelism.",
+      "updated_at": "2026-07-23T18:46:23Z"
+    },
+    "F18": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F19": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F20": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F21": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F22": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F23": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F24": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F25": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F26": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F27": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F28": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G01": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G02": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G03": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G04": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "G05": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "S01": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "S02": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "S03": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R01": {
+      "state": "accepted",
+      "commit": "e3736e7fb",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R01",
+        "docs/fork/ideal-base/reviews/R01-implementation-review.md"
+      ],
+      "summary": "Accepted after FAIL->fix->re-review. Atomic publish, explicit reload target resolution, force threaded through ReloadSignal (BLOCKING-1 fix 923bba4aa), alias binding + 7-day GC. Reviews: hog (Opus 4.8, FAIL), dragon (Opus 4.8, PASS).",
+      "updated_at": "2026-07-19T05:57:00Z"
+    },
+    "R03": {
+      "state": "accepted",
+      "commit": "a0676f781",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R03",
+        "docs/fork/ideal-base/reviews/R03-implementation-review.md"
+      ],
+      "summary": "Accepted first round. Terminal-mode ownership: guard armed through exec, InheritedTerminalGuard, full signal-path disables. Review: dromedary (Opus 4.8, PASS) with 4 non-blocking hardening notes.",
+      "updated_at": "2026-07-19T05:57:00Z"
+    },
+    "R04": {
+      "state": "accepted",
+      "commit": "c71628498",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R04"
+      ],
+      "summary": "Accepted after first-round PASS by independent opus review (3b4680277). 4 non-blocking follow-ups recorded in the review: beacon multi-server keying, hard-crash semantics wording, Handoff watchdog arm, doctor wiring.",
+      "updated_at": "2026-07-20T05:05:28Z"
+    },
+    "R05": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    }
+  }
+}

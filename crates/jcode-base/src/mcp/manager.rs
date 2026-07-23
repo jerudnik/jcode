@@ -4,7 +4,9 @@
 //! are managed by the pool and reused across sessions. Servers marked `shared: false`
 //! (e.g., Playwright with browser state) are spawned per-session.
 
-use super::client::{MAX_OWNED_MCP_CHILDREN, McpClient, McpHandle, OwnedChildPermit};
+use super::client::{
+    DEFAULT_MCP_REAP_GRACE, McpChildTracker, McpClient, McpHandle, OwnedChildPermit,
+};
 use super::pool::SharedMcpPool;
 use super::protocol::{McpConfig, McpServerConfig, McpToolDef, ToolCallResult};
 use anyhow::{Context, Result, anyhow};
@@ -17,6 +19,18 @@ use tokio::sync::RwLock;
 /// to come up before failing with a clean tool error. Keeps a slow/hanging
 /// server from blocking a single tool call forever (and never blocks spawn).
 const CONNECT_ON_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Died-after-connect cooldown: when a server dies and its single bounded
+/// reconnect (or the retried call on the fresh child) fails too, further
+/// call_tool reconnect attempts are suppressed for this window so a
+/// crash-looping server cannot burn a spawn per tool call.
+const DIED_RETRY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[derive(Clone)]
+struct DiedCooldownRecord {
+    message: String,
+    died_at: std::time::Instant,
+}
 
 /// Meter a completed tool call for sponsored-discovery provenance. No-op for
 /// servers without discovery provenance (the overwhelmingly common case) and
@@ -51,11 +65,18 @@ pub struct McpManager {
     pool_handles: RwLock<HashMap<String, McpHandle>>,
     /// Per-session owned clients (non-shared / stateful servers)
     owned_clients: RwLock<HashMap<String, McpClient>>,
+    /// Died-after-connect cooldown records (see [`DIED_RETRY_COOLDOWN`]).
+    died_cooldown: RwLock<HashMap<String, DiedCooldownRecord>>,
     config: McpConfig,
     session_id: String,
     /// Project directory used to resolve project-local MCP config. `None`
     /// loads only global config and never consults the process working directory.
     project_dir: Option<std::path::PathBuf>,
+    /// Activity-lease authority (F01 C7): every in-flight call (pooled fast
+    /// path, owned per-session path, connect-on-first-call retries) holds a
+    /// lease so the daemon cannot idle-exit mid-call. Defaults to no-op;
+    /// the daemon injects its real authority at the composition root.
+    activity: Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
 }
 
 impl McpManager {
@@ -65,9 +86,11 @@ impl McpManager {
             pool: None,
             pool_handles: RwLock::new(HashMap::new()),
             owned_clients: RwLock::new(HashMap::new()),
+            died_cooldown: RwLock::new(HashMap::new()),
             config: McpConfig::load(),
             session_id: "owned".to_string(),
             project_dir: None,
+            activity: jcode_core::activity::noop_activity_authority(),
         }
     }
 
@@ -84,13 +107,31 @@ impl McpManager {
         session_id: String,
         project_dir: Option<std::path::PathBuf>,
     ) -> Self {
+        Self::with_shared_pool_for_dir_and_activity(
+            pool,
+            session_id,
+            project_dir,
+            jcode_core::activity::noop_activity_authority(),
+        )
+    }
+
+    /// Like [`Self::with_shared_pool_for_dir`], with an injected
+    /// activity-lease authority (F01 C7 composition-root injection).
+    pub fn with_shared_pool_for_dir_and_activity(
+        pool: Arc<SharedMcpPool>,
+        session_id: String,
+        project_dir: Option<std::path::PathBuf>,
+        activity: Arc<dyn jcode_core::activity::ActivityLeaseAuthority>,
+    ) -> Self {
         Self {
             pool: Some(pool),
             pool_handles: RwLock::new(HashMap::new()),
             owned_clients: RwLock::new(HashMap::new()),
+            died_cooldown: RwLock::new(HashMap::new()),
             config: McpConfig::load_for_dir(project_dir.as_deref()),
             session_id,
             project_dir,
+            activity,
         }
     }
 
@@ -100,9 +141,11 @@ impl McpManager {
             pool: None,
             pool_handles: RwLock::new(HashMap::new()),
             owned_clients: RwLock::new(HashMap::new()),
+            died_cooldown: RwLock::new(HashMap::new()),
             config,
             session_id: "owned".to_string(),
             project_dir: None,
+            activity: jcode_core::activity::noop_activity_authority(),
         }
     }
 
@@ -159,26 +202,33 @@ impl McpManager {
         // Connect non-shared servers per-session
         if !owned_servers.is_empty() {
             let mut spawn_handles = Vec::new();
+            let child_tracker = self
+                .pool
+                .as_ref()
+                .map(|pool| pool.child_tracker())
+                .unwrap_or_else(McpChildTracker::process);
 
             for (name, config) in owned_servers {
                 let Some(permit) = OwnedChildPermit::try_acquire() else {
-                    crate::logging::warn(&format!(
-                        "MCP: owned child cap {} reached; not spawning '{}'",
-                        MAX_OWNED_MCP_CHILDREN, name
-                    ));
-                    total_failures.push((name.clone(), "owned MCP child cap reached".to_string()));
+                    let refusal = OwnedChildPermit::refusal_message(name);
+                    crate::logging::warn(&format!("MCP: {refusal}"));
+                    total_failures.push((name.clone(), refusal));
                     continue;
                 };
                 let name = name.clone();
                 let config = config.clone();
+                let child_tracker = Arc::clone(&child_tracker);
                 let handle = tokio::spawn(async move {
-                    let result = match McpClient::connect(name.clone(), &config).await {
-                        Ok(mut client) => {
-                            client.attach_child_permit(permit);
-                            Ok(client)
-                        }
-                        Err(e) => Err(e),
-                    };
+                    let result =
+                        match McpClient::connect_with_tracker(name.clone(), &config, child_tracker)
+                            .await
+                        {
+                            Ok(mut client) => {
+                                client.attach_child_permit(permit);
+                                Ok(client)
+                            }
+                            Err(e) => Err(e),
+                        };
                     (name, result)
                 });
                 spawn_handles.push(handle);
@@ -241,11 +291,14 @@ impl McpManager {
 
         // Owned (non-shared or no pool available)
         let Some(permit) = OwnedChildPermit::try_acquire() else {
-            return Err(anyhow!(
-                "owned MCP child cap {MAX_OWNED_MCP_CHILDREN} reached; not spawning '{name}'"
-            ));
+            return Err(anyhow!(OwnedChildPermit::refusal_message(name)));
         };
-        let mut client = McpClient::connect(name.to_string(), config)
+        let child_tracker = self
+            .pool
+            .as_ref()
+            .map(|pool| pool.child_tracker())
+            .unwrap_or_else(McpChildTracker::process);
+        let mut client = McpClient::connect_with_tracker(name.to_string(), config, child_tracker)
             .await
             .with_context(|| format!("Failed to connect to MCP server '{}'", name))?;
         client.attach_child_permit(permit);
@@ -295,10 +348,26 @@ impl McpManager {
         }
 
         // Shutdown owned clients
-        {
+        let (child_tracker, pids) = {
             let mut clients = self.owned_clients.write().await;
+            let child_tracker = self
+                .pool
+                .as_ref()
+                .map(|pool| pool.child_tracker())
+                .unwrap_or_else(McpChildTracker::process);
+            let mut pids = Vec::with_capacity(clients.len());
             for (_, mut client) in clients.drain() {
-                client.shutdown().await;
+                pids.push(client.request_shutdown());
+            }
+            (child_tracker, pids)
+        };
+        if !pids.is_empty() {
+            let report = child_tracker.reap_pids(&pids, DEFAULT_MCP_REAP_GRACE).await;
+            if !report.unreaped.is_empty() {
+                crate::logging::warn(&format!(
+                    "MCP manager: child PID(s) still live after bounded reap: {:?}",
+                    report.unreaped
+                ));
             }
         }
     }
@@ -345,20 +414,102 @@ impl McpManager {
         tool: &str,
         arguments: serde_json::Value,
     ) -> Result<ToolCallResult> {
+        // Activity lease (F01 C7): one guard at entry covers the pooled fast
+        // path, the owned per-session path, AND connect-on-first-call
+        // retries, so the daemon cannot idle-exit mid-call regardless of
+        // which route serves it. A ShuttingDown refusal means no new call
+        // may start during drain.
+        let _lease = jcode_core::activity::ActivityLeaseGuard::acquire(
+            &self.activity,
+            jcode_core::activity::ActivityClass::McpCall,
+            &format!("{}/{server}/{tool}", self.session_id),
+        )
+        .map_err(|refused| anyhow::anyhow!("MCP call refused: {refused}"))?;
         // Fast path: already connected via pool handle.
         {
-            let handles = self.pool_handles.read().await;
-            if let Some(handle) = handles.get(server) {
-                let result = handle.call_tool(tool, arguments).await;
+            let handle = self.pool_handles.read().await.get(server).cloned();
+            if let Some(handle) = handle {
+                if handle.is_dead() {
+                    let reason = handle.death_reason();
+                    self.evict_dead_pool_handle(server, &handle).await;
+                    // A healthy replacement may already exist in the pool
+                    // (another session reconnected); use it (BLOCKING-1).
+                    if let Some(fresh) = self.refetch_pool_handle(server).await {
+                        let result = fresh.call_tool(tool, arguments).await;
+                        meter_provenance_call(server, &result);
+                        return result;
+                    }
+                    // Dead pre-send: never delivered, retry cannot double-execute.
+                    let result = self
+                        .reconnect_and_retry_once(server, tool, arguments, &reason)
+                        .await;
+                    meter_provenance_call(server, &result);
+                    return result;
+                }
+                let result = handle.call_tool(tool, arguments.clone()).await;
+                if handle.is_dead() {
+                    // The call detected death (EOF, write failure, or health
+                    // deadline): drop the stale cache and pool entry now.
+                    self.evict_dead_pool_handle(server, &handle).await;
+                    match result {
+                        Err(err) if super::client::error_permits_auto_retry(&err) => {
+                            // Never delivered: safe to reconnect and retry.
+                            let reason = handle.death_reason();
+                            let result = self
+                                .reconnect_and_retry_once(server, tool, arguments, &reason)
+                                .await;
+                            meter_provenance_call(server, &result);
+                            return result;
+                        }
+                        other => {
+                            // Delivered-but-failed or succeeded-then-died:
+                            // never re-send (BLOCKING-2). Eviction already
+                            // cleared the caches; the next call reconnects.
+                            meter_provenance_call(server, &other);
+                            return other;
+                        }
+                    }
+                }
                 meter_provenance_call(server, &result);
                 return result;
             }
         }
         // Fast path: already connected via owned client.
         {
-            let clients = self.owned_clients.read().await;
-            if let Some(client) = clients.get(server) {
-                let result = client.call_tool(tool, arguments).await;
+            let handle = self
+                .owned_clients
+                .read()
+                .await
+                .get(server)
+                .map(|client| client.handle());
+            if let Some(handle) = handle {
+                if handle.is_dead() {
+                    let reason = handle.death_reason();
+                    self.evict_dead_owned_client(server, &handle).await;
+                    let result = self
+                        .reconnect_and_retry_once(server, tool, arguments, &reason)
+                        .await;
+                    meter_provenance_call(server, &result);
+                    return result;
+                }
+                let result = handle.call_tool(tool, arguments.clone()).await;
+                if handle.is_dead() {
+                    self.evict_dead_owned_client(server, &handle).await;
+                    match result {
+                        Err(err) if super::client::error_permits_auto_retry(&err) => {
+                            let reason = handle.death_reason();
+                            let result = self
+                                .reconnect_and_retry_once(server, tool, arguments, &reason)
+                                .await;
+                            meter_provenance_call(server, &result);
+                            return result;
+                        }
+                        other => {
+                            meter_provenance_call(server, &other);
+                            return other;
+                        }
+                    }
+                }
                 meter_provenance_call(server, &result);
                 return result;
             }
@@ -366,6 +517,19 @@ impl McpManager {
 
         // Not connected yet. If the server is configured, connect-on-first-call.
         if let Some(config) = self.config.servers.get(server).cloned() {
+            // Died-cooldown gate: a server that recently died after connect
+            // (and whose one bounded reconnect failed too) must not burn a
+            // fresh child spawn on every tool call.
+            if let Some(record) = self.active_died_cooldown(server).await {
+                anyhow::bail!(
+                    "MCP server '{server}' recently died: {} (reconnect suppressed for ~{}s)",
+                    record.message,
+                    DIED_RETRY_COOLDOWN
+                        .saturating_sub(record.died_at.elapsed())
+                        .as_secs()
+                        .max(1)
+                );
+            }
             crate::logging::info(&format!(
                 "MCP: connecting to '{server}' on first tool call (connect-on-first-call)"
             ));
@@ -373,23 +537,9 @@ impl McpManager {
             match tokio::time::timeout(CONNECT_ON_CALL_TIMEOUT, connect).await {
                 Ok(Ok(())) => {
                     // Retry once now that we should be connected.
-                    {
-                        let handles = self.pool_handles.read().await;
-                        if let Some(handle) = handles.get(server) {
-                            let result = handle.call_tool(tool, arguments).await;
-                            meter_provenance_call(server, &result);
-                            return result;
-                        }
-                    }
-                    let clients = self.owned_clients.read().await;
-                    if let Some(client) = clients.get(server) {
-                        let result = client.call_tool(tool, arguments).await;
-                        meter_provenance_call(server, &result);
-                        return result;
-                    }
-                    anyhow::bail!(
-                        "MCP server '{server}' connected but exposed no handle for tool '{tool}'"
-                    );
+                    let result = self.call_fresh_handle_once(server, tool, arguments).await;
+                    meter_provenance_call(server, &result);
+                    return result;
                 }
                 Ok(Err(err)) => {
                     anyhow::bail!("MCP server '{server}' failed to connect: {err:#}");
@@ -405,6 +555,178 @@ impl McpManager {
         }
 
         anyhow::bail!("MCP server '{}' not connected", server)
+    }
+
+    /// Call `tool` once on the handle for a just-connected `server` (pooled or
+    /// owned). If the child dies during this call (died-after-connect crash
+    /// loop), it is evicted and a died-cooldown entry is recorded so calls
+    /// inside [`DIED_RETRY_COOLDOWN`] fail fast without spawning more children.
+    async fn call_fresh_handle_once(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> Result<ToolCallResult> {
+        enum Route {
+            Pooled,
+            Owned,
+        }
+        let (handle, route) = {
+            let pooled = self.pool_handles.read().await.get(server).cloned();
+            if let Some(handle) = pooled {
+                (handle, Route::Pooled)
+            } else {
+                let owned = self
+                    .owned_clients
+                    .read()
+                    .await
+                    .get(server)
+                    .map(|client| client.handle());
+                match owned {
+                    Some(handle) => (handle, Route::Owned),
+                    None => anyhow::bail!(
+                        "MCP server '{server}' connected but exposed no handle for tool '{tool}'"
+                    ),
+                }
+            }
+        };
+        let result = handle.call_tool(tool, arguments).await;
+        if handle.is_dead() {
+            let reason = handle.death_reason();
+            match route {
+                Route::Pooled => self.evict_dead_pool_handle(server, &handle).await,
+                Route::Owned => self.evict_dead_owned_client(server, &handle).await,
+            }
+            self.record_died_cooldown(server, &reason).await;
+        }
+        result
+    }
+
+    /// One bounded reconnect after a dead-handle eviction (via the existing
+    /// connect machinery, honoring the pool's connect dedupe for shared
+    /// servers), then one retry of the failed call. Never goes through
+    /// `reload()`. Failure at any step records a died-cooldown entry so
+    /// subsequent calls inside the window fail fast without reconnecting.
+    async fn reconnect_and_retry_once(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+        death_reason: &str,
+    ) -> Result<ToolCallResult> {
+        if let Some(record) = self.active_died_cooldown(server).await {
+            anyhow::bail!(
+                "MCP server '{server}' is dead ({death_reason}); reconnect suppressed: {}",
+                record.message
+            );
+        }
+        // Config fidelity: always the manager's current config for this
+        // server, exactly as connect-on-first-call would use it.
+        let Some(config) = self.config.servers.get(server).cloned() else {
+            anyhow::bail!(
+                "MCP server '{server}' is dead ({death_reason}) and not configured; \
+                 cannot reconnect"
+            );
+        };
+        crate::logging::info(&format!(
+            "MCP: reconnecting to dead server '{server}' once ({death_reason})"
+        ));
+        let connect = self.connect(server, &config);
+        match tokio::time::timeout(CONNECT_ON_CALL_TIMEOUT, connect).await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                let message = format!("reconnect failed: {err:#}");
+                self.record_died_cooldown(server, &message).await;
+                anyhow::bail!("MCP server '{server}' died ({death_reason}); {message}");
+            }
+            Err(_) => {
+                let message = format!(
+                    "reconnect timed out after {}s",
+                    CONNECT_ON_CALL_TIMEOUT.as_secs()
+                );
+                self.record_died_cooldown(server, &message).await;
+                anyhow::bail!("MCP server '{server}' died ({death_reason}); {message}");
+            }
+        }
+        self.call_fresh_handle_once(server, tool, arguments).await
+    }
+
+    async fn active_died_cooldown(&self, server: &str) -> Option<DiedCooldownRecord> {
+        self.died_cooldown
+            .read()
+            .await
+            .get(server)
+            .filter(|record| record.died_at.elapsed() < DIED_RETRY_COOLDOWN)
+            .cloned()
+    }
+
+    async fn record_died_cooldown(&self, server: &str, message: &str) {
+        self.died_cooldown.write().await.insert(
+            server.to_string(),
+            DiedCooldownRecord {
+                message: message.to_string(),
+                died_at: std::time::Instant::now(),
+            },
+        );
+    }
+
+    /// Drop this session's stale pool-handle cache entry for a dead server and
+    /// evict it from the shared pool (which reaps the child via the tracker).
+    async fn evict_dead_pool_handle(&self, server: &str, observed_dead: &super::client::McpHandle) {
+        // Drop this session's stale cache unconditionally, but only evict the
+        // POOL entry if the pool's current handle is the same dead generation
+        // (F07 review BLOCKING-1: a stale clone must not kill the healthy
+        // replacement another session already reconnected).
+        self.pool_handles.write().await.remove(server);
+        if let Some(pool) = &self.pool {
+            let evicted = pool.evict_dead_server(server, observed_dead).await;
+            if evicted {
+                pool.release_handles(&self.session_id, &[server.to_string()])
+                    .await;
+            }
+        }
+    }
+
+    /// Re-fetch the pool's current handle for `server` (if any) and cache it
+    /// for this session. Used after an identity-mismatch eviction no-op: the
+    /// pool already holds a healthy replacement.
+    async fn refetch_pool_handle(&self, server: &str) -> Option<super::client::McpHandle> {
+        let pool = self.pool.as_ref()?;
+        let handle = pool.get_handle(server).await?;
+        if handle.is_dead() {
+            return None;
+        }
+        self.pool_handles
+            .write()
+            .await
+            .insert(server.to_string(), handle.clone());
+        Some(handle)
+    }
+
+    /// Remove a dead owned client and reap its child through the tracker
+    /// (F06 invariant: no leaked tracked children). The lock is released
+    /// before the awaited reap. Identity-checked like the pool path: a stale
+    /// handle must not shut down a healthy replacement client.
+    async fn evict_dead_owned_client(
+        &self,
+        server: &str,
+        observed_dead: &super::client::McpHandle,
+    ) {
+        let client = {
+            let mut owned = self.owned_clients.write().await;
+            match owned.get(server) {
+                Some(current) if current.handle().same_generation(observed_dead) => {
+                    owned.remove(server)
+                }
+                _ => None,
+            }
+        };
+        if let Some(mut client) = client {
+            crate::logging::warn(&format!(
+                "MCP manager: evicting dead owned server '{server}'"
+            ));
+            client.shutdown().await;
+        }
     }
 
     /// Ensure a configured server is connected, bounded by `timeout`. No-op if
@@ -634,6 +956,7 @@ mod tests {
 mod provenance_integration_tests {
     use super::*;
     use std::io::Write;
+    use std::time::Duration;
 
     /// Write a minimal stdio MCP server as a shell script: answers
     /// initialize, tools/list, and tools/call with canned JSON-RPC replies.
@@ -740,5 +1063,338 @@ done
 
         manager.disconnect_all().await;
         drop(env_guard);
+    }
+
+    /// F07 phase 1 + 2: a SIGKILLed child mid-session is detected fast, and
+    /// the next call reconnects exactly once (fresh fake server) and SUCCEEDS,
+    /// without any reload. The dead child leaves no tracked record behind.
+    #[tokio::test]
+    async fn killed_child_reconnects_once_and_call_succeeds() {
+        // Serializes against tests that mutate JCODE_MCP_HEALTH_DEADLINE_MS
+        // (the hung-child test), which would otherwise leak a 500ms deadline
+        // into this test's connect handshakes.
+        let env_guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let server_path = write_fake_mcp_server(temp.path());
+        let server_name = "f07-kill9-victim";
+
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            server_name.to_string(),
+            McpServerConfig {
+                command: server_path.to_string_lossy().to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: false,
+                transport: None,
+                url: None,
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager::with_config(config.clone());
+        let server_config = config.servers.get(server_name).unwrap().clone();
+        manager
+            .connect(server_name, &server_config)
+            .await
+            .expect("fake MCP server must connect");
+
+        let tracker = crate::mcp::client::McpChildTracker::process();
+        let pid = tracker
+            .tracked_children()
+            .into_iter()
+            .find(|child| child.server_name == server_name)
+            .expect("child must be tracked")
+            .pid;
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+        // Wait for the reader task to observe EOF and mark the handle dead.
+        // This makes the next call take the pre-send dead-flag path, which is
+        // provably-undelivered and therefore eligible for the one bounded
+        // auto-retry (BLOCKING-2 retry gating: a kill RACING an in-flight
+        // call is ambiguous-delivery and would legitimately NOT be retried).
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let started = std::time::Instant::now();
+        let result = manager
+            .call_tool(server_name, "create_card", serde_json::json!({}))
+            .await;
+        let elapsed = started.elapsed();
+        // Phase 2: eviction is followed by exactly one reconnect + retry,
+        // which succeeds against the still-runnable fake server script.
+        let result = result.expect("call after SIGKILL must reconnect and succeed");
+        assert!(!result.is_error, "retried call must succeed");
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "evict+reconnect+retry must be fast, took {elapsed:?}"
+        );
+
+        // The dead child's tracking record is gone; a fresh child (different
+        // pid) is tracked for the reconnected server (F06: no leaks).
+        let tracked: Vec<_> = tracker
+            .tracked_children()
+            .into_iter()
+            .filter(|child| child.server_name == server_name)
+            .collect();
+        assert!(
+            tracked.iter().all(|child| child.pid != pid),
+            "dead child must be untracked after eviction"
+        );
+        assert_eq!(tracked.len(), 1, "exactly one fresh child after reconnect");
+        assert!(
+            manager
+                .connected_servers()
+                .await
+                .contains(&server_name.to_string()),
+            "server must be connected again after reconnect"
+        );
+
+        manager.disconnect_all().await;
+        assert!(
+            tracker
+                .tracked_children()
+                .into_iter()
+                .all(|child| child.server_name != server_name),
+            "no tracked children after disconnect"
+        );
+        drop(env_guard);
+    }
+
+    /// Write a fake MCP server that completes the handshake, then exits
+    /// immediately (died-after-connect crash loop). Every spawn appends a
+    /// line to `spawn_counter` so tests can count child spawns.
+    fn write_crash_loop_mcp_server(
+        dir: &std::path::Path,
+        spawn_counter: &std::path::Path,
+    ) -> std::path::PathBuf {
+        let path = dir.join("crash-loop-mcp-server.sh");
+        let script = format!(
+            r##"#!/bin/bash
+echo spawn >> "{counter}"
+while IFS= read -r line; do
+  id=$(echo "$line" | grep -o '"id":[0-9]*' | grep -o '[0-9]*' | head -1)
+  case "$line" in
+    *'"initialize"'*)
+      echo '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"protocolVersion":"2024-11-05","capabilities":{{"tools":{{}}}},"serverInfo":{{"name":"crashy","version":"0.0.1"}}}}}}'
+      ;;
+    *'"tools/list"'*)
+      echo '{{"jsonrpc":"2.0","id":'"$id"',"result":{{"tools":[{{"name":"boom","description":"dies","inputSchema":{{"type":"object"}}}}]}}}}'
+      exit 0
+      ;;
+  esac
+done
+"##,
+            counter = spawn_counter.to_string_lossy()
+        );
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(script.as_bytes()).unwrap();
+        drop(file);
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    fn spawn_count(counter: &std::path::Path) -> usize {
+        std::fs::read_to_string(counter)
+            .map(|s| s.lines().count())
+            .unwrap_or(0)
+    }
+
+    /// F07 phase 2 crash loop: a server that dies immediately after connect
+    /// gets exactly ONE reconnect attempt; while the died-cooldown is active,
+    /// further calls fail fast WITHOUT spawning another child.
+    #[tokio::test]
+    async fn crash_loop_server_gets_one_reconnect_then_cooldown_fast_fail() {
+        // Serializes against JCODE_MCP_HEALTH_DEADLINE_MS mutations elsewhere.
+        let env_guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().unwrap();
+        let counter = temp.path().join("spawn-counter");
+        let server_path = write_crash_loop_mcp_server(temp.path(), &counter);
+        let server_name = "f07-crash-loop";
+
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            server_name.to_string(),
+            McpServerConfig {
+                command: server_path.to_string_lossy().to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: false,
+                transport: None,
+                url: None,
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager::with_config(config.clone());
+        let server_config = config.servers.get(server_name).unwrap().clone();
+        manager
+            .connect(server_name, &server_config)
+            .await
+            .expect("crash-loop fixture completes the handshake before dying");
+        assert_eq!(spawn_count(&counter), 1, "one spawn from initial connect");
+        // Let the reader observe EOF so the first call takes the pre-send
+        // dead-flag path (provably undelivered => eligible for the one
+        // bounded reconnect under BLOCKING-2 retry gating).
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // First call: the dead child is evicted, ONE reconnect happens (spawn
+        // 2), the retried call fails because the fresh child dies too, and a
+        // died-cooldown entry is recorded.
+        let first = manager
+            .call_tool(server_name, "boom", serde_json::json!({}))
+            .await;
+        assert!(first.is_err(), "crash-loop call must fail: {first:?}");
+        assert_eq!(
+            spawn_count(&counter),
+            2,
+            "exactly one reconnect spawn after death"
+        );
+
+        // Second call within the cooldown window: fails fast, NO new spawn.
+        let started = std::time::Instant::now();
+        let second = manager
+            .call_tool(server_name, "boom", serde_json::json!({}))
+            .await;
+        assert!(second.is_err(), "cooldown call must fail");
+        let msg = format!("{:#}", second.unwrap_err());
+        assert!(
+            msg.contains("suppressed") || msg.contains("recently died"),
+            "cooldown error must explain suppression: {msg}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "cooldown fast-fail must not wait on connects"
+        );
+        assert_eq!(
+            spawn_count(&counter),
+            2,
+            "no additional spawn during died-cooldown"
+        );
+
+        // F06 invariant: nothing tracked leaks across evict+reconnect cycles.
+        let tracker = crate::mcp::client::McpChildTracker::process();
+        assert!(
+            tracker
+                .tracked_children()
+                .into_iter()
+                .all(|child| child.server_name != server_name),
+            "crash-loop server must leave no tracked children"
+        );
+        drop(env_guard);
+    }
+
+    /// Write a fake MCP server that answers the handshake but silently reads
+    /// tools/call requests without ever replying (hung-child simulation).
+    fn write_hung_mcp_server(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("hung-mcp-server.sh");
+        let script = r##"#!/bin/bash
+while IFS= read -r line; do
+  id=$(echo "$line" | grep -o '"id":[0-9]*' | grep -o '[0-9]*' | head -1)
+  case "$line" in
+    *'"initialize"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"hung","version":"0.0.1"}}}'
+      ;;
+    *'"tools/list"'*)
+      echo '{"jsonrpc":"2.0","id":'"$id"',"result":{"tools":[{"name":"never_returns","description":"hangs","inputSchema":{"type":"object"}}]}}'
+      ;;
+    *'"tools/call"'*)
+      : # reads the request but never replies
+      ;;
+    *'"shutdown"'*)
+      exit 0
+      ;;
+  esac
+done
+"##;
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(script.as_bytes()).unwrap();
+        drop(file);
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    /// F07 phase 1: a hung child (alive, reads requests, never replies) is
+    /// declared dead at the health deadline, not the 30s total timeout.
+    #[tokio::test]
+    async fn hung_child_fails_at_health_deadline_and_is_evicted() {
+        let env_guard = crate::storage::lock_test_env();
+
+        let temp = tempfile::tempdir().unwrap();
+        let server_path = write_hung_mcp_server(temp.path());
+        let server_name = "f07-hung-server";
+
+        let mut config = McpConfig::default();
+        config.servers.insert(
+            server_name.to_string(),
+            McpServerConfig {
+                command: server_path.to_string_lossy().to_string(),
+                args: vec![],
+                env: HashMap::new(),
+                shared: false,
+                transport: None,
+                url: None,
+                enabled: None,
+                disabled: None,
+            },
+        );
+        let manager = McpManager::with_config(config.clone());
+        let server_config = config.servers.get(server_name).unwrap().clone();
+        manager
+            .connect(server_name, &server_config)
+            .await
+            .expect("hung fixture must complete the handshake");
+
+        // Shorten the deadline only AFTER the handshake: under load (e.g.
+        // the F08 integrated gate running builds in parallel) a 500ms
+        // deadline can starve the initialize itself, failing connect
+        // instead of exercising the hung-call path.
+        crate::env::set_var(crate::mcp::client::MCP_HEALTH_DEADLINE_ENV, "500");
+
+        let started = std::time::Instant::now();
+        let result = manager
+            .call_tool(server_name, "never_returns", serde_json::json!({}))
+            .await;
+        let elapsed = started.elapsed();
+
+        crate::env::remove_var(crate::mcp::client::MCP_HEALTH_DEADLINE_ENV);
+        drop(env_guard);
+
+        assert!(result.is_err(), "hung child must yield an error");
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains("health deadline exceeded"),
+            "error must cite the health deadline: {msg}"
+        );
+        assert!(
+            elapsed >= Duration::from_millis(400),
+            "must wait for the configured deadline, took {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "hung-child failure must honor the short deadline, took {elapsed:?}"
+        );
+
+        // Eviction reaped the still-live child through the tracker.
+        let tracker = crate::mcp::client::McpChildTracker::process();
+        assert!(
+            tracker
+                .tracked_children()
+                .into_iter()
+                .all(|child| child.server_name != server_name),
+            "evicted hung server must leave no tracked children"
+        );
+        assert!(
+            !manager
+                .connected_servers()
+                .await
+                .contains(&server_name.to_string())
+        );
     }
 }

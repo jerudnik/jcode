@@ -51,6 +51,8 @@ fn observe_smoothness_frame_text(
 fn smoothness_benchmark_simulated_streaming_turn_stays_within_budget() {
     let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
+    app.stream_buffer
+        .set_reveal_step_override(Some(Duration::from_millis(16)));
     app.session.short_name = Some("test".to_string());
     let rt = tokio::runtime::Runtime::new().unwrap();
     let _guard = rt.enter();

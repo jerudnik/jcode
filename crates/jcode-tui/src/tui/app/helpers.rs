@@ -1,5 +1,7 @@
 #![cfg_attr(test, allow(clippy::items_after_test_module))]
 
+mod ambient_widget;
+
 use crate::todo::TodoItem;
 use crate::tui::info_widget::{AmbientWidgetData, GitInfo, MemoryInfo};
 use crate::tui::session_picker::ResumeTarget;
@@ -202,10 +204,6 @@ pub(super) fn ctrl_bracket_fallback_to_esc(code: &mut KeyCode, modifiers: &mut K
         KeyCode::Esc => {
             *code = KeyCode::Char('[');
         }
-        KeyCode::Char('5') => {
-            // Legacy tty mapping for Ctrl+]
-            *code = KeyCode::Char(']');
-        }
         _ => {}
     }
 }
@@ -383,6 +381,11 @@ pub(super) fn format_tokens(tokens: u64) -> String {
 /// Copy text to clipboard, trying wl-copy first (Wayland), then OSC 52 (works
 /// over SSH / Docker / tmux), then arboard as a final fallback.
 pub(super) fn copy_to_clipboard(text: &str) -> bool {
+    #[cfg(test)]
+    if let Some(result) = super::test_support::test_clipboard_result() {
+        return result;
+    }
+
     if let Ok(mut child) = std::process::Command::new("wl-copy")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
@@ -1380,65 +1383,10 @@ fn gather_ambient_info_inner(ambient_enabled: bool) -> Option<AmbientWidgetData>
         .as_ref()
         .map(|m| m.queue().items().to_vec())
         .unwrap_or_default();
-    let queue_count = queue_items.len();
-    let next_queue_item = queue_items.iter().min_by_key(|item| item.scheduled_for);
-    let reminder_items: Vec<_> = queue_items
-        .iter()
-        .filter(|item| item.target.is_direct_delivery())
-        .collect();
-    let reminder_count = reminder_items.len();
-    let next_reminder_item = reminder_items
-        .iter()
-        .min_by_key(|item| item.scheduled_for)
-        .copied();
-
-    if !ambient_enabled && reminder_count == 0 {
-        return None;
-    }
-
-    let last_run_ago = state.last_run.map(|t| {
-        let ago = chrono::Utc::now() - t;
-        if ago.num_hours() > 0 {
-            format!("{}h ago", ago.num_hours())
-        } else {
-            format!("{}m ago", ago.num_minutes().max(0))
-        }
-    });
-    let next_wake = match &state.status {
-        crate::ambient::AmbientStatus::Scheduled { next_wake } => {
-            Some(format_countdown_until(*next_wake))
-        }
-        _ => None,
-    };
-
-    let next_queue_preview = next_queue_item.map(|item| {
-        item.task_description
-            .as_deref()
-            .unwrap_or(&item.context)
-            .to_string()
-    });
-    let next_reminder_preview = next_reminder_item.map(|item| {
-        item.task_description
-            .as_deref()
-            .unwrap_or(&item.context)
-            .to_string()
-    });
-
-    Some(AmbientWidgetData {
-        show_widget: ambient_enabled || reminder_count > 1,
-        status: state.status,
-        queue_count,
-        next_queue_preview,
-        reminder_count,
-        next_reminder_preview,
-        last_run_ago,
-        last_summary: state.last_summary,
-        next_wake,
-        next_reminder_wake: next_reminder_item
-            .map(|item| format_countdown_until(item.scheduled_for)),
-        budget_percent: None,
-    })
+    ambient_widget_data_from(state, &queue_items, ambient_enabled)
 }
+
+use ambient_widget::ambient_widget_data_from;
 
 #[cfg(test)]
 pub(crate) fn clear_ambient_info_cache_for_tests() {

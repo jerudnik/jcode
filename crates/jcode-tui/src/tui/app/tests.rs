@@ -1,14 +1,18 @@
 #![cfg_attr(test, allow(clippy::clone_on_copy))]
 
+use super::test_support::{lock_test_env, with_temp_jcode_home};
+
 include!("tests/support_failover/part_01.rs");
 include!("tests/support_failover/part_02.rs");
 include!("tests/commands_accounts_01/part_01.rs");
+include!("tests/commands_accounts_01/part_03.rs");
 include!("tests/commands_accounts_01/part_02.rs");
 include!("tests/commands_accounts_02/part_01.rs");
 include!("tests/commands_accounts_02/part_02.rs");
 include!("tests/state_model_poke_01/part_01.rs");
 include!("tests/state_model_poke_01/part_02.rs");
 include!("tests/state_model_poke_02/part_01.rs");
+include!("tests/state_model_poke_02/part_03.rs");
 include!("tests/state_model_poke_02/part_02.rs");
 include!("tests/state_model_poke_03.rs");
 include!("tests/remote_startup_input_01/part_01.rs");
@@ -20,6 +24,7 @@ include!("tests/remote_startup_input_03/part_02.rs");
 include!("tests/remote_startup_input_04.rs");
 include!("tests/image_placeholder_commands.rs");
 include!("tests/remote_events_reload_01/part_01.rs");
+include!("tests/remote_events_reload_01/part_03.rs");
 include!("tests/remote_events_reload_01/part_02.rs");
 include!("tests/remote_events_reload_02/part_01.rs");
 include!("tests/remote_events_reload_02/part_02.rs");
@@ -33,7 +38,9 @@ include!("tests/scroll_copy_01/part_01.rs");
 include!("tests/scroll_copy_01/part_02.rs");
 include!("tests/scroll_copy_02/part_01.rs");
 include!("tests/scroll_copy_02/part_02.rs");
+include!("tests/scroll_copy_02/part_03.rs");
 include!("tests/scroll_copy_03.rs");
+include!("tests/scroll_copy_03/swarm_expand.rs");
 include!("tests/input_copy_selection.rs");
 include!("tests/onboarding_flow.rs");
 include!("tests/onboarding_golden.rs");
@@ -43,6 +50,7 @@ include!("tests/reasoning_region.rs");
 include!("tests/smoothness_benchmark.rs");
 include!("tests/hotkey_feedback_e2e.rs");
 include!("tests/todo_card.rs");
+include!("tests/clear_context_usage.rs");
 
 #[test]
 fn assistant_status_command_shows_metadata_and_recovery() {
@@ -337,6 +345,7 @@ fn idle_cold_cache_warning_waits_for_ttl_and_rearms_after_new_cache_write() {
 
 #[test]
 fn harness_caused_kv_cache_miss_pushes_in_chat_alarm() {
+    let _env = lock_test_env();
     // A warm session whose system prompt hash silently changes between turns is
     // the exact failure mode of the skill-ordering bug: the conversation only
     // grew, yet the cached prefix is invalidated. We must surface that loudly.
@@ -393,6 +402,7 @@ fn harness_caused_kv_cache_miss_pushes_in_chat_alarm() {
 
 #[test]
 fn documented_invalidation_downgrades_kv_cache_alarm_to_attribution() {
+    let _env = lock_test_env();
     // Config/skill reloads legitimately change the system prompt mid-session.
     // Those sites document the invalidation; a harness-attributed miss that
     // follows must be surfaced as an informational "refresh" with the cause,
@@ -1049,6 +1059,7 @@ fn update_command_reloads_stale_remote_server_before_client_update_check() {
 
 #[test]
 fn stale_server_history_is_deferred_before_remote_state_is_applied() {
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1135,77 +1146,76 @@ fn deferred_stale_server_history_captures_session_id_for_reload_handoff() {
     // store can resolve, leaving the user stuck at "No session found matching
     // ...". We must stash the real session id so the re-exec resumes the actual
     // server session instead.
-    let _env_guard = crate::storage::lock_test_env();
-    crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
-    crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.21.0 (deadbeef)");
+    with_temp_jcode_home(|| {
+        crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
+        crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.21.0 (deadbeef)");
 
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        let mut app = create_test_app();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
 
-    app.is_remote = true;
-    // Fresh client: no session id learned yet (the #328 reproduction).
-    app.remote_session_id = None;
-    assert!(app.pending_reload_session_id.is_none());
+        app.is_remote = true;
+        // Fresh client: no session id learned yet (the #328 reproduction).
+        app.remote_session_id = None;
+        assert!(app.pending_reload_session_id.is_none());
 
-    let redraw = app.handle_server_event(
-        crate::protocol::ServerEvent::History {
-            id: 1,
-            session_id: "session_real_server_owned".to_string(),
-            messages: vec![crate::protocol::HistoryMessage {
-                role: "assistant".to_string(),
-                content: "stale answer".to_string(),
-                tool_calls: None,
-                tool_data: None,
-            }],
-            images: vec![],
-            provider_name: Some("stale-provider".to_string()),
-            provider_model: Some("stale-model".to_string()),
-            subagent_model: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            available_models: vec![],
-            available_model_routes: vec![],
-            mcp_servers: vec![],
-            skills: vec![],
-            total_tokens: None,
-            token_usage_totals: None,
-            all_sessions: vec![],
-            client_count: None,
-            is_canary: None,
-            reload_recovery: None,
-            // Ancient server that predates self-reported staleness; the client's
-            // own release-version comparison drives the deferral.
-            server_version: Some("v0.20.4".to_string()),
-            server_name: Some("stale-server".to_string()),
-            server_icon: Some("🧟".to_string()),
-            server_has_update: None,
-            was_interrupted: None,
-            connection_type: None,
-            status_detail: None,
-            upstream_provider: None,
-            resolved_credential: None,
-            reasoning_effort: None,
-            service_tier: None,
-            compaction_mode: crate::config::CompactionMode::Reactive,
-            activity: None,
-            side_panel: crate::side_panel::SidePanelSnapshot::default(),
-        },
-        &mut remote,
-    );
+        let redraw = app.handle_server_event(
+            crate::protocol::ServerEvent::History {
+                id: 1,
+                session_id: "session_real_server_owned".to_string(),
+                messages: vec![crate::protocol::HistoryMessage {
+                    role: "assistant".to_string(),
+                    content: "stale answer".to_string(),
+                    tool_calls: None,
+                    tool_data: None,
+                }],
+                images: vec![],
+                provider_name: Some("stale-provider".to_string()),
+                provider_model: Some("stale-model".to_string()),
+                subagent_model: None,
+                autoreview_enabled: None,
+                autojudge_enabled: None,
+                available_models: vec![],
+                available_model_routes: vec![],
+                mcp_servers: vec![],
+                skills: vec![],
+                total_tokens: None,
+                token_usage_totals: None,
+                all_sessions: vec![],
+                client_count: None,
+                is_canary: None,
+                reload_recovery: None,
+                // Ancient server that predates self-reported staleness; the client's
+                // own release-version comparison drives the deferral.
+                server_version: Some("v0.20.4".to_string()),
+                server_name: Some("stale-server".to_string()),
+                server_icon: Some("🧟".to_string()),
+                server_has_update: None,
+                was_interrupted: None,
+                connection_type: None,
+                status_detail: None,
+                upstream_provider: None,
+                resolved_credential: None,
+                reasoning_effort: None,
+                service_tier: None,
+                compaction_mode: crate::config::CompactionMode::Reactive,
+                activity: None,
+                side_panel: crate::side_panel::SidePanelSnapshot::default(),
+            },
+            &mut remote,
+        );
 
-    // History is deferred (no redraw, reload pending, remote_session_id still
-    // unset) but the real session id is captured for the reload handoff.
-    assert!(!redraw);
-    assert!(app.pending_server_reload);
-    assert_eq!(app.remote_session_id.as_deref(), None);
-    assert_eq!(
-        app.pending_reload_session_id.as_deref(),
-        Some("session_real_server_owned")
-    );
-
-    crate::env::remove_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE");
+        // History is deferred (no redraw, reload pending, remote_session_id still
+        // unset) but the real session id is captured for the reload handoff.
+        assert!(!redraw);
+        assert!(app.pending_server_reload);
+        assert_eq!(app.remote_session_id.as_deref(), None);
+        assert_eq!(
+            app.pending_reload_session_id.as_deref(),
+            Some("session_real_server_owned")
+        );
+    });
 }
 
 #[test]
@@ -1215,7 +1225,7 @@ fn ancient_server_history_is_deferred_via_client_side_release_check() {
     // it is stale. The client must independently compare release versions and
     // defer + reload anyway, instead of attaching to the ancient daemon (which
     // would then reject newer protocol requests like `set_route`).
-    let _env_guard = crate::storage::lock_test_env();
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
     // The test binary's own version is dev/dirty (unorderable), so use the
     // test-only override to give the client a clean release version newer than
@@ -1306,7 +1316,7 @@ fn older_server_reporting_no_update_is_still_deferred_via_client_check() {
     // short-circuited and the client trusted the old server forever. Now the
     // client's release-order check wins: defer + reload (after repairing the
     // shared-server channel client-side).
-    let _env_guard = crate::storage::lock_test_env();
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
     crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
 
@@ -1386,7 +1396,7 @@ fn older_server_history_repairs_stale_shared_server_channel_end_to_end() {
     // production History handler must repair the shared-server channel so the
     // forced reload it queues has a strictly-newer binary to exec into.
     use std::time::{Duration, SystemTime};
-    let _env_guard = crate::storage::lock_test_env();
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
     crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.22.0 (abcd1234)");
     let temp = tempfile::TempDir::new().expect("temp home");
@@ -1486,7 +1496,7 @@ fn current_release_server_history_is_not_deferred_by_client_check() {
     // A server on the SAME or NEWER clean release as the client, with
     // server_has_update: None, must be trusted and attached normally. This
     // guards against the client-side check over-firing and looping reloads.
-    let _env_guard = crate::storage::lock_test_env();
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
     crate::env::set_var("JCODE_TEST_CLIENT_VERSION_OVERRIDE", "v0.17.0 (d741696f)");
 
@@ -1608,53 +1618,4 @@ fn oversized_pasted_submit_is_rejected_and_preserves_input() {
             .any(|message| message.role == "system"
                 && message.content.contains("Message is too large to send"))
     );
-}
-
-fn seed_stale_clear_usage(app: &mut App) {
-    app.streaming.streaming_input_tokens = 40_000;
-    app.streaming.streaming_output_tokens = 2_000;
-    app.streaming.streaming_cache_read_tokens = Some(30_000);
-    app.streaming.streaming_cache_creation_tokens = Some(5_000);
-    app.streaming.streaming_context_stale = true;
-    app.streaming.streaming_usage_call_reset_pending = true;
-    app.kv_cache.current_api_usage_recorded = true;
-}
-
-fn assert_clear_usage_reset(app: &App) {
-    assert_eq!(app.current_stream_context_tokens(), None);
-    assert_eq!(app.streaming.streaming_input_tokens, 0);
-    assert_eq!(app.streaming.streaming_output_tokens, 0);
-    assert_eq!(app.streaming.streaming_cache_read_tokens, None);
-    assert_eq!(app.streaming.streaming_cache_creation_tokens, None);
-    assert!(!app.streaming.streaming_context_stale);
-    assert!(!app.streaming.streaming_usage_call_reset_pending);
-    assert!(!app.kv_cache.current_api_usage_recorded);
-}
-
-#[test]
-fn local_clear_resets_provider_reported_context_usage() {
-    let mut app = create_test_app();
-    seed_stale_clear_usage(&mut app);
-
-    assert!(super::commands::handle_session_command(&mut app, "/clear"));
-
-    assert_clear_usage_reset(&app);
-}
-
-#[test]
-fn remote_clear_resets_provider_reported_context_usage() {
-    let mut app = create_test_app();
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let _guard = rt.enter();
-    let mut remote = crate::tui::backend::RemoteConnection::dummy();
-    remote.mark_history_loaded();
-    app.is_remote = true;
-    seed_stale_clear_usage(&mut app);
-    app.input = "/clear".to_string();
-    app.cursor_pos = app.input.len();
-
-    rt.block_on(app.handle_remote_key(KeyCode::Enter, KeyModifiers::empty(), &mut remote))
-        .expect("remote /clear should succeed");
-
-    assert_clear_usage_reset(&app);
 }

@@ -12,8 +12,20 @@ fn test_redraw_interval_uses_low_frequency_during_remote_startup_phase() {
         ..Default::default()
     };
 
-    let idle_interval = crate::tui::redraw_interval(&idle);
-    let startup_interval = crate::tui::redraw_interval(&startup);
+    // Renderer thread-local state can remain populated when the Rust test
+    // harness reuses a worker thread. Redraw policy must use the supplied
+    // TuiState rather than inheriting that unrelated prior frame.
+    crate::tui::ui::set_tail_catchup_active(true);
+    // Pin a Full-tier policy so the assertion is deterministic regardless of
+    // ambient machine load: crate::perf::profile() is a load-sensitive
+    // OnceLock, and on a saturated host it can latch a degraded tier that
+    // changes redraw cadence. redraw_interval_with_policy takes the policy
+    // explicitly, removing the global-load dependency (F17 hermeticity).
+    let mut full_policy = crate::perf::tui_policy();
+    full_policy.tier = crate::perf::PerformanceTier::Full;
+    let idle_interval = crate::tui::redraw_interval_with_policy(&idle, &full_policy);
+    let startup_interval = crate::tui::redraw_interval_with_policy(&startup, &full_policy);
+    crate::tui::ui::set_tail_catchup_active(false);
 
     assert_eq!(idle_interval, crate::tui::REDRAW_DEEP_IDLE);
     assert_eq!(startup_interval, crate::tui::REDRAW_REMOTE_STARTUP);
@@ -187,6 +199,9 @@ fn test_active_swarm_spinner_keeps_redrawing_at_deep_idle() {
     }
 
     let deep_idle = crate::tui::REDRAW_DEEP_IDLE_AFTER + Duration::from_secs(1);
+    let mut full_policy = crate::perf::tui_policy();
+    full_policy.tier = crate::perf::PerformanceTier::Full;
+    full_policy.enable_decorative_animations = true;
 
     let quiet = TestState {
         display_messages: vec![DisplayMessage::system("seed".to_string())],
@@ -211,7 +226,7 @@ fn test_active_swarm_spinner_keeps_redrawing_at_deep_idle() {
             "an {status} swarm agent must keep driving redraws at deep idle"
         );
         assert_eq!(
-            crate::tui::redraw_interval(&animating),
+            crate::tui::redraw_interval_with_policy(&animating, &full_policy),
             crate::tui::REDRAW_SWARM_SPINNER,
             "an {status} swarm agent should repaint at the spinner cadence"
         );
@@ -231,7 +246,7 @@ fn test_active_swarm_spinner_keeps_redrawing_at_deep_idle() {
             "a {status} swarm agent renders a static glyph and should stay deep-idle"
         );
         assert_eq!(
-            crate::tui::redraw_interval(&settled),
+            crate::tui::redraw_interval_with_policy(&settled, &full_policy),
             crate::tui::REDRAW_DEEP_IDLE,
             "a {status} swarm agent should not bump the redraw cadence"
         );

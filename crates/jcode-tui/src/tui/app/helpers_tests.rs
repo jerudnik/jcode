@@ -1,8 +1,7 @@
 use super::{
-    build_resume_command, clear_ambient_info_cache_for_tests, effort_display_label,
-    extract_bracketed_system_message, format_countdown_until, gather_ambient_info,
-    inferred_reasoning_efforts, partition_queued_messages, pretty_model_display_name,
-    resume_invocation_args,
+    ambient_widget_data_from, build_resume_command, effort_display_label,
+    extract_bracketed_system_message, format_countdown_until, inferred_reasoning_efforts,
+    partition_queued_messages, pretty_model_display_name, resume_invocation_args,
 };
 use crate::ambient::{AmbientManager, Priority, ScheduleRequest, ScheduleTarget};
 use crate::terminal_launch::{detected_resume_terminal, shell_command};
@@ -154,7 +153,7 @@ fn swarm_effort_display_labels_are_marked_beta() {
 #[cfg(unix)]
 #[test]
 fn detected_resume_terminal_recognizes_handterm_term_program() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let _guard = EnvVarGuard::set_value("TERM_PROGRAM", "handterm");
     assert_eq!(detected_resume_terminal().as_deref(), Some("handterm"));
 }
@@ -207,11 +206,11 @@ fn resume_invocation_args_omits_blank_socket() {
 /// other tests mutating JCODE_HOME in parallel. Returns the guards that keep
 /// the environment pinned for the duration of the test.
 fn pinned_resume_test_home() -> (
-    std::sync::MutexGuard<'static, ()>,
+    crate::tui::app::test_support::TestEnvWriteScope,
     tempfile::TempDir,
     EnvVarGuard,
 ) {
-    let env_lock = crate::storage::lock_test_env();
+    let env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let current = temp.path().join("builds").join("current");
     std::fs::create_dir_all(&current).expect("create builds/current");
@@ -288,7 +287,7 @@ fn format_countdown_until_handles_subminute_and_minutes() {
 
 #[test]
 fn gather_ambient_info_filters_to_session_reminders_when_ambient_disabled() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
 
@@ -346,16 +345,15 @@ fn gather_ambient_info_filters_to_session_reminders_when_ambient_disabled() {
         })
         .expect("schedule second reminder");
 
-    clear_ambient_info_cache_for_tests();
-    let info = (0..20)
-        .find_map(|_| {
-            let info = gather_ambient_info(false);
-            if info.is_none() {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            info
-        })
-        .expect("ambient info");
+    // This regression verifies queue filtering, not queue persistence or the
+    // asynchronous cache scheduler. Use the manager's in-memory queue so an
+    // unrelated background writer cannot replace the temp-home queue file.
+    let info = ambient_widget_data_from(
+        crate::ambient::AmbientState::default(),
+        manager.queue().items(),
+        false,
+    )
+    .expect("ambient info");
     assert!(info.show_widget);
     assert_eq!(info.queue_count, 3);
     assert_eq!(info.reminder_count, 2);
@@ -410,7 +408,7 @@ fn invalidate_todos_cache_backdates_entry_so_next_gather_refetches() {
         todos_cache_entry_age_for_tests,
     };
 
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     clear_todos_cache_for_tests();

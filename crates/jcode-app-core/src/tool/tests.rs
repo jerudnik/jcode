@@ -1,8 +1,10 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
 use super::*;
+use crate::message::StreamEvent;
 use crate::message::{Message, ToolDefinition};
 use crate::provider::{EventStream, Provider};
+use async_stream::stream;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -81,18 +83,133 @@ async fn test_discover_tools_not_registered_when_sponsors_disabled() {
 }
 
 #[tokio::test]
-async fn subagent_tool_is_not_registered() {
+async fn subagent_tool_is_registered() {
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
 
     assert!(
-        !registry
+        registry
             .tool_names()
             .await
             .iter()
             .any(|name| name == "subagent"),
-        "the deprecated direct subagent tool must not be exposed; use swarm instead"
+        "the Claude Agent/Task compatibility bridge must be registered"
     );
+}
+
+#[tokio::test]
+async fn claude_identity_tool_names_resolve_to_registered_tools() {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let registered: std::collections::HashSet<String> =
+        registry.tool_names().await.into_iter().collect();
+
+    // Keep aligned with claude_code_identity_tools in
+    // crates/jcode-provider-anthropic/src/lib.rs. App-core cannot depend on the
+    // provider crate without inverting the dependency graph.
+    for advertised in [
+        "Agent",
+        "Bash",
+        "Edit",
+        "Glob",
+        "Grep",
+        "Read",
+        "ScheduleWakeup",
+        "Skill",
+        "Write",
+    ] {
+        let resolved = Registry::resolve_tool_name(advertised);
+        assert!(
+            registered.contains(resolved),
+            "advertised Claude identity tool {advertised} resolves to unregistered tool {resolved}"
+        );
+    }
+}
+
+#[derive(Clone, Default)]
+struct CapturingSubagentProvider {
+    observed_tools: Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl Provider for CapturingSubagentProvider {
+    async fn complete(
+        &self,
+        _messages: &[Message],
+        tools: &[ToolDefinition],
+        _system: &str,
+        _resume_session_id: Option<&str>,
+    ) -> anyhow::Result<EventStream> {
+        *self.observed_tools.lock().expect("observed tools lock") =
+            tools.iter().map(|tool| tool.name.clone()).collect();
+        Ok(Box::pin(stream! {
+            yield Ok(StreamEvent::TextDelta("captured worker output".to_string()));
+        }))
+    }
+
+    fn name(&self) -> &str {
+        "mock"
+    }
+
+    fn model(&self) -> String {
+        "mock-model".to_string()
+    }
+
+    fn fork(&self) -> Arc<dyn Provider> {
+        Arc::new(self.clone())
+    }
+}
+
+#[tokio::test]
+async fn subagent_tool_returns_captured_worker_output() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let previous_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_HOME", temp.path());
+
+    let provider = CapturingSubagentProvider::default();
+    let observed_tools = provider.observed_tools.clone();
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let registry = Registry::new(provider).await;
+    let mut parent = crate::session::Session::create(None, Some("parent".to_string()));
+    parent.model = Some("mock-model".to_string());
+    parent.save().expect("save parent session");
+    let ctx = ToolContext {
+        session_id: parent.id,
+        message_id: "message_test".to_string(),
+        tool_call_id: "call_test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let output = registry
+        .execute(
+            "subagent",
+            serde_json::json!({
+                "description": "trivial worker",
+                "prompt": "return the fixture",
+                "subagent_type": "test"
+            }),
+            ctx,
+        )
+        .await
+        .expect("subagent execution");
+
+    assert_eq!(output.output, "captured worker output");
+    assert!(
+        !observed_tools
+            .lock()
+            .expect("observed tools lock")
+            .iter()
+            .any(|name| name == "subagent"),
+        "spawned workers must not receive the subagent tool"
+    );
+    match previous_home {
+        Some(value) => crate::env::set_var("JCODE_HOME", value),
+        None => crate::env::remove_var("JCODE_HOME"),
+    }
 }
 
 struct BareSchemaTool;

@@ -63,9 +63,23 @@ async fn connect_socket_preserves_refused_socket_path() {
         "listener drop should leave the socket path behind for stale-socket checks"
     );
 
-    let err = connect_socket(&socket_path)
-        .await
-        .expect_err("connect should fail once the listener is gone");
+    // On macOS, a connect can briefly succeed from the socket's pending queue
+    // after the listening fd is closed. Wait until the kernel exposes the
+    // stable stale-socket state that this regression is intended to exercise.
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    let err = loop {
+        match connect_socket(&socket_path).await {
+            Ok(stream) => {
+                drop(stream);
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "socket kept accepting connections after listener teardown"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Err(err) => break err,
+        }
+    };
     assert!(
         err.to_string().contains("refused the connection"),
         "unexpected error: {err:#}"

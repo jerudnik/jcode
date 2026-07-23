@@ -1421,3 +1421,64 @@ fn simulator_flat_deep_seed_grows_via_root_gate() {
     assert_eq!(gap.origin, Some(NodeOrigin::Gap));
     assert!(g.get("plan::gate").unwrap().is_done());
 }
+
+#[test]
+fn expansion_depth_cap_blocks_recursive_decomposition() {
+    // Recursion guard: seeds (depth 0) may expand; their children (depth 1)
+    // may expand once more; grandchildren (depth 2) may NOT. This is the
+    // F01-R incident guard (2 seeds -> 148 nodes at depth 4).
+    let mut g = dag(Mode::Deep, vec![spec("root", NodeKind::Explore)]);
+    dispatch(&mut g, "root", "w0");
+    expand_node(
+        &mut g,
+        "root",
+        "w0",
+        vec![spec("root.a", NodeKind::Explore)],
+    )
+    .unwrap();
+
+    dispatch(&mut g, "root.a", "w1");
+    expand_node(
+        &mut g,
+        "root.a",
+        "w1",
+        vec![spec("root.a.x", NodeKind::Explore)],
+    )
+    .unwrap();
+
+    dispatch(&mut g, "root.a.x", "w2");
+    let err = expand_node(
+        &mut g,
+        "root.a.x",
+        "w2",
+        vec![spec("root.a.x.deep", NodeKind::Explore)],
+    )
+    .expect_err("depth-2 node must not expand further");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("decomposition depth"),
+        "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn expansion_width_cap_blocks_shrapnel_fanout() {
+    let mut g = dag(Mode::Deep, vec![spec("root", NodeKind::Explore)]);
+    dispatch(&mut g, "root", "w0");
+    let children: Vec<NodeSpec> = (0..MAX_EXPANSION_CHILDREN + 1)
+        .map(|i| spec(&format!("root.c{i}"), NodeKind::Explore))
+        .collect();
+    let err = expand_node(&mut g, "root", "w0", children)
+        .expect_err("over-wide expansion must be rejected");
+    let message = format!("{err:?}");
+    assert!(
+        message.contains("children (cap"),
+        "unexpected error: {message}"
+    );
+
+    // At the cap is fine.
+    let children: Vec<NodeSpec> = (0..MAX_EXPANSION_CHILDREN)
+        .map(|i| spec(&format!("root.k{i}"), NodeKind::Explore))
+        .collect();
+    expand_node(&mut g, "root", "w0", children).unwrap();
+}

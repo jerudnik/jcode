@@ -1,0 +1,48 @@
+# F03 fixture matrix transcript (strengthened per review F03-I1/I2)
+# Binary: target/selfdev/jcode rebuilt from reviewed commit d8c223d29 tree
+# Date: 2026-07-18
+== A. Per-lease-class hold/release fixtures (idle timeout 5s) ==
+PASS: [client-connection] daemon alive past idle timeout while leased
+PASS: [client-connection] alive 4s after release (full new idle window enforced)
+PASS: [client-connection] exit 44 after release + full idle window
+PASS: [client-connection] zero socket/hash/metadata residue
+PASS: [provider-turn] daemon alive past idle timeout while leased
+PASS: [provider-turn] alive 4s after release (full new idle window enforced)
+PASS: [provider-turn] exit 44 after release + full idle window
+PASS: [provider-turn] zero socket/hash/metadata residue
+PASS: [startup-recovery] daemon alive past idle timeout while leased
+PASS: [startup-recovery] alive 4s after release (full new idle window enforced)
+PASS: [startup-recovery] exit 44 after release + full idle window
+PASS: [startup-recovery] zero socket/hash/metadata residue
+PASS: [debug-job] daemon alive past idle timeout while leased
+PASS: [debug-job] alive 4s after release (full new idle window enforced)
+PASS: [debug-job] exit 44 after release + full idle window
+PASS: [debug-job] zero socket/hash/metadata residue
+PASS: [background-task] daemon alive past idle timeout while leased
+PASS: [background-task] alive 4s after release (full new idle window enforced)
+PASS: [background-task] exit 44 after release + full idle window
+PASS: [background-task] zero socket/hash/metadata residue
+PASS: [mcp-call] daemon alive past idle timeout while leased
+PASS: [mcp-call] alive 4s after release (full new idle window enforced)
+PASS: [mcp-call] exit 44 after release + full idle window
+PASS: [mcp-call] zero socket/hash/metadata residue
+PASS: [swarm-waiter] daemon alive past idle timeout while leased
+PASS: [swarm-waiter] alive 4s after release (full new idle window enforced)
+PASS: [swarm-waiter] exit 44 after release + full idle window
+PASS: [swarm-waiter] zero socket/hash/metadata residue
+PASS: [scheduled-delivery] daemon alive past idle timeout while leased
+PASS: [scheduled-delivery] alive 4s after release (full new idle window enforced)
+PASS: [scheduled-delivery] exit 44 after release + full idle window
+PASS: [scheduled-delivery] zero socket/hash/metadata residue
+== B. Forced-exit fixture (cleanup hang + SIGTERM -> watchdog 70) ==
+PASS: [forced] watchdog forced exit code 70
+PASS: [forced] durable marker records fired
+PASS: [forced] successor booted over forced-exit residue
+PASS: [forced] successor idle-exited 44
+PASS: [forced-successor] zero socket/hash/metadata residue
+== C. Parent-SIGKILL residue fixture (successor reaps stale socket) ==
+PASS: [sigkill] stale socket residue present as expected after SIGKILL
+PASS: [sigkill] successor daemon booted over stale residue
+PASS: [sigkill] successor idle-exited 44 with clean residue
+PASS: [sigkill-successor] zero socket/hash/metadata residue
+ALL F03 FIXTURES PASSED

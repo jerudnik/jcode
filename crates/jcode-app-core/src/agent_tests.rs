@@ -18,6 +18,9 @@ use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::ReceiverStream;
 
+#[path = "agent_tests/active_pid.rs"]
+mod active_pid;
+
 struct DelayedProvider {
     open_delay: Duration,
     first_event_delay: Duration,
@@ -1566,34 +1569,6 @@ async fn interrupt_signal_notified_completes_after_fire() {
 }
 
 #[tokio::test]
-async fn new_agent_registers_active_pid_and_clear_swaps_it() {
-    let _guard = crate::storage::lock_test_env();
-    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
-    let registry = Registry::new(provider.clone()).await;
-    let mut agent = Agent::new(provider, registry);
-
-    let first_session_id = agent.session_id().to_string();
-    assert!(
-        crate::session::active_session_ids().contains(&first_session_id),
-        "fresh agent session should be tracked as active"
-    );
-
-    agent.clear();
-
-    let second_session_id = agent.session_id().to_string();
-    let active = crate::session::active_session_ids();
-    assert_ne!(first_session_id, second_session_id);
-    assert!(
-        active.contains(&second_session_id),
-        "replacement session should be tracked as active"
-    );
-    assert!(
-        !active.contains(&first_session_id),
-        "cleared session should no longer be tracked as active"
-    );
-}
-
-#[tokio::test]
 async fn gmail_is_exposed_by_default_and_can_be_explicitly_disabled() {
     let _guard = crate::storage::lock_test_env();
     let prev_home = std::env::var_os("JCODE_HOME");
@@ -1681,6 +1656,103 @@ async fn gmail_is_exposed_by_default_and_can_be_explicitly_disabled() {
         crate::env::remove_var("JCODE_DISABLE_BASE_TOOLS");
     }
     crate::config::Config::invalidate_cache();
+}
+
+#[tokio::test]
+async fn validate_tool_allowed_resolves_aliases_against_policy_sets() {
+    let provider: Arc<dyn Provider> = Arc::new(NativeAutoCompactionProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+
+    // Worker-style allow-list holds internal names only, mirroring
+    // run_subagent_worker which seeds it from registry.tool_names().
+    agent.allowed_tools = Some(std::collections::HashSet::from([
+        "agentgrep".to_string(),
+        "bash".to_string(),
+    ]));
+
+    for alias in ["grep", "Grep", "Glob", "file_grep", "agentgrep", "bash"] {
+        agent
+            .validate_tool_allowed(alias)
+            .unwrap_or_else(|err| panic!("alias '{alias}' must resolve to an allowed tool: {err}"));
+    }
+    agent
+        .validate_tool_allowed("edit")
+        .expect_err("tools outside the allow-list must still be rejected");
+
+    // Disabled sets must also match through aliases.
+    agent.allowed_tools = None;
+    agent.disabled_tools.insert("agentgrep".to_string());
+    let err = agent
+        .validate_tool_allowed("grep")
+        .expect_err("alias of a disabled tool must be rejected");
+    assert!(err.to_string().contains("disabled"));
+}
+
+#[tokio::test]
+async fn disallowed_tool_call_returns_error_result_instead_of_aborting_turn() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("temp JCODE_HOME");
+    let _home = ScopedEnvVar::set("JCODE_HOME", temp.path());
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+
+    // Turn 1: the model calls a tool outside the allow-list. Turn 2: it
+    // recovers and finishes. With the old `?` propagation the whole run
+    // errored out instead of feeding the policy error back to the model.
+    let provider: Arc<dyn Provider> = Arc::new(RetryEvidenceProvider {
+        attempts: Arc::new(Mutex::new(VecDeque::from(vec![
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseStart {
+                    id: "tc-denied-1".to_string(),
+                    name: "bash".to_string(),
+                }),
+                ScriptedProviderEvent::Event(StreamEvent::ToolInputDelta(
+                    "{\"command\":\"echo hi\"}".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::ToolUseEnd),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("tool_use".to_string()),
+                }),
+            ]),
+            ScriptedProviderAttempt::Stream(vec![
+                ScriptedProviderEvent::Event(StreamEvent::TextDelta(
+                    "recovered without bash".to_string(),
+                )),
+                ScriptedProviderEvent::Event(StreamEvent::MessageEnd {
+                    stop_reason: Some("end_turn".to_string()),
+                }),
+            ]),
+        ]))),
+    });
+    let registry = Registry::new(provider.clone()).await;
+    let mut agent = Agent::new(provider, registry);
+    agent.allowed_tools = Some(std::collections::HashSet::new());
+    agent.memory_enabled = false;
+    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+
+    let output = agent
+        .run_once_capture("try a disallowed tool")
+        .await
+        .expect("disallowed tool call must not abort the turn");
+    assert_eq!(output, "recovered without bash");
+
+    // The policy failure must be recorded as an error tool-result the model saw.
+    let saw_policy_error = agent.session.messages.iter().any(|message| {
+        message.content.iter().any(|block| {
+            matches!(
+                block,
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    is_error: Some(true),
+                } if tool_use_id == "tc-denied-1" && content.contains("not allowed")
+            )
+        })
+    });
+    assert!(
+        saw_policy_error,
+        "policy denial must be persisted as an error tool-result"
+    );
 }
 
 fn seed_transient_session_state(agent: &mut Agent) {

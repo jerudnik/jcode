@@ -14,6 +14,16 @@ use tokio::sync::{Mutex, RwLock};
 
 type SessionAgents = Arc<RwLock<HashMap<String, Arc<Mutex<Agent>>>>>;
 
+fn active_session_list(sessions: &HashMap<String, Arc<Mutex<Agent>>>) -> String {
+    let mut active = sessions.keys().cloned().collect::<Vec<_>>();
+    active.sort();
+    if active.is_empty() {
+        "none".to_string()
+    } else {
+        active.join(", ")
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct DebugInterruptContext {
     pub session_id: String,
@@ -58,10 +68,38 @@ pub(super) async fn resolve_debug_session(
 
     let sessions_guard = sessions.read().await;
     if let Some(id) = target {
-        let agent = sessions_guard
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("Unknown session_id '{}'", id))?;
+        let alias_target = match super::reload_recovery::resolve_session_alias(&id) {
+            Ok(alias_target) => alias_target,
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "debug session resolver: failed to read alias for {}: {}",
+                    id, error
+                ));
+                None
+            }
+        };
+        if let Some(alias_target) = alias_target.as_deref()
+            && let Some(agent) = sessions_guard.get(alias_target).cloned()
+        {
+            return Ok((alias_target.to_string(), agent));
+        }
+        let agent = sessions_guard.get(&id).cloned().ok_or_else(|| {
+            let active_sessions = active_session_list(&sessions_guard);
+            if let Some(alias_target) = alias_target {
+                anyhow::anyhow!(
+                    "Unknown session_id '{}' (alias resolves to '{}', but that session is not active). Active sessions: {}",
+                    id,
+                    alias_target,
+                    active_sessions
+                )
+            } else {
+                anyhow::anyhow!(
+                    "Unknown session_id '{}'. Active sessions: {}",
+                    id,
+                    active_sessions
+                )
+            }
+        })?;
         return Ok((id, agent));
     }
 
@@ -618,7 +656,7 @@ pub(super) async fn execute_debug_command(
 
 #[cfg(test)]
 mod tests {
-    use super::{DebugInterruptContext, execute_debug_command};
+    use super::{DebugInterruptContext, execute_debug_command, resolve_debug_session};
     use crate::agent::Agent;
     use crate::provider::{EventStream, Provider};
     use crate::tool::Registry;
@@ -627,18 +665,9 @@ mod tests {
     use jcode_agent_runtime::InterruptSignal;
     use std::collections::HashMap;
     use std::ffi::OsString;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
     use tokio::sync::{Mutex as AsyncMutex, RwLock};
-
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
 
     struct EnvGuard {
         key: &'static str,
@@ -688,9 +717,88 @@ mod tests {
         }
     }
 
+    async fn test_agent() -> Arc<AsyncMutex<Agent>> {
+        let provider: Arc<dyn Provider> = Arc::new(TestProvider);
+        let registry = Registry::new(provider.clone()).await;
+        Arc::new(AsyncMutex::new(Agent::new(provider, registry)))
+    }
+
+    #[tokio::test]
+    async fn resolve_debug_session_resolves_reconnect_alias_to_live_agent() -> Result<()> {
+        let _env_lock = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp JCODE_HOME");
+        let _home = EnvGuard::set("JCODE_HOME", &temp_home.path().to_string_lossy());
+
+        let agent = test_agent().await;
+        let target_session_id = agent.lock().await.session_id().to_string();
+        crate::server::reload_recovery::persist_session_alias(
+            "source-client-session",
+            &target_session_id,
+            "debug reconnect test",
+        )?;
+
+        let sessions = Arc::new(RwLock::new(HashMap::from([(
+            target_session_id.clone(),
+            Arc::clone(&agent),
+        )])));
+        let current = Arc::new(RwLock::new("source-client-session".to_string()));
+
+        let (resolved_id, resolved_agent) =
+            resolve_debug_session(&sessions, &current, None).await?;
+        assert_eq!(resolved_id, target_session_id);
+        assert!(Arc::ptr_eq(&resolved_agent, &agent));
+
+        let (requested_resolved_id, _) = resolve_debug_session(
+            &sessions,
+            &current,
+            Some("source-client-session".to_string()),
+        )
+        .await?;
+        assert_eq!(requested_resolved_id, target_session_id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn resolve_debug_session_unknown_id_error_names_alias_and_active_sessions() -> Result<()>
+    {
+        let _env_lock = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp JCODE_HOME");
+        let _home = EnvGuard::set("JCODE_HOME", &temp_home.path().to_string_lossy());
+
+        crate::server::reload_recovery::persist_session_alias(
+            "stale-source-session",
+            "resolved-active-target",
+            "debug stale id test",
+        )?;
+        let agent = test_agent().await;
+        let sessions = Arc::new(RwLock::new(HashMap::from([(
+            "other-live-session".to_string(),
+            agent,
+        )])));
+        let current = Arc::new(RwLock::new(String::new()));
+
+        let error = match resolve_debug_session(
+            &sessions,
+            &current,
+            Some("stale-source-session".to_string()),
+        )
+        .await
+        {
+            Ok(_) => panic!("stale alias whose target is not live should error"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains("stale-source-session"), "{error}");
+        assert!(error.contains("resolved-active-target"), "{error}");
+        assert!(error.contains("other-live-session"), "{error}");
+        Ok(())
+    }
+
     #[tokio::test]
     async fn debug_tool_selfdev_reload_returns_promptly_for_direct_execution() {
-        let _env_lock = lock_env();
+        let _env_lock = crate::storage::lock_test_env();
+        let temp_home = tempfile::tempdir().expect("temp JCODE_HOME");
+        let _home = EnvGuard::set("JCODE_HOME", &temp_home.path().to_string_lossy());
         let _test_session = EnvGuard::set("JCODE_TEST_SESSION", "1");
         let _debug_control = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
 
@@ -748,6 +856,10 @@ mod tests {
             output.contains("Reload acknowledged") || output.contains("Server is restarting now"),
             "expected reload acknowledgement output, got: {}",
             output
+        );
+        assert!(
+            temp_home.path().join("builds/manifest.json").exists(),
+            "selfdev reload state should be confined to the temporary JCODE_HOME"
         );
     }
 

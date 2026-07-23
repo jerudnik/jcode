@@ -94,6 +94,20 @@ mod tests {
             ("server", "state")
         );
     }
+
+    #[test]
+    fn debug_command_errors_are_returned_as_failed_responses() {
+        let event = debug_response_event(42, Err(anyhow::anyhow!("Unknown session_id 'missing'")));
+
+        match event {
+            ServerEvent::DebugResponse { id, ok, output } => {
+                assert_eq!(id, 42);
+                assert!(!ok);
+                assert_eq!(output, "Unknown session_id 'missing'");
+            }
+            other => panic!("expected debug response, got {other:?}"),
+        }
+    }
 }
 
 mod transcript_routing_tests {
@@ -563,12 +577,12 @@ mod debug_execution_tests {
     use std::sync::Arc;
     use tokio::sync::{Mutex as AsyncMutex, RwLock};
 
-    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+    fn lock_env() -> crate::storage::TestEnvLease {
         crate::storage::lock_test_env()
     }
 
     struct EnvVarGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: crate::storage::TestEnvLease,
         key: &'static str,
         previous: Option<OsString>,
     }

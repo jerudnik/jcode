@@ -59,6 +59,29 @@ pub(super) async fn maybe_handle_server_state_command(
     shutdown_signals: &Arc<RwLock<HashMap<String, jcode_agent_runtime::InterruptSignal>>>,
     soft_interrupt_queues: &SessionInterruptQueues,
 ) -> Result<Option<String>> {
+    // Shutdown coordinator surface (F03 fixtures): session-independent.
+    if cmd == "shutdown:state" {
+        return Ok(Some(super::shutdown::debug_shutdown_state().to_string()));
+    }
+    if let Some(class_name) = cmd.strip_prefix("shutdown:hold_lease:") {
+        // Acquire and hold a lease of the named class (survives this debug
+        // connection; released via shutdown:release_lease:<token>).
+        return match super::shutdown::debug_acquire_lease(class_name.trim()) {
+            Ok(token) => Ok(Some(serde_json::json!({ "token": token }).to_string())),
+            Err(error) => Err(anyhow::anyhow!(error)),
+        };
+    }
+    if let Some(token) = cmd.strip_prefix("shutdown:release_lease:") {
+        let token: u64 = token
+            .trim()
+            .parse()
+            .map_err(|_| anyhow::anyhow!("release_lease requires a numeric token"))?;
+        let released = super::shutdown::debug_release_lease(token);
+        return Ok(Some(
+            serde_json::json!({ "released": released }).to_string(),
+        ));
+    }
+
     if cmd == "sessions" {
         let (connected_agents, members) =
             connected_session_snapshot(sessions, client_connections, swarm_members).await;

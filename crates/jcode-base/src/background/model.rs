@@ -192,6 +192,12 @@ pub struct BackgroundTaskInfo {
     pub task_id: String,
     pub output_file: PathBuf,
     pub status_file: PathBuf,
+    /// Set when the spawn was REFUSED (cap reached, shutdown drain): the
+    /// task never ran and this carries the self-documenting reason. Callers
+    /// must surface this instead of reporting a started task (F12 review
+    /// important-1: refusal must be explicit at the tool layer).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -232,6 +238,24 @@ pub(super) struct RunningTask {
     pub(super) started_at_rfc3339: String,
     pub(super) delivery_flags: watch::Sender<(bool, bool)>,
     pub(super) handle: JoinHandle<Result<TaskResult>>,
+    /// Abort authority for the ORIGINAL adopted future (F02-R2-B2). For
+    /// spawned tasks the wrapper IS the task and this is `None`. For adopted
+    /// tasks, aborting only the wrapper would drop-detach the original
+    /// `JoinHandle` and let the underlying work keep running; cleanup must
+    /// abort this handle too.
+    pub(super) original_abort: Option<tokio::task::AbortHandle>,
+    /// Activity lease (F01 C5): held while the task is tracked in the live
+    /// map, dropped at terminal pruning. `None` when acquisition was refused
+    /// during shutdown drain (the task then does not pin the daemon).
+    /// Never read: the guard's lifetime IS its function.
+    #[allow(dead_code)]
+    pub(super) activity_lease: Option<jcode_core::activity::ActivityLeaseGuard>,
+    /// Whether a durable `Running` record exists on disk (F04-R2-B1).
+    /// True for spawned tasks (initial persistence is a spawn
+    /// prerequisite); false only for adopted tasks whose permitted initial
+    /// write failed. Shutdown finalize uses this to apply its explicit
+    /// data-loss policy when terminal persistence also fails.
+    pub(super) durable_record: bool,
 }
 
 /// Result from a background task execution

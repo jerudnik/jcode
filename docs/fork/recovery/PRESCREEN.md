@@ -1,5 +1,9 @@
 # Mechanical responsibility pre-screen
 
+> **Historical Phase 0 triage evidence.** Do not dispatch Mapper or Map critic
+> work from this file. Active work is defined by
+> [`../ideal-base/WORK_GRAPH.json`](../ideal-base/WORK_GRAPH.json).
+
 Status: Phase 0 evidence, not an ownership decision
 
 Measured at `2026-07-15T06:50:07Z` from fork

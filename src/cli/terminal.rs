@@ -10,6 +10,38 @@ pub struct TuiRuntimeState {
     focus_change: bool,
 }
 
+struct InheritedTerminalGuard {
+    state: TuiRuntimeState,
+    armed: bool,
+}
+
+impl InheritedTerminalGuard {
+    fn new(modes: InheritedTerminalModes) -> Self {
+        Self {
+            state: TuiRuntimeState {
+                mouse_capture: modes.mouse_capture,
+                keyboard_enhanced: modes.keyboard_enhanced,
+                focus_change: modes.focus_change,
+            },
+            armed: true,
+        }
+    }
+
+    fn transfer_to(mut self, guard: TuiRuntimeGuard) -> TuiRuntimeGuard {
+        self.armed = false;
+        guard
+    }
+}
+
+impl Drop for InheritedTerminalGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            cleanup_tui_runtime(&self.state, true);
+            self.armed = false;
+        }
+    }
+}
+
 const INHERITED_MODES_ENV: &str = "JCODE_TUI_INHERITED_MODES";
 const INHERITED_THEME_ENV: &str = "JCODE_TUI_INHERITED_THEME";
 
@@ -95,6 +127,10 @@ thread_local! {
     /// Counts how many times the guard's `Drop` performed an emergency restore.
     /// Used by tests to verify the error/panic safety net fires exactly once.
     static GUARD_DROP_RESTORES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static CLEANUP_RECORDS: std::cell::RefCell<Vec<(bool, bool, bool, bool)>> = const {
+        std::cell::RefCell::new(Vec::new())
+    };
+    static SUPPRESS_REAL_CLEANUP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 impl TuiRuntimeGuard {
@@ -108,15 +144,26 @@ impl TuiRuntimeGuard {
         self.armed = false;
     }
 
-    /// Normal teardown for the interactive client: restore unless we are about
-    /// to exec a follow-up process (reload/rebuild/update), in which case the
-    /// next process inherits the terminal modes.
-    pub fn finish_for_run_result(mut self, run_result: &crate::tui::RunResult, extra_exec: bool) {
+    /// Complete an interactive run while retaining ownership across a possible
+    /// exec handoff. On the exec success path `action` never returns. If it does
+    /// return an error, this guard remains armed and its `Drop` performs a full
+    /// restore before the error propagates.
+    pub fn finish_for_run_result(
+        mut self,
+        run_result: &crate::tui::RunResult,
+        extra_exec: bool,
+        action: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
         if run_result_will_exec(run_result, extra_exec) {
             export_tui_exec_handoff(&self.state);
+            cleanup_tui_runtime(&self.state, false);
+            action()?;
+        } else {
+            cleanup_tui_runtime(&self.state, true);
+            action()?;
         }
-        cleanup_tui_runtime_for_run_result(&self.state, run_result, extra_exec);
         self.armed = false;
+        Ok(())
     }
 }
 
@@ -249,6 +296,11 @@ pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)>
     // new process still took the resume path, leaving it on the primary screen
     // without mouse capture.
     let inherited_terminal = has_terminal_exec_handoff(is_resuming, inherited_modes);
+    // Own inherited protocol modes before any successor initialization can
+    // fail or unwind. Ownership transfers only after the normal runtime guard
+    // has been constructed.
+    let inherited_guard = inherited_terminal
+        .then(|| InheritedTerminalGuard::new(inherited_modes.expect("validated handoff modes")));
     if inherited_terminal {
         // OSC terminal queries are unsafe here because the previous process
         // deliberately exec'd without leaving raw mode or the alternate screen.
@@ -322,17 +374,29 @@ pub fn init_tui_runtime() -> Result<(ratatui::DefaultTerminal, TuiRuntimeGuard)>
         inherited_terminal,
     ));
 
-    Ok((
-        terminal,
-        TuiRuntimeGuard::new(TuiRuntimeState {
-            mouse_capture: modes.mouse_capture,
-            keyboard_enhanced: modes.keyboard_enhanced,
-            focus_change: modes.focus_change,
-        }),
-    ))
+    let runtime_guard = TuiRuntimeGuard::new(TuiRuntimeState {
+        mouse_capture: modes.mouse_capture,
+        keyboard_enhanced: modes.keyboard_enhanced,
+        focus_change: modes.focus_change,
+    });
+    let runtime_guard = match inherited_guard {
+        Some(guard) => guard.transfer_to(runtime_guard),
+        None => runtime_guard,
+    };
+
+    Ok((terminal, runtime_guard))
 }
 
 fn cleanup_tui_runtime(state: &TuiRuntimeState, restore_terminal: bool) {
+    #[cfg(test)]
+    CLEANUP_RECORDS.with(|records| {
+        records.borrow_mut().push((
+            restore_terminal,
+            state.mouse_capture,
+            state.keyboard_enhanced,
+            state.focus_change,
+        ));
+    });
     crate::logging::info(&format!(
         "EVENT event=TUI_TERMINAL_MODES phase=cleanup pid={} restore_terminal={} raw_mode={} mouse_capture={} keyboard_enhanced={} focus_change={}",
         std::process::id(),
@@ -343,28 +407,80 @@ fn cleanup_tui_runtime(state: &TuiRuntimeState, restore_terminal: bool) {
         state.focus_change,
     ));
     if restore_terminal {
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableBracketedPaste);
-        if state.focus_change {
-            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableFocusChange);
+        #[cfg(test)]
+        let suppress_real_cleanup = SUPPRESS_REAL_CLEANUP.with(std::cell::Cell::get);
+        #[cfg(not(test))]
+        let suppress_real_cleanup = false;
+        if !suppress_real_cleanup {
+            let _ = write_terminal_protocol_cleanup(std::io::stdout(), state);
+            ratatui::restore();
         }
-        if state.mouse_capture {
-            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-        }
-        if state.keyboard_enhanced {
-            tui::disable_keyboard_enhancement();
-        }
-        ratatui::restore();
     }
 
     crate::tui::mermaid::clear_image_state();
 }
 
-fn cleanup_tui_runtime_for_run_result(
+fn write_terminal_protocol_cleanup(
+    mut writer: impl Write,
     state: &TuiRuntimeState,
-    run_result: &crate::tui::RunResult,
-    extra_exec: bool,
-) {
-    cleanup_tui_runtime(state, !run_result_will_exec(run_result, extra_exec));
+) -> io::Result<()> {
+    let mut first_error = None;
+    let mut remember = |result: io::Result<()>| {
+        if let Err(error) = result
+            && first_error.is_none()
+        {
+            first_error = Some(error);
+        }
+    };
+
+    remember(crossterm::execute!(
+        writer,
+        crossterm::event::DisableBracketedPaste
+    ));
+    if state.focus_change {
+        remember(crossterm::execute!(
+            writer,
+            crossterm::event::DisableFocusChange
+        ));
+    }
+    if state.mouse_capture {
+        remember(crossterm::execute!(
+            writer,
+            crossterm::event::DisableMouseCapture
+        ));
+    }
+    if state.keyboard_enhanced {
+        remember(crossterm::execute!(
+            writer,
+            crossterm::event::PopKeyboardEnhancementFlags
+        ));
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+#[cfg(unix)]
+fn restore_signal_terminal(
+    mut writer: impl Write,
+    disable_raw_mode: impl FnOnce(),
+) -> io::Result<()> {
+    let protocol_result =
+        write_terminal_protocol_cleanup(&mut writer, &inherited_all_modes_state());
+    disable_raw_mode();
+    let screen_result = crossterm::execute!(
+        writer,
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::cursor::Show
+    );
+    protocol_result.and(screen_result)
+}
+
+#[cfg(unix)]
+fn inherited_all_modes_state() -> TuiRuntimeState {
+    TuiRuntimeState {
+        mouse_capture: true,
+        keyboard_enhanced: true,
+        focus_change: true,
+    }
 }
 
 fn run_result_will_exec(run_result: &crate::tui::RunResult, extra_exec: bool) -> bool {
@@ -464,12 +580,9 @@ fn signal_crash_reason(sig: i32) -> String {
 fn handle_termination_signal(sig: i32) -> ! {
     mark_current_session_crashed(signal_crash_reason(sig));
 
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(
-        std::io::stderr(),
-        crossterm::terminal::LeaveAlternateScreen,
-        crossterm::cursor::Show
-    );
+    let _ = restore_signal_terminal(std::io::stderr(), || {
+        let _ = crossterm::terminal::disable_raw_mode();
+    });
 
     if let Some(session_id) = get_current_session() {
         print_session_resume_hint(&session_id);
@@ -526,6 +639,23 @@ mod tests {
             keyboard_enhanced: false,
             focus_change: false,
         })
+    }
+
+    fn all_modes() -> InheritedTerminalModes {
+        InheritedTerminalModes {
+            mouse_capture: true,
+            keyboard_enhanced: true,
+            focus_change: true,
+        }
+    }
+
+    fn reset_cleanup_records() {
+        CLEANUP_RECORDS.with(|records| records.borrow_mut().clear());
+        SUPPRESS_REAL_CLEANUP.with(|suppress| suppress.set(true));
+    }
+
+    fn cleanup_records() -> Vec<(bool, bool, bool, bool)> {
+        CLEANUP_RECORDS.with(|records| records.borrow().clone())
     }
 
     #[test]
@@ -615,6 +745,122 @@ mod tests {
             restores, 0,
             "finish() should disarm the guard so drop does not double-restore"
         );
+    }
+
+    #[test]
+    fn failed_exec_handoff_restores_all_inherited_modes() {
+        reset_cleanup_records();
+        GUARD_DROP_RESTORES.with(|c| c.set(0));
+        let run_result = crate::tui::RunResult {
+            reload_session: Some("session_exec_failure".into()),
+            ..Default::default()
+        };
+        let guard = TuiRuntimeGuard::new(TuiRuntimeState {
+            mouse_capture: true,
+            keyboard_enhanced: true,
+            focus_change: true,
+        });
+
+        let error = guard
+            .finish_for_run_result(&run_result, false, || {
+                Err(anyhow::anyhow!("mock replace_process failure"))
+            })
+            .expect_err("mock exec replacement must fail");
+
+        assert!(error.to_string().contains("mock replace_process failure"));
+        assert_eq!(
+            cleanup_records(),
+            vec![(false, true, true, true), (true, true, true, true)],
+            "handoff export must be followed by a full restore when exec returns"
+        );
+        assert_eq!(GUARD_DROP_RESTORES.with(|c| c.get()), 1);
+        crate::env::remove_var(INHERITED_MODES_ENV);
+        crate::env::remove_var(INHERITED_THEME_ENV);
+    }
+
+    #[test]
+    fn inherited_guard_restores_at_every_successor_init_boundary() {
+        for boundary in [
+            "theme_resume",
+            "enable_raw_mode",
+            "terminal_new",
+            "terminal_clear",
+            "hook_install",
+            "perf_policy",
+            "bracketed_paste",
+            "focus_change",
+            "mouse_capture",
+            "runtime_guard_construction",
+        ] {
+            reset_cleanup_records();
+            let run_boundary = || -> Result<()> {
+                let _handoff = InheritedTerminalGuard::new(all_modes());
+                Err(anyhow::anyhow!("injected failure at {boundary}"))
+            };
+            let result = run_boundary();
+            assert!(result.is_err());
+            assert_eq!(
+                cleanup_records(),
+                vec![(true, true, true, true)],
+                "inherited modes were not restored at boundary {boundary}"
+            );
+        }
+
+        reset_cleanup_records();
+        let unwind = std::panic::catch_unwind(|| {
+            let _handoff = InheritedTerminalGuard::new(all_modes());
+            panic!("injected successor unwind");
+        });
+        assert!(unwind.is_err());
+        assert_eq!(cleanup_records(), vec![(true, true, true, true)]);
+    }
+
+    #[test]
+    fn inherited_guard_transfers_without_early_cleanup() {
+        reset_cleanup_records();
+        let handoff = InheritedTerminalGuard::new(all_modes());
+        let runtime = handoff.transfer_to(TuiRuntimeGuard::new(TuiRuntimeState {
+            mouse_capture: true,
+            keyboard_enhanced: true,
+            focus_change: true,
+        }));
+        assert!(cleanup_records().is_empty());
+        runtime.finish(false);
+        assert_eq!(cleanup_records(), vec![(false, true, true, true)]);
+    }
+
+    #[test]
+    fn protocol_cleanup_emits_all_four_disables() {
+        let mut output = Vec::new();
+        write_terminal_protocol_cleanup(
+            &mut output,
+            &TuiRuntimeState {
+                mouse_capture: true,
+                keyboard_enhanced: true,
+                focus_change: true,
+            },
+        )
+        .unwrap();
+
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?2004l"));
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1004l"));
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1006l"));
+        assert!(output.windows(5).any(|bytes| bytes == b"\x1b[<1u"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_cleanup_emits_full_disable_set_and_leaves_alt_screen() {
+        let mut output = Vec::new();
+        let raw_mode_disabled = std::cell::Cell::new(false);
+        restore_signal_terminal(&mut output, || raw_mode_disabled.set(true)).unwrap();
+
+        assert!(raw_mode_disabled.get());
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?2004l"));
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1004l"));
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1006l"));
+        assert!(output.windows(5).any(|bytes| bytes == b"\x1b[<1u"));
+        assert!(output.windows(8).any(|bytes| bytes == b"\x1b[?1049l"));
     }
 
     #[test]

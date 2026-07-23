@@ -968,3 +968,244 @@ fn repair_never_downgrades_when_stable_is_older() {
         );
     });
 }
+
+// --- reconcile_stale_pending_activation (F09) ---
+
+fn install_pending_fixture(current_version: &str, shared_version: &str) -> (String, String) {
+    let exe = std::env::current_exe().expect("current exe");
+    install_binary_at_version(&exe, current_version).expect("install current");
+    install_binary_at_version(&exe, shared_version).expect("install shared");
+    update_current_symlink(current_version).expect("publish current");
+    update_shared_server_symlink(shared_version).expect("publish shared");
+    (current_version.to_string(), shared_version.to_string())
+}
+
+fn write_candidate_with_sidecar(version: &str, fingerprint: &str) -> PathBuf {
+    let exe = std::env::current_exe().expect("current exe");
+    let path = install_binary_at_version(&exe, version).expect("install candidate");
+    let metadata = DevBinarySourceMetadata {
+        version_label: version.to_string(),
+        source_fingerprint: fingerprint.to_string(),
+        short_hash: "abc1234".to_string(),
+        full_hash: "abc1234def".to_string(),
+        dirty: false,
+        changed_paths: 0,
+    };
+    let sidecar = path.with_file_name(format!("{}.source.json", binary_name()));
+    std::fs::write(&sidecar, serde_json::to_vec(&metadata).unwrap()).expect("write sidecar");
+    path
+}
+
+fn stale_pending(
+    session_id: &str,
+    new_version: &str,
+    fingerprint: Option<&str>,
+) -> PendingActivation {
+    PendingActivation {
+        session_id: session_id.to_string(),
+        new_version: new_version.to_string(),
+        previous_current_version: Some("prev-current".to_string()),
+        previous_shared_server_version: Some("prev-shared".to_string()),
+        source_fingerprint: fingerprint.map(str::to_string),
+        requested_at: Utc::now() - chrono::Duration::hours(1),
+    }
+}
+
+const RECONCILE_MIN_AGE_MINUTES: i64 = 10;
+
+fn reconcile_none_alive() -> PendingReconcileOutcome {
+    reconcile_stale_pending_activation(chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES), |_| {
+        false
+    })
+    .expect("reconcile")
+}
+
+#[test]
+fn reconcile_no_pending_returns_no_pending() {
+    with_temp_jcode_home(|| {
+        assert_eq!(reconcile_none_alive(), PendingReconcileOutcome::NoPending);
+    });
+}
+
+#[test]
+fn reconcile_dead_session_valid_candidate_completes() {
+    with_temp_jcode_home(|| {
+        install_pending_fixture("prev-current", "prev-shared");
+        write_candidate_with_sidecar("cand-1", "fp-1");
+        let mut manifest = BuildManifest::default();
+        manifest
+            .set_pending_activation(stale_pending("dead-session", "cand-1", Some("fp-1")))
+            .expect("set pending");
+        // Point the symlinks at the candidate, as a mid-cycle reload would.
+        update_current_symlink("cand-1").expect("point current at candidate");
+
+        assert_eq!(
+            reconcile_none_alive(),
+            PendingReconcileOutcome::Completed("cand-1".to_string())
+        );
+        let manifest = BuildManifest::load().expect("load");
+        assert!(manifest.pending_activation.is_none());
+        assert_eq!(manifest.canary.as_deref(), Some("cand-1"));
+        assert_eq!(manifest.canary_status, Some(CanaryStatus::Passed));
+        // Symlinks untouched by completion.
+        assert_eq!(read_current_version().unwrap().as_deref(), Some("cand-1"));
+    });
+}
+
+#[test]
+fn reconcile_dead_session_missing_candidate_rolls_back() {
+    with_temp_jcode_home(|| {
+        install_pending_fixture("prev-current", "prev-shared");
+        // Point symlinks at the (never-installed) candidate version markers.
+        // The version dir for "cand-missing" does not exist.
+        std::fs::write(current_version_file().unwrap(), "cand-missing").unwrap();
+        std::fs::write(shared_server_version_file().unwrap(), "cand-missing").unwrap();
+        let mut manifest = BuildManifest::default();
+        manifest
+            .set_pending_activation(stale_pending("dead-session", "cand-missing", Some("fp-x")))
+            .expect("set pending");
+
+        assert_eq!(
+            reconcile_none_alive(),
+            PendingReconcileOutcome::RolledBack("cand-missing".to_string())
+        );
+        let manifest = BuildManifest::load().expect("load");
+        assert!(manifest.pending_activation.is_none());
+        assert_eq!(manifest.canary_status, Some(CanaryStatus::Failed));
+        assert_eq!(
+            read_current_version().unwrap().as_deref(),
+            Some("prev-current")
+        );
+        assert_eq!(
+            read_shared_server_version().unwrap().as_deref(),
+            Some("prev-shared")
+        );
+    });
+}
+
+#[test]
+fn reconcile_dead_session_fingerprint_mismatch_rolls_back() {
+    with_temp_jcode_home(|| {
+        install_pending_fixture("prev-current", "prev-shared");
+        write_candidate_with_sidecar("cand-2", "fp-actual");
+        std::fs::write(current_version_file().unwrap(), "cand-2").unwrap();
+        std::fs::write(shared_server_version_file().unwrap(), "cand-2").unwrap();
+        let mut manifest = BuildManifest::default();
+        manifest
+            .set_pending_activation(stale_pending("dead-session", "cand-2", Some("fp-expected")))
+            .expect("set pending");
+
+        assert_eq!(
+            reconcile_none_alive(),
+            PendingReconcileOutcome::RolledBack("cand-2".to_string())
+        );
+        assert_eq!(
+            read_current_version().unwrap().as_deref(),
+            Some("prev-current")
+        );
+        assert_eq!(
+            read_shared_server_version().unwrap().as_deref(),
+            Some("prev-shared")
+        );
+    });
+}
+
+#[test]
+fn reconcile_live_initiator_is_left_alone() {
+    with_temp_jcode_home(|| {
+        let mut manifest = BuildManifest::default();
+        manifest
+            .set_pending_activation(stale_pending("live-session", "cand-3", None))
+            .expect("set pending");
+
+        let outcome = reconcile_stale_pending_activation(
+            chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES),
+            |sid| sid == "live-session",
+        )
+        .expect("reconcile");
+        assert_eq!(outcome, PendingReconcileOutcome::InitiatorAlive);
+        assert!(BuildManifest::load().unwrap().pending_activation.is_some());
+    });
+}
+
+#[test]
+fn reconcile_fresh_record_is_untouched_even_with_dead_session() {
+    with_temp_jcode_home(|| {
+        let mut pending = stale_pending("dead-session", "cand-4", None);
+        pending.requested_at = Utc::now();
+        let mut manifest = BuildManifest::default();
+        manifest
+            .set_pending_activation(pending)
+            .expect("set pending");
+
+        assert_eq!(reconcile_none_alive(), PendingReconcileOutcome::StillFresh);
+        assert!(BuildManifest::load().unwrap().pending_activation.is_some());
+    });
+}
+
+#[test]
+fn reconcile_preserves_live_canary_from_other_session() {
+    with_temp_jcode_home(|| {
+        install_pending_fixture("prev-current", "prev-shared");
+        write_candidate_with_sidecar("cand-5", "fp-5");
+        update_current_symlink("cand-5").expect("point current at candidate");
+        let mut manifest = BuildManifest::default();
+        manifest.canary = Some("other-canary".to_string());
+        manifest.canary_session = Some("live-other".to_string());
+        manifest.canary_status = Some(CanaryStatus::Testing);
+        manifest
+            .set_pending_activation(stale_pending("dead-session", "cand-5", Some("fp-5")))
+            .expect("set pending");
+
+        let outcome = reconcile_stale_pending_activation(
+            chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES),
+            |sid| sid == "live-other",
+        )
+        .expect("reconcile");
+        assert_eq!(
+            outcome,
+            PendingReconcileOutcome::Skipped("cand-5".to_string())
+        );
+
+        let manifest = BuildManifest::load().expect("load");
+        assert!(manifest.pending_activation.is_none(), "record cleared");
+        assert_eq!(manifest.canary.as_deref(), Some("other-canary"));
+        assert_eq!(manifest.canary_session.as_deref(), Some("live-other"));
+        assert_eq!(manifest.canary_status, Some(CanaryStatus::Testing));
+        assert_eq!(read_current_version().unwrap().as_deref(), Some("cand-5"));
+        assert_eq!(
+            read_shared_server_version().unwrap().as_deref(),
+            Some("prev-shared")
+        );
+    });
+}
+
+#[test]
+fn reconcile_rollback_does_not_clobber_newer_publish() {
+    with_temp_jcode_home(|| {
+        install_pending_fixture("prev-current", "prev-shared");
+        // Someone published a newer build after the stale record was written.
+        let exe = std::env::current_exe().expect("current exe");
+        install_binary_at_version(&exe, "newer-publish").expect("install newer");
+        update_current_symlink("newer-publish").expect("publish newer current");
+        std::fs::write(shared_server_version_file().unwrap(), "cand-6").unwrap();
+        let mut manifest = BuildManifest::default();
+        manifest
+            .set_pending_activation(stale_pending("dead-session", "cand-6", Some("fp-6")))
+            .expect("set pending");
+
+        assert_eq!(
+            reconcile_none_alive(),
+            PendingReconcileOutcome::RolledBack("cand-6".to_string())
+        );
+        // current still points at the newer publish, only shared-server restored.
+        assert_eq!(
+            read_current_version().unwrap().as_deref(),
+            Some("newer-publish")
+        );
+        assert_eq!(
+            read_shared_server_version().unwrap().as_deref(),
+            Some("prev-shared")
+        );
+    });
+}

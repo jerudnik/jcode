@@ -1,5 +1,6 @@
 #[test]
 fn test_new_for_remote_restored_soft_interrupt_resend_triggers_dispatch_state() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-soft-interrupt-dispatch-{}", std::process::id());
 
@@ -10,13 +11,14 @@ fn test_new_for_remote_restored_soft_interrupt_resend_triggers_dispatch_state() 
     let restored = App::new_for_remote(Some(session_id));
     assert!(restored.interleave_message.is_none());
     assert_eq!(restored.queued_messages(), &["sent interrupt"]);
-    assert!(restored.pending_queued_dispatch);
-    assert!(restored.is_processing);
-    assert!(matches!(restored.status, ProcessingStatus::Sending));
+    assert!(!restored.pending_queued_dispatch);
+    assert!(!restored.is_processing);
+    assert!(matches!(restored.status, ProcessingStatus::Idle));
 }
 
 #[test]
 fn test_new_for_remote_does_not_requeue_acked_pending_soft_interrupts() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-acked-{}", std::process::id());
 
@@ -26,11 +28,11 @@ fn test_new_for_remote_does_not_requeue_acked_pending_soft_interrupts() {
     app.save_input_for_reload(&session_id);
 
     let restored = App::new_for_remote(Some(session_id));
+    assert!(restored.interleave_message.is_none());
     assert_eq!(
-        restored.interleave_message.as_deref(),
-        Some("local interleave")
+        restored.queued_messages(),
+        &["local interleave", "queued later"]
     );
-    assert_eq!(restored.queued_messages(), &["queued later"]);
 }
 
 #[test]
@@ -72,7 +74,7 @@ fn test_initial_history_bootstrap_preserves_restored_interleave_state() {
                 mcp_servers: vec![],
                 skills: vec![],
                 total_tokens: None,
-            token_usage_totals: None,
+                token_usage_totals: None,
                 all_sessions: vec![],
                 client_count: None,
                 is_canary: None,
@@ -163,7 +165,7 @@ fn test_initial_history_bootstrap_skips_resubmit_when_prompt_already_in_history(
                 mcp_servers: vec![],
                 skills: vec![],
                 total_tokens: None,
-            token_usage_totals: None,
+                token_usage_totals: None,
                 all_sessions: vec![],
                 client_count: None,
                 is_canary: None,

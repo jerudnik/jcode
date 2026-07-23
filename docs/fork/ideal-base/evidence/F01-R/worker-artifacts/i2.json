@@ -1,0 +1,39 @@
+{
+ "node_id": "i2",
+ "worker_session": "session_jaguar_1784361265525_1c7d903c3ac8ff92",
+ "worker_name": "jaguar",
+ "model": "gpt-5.6-terra",
+ "artifact": {
+  "confidence": "high",
+  "edge_cases_considered": [
+   "Watchdog fires during Draining before CleaningUp.",
+   "Watchdog fires partway through ordered cleanup after socket or registry removal but before other A0 sidecars.",
+   "Coordinator completes just before the deadline, requiring disarm/race-safe forced-exit suppression.",
+   "A cleanup operation hangs, so the hard deadline is needed but cannot be allowed to relabel the result as successful Exited.",
+   "SIGTERM starts as a normal exit but exceeds its budget, so its forced outcome must not silently exempt A0 residue requirements."
+  ],
+  "evidence": [
+   "docs/fork/ideal-base/reviews/F01-architecture-critique.md:10-28 classifies three blocking gaps separately and names watchdog behavior as a material contradiction.",
+   "docs/fork/ideal-base/reviews/F01-architecture-critique.md:174-213 classifies I2 as IMPORTANT, explains its contradiction, and supplies the baseline correction.",
+   "docs/fork/ideal-base/reviews/F01-architecture-critique.md:291-306 item 8 makes watchdog reconciliation with I2/I5/I7/A0 required for F01 acceptance.",
+   "docs/fork/ideal-base/evidence/F01/design.md:140-144 declares a single coordinator and forbids direct voluntary exits outside it.",
+   "docs/fork/ideal-base/evidence/F01/design.md:146-186 defines Running -> Draining -> CleaningUp/Handoff -> Exited, retains an OS-thread watchdog, and says it covers all cleanup.",
+   "docs/fork/ideal-base/evidence/F01/design.md:188-195 explicitly preserves the SIGTERM watchdog as a hard bound.",
+   "docs/fork/ideal-base/evidence/F01/design.md:252-269 states I2, I5, and I7, including the watchdog-preemption cleanup-skip exception.",
+   "crates/jcode-app-core/src/server.rs:1204-1223 shows current SIGTERM starts a detached OS thread that sleeps three seconds and directly process::exit(0).",
+   "docs/fork/ideal-base/ACCEPTANCE_STANDARD.md:7-15 requires a single bounded authority and coherent-or-removed sidecars on normal daemon exits."
+  ],
+  "findings": "I2 is substantiated. Severity classification: it is an IMPORTANT finding, not one of the critique's three items under \u201cBlocking findings\u201d (review:174-195; review:10-28). However, it is an acceptance-gate blocker: the required F01 revision gate expressly requires reconciling watchdog behavior with I2, I5, I7, and A0 before acceptance (review:291-306, item 8). The design has a direct internal contradiction: it calls ShutdownCoordinator the only voluntary exit path and says direct process::exit outside it is a violation (design:140-144), but retains an OS-thread watchdog as the hard bound (design:165-178; wiring explicitly says it stays, design:188-195). The declared phase graph and I2 only allow Exited after Draining then CleaningUp, except Handoff (design:146-154, 257-258), while I7 authorizes watchdog preemption to skip cleanup (design:267-269). That forced direct exit therefore has no coherent state-machine outcome and cannot satisfy I2. I5 also budgets coordinator completion as drain deadline plus cleanup deadline, but merely says it is enforced by the OS-thread watchdog (design:263-265), without ensuring those budgets fit below the watchdog deadline. Runtime evidence confirms the risk: on SIGTERM the existing code starts an independent OS thread that sleeps 3 seconds then calls process::exit(0), before the handler's direct unregister-and-exit sequence (server.rs:1204-1223). A forced exit can occur while the future coordinator is still Draining and before CleaningUp, after which it cannot reliably log skipped cleanup. This conflicts with A0's requirement that normal exit paths use one bounded authority and that socket/debug socket/lock/hash/metadata/registry sidecars are live-and-coherent or fully removed (ACCEPTANCE_STANDARD.md:7-15). Therefore I7's 'watchdog preemption is the only allowed skip' exception is insufficient and contradicts A0.\n\nRequired correction criteria: (1) the coordinator, not the SIGTERM handler or a detached external thread, exclusively arms, resets/disarms, and records the watchdog; no independently reachable direct process::exit may remain; (2) model a distinct ForcedExit/ForcedTermination terminal outcome, never report it as successfully completed Exited, and make its reason/deadline/last completed cleanup step durable or synchronously observable before termination; (3) state an explicit hard-deadline inequality that budgets intake stop, drain/abandon, every A0-required cleanup step, and logging below the watchdog deadline, with a defined failure policy for an individual step; (4) tighten I7 so skipped steps cannot leave an A0 sidecar incoherent. Either all A0-required sidecars must complete before forced termination, or the design must define and test an approved recovery contract that still meets A0 rather than calling skipped cleanup success; (5) test the forced path at each preemption boundary, especially during Draining and each cleanup step, asserting no successful Exited transition, exact exit status, exact lifecycle record, no owned descendants, and the full socket/debug socket/lock/hash/metadata/registry residue contract. Reconcile those tests with the normal SIGTERM fixture required by A0.",
+  "open_questions": [
+   "Which durable mechanism, if any, can record partial cleanup state before a process-level forced termination and support recovery without weakening A0?",
+   "Does the revised acceptance standard classify a forced SIGTERM termination as abnormal/involuntary, or must it retain all normal-SIGTERM A0 cleanup guarantees? The revision must decide this explicitly.",
+   "What per-step cleanup budgets make the total hard-deadline inequality feasible under the current three-second SIGTERM window?"
+  ],
+  "validation": "Read-only cross-check of the complete F01 design lifecycle/authority/coverage/invariant sections, the full I2 review section and revision gate, the acceptance standard A0, and current SIGTERM watchdog source. No code or runtime behavior was changed or executed.",
+  "what_i_did_not_check": [
+   "I did not design or validate the eventual concrete coordinator API, timer cancellation primitive, or durable cleanup-journal implementation.",
+   "I did not run live process fixtures because this assigned task is a design-only, no-edit review.",
+   "I did not re-audit I1, I3-I5, or the three blocking architecture findings except where I5 and A0 directly constrain I2."
+  ]
+ }
+}

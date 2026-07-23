@@ -632,7 +632,7 @@ fn test_filter_matches_recent_message_content() {
 
 #[test]
 fn test_loading_preview_refreshes_search_index_for_picker_filtering() {
-    let _env_lock = crate::storage::lock_test_env();
+    let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("temp dir");
     let previous_home = std::env::var("JCODE_HOME").ok();
     crate::env::set_var("JCODE_HOME", temp.path());

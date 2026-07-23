@@ -1,15 +1,28 @@
 use super::events::desktop_event_from_server_value;
 use super::*;
 use serde_json::{Value, json};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
-#[cfg(unix)]
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(unix)]
+use std::sync::{Mutex, MutexGuard};
+
+#[cfg(unix)]
+#[path = "tests/fake_server.rs"]
+mod fake_server;
+#[cfg(unix)]
+use fake_server::{accept_first_requesting_client, read_fake_server_request, unique_socket_path};
 
 #[cfg(unix)]
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(unix)]
+fn lock_test_env() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn validates_safe_session_ids() -> Result<()> {
@@ -435,15 +448,8 @@ fn desktop_session_worker_slots_are_bounded_and_released() -> Result<()> {
 #[cfg(unix)]
 #[test]
 fn desktop_worker_roundtrips_message_with_fake_server() -> Result<()> {
-    let _guard = ENV_LOCK.lock().unwrap();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-smoke-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let _guard = lock_test_env();
+    let socket_path = unique_socket_path("sm");
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     let previous_socket = std::env::var_os("JCODE_SOCKET");
@@ -487,19 +493,9 @@ fn desktop_worker_roundtrips_message_with_fake_server() -> Result<()> {
 #[cfg(unix)]
 #[test]
 fn desktop_worker_emits_reloaded_before_real_done_after_fake_reload() -> Result<()> {
-    let _guard = ENV_LOCK.lock().unwrap();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-old-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
+    let _guard = lock_test_env();
+    let socket_path = unique_socket_path("ro");
+    let new_socket_path = unique_socket_path("rn");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&new_socket_path);
     let listener = UnixListener::bind(&socket_path)?;
@@ -558,19 +554,9 @@ fn desktop_worker_emits_reloaded_before_real_done_after_fake_reload() -> Result<
 #[cfg(unix)]
 #[test]
 fn desktop_worker_rejects_reconnect_session_id_mismatch() -> Result<()> {
-    let _guard = ENV_LOCK.lock().unwrap();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-mismatch-old-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-reload-mismatch-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
+    let _guard = lock_test_env();
+    let socket_path = unique_socket_path("mo");
+    let new_socket_path = unique_socket_path("mn");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&new_socket_path);
     let listener = UnixListener::bind(&socket_path)?;
@@ -619,15 +605,8 @@ fn desktop_worker_rejects_reconnect_session_id_mismatch() -> Result<()> {
 #[cfg(unix)]
 #[test]
 fn desktop_worker_rejects_malformed_server_event_lines() -> Result<()> {
-    let _guard = ENV_LOCK.lock().unwrap();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-malformed-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let _guard = lock_test_env();
+    let socket_path = unique_socket_path("mf");
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     let previous_socket = std::env::var_os("JCODE_SOCKET");
@@ -712,22 +691,9 @@ fn drain_session_events_treats_cancel_completion_as_terminal() -> Result<()> {
 #[cfg(unix)]
 #[test]
 fn validate_reload_socket_path_requires_owned_socket_in_current_directory() -> Result<()> {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let current_socket = std::env::temp_dir().join(format!(
-        "jcode-desktop-reload-validate-current-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket = std::env::temp_dir().join(format!(
-        "jcode-desktop-reload-validate-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let non_socket = std::env::temp_dir().join(format!(
-        "jcode-desktop-reload-validate-file-{}-{nonce}",
-        std::process::id(),
-    ));
+    let current_socket = unique_socket_path("vc");
+    let new_socket = unique_socket_path("vn");
+    let non_socket = unique_socket_path("vf");
     let _ = std::fs::remove_file(&current_socket);
     let _ = std::fs::remove_file(&new_socket);
     let _ = std::fs::remove_file(&non_socket);
@@ -756,15 +722,8 @@ fn validate_reload_socket_path_requires_owned_socket_in_current_directory() -> R
 #[cfg(unix)]
 #[test]
 fn workspace_send_message_uses_shared_server_instead_of_prompt_argv() -> Result<()> {
-    let _guard = ENV_LOCK.lock().unwrap();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-workspace-send-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let _guard = lock_test_env();
+    let socket_path = unique_socket_path("ws");
     let _ = std::fs::remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
     let previous_socket = std::env::var_os("JCODE_SOCKET");
@@ -793,19 +752,9 @@ fn workspace_send_message_uses_shared_server_instead_of_prompt_argv() -> Result<
 #[cfg(unix)]
 #[test]
 fn desktop_workers_reconnect_independently_across_same_fake_reload() -> Result<()> {
-    let _guard = ENV_LOCK.lock().unwrap();
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-multi-reload-old-{}-{nonce}.sock",
-        std::process::id(),
-    ));
-    let new_socket_path = std::env::temp_dir().join(format!(
-        "jcode-desktop-worker-multi-reload-new-{}-{nonce}.sock",
-        std::process::id(),
-    ));
+    let _guard = lock_test_env();
+    let socket_path = unique_socket_path("xo");
+    let new_socket_path = unique_socket_path("xn");
     let _ = std::fs::remove_file(&socket_path);
     let _ = std::fs::remove_file(&new_socket_path);
     let listener = UnixListener::bind(&socket_path)?;
@@ -1159,41 +1108,6 @@ fn assert_client_reload_sequence(events: Vec<DesktopSessionEvent>, session_id: &
     );
     assert!(reload_index < reloaded_index, "{events:?}");
     assert!(reloaded_index < done_indices[0], "{events:?}");
-}
-
-#[cfg(unix)]
-fn accept_first_requesting_client(
-    listener: &UnixListener,
-) -> Result<(BufReader<UnixStream>, UnixStream, Value)> {
-    loop {
-        let (stream, _) = listener.accept()?;
-        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-        let mut reader = BufReader::new(stream.try_clone()?);
-        let mut first_line = String::new();
-        match reader.read_line(&mut first_line) {
-            Ok(0) => continue,
-            Ok(_) => {
-                let first_request = serde_json::from_str(first_line.trim())?;
-                return Ok((reader, stream, first_request));
-            }
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                ) =>
-            {
-                continue;
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-}
-
-#[cfg(unix)]
-fn read_fake_server_request(reader: &mut BufReader<UnixStream>) -> Result<Value> {
-    let mut line = String::new();
-    reader.read_line(&mut line)?;
-    Ok(serde_json::from_str(line.trim())?)
 }
 
 fn restore_env_var(key: &str, value: Option<std::ffi::OsString>) {

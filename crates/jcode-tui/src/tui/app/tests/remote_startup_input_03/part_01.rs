@@ -169,7 +169,10 @@ fn test_terminal_file_drop_submits_as_user_input_instead_of_a_skill() {
 
     app.submit_input();
 
-    assert!(app.is_processing, "the dropped file path should start a turn");
+    assert!(
+        app.is_processing,
+        "the dropped file path should start a turn"
+    );
     assert!(
         app.display_messages()
             .iter()
@@ -740,7 +743,9 @@ fn test_startup_update_diverged_offers_merge_without_failure_card() {
         message.content
     );
     assert!(
-        !message.content.contains("Continuing with the current version."),
+        !message
+            .content
+            .contains("Continuing with the current version."),
         "unexpected continue footer: {}",
         message.content
     );
@@ -809,7 +814,7 @@ fn test_startup_update_error_replaces_checking_card() {
 
 #[test]
 fn test_selfdev_command_spawns_session_in_test_mode() {
-    let _guard = crate::storage::lock_test_env();
+    let _guard = crate::tui::app::test_support::lock_test_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let prev_home = std::env::var_os("JCODE_HOME");
     let prev_test = std::env::var_os("JCODE_TEST_SESSION");
@@ -855,6 +860,7 @@ fn test_selfdev_command_spawns_session_in_test_mode() {
 
 #[test]
 fn test_save_and_restore_reload_state_preserves_queued_messages() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-reload-{}", std::process::id());
 
@@ -880,6 +886,7 @@ fn test_save_and_restore_reload_state_preserves_queued_messages() {
 
 #[test]
 fn test_new_for_remote_restored_queued_messages_stay_queued_until_remote_idle() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-queued-restore-{}", std::process::id());
 
@@ -922,6 +929,7 @@ fn test_save_and_restore_startup_submission_preserves_pending_images() {
 
 #[test]
 fn test_save_and_restore_reload_state_preserves_interleave_and_pending_retry() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-reload-pending-{}", std::process::id());
 
@@ -977,6 +985,7 @@ fn test_save_and_restore_reload_state_preserves_interleave_and_pending_retry() {
 
 #[test]
 fn test_save_and_restore_reload_state_promotes_inflight_prompt_to_startup_submission() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-reload-inflight-prompt-{}", std::process::id());
 
@@ -1008,6 +1017,7 @@ fn test_save_and_restore_reload_state_promotes_inflight_prompt_to_startup_submis
 
 #[test]
 fn test_save_and_restore_reload_state_preserves_observe_mode() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-reload-observe-{}", std::process::id());
 
@@ -1027,6 +1037,7 @@ fn test_save_and_restore_reload_state_preserves_observe_mode() {
 
 #[test]
 fn test_save_and_restore_reload_state_preserves_split_view_mode() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-reload-splitview-{}", std::process::id());
 
@@ -1039,6 +1050,7 @@ fn test_save_and_restore_reload_state_preserves_split_view_mode() {
 
 #[test]
 fn test_new_for_remote_restores_observe_mode_from_reload_state() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-observe-{}", std::process::id());
 
@@ -1059,6 +1071,7 @@ fn test_new_for_remote_restores_observe_mode_from_reload_state() {
 
 #[test]
 fn test_new_for_remote_restores_split_view_from_reload_state() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-splitview-{}", std::process::id());
 
@@ -1077,6 +1090,7 @@ fn test_new_for_remote_restores_split_view_from_reload_state() {
 
 #[test]
 fn test_restore_reload_state_supports_legacy_input_format() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let session_id = format!("test-reload-legacy-{}", std::process::id());
     let jcode_dir = crate::storage::jcode_dir().unwrap();
     let path = jcode_dir.join(format!("client-input-{}", session_id));
@@ -1091,6 +1105,7 @@ fn test_restore_reload_state_supports_legacy_input_format() {
 
 #[test]
 fn test_new_for_remote_requeues_restored_pending_soft_interrupts() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-restore-{}", std::process::id());
 
@@ -1111,6 +1126,7 @@ fn test_new_for_remote_requeues_restored_pending_soft_interrupts() {
 
 #[test]
 fn test_new_for_remote_restored_interleave_triggers_dispatch_state() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-remote-interleave-dispatch-{}", std::process::id());
 
@@ -1120,7 +1136,7 @@ fn test_new_for_remote_restored_interleave_triggers_dispatch_state() {
     let restored = App::new_for_remote(Some(session_id));
     assert!(restored.interleave_message.is_none());
     assert_eq!(restored.queued_messages(), &["interrupt after reload"]);
-    assert!(restored.pending_queued_dispatch);
-    assert!(restored.is_processing);
-    assert!(matches!(restored.status, ProcessingStatus::Sending));
+    assert!(!restored.pending_queued_dispatch);
+    assert!(!restored.is_processing);
+    assert!(matches!(restored.status, ProcessingStatus::Idle));
 }

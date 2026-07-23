@@ -75,6 +75,7 @@ fn test_disconnect_still_clears_pending_for_non_queued_shapes() {
 
 #[test]
 fn test_save_input_for_reload_persists_inflight_queued_continuation() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-391-inflight-{}", std::process::id());
 
@@ -112,6 +113,7 @@ fn test_save_input_for_reload_persists_inflight_queued_continuation() {
 
 #[test]
 fn test_save_input_for_reload_removes_stale_file_when_state_is_empty() {
+    let _env_scope = crate::tui::app::test_support::TestEnvScope::new();
     let mut app = create_test_app();
     let session_id = format!("test-391-stale-{}", std::process::id());
 

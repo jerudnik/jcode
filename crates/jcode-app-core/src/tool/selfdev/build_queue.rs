@@ -563,6 +563,11 @@ impl SelfDevTool {
                 )
                 .await;
 
+            if let Some(reason) = &info.refused {
+                crate::logging::warn(&format!(
+                    "selfdev build task refused (request continues via status-file follow-up): {reason}"
+                ));
+            }
             request.background_task_id = Some(info.task_id.clone());
             request.output_file = Some(info.output_file.display().to_string());
             request.status_file = Some(info.status_file.display().to_string());
@@ -667,6 +672,11 @@ impl SelfDevTool {
             )
             .await;
 
+        if let Some(reason) = &info.refused {
+            crate::logging::warn(&format!(
+                "selfdev build task refused (request continues via status-file follow-up): {reason}"
+            ));
+        }
         request.background_task_id = Some(info.task_id.clone());
         request.output_file = Some(info.output_file.display().to_string());
         request.status_file = Some(info.status_file.display().to_string());
@@ -976,6 +986,11 @@ impl SelfDevTool {
             )
             .await;
 
+        if let Some(reason) = &info.refused {
+            crate::logging::warn(&format!(
+                "selfdev build task refused (request continues via status-file follow-up): {reason}"
+            ));
+        }
         request.background_task_id = Some(info.task_id.clone());
         request.output_file = Some(info.output_file.display().to_string());
         request.status_file = Some(info.status_file.display().to_string());

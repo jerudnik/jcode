@@ -96,7 +96,16 @@ pub(super) fn estimate_prepared_messages_bytes(prepared: &PreparedMessages) -> u
 }
 
 pub(super) fn estimate_prepared_chat_frame_bytes(prepared: &PreparedChatFrame) -> usize {
+    let mut seen_sections = std::collections::HashSet::new();
+    let section_bytes = prepared
+        .sections
+        .iter()
+        .filter(|section| seen_sections.insert(Arc::as_ptr(&section.prepared) as usize))
+        .map(|section| estimate_prepared_messages_bytes(&section.prepared))
+        .sum::<usize>();
+
     prepared.sections.capacity() * std::mem::size_of::<PreparedSection>()
+        + section_bytes
         + estimate_usize_vec_bytes(&prepared.wrapped_user_indices)
         + estimate_usize_vec_bytes(&prepared.wrapped_user_prompt_starts)
         + estimate_usize_vec_bytes(&prepared.wrapped_user_prompt_ends)

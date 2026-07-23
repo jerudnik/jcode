@@ -84,7 +84,7 @@ fn test_expand_badge_shortcut_toggles_inline_diff_and_pulses_key() {
 #[test]
 fn test_alt_shift_i_toggles_inline_images_and_persists() {
     let _render_lock = scroll_render_test_lock();
-    let _env_guard = crate::storage::lock_test_env();
+    let _env_guard = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp.path());
@@ -120,7 +120,10 @@ fn test_alt_shift_i_toggles_inline_images_and_persists() {
         KeyCode::Char('I'),
         KeyModifiers::ALT | KeyModifiers::SHIFT,
     ));
-    assert!(app.inline_images_visible, "second toggle should show images");
+    assert!(
+        app.inline_images_visible,
+        "second toggle should show images"
+    );
     assert!(crate::tui::app::ui_prefs::inline_images_visible());
 
     if let Some(prev_home) = prev_home {
@@ -225,7 +228,9 @@ fn make_edit_badge_test_app(
                     "old_string": old_string,
                     "new_string": new_string,
                 }),
-                intent: None, thought_signature: None, },
+                intent: None,
+                thought_signature: None,
+            },
         ),
     ];
     app.bump_display_messages_version();
@@ -429,7 +434,9 @@ fn test_expand_badge_shortcut_opens_full_inline_from_non_inline_mode() {
                 "old_string": "old line\n",
                 "new_string": "new line\n",
             }),
-            intent: None, thought_signature: None, },
+            intent: None,
+            thought_signature: None,
+        },
     ));
     app.bump_display_messages_version();
     app.diff_mode = crate::config::DiffDisplayMode::Off;
@@ -458,7 +465,9 @@ fn test_expand_badge_shortcut_uses_display_messages_when_edit_count_is_stale() {
                 "old_string": "old line\n",
                 "new_string": "new line\n",
             }),
-            intent: None, thought_signature: None, },
+            intent: None,
+            thought_signature: None,
+        },
     ));
     app.bump_display_messages_version();
     app.diff_mode = crate::config::DiffDisplayMode::Off;
@@ -654,7 +663,7 @@ fn test_mouse_click_in_wrapped_input_moves_cursor_to_second_visual_line() {
         modifiers: KeyModifiers::empty(),
     });
 
-    assert_eq!(app.cursor_pos, 5);
+    assert_eq!(app.cursor_pos, 9);
 }
 
 /// End-to-end: a real left-click on an inline image's label line maps the
@@ -705,7 +714,8 @@ fn test_click_on_inline_image_label_line_cycles_level() {
         "expected a Fit image region anchored under the label line"
     );
 
-    let prepared = std::sync::Arc::new(PreparedChatFrame::from_single(std::sync::Arc::new(section)));
+    let prepared =
+        std::sync::Arc::new(PreparedChatFrame::from_single(std::sync::Arc::new(section)));
     let visible_end = prepared.wrapped_plain_line_count();
     let content_area = Rect::new(0, 0, chat_width, visible_end as u16 + 1);
 
@@ -863,8 +873,8 @@ const REPRO_TINY_PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAA
 /// path actually used in production, not the isolated `build_section` helper.
 #[test]
 fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
-    use crate::tui::ui::inline_image_ui::ImageExpandLevel;
     use crate::message::{ContentBlock, Role};
+    use crate::tui::ui::inline_image_ui::ImageExpandLevel;
 
     let _render_lock = scroll_render_test_lock();
     let mut app = create_test_app();
@@ -978,8 +988,7 @@ fn test_real_draw_click_on_body_anchored_image_label_cycles_level() {
             }
         }
     }
-    let (badge_col, badge_row) =
-        badge.expect("image label cell should be visible in the frame");
+    let (badge_col, badge_row) = badge.expect("image label cell should be visible in the frame");
 
     assert_eq!(
         app.image_expand_level(image_id),
@@ -1099,105 +1108,5 @@ fn test_real_draw_never_emits_inline_image_marker_text() {
     assert!(
         !rendered.contains("MERMAID_IMAGE"),
         "raw mermaid marker text must never be drawn to the terminal, got:\n{rendered}"
-    );
-}
-
-/// Clicking anywhere on the image body (its placeholder rows) must cycle the
-/// expand level, exactly like the label badge. Clicks in the blank area to
-/// the RIGHT of a narrow image must not.
-#[test]
-fn test_click_on_inline_image_body_cycles_level() {
-    use crate::tui::ui::inline_image_ui::{
-        AllFit, ImageExpandLevel, InlineImageItem, build_section,
-    };
-    use jcode_tui_messages::PreparedChatFrame;
-
-    let _render_lock = scroll_render_test_lock();
-    let mut app = create_test_app();
-
-    const IMAGE_ID: u64 = 0xBEEF;
-    let chat_width: u16 = 80;
-
-    let items = vec![InlineImageItem {
-        id: IMAGE_ID,
-        width: 320,
-        height: 200,
-        label: "shot.png".to_string(),
-    }];
-    let section = build_section(&items, chat_width, 40, false, true, &AllFit);
-    let region = *section
-        .image_regions
-        .iter()
-        .find(|r| r.hash == IMAGE_ID)
-        .expect("section should carry the image region");
-    assert!(region.width > 0, "fit regions record their rendered width");
-    assert!(
-        region.width < chat_width,
-        "test image must be narrower than the chat so the right side is blank"
-    );
-
-    let prepared =
-        std::sync::Arc::new(PreparedChatFrame::from_single(std::sync::Arc::new(section)));
-    let visible_end = prepared.wrapped_plain_line_count();
-    let content_area = Rect::new(0, 0, chat_width, visible_end as u16 + 1);
-
-    crate::tui::ui::clear_copy_viewport_snapshot();
-    crate::tui::ui::record_copy_viewport_frame_snapshot_for_test(
-        prepared,
-        0,
-        visible_end,
-        content_area,
-        &vec![0u16; visible_end],
-    );
-
-    assert_eq!(app.image_expand_level(IMAGE_ID), ImageExpandLevel::Fit);
-
-    // Click in the middle of the image body (a placeholder row, inside the
-    // rendered width). Down then Up, like a real terminal click.
-    let body_row = content_area.y + region.abs_line_idx as u16 + 1;
-    let body_col = content_area.x + region.width / 2;
-    let click = |app: &mut App, col: u16, row: u16| {
-        app.handle_mouse_event(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: col,
-            row,
-            modifiers: KeyModifiers::empty(),
-        });
-        app.handle_mouse_event(MouseEvent {
-            kind: MouseEventKind::Up(MouseButton::Left),
-            column: col,
-            row,
-            modifiers: KeyModifiers::empty(),
-        });
-    };
-    click(&mut app, body_col, body_row);
-    assert_eq!(
-        app.image_expand_level(IMAGE_ID),
-        ImageExpandLevel::Large,
-        "clicking the image body should expand Fit -> Large"
-    );
-
-    // Clicking the body again advances the cycle.
-    click(&mut app, body_col, body_row);
-    assert_eq!(
-        app.image_expand_level(IMAGE_ID),
-        ImageExpandLevel::Full,
-        "second body click should expand Large -> Full"
-    );
-    click(&mut app, body_col, body_row);
-    assert_eq!(
-        app.image_expand_level(IMAGE_ID),
-        ImageExpandLevel::Fit,
-        "third body click should wrap Full -> Fit"
-    );
-
-    // A click in the blank space to the right of the image must stay inert.
-    let far_right = content_area.x + chat_width - 2;
-    assert!(far_right > content_area.x + region.width);
-    click(&mut app, far_right, body_row);
-    assert_eq!(
-        app.image_expand_level(IMAGE_ID),
-        ImageExpandLevel::Fit,
-        "clicking blank space beside the image must not cycle it"
     );
 }

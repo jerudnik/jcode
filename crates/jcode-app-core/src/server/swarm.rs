@@ -4,7 +4,7 @@ use super::{persist_swarm_state_for, remove_persisted_swarm_state_for};
 use crate::agent::Agent;
 use crate::plan::{PlanItem, newly_ready_item_ids};
 use crate::protocol::{NotificationType, ServerEvent};
-use crate::session::Session;
+use crate::tool::subagent::{SubagentParent, run_subagent_worker};
 use anyhow::Result;
 use futures::future::try_join_all;
 use jcode_swarm_core::{
@@ -270,6 +270,16 @@ pub(super) async fn sweep_dead_pid_swarm_members(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     _swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
 ) -> Vec<String> {
+    // The sweep resolves JCODE_HOME and mutates its persisted session/marker
+    // state. In tests, retain a transferable environment lease across every
+    // await so opportunistic status broadcasts cannot enter another test's
+    // temporary home while that test is constructing its fixture. A foreign
+    // writer-child may itself be calling this best-effort sweep, so defer
+    // rather than blocking against its exclusion and deadlocking the task.
+    #[cfg(test)]
+    let Some(_test_env_lease) = crate::storage::try_lock_test_env_fixture() else {
+        return Vec::new();
+    };
     let _ = crate::session::reconcile_active_sessions();
     // Only members not already in a terminal (dead) state can newly transition
     // to crashed, so skip the rest BEFORE touching disk. This keeps the per-sweep
@@ -1742,49 +1752,40 @@ pub(super) async fn run_swarm_task(
         )
     };
     let parent_session_id = session_id.clone();
-    let mut session = Session::create(
-        Some(session_id),
-        Some(format!("{} (@{} swarm)", description, subagent_type)),
-    );
-    let child_session_id = session.id.clone();
-    session.model = Some(coordinator_model);
-    // Inherit the coordinator's exact auth identity so the forked worker keeps
-    // the same provider/auth route (OAuth vs API, openai-compatible profile)
-    // instead of silently falling back to the config default on persistence.
-    session.provider_key = provider_key;
-    session.route_api_method = route;
-    if let Some(dir) = working_dir {
-        session.working_dir = Some(dir.display().to_string());
-    }
-    session.save()?;
 
     log_swarm_lifecycle(
         "task_start",
         vec![
             ("parent_session_id", parent_session_id.clone()),
-            ("child_session_id", child_session_id.clone()),
             ("subagent_type", subagent_type.to_string()),
             ("description_chars", description.chars().count().to_string()),
             ("prompt_chars", prompt.chars().count().to_string()),
         ],
     );
 
-    let mut allowed: HashSet<String> = registry.tool_names().await.into_iter().collect();
-    for blocked in ["subagent", "task", "todo", "todowrite", "todoread"] {
-        allowed.remove(blocked);
-    }
-    crate::config::config()
-        .tools
-        .apply_to_allowed_set(&mut allowed);
-
-    let mut worker = Agent::new_with_session(provider, registry, session, Some(allowed));
-    match worker.run_once_capture(prompt).await {
+    let parent = SubagentParent {
+        session_id,
+        working_dir,
+        model: coordinator_model,
+        provider_key,
+        route_api_method: route,
+    };
+    match run_subagent_worker(
+        provider,
+        registry,
+        parent,
+        description,
+        subagent_type,
+        prompt,
+        None,
+    )
+    .await
+    {
         Ok(output) => {
             log_swarm_lifecycle(
                 "task_done",
                 vec![
                     ("parent_session_id", parent_session_id),
-                    ("child_session_id", child_session_id),
                     ("subagent_type", subagent_type.to_string()),
                     ("output_chars", output.chars().count().to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
@@ -1798,7 +1799,6 @@ pub(super) async fn run_swarm_task(
                 vec![
                     ("phase", "task_error".to_string()),
                     ("parent_session_id", parent_session_id),
-                    ("child_session_id", child_session_id),
                     ("subagent_type", subagent_type.to_string()),
                     ("error", error.to_string()),
                     ("elapsed_ms", started.elapsed().as_millis().to_string()),
@@ -2129,151 +2129,7 @@ mod tests {
         member
     }
 
-    #[tokio::test]
-    async fn dead_pid_sweep_marks_swarm_member_crashed_without_picker() {
-        let _guard = crate::storage::lock_test_env();
-        let temp_home = tempfile::TempDir::new().expect("temp home");
-        crate::env::set_var("JCODE_HOME", temp_home.path());
-
-        let dead_pid = 99_999_999;
-        let mut session =
-            crate::session::Session::create_with_id("dead-visible-worker".to_string(), None, None);
-        session.mark_active_with_pid(dead_pid);
-        session.save().expect("persist active session");
-
-        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
-        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
-            "swarm-1".to_string(),
-            HashSet::from(["dead-visible-worker".to_string()]),
-        )])));
-        let (mut member, _rx) = swarm_member("dead-visible-worker", "agent", false);
-        member.status = "ready".to_string();
-        swarm_members
-            .write()
-            .await
-            .insert("dead-visible-worker".to_string(), member);
-
-        let changed = super::sweep_dead_pid_swarm_members(&swarm_members, &swarms_by_id).await;
-
-        assert_eq!(changed, vec!["swarm-1".to_string()]);
-        let members = swarm_members.read().await;
-        let member = members.get("dead-visible-worker").expect("member");
-        assert_eq!(member.status, "crashed");
-        assert_eq!(member.detail.as_deref(), Some("client process exited"));
-    }
-
-    #[tokio::test]
-    async fn dead_pid_sweep_then_salvage_requeues_once_without_duplicate_assignment() {
-        let _guard = crate::storage::lock_test_env();
-        let temp_home = tempfile::TempDir::new().expect("temp home");
-        crate::env::set_var("JCODE_HOME", temp_home.path());
-
-        let dead_pid = 99_999_998;
-        let worker_id = "dead-visible-worker-chain";
-        let mut session =
-            crate::session::Session::create_with_id(worker_id.to_string(), None, None);
-        session.mark_active_with_pid(dead_pid);
-        session.save().expect("persist active session");
-
-        let swarm_id = "swarm-1";
-        let swarm_members = Arc::new(RwLock::new(HashMap::new()));
-        let swarms_by_id = Arc::new(RwLock::new(HashMap::from([(
-            swarm_id.to_string(),
-            HashSet::from(["coord".to_string(), worker_id.to_string()]),
-        )])));
-        let swarm_coordinators = Arc::new(RwLock::new(HashMap::from([(
-            swarm_id.to_string(),
-            "coord".to_string(),
-        )])));
-        let swarm_plans = Arc::new(RwLock::new(HashMap::from([(
-            swarm_id.to_string(),
-            VersionedPlan {
-                items: vec![PlanItem {
-                    content: "task".to_string(),
-                    status: "running".to_string(),
-                    priority: "high".to_string(),
-                    id: "task-1".to_string(),
-                    subsystem: None,
-                    file_scope: Vec::new(),
-                    blocked_by: Vec::new(),
-                    assigned_to: Some(worker_id.to_string()),
-                }],
-                version: 1,
-                participants: HashSet::from(["coord".to_string(), worker_id.to_string()]),
-                task_progress: HashMap::from([(
-                    "task-1".to_string(),
-                    crate::server::SwarmTaskProgress {
-                        assigned_session_id: Some(worker_id.to_string()),
-                        last_heartbeat_unix_ms: Some(42),
-                        last_detail: Some("old detail".to_string()),
-                        checkpoint_summary: Some("old checkpoint".to_string()),
-                        checkpoint_count: Some(3),
-                        ..Default::default()
-                    },
-                )]),
-                mode: "light".to_string(),
-                node_meta: HashMap::new(),
-            },
-        )])));
-        let (coord, mut coord_rx) = swarm_member("coord", "coordinator", false);
-        let (mut worker, _worker_rx) = swarm_member(worker_id, "agent", false);
-        worker.status = "running".to_string();
-        {
-            let mut members = swarm_members.write().await;
-            members.insert("coord".to_string(), coord);
-            members.insert(worker_id.to_string(), worker);
-        }
-
-        let changed = super::sweep_dead_pid_swarm_members(&swarm_members, &swarms_by_id).await;
-
-        assert_eq!(changed, vec![swarm_id.to_string()]);
-        {
-            let members = swarm_members.read().await;
-            let member = members.get(worker_id).expect("member");
-            assert_eq!(member.status, "crashed");
-            assert_eq!(member.detail.as_deref(), Some("client process exited"));
-        }
-
-        let outcome = salvage_assignments_of_dead_member(
-            worker_id,
-            swarm_id,
-            &swarm_members,
-            &swarms_by_id,
-            &swarm_plans,
-            &swarm_coordinators,
-        )
-        .await;
-
-        assert_eq!(outcome.requeued_task_ids, vec!["task-1".to_string()]);
-        assert!(outcome.failed_task_ids.is_empty());
-        let plans = swarm_plans.read().await;
-        let plan = plans.get(swarm_id).expect("plan");
-        let task = plan.items.iter().find(|item| item.id == "task-1").unwrap();
-        assert_eq!(task.status, "queued");
-        assert_eq!(
-            task.assigned_to, None,
-            "no duplicate assignment remains after salvage"
-        );
-        let progress = plan.task_progress.get("task-1").expect("progress");
-        assert_eq!(progress.assigned_session_id, None);
-        assert_eq!(progress.dead_assignee_reclaims, Some(1));
-        assert_eq!(progress.last_heartbeat_unix_ms, Some(42));
-        assert_eq!(progress.last_detail.as_deref(), Some("old detail"));
-        let checkpoint_summary = progress.checkpoint_summary.as_deref().unwrap_or_default();
-        assert!(checkpoint_summary.contains("old checkpoint"));
-        assert!(checkpoint_summary.contains("assignment reclaimed"));
-        drop(plans);
-
-        let coord_events: Vec<_> = std::iter::from_fn(|| coord_rx.try_recv().ok()).collect();
-        assert!(
-            coord_events.iter().any(|event| matches!(
-                event,
-                ServerEvent::Notification { message, .. }
-                    if message.contains("died") && message.contains("task-1")
-            )),
-            "coordinator should be notified of dead-PID salvage, got {coord_events:?}"
-        );
-    }
+    include!("swarm_tests/dead_pid.rs");
 
     #[test]
     fn swarm_depth_and_ancestry_follow_report_back_chain() {
