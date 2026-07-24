@@ -147,14 +147,25 @@ pub async fn run_self_dev(
             ));
         }
         let build = build::selfdev_build_command(&repo_dir);
-        output::stderr_info(format!("Building with {}...", build.display));
+        // Verbose build command behind JCODE_SELFDEV_VERBOSE; low-noise default
+        // just shows the concise reload summary below.
+        if std::env::var_os("JCODE_SELFDEV_VERBOSE").is_some() {
+            output::stderr_info(format!("Building with {}...", build.display));
+        }
 
         build::run_selfdev_build(&repo_dir)?;
         build::ensure_source_state_matches(&repo_dir, &source)?;
 
         build::publish_local_current_build_for_source(&repo_dir, &source)?;
 
-        output::stderr_info("✓ Build complete; updated current launcher");
+        // Low-noise, transparent one-liner: the commit and dirty state are what
+        // matter for "which build am I now on". `-v`/JCODE_SELFDEV_VERBOSE keeps
+        // the full build command above for when you want the detail.
+        output::stderr_info(format!(
+            "reloaded onto {}{}",
+            source.short_hash,
+            if source.dirty { "-dirty" } else { "" }
+        ));
     }
 
     let target_binary = build::client_update_candidate(true)
