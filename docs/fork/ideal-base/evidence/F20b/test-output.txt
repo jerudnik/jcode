@@ -1,0 +1,15 @@
+test atomic_publish_tests::concurrent_source_truncation_between_stage_and_rename_preserves_published_copy ... ok
+test atomic_publish_tests::fixed_path_publish_survives_source_truncation_between_stage_and_rename ... ok
+test fixed_path_resolver_tests::client_update_candidate_prefers_fixed_path_over_channels ... ok
+test fixed_path_resolver_tests::shared_server_candidate_prefers_fixed_path_over_channels ... ok
+test tests::normal_shared_server_candidate_allows_shared_channel_matching_stable ... ok
+test tests::normal_shared_server_candidate_ignores_shared_channel_with_corrupt_marker ... ok
+test tests::normal_shared_server_candidate_ignores_shared_channel_with_missing_marker ... ok
+test tests::normal_shared_server_candidate_repairs_stale_shared_channel_to_stable ... ok
+test tests::reconcile_dead_session_missing_candidate_rolls_back ... ok
+test tests::reconcile_dead_session_valid_candidate_completes ... ok
+test tests::shared_server_candidate_prefers_approved_channel_over_current ... ok
+test tests::test_binary_version_hash_mismatch_rejects_publish_candidate ... ok
+test tests::test_client_update_candidate_prefers_dev_binary_for_selfdev ... ok
+test tests::test_dev_binary_source_metadata_mismatch_rejects_publish_candidate ... ok
+test result: ok. 63 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.02s
