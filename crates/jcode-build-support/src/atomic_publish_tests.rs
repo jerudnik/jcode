@@ -7,12 +7,10 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
-fn atomic_publish_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    LOCK.get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+// Serialize on the ONE crate-global publish lock so these tests (which arm the
+// process-global INSTALL_STAGE_HOOK) never overlap with resolver/home tests in
+// other modules that also drive the publish path.
+use super::publish_test_lock as atomic_publish_test_lock;
 
 fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', "'\\''"))

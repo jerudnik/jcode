@@ -583,6 +583,20 @@ type InstallStageHook = Box<dyn FnOnce(&Path, &Path) + Send + 'static>;
 #[cfg(test)]
 static INSTALL_STAGE_HOOK: std::sync::Mutex<Option<InstallStageHook>> = std::sync::Mutex::new(None);
 
+/// One process-global lock serializing EVERY test that touches shared publish
+/// state: the `INSTALL_STAGE_HOOK` static and the `JCODE_HOME` env var. The
+/// publish path (`install_binary_at_version`, `publish_current_fixed`) reads the
+/// global hook, and resolution reads `JCODE_HOME`, so any two tests exercising
+/// those must not overlap under multithreaded runs. All test modules in this
+/// crate acquire this before arming the hook or mutating `JCODE_HOME`.
+#[cfg(test)]
+pub(crate) fn publish_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(test)]
 fn set_after_install_stage_hook(hook: impl FnOnce(&Path, &Path) + Send + 'static) {
     *INSTALL_STAGE_HOOK
