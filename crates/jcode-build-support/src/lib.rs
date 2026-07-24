@@ -6,12 +6,13 @@ mod storage_helpers;
 pub use paths::{
     SELFDEV_CARGO_PROFILE, binary_name, binary_stem, client_update_candidate,
     current_binary_build_time_string, current_binary_built_at, current_fixed_binary_path,
-    current_fixed_dir, find_dev_binary, find_repo_in_ancestors, get_repo_dir, is_externally_managed,
-    is_jcode_repo, launcher_binary_path, launcher_dir, nix_managed_fallback_binary,
-    preferred_reload_candidate, release_binary_path, resolve_binary_payload, run_selfdev_build,
-    selfdev_binary_path, selfdev_build_command, selfdev_build_command_for_target,
-    shared_server_update_candidate, update_launcher_symlink_to_current,
-    update_launcher_symlink_to_stable, version_matches_installed_channel,
+    current_fixed_dir, find_dev_binary, find_repo_in_ancestors, get_repo_dir,
+    is_externally_managed, is_jcode_repo, launcher_binary_path, launcher_dir,
+    nix_managed_fallback_binary, preferred_reload_candidate, release_binary_path,
+    resolve_binary_payload, run_selfdev_build, selfdev_binary_path, selfdev_build_command,
+    selfdev_build_command_for_target, shared_server_update_candidate,
+    update_launcher_symlink_to_current, update_launcher_symlink_to_stable,
+    version_matches_installed_channel,
 };
 pub use source_state::{
     current_build_info, current_git_diff, current_git_hash, current_git_hash_full,
@@ -379,10 +380,37 @@ pub fn install_binary_at_version(source: &std::path::Path, version: &str) -> Res
     install_binary_at_version_in_builds_dir(source, version, &builds_root)
 }
 
+/// Atomically publish `source` as the single fixed reload target
+/// `~/.jcode/current/jcode` (F20b). Reuses [`atomic_publish_binary`] so it gets
+/// the exact stage->fsync->smoke->rename guarantee the version store has. The
+/// `current/` directory is persistent (it may already hold the last good
+/// binary), so a failed publish must NOT remove it: pass `cleanup_empty_dir =
+/// false` and let the prior published binary stand.
+pub fn publish_current_fixed(source: &Path) -> Result<PathBuf> {
+    let dest_dir = paths::current_fixed_dir()?;
+    atomic_publish_binary(source, &dest_dir, false)
+}
+
 fn install_binary_at_version_in_builds_dir(
     source: &std::path::Path,
     version: &str,
     builds_root: &Path,
+) -> Result<PathBuf> {
+    let dest_dir = builds_root.join("versions").join(version);
+    let cleanup_empty_dir = true;
+    atomic_publish_binary(source, &dest_dir, cleanup_empty_dir)
+}
+
+/// Atomically publish `source` into `dest_dir` as `dest_dir/<binary_name>`,
+/// staging into a private temp copy, smoke-testing it, then `rename(2)`-ing it
+/// into place. This is the ONE atomic-swap primitive shared by the versioned
+/// store and the F20b fixed reload path; the source-truncation regression test
+/// guards it. When `cleanup_empty_dir` is set, a failed publish removes a
+/// freshly-created (still-empty) `dest_dir` so a bad install leaves no residue.
+fn atomic_publish_binary(
+    source: &Path,
+    dest_dir: &Path,
+    cleanup_empty_dir: bool,
 ) -> Result<PathBuf> {
     let source_metadata = std::fs::metadata(source)
         .with_context(|| format!("Binary not found at {}", source.display()))?;
@@ -390,14 +418,15 @@ fn install_binary_at_version_in_builds_dir(
         anyhow::bail!("Binary is not a file at {}", source.display());
     }
 
-    let dest_dir = builds_root.join("versions").join(version);
-    storage::ensure_dir(&dest_dir)?;
+    storage::ensure_dir(dest_dir)?;
 
     let dest = dest_dir.join(binary_name());
-    let staged = match copy_binary_to_staging_path(source, &dest_dir) {
+    let staged = match copy_binary_to_staging_path(source, dest_dir) {
         Ok(staged) => staged,
         Err(err) => {
-            let _ = std::fs::remove_dir(&dest_dir);
+            if cleanup_empty_dir {
+                let _ = std::fs::remove_dir(dest_dir);
+            }
             return Err(err);
         }
     };
@@ -405,14 +434,14 @@ fn install_binary_at_version_in_builds_dir(
     let install_result = (|| {
         run_after_install_stage_hook(source, &staged);
         smoke_test_staged_binary_for_install(source, &staged)?;
-        publish_staged_binary(&staged, &dest_dir, &dest)?;
+        publish_staged_binary(&staged, dest_dir, &dest)?;
         Ok(dest.clone())
     })();
 
     if install_result.is_err() {
         let _ = std::fs::remove_file(&staged);
-        if !dest.exists() {
-            let _ = std::fs::remove_dir(&dest_dir);
+        if cleanup_empty_dir && !dest.exists() {
+            let _ = std::fs::remove_dir(dest_dir);
         }
     }
 
@@ -576,119 +605,8 @@ fn run_after_install_stage_hook(source: &Path, staged: &Path) {
 fn run_after_install_stage_hook(_source: &Path, _staged: &Path) {}
 
 #[cfg(all(test, unix))]
-mod atomic_publish_tests {
-    use super::*;
-    use std::os::unix::fs::PermissionsExt;
-
-    fn atomic_publish_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn shell_quote(path: &Path) -> String {
-        format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
-    }
-
-    fn write_smoke_script(path: &Path, log_path: Option<&Path>, succeeds: bool) {
-        let log_line = log_path
-            .map(|path| format!("printf '%s\\n' \"$0\" > {}\n", shell_quote(path)))
-            .unwrap_or_default();
-        let body = if succeeds {
-            format!(
-                "#!/bin/sh\n{log_line}if [ \"$1\" = 'version' ] && [ \"$2\" = '--json' ]; then\n  printf '%s\\n' '{{\"version\":\"test-version\",\"git_hash\":\"testhash\"}}'\n  exit 0\nfi\nexit 64\n"
-            )
-        } else {
-            format!("#!/bin/sh\n{log_line}printf '%s\\n' 'boom' >&2\nexit 65\n")
-        };
-        std::fs::write(path, body).expect("write smoke script");
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-            .expect("chmod smoke script");
-    }
-
-    #[test]
-    fn concurrent_source_truncation_between_stage_and_rename_preserves_published_copy() {
-        let _guard = atomic_publish_test_lock();
-        let fixture = tempfile::tempdir().expect("fixture tempdir");
-        let builds_root = fixture.path().join("builds");
-        let source = fixture.path().join(binary_name());
-        let smoke_log = fixture.path().join("smoked-path");
-        write_smoke_script(&source, Some(&smoke_log), true);
-        let original = std::fs::read(&source).expect("read original script");
-        let version = "race-truncate-preserves-published-copy";
-
-        set_after_install_stage_hook({
-            let source = source.clone();
-            let staged_original = original.clone();
-            move |_source, staged| {
-                assert_eq!(
-                    std::fs::read(staged).expect("read staged script"),
-                    staged_original,
-                    "staged copy must be complete before the source is truncated"
-                );
-                std::fs::write(&source, b"").expect("truncate source after staging");
-            }
-        });
-
-        let versioned = install_binary_at_version_in_builds_dir(&source, version, &builds_root)
-            .expect("install succeeds");
-
-        assert_eq!(
-            std::fs::metadata(&source).expect("source metadata").len(),
-            0
-        );
-        assert!(
-            std::fs::metadata(&versioned)
-                .expect("version metadata")
-                .len()
-                > 0
-        );
-        assert_eq!(std::fs::read(&versioned).expect("read versioned"), original);
-
-        let smoked_path = std::fs::read_to_string(&smoke_log).expect("read smoke log");
-        let smoked_path = PathBuf::from(smoked_path.trim());
-        assert_ne!(
-            smoked_path, source,
-            "smoke test must not run the source path"
-        );
-        assert_ne!(
-            smoked_path, versioned,
-            "smoke test must run before the atomic rename into place"
-        );
-        assert_eq!(smoked_path.parent(), versioned.parent());
-        assert!(
-            smoked_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(".jcode-publish-")),
-            "smoke test should run the staged temp path in {}",
-            versioned.parent().unwrap().display()
-        );
-        assert!(versioned.starts_with(builds_root.join("versions")));
-    }
-
-    #[test]
-    fn failed_smoke_test_leaves_no_version_entry() {
-        let _guard = atomic_publish_test_lock();
-        let fixture = tempfile::tempdir().expect("fixture tempdir");
-        let builds_root = fixture.path().join("builds");
-        let source = fixture.path().join(binary_name());
-        write_smoke_script(&source, None, false);
-        let version = "failed-smoke-no-entry";
-        let version_dir = builds_root.join("versions").join(version);
-
-        let error = install_binary_at_version_in_builds_dir(&source, version, &builds_root)
-            .expect_err("failed smoke test should reject install");
-
-        assert!(error.to_string().contains("Binary smoke test failed"));
-        assert!(
-            !version_dir.exists(),
-            "failed smoke test must not leave a partial {} entry",
-            version_dir.display()
-        );
-    }
-}
+#[path = "atomic_publish_tests.rs"]
+mod atomic_publish_tests;
 
 fn binary_source_metadata_path(binary: &Path) -> PathBuf {
     let file_name = binary
@@ -1181,6 +1099,11 @@ pub fn publish_local_current_build_for_source(
         );
     }
     validate_binary_version_matches_source_report(&installed_report, &versioned_path, source)?;
+    // F20b: publish the validated binary to the single fixed reload target
+    // (~/.jcode/current/jcode) atomically. This is the new source of truth that
+    // every resolver prefers; the legacy channel writes below remain until F20c
+    // removes them. Publish from the already-smoke-tested versioned copy.
+    publish_current_fixed(&versioned_path)?;
     let current_link = update_current_symlink(&source.version_label)?;
     let launcher_link = update_launcher_symlink_to_current()?;
 
@@ -1401,3 +1324,6 @@ pub fn update_canary_symlink(hash: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod fixed_path_resolver_tests;

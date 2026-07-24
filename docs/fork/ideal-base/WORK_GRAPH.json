@@ -774,6 +774,7 @@
         "owned_paths": [
           "crates/jcode-build-support/src/paths.rs",
           "crates/jcode-build-support/src/lib.rs",
+          "crates/jcode-build-support/src/tests.rs",
           "crates/jcode-app-core/src/update.rs",
           "src/cli/hot_exec.rs",
           "src/cli/selfdev.rs",
@@ -1944,6 +1945,7 @@
       "owned_paths": [
         "crates/jcode-build-support/src/paths.rs",
         "crates/jcode-build-support/src/lib.rs",
+        "crates/jcode-build-support/src/tests.rs",
         "crates/jcode-app-core/src/update.rs",
         "src/cli/hot_exec.rs",
         "src/cli/selfdev.rs",
