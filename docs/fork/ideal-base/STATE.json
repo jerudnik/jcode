@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F19",
+    "node": "F20a",
     "state": "accepted",
-    "commit": "a4dd576d4",
-    "updated_at": "2026-07-24T05:01:46Z",
-    "summary": "Mobile assets packaged to $out/share/jcode/web/jcode-mobile; installed binary serves index.html from outside the checkout; CWD cannot mask packaged assets (proven via decoy). doCheck stays false."
+    "commit": "dc9ded881",
+    "updated_at": "2026-07-24T07:05:46Z",
+    "summary": "Store-path detection makes a nix binary self-declare managed (no wrapper, zero nix-file changes); should_auto_update and jcode update decline on managed installs with nix guidance. Proven end-to-end on the real store binary. Selfdev/hot-reload unaffected."
   },
   "nodes": {
     "W0": {
@@ -417,11 +417,15 @@
       "updated_at": null
     },
     "F20a": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "dc9ded881",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F20a/README.md",
+        "docs/fork/ideal-base/evidence/F20a/update-decline.txt",
+        "docs/fork/ideal-base/evidence/F20a/doctor-origin.txt"
+      ],
+      "summary": "Store-path detection makes a nix binary self-declare managed (no wrapper, zero nix-file changes); should_auto_update and jcode update decline on managed installs with nix guidance. Proven end-to-end on the real store binary. Selfdev/hot-reload unaffected.",
+      "updated_at": "2026-07-24T07:05:46Z"
     },
     "F20b": {
       "state": "pending",
