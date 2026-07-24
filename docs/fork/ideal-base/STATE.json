@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F18",
+    "node": "F19",
     "state": "accepted",
-    "commit": "ca5f38bde",
-    "updated_at": "2026-07-23T21:54:04Z",
-    "summary": "PRs now run a real nix build + result/bin/jcode --version (x86_64-linux) on pull_request; doCheck stays false, cache push stays off. Green run 30045621841."
+    "commit": "a4dd576d4",
+    "updated_at": "2026-07-24T05:01:46Z",
+    "summary": "Mobile assets packaged to $out/share/jcode/web/jcode-mobile; installed binary serves index.html from outside the checkout; CWD cannot mask packaged assets (proven via decoy). doCheck stays false."
   },
   "nodes": {
     "W0": {
@@ -258,11 +258,15 @@
       "updated_at": "2026-07-23T21:54:04Z"
     },
     "F19": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "a4dd576d4",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F19/README.md",
+        "docs/fork/ideal-base/evidence/F19/http-proof.txt",
+        "docs/fork/ideal-base/evidence/F19/mask-prevention-proof.txt"
+      ],
+      "summary": "Mobile assets packaged to $out/share/jcode/web/jcode-mobile; installed binary serves index.html from outside the checkout; CWD cannot mask packaged assets (proven via decoy). doCheck stays false.",
+      "updated_at": "2026-07-24T05:01:46Z"
     },
     "F20": {
       "state": "pending",
