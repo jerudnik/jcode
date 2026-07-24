@@ -477,6 +477,39 @@ pub fn launcher_binary_path() -> Result<PathBuf> {
     Ok(launcher_dir()?.join(binary_name()))
 }
 
+/// Directory holding the single atomic fixed reload target (`~/.jcode/current`).
+///
+/// F20b collapses the multi-channel version store to ONE fixed path that every
+/// self-dev publish rename-publishes into and every resolver prefers. It lives
+/// as a sibling of `builds/` under the jcode home (respecting `JCODE_HOME`) so
+/// it is unaffected by the legacy `builds/<channel>/jcode` layout it supersedes.
+pub fn current_fixed_dir() -> Result<PathBuf> {
+    Ok(storage::jcode_dir()?.join("current"))
+}
+
+/// The single atomic fixed reload target: `~/.jcode/current/jcode`.
+///
+/// A real file (not a symlink), atomically rename-published on every self-dev
+/// build via the same stage->fsync->smoke->rename primitive the version store
+/// uses. This is the F20b source of truth; the legacy `builds/<channel>/jcode`
+/// symlinks remain as a dead fallback until F20c removes them.
+pub fn current_fixed_binary_path() -> Result<PathBuf> {
+    Ok(current_fixed_dir()?.join(binary_name()))
+}
+
+/// The nix-managed binary to fall back onto — the escape-hatch target for the
+/// migrate hatch (`JCODE_MIGRATE_BINARY`) once F20c retires the stable channel.
+///
+/// Resolves the launcher (`~/.local/bin/jcode`) or the running executable the
+/// way [`nix_managed_override_target`] does when externally managed, but only
+/// returns it when it genuinely lives in the nix store. A non-nix install (or a
+/// launcher that does not resolve into `/nix/store`) yields `None` so callers
+/// fall back to their own default instead of a bogus target.
+pub fn nix_managed_fallback_binary() -> Option<PathBuf> {
+    let (path, _) = nix_managed_override_target(true, false)?;
+    running_from_nix_store(&path).then_some(path)
+}
+
 /// True when jcode is managed by an external package manager (e.g. Nix) that
 /// owns the launcher binary. In that mode jcode must NOT install or rewrite the
 /// `~/.local/bin/jcode` shadow symlink — doing so silently overrides the
@@ -588,6 +621,13 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
         return Some(nix);
     }
 
+    // F20b: the single atomic fixed path is the source of truth. Every self-dev
+    // publish rename-publishes into it, so prefer it ahead of the legacy channel
+    // symlinks (kept below as a dead fallback until F20c removes them).
+    if let Some(fixed) = existing_binary(current_fixed_binary_path(), "current-fixed") {
+        return Some(fixed);
+    }
+
     if let Some(current) = existing_binary(current_binary_path(), "current") {
         return Some(current);
     }
@@ -624,6 +664,13 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
 pub fn shared_server_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     if let Some(nix) = nix_managed_launcher_override(is_selfdev_session) {
         return Some(nix);
+    }
+
+    // F20b: route the daemon onto the single atomic fixed path first. This is the
+    // one publish target now (rename-published, so always a complete binary), so
+    // the shared-server/stable channel lookups below are a dead fallback (F20c).
+    if let Some(fixed) = existing_binary(current_fixed_binary_path(), "current-fixed") {
+        return Some(fixed);
     }
 
     let shared_server = existing_binary(shared_server_binary_path(), "shared-server");
