@@ -169,6 +169,12 @@ pub fn should_auto_update() -> bool {
         return false;
     }
 
+    // Nix/externally managed installs never GitHub-self-update (read-only store
+    // path); `jcode update` prints the package-manager path instead.
+    if build::is_externally_managed() {
+        return false;
+    }
+
     if let Ok(exe) = std::env::current_exe()
         && is_inside_git_repo(&exe)
     {
@@ -213,10 +219,7 @@ fn is_inside_git_repo(path: &std::path::Path) -> bool {
 }
 
 pub fn fetch_latest_release_blocking() -> Result<GitHubRelease> {
-    let url = format!(
-        "https://api.github.com/repos/{}/releases/latest",
-        GITHUB_REPO
-    );
+    let url = format!("https://api.github.com/repos/{GITHUB_REPO}/releases/latest");
 
     let client = reqwest::blocking::Client::builder()
         .timeout(UPDATE_CHECK_TIMEOUT)
@@ -940,22 +943,19 @@ fn content_range_total(response: &reqwest::blocking::Response) -> Option<u64> {
 
 fn log_download_retry(attempt: usize, resume_from: u64, err: &impl std::fmt::Display) {
     crate::logging::warn(&format!(
-        "Update download attempt {}/{} failed at {} bytes: {}; retrying with resume",
-        attempt, DOWNLOAD_MAX_ATTEMPTS, resume_from, err
+        "Update download attempt {attempt}/{DOWNLOAD_MAX_ATTEMPTS} failed at {resume_from} bytes: {err}; retrying with resume"
     ));
 }
 
 fn log_download_retry_status(attempt: usize, resume_from: u64, status: reqwest::StatusCode) {
     crate::logging::warn(&format!(
-        "Update download attempt {}/{} got status {} at {} bytes; retrying with resume",
-        attempt, DOWNLOAD_MAX_ATTEMPTS, status, resume_from
+        "Update download attempt {attempt}/{DOWNLOAD_MAX_ATTEMPTS} got status {status} at {resume_from} bytes; retrying with resume"
     ));
 }
 
 fn log_download_retry_short(attempt: usize, downloaded: u64, total: u64) {
     crate::logging::warn(&format!(
-        "Update download attempt {}/{} ended early ({} of {} bytes); retrying with resume",
-        attempt, DOWNLOAD_MAX_ATTEMPTS, downloaded, total
+        "Update download attempt {attempt}/{DOWNLOAD_MAX_ATTEMPTS} ended early ({downloaded} of {total} bytes); retrying with resume"
     ));
 }
 
