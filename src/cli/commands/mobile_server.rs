@@ -205,12 +205,12 @@ const SOURCE_REL: &str = "web/jcode-mobile";
 fn mobile_web_root() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("resolve current jcode executable")?;
     // CWD is only a dev fallback, so a failure to read it is not fatal here; it
-    // just means the CWD candidate is skipped. Convert the Result to an Option
-    // with an explicit match so the discard of the error is visible on purpose.
-    let cwd = match std::env::current_dir() {
-        Ok(dir) => Some(dir),
-        Err(_) => None,
-    };
+    // just means the CWD candidate is skipped. Bind it with `if let Ok` so the
+    // error is discarded explicitly rather than through a silent conversion.
+    let mut cwd: Option<PathBuf> = None;
+    if let Ok(dir) = std::env::current_dir() {
+        cwd = Some(dir);
+    }
     let env_override = std::env::var_os("JCODE_MOBILE_WEB_ROOT").map(PathBuf::from);
     resolve_mobile_web_root(&exe, cwd.as_deref(), env_override.as_deref(), |p| {
         p.join("index.html").is_file()
