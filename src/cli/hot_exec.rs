@@ -331,6 +331,19 @@ pub fn run_auto_update() -> Result<()> {
 }
 
 pub fn run_update() -> Result<()> {
+    // Nix/externally managed installs are updated by the package manager, not by
+    // downloading a GitHub release over the read-only store path. Surface honest
+    // guidance instead of attempting an install that would silently drift the
+    // launcher off the managed binary.
+    if build::is_externally_managed() {
+        update::print_centered("jcode is managed by nix; self-update is disabled.");
+        update::print_centered("Update it the way you installed it:");
+        update::print_centered("  home-manager:  rebuild your home-manager generation");
+        update::print_centered("  nix profile:   nix profile upgrade jcode  (or your flake ref)");
+        update::print_centered("  flake input:   nix flake update jcode  then rebuild");
+        return Ok(());
+    }
+
     if update::is_release_build() {
         update::print_centered("Checking GitHub for latest release...");
         match update::check_for_update_blocking() {

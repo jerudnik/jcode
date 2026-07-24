@@ -747,6 +747,8 @@
           "nix/package.nix",
           "nix/modules/home-manager.nix",
           "crates/jcode-app-core/src/update.rs",
+          "crates/jcode-build-support/src/paths.rs",
+          "src/cli/hot_exec.rs",
           "docs/fork/ideal-base/evidence/F20a/**"
         ],
         "acceptance_gates": [
@@ -1914,6 +1916,8 @@
         "nix/package.nix",
         "nix/modules/home-manager.nix",
         "crates/jcode-app-core/src/update.rs",
+        "crates/jcode-build-support/src/paths.rs",
+        "src/cli/hot_exec.rs",
         "docs/fork/ideal-base/evidence/F20a/**"
       ],
       "acceptance_gates": [
