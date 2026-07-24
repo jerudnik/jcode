@@ -268,13 +268,6 @@
       "summary": "Mobile assets packaged to $out/share/jcode/web/jcode-mobile; installed binary serves index.html from outside the checkout; CWD cannot mask packaged assets (proven via decoy). doCheck stays false.",
       "updated_at": "2026-07-24T05:01:46Z"
     },
-    "F20": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
-    },
     "F21": {
       "state": "pending",
       "commit": null,
@@ -417,6 +410,27 @@
       "updated_at": "2026-07-20T05:05:28Z"
     },
     "R05": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F20a": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F20b": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F20c": {
       "state": "pending",
       "commit": null,
       "evidence": [],

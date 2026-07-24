@@ -734,27 +734,91 @@
         "parent": "W3"
       },
       {
-        "id": "F20",
-        "content": "Extend hermetic installer and Rust updater acquisition fixtures through real local daemon reload and rollback.",
+        "id": "F20a",
+        "content": "Make jcode nix-native and update-inert: the packaged binary self-declares JCODE_NIX_MANAGED so home-manager and `nix profile` installs both inherit it, the GitHub-release self-update path never fires on a managed/non-git install, and `jcode update` surfaces the correct nix guidance (home-manager rebuild vs `nix profile upgrade`) instead of downloading a release over a read-only store path.",
         "kind": "implement",
         "depends_on": [
           "F16",
           "F19"
         ],
-        "priority": 80,
+        "priority": 88,
         "owned_paths": [
-          "tests/test_r10_release_acquisition.py",
+          "flake.nix",
+          "nix/package.nix",
+          "nix/modules/home-manager.nix",
           "crates/jcode-app-core/src/update.rs",
-          "scripts/install.sh",
-          "docs/fork/ideal-base/evidence/F20/**"
+          "docs/fork/ideal-base/evidence/F20a/**"
         ],
         "acceptance_gates": [
-          "Checksum, interruption, invalid replacement, rollback, and exactly-once reload paths pass without network",
-          "Every failure preserves old runtime/channel pointers"
+          "A nix-built binary reports externally-managed and should_auto_update() returns false without network",
+          "`jcode update` on a managed binary prints nix guidance and performs no GitHub-release download"
         ],
         "evidence": [
-          "local acquisition matrix",
-          "before/after channel manifests"
+          "managed-binary decline log",
+          "packaged JCODE_NIX_MANAGED proof"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W3"
+      },
+      {
+        "id": "F20b",
+        "content": "Collapse the self-dev reload to a single atomic fixed path: keep fast incremental `cargo build`, but replace the copy-into-versions plus stable/current/shared-server channel fan-out with one atomic stage->fsync->smoke->rename into a single reload target, preserving atomic-swap, execv-failure safety, wrapper->payload resolution, and reload-recovery intents for in-process swarm agents. Provide the stable/comfort fallback through nix generations (home-manager / `nix profile rollback`) and repoint the migrate escape hatch off the retired `stable` channel.",
+        "kind": "implement",
+        "depends_on": [
+          "F20a"
+        ],
+        "priority": 80,
+        "owned_paths": [
+          "crates/jcode-build-support/src/paths.rs",
+          "crates/jcode-app-core/src/update.rs",
+          "src/cli/hot_exec.rs",
+          "src/cli/selfdev.rs",
+          "docs/fork/ideal-base/evidence/F20b/**"
+        ],
+        "acceptance_gates": [
+          "Concurrent source-truncation during a self-dev reload never yields a truncated exec target (regression test holds)",
+          "A build/reload stress loop reloads onto the freshly built binary every iteration with no channel drift and no downgrade"
+        ],
+        "evidence": [
+          "atomic-swap regression run",
+          "build-reload stress-loop log"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W3"
+      },
+      {
+        "id": "F20c",
+        "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, release/windows/freebsd workflows, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
+        "kind": "implement",
+        "depends_on": [
+          "F20b"
+        ],
+        "priority": 72,
+        "owned_paths": [
+          "crates/jcode-update-core/**",
+          "crates/jcode-build-support/src/lib.rs",
+          "scripts/install.sh",
+          "scripts/install.ps1",
+          "scripts/install_release.sh",
+          "scripts/quick-release.sh",
+          "scripts/uninstall.sh",
+          "scripts/test_install_release.sh",
+          "scripts/generate_release_notes.sh",
+          ".github/workflows/release.yml",
+          ".github/workflows/windows-smoke.yml",
+          ".github/workflows/freebsd-smoke.yml",
+          "tests/test_r10_release_acquisition.py",
+          "docs/fork/ideal-base/evidence/F20c/**"
+        ],
+        "acceptance_gates": [
+          "Release-acquisition subsystem and channel/version-store code are removed with no remaining references, workspace builds",
+          "Full deterministic suite passes twice from clean state after removal"
+        ],
+        "evidence": [
+          "removal grep-clean report",
+          "post-removal double-green suite"
         ],
         "review_model": "opus",
         "class": "deterministic",
@@ -768,7 +832,7 @@
           "F17",
           "F18",
           "F19",
-          "F20"
+          "F20c"
         ],
         "priority": 70,
         "owned_paths": [
@@ -1837,27 +1901,91 @@
       "parent": "W3"
     },
     {
-      "id": "F20",
-      "content": "Extend hermetic installer and Rust updater acquisition fixtures through real local daemon reload and rollback.",
+      "id": "F20a",
+      "content": "Make jcode nix-native and update-inert: the packaged binary self-declares JCODE_NIX_MANAGED so home-manager and `nix profile` installs both inherit it, the GitHub-release self-update path never fires on a managed/non-git install, and `jcode update` surfaces the correct nix guidance (home-manager rebuild vs `nix profile upgrade`) instead of downloading a release over a read-only store path.",
       "kind": "implement",
       "depends_on": [
         "F16",
         "F19"
       ],
-      "priority": 80,
+      "priority": 88,
       "owned_paths": [
-        "tests/test_r10_release_acquisition.py",
+        "flake.nix",
+        "nix/package.nix",
+        "nix/modules/home-manager.nix",
         "crates/jcode-app-core/src/update.rs",
-        "scripts/install.sh",
-        "docs/fork/ideal-base/evidence/F20/**"
+        "docs/fork/ideal-base/evidence/F20a/**"
       ],
       "acceptance_gates": [
-        "Checksum, interruption, invalid replacement, rollback, and exactly-once reload paths pass without network",
-        "Every failure preserves old runtime/channel pointers"
+        "A nix-built binary reports externally-managed and should_auto_update() returns false without network",
+        "`jcode update` on a managed binary prints nix guidance and performs no GitHub-release download"
       ],
       "evidence": [
-        "local acquisition matrix",
-        "before/after channel manifests"
+        "managed-binary decline log",
+        "packaged JCODE_NIX_MANAGED proof"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W3"
+    },
+    {
+      "id": "F20b",
+      "content": "Collapse the self-dev reload to a single atomic fixed path: keep fast incremental `cargo build`, but replace the copy-into-versions plus stable/current/shared-server channel fan-out with one atomic stage->fsync->smoke->rename into a single reload target, preserving atomic-swap, execv-failure safety, wrapper->payload resolution, and reload-recovery intents for in-process swarm agents. Provide the stable/comfort fallback through nix generations (home-manager / `nix profile rollback`) and repoint the migrate escape hatch off the retired `stable` channel.",
+      "kind": "implement",
+      "depends_on": [
+        "F20a"
+      ],
+      "priority": 80,
+      "owned_paths": [
+        "crates/jcode-build-support/src/paths.rs",
+        "crates/jcode-app-core/src/update.rs",
+        "src/cli/hot_exec.rs",
+        "src/cli/selfdev.rs",
+        "docs/fork/ideal-base/evidence/F20b/**"
+      ],
+      "acceptance_gates": [
+        "Concurrent source-truncation during a self-dev reload never yields a truncated exec target (regression test holds)",
+        "A build/reload stress loop reloads onto the freshly built binary every iteration with no channel drift and no downgrade"
+      ],
+      "evidence": [
+        "atomic-swap regression run",
+        "build-reload stress-loop log"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W3"
+    },
+    {
+      "id": "F20c",
+      "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, release/windows/freebsd workflows, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
+      "kind": "implement",
+      "depends_on": [
+        "F20b"
+      ],
+      "priority": 72,
+      "owned_paths": [
+        "crates/jcode-update-core/**",
+        "crates/jcode-build-support/src/lib.rs",
+        "scripts/install.sh",
+        "scripts/install.ps1",
+        "scripts/install_release.sh",
+        "scripts/quick-release.sh",
+        "scripts/uninstall.sh",
+        "scripts/test_install_release.sh",
+        "scripts/generate_release_notes.sh",
+        ".github/workflows/release.yml",
+        ".github/workflows/windows-smoke.yml",
+        ".github/workflows/freebsd-smoke.yml",
+        "tests/test_r10_release_acquisition.py",
+        "docs/fork/ideal-base/evidence/F20c/**"
+      ],
+      "acceptance_gates": [
+        "Release-acquisition subsystem and channel/version-store code are removed with no remaining references, workspace builds",
+        "Full deterministic suite passes twice from clean state after removal"
+      ],
+      "evidence": [
+        "removal grep-clean report",
+        "post-removal double-green suite"
       ],
       "review_model": "opus",
       "class": "deterministic",
@@ -1871,7 +1999,7 @@
         "F17",
         "F18",
         "F19",
-        "F20"
+        "F20c"
       ],
       "priority": 70,
       "owned_paths": [
@@ -2398,9 +2526,11 @@
     },
     {
       "id": "A14",
-      "item": "Hermetic installer and updater acquisition fixtures",
+      "item": "Nix-native update, atomic single-path reload, and retired release/channel distribution",
       "nodes": [
-        "F20",
+        "F20a",
+        "F20b",
+        "F20c",
         "F21"
       ],
       "class": "deterministic"
