@@ -1,0 +1,16 @@
+# F20a proof: store-resident binary is nix-managed and update-inert
+
+PKG=/nix/store/bmzfkrqpgw49nagjcyjmq4ln2c55a2pd-jcode-0.46.0
+Binary is the real Mach-O ELF at a /nix/store/ path (no wrapper):
+/nix/store/bmzfkrqpgw49nagjcyjmq4ln2c55a2pd-jcode-0.46.0/bin/jcode: Mach-O 64-bit executable arm64
+
+## `jcode update` from the store binary (empty CWD, throwaway JCODE_HOME)
+Expect: nix guidance, NO GitHub download, exit 0.
+```
+               jcode is managed by nix; self-update is disabled.
+                      Update it the way you installed it:
+               home-manager:  rebuild your home-manager generation
+          nix profile:   nix profile upgrade jcode  (or your flake ref)
+               flake input:   nix flake update jcode  then rebuild
+```
+exit code: 0
