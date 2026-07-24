@@ -1,0 +1,33 @@
+# F19 gate #2 proof: CWD ./web/jcode-mobile cannot mask packaged assets
+
+PKG=/nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0
+CWD has a DECOY ./web/jcode-mobile/index.html:
+<html>DECOY CWD ASSETS - should NOT be served</html>
+
+## server startup log (must serve the PACKAGED path, not the decoy)
+[90m
+  jcode collects anonymous usage statistics (install count, version, OS,
+  session activity, tool counts, and crash/exit reasons). No code, filenames,
+  prompts, or personal data is sent.
+  To opt out: export JCODE_NO_TELEMETRY=1
+  Details: https://github.com/1jehuang/jcode/blob/master/TELEMETRY.md
+[0m
+mobile server ready at http://127.0.0.1:8793/
+serving /nix/store/wlyigfzkgx4fw46gahxgg33q8yhdzxry-jcode-0.46.0/share/jcode/web/jcode-mobile
+
+## curl http://127.0.0.1:8793/  (must be the real jcode index, NOT 'DECOY')
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07130f" />
+    <title>jcode mobile web</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <noscript>jcode mobile web needs JavaScript enabled.</noscript>
+    <main id="app" aria-live="polite"></main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
