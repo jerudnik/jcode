@@ -291,10 +291,18 @@ jobs:
             cargo test --target aarch64-apple-darwin -p jcode-tui --lib \
             -- --test-threads=1
 
+      # Serialized for the same process-global-pollution reason as jcode-tui:
+      # jcode-app-core tests toggle process env (JCODE_DISABLED_TOOLS/JCODE_TOOLS
+      # etc. via crate::env::set_var, which has no serialization lock), so a
+      # parallel agent_tests run can disable `bash` while tool::tests executes a
+      # shell_exec, flaking test_batch_resolves_*. Runtime is multi-process, so
+      # this is a test-harness artifact, not a product race. Follow-up F28
+      # hardens the env-lock discipline so parallelism can be restored.
       - name: Run jcode-app-core library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target aarch64-apple-darwin -p jcode-app-core --lib
+            cargo test --target aarch64-apple-darwin -p jcode-app-core --lib \
+            -- --test-threads=1
 
       - name: Compile integration test binaries
         run: |
@@ -367,10 +375,14 @@ jobs:
             cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib \
             -- --test-threads=1
 
+      # Serialized for the same reason as the macOS jcode-app-core step above:
+      # process-global env toggles (JCODE_DISABLED_TOOLS etc.) race tool::tests
+      # under parallelism. See that comment and F28.
       - name: Run jcode-app-core library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target x86_64-unknown-linux-gnu -p jcode-app-core --lib
+            cargo test --target x86_64-unknown-linux-gnu -p jcode-app-core --lib \
+            -- --test-threads=1
 
       - name: Compile integration test binaries
         run: |
