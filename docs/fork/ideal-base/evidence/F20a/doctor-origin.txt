@@ -1,0 +1,8 @@
+# F20a proof: doctor classifies the store binary as origin=nix
+
+The store-resident binary's own doctor output (origin=nix confirms the
+same /nix/store/ residence that drives is_externally_managed()).
+```
+client:  /nix/store/bmzfkrqpgw49nagjcyjmq4ln2c55a2pd-jcode-0.46.0/bin/jcode  origin=nix  0.46.0 (80bc55c-dirty)
+nix:     /nix/store/8fg6b03y23kaw0np1n6cvplh77qga8v1-jcode-nix-managed/bin/jcode  v0.46.0 (2ccf43f)
+```

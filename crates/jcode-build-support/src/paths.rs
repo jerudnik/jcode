@@ -483,8 +483,30 @@ pub fn launcher_binary_path() -> Result<PathBuf> {
 /// externally-installed binary and causes version drift. Hot-reload of the
 /// running process is unaffected; only the persistent launcher pointer is left
 /// alone so a fresh `jcode` deterministically starts from the managed binary.
+///
+/// Detection is store-residence-first: a packaged jcode runs from an immutable
+/// `/nix/store/...` path, which is a self-declaring, wrapper-free signal that
+/// nix owns this binary. Self-dev builds live under `~/.jcode/builds/` and
+/// dev-shell `cargo` builds under `target/`, so neither is misclassified. The
+/// `JCODE_NIX_MANAGED` env var remains an explicit override for installs that
+/// place the binary outside the store (or to force the behavior in tests).
 pub fn is_externally_managed() -> bool {
-    std::env::var_os("JCODE_NIX_MANAGED").is_some()
+    if std::env::var_os("JCODE_NIX_MANAGED").is_some() {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        return running_from_nix_store(&exe);
+    }
+    false
+}
+
+/// True when `path` resolves inside the immutable Nix store. Kept pure (takes an
+/// explicit path, no env/`current_exe` access) so the classification is unit
+/// testable. Canonicalizes first so a `~/.local/bin/jcode` symlink pointing into
+/// the store is still recognized as store-managed.
+pub fn running_from_nix_store(path: &Path) -> bool {
+    let resolved = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    resolved.to_string_lossy().contains("/nix/store/")
 }
 
 fn update_launcher_symlink(target: &Path) -> Result<PathBuf> {
@@ -776,6 +798,42 @@ mod tests {
             .expect("managed non-selfdev must resolve to a nix binary");
         assert_eq!(label, "nix-managed");
         assert!(path.exists(), "resolved nix binary should exist on disk");
+    }
+
+    #[test]
+    fn running_from_nix_store_classifies_store_paths() {
+        // A packaged binary runs from the immutable store.
+        assert!(running_from_nix_store(Path::new(
+            "/nix/store/abc123-jcode-0.46.0/bin/jcode"
+        )));
+        // Self-dev and cargo build outputs are NOT store-managed.
+        assert!(!running_from_nix_store(Path::new(
+            "/home/dev/.jcode/builds/current/jcode"
+        )));
+        assert!(!running_from_nix_store(Path::new(
+            "/home/dev/jcode/target/selfdev/jcode"
+        )));
+        // A bare launcher on PATH that does not resolve into the store.
+        assert!(!running_from_nix_store(Path::new("/usr/local/bin/jcode")));
+    }
+
+    #[test]
+    fn running_from_nix_store_follows_symlink_into_store() {
+        // A `~/.local/bin/jcode` style symlink pointing into the store must be
+        // recognized as store-managed after canonicalization.
+        let temp = tempfile::TempDir::new().expect("temp");
+        let store_like = temp.path().join("nix").join("store").join("xy-jcode");
+        std::fs::create_dir_all(&store_like).expect("store dir");
+        let real = store_like.join("jcode");
+        std::fs::write(&real, b"#!/bin/sh\n").expect("real bin");
+        let link = temp.path().join("jcode-launcher");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        #[cfg(unix)]
+        assert!(
+            running_from_nix_store(&link),
+            "symlink resolving into a /nix/store/ path is store-managed"
+        );
     }
 
     fn repo_fixture(git_file: bool) -> tempfile::TempDir {
