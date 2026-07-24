@@ -1,12 +1,9 @@
 use super::*;
 
-pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+// Delegate to the ONE crate-global publish lock (lib.rs) so home-mutating tests
+// here serialize against the install-stage-hook tests in atomic_publish_tests
+// and the resolver tests, all of which drive the shared publish path.
+pub(crate) use super::publish_test_lock as test_env_lock;
 
 pub(crate) fn with_temp_jcode_home<T>(f: impl FnOnce() -> T) -> T {
     let _guard = test_env_lock();
