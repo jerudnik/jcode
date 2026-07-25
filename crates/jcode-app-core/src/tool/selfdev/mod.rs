@@ -22,6 +22,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 mod build_queue;
 mod launch;
+#[cfg(test)]
+mod reconcile_tests;
 mod reload;
 mod setup;
 mod status;

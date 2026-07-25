@@ -9,8 +9,8 @@ pub use paths::{
     current_fixed_dir, find_dev_binary, find_repo_in_ancestors, get_repo_dir,
     is_externally_managed, is_jcode_repo, launcher_binary_path, launcher_dir,
     nix_managed_fallback_binary, preferred_reload_candidate, release_binary_path,
-    resolve_binary_payload, retired_layout_residue, run_selfdev_build, selfdev_binary_path, selfdev_build_command,
-    selfdev_build_command_for_target, shared_server_update_candidate,
+    resolve_binary_payload, retired_layout_residue, run_selfdev_build, selfdev_binary_path,
+    selfdev_build_command, selfdev_build_command_for_target, shared_server_update_candidate,
     update_launcher_symlink_to_current,
 };
 pub use source_state::{

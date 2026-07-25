@@ -160,19 +160,19 @@ struct RetiredLayoutReport {
     launcher_stranded: bool,
 }
 
-fn retired_layout_report() -> Option<RetiredLayoutReport> {
-    let residue = crate::build::retired_layout_residue().ok()?;
+fn retired_layout_report() -> Result<Option<RetiredLayoutReport>> {
+    let residue = crate::build::retired_layout_residue()?;
     if residue.is_empty() {
-        return None;
+        return Ok(None);
     }
-    Some(RetiredLayoutReport {
+    Ok(Some(RetiredLayoutReport {
         bytes: residue.iter().map(|item| item.bytes).sum(),
         launcher_stranded: residue.iter().any(|item| item.launcher_points_here),
         entries: residue
             .iter()
             .map(|item| item.path.display().to_string())
             .collect(),
-    })
+    }))
 }
 
 /// Human-readable byte size, one decimal place above KiB.
@@ -197,7 +197,7 @@ fn human_bytes(bytes: u64) -> String {
 /// the user's `jcode` currently executes from would break their install, and
 /// the honest fix there is to re-point the launcher first (reinstall, or
 /// `jcode selfdev` which republishes and relinks).
-pub fn run_clean_retired_layout_command() -> Result<()> {
+fn run_clean_retired_layout_command() -> Result<()> {
     let residue = crate::build::retired_layout_residue()?;
     if residue.is_empty() {
         println!("No retired distribution layout found; nothing to clean.");
@@ -223,7 +223,11 @@ pub fn run_clean_retired_layout_command() -> Result<()> {
             std::fs::remove_file(&item.path)
         };
         match result {
-            Ok(()) => println!("removed {} ({})", item.path.display(), human_bytes(item.bytes)),
+            Ok(()) => println!(
+                "removed {} ({})",
+                item.path.display(),
+                human_bytes(item.bytes)
+            ),
             Err(err) => println!("FAILED  {}: {err}", item.path.display()),
         }
     }
@@ -577,7 +581,10 @@ fn fallback_command() -> String {
     "nix run github:jerudnik/jcode -- doctor   (or `jcode server reload`)".to_string()
 }
 
-pub fn run_doctor_command(emit_json: bool) -> Result<()> {
+pub fn run_doctor_command(emit_json: bool, clean_retired_layout: bool) -> Result<()> {
+    if clean_retired_layout {
+        return run_clean_retired_layout_command();
+    }
     let client = client_identity();
     let server = server_identity();
     let nix_installed = nix_installed_identity();
@@ -600,7 +607,14 @@ pub fn run_doctor_command(emit_json: bool) -> Result<()> {
         verdict: format!("{v:?}").to_lowercase(),
         verdict_detail: detail,
         drift_summary,
-        retired_layout: retired_layout_report(),
+        retired_layout: match retired_layout_report() {
+            Ok(report) => report,
+            Err(err) => {
+                // A diagnostic must not go quiet on its own failure.
+                eprintln!("warning: could not scan for retired layout: {err}");
+                None
+            }
+        },
         fallback: fallback_command(),
     };
 
@@ -684,7 +698,11 @@ pub fn run_doctor_command(emit_json: bool) -> Result<()> {
             "retired: {} leftover entr{} under ~/.jcode/builds ({}) -- \
              the pre-F20c version store; nothing reads it",
             retired.entries.len(),
-            if retired.entries.len() == 1 { "y" } else { "ies" },
+            if retired.entries.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
             human_bytes(retired.bytes),
         );
         if retired.launcher_stranded {

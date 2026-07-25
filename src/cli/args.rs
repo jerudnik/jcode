@@ -251,8 +251,8 @@ pub(crate) enum Command {
         /// Delete leftover pre-F20c distribution directories under
         /// ~/.jcode/builds/ (the retired version store and channel symlinks).
         /// Refuses while the launcher still resolves into them.
-        #[arg(long)]
-        clean_retired_layout: bool,
+        #[arg(long = "clean-retired-layout")]
+        clean: bool,
     },
 
     /// Show usage limits for connected providers

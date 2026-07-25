@@ -60,8 +60,8 @@ pub fn hot_restart(session_id: &str) -> Result<()> {
 /// doing nothing. Returns `None` when there is no usable target, so the caller
 /// falls through to normal reload resolution.
 fn migrate_target() -> Option<std::path::PathBuf> {
-    let requested = std::env::var("JCODE_MIGRATE_BINARY").ok()?;
-    let requested = std::path::PathBuf::from(requested.trim());
+    let requested = std::env::var_os("JCODE_MIGRATE_BINARY")?;
+    let requested = std::path::PathBuf::from(requested.to_string_lossy().trim());
     if requested.as_os_str().is_empty() {
         return None;
     }
