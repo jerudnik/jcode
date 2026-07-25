@@ -4,12 +4,12 @@ mod source_state;
 mod storage_helpers;
 
 pub use paths::{
-    SELFDEV_CARGO_PROFILE, binary_name, binary_stem, client_update_candidate,
+    RetiredLayoutResidue, SELFDEV_CARGO_PROFILE, binary_name, binary_stem, client_update_candidate,
     current_binary_build_time_string, current_binary_built_at, current_fixed_binary_path,
     current_fixed_dir, find_dev_binary, find_repo_in_ancestors, get_repo_dir,
     is_externally_managed, is_jcode_repo, launcher_binary_path, launcher_dir,
     nix_managed_fallback_binary, preferred_reload_candidate, release_binary_path,
-    resolve_binary_payload, run_selfdev_build, selfdev_binary_path, selfdev_build_command,
+    resolve_binary_payload, retired_layout_residue, run_selfdev_build, selfdev_binary_path, selfdev_build_command,
     selfdev_build_command_for_target, shared_server_update_candidate,
     update_launcher_symlink_to_current,
 };

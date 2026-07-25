@@ -431,3 +431,90 @@ fn launcher_symlink_points_at_the_fixed_publish_target_and_stays_in_sandbox_home
         );
     });
 }
+
+// ---------------------------------------------------------------------------
+// F20c: retired-layout residue detection
+//
+// The cut deleted every reader of `~/.jcode/builds/{versions,stable,current,
+// canary,shared-server}`. Deleting readers without detecting leftovers is the
+// dangerous half of a removal: a launcher symlink still pointing into
+// `builds/current/` keeps executing a binary that no code path can ever
+// replace, while every in-process resolver reports the fixed path as
+// authoritative. These tests pin that the leftovers are found, sized, and that
+// a stranded launcher is called out specifically.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn clean_home_reports_no_retired_layout_residue() {
+    with_temp_jcode_home(|| {
+        let residue = retired_layout_residue().expect("scan");
+        assert!(
+            residue.is_empty(),
+            "a machine that never had the old layout must report nothing: {residue:?}"
+        );
+    });
+}
+
+#[test]
+fn retired_version_store_is_detected_and_sized() {
+    with_temp_jcode_home(|| {
+        let builds = storage::jcode_dir().expect("home").join("builds");
+        let version_dir = builds.join("versions").join("0.1.0");
+        std::fs::create_dir_all(&version_dir).expect("mkdir versions");
+        std::fs::write(version_dir.join("jcode"), vec![0u8; 4096]).expect("write binary");
+        std::fs::create_dir_all(builds.join("stable")).expect("mkdir stable");
+        std::fs::write(builds.join("stable-version"), "0.1.0\n").expect("write marker");
+
+        let residue = retired_layout_residue().expect("scan");
+        let names: Vec<_> = residue
+            .iter()
+            .filter_map(|item| item.path.file_name().and_then(|n| n.to_str()))
+            .collect();
+        assert!(names.contains(&"versions"), "found {names:?}");
+        assert!(names.contains(&"stable"), "found {names:?}");
+        assert!(names.contains(&"stable-version"), "found {names:?}");
+
+        let versions = residue
+            .iter()
+            .find(|item| item.path.ends_with("versions"))
+            .expect("versions entry");
+        assert_eq!(
+            versions.bytes, 4096,
+            "size must be measured recursively so the cleanup can be quantified"
+        );
+        assert!(
+            residue.iter().all(|item| !item.launcher_points_here),
+            "no launcher was created, so nothing may be reported as stranded"
+        );
+    });
+}
+
+#[test]
+fn launcher_still_pointing_into_retired_layout_is_flagged_as_stranded() {
+    with_temp_jcode_home(|| {
+        let home = storage::jcode_dir().expect("home");
+        let stale_channel = home.join("builds").join("current");
+        std::fs::create_dir_all(&stale_channel).expect("mkdir channel");
+        let stale_binary = stale_channel.join(binary_name());
+        std::fs::write(&stale_binary, b"#!/bin/sh\n").expect("write stale binary");
+
+        // Point the launcher at the retired channel the way a pre-F20c install
+        // left it. JCODE_HOME already redirects launcher_dir() into the sandbox.
+        let launcher = launcher_binary_path().expect("launcher path");
+        std::fs::create_dir_all(launcher.parent().expect("parent")).expect("mkdir launcher parent");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&stale_binary, &launcher).expect("symlink launcher");
+
+        let residue = retired_layout_residue().expect("scan");
+        let stranded: Vec<_> = residue
+            .iter()
+            .filter(|item| item.launcher_points_here)
+            .collect();
+        assert_eq!(
+            stranded.len(),
+            1,
+            "exactly the channel the launcher resolves into must be flagged: {residue:?}"
+        );
+        assert!(stranded[0].path.ends_with("current"));
+    });
+}

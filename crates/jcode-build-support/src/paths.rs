@@ -1037,3 +1037,83 @@ mod tests {
         drop((store, selfdev, wrapper_dir));
     }
 }
+
+/// The retired distribution layout F20c deleted the readers for.
+///
+/// These are the `~/.jcode/builds/` entries that the version store and the
+/// stable/current/shared-server/canary channels used to write. After F20c no
+/// resolver consults any of them, which is precisely why they are dangerous to
+/// leave in place: a launcher symlink still pointing into `builds/current/`
+/// keeps serving whatever binary was published there before the cut, forever,
+/// while every in-process code path believes the fixed path is authoritative.
+const RETIRED_LAYOUT_ENTRIES: &[&str] = &[
+    "versions",
+    "stable",
+    "current",
+    "canary",
+    "shared-server",
+    "stable-version",
+    "current-version",
+    "shared-server-version",
+];
+
+/// A leftover from the pre-F20c distribution layout, with enough detail to
+/// explain the risk and size the cleanup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredLayoutResidue {
+    /// Absolute path of the leftover entry under `~/.jcode/builds/`.
+    pub path: PathBuf,
+    /// Total bytes it occupies (0 when unreadable).
+    pub bytes: u64,
+    /// True when the launcher symlink still resolves into this entry, i.e. the
+    /// machine is still *executing* out of the retired layout.
+    pub launcher_points_here: bool,
+}
+
+/// Enumerate pre-F20c distribution residue under the jcode home.
+///
+/// Returns an empty vec on a clean machine. This reports only; removal is an
+/// explicit user action (`jcode doctor --clean-retired-layout` / `uninstall.sh`)
+/// because these directories can hold the only copy of a binary a user is
+/// currently running.
+pub fn retired_layout_residue() -> Result<Vec<RetiredLayoutResidue>> {
+    let builds = storage::jcode_dir()?.join("builds");
+    let launcher_target = launcher_binary_path()
+        .ok()
+        .and_then(|link| std::fs::canonicalize(link).ok());
+
+    let mut found = Vec::new();
+    for entry in RETIRED_LAYOUT_ENTRIES {
+        let path = builds.join(entry);
+        if !path.exists() && path.symlink_metadata().is_err() {
+            continue;
+        }
+        let launcher_points_here = launcher_target
+            .as_ref()
+            .zip(std::fs::canonicalize(&path).ok())
+            .is_some_and(|(target, resolved)| target.starts_with(&resolved));
+        found.push(RetiredLayoutResidue {
+            bytes: directory_size(&path),
+            path,
+            launcher_points_here,
+        });
+    }
+    Ok(found)
+}
+
+/// Recursive on-disk size, symlink-safe (never follows links out of the tree).
+fn directory_size(path: &Path) -> u64 {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !meta.is_dir() {
+        return meta.len();
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| directory_size(&entry.path()))
+        .sum()
+}

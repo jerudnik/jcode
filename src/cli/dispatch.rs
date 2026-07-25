@@ -212,8 +212,15 @@ pub(crate) async fn run_main(mut args: Args) -> Result<()> {
         Some(Command::Version { json }) => {
             commands::run_version_command(json)?;
         }
-        Some(Command::Doctor { json }) => {
-            commands::run_doctor_command(json)?;
+        Some(Command::Doctor {
+            json,
+            clean_retired_layout,
+        }) => {
+            if clean_retired_layout {
+                commands::run_clean_retired_layout_command()?;
+            } else {
+                commands::run_doctor_command(json)?;
+            }
         }
         Some(Command::Usage { json }) => {
             commands::run_usage_command(json).await?;

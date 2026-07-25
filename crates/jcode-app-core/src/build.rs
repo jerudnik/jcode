@@ -1,6 +1,7 @@
 pub use jcode_build_support::{
     BinaryVersionReport, BuildInfo, BuildManifest, DevBinarySourceMetadata, MigrationContext,
-    PublishedBuild, SELFDEV_CARGO_PROFILE, SelfDevBuildCommand, SelfDevBuildTarget, SourceState,
+    PublishedBuild, RetiredLayoutResidue, SELFDEV_CARGO_PROFILE, SelfDevBuildCommand,
+    SelfDevBuildTarget, SourceState,
     binary_name, binary_stem, build_log_path, build_progress_path, builds_dir,
     clear_build_progress, clear_migration_context, client_update_candidate,
     current_binary_build_time_string, current_binary_built_at, current_build_info,
@@ -12,7 +13,7 @@ pub use jcode_build_support::{
     migration_context_path, nix_managed_fallback_binary, preferred_reload_candidate,
     publish_local_current_build, publish_local_current_build_for_source, read_build_progress,
     read_dev_binary_source_metadata, release_binary_path, repo_build_version, repo_scope_key,
-    resolve_binary_payload, run_selfdev_build, save_migration_context, selfdev_binary_path,
+    resolve_binary_payload, retired_layout_residue, run_selfdev_build, save_migration_context, selfdev_binary_path,
     selfdev_build_command, selfdev_build_command_for_target, shared_server_update_candidate,
     smoke_test_binary, smoke_test_server_binary, update_launcher_symlink_to_current,
     worktree_scope_key, write_build_progress, write_current_dev_binary_source_metadata,

@@ -144,7 +144,91 @@ struct DoctorReport {
     verdict: String,
     verdict_detail: String,
     drift_summary: Option<String>,
+    /// Pre-F20c distribution leftovers under `~/.jcode/builds/`, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retired_layout: Option<RetiredLayoutReport>,
     fallback: String,
+}
+
+/// What is left of the retired version store / channel layout on this machine.
+#[derive(Debug, Serialize)]
+struct RetiredLayoutReport {
+    entries: Vec<String>,
+    bytes: u64,
+    /// True when the launcher symlink still resolves into the retired layout,
+    /// i.e. `jcode` on PATH is executing a binary nothing can update anymore.
+    launcher_stranded: bool,
+}
+
+fn retired_layout_report() -> Option<RetiredLayoutReport> {
+    let residue = crate::build::retired_layout_residue().ok()?;
+    if residue.is_empty() {
+        return None;
+    }
+    Some(RetiredLayoutReport {
+        bytes: residue.iter().map(|item| item.bytes).sum(),
+        launcher_stranded: residue.iter().any(|item| item.launcher_points_here),
+        entries: residue
+            .iter()
+            .map(|item| item.path.display().to_string())
+            .collect(),
+    })
+}
+
+/// Human-readable byte size, one decimal place above KiB.
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Delete the pre-F20c distribution leftovers.
+///
+/// Refuses while the launcher still resolves into them: removing the directory
+/// the user's `jcode` currently executes from would break their install, and
+/// the honest fix there is to re-point the launcher first (reinstall, or
+/// `jcode selfdev` which republishes and relinks).
+pub fn run_clean_retired_layout_command() -> Result<()> {
+    let residue = crate::build::retired_layout_residue()?;
+    if residue.is_empty() {
+        println!("No retired distribution layout found; nothing to clean.");
+        return Ok(());
+    }
+
+    if let Some(stranded) = residue.iter().find(|item| item.launcher_points_here) {
+        anyhow::bail!(
+            "refusing to clean: the launcher still resolves into {}\n\
+             That binary is what `jcode` on PATH runs today, and nothing can \
+             update it anymore.\n\
+             Re-point the launcher first (reinstall, or run `jcode selfdev` in \
+             the repo to republish), then re-run this command.",
+            stranded.path.display()
+        );
+    }
+
+    let total: u64 = residue.iter().map(|item| item.bytes).sum();
+    for item in &residue {
+        let result = if item.path.symlink_metadata()?.is_dir() {
+            std::fs::remove_dir_all(&item.path)
+        } else {
+            std::fs::remove_file(&item.path)
+        };
+        match result {
+            Ok(()) => println!("removed {} ({})", item.path.display(), human_bytes(item.bytes)),
+            Err(err) => println!("FAILED  {}: {err}", item.path.display()),
+        }
+    }
+    println!("Reclaimed up to {}.", human_bytes(total));
+    Ok(())
 }
 
 fn client_identity() -> ClientIdentity {
@@ -516,6 +600,7 @@ pub fn run_doctor_command(emit_json: bool) -> Result<()> {
         verdict: format!("{v:?}").to_lowercase(),
         verdict_detail: detail,
         drift_summary,
+        retired_layout: retired_layout_report(),
         fallback: fallback_command(),
     };
 
@@ -593,6 +678,24 @@ pub fn run_doctor_command(emit_json: bool) -> Result<()> {
     );
     if let Some(summary) = report.drift_summary.as_deref() {
         println!("drift:   {summary}");
+    }
+    if let Some(retired) = report.retired_layout.as_ref() {
+        println!(
+            "retired: {} leftover entr{} under ~/.jcode/builds ({}) -- \
+             the pre-F20c version store; nothing reads it",
+            retired.entries.len(),
+            if retired.entries.len() == 1 { "y" } else { "ies" },
+            human_bytes(retired.bytes),
+        );
+        if retired.launcher_stranded {
+            println!(
+                "  WARNING: the launcher still resolves into the retired layout, so \
+                 `jcode` on PATH runs a binary nothing can update. \
+                 Reinstall or run `jcode selfdev` to republish and relink."
+            );
+        } else {
+            println!("  clean up with: jcode doctor --clean-retired-layout");
+        }
     }
     println!("fallback: {}", report.fallback);
 
