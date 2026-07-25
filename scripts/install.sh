@@ -63,13 +63,17 @@ URL_SHA256SUMS="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
 # ~/.jcode/current/jcode. The old version store plus the
 # stable/current/shared-server/canary channel symlinks were deleted, so writing
 # them here would create state that nothing reads.
+# The publish target must be the directory the RESOLVER reads. That is
+# jcode_dir() (crates/jcode-storage), which is $JCODE_HOME or $HOME/.jcode on
+# every platform -- it has no LOCALAPPDATA branch, unlike launcher_dir(). A
+# Windows install that published to %LOCALAPPDATA%\jcode\current would write
+# somewhere no in-binary resolver ever looks.
 if [ "$IS_WINDOWS" = true ]; then
   EXE=".exe"
-  jcode_home="$LOCALAPPDATA/jcode"
 else
   EXE=""
-  jcode_home="${JCODE_HOME:-$HOME/.jcode}"
 fi
+jcode_home="${JCODE_HOME:-$HOME/.jcode}"
 current_dir="$jcode_home/current"
 launcher_path="$INSTALL_DIR/jcode${EXE}"
 

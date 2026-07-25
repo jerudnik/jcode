@@ -35,7 +35,10 @@ $installScript = Join-Path $repoRoot 'scripts\install.ps1'
 # stable channel it used to assert here were deleted, so asserting them would
 # only re-pin state no resolver reads.
 $launcherPath = Join-Path $installDir 'jcode.exe'
-$publishedPath = Join-Path $localAppData 'jcode\current\jcode.exe'
+# The verifier must assert the path the RESOLVER reads (jcode_dir() = JCODE_HOME
+# here), not the installer's own notion of where it wrote. Asserting the
+# installer's path would let a writer/reader divergence pass CI.
+$publishedPath = Join-Path $jcodeHome 'current\jcode.exe'
 
 foreach ($path in @($launcherPath, $publishedPath)) {
     if (-not (Test-Path -LiteralPath $path)) {
@@ -44,8 +47,8 @@ foreach ($path in @($launcherPath, $publishedPath)) {
 }
 
 # The retired layout must not be recreated by the installer.
-foreach ($residue in @('jcode\builds\versions', 'jcode\builds\stable', 'jcode\builds\current')) {
-    $residuePath = Join-Path $localAppData $residue
+foreach ($residue in @('builds\versions', 'builds\stable', 'builds\current')) {
+    $residuePath = Join-Path $jcodeHome $residue
     if (Test-Path -LiteralPath $residuePath) {
         throw "Retired distribution layout was recreated: $residuePath"
     }

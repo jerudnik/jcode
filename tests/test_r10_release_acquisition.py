@@ -21,6 +21,10 @@ from tempfile import TemporaryDirectory
 
 REPO = Path(__file__).resolve().parents[1]
 INSTALL_SH = REPO / "scripts" / "install.sh"
+POWERSHELL_SCRIPTS = (
+    REPO / "scripts" / "install.ps1",
+    REPO / ".github" / "scripts" / "verify_windows_install.ps1",
+)
 UPDATE_RS = REPO / "crates" / "jcode-app-core" / "src" / "update.rs"
 RELEASE_YML = REPO / ".github" / "workflows" / "release.yml"
 QUICK_RELEASE_SH = REPO / "scripts" / "quick-release.sh"
@@ -331,6 +335,36 @@ class R10ReleaseAcquisitionTests(unittest.TestCase):
         self.assertNotIn("--generate-notes", quick_release)
         self.assertNotIn("Users can now: jcode update", quick_release)
         self.assertNotIn("gh issue close", quick_release)
+
+
+    def test_powershell_installers_parse(self) -> None:
+        """A PowerShell script with a parse error fails at load, not at the
+        broken line, so a typo anywhere disables the whole installer.
+
+        `scripts/install.ps1` carried exactly that: an unbraced `$AssetName:`
+        in the checksum-mismatch message made the entire installer unparseable
+        while looking like a working checksum guard.
+        """
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("no PowerShell available to parse-check")
+
+        for script in POWERSHELL_SCRIPTS:
+            with self.subTest(script=script.name):
+                probe = (
+                    "$e = $null; $t = $null; "
+                    f"$null = [System.Management.Automation.Language.Parser]::ParseFile('{script}', "
+                    "[ref]$t, [ref]$e); "
+                    "if ($e.Count) { $e | ForEach-Object { Write-Output $_.Message }; exit 1 }"
+                )
+                result = subprocess.run(
+                    [pwsh, "-NoProfile", "-Command", probe],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(
+                    result.returncode, 0, f"{script.name} does not parse:\n{result.stdout}"
+                )
 
 
 if __name__ == "__main__":

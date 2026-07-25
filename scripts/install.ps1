@@ -175,7 +175,7 @@ function Test-AssetChecksum {
 
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $AssetPath).Hash.ToLowerInvariant()
     if ($actual -ne $expected) {
-        Write-Err "Checksum mismatch for $AssetName: expected $expected, got $actual"
+        Write-Err "Checksum mismatch for ${AssetName}: expected $expected, got $actual"
     }
 
     Write-Info "Verified SHA256 checksum for $AssetName"
@@ -462,7 +462,14 @@ $ChecksumUrl = "https://github.com/$Repo/releases/download/$Version/SHA256SUMS"
 # F20b/F20c: jcode resolves every client and daemon to ONE fixed binary path.
 # The version store and the stable/current channel symlinks were deleted, so
 # writing them here would create state that nothing reads.
-$CurrentDir = Join-Path $env:LOCALAPPDATA "jcode\current"
+#
+# This must be the directory the RESOLVER reads: jcode_dir()
+# (crates/jcode-storage) is $JCODE_HOME or $USERPROFILE\.jcode and has no
+# LOCALAPPDATA branch, unlike launcher_dir(). Publishing to
+# %LOCALAPPDATA%\jcode\current would land where no in-binary resolver looks.
+# $JcodeHome is resolved once near the top of this script, the same way
+# jcode_dir() resolves it.
+$CurrentDir = Join-Path $JcodeHome "current"
 $StagingDir = Join-Path $env:TEMP "jcode-install-$PID"
 $LauncherPath = Join-Path $InstallDir "jcode.exe"
 
