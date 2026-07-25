@@ -794,10 +794,11 @@
       },
       {
         "id": "F20c",
-        "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, release/windows/freebsd workflows, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
+        "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
         "kind": "implement",
         "depends_on": [
-          "F20b"
+          "F20b",
+          "F17"
         ],
         "priority": 72,
         "owned_paths": [
@@ -824,10 +825,8 @@
           "scripts/quick-release.sh",
           "scripts/uninstall.sh",
           "scripts/test_install_release.sh",
+          ".github/scripts/verify_windows_install.ps1",
           "scripts/generate_release_notes.sh",
-          ".github/workflows/release.yml",
-          ".github/workflows/windows-smoke.yml",
-          ".github/workflows/freebsd-smoke.yml",
           "tests/test_r10_release_acquisition.py",
           "crates/jcode-tui/src/tui/app.rs",
           "crates/jcode-tui/src/tui/app/debug_cmds.rs",
@@ -1988,10 +1987,11 @@
     },
     {
       "id": "F20c",
-      "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, release/windows/freebsd workflows, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
+      "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
       "kind": "implement",
       "depends_on": [
-        "F20b"
+        "F20b",
+        "F17"
       ],
       "priority": 72,
       "owned_paths": [
@@ -2018,10 +2018,8 @@
         "scripts/quick-release.sh",
         "scripts/uninstall.sh",
         "scripts/test_install_release.sh",
+        ".github/scripts/verify_windows_install.ps1",
         "scripts/generate_release_notes.sh",
-        ".github/workflows/release.yml",
-        ".github/workflows/windows-smoke.yml",
-        ".github/workflows/freebsd-smoke.yml",
         "tests/test_r10_release_acquisition.py",
         "crates/jcode-tui/src/tui/app.rs",
         "crates/jcode-tui/src/tui/app/debug_cmds.rs",

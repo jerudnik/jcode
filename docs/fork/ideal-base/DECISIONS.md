@@ -666,3 +666,32 @@ status; Cursor route `gpt-5.6-sol-high` silently fell back to `gpt-5.5`
 (use the OpenAI-routed `gpt-5.6-sol` next time). Shared-worktree edits by
 two workers on one file (remote_events_reload_04.rs) triggered the R05
 overlap warning; coordinator serialized ownership by DM.
+
+## D0xx — F20c: retire distribution state, not the release workflows
+
+**Context.** F20c's declared `owned_paths` named `.github/workflows/release.yml`,
+`windows-smoke.yml`, and `freebsd-smoke.yml`. Editing them from `main` violates
+the branch model: `docs/BRANCHING.md` gives `distro/nix` sole ownership of
+`.github/workflows/**`, and `scripts/fork-health.sh` check 5 fails when `main`
+carries a workflow diff. (That check already FAILs on 8 pre-existing files; the
+right response is not to add a 9th.)
+
+**Decision.** Amend F20c to drop the three workflow paths and instead own
+`.github/scripts/verify_windows_install.ps1`. `depends_on` gains `F17`, which
+owns `.github/scripts/**`, to serialize the ownership overlap the railway
+validator correctly flagged.
+
+**Why this is the honest scope, not a dodge.** The thing F20c must remove is
+*state*, not CI. Nothing in the three workflow YAMLs referenced the version
+store, the channel symlinks, or the in-binary acquisition path; they build and
+publish artifacts, which is orthogonal to how a machine installs them. The one
+real coupling was `.github/scripts/verify_windows_install.ps1`, which asserted
+`builds/versions/<v>/jcode.exe` and `builds/stable/jcode.exe` exist after
+install. That is exactly the class of failure F20c exists to prevent: a checker
+pinning a layout no resolver reads. It now asserts the single fixed publish path
+and that the retired layout is NOT recreated.
+
+**Consequence.** Whether the fork keeps cutting GitHub releases is a
+distribution-layer question, decidable on `distro/nix` independently and at any
+time. F20c leaves that lever untouched and only guarantees that *if* a release
+is installed, it lands on the one fixed path.
