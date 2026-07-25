@@ -366,8 +366,14 @@ fn client_and_shared_server_resolve_to_the_same_fixed_publish_target() {
 fn selfdev_falls_back_to_an_unpublished_repo_build() {
     // A self-dev session that has built but not yet published should still be
     // able to reload into its fresh repo build.
+    //
+    // The fixture MUST be a real jcode repo: get_repo_dir() validates
+    // JCODE_REPO_DIR with is_jcode_repo() and silently falls back to
+    // CARGO_MANIFEST_DIR when it fails. With a bare tempdir this test resolved
+    // the developer's actual checkout and only passed while that checkout
+    // happened to have no target/selfdev/jcode built.
     with_temp_jcode_home(|| {
-        let repo = tempfile::tempdir().expect("repo tempdir");
+        let repo = create_git_repo_fixture();
         let target = repo.path().join("target").join("selfdev");
         std::fs::create_dir_all(&target).expect("create target dir");
         let dev = target.join(binary_name());
