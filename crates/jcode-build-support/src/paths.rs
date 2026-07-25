@@ -486,15 +486,17 @@ pub fn current_fixed_dir() -> Result<PathBuf> {
 /// The single atomic fixed reload target: `~/.jcode/current/jcode`.
 ///
 /// A real file (not a symlink), atomically rename-published on every self-dev
-/// build via the same stage->fsync->smoke->rename primitive the version store
-/// uses. This is the F20b source of truth; the legacy `builds/<channel>/jcode`
-/// symlinks remain as a dead fallback until F20c removes them.
+/// build via the stage->fsync->smoke->rename primitive. This is the ONLY
+/// publish target: F20c deleted the version store and the
+/// `builds/<channel>/jcode` symlinks that used to shadow it, so every client
+/// and daemon resolver reads exactly this path.
 pub fn current_fixed_binary_path() -> Result<PathBuf> {
     Ok(current_fixed_dir()?.join(binary_name()))
 }
 
 /// The nix-managed binary to fall back onto — the escape-hatch target for the
-/// migrate hatch (`JCODE_MIGRATE_BINARY`) once F20c retires the stable channel.
+/// migrate hatch (`JCODE_MIGRATE_BINARY`) now that F20c has retired the
+/// channels it used to point at.
 ///
 /// Resolves the launcher (`~/.local/bin/jcode`) or the running executable the
 /// way [`nix_managed_override_target`] does when externally managed, but only

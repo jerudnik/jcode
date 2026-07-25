@@ -200,11 +200,15 @@ fn resume_invocation_args_omits_blank_socket() {
     );
 }
 
-/// Pin JCODE_HOME to a tempdir containing a `builds/current/jcode` binary so
+/// Pin JCODE_HOME to a tempdir containing a published `current/jcode` binary so
 /// `launch_client_executable()` resolves deterministically, independent of
-/// whether the developer machine has a published local build channel and of
-/// other tests mutating JCODE_HOME in parallel. Returns the guards that keep
-/// the environment pinned for the duration of the test.
+/// whether the developer machine has a local published build and of other tests
+/// mutating JCODE_HOME in parallel. Returns the guards that keep the
+/// environment pinned for the duration of the test.
+///
+/// F20c: the fixture must write the SINGLE fixed publish path
+/// (`$JCODE_HOME/current/jcode`); the old `builds/current` channel is no longer
+/// read by any resolver, so a fixture writing it would silently stop pinning.
 fn pinned_resume_test_home() -> (
     crate::tui::app::test_support::TestEnvWriteScope,
     tempfile::TempDir,
@@ -212,8 +216,8 @@ fn pinned_resume_test_home() -> (
 ) {
     let env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let current = temp.path().join("builds").join("current");
-    std::fs::create_dir_all(&current).expect("create builds/current");
+    let current = temp.path().join("current");
+    std::fs::create_dir_all(&current).expect("create current dir");
     std::fs::write(current.join("jcode"), b"#!/bin/sh\n").expect("write fake jcode binary");
     let home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     (env_lock, temp, home)
