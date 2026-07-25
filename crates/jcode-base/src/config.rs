@@ -30,6 +30,14 @@ const CONFIG_CACHE_CHECK_INTERVAL: Duration = if cfg!(test) {
 
 static CONFIG_CACHE_GENERATION: AtomicU64 = AtomicU64::new(1);
 
+/// Reload reasons recorded for tests. A cache-generation assertion that fires
+/// is otherwise unactionable: the number says a reload happened but not what
+/// caused it, and the usual cause is another test mutating process-global
+/// environment without the environment lease.
+#[cfg(test)]
+static CONFIG_RELOAD_REASONS: LazyLock<RwLock<Vec<String>>> =
+    LazyLock::new(|| RwLock::new(Vec::new()));
+
 const CONFIG_ENV_KEYS: &[&str] = &[
     "HOME",
     "JCODE_ACP_PROFILE",
@@ -305,6 +313,11 @@ pub fn config() -> &'static Config {
     };
 
     if let Some(reason) = reload_reason {
+        #[cfg(test)]
+        CONFIG_RELOAD_REASONS
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(reason.clone());
         crate::logging::info(&format!("CONFIG_RELOAD {}", reason));
         // A config reload can change config-derived system prompt sections
         // (feature toggles, sponsors, ...), which legitimately invalidates the
@@ -462,6 +475,17 @@ pub fn invalidate_config_cache() {
 #[cfg(test)]
 pub(crate) fn config_cache_generation() -> u64 {
     CONFIG_CACHE_GENERATION.load(Ordering::Acquire)
+}
+
+/// Drain the recorded reload reasons. Tests asserting on the cache generation
+/// use this to report *why* a reload happened.
+#[cfg(test)]
+pub(crate) fn take_config_reload_reasons() -> Vec<String> {
+    std::mem::take(
+        &mut *CONFIG_RELOAD_REASONS
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
 }
 
 fn notify_config_reloaded() {
@@ -912,3 +936,7 @@ mod env_overrides;
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "config_wi4_tests.rs"]
+mod wi4_tests;
