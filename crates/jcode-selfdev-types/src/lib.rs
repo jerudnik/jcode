@@ -179,14 +179,3 @@ pub struct BuildInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version_label: Option<String>,
 }
-
-/// Context saved before migrating to a newly published build
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MigrationContext {
-    pub session_id: String,
-    pub from_version: String,
-    pub to_version: String,
-    pub change_summary: Option<String>,
-    pub diff: Option<String>,
-    pub timestamp: DateTime<Utc>,
-}

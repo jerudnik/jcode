@@ -1,51 +1,23 @@
-use super::MigrationContext;
 use anyhow::Result;
 use jcode_storage as storage;
 use std::path::PathBuf;
 
-/// Get path to builds directory
-pub fn builds_dir() -> Result<PathBuf> {
-    let base = storage::jcode_dir()?;
-    let dir = base.join("builds");
-    storage::ensure_dir(&dir)?;
-    Ok(dir)
-}
-
-/// Get path to build manifest
+/// Path to the build manifest (self-dev build history).
+///
+/// F20c: this deliberately does NOT live under `~/.jcode/builds/`. That
+/// directory is the retired distribution layout, and `jcode doctor
+/// --clean-retired-layout` exists to delete it; keeping live state inside it
+/// would mean the cleanup destroys data that is still in use, and would
+/// recreate the retired directory on every run.
 pub fn manifest_path() -> Result<PathBuf> {
-    Ok(builds_dir()?.join("manifest.json"))
+    Ok(storage::jcode_dir()?.join("build-manifest.json"))
 }
 
-/// Get path to migration context file
-pub fn migration_context_path(session_id: &str) -> Result<PathBuf> {
-    Ok(builds_dir()?
-        .join("migrations")
-        .join(format!("{}.json", session_id)))
-}
-
-/// Save migration context before switching to canary
-pub fn save_migration_context(ctx: &MigrationContext) -> Result<()> {
-    let path = migration_context_path(&ctx.session_id)?;
-    storage::write_json(&path, ctx)
-}
-
-/// Load migration context
-pub fn load_migration_context(session_id: &str) -> Result<Option<MigrationContext>> {
-    let path = migration_context_path(session_id)?;
-    if path.exists() {
-        Ok(Some(storage::read_json(&path)?))
-    } else {
-        Ok(None)
-    }
-}
-
-/// Clear migration context after successful migration
-pub fn clear_migration_context(session_id: &str) -> Result<()> {
-    let path = migration_context_path(session_id)?;
-    if path.exists() {
-        std::fs::remove_file(path)?;
-    }
-    Ok(())
+/// The pre-F20c manifest location, inside the retired `builds/` directory.
+///
+/// Only used to migrate history forward once; nothing writes it.
+pub fn legacy_manifest_path() -> Result<PathBuf> {
+    Ok(storage::jcode_dir()?.join("builds").join("manifest.json"))
 }
 
 /// Get path to build log file

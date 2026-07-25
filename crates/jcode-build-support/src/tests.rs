@@ -524,3 +524,86 @@ fn launcher_still_pointing_into_retired_layout_is_flagged_as_stranded() {
         assert!(stranded[0].path.ends_with("current"));
     });
 }
+
+#[test]
+fn launcher_traversing_a_retired_channel_is_flagged_even_when_the_payload_is_elsewhere() {
+    // Independent-review finding (F20c I1). A one-shot canonicalize of the
+    // launcher resolves EVERY symlink hop at once, so a launcher wired as
+    //   ~/.local/bin/jcode -> builds/stable/jcode -> <payload outside builds/>
+    // lands on the payload and reports "not stranded" -- and the cleanup then
+    // deletes `builds/stable`, destroying the hop the launcher traverses and
+    // breaking the install it was supposed to protect.
+    with_temp_jcode_home(|| {
+        let home = storage::jcode_dir().expect("home");
+
+        // The real payload deliberately lives OUTSIDE the retired layout.
+        let payload_dir = home.join("payloads");
+        std::fs::create_dir_all(&payload_dir).expect("mkdir payloads");
+        let payload = payload_dir.join(binary_name());
+        std::fs::write(&payload, b"#!/bin/sh\n").expect("write payload");
+
+        // Intermediate hop inside the retired channel.
+        let channel = home.join("builds").join("stable");
+        std::fs::create_dir_all(&channel).expect("mkdir stable");
+        let hop = channel.join(binary_name());
+
+        let launcher = launcher_binary_path().expect("launcher path");
+        std::fs::create_dir_all(launcher.parent().expect("parent")).expect("mkdir launcher dir");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&payload, &hop).expect("symlink hop -> payload");
+            std::os::unix::fs::symlink(&hop, &launcher).expect("symlink launcher -> hop");
+        }
+
+        let residue = retired_layout_residue().expect("scan");
+        let stable = residue
+            .iter()
+            .find(|item| item.path.ends_with("stable"))
+            .expect("stable entry present");
+        assert!(
+            stable.launcher_points_here,
+            "the channel the launcher traverses must be flagged even though the \
+             payload lives outside it, or the cleanup will delete a live hop: {residue:?}"
+        );
+    });
+}
+
+#[test]
+fn build_history_migrates_out_of_the_retired_builds_directory() {
+    // F20c moved the manifest out of `~/.jcode/builds/`, which is now the
+    // retired layout `doctor --clean-retired-layout` deletes. Moving live state
+    // without migrating it would silently discard a user's build history, and
+    // leaving it there would mean the cleanup destroys data still in use.
+    with_temp_jcode_home(|| {
+        let legacy = storage_helpers::legacy_manifest_path().expect("legacy path");
+        std::fs::create_dir_all(legacy.parent().expect("parent")).expect("mkdir builds");
+        // Written in the pre-F20c shape: extra channel keys that no longer
+        // exist on the struct must not block the migration.
+        std::fs::write(
+            &legacy,
+            r#"{"stable":"abc-release","canary":"def-dirty","history":[
+                 {"hash":"abc1234","full_hash":"abc1234def","built_at":"2026-07-19T06:17:05.562044Z",
+                  "commit_message":"old build","dirty":false}]}"#,
+        )
+        .expect("write legacy manifest");
+
+        let manifest = BuildManifest::load().expect("load manifest");
+        assert_eq!(
+            manifest.history.len(),
+            1,
+            "history from the retired location must be carried forward"
+        );
+        assert_eq!(manifest.history[0].hash, "abc1234");
+
+        let migrated = manifest_path().expect("new path");
+        assert!(
+            migrated.exists(),
+            "the migration must persist to the new location so the retired \
+             directory can be deleted safely"
+        );
+        assert!(
+            !migrated.starts_with(storage::jcode_dir().expect("home").join("builds")),
+            "the manifest must not live inside the retired layout"
+        );
+    });
+}

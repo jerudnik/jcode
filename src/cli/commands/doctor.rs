@@ -34,10 +34,11 @@ const VERSION_CHECK_TIMEOUT: Duration = Duration::from_millis(500);
 enum Origin {
     /// Immutable Nix store path (`/nix/store/...`).
     Nix,
-    /// A self-dev / local build channel under `~/.jcode/builds/`.
-    Selfdev,
-    /// A release channel binary under `~/.jcode/builds/{stable,versions}/`.
-    Release,
+    /// The single published binary at `~/.jcode/current/jcode` (F20b/F20c).
+    Published,
+    /// A leftover binary under the retired `~/.jcode/builds/` layout, which
+    /// F20c deleted every reader of. Running one means the install is stranded.
+    Retired,
     /// A bare `cargo` build under a `target/` directory.
     Source,
     /// Anything else (e.g. a hand-copied binary on `PATH`).
@@ -48,24 +49,27 @@ impl Origin {
     fn as_str(self) -> &'static str {
         match self {
             Origin::Nix => "nix",
-            Origin::Selfdev => "selfdev",
-            Origin::Release => "release",
+            Origin::Published => "published",
+            Origin::Retired => "retired",
             Origin::Source => "source",
             Origin::Unknown => "unknown",
         }
     }
 
-    /// Classify by path. Order matters: Nix store wins, then the explicit build
-    /// channels, then a cargo `target/` tree, else unknown.
+    /// Classify by path. Order matters: Nix store wins, then the single
+    /// publish target, then the retired layout, then a cargo `target/` tree,
+    /// else unknown.
     fn classify(path: &Path) -> Origin {
         let p = path.to_string_lossy();
         if p.contains("/nix/store/") {
             Origin::Nix
-        } else if p.contains("/builds/stable/") || p.contains("/builds/versions/") {
-            Origin::Release
+        } else if p.contains("/.jcode/current/") {
+            Origin::Published
         } else if p.contains("/builds/") {
-            // current / canary / shared-server / any other local-build channel.
-            Origin::Selfdev
+            // versions / stable / current / canary / shared-server: all retired
+            // by F20c. Nothing publishes here anymore, so a binary found here
+            // can only be a leftover.
+            Origin::Retired
         } else if p.contains("/target/debug/")
             || p.contains("/target/release/")
             || p.contains("/target/selfdev/")
@@ -198,6 +202,14 @@ fn human_bytes(bytes: u64) -> String {
 /// the honest fix there is to re-point the launcher first (reinstall, or
 /// `jcode selfdev` which republishes and relinks).
 fn run_clean_retired_layout_command() -> Result<()> {
+    // The build manifest used to live inside this directory. Load it first so
+    // its history migrates to the new location, otherwise the cleanup would be
+    // the thing that destroys it. Failure is not fatal: history is
+    // informational, and refusing to reclaim 4+ GiB over it would be worse.
+    if let Err(err) = crate::build::BuildManifest::load() {
+        eprintln!("warning: could not migrate build history before cleanup: {err}");
+    }
+
     let residue = crate::build::retired_layout_residue()?;
     if residue.is_empty() {
         println!("No retired distribution layout found; nothing to clean.");
@@ -231,6 +243,21 @@ fn run_clean_retired_layout_command() -> Result<()> {
             Err(err) => println!("FAILED  {}: {err}", item.path.display()),
         }
     }
+    // Drop the now-empty parent so a cleaned machine reports truly clean and
+    // doctor stops mentioning a directory with nothing in it. Only when empty:
+    // anything unrecognized left behind is the user's, not ours to delete.
+    if let Ok(builds) = crate::build::retired_layout_dir()
+        && builds
+            .read_dir()
+            .is_ok_and(|mut entries| entries.next().is_none())
+        && let Err(err) = std::fs::remove_dir(&builds)
+    {
+        println!(
+            "note: emptied but could not remove {}: {err}",
+            builds.display()
+        );
+    }
+
     println!("Reclaimed up to {}.", human_bytes(total));
     Ok(())
 }
@@ -244,9 +271,9 @@ fn client_identity() -> ClientIdentity {
     // The working tree is only meaningful for a source/selfdev build sitting in
     // a repo. Don't shell out to git for an immutable Nix or release binary.
     let dirty = match origin {
-        Origin::Source | Origin::Selfdev | Origin::Unknown => crate::build::get_repo_dir()
+        Origin::Source | Origin::Published | Origin::Unknown => crate::build::get_repo_dir()
             .and_then(|repo| crate::build::is_working_tree_dirty(&repo).ok()),
-        Origin::Nix | Origin::Release => None,
+        Origin::Nix | Origin::Retired => None,
     };
 
     ClientIdentity {
@@ -265,11 +292,11 @@ fn client_identity() -> ClientIdentity {
 /// checkout produced this"; return `None` there. (G4 in the divergence doc.)
 fn build_source_dir(origin: Origin) -> Option<String> {
     match origin {
-        Origin::Source | Origin::Selfdev | Origin::Unknown => {
+        Origin::Source | Origin::Published | Origin::Unknown => {
             let dir = jcode_build_meta::BUILD_SOURCE_DIR.trim();
             (!dir.is_empty() && dir != "unknown").then(|| dir.to_string())
         }
-        Origin::Nix | Origin::Release => None,
+        Origin::Nix | Origin::Retired => None,
     }
 }
 
@@ -732,23 +759,29 @@ mod tests {
     }
 
     #[test]
-    fn classifies_selfdev_current_channel() {
-        let p = PathBuf::from("/home/u/.jcode/builds/current/jcode");
-        assert_eq!(Origin::classify(&p), Origin::Selfdev);
+    fn classifies_the_single_publish_target() {
+        // F20c: the one path every resolver reads must not fall through to
+        // Unknown, which is what happened while the classifier still only knew
+        // about the retired channels.
+        let p = PathBuf::from("/home/u/.jcode/current/jcode");
+        assert_eq!(Origin::classify(&p), Origin::Published);
     }
 
     #[test]
-    fn classifies_release_channels() {
-        assert_eq!(
-            Origin::classify(&PathBuf::from("/home/u/.jcode/builds/stable/jcode")),
-            Origin::Release
-        );
-        assert_eq!(
-            Origin::classify(&PathBuf::from(
-                "/home/u/.jcode/builds/versions/0.14.6/jcode"
-            )),
-            Origin::Release
-        );
+    fn classifies_every_retired_channel_as_retired() {
+        for path in [
+            "/home/u/.jcode/builds/stable/jcode",
+            "/home/u/.jcode/builds/versions/0.14.6/jcode",
+            "/home/u/.jcode/builds/current/jcode",
+            "/home/u/.jcode/builds/canary/jcode",
+            "/home/u/.jcode/builds/shared-server/jcode",
+        ] {
+            assert_eq!(
+                Origin::classify(&PathBuf::from(path)),
+                Origin::Retired,
+                "{path} is part of the layout F20c retired"
+            );
+        }
     }
 
     #[test]
@@ -865,15 +898,15 @@ mod tests {
     #[test]
     fn build_source_dir_hidden_for_immutable_origins() {
         assert_eq!(build_source_dir(Origin::Nix), None);
-        assert_eq!(build_source_dir(Origin::Release), None);
+        assert_eq!(build_source_dir(Origin::Retired), None);
     }
 
     #[test]
     fn build_source_dir_shown_for_live_origins_when_stamped() {
         // The stamped value is whatever this test binary was built with; it is a
-        // real path (cargo target tree), never empty/"unknown", so source/selfdev
-        // origins surface Some(_).
+        // real path (cargo target tree), never empty/"unknown", so source and
+        // published origins surface Some(_).
         assert!(build_source_dir(Origin::Source).is_some());
-        assert!(build_source_dir(Origin::Selfdev).is_some());
+        assert!(build_source_dir(Origin::Published).is_some());
     }
 }

@@ -9,9 +9,9 @@ pub use paths::{
     current_fixed_dir, find_dev_binary, find_repo_in_ancestors, get_repo_dir,
     is_externally_managed, is_jcode_repo, launcher_binary_path, launcher_dir,
     nix_managed_fallback_binary, preferred_reload_candidate, release_binary_path,
-    resolve_binary_payload, retired_layout_residue, run_selfdev_build, selfdev_binary_path,
-    selfdev_build_command, selfdev_build_command_for_target, shared_server_update_candidate,
-    update_launcher_symlink_to_current,
+    resolve_binary_payload, retired_layout_dir, retired_layout_residue, run_selfdev_build,
+    selfdev_binary_path, selfdev_build_command, selfdev_build_command_for_target,
+    shared_server_update_candidate, update_launcher_symlink_to_current,
 };
 pub use source_state::{
     current_build_info, current_git_diff, current_git_hash, current_git_hash_full,
@@ -19,9 +19,8 @@ pub use source_state::{
     repo_build_version, repo_scope_key, worktree_scope_key,
 };
 pub use storage_helpers::{
-    build_log_path, build_progress_path, builds_dir, clear_build_progress, clear_migration_context,
-    load_migration_context, manifest_path, migration_context_path, read_build_progress,
-    save_migration_context, write_build_progress,
+    build_log_path, build_progress_path, clear_build_progress, manifest_path, read_build_progress,
+    write_build_progress,
 };
 
 use anyhow::{Context, Result};
@@ -35,7 +34,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 pub use jcode_selfdev_types::{
-    BinaryVersionReport, BuildInfo, DevBinarySourceMetadata, MigrationContext, PublishedBuild,
+    BinaryVersionReport, BuildInfo, DevBinarySourceMetadata, PublishedBuild,
     RuntimeIdentityProjection, SelfDevBuildCommand, SelfDevBuildTarget, SourceState,
 };
 
@@ -124,14 +123,28 @@ pub struct BuildManifest {
 }
 
 impl BuildManifest {
-    /// Load manifest from disk
+    /// Load manifest from disk.
+    ///
+    /// F20c moved the manifest out of `~/.jcode/builds/` (which is now the
+    /// retired layout that `doctor --clean-retired-layout` deletes). Build
+    /// history from the old location is migrated forward once rather than
+    /// silently dropped; a failed migration is not fatal, since history is
+    /// informational.
     pub fn load() -> Result<Self> {
         let path = manifest_path()?;
         if path.exists() {
-            storage::read_json(&path)
-        } else {
-            Ok(Self::default())
+            return storage::read_json(&path);
         }
+
+        let legacy = storage_helpers::legacy_manifest_path()?;
+        if legacy.exists()
+            && let Ok(migrated) = storage::read_json::<Self>(&legacy)
+        {
+            let _ = migrated.save();
+            return Ok(migrated);
+        }
+
+        Ok(Self::default())
     }
 
     /// Save manifest to disk

@@ -1055,6 +1055,9 @@ const RETIRED_LAYOUT_ENTRIES: &[&str] = &[
     "stable-version",
     "current-version",
     "shared-server-version",
+    // The manifest lived here before F20c. It is migrated forward on first
+    // load, so by cleanup time this is a copy, not the only copy.
+    "manifest.json",
 ];
 
 /// A leftover from the pre-F20c distribution layout, with enough detail to
@@ -1076,11 +1079,18 @@ pub struct RetiredLayoutResidue {
 /// explicit user action (`jcode doctor --clean-retired-layout` / `uninstall.sh`)
 /// because these directories can hold the only copy of a binary a user is
 /// currently running.
+/// The retired pre-F20c distribution directory. Nothing writes here; it exists
+/// only so diagnostics and cleanup can name and remove it.
+pub fn retired_layout_dir() -> Result<PathBuf> {
+    Ok(storage::jcode_dir()?.join("builds"))
+}
+
 pub fn retired_layout_residue() -> Result<Vec<RetiredLayoutResidue>> {
-    let builds = storage::jcode_dir()?.join("builds");
-    let launcher_target = launcher_binary_path()
+    let builds = retired_layout_dir()?;
+    let launcher_chain = launcher_binary_path()
         .ok()
-        .and_then(|link| std::fs::canonicalize(link).ok());
+        .map(|link| symlink_chain(&link))
+        .unwrap_or_default();
 
     let mut found = Vec::new();
     for entry in RETIRED_LAYOUT_ENTRIES {
@@ -1088,10 +1098,18 @@ pub fn retired_layout_residue() -> Result<Vec<RetiredLayoutResidue>> {
         if !path.exists() && path.symlink_metadata().is_err() {
             continue;
         }
-        let launcher_points_here = launcher_target
-            .as_ref()
-            .zip(std::fs::canonicalize(&path).ok())
-            .is_some_and(|(target, resolved)| target.starts_with(&resolved));
+        let resolved = std::fs::canonicalize(&path).ok();
+        // Every hop must be checked, not just the final payload. A launcher
+        // that goes `~/.local/bin/jcode -> builds/stable/jcode -> <payload>`
+        // canonicalizes straight past `builds/`, so a single canonicalize
+        // would report "not stranded" and let the cleanup delete the very
+        // symlink the launcher traverses.
+        let launcher_points_here = launcher_chain.iter().any(|hop| {
+            resolved
+                .as_ref()
+                .is_some_and(|resolved| hop.starts_with(resolved))
+                || hop.starts_with(&path)
+        });
         found.push(RetiredLayoutResidue {
             bytes: directory_size(&path),
             path,
@@ -1099,6 +1117,42 @@ pub fn retired_layout_residue() -> Result<Vec<RetiredLayoutResidue>> {
         });
     }
     Ok(found)
+}
+
+/// Every path traversed when resolving `start`, including `start` itself, each
+/// intermediate symlink, and the final payload.
+///
+/// Bounded to a small number of hops so a symlink cycle can never hang a
+/// diagnostic. Each hop is also recorded in canonicalized form (when it
+/// resolves) so callers can compare against a canonicalized directory.
+fn symlink_chain(start: &Path) -> Vec<PathBuf> {
+    const MAX_HOPS: usize = 32;
+    let mut chain = Vec::new();
+    let mut cursor = start.to_path_buf();
+
+    for _ in 0..MAX_HOPS {
+        if chain.contains(&cursor) {
+            break;
+        }
+        chain.push(cursor.clone());
+        if let Ok(canonical) = std::fs::canonicalize(&cursor)
+            && !chain.contains(&canonical)
+        {
+            chain.push(canonical);
+        }
+        let Ok(next) = std::fs::read_link(&cursor) else {
+            break;
+        };
+        cursor = if next.is_absolute() {
+            next
+        } else {
+            match cursor.parent() {
+                Some(parent) => parent.join(next),
+                None => next,
+            }
+        };
+    }
+    chain
 }
 
 /// Recursive on-disk size, symlink-safe (never follows links out of the tree).
