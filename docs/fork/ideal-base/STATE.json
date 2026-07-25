@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F20a",
+    "node": "F20b",
     "state": "accepted",
-    "commit": "dc9ded881",
-    "updated_at": "2026-07-24T07:05:46Z",
-    "summary": "Store-path detection makes a nix binary self-declare managed (no wrapper, zero nix-file changes); should_auto_update and jcode update decline on managed installs with nix guidance. Proven end-to-end on the real store binary. Selfdev/hot-reload unaffected."
+    "commit": "c01518181",
+    "updated_at": "2026-07-25T00:07:58Z",
+    "summary": "Self-dev reload collapsed to one atomic fixed path ~/.jcode/current/jcode; client+daemon resolvers prefer it; atomicity preserved (truncation test) and no channel drift/downgrade (resolver tests). Low-noise reload summary. Legacy channels left dead for F20c."
   },
   "nodes": {
     "W0": {
@@ -428,11 +428,14 @@
       "updated_at": "2026-07-24T07:05:46Z"
     },
     "F20b": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "c01518181",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F20b/README.md",
+        "docs/fork/ideal-base/evidence/F20b/test-output.txt"
+      ],
+      "summary": "Self-dev reload collapsed to one atomic fixed path ~/.jcode/current/jcode; client+daemon resolvers prefer it; atomicity preserved (truncation test) and no channel drift/downgrade (resolver tests). Low-noise reload summary. Legacy channels left dead for F20c.",
+      "updated_at": "2026-07-25T00:07:58Z"
     },
     "F20c": {
       "state": "pending",
