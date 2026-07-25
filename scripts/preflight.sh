@@ -101,6 +101,7 @@ run "test-size ratchet"        python3 scripts/check_test_size_budget.py
 run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.py
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py
+run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
 
 # Lint any fork-owned workflow files that changed (mirrors the nix.yml step).

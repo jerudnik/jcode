@@ -86,6 +86,10 @@ jobs:
         shell: bash
         run: python3 scripts/check_config_env_lease.py
 
+      - name: Enforce F20c retired distribution surface stays removed
+        shell: bash
+        run: scripts/f20c_removal_report.sh --stdout > /dev/null
+
       - name: Enforce wildcard re-export ratchet
         shell: bash
         run: python3 scripts/check_wildcard_reexport_budget.py
