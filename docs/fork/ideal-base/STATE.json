@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F20b",
-    "state": "accepted",
-    "commit": "c01518181",
-    "updated_at": "2026-07-25T00:07:58Z",
-    "summary": "Self-dev reload collapsed to one atomic fixed path ~/.jcode/current/jcode; client+daemon resolvers prefer it; atomicity preserved (truncation test) and no channel drift/downgrade (resolver tests). Low-noise reload summary. Legacy channels left dead for F20c."
+    "node": "F20c",
+    "state": "in_progress",
+    "commit": null,
+    "updated_at": "2026-07-25T02:02:53Z",
+    "summary": "Coordinator owns F20c; blast radius declared. Cutting release acquisition first, then the channel/version store."
   },
   "nodes": {
     "W0": {
@@ -438,11 +438,11 @@
       "updated_at": "2026-07-25T00:07:58Z"
     },
     "F20c": {
-      "state": "pending",
+      "state": "in_progress",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Coordinator owns F20c; blast radius declared. Cutting release acquisition first, then the channel/version store.",
+      "updated_at": "2026-07-25T02:02:53Z"
     }
   }
 }
