@@ -983,27 +983,34 @@ fn status_output_prunes_stale_pending_requests() {
 }
 
 #[test]
-fn status_output_reads_the_persisted_stable_channel_marker() {
+fn status_output_reports_the_published_build_from_its_source_sidecar() {
+    // F20c: the channel markers this used to read are gone. The status view now
+    // reports the single published binary, and its identity must come from the
+    // sidecar written next to that binary at publish time (not from manifest
+    // state that can go stale).
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
 
-    let mut manifest = build::BuildManifest::load().expect("load manifest");
-    manifest.stable = Some("stale-manifest-value".to_string());
-    manifest.save().expect("save manifest");
-    std::fs::write(
-        build::stable_version_file().expect("stable version path"),
-        "stable-marker-value\n",
-    )
-    .expect("write stable version marker");
+    let published = build::current_fixed_binary_path().expect("fixed path");
+    std::fs::create_dir_all(published.parent().expect("fixed dir")).expect("create fixed dir");
+    std::fs::write(&published, "published binary").expect("write published binary");
+    let source = test_source_state(std::path::Path::new("/tmp/jcode"));
+    build::write_dev_binary_source_metadata(&published, &source).expect("write sidecar");
 
     let status_output = selfdev_status_output().expect("status output");
     assert!(
         status_output
             .output
-            .contains("**Stable:** stable-marker-value")
+            .contains(&format!("**Version:** {}", source.version_label)),
+        "status should report the published build's version from its sidecar: {}",
+        status_output.output
     );
-    assert!(!status_output.output.contains("stale-manifest-value"));
+    assert!(
+        status_output
+            .output
+            .contains(&format!("**Source fingerprint:** `{}`", source.fingerprint))
+    );
 }
 
 #[test]

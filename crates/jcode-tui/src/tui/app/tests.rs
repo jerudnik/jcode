@@ -1388,13 +1388,16 @@ fn older_server_reporting_no_update_is_still_deferred_via_client_check() {
 }
 
 #[test]
-fn older_server_history_repairs_stale_shared_server_channel_end_to_end() {
-    // Full-path sandbox: a real temp JCODE_HOME set up in the exact field state
-    // (shared-server pinned to an OLD build, stable advanced to a NEW release by
-    // a previous install). When the current client attaches to a server that
-    // self-reports an older release with `server_has_update: Some(false)`, the
-    // production History handler must repair the shared-server channel so the
-    // forced reload it queues has a strictly-newer binary to exec into.
+fn older_server_history_queues_a_forced_reload_end_to_end() {
+    // Full-path sandbox with a real temp JCODE_HOME. When the current client
+    // attaches to a server that self-reports an OLDER release while claiming
+    // `server_has_update: Some(false)`, the production History handler must not
+    // believe the server: it must queue a forced reload so the daemon execs
+    // into the newest published binary.
+    //
+    // F20c removed the client-side shared-server channel repair this used to
+    // also assert: with one fixed publish target there is no stale channel left
+    // to repoint, so the queued reload is the whole remedy.
     use std::time::{Duration, SystemTime};
     let _env_guard = crate::tui::app::test_support::lock_test_env();
     crate::env::remove_var("JCODE_ALLOW_SERVER_VERSION_MISMATCH");
@@ -1403,27 +1406,16 @@ fn older_server_history_repairs_stale_shared_server_channel_end_to_end() {
     let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_HOME", temp.path());
 
-    // Build the field state: shared-server -> OLD, stable -> NEW (newer mtime).
+    // Field state: a newer binary has already been published to the single
+    // fixed target, so a reload has somewhere strictly newer to go.
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    let write_version = |version: &str, mtime: SystemTime| {
-        let dir = crate::build::builds_dir()
-            .unwrap()
-            .join("versions")
-            .join(version);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join(crate::build::binary_name());
-        std::fs::write(&path, format!("bin {version}")).unwrap();
-        std::fs::File::open(&path)
-            .unwrap()
-            .set_modified(mtime)
-            .unwrap();
-    };
-    let old = "0.14.6";
-    let new = "0.22.0";
-    write_version(old, base);
-    write_version(new, base + Duration::from_secs(60));
-    crate::build::update_shared_server_symlink(old).expect("pin shared-server old");
-    crate::build::update_stable_symlink(new).expect("stable new");
+    let published = crate::build::current_fixed_binary_path().expect("fixed path");
+    std::fs::create_dir_all(published.parent().expect("fixed dir")).expect("create fixed dir");
+    std::fs::write(&published, "bin 0.22.0").expect("write published binary");
+    std::fs::File::open(&published)
+        .expect("open published binary")
+        .set_modified(base + Duration::from_secs(60))
+        .expect("set mtime");
 
     let mut app = create_test_app();
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1471,7 +1463,6 @@ fn older_server_history_repairs_stale_shared_server_channel_end_to_end() {
         &mut remote,
     );
 
-    let repaired = crate::build::read_shared_server_version().ok().flatten();
     let pending = app.pending_server_reload;
 
     // Restore env before asserting so a panic cannot leak global state.
@@ -1482,12 +1473,10 @@ fn older_server_history_repairs_stale_shared_server_channel_end_to_end() {
         crate::env::remove_var("JCODE_HOME");
     }
 
-    assert!(pending, "older server must queue a reload");
-    assert_eq!(
-        repaired.as_deref(),
-        Some(new),
-        "the History handler must repair the stale shared-server channel to the newer stable \
-         release so the queued reload upgrades the server instead of re-execing the old binary"
+    assert!(
+        pending,
+        "a server self-reporting an older release must be force-reloaded even when it claims \
+         server_has_update: false"
     );
 }
 

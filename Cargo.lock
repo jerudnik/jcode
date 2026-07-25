@@ -3361,7 +3361,6 @@ dependencies = [
  "jcode-terminal-image",
  "jcode-tool-core",
  "jcode-tool-types",
- "jcode-update-core",
  "libc",
  "open",
  "rand 0.9.3",
@@ -4376,15 +4375,6 @@ name = "jcode-tui-workspace"
 version = "0.1.0"
 dependencies = [
  "ratatui",
-]
-
-[[package]]
-name = "jcode-update-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "sha2 0.10.9",
 ]
 
 [[package]]

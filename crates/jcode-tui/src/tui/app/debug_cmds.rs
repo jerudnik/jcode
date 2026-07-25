@@ -1005,5 +1005,4 @@ impl App {
             format!("ERROR: unknown command '{}'. Use 'help' for list.", cmd)
         }
     }
-
 }

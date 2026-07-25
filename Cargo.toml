@@ -77,7 +77,6 @@ members = [
     "crates/jcode-tui-permissions",
     "crates/jcode-tui-tool-display",
     "crates/jcode-tui-usage-overlay",
-    "crates/jcode-update-core",
     "crates/jcode-terminal-launch",
     "crates/jcode-terminal-image",
     "crates/jcode-telemetry-core",

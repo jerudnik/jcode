@@ -1,5 +1,5 @@
 //! Atomic-publish regression tests for the stage->fsync->smoke->rename
-//! primitive shared by the version store and the F20b fixed reload path.
+//! primitive behind the F20b fixed reload path.
 //! Extracted from lib.rs to keep that file under the code-size budget; the
 //! module still resolves private items via `super::*`.
 #![cfg(all(test, unix))]
@@ -34,8 +34,7 @@ fn write_smoke_script(path: &Path, log_path: Option<&Path>, succeeds: bool) {
 
 /// Set up a source binary whose staged copy is asserted complete and whose
 /// source is truncated mid-stage (via the after-stage hook). Returns the
-/// source path, its original bytes, and the smoke-log path. Shared by the
-/// version-store and fixed-path truncation regression tests.
+/// source path, its original bytes, and the smoke-log path.
 fn arm_truncation_fixture(dir: &Path) -> (PathBuf, Vec<u8>, PathBuf) {
     let source = dir.join(binary_name());
     let smoke_log = dir.join("smoked-path");
@@ -88,61 +87,72 @@ fn assert_truncation_preserved(
 }
 
 #[test]
-fn concurrent_source_truncation_between_stage_and_rename_preserves_published_copy() {
-    let _guard = atomic_publish_test_lock();
-    let fixture = tempfile::tempdir().expect("fixture tempdir");
-    let builds_root = fixture.path().join("builds");
-    let version = "race-truncate-preserves-published-copy";
-    let (source, original, smoke_log) = arm_truncation_fixture(fixture.path());
-
-    let versioned = install_binary_at_version_in_builds_dir(&source, version, &builds_root)
-        .expect("install succeeds");
-
-    assert_truncation_preserved(
-        &versioned,
-        &source,
-        &original,
-        &smoke_log,
-        versioned.parent().unwrap(),
-    );
-    assert!(versioned.starts_with(builds_root.join("versions")));
-}
-
-#[test]
 fn fixed_path_publish_survives_source_truncation_between_stage_and_rename() {
-    // F20b acceptance gate 1: the single fixed reload target is published
-    // through the SAME atomic primitive (cleanup_empty_dir = false, since the
-    // fixed dir is persistent), so a mid-stage source truncation still yields
-    // a complete published binary at the fixed path.
+    // F20b acceptance gate 1: a mid-stage source truncation still yields a
+    // complete published binary at the fixed path, because the staged copy is
+    // fully written and smoke-tested before the rename.
     let _guard = atomic_publish_test_lock();
     let fixture = tempfile::tempdir().expect("fixture tempdir");
     let dest_dir = fixture.path().join("current");
     let (source, original, smoke_log) = arm_truncation_fixture(fixture.path());
 
-    let published =
-        atomic_publish_binary(&source, &dest_dir, false).expect("fixed publish succeeds");
+    let published = atomic_publish_binary(&source, &dest_dir).expect("fixed publish succeeds");
 
     assert_eq!(published, dest_dir.join(binary_name()));
     assert_truncation_preserved(&published, &source, &original, &smoke_log, &dest_dir);
 }
 
 #[test]
-fn failed_smoke_test_leaves_no_version_entry() {
+fn failed_smoke_test_publishes_nothing_and_leaves_no_staged_temp() {
+    // A binary that fails its smoke test must never reach the published path,
+    // and must not litter the persistent publish directory with staged temps.
     let _guard = atomic_publish_test_lock();
     let fixture = tempfile::tempdir().expect("fixture tempdir");
-    let builds_root = fixture.path().join("builds");
+    let dest_dir = fixture.path().join("current");
     let source = fixture.path().join(binary_name());
     write_smoke_script(&source, None, false);
-    let version = "failed-smoke-no-entry";
-    let version_dir = builds_root.join("versions").join(version);
 
-    let error = install_binary_at_version_in_builds_dir(&source, version, &builds_root)
-        .expect_err("failed smoke test should reject install");
+    let error = atomic_publish_binary(&source, &dest_dir)
+        .expect_err("failed smoke test should reject the publish");
 
     assert!(error.to_string().contains("Binary smoke test failed"));
     assert!(
-        !version_dir.exists(),
-        "failed smoke test must not leave a partial {} entry",
-        version_dir.display()
+        !dest_dir.join(binary_name()).exists(),
+        "failed smoke test must not publish a binary"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(&dest_dir)
+        .expect("read dest dir")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name())
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "failed publish must clean up its staged temp, found {leftovers:?}"
+    );
+}
+
+#[test]
+fn failed_publish_preserves_the_previously_published_binary() {
+    // The publish directory is persistent: a bad build must not take down the
+    // last good binary the daemon can still reload into.
+    let _guard = atomic_publish_test_lock();
+    let fixture = tempfile::tempdir().expect("fixture tempdir");
+    let dest_dir = fixture.path().join("current");
+
+    let good = fixture.path().join("good").join(binary_name());
+    std::fs::create_dir_all(good.parent().expect("good dir")).expect("create good dir");
+    write_smoke_script(&good, None, true);
+    let published = atomic_publish_binary(&good, &dest_dir).expect("first publish succeeds");
+    let good_bytes = std::fs::read(&published).expect("read published");
+
+    let bad = fixture.path().join("bad").join(binary_name());
+    std::fs::create_dir_all(bad.parent().expect("bad dir")).expect("create bad dir");
+    write_smoke_script(&bad, None, false);
+    atomic_publish_binary(&bad, &dest_dir).expect_err("bad publish must fail");
+
+    assert_eq!(
+        std::fs::read(&published).expect("read published after failure"),
+        good_bytes,
+        "a failed publish must leave the previously published binary intact"
     );
 }

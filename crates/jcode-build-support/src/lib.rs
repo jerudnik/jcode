@@ -149,14 +149,11 @@ impl BuildManifest {
 }
 
 /// Atomically publish `source` as the single fixed reload target
-/// `~/.jcode/current/jcode` (F20b). Reuses [`atomic_publish_binary`] so it gets
-/// the exact stage->fsync->smoke->rename guarantee the version store has. The
-/// `current/` directory is persistent (it may already hold the last good
-/// binary), so a failed publish must NOT remove it: pass `cleanup_empty_dir =
-/// false` and let the prior published binary stand.
+/// `~/.jcode/current/jcode` (F20b): stage -> fsync -> smoke -> rename, so a
+/// concurrent reader only ever observes a complete, smoke-tested binary.
 pub fn publish_current_fixed(source: &Path) -> Result<PathBuf> {
     let dest_dir = paths::current_fixed_dir()?;
-    atomic_publish_binary(source, &dest_dir, false)
+    atomic_publish_binary(source, &dest_dir)
 }
 
 /// Atomically publish `source` into `dest_dir` as `dest_dir/<binary_name>`,
@@ -165,11 +162,7 @@ pub fn publish_current_fixed(source: &Path) -> Result<PathBuf> {
 /// store and the F20b fixed reload path; the source-truncation regression test
 /// guards it. When `cleanup_empty_dir` is set, a failed publish removes a
 /// freshly-created (still-empty) `dest_dir` so a bad install leaves no residue.
-fn atomic_publish_binary(
-    source: &Path,
-    dest_dir: &Path,
-    cleanup_empty_dir: bool,
-) -> Result<PathBuf> {
+fn atomic_publish_binary(source: &Path, dest_dir: &Path) -> Result<PathBuf> {
     let source_metadata = std::fs::metadata(source)
         .with_context(|| format!("Binary not found at {}", source.display()))?;
     if !source_metadata.is_file() {
@@ -179,15 +172,7 @@ fn atomic_publish_binary(
     storage::ensure_dir(dest_dir)?;
 
     let dest = dest_dir.join(binary_name());
-    let staged = match copy_binary_to_staging_path(source, dest_dir) {
-        Ok(staged) => staged,
-        Err(err) => {
-            if cleanup_empty_dir {
-                let _ = std::fs::remove_dir(dest_dir);
-            }
-            return Err(err);
-        }
-    };
+    let staged = copy_binary_to_staging_path(source, dest_dir)?;
 
     let install_result = (|| {
         run_after_install_stage_hook(source, &staged);
@@ -197,10 +182,10 @@ fn atomic_publish_binary(
     })();
 
     if install_result.is_err() {
+        // The destination directory is persistent (it may already hold the last
+        // good binary), so a failed publish only drops its own staged temp and
+        // lets the previously published binary stand.
         let _ = std::fs::remove_file(&staged);
-        if cleanup_empty_dir && !dest.exists() {
-            let _ = std::fs::remove_dir(dest_dir);
-        }
     }
 
     install_result

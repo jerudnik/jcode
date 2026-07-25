@@ -362,21 +362,17 @@ impl SelfDevTool {
                     )));
                 }
                 match server::await_reload_handoff(&server::socket_path(), timeout).await {
-                    server::ReloadWaitStatus::Ready => {
-                        Ok(ToolOutput::new(format!(
-                            "Reload completed successfully for build {}. Server reported ready.",
-                            ack.hash
-                        )))
-                    }
-                    server::ReloadWaitStatus::Failed(detail) => {
-                        Err(anyhow::anyhow!(
-                            "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
-                            ack.hash,
-                            server::socket_path().display(),
-                            detail.unwrap_or_else(|| "unknown reload failure".to_string()),
-                            server::reload_state_summary(std::time::Duration::from_secs(60))
-                        ))
-                    }
+                    server::ReloadWaitStatus::Ready => Ok(ToolOutput::new(format!(
+                        "Reload completed successfully for build {}. Server reported ready.",
+                        ack.hash
+                    ))),
+                    server::ReloadWaitStatus::Failed(detail) => Err(anyhow::anyhow!(
+                        "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
+                        ack.hash,
+                        server::socket_path().display(),
+                        detail.unwrap_or_else(|| "unknown reload failure".to_string()),
+                        server::reload_state_summary(std::time::Duration::from_secs(60))
+                    )),
                     server::ReloadWaitStatus::Idle | server::ReloadWaitStatus::Waiting { .. } => {
                         Err(anyhow::anyhow!(
                             "Reload was acknowledged for build {}, but readiness could not be confirmed within {}s.",

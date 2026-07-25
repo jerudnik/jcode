@@ -19,6 +19,32 @@ pub(crate) fn with_temp_jcode_home<T>(f: impl FnOnce() -> T) -> T {
     result
 }
 
+/// Scoped env-var override for tests that must drive env-sensitive resolution
+/// (nix-managed mode, repo discovery) without leaking into sibling tests. All
+/// callers already hold the crate-global publish lock via
+/// [`with_temp_jcode_home`].
+pub(crate) struct EnvVarGuard {
+    key: &'static str,
+    prev: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    pub(crate) fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let prev = std::env::var_os(key);
+        jcode_core::env::set_var(key, value);
+        Self { key, prev }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(prev) => jcode_core::env::set_var(self.key, prev),
+            None => jcode_core::env::remove_var(self.key),
+        }
+    }
+}
+
 fn create_git_repo_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir_all(temp.path().join(".git")).expect("create .git dir");
@@ -155,43 +181,6 @@ fn same_commit_dirty_sidecars_project_distinct_runtime_identities() {
 }
 
 #[test]
-fn installed_immutable_binary_sidecar_projects_exact_runtime_identity() {
-    with_temp_jcode_home(|| {
-        let source = source_state_fixture("fedcba9", "999999999999cccc");
-        let versioned = install_binary_at_version(
-            std::env::current_exe().as_ref().unwrap(),
-            &source.version_label,
-        )
-        .expect("install immutable binary");
-        write_dev_binary_source_metadata(&versioned, &source).expect("write immutable sidecar");
-
-        let projection = runtime_identity_projection_for_binary(&versioned, "shared-server");
-
-        assert_eq!(projection.version_label, "fedcba9-dirty-999999999999");
-        assert_eq!(
-            projection.source_fingerprint.as_deref(),
-            Some("999999999999cccc")
-        );
-        assert_eq!(projection.source_dirty, Some(true));
-        assert_eq!(projection.source_hash.as_deref(), Some("fedcba9"));
-        assert_eq!(projection.source_full_hash.as_deref(), Some("fedcba9-full"));
-        assert_eq!(projection.activation_channel, "shared-server");
-        assert_eq!(
-            projection.resolved_executable_payload,
-            resolve_binary_payload(&versioned)
-        );
-    });
-}
-
-#[test]
-fn test_build_manifest_default() {
-    let manifest = BuildManifest::default();
-    assert!(manifest.stable.is_none());
-    assert!(manifest.canary.is_none());
-    assert!(manifest.history.is_empty());
-}
-
-#[test]
 fn test_binary_version_hash_mismatch_rejects_publish_candidate() {
     let source = source_state_fixture("newhash", "123456789abcffff");
     let report = BinaryVersionReport {
@@ -262,27 +251,6 @@ fn test_smoke_test_server_protocol_uses_fresh_connection_after_ping() {
 }
 
 #[test]
-fn test_binary_choice_for_canary_session() {
-    let manifest = BuildManifest {
-        canary: Some("abc123".to_string()),
-        canary_session: Some("session_test".to_string()),
-        ..Default::default()
-    };
-
-    // Canary session should get canary binary
-    match manifest.binary_for_session("session_test") {
-        BinaryChoice::Canary(hash) => assert_eq!(hash, "abc123"),
-        _ => panic!("Expected canary binary"),
-    }
-
-    // Other sessions should get stable (or current if no stable)
-    match manifest.binary_for_session("other_session") {
-        BinaryChoice::Current => {}
-        _ => panic!("Expected current binary"),
-    }
-}
-
-#[test]
 fn test_find_repo_in_ancestors_walks_upward() {
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = temp.path().join("jcode-repo");
@@ -301,73 +269,12 @@ fn test_find_repo_in_ancestors_walks_upward() {
 }
 
 #[test]
-fn test_client_update_candidate_prefers_dev_binary_for_selfdev() {
-    let _guard = test_env_lock();
-    let temp_home = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    jcode_core::env::set_var("JCODE_HOME", temp_home.path());
-
-    let version = "test-current";
-    let version_binary =
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), version)
-            .expect("install test version");
-    update_current_symlink(version).expect("update current symlink");
-
-    let candidate = client_update_candidate(true).expect("expected selfdev candidate");
-    assert_eq!(candidate.1, "current");
-    assert_eq!(
-        std::fs::canonicalize(candidate.0).expect("canonical candidate"),
-        std::fs::canonicalize(version_binary).expect("canonical version binary")
-    );
-
-    if let Some(prev_home) = prev_home {
-        jcode_core::env::set_var("JCODE_HOME", prev_home);
-    } else {
-        jcode_core::env::remove_var("JCODE_HOME");
-    }
-}
-
-#[test]
 fn launcher_dir_uses_sandbox_bin_when_jcode_home_is_set() {
     with_temp_jcode_home(|| {
         let launcher_dir = launcher_dir().expect("launcher dir");
         let expected = storage::jcode_dir().expect("jcode dir").join("bin");
         assert_eq!(launcher_dir, expected);
     });
-}
-
-#[test]
-fn update_launcher_symlink_stays_inside_sandbox_home() {
-    with_temp_jcode_home(|| {
-        let version = "sandbox-current";
-        let version_binary =
-            install_binary_at_version(std::env::current_exe().as_ref().unwrap(), version)
-                .expect("install test version");
-        update_current_symlink(version).expect("update current symlink");
-
-        let launcher = update_launcher_symlink_to_current().expect("update launcher");
-        let expected_launcher = storage::jcode_dir()
-            .expect("jcode dir")
-            .join("bin")
-            .join(binary_name());
-        assert_eq!(launcher, expected_launcher);
-        assert_eq!(
-            std::fs::canonicalize(&launcher).expect("canonical launcher"),
-            std::fs::canonicalize(version_binary).expect("canonical version binary")
-        );
-    });
-}
-
-#[test]
-fn test_canary_status_serialization() {
-    assert_eq!(
-        serde_json::to_string(&CanaryStatus::Testing).unwrap(),
-        "\"testing\""
-    );
-    assert_eq!(
-        serde_json::to_string(&CanaryStatus::Passed).unwrap(),
-        "\"passed\""
-    );
 }
 
 #[test]
@@ -385,824 +292,142 @@ fn dirty_source_state_uses_fingerprint_in_version_label() {
     assert!(state.version_label.len() > state.short_hash.len() + 7);
 }
 
-#[test]
-fn pending_activation_can_complete_and_roll_back() {
-    with_temp_jcode_home(|| {
-        let current_version = "stable-prev";
-        let shared_version = "shared-prev";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), current_version)
-            .expect("install previous version");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), shared_version)
-            .expect("install previous shared version");
-        update_current_symlink(current_version).expect("publish previous current");
-        update_shared_server_symlink(shared_version).expect("publish previous shared");
-
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(PendingActivation {
-                session_id: "session-a".to_string(),
-                new_version: "canary-next".to_string(),
-                previous_current_version: Some(current_version.to_string()),
-                previous_shared_server_version: Some(shared_version.to_string()),
-                source_fingerprint: Some("fingerprint-a".to_string()),
-                requested_at: Utc::now(),
-            })
-            .expect("set pending activation");
-
-        let completed = complete_pending_activation_for_session("session-a")
-            .expect("complete activation")
-            .expect("completed version");
-        assert_eq!(completed, "canary-next");
-        let manifest = BuildManifest::load().expect("load manifest");
-        assert!(manifest.pending_activation.is_none());
-        assert_eq!(manifest.canary.as_deref(), Some("canary-next"));
-        assert_eq!(manifest.canary_status, Some(CanaryStatus::Passed));
-
-        let mut manifest = BuildManifest::load().expect("reload manifest");
-        manifest
-            .set_pending_activation(PendingActivation {
-                session_id: "session-b".to_string(),
-                new_version: "canary-bad".to_string(),
-                previous_current_version: Some(current_version.to_string()),
-                previous_shared_server_version: Some(shared_version.to_string()),
-                source_fingerprint: Some("fingerprint-b".to_string()),
-                requested_at: Utc::now(),
-            })
-            .expect("set second pending activation");
-
-        let rolled_back = rollback_pending_activation_for_session("session-b")
-            .expect("rollback activation")
-            .expect("rolled back version");
-        assert_eq!(rolled_back, "canary-bad");
-        let restored = read_current_version()
-            .expect("read current version")
-            .expect("restored current version");
-        assert_eq!(restored, current_version);
-        let restored_shared = read_shared_server_version()
-            .expect("read shared server version")
-            .expect("restored shared server version");
-        assert_eq!(restored_shared, shared_version);
-    });
-}
-
-#[test]
-fn shared_server_candidate_prefers_approved_channel_over_current() {
-    with_temp_jcode_home(|| {
-        let approved_version = "shared-ok";
-        let current_version = "current-dev";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), approved_version)
-            .expect("install approved version");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), current_version)
-            .expect("install current version");
-        update_shared_server_symlink(approved_version).expect("update shared server");
-        update_current_symlink(current_version).expect("update current");
-
-        let candidate =
-            shared_server_update_candidate(true).expect("expected shared-server candidate");
-        assert_eq!(candidate.1, "shared-server");
-        let selected = std::fs::canonicalize(candidate.0).expect("canonical selected");
-        let approved = std::fs::canonicalize(version_binary_path(approved_version).unwrap())
-            .expect("canonical approved");
-        assert_eq!(selected, approved);
-    });
-}
-
-#[test]
-fn normal_shared_server_candidate_repairs_stale_shared_channel_to_stable() {
-    with_temp_jcode_home(|| {
-        let stale_version = "0.14.2";
-        let installed_version = "0.17.0";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), stale_version)
-            .expect("install stale shared version");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), installed_version)
-            .expect("install installed version");
-        update_shared_server_symlink(stale_version).expect("update shared server");
-        update_stable_symlink(installed_version).expect("update stable");
-        update_current_symlink(installed_version).expect("update current");
-
-        let candidate =
-            shared_server_update_candidate(false).expect("expected stable shared-server candidate");
-        assert_eq!(candidate.1, "stable");
-        let selected = std::fs::canonicalize(candidate.0).expect("canonical selected");
-        let installed = std::fs::canonicalize(version_binary_path(installed_version).unwrap())
-            .expect("canonical installed");
-        assert_eq!(selected, installed);
-    });
-}
-
-#[test]
-fn normal_shared_server_candidate_allows_shared_channel_matching_stable() {
-    with_temp_jcode_home(|| {
-        let installed_version = "0.17.0";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), installed_version)
-            .expect("install installed version");
-        update_shared_server_symlink(installed_version).expect("update shared server");
-        update_stable_symlink(installed_version).expect("update stable");
-
-        let candidate = shared_server_update_candidate(false)
-            .expect("expected matching shared-server candidate");
-        assert_eq!(candidate.1, "shared-server");
-    });
-}
-
-#[test]
-fn normal_shared_server_candidate_ignores_shared_channel_with_missing_marker() {
-    with_temp_jcode_home(|| {
-        let shared_version = "0.14.2";
-        let installed_version = "0.17.0";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), shared_version)
-            .expect("install shared version");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), installed_version)
-            .expect("install installed version");
-        update_shared_server_symlink(shared_version).expect("update shared server");
-        std::fs::remove_file(shared_server_version_file().unwrap()).expect("remove marker");
-        update_stable_symlink(installed_version).expect("update stable");
-
-        let candidate = shared_server_update_candidate(false)
-            .expect("expected stable candidate when shared marker is missing");
-        assert_eq!(candidate.1, "stable");
-    });
-}
-
-#[test]
-fn normal_shared_server_candidate_ignores_shared_channel_with_corrupt_marker() {
-    with_temp_jcode_home(|| {
-        let shared_version = "0.14.2";
-        let installed_version = "0.17.0";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), shared_version)
-            .expect("install shared version");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), installed_version)
-            .expect("install installed version");
-        update_shared_server_symlink(shared_version).expect("update shared server");
-        std::fs::write(
-            shared_server_version_file().unwrap(),
-            "not-the-installed-version",
-        )
-        .expect("write corrupt marker");
-        update_stable_symlink(installed_version).expect("update stable");
-
-        let candidate = shared_server_update_candidate(false)
-            .expect("expected stable candidate when shared marker is corrupt");
-        assert_eq!(candidate.1, "stable");
-    });
-}
-
-#[test]
-fn version_match_detects_installed_channel_by_semver_or_git_hash() {
-    with_temp_jcode_home(|| {
-        std::fs::create_dir_all(builds_dir().unwrap()).expect("create builds dir");
-        std::fs::write(stable_version_file().unwrap(), "0.17.0").expect("write stable marker");
-        assert!(version_matches_installed_channel(
-            "v0.17.0 (abc1234)",
-            "different"
-        ));
-        assert!(!version_matches_installed_channel("v0.14.2", "different"));
-
-        std::fs::write(stable_version_file().unwrap(), "abc1234-dirty-build")
-            .expect("write git marker");
-        assert!(version_matches_installed_channel(
-            "v0.14.2-dev (abc1234)",
-            "abc1234"
-        ));
-    });
-}
-
-#[test]
-fn shared_server_tracks_stable_when_marker_missing() {
-    with_temp_jcode_home(|| {
-        std::fs::create_dir_all(builds_dir().unwrap()).expect("create builds dir");
-        // No shared-server marker at all: nothing deliberate to protect.
-        assert!(shared_server_tracks_stable().expect("tracks stable"));
-    });
-}
-
-#[test]
-fn shared_server_tracks_stable_when_equal_to_stable() {
-    with_temp_jcode_home(|| {
-        std::fs::create_dir_all(builds_dir().unwrap()).expect("create builds dir");
-        std::fs::write(stable_version_file().unwrap(), "0.17.0").expect("write stable");
-        std::fs::write(shared_server_version_file().unwrap(), "0.17.0").expect("write shared");
-        assert!(shared_server_tracks_stable().expect("tracks stable"));
-    });
-}
-
-#[test]
-fn shared_server_does_not_track_stable_when_pinned_to_selfdev() {
-    with_temp_jcode_home(|| {
-        std::fs::create_dir_all(builds_dir().unwrap()).expect("create builds dir");
-        std::fs::write(stable_version_file().unwrap(), "0.17.0").expect("write stable");
-        std::fs::write(
-            shared_server_version_file().unwrap(),
-            "56f43c3d-dirty-deadbeef",
-        )
-        .expect("write shared");
-        assert!(!shared_server_tracks_stable().expect("does not track stable"));
-    });
-}
-
-#[test]
-fn advance_shared_server_carries_forward_when_tracking_stable() {
-    with_temp_jcode_home(|| {
-        let old = "0.17.0";
-        let new = "0.18.0";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), old)
-            .expect("install old");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), new)
-            .expect("install new");
-        update_stable_symlink(old).expect("stable old");
-        update_shared_server_symlink(old).expect("shared old");
-
-        let advanced = advance_shared_server_if_tracking_stable(new).expect("advance");
-        assert!(advanced);
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some(new),
-            "shared-server should follow the update"
-        );
-    });
-}
-
-#[test]
-fn advance_shared_server_preserves_pinned_selfdev_build() {
-    with_temp_jcode_home(|| {
-        let stable_old = "0.17.0";
-        let selfdev = "56f43c3d-dirty-deadbeef";
-        let update = "0.18.0";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), stable_old)
-            .expect("install stable");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), selfdev)
-            .expect("install selfdev");
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), update)
-            .expect("install update");
-        update_stable_symlink(stable_old).expect("stable");
-        update_shared_server_symlink(selfdev).expect("shared selfdev");
-
-        let advanced = advance_shared_server_if_tracking_stable(update).expect("advance");
-        assert!(!advanced, "must not advance a deliberately-promoted build");
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some(selfdev),
-            "self-dev shared-server build must be preserved across update"
-        );
-    });
-}
-
-/// Simulate the channel mutations performed by `/update`'s stable install path
-/// (`download_and_install_blocking_with_progress`), without doing any network
-/// I/O. This is the exact sequence: advance shared-server if tracking stable,
-/// then move stable/current/launcher to the freshly installed version.
-fn simulate_stable_update_channel_swap(new_version: &str) {
-    install_binary_at_version(std::env::current_exe().as_ref().unwrap(), new_version)
-        .expect("install update version");
-    // /update tries to carry the daemon's reload target forward, but only when
-    // shared-server is tracking stable.
-    advance_shared_server_if_tracking_stable(new_version).expect("advance shared-server");
-    update_stable_symlink(new_version).expect("update stable");
-    update_current_symlink(new_version).expect("update current");
-    update_launcher_symlink_to_current().expect("update launcher");
-}
-
-/// Resolve the binary the long-lived daemon would actually reload into for a
-/// *normal* (non-self-dev) session. This mirrors `reload_exec_target` /
-/// `server_update_candidate` in the server, which both go through
-/// `shared_server_update_candidate(false)`.
-fn daemon_reload_target_version() -> Option<String> {
-    let (candidate, _label) = shared_server_update_candidate(false)?;
-    let canonical = std::fs::canonicalize(&candidate).unwrap_or(candidate);
-    // versions/<version>/jcode -> <version>
-    canonical
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-}
-
-/// Reproduces the user-reported "/update gives the new client but a stale
-/// server" bug.
-///
-/// Repro setup matches a real self-dev machine state observed in the field:
-/// the `shared-server` channel is pinned to a self-dev build that differs from
-/// `stable`. When the user runs `/update`, the client channels advance to the
-/// new release, but `advance_shared_server_if_tracking_stable` refuses to move
-/// the pinned shared-server channel, so the daemon's reload target stays on the
-/// old self-dev binary forever.
-///
-/// EXPECTED (post-fix): after `/update`, the daemon's reload target resolves to
-/// the freshly installed release version, so a reconnecting client can upgrade
-/// the server too.
-#[test]
-fn update_leaves_daemon_reload_target_stale_when_shared_server_pinned_to_selfdev() {
-    with_temp_jcode_home(|| {
-        // Field state: client + server both on an old self-dev build.
-        let old_selfdev = "3f160da1-dirty-e756d52efca9";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), old_selfdev)
-            .expect("install old selfdev");
-        // `stable` lags behind (a previously released version).
-        let old_stable = "0.14.3";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), old_stable)
-            .expect("install old stable");
-        update_stable_symlink(old_stable).expect("stable");
-        update_current_symlink(old_selfdev).expect("current selfdev");
-        update_shared_server_symlink(old_selfdev).expect("shared-server selfdev");
-
-        // User runs `/update`: a newer release ships and the client installs it.
-        let new_release = "0.15.0";
-        simulate_stable_update_channel_swap(new_release);
-
-        // Client side is upgraded: current + stable now point at the release.
-        assert_eq!(
-            read_current_version().unwrap().as_deref(),
-            Some(new_release),
-            "client `current` channel should advance on /update"
-        );
-        assert_eq!(
-            read_stable_version().unwrap().as_deref(),
-            Some(new_release),
-            "client `stable` channel should advance on /update"
-        );
-
-        // Server side: what would the daemon reload into? This is the bug.
-        let target = daemon_reload_target_version();
-        assert_eq!(
-            target.as_deref(),
-            Some(new_release),
-            "BUG: after /update the daemon's reload target is still stale \
-             (shared-server pinned to {old_selfdev}); the user gets a new client \
-             but the long-lived server never upgrades. shared-server-version={:?}",
-            read_shared_server_version().unwrap()
-        );
-    });
-}
-
-/// Control case: when `shared-server` is tracking `stable` (the normal,
-/// non-self-dev install), `/update` correctly advances the daemon's reload
-/// target. This guards against a fix that over-corrects and breaks the healthy
-/// path.
-#[test]
-fn update_advances_daemon_reload_target_when_shared_server_tracks_stable() {
-    with_temp_jcode_home(|| {
-        let old_release = "0.14.3";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), old_release)
-            .expect("install old release");
-        update_stable_symlink(old_release).expect("stable");
-        update_current_symlink(old_release).expect("current");
-        update_shared_server_symlink(old_release).expect("shared-server tracks stable");
-
-        let new_release = "0.15.0";
-        simulate_stable_update_channel_swap(new_release);
-
-        assert_eq!(
-            daemon_reload_target_version().as_deref(),
-            Some(new_release),
-            "daemon reload target should advance with /update when tracking stable"
-        );
-    });
-}
-
-fn candidate_version(candidate: Option<(PathBuf, &'static str)>) -> Option<String> {
-    let (candidate, _label) = candidate?;
-    let canonical = std::fs::canonicalize(&candidate).unwrap_or(candidate);
-    canonical
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-}
-
-/// Documents the channel-level precondition behind the "/update -> new client,
-/// stale server" bug for a self-dev / canary daemon.
-///
-/// The daemon decides "is a server update available?" via `server_has_newer_binary`,
-/// which scans BOTH candidate flavors (`shared_server_update_candidate(false)`
-/// AND `(true)`). After `/update`, the `false` flavor self-heals to the freshly
-/// installed release, so the daemon reports `server_has_update = true`.
-///
-/// The single-flavor reload target, however, diverges: a self-dev/canary session
-/// resolves `shared_server_update_candidate(true)`, which returns the *pinned*
-/// old shared-server binary == the running daemon. So if the daemon naively
-/// reloaded into only its own flavor it would exec back into the same old binary,
-/// never upgrade, and loop on the still-true update signal.
-///
-/// The fix lives in `server::util::reload_exec_target`, which now selects the
-/// *newest* candidate across both flavors so the reload target matches the
-/// advertised update. This test pins the channel-level divergence that motivates
-/// that fix.
-#[test]
-fn selfdev_reload_target_diverges_from_update_probe_when_shared_server_pinned() {
-    with_temp_jcode_home(|| {
-        let old_selfdev = "3f160da1-dirty-e756d52efca9";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), old_selfdev)
-            .expect("install old selfdev");
-        let old_stable = "0.14.3";
-        install_binary_at_version(std::env::current_exe().as_ref().unwrap(), old_stable)
-            .expect("install old stable");
-        update_stable_symlink(old_stable).expect("stable");
-        update_current_symlink(old_selfdev).expect("current selfdev");
-        update_shared_server_symlink(old_selfdev).expect("shared-server pinned selfdev");
-
-        let new_release = "0.15.0";
-        simulate_stable_update_channel_swap(new_release);
-
-        // The "is there a server update?" probe (false flavor) self-heals and
-        // sees the new release, so the daemon advertises an update.
-        let update_probe = candidate_version(shared_server_update_candidate(false));
-        assert_eq!(
-            update_probe.as_deref(),
-            Some(new_release),
-            "server_has_newer_binary's normal-candidate probe should see the new release \
-             (this is what makes the daemon advertise server_has_update = true)"
-        );
-
-        // A self-dev/canary session's OWN flavor stays pinned to the OLD binary.
-        // This single-flavor divergence is what `reload_exec_target` must
-        // reconcile by taking the newest candidate across both flavors.
-        let selfdev_reload_target = candidate_version(shared_server_update_candidate(true));
-        assert_eq!(
-            selfdev_reload_target.as_deref(),
-            Some(old_selfdev),
-            "self-dev single-flavor reload target stays pinned to the old binary"
-        );
-
-        assert_ne!(
-            selfdev_reload_target, update_probe,
-            "the single-flavor self-dev reload target diverges from the advertised update; \
-             reload_exec_target reconciles this by preferring the newest candidate across flavors"
-        );
-    });
-}
-
-/// Write a distinct, real binary into `versions/<version>/jcode` with an
-/// explicit mtime so channel-repair mtime comparisons are deterministic
-/// (install_binary_at_version hard-links and would share an mtime).
-fn write_versioned_binary(version: &str, mtime: std::time::SystemTime) -> PathBuf {
-    let dir = builds_dir().unwrap().join("versions").join(version);
-    std::fs::create_dir_all(&dir).expect("create version dir");
-    let path = dir.join(binary_name());
-    std::fs::write(&path, format!("bin {version}")).expect("write binary");
-    std::fs::File::open(&path)
-        .expect("open binary")
-        .set_modified(mtime)
-        .expect("set mtime");
+/// Publish a fake binary at the single fixed target and return its path.
+fn publish_fixed(contents: &str) -> PathBuf {
+    let path = current_fixed_binary_path().expect("fixed path");
+    std::fs::create_dir_all(path.parent().expect("fixed dir")).expect("create fixed dir");
+    std::fs::write(&path, contents).expect("write published binary");
+    crate::platform_support::set_permissions_executable(&path).expect("chmod published binary");
     path
 }
 
 #[test]
-fn repair_repoints_stale_shared_server_to_newer_stable() {
-    use std::time::{Duration, SystemTime};
-    with_temp_jcode_home(|| {
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let old = "0.14.6";
-        let new = "0.22.0";
-        // shared-server pinned to the OLD build; stable advanced to the NEW
-        // release (the "current client, no-op /update, stale server" state).
-        write_versioned_binary(old, base);
-        write_versioned_binary(new, base + Duration::from_secs(60));
-        update_shared_server_symlink(old).expect("pin shared-server old");
-        update_stable_symlink(new).expect("stable new");
+fn build_manifest_default_is_empty_history() {
+    let manifest = BuildManifest::default();
+    assert!(manifest.history.is_empty());
+}
 
-        let outcome = repair_stale_shared_server_channel().expect("repair");
+#[test]
+fn published_binary_sidecar_projects_exact_runtime_identity() {
+    with_temp_jcode_home(|| {
+        let source = source_state_fixture("fedcba9", "999999999999cccc");
+        let published = publish_fixed("published binary");
+        write_dev_binary_source_metadata(&published, &source).expect("write sidecar");
+
+        let projection = runtime_identity_projection_for_binary(&published, "selfdev");
+
+        assert_eq!(projection.version_label, "fedcba9-dirty-999999999999");
         assert_eq!(
-            outcome,
-            SharedServerRepair::Repaired {
-                previous: Some(old.to_string()),
-                repaired_to: new.to_string(),
-            },
+            projection.source_fingerprint.as_deref(),
+            Some("999999999999cccc")
         );
+        assert_eq!(projection.source_dirty, Some(true));
+        assert_eq!(projection.source_hash.as_deref(), Some("fedcba9"));
+        assert_eq!(projection.source_full_hash.as_deref(), Some("fedcba9-full"));
+        assert_eq!(projection.activation_channel, "selfdev");
         assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some(new),
-            "shared-server should be dragged forward to stable"
+            projection.resolved_executable_payload,
+            resolve_binary_payload(&published)
         );
     });
 }
 
 #[test]
-fn repair_is_noop_when_shared_server_already_matches_stable() {
-    use std::time::{Duration, SystemTime};
+fn client_and_shared_server_resolve_to_the_same_fixed_publish_target() {
+    // F20c invariant: there is exactly ONE published binary, so the client and
+    // the daemon can no longer diverge onto different channels. This is the
+    // structural fix for the "new client, stale server" class of bugs.
     with_temp_jcode_home(|| {
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let v = "0.22.0";
-        write_versioned_binary(v, base);
-        update_shared_server_symlink(v).expect("shared");
-        update_stable_symlink(v).expect("stable");
+        let published = publish_fixed("published binary");
+        let canonical = std::fs::canonicalize(&published).expect("canonical published");
 
-        assert_eq!(
-            repair_stale_shared_server_channel().expect("repair"),
-            SharedServerRepair::AlreadyCurrent,
-        );
-        assert_eq!(read_shared_server_version().unwrap().as_deref(), Some(v));
+        for is_selfdev in [false, true] {
+            let (client, client_label) =
+                client_update_candidate(is_selfdev).expect("client candidate");
+            let (server, server_label) =
+                shared_server_update_candidate(is_selfdev).expect("server candidate");
+            assert_eq!(client_label, "current-fixed");
+            assert_eq!(server_label, "current-fixed");
+            assert_eq!(
+                std::fs::canonicalize(&client).expect("canonical client"),
+                canonical,
+                "client must resolve to the fixed publish target (is_selfdev={is_selfdev})"
+            );
+            assert_eq!(
+                std::fs::canonicalize(&server).expect("canonical server"),
+                canonical,
+                "daemon must resolve to the fixed publish target (is_selfdev={is_selfdev})"
+            );
+        }
     });
 }
 
 #[test]
-fn repair_preserves_fresher_selfdev_pin() {
-    use std::time::{Duration, SystemTime};
+fn selfdev_falls_back_to_an_unpublished_repo_build() {
+    // A self-dev session that has built but not yet published should still be
+    // able to reload into its fresh repo build.
     with_temp_jcode_home(|| {
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let stable_old = "0.14.3";
-        let selfdev_new = "56f43c3d-dirty-deadbeef";
-        // Deliberately-promoted self-dev build that is NEWER than stable must be
-        // preserved (the whole point of pinning shared-server).
-        write_versioned_binary(stable_old, base);
-        write_versioned_binary(selfdev_new, base + Duration::from_secs(120));
-        update_stable_symlink(stable_old).expect("stable");
-        update_shared_server_symlink(selfdev_new).expect("pin newer self-dev");
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let target = repo.path().join("target").join("selfdev");
+        std::fs::create_dir_all(&target).expect("create target dir");
+        let dev = target.join(binary_name());
+        std::fs::write(&dev, "dev build").expect("write dev binary");
+        let _repo_guard = EnvVarGuard::set("JCODE_REPO_DIR", repo.path());
 
+        let (candidate, label) = client_update_candidate(true).expect("selfdev candidate");
+        assert_eq!(label, "dev");
         assert_eq!(
-            repair_stale_shared_server_channel().expect("repair"),
-            SharedServerRepair::AlreadyCurrent,
-            "must not downgrade a fresher self-dev pin to an older stable"
-        );
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some(selfdev_new),
-        );
-    });
-}
-
-#[test]
-fn repair_preserves_older_selfdev_pin() {
-    use std::time::{Duration, SystemTime};
-    with_temp_jcode_home(|| {
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let selfdev_old = "56f43c3d-dirty-deadbeef";
-        let stable_new = "0.22.0";
-        write_versioned_binary(selfdev_old, base);
-        write_versioned_binary(stable_new, base + Duration::from_secs(120));
-        update_shared_server_symlink(selfdev_old).expect("pin older self-dev");
-        update_stable_symlink(stable_new).expect("stable new");
-
-        assert_eq!(
-            repair_stale_shared_server_channel().expect("repair"),
-            SharedServerRepair::AlreadyCurrent,
-            "repair must not overwrite a deliberately-pinned self-dev build"
-        );
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some(selfdev_old),
+            std::fs::canonicalize(candidate).expect("canonical candidate"),
+            std::fs::canonicalize(&dev).expect("canonical dev")
         );
     });
 }
 
 #[test]
-fn repair_never_downgrades_when_stable_is_older() {
-    use std::time::{Duration, SystemTime};
+fn nix_managed_sessions_ignore_the_self_managed_publish_target() {
+    // F20a/F20c: on a nix-managed install the package manager owns the binary,
+    // so a stale self-dev publish must never shadow it for normal sessions.
     with_temp_jcode_home(|| {
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let shared_new = "0.22.0";
-        let stable_old = "0.14.3";
-        write_versioned_binary(stable_old, base);
-        write_versioned_binary(shared_new, base + Duration::from_secs(90));
-        update_shared_server_symlink(shared_new).expect("shared new");
-        update_stable_symlink(stable_old).expect("stable old");
+        publish_fixed("self-managed publish");
+        let launcher = launcher_binary_path().expect("launcher path");
+        std::fs::create_dir_all(launcher.parent().expect("launcher dir"))
+            .expect("create launcher dir");
+        std::fs::write(&launcher, "nix profile binary").expect("write launcher");
+        let _nix_guard = EnvVarGuard::set("JCODE_NIX_MANAGED", "1");
 
+        let (candidate, label) = client_update_candidate(false).expect("nix candidate");
+        assert_eq!(label, "nix-managed");
         assert_eq!(
-            repair_stale_shared_server_channel().expect("repair"),
-            SharedServerRepair::AlreadyCurrent,
-            "repair must never move shared-server backward to an older stable"
+            std::fs::canonicalize(candidate).expect("canonical candidate"),
+            std::fs::canonicalize(&launcher).expect("canonical launcher")
         );
+
+        // An explicit self-dev session still opts into the local publish.
+        let (selfdev, selfdev_label) = client_update_candidate(true).expect("selfdev candidate");
+        assert_eq!(selfdev_label, "current-fixed");
         assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some(shared_new),
-        );
-    });
-}
-
-// --- reconcile_stale_pending_activation (F09) ---
-
-fn install_pending_fixture(current_version: &str, shared_version: &str) -> (String, String) {
-    let exe = std::env::current_exe().expect("current exe");
-    install_binary_at_version(&exe, current_version).expect("install current");
-    install_binary_at_version(&exe, shared_version).expect("install shared");
-    update_current_symlink(current_version).expect("publish current");
-    update_shared_server_symlink(shared_version).expect("publish shared");
-    (current_version.to_string(), shared_version.to_string())
-}
-
-fn write_candidate_with_sidecar(version: &str, fingerprint: &str) -> PathBuf {
-    let exe = std::env::current_exe().expect("current exe");
-    let path = install_binary_at_version(&exe, version).expect("install candidate");
-    let metadata = DevBinarySourceMetadata {
-        version_label: version.to_string(),
-        source_fingerprint: fingerprint.to_string(),
-        short_hash: "abc1234".to_string(),
-        full_hash: "abc1234def".to_string(),
-        dirty: false,
-        changed_paths: 0,
-    };
-    let sidecar = path.with_file_name(format!("{}.source.json", binary_name()));
-    std::fs::write(&sidecar, serde_json::to_vec(&metadata).unwrap()).expect("write sidecar");
-    path
-}
-
-fn stale_pending(
-    session_id: &str,
-    new_version: &str,
-    fingerprint: Option<&str>,
-) -> PendingActivation {
-    PendingActivation {
-        session_id: session_id.to_string(),
-        new_version: new_version.to_string(),
-        previous_current_version: Some("prev-current".to_string()),
-        previous_shared_server_version: Some("prev-shared".to_string()),
-        source_fingerprint: fingerprint.map(str::to_string),
-        requested_at: Utc::now() - chrono::Duration::hours(1),
-    }
-}
-
-const RECONCILE_MIN_AGE_MINUTES: i64 = 10;
-
-fn reconcile_none_alive() -> PendingReconcileOutcome {
-    reconcile_stale_pending_activation(chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES), |_| {
-        false
-    })
-    .expect("reconcile")
-}
-
-#[test]
-fn reconcile_no_pending_returns_no_pending() {
-    with_temp_jcode_home(|| {
-        assert_eq!(reconcile_none_alive(), PendingReconcileOutcome::NoPending);
-    });
-}
-
-#[test]
-fn reconcile_dead_session_valid_candidate_completes() {
-    with_temp_jcode_home(|| {
-        install_pending_fixture("prev-current", "prev-shared");
-        write_candidate_with_sidecar("cand-1", "fp-1");
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(stale_pending("dead-session", "cand-1", Some("fp-1")))
-            .expect("set pending");
-        // Point the symlinks at the candidate, as a mid-cycle reload would.
-        update_current_symlink("cand-1").expect("point current at candidate");
-
-        assert_eq!(
-            reconcile_none_alive(),
-            PendingReconcileOutcome::Completed("cand-1".to_string())
-        );
-        let manifest = BuildManifest::load().expect("load");
-        assert!(manifest.pending_activation.is_none());
-        assert_eq!(manifest.canary.as_deref(), Some("cand-1"));
-        assert_eq!(manifest.canary_status, Some(CanaryStatus::Passed));
-        // Symlinks untouched by completion.
-        assert_eq!(read_current_version().unwrap().as_deref(), Some("cand-1"));
-    });
-}
-
-#[test]
-fn reconcile_dead_session_missing_candidate_rolls_back() {
-    with_temp_jcode_home(|| {
-        install_pending_fixture("prev-current", "prev-shared");
-        // Point symlinks at the (never-installed) candidate version markers.
-        // The version dir for "cand-missing" does not exist.
-        std::fs::write(current_version_file().unwrap(), "cand-missing").unwrap();
-        std::fs::write(shared_server_version_file().unwrap(), "cand-missing").unwrap();
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(stale_pending("dead-session", "cand-missing", Some("fp-x")))
-            .expect("set pending");
-
-        assert_eq!(
-            reconcile_none_alive(),
-            PendingReconcileOutcome::RolledBack("cand-missing".to_string())
-        );
-        let manifest = BuildManifest::load().expect("load");
-        assert!(manifest.pending_activation.is_none());
-        assert_eq!(manifest.canary_status, Some(CanaryStatus::Failed));
-        assert_eq!(
-            read_current_version().unwrap().as_deref(),
-            Some("prev-current")
-        );
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some("prev-shared")
+            std::fs::canonicalize(selfdev).expect("canonical selfdev"),
+            std::fs::canonicalize(current_fixed_binary_path().unwrap()).expect("canonical fixed")
         );
     });
 }
 
 #[test]
-fn reconcile_dead_session_fingerprint_mismatch_rolls_back() {
+fn launcher_symlink_points_at_the_fixed_publish_target_and_stays_in_sandbox_home() {
     with_temp_jcode_home(|| {
-        install_pending_fixture("prev-current", "prev-shared");
-        write_candidate_with_sidecar("cand-2", "fp-actual");
-        std::fs::write(current_version_file().unwrap(), "cand-2").unwrap();
-        std::fs::write(shared_server_version_file().unwrap(), "cand-2").unwrap();
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(stale_pending("dead-session", "cand-2", Some("fp-expected")))
-            .expect("set pending");
+        let published = publish_fixed("published binary");
+        let launcher = update_launcher_symlink_to_current().expect("update launcher");
 
-        assert_eq!(
-            reconcile_none_alive(),
-            PendingReconcileOutcome::RolledBack("cand-2".to_string())
+        let home = storage::jcode_dir().expect("jcode dir");
+        assert!(
+            launcher.starts_with(&home),
+            "launcher {} must stay inside the sandbox home {}",
+            launcher.display(),
+            home.display()
         );
         assert_eq!(
-            read_current_version().unwrap().as_deref(),
-            Some("prev-current")
-        );
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some("prev-shared")
-        );
-    });
-}
-
-#[test]
-fn reconcile_live_initiator_is_left_alone() {
-    with_temp_jcode_home(|| {
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(stale_pending("live-session", "cand-3", None))
-            .expect("set pending");
-
-        let outcome = reconcile_stale_pending_activation(
-            chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES),
-            |sid| sid == "live-session",
-        )
-        .expect("reconcile");
-        assert_eq!(outcome, PendingReconcileOutcome::InitiatorAlive);
-        assert!(BuildManifest::load().unwrap().pending_activation.is_some());
-    });
-}
-
-#[test]
-fn reconcile_fresh_record_is_untouched_even_with_dead_session() {
-    with_temp_jcode_home(|| {
-        let mut pending = stale_pending("dead-session", "cand-4", None);
-        pending.requested_at = Utc::now();
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(pending)
-            .expect("set pending");
-
-        assert_eq!(reconcile_none_alive(), PendingReconcileOutcome::StillFresh);
-        assert!(BuildManifest::load().unwrap().pending_activation.is_some());
-    });
-}
-
-#[test]
-fn reconcile_preserves_live_canary_from_other_session() {
-    with_temp_jcode_home(|| {
-        install_pending_fixture("prev-current", "prev-shared");
-        write_candidate_with_sidecar("cand-5", "fp-5");
-        update_current_symlink("cand-5").expect("point current at candidate");
-        let mut manifest = BuildManifest::default();
-        manifest.canary = Some("other-canary".to_string());
-        manifest.canary_session = Some("live-other".to_string());
-        manifest.canary_status = Some(CanaryStatus::Testing);
-        manifest
-            .set_pending_activation(stale_pending("dead-session", "cand-5", Some("fp-5")))
-            .expect("set pending");
-
-        let outcome = reconcile_stale_pending_activation(
-            chrono::Duration::minutes(RECONCILE_MIN_AGE_MINUTES),
-            |sid| sid == "live-other",
-        )
-        .expect("reconcile");
-        assert_eq!(
-            outcome,
-            PendingReconcileOutcome::Skipped("cand-5".to_string())
-        );
-
-        let manifest = BuildManifest::load().expect("load");
-        assert!(manifest.pending_activation.is_none(), "record cleared");
-        assert_eq!(manifest.canary.as_deref(), Some("other-canary"));
-        assert_eq!(manifest.canary_session.as_deref(), Some("live-other"));
-        assert_eq!(manifest.canary_status, Some(CanaryStatus::Testing));
-        assert_eq!(read_current_version().unwrap().as_deref(), Some("cand-5"));
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some("prev-shared")
-        );
-    });
-}
-
-#[test]
-fn reconcile_rollback_does_not_clobber_newer_publish() {
-    with_temp_jcode_home(|| {
-        install_pending_fixture("prev-current", "prev-shared");
-        // Someone published a newer build after the stale record was written.
-        let exe = std::env::current_exe().expect("current exe");
-        install_binary_at_version(&exe, "newer-publish").expect("install newer");
-        update_current_symlink("newer-publish").expect("publish newer current");
-        std::fs::write(shared_server_version_file().unwrap(), "cand-6").unwrap();
-        let mut manifest = BuildManifest::default();
-        manifest
-            .set_pending_activation(stale_pending("dead-session", "cand-6", Some("fp-6")))
-            .expect("set pending");
-
-        assert_eq!(
-            reconcile_none_alive(),
-            PendingReconcileOutcome::RolledBack("cand-6".to_string())
-        );
-        // current still points at the newer publish, only shared-server restored.
-        assert_eq!(
-            read_current_version().unwrap().as_deref(),
-            Some("newer-publish")
-        );
-        assert_eq!(
-            read_shared_server_version().unwrap().as_deref(),
-            Some("prev-shared")
+            std::fs::canonicalize(&launcher).expect("canonical launcher"),
+            std::fs::canonicalize(&published).expect("canonical published")
         );
     });
 }
