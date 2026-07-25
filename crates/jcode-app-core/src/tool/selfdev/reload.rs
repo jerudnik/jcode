@@ -290,39 +290,13 @@ impl SelfDevTool {
                 &repo_dir, &source,
             )?)
         };
-        let previous_shared_server_version = if SelfDevTool::is_test_session() {
-            None
-        } else {
+        if !SelfDevTool::is_test_session() {
             let published_build = published.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
                     "published build metadata was missing after publish_local_current_build_for_source"
                 )
             })?;
-            build::smoke_test_server_binary(&published_build.versioned_path)?;
-            build::read_shared_server_version()?
-        };
-
-        // Update manifest - track what we're testing
-        let mut manifest = build::BuildManifest::load()?;
-        manifest.canary = Some(hash.clone());
-        manifest.canary_status = Some(build::CanaryStatus::Testing);
-        manifest.set_pending_activation(build::PendingActivation {
-            session_id: session_id.to_string(),
-            new_version: hash.clone(),
-            previous_current_version: published
-                .as_ref()
-                .and_then(|published| published.previous_current_version.clone()),
-            previous_shared_server_version,
-            source_fingerprint: Some(source.fingerprint.clone()),
-            requested_at: chrono::Utc::now(),
-        })?;
-        manifest.save()?;
-
-        if !SelfDevTool::is_test_session()
-            && let Err(error) = build::update_shared_server_symlink(&hash)
-        {
-            let _ = build::rollback_pending_activation_for_session(session_id);
-            return Err(error);
+            build::smoke_test_server_binary(&published_build.published_path)?;
         }
 
         // Save reload context for continuation after restart
@@ -339,7 +313,6 @@ impl SelfDevTool {
         ));
         if let Err(e) = reload_ctx.save() {
             crate::logging::error(&format!("Failed to save reload context: {}", e));
-            let _ = build::rollback_pending_activation_for_session(session_id);
             return Err(e);
         }
         crate::logging::info("Reload context saved successfully");
@@ -365,7 +338,6 @@ impl SelfDevTool {
         let ack = server::wait_for_reload_ack(&request_id, timeout)
             .await
             .map_err(|error| {
-                let _ = build::rollback_pending_activation_for_session(session_id);
                 anyhow::anyhow!(
                     "Timed out waiting for the server to begin reload after {}s: {}. The reload signal may not have been picked up; check that the connected server is running a build with unified self-dev reload support and try restarting the shared server.",
                     timeout.as_secs(),
@@ -391,14 +363,12 @@ impl SelfDevTool {
                 }
                 match server::await_reload_handoff(&server::socket_path(), timeout).await {
                     server::ReloadWaitStatus::Ready => {
-                        let _ = build::complete_pending_activation_for_session(session_id);
                         Ok(ToolOutput::new(format!(
                             "Reload completed successfully for build {}. Server reported ready.",
                             ack.hash
                         )))
                     }
                     server::ReloadWaitStatus::Failed(detail) => {
-                        let _ = build::rollback_pending_activation_for_session(session_id);
                         Err(anyhow::anyhow!(
                             "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
                             ack.hash,
@@ -408,7 +378,6 @@ impl SelfDevTool {
                         ))
                     }
                     server::ReloadWaitStatus::Idle | server::ReloadWaitStatus::Waiting { .. } => {
-                        let _ = build::rollback_pending_activation_for_session(session_id);
                         Err(anyhow::anyhow!(
                             "Reload was acknowledged for build {}, but readiness could not be confirmed within {}s.",
                             ack.hash,

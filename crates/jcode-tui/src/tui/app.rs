@@ -1125,12 +1125,6 @@ pub struct App {
     swarm_plan_swarm_id: Option<String>,
     // Number of connected clients (remote mode only)
     remote_client_count: Option<usize>,
-    // Build version tracking for auto-migration
-    known_stable_version: Option<String>,
-    // Last time we checked for stable version
-    last_version_check: Option<Instant>,
-    // Pending migration to new stable version
-    pending_migration: Option<String>,
     // Session to resume on connect (remote mode)
     resume_session_id: Option<String>,
     // Exit code to use when quitting (for canary wrapper communication)

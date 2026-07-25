@@ -829,6 +829,14 @@
           ".github/workflows/windows-smoke.yml",
           ".github/workflows/freebsd-smoke.yml",
           "tests/test_r10_release_acquisition.py",
+          "crates/jcode-tui/src/tui/app.rs",
+          "crates/jcode-tui/src/tui/app/debug_cmds.rs",
+          "crates/jcode-tui/src/tui/app/local.rs",
+          "crates/jcode-tui/src/tui/app/construction.rs",
+          "crates/jcode-tui/src/tui/app/debug_profile.rs",
+          "crates/jcode-tui/src/tui/app/state_ui_maintenance.rs",
+          "crates/jcode-selfdev-types/src/lib.rs",
+          "crates/jcode-app-core/src/server.rs",
           "docs/fork/ideal-base/evidence/F20c/**"
         ],
         "acceptance_gates": [
@@ -2015,6 +2023,14 @@
         ".github/workflows/windows-smoke.yml",
         ".github/workflows/freebsd-smoke.yml",
         "tests/test_r10_release_acquisition.py",
+        "crates/jcode-tui/src/tui/app.rs",
+        "crates/jcode-tui/src/tui/app/debug_cmds.rs",
+        "crates/jcode-tui/src/tui/app/local.rs",
+        "crates/jcode-tui/src/tui/app/construction.rs",
+        "crates/jcode-tui/src/tui/app/debug_profile.rs",
+        "crates/jcode-tui/src/tui/app/state_ui_maintenance.rs",
+        "crates/jcode-selfdev-types/src/lib.rs",
+        "crates/jcode-app-core/src/server.rs",
         "docs/fork/ideal-base/evidence/F20c/**"
       ],
       "acceptance_gates": [

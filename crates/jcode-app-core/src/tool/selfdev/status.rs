@@ -35,58 +35,24 @@ pub fn selfdev_status_output() -> Result<ToolOutput> {
         }
     }
 
-    status.push_str("\n## Build Channels\n\n");
-
-    if let Ok(Some(current)) = build::read_current_version() {
-        status.push_str(&format!("**Current:** {}\n", current));
-    } else {
-        status.push_str("**Current:** none\n");
-    }
-
-    if let Ok(Some(shared_server)) = build::read_shared_server_version() {
-        status.push_str(&format!("**Shared server:** {}\n", shared_server));
-    } else {
-        status.push_str("**Shared server:** none\n");
-    }
-
-    if let Ok(Some(stable)) = build::read_stable_version() {
-        status.push_str(&format!("**Stable:** {}\n", stable));
-    } else {
-        status.push_str("**Stable:** none\n");
-    }
-
-    if let Some(ref canary) = manifest.canary {
-        let status_str = match &manifest.canary_status {
-            Some(build::CanaryStatus::Testing) => "testing",
-            Some(build::CanaryStatus::Passed) => "passed",
-            Some(build::CanaryStatus::Failed) => "failed",
-            None => "unknown",
-        };
-        status.push_str(&format!("**Canary:** {} ({})\n", canary, status_str));
-    } else {
-        status.push_str("**Canary:** none\n");
-    }
-
-    if let Some(pending) = manifest.pending_activation.as_ref() {
-        status.push_str(&format!(
-            "**Pending activation:** {} for session `{}`\n",
-            pending.new_version, pending.session_id
-        ));
-        if let Some(previous) = pending.previous_current_version.as_deref() {
-            status.push_str(&format!("**Rollback target:** {}\n", previous));
+    // F20c: one publish target replaced the current/stable/shared-server/canary
+    // channel matrix, so there is a single published binary to report.
+    status.push_str("\n## Published Build\n\n");
+    match build::current_fixed_binary_path() {
+        Ok(path) if path.exists() => {
+            status.push_str(&format!("**Path:** {}\n", path.display()));
+            match build::read_dev_binary_source_metadata(&path) {
+                Some(meta) => {
+                    status.push_str(&format!("**Version:** {}\n", meta.version_label));
+                    status.push_str(&format!(
+                        "**Source fingerprint:** `{}`\n",
+                        meta.source_fingerprint
+                    ));
+                }
+                None => status.push_str("**Version:** unknown (no source metadata)\n"),
+            }
         }
-        if let Some(previous) = pending.previous_shared_server_version.as_deref() {
-            status.push_str(&format!(
-                "**Shared server rollback target:** {}\n",
-                previous
-            ));
-        }
-        if let Some(fingerprint) = pending.source_fingerprint.as_deref() {
-            status.push_str(&format!(
-                "**Pending source fingerprint:** `{}`\n",
-                fingerprint
-            ));
-        }
+        _ => status.push_str("**Path:** none published\n"),
     }
 
     status.push_str("\n## Debug Socket\n\n");
@@ -169,27 +135,6 @@ pub fn selfdev_status_output() -> Result<ToolOutput> {
         }
     }
 
-    if let Some(ref crash) = manifest.last_crash {
-        status.push_str(&format!(
-            "\n## Last Crash\n\n\
-             Build: {}\n\
-             Exit code: {}\n\
-             Time: {}\n",
-            crash.build_hash,
-            crash.exit_code,
-            crash.crashed_at.format("%Y-%m-%d %H:%M:%S UTC")
-        ));
-
-        if !crash.stderr.is_empty() {
-            let stderr_preview = if crash.stderr.len() > 500 {
-                format!("{}...", crate::util::truncate_str(&crash.stderr, 500))
-            } else {
-                crash.stderr.clone()
-            };
-            status.push_str(&format!("\nStderr:\n```\n{}\n```\n", stderr_preview));
-        }
-    }
-
     if !manifest.history.is_empty() {
         status.push_str("\n## Recent Builds\n\n");
         for (i, info) in manifest.history.iter().take(5).enumerate() {
@@ -259,7 +204,7 @@ Unnamespaced commands default to `server:`.
 ### Server Commands (agent/tools)
 | Command | Description |
 |---------|-------------|
-| `state` | Agent state (session, model, canary) |
+| `state` | Agent state (session, model) |
 | `history` | Conversation history as JSON |
 | `tools` | List available tools |
 | `last_response` | Last assistant response |

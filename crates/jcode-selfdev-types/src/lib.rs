@@ -59,17 +59,6 @@ pub struct BinaryVersionReport {
     pub git_hash: Option<String>,
 }
 
-/// Which binary to use.
-#[derive(Debug, Clone)]
-pub enum BinaryChoice {
-    /// Use the stable version.
-    Stable(String),
-    /// Use the canary version for testing.
-    Canary(String),
-    /// Use current running binary because no versioned builds exist yet.
-    Current,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceState {
     pub repo_scope: String,
@@ -134,24 +123,17 @@ impl SourceState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Result of publishing a self-dev build.
+///
+/// F20c collapsed publishing onto one atomic fixed path, so there is no
+/// versioned copy, no `current` channel symlink, and no previous-version
+/// bookkeeping for a rollback that can no longer happen.
 pub struct PublishedBuild {
     pub version: String,
     pub source_fingerprint: String,
-    pub versioned_path: PathBuf,
-    pub current_link: PathBuf,
+    /// The single fixed publish target (`~/.jcode/current/jcode`).
+    pub published_path: PathBuf,
     pub launcher_link: PathBuf,
-    pub previous_current_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PendingActivation {
-    pub session_id: String,
-    pub new_version: String,
-    pub previous_current_version: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_shared_server_version: Option<String>,
-    pub source_fingerprint: Option<String>,
-    pub requested_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -177,21 +159,6 @@ impl From<&SourceState> for DevBinarySourceMetadata {
     }
 }
 
-/// Status of a canary build being tested
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum CanaryStatus {
-    /// Build is currently being tested
-    #[serde(alias = "Testing")]
-    Testing,
-    /// Build passed all tests and is ready for promotion
-    #[serde(alias = "Passed")]
-    Passed,
-    /// Build failed testing
-    #[serde(alias = "Failed")]
-    Failed,
-}
-
 /// Information about a specific build version
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuildInfo {
@@ -213,23 +180,7 @@ pub struct BuildInfo {
     pub version_label: Option<String>,
 }
 
-/// Information about a crash during canary testing
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CrashInfo {
-    /// Build hash that crashed
-    pub build_hash: String,
-    /// Exit code
-    pub exit_code: i32,
-    /// Stderr output (truncated)
-    pub stderr: String,
-    /// Timestamp of crash
-    pub crashed_at: DateTime<Utc>,
-    /// Git diff that was being tested
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diff: Option<String>,
-}
-
-/// Context saved before migrating to a canary build
+/// Context saved before migrating to a newly published build
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationContext {
     pub session_id: String,

@@ -1,8 +1,4 @@
-use super::{
-    SelfDevBuildCommand, SelfDevBuildTarget, canary_binary_path, current_binary_path,
-    read_current_version, read_shared_server_version, read_stable_version,
-    shared_server_binary_path, stable_binary_path,
-};
+use super::{SelfDevBuildCommand, SelfDevBuildTarget};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use jcode_storage as storage;
@@ -568,35 +564,35 @@ fn update_launcher_symlink(target: &Path) -> Result<PathBuf> {
     Ok(launcher)
 }
 
-/// Update launcher path to point at the current channel binary.
+/// Point the launcher (`~/.local/bin/jcode`) at the single fixed publish target.
+///
+/// F20c retired the `builds/current` channel symlink this used to follow, so the
+/// launcher now resolves straight to `~/.jcode/current/jcode`. Nix-managed
+/// installs own the launcher and are left untouched by
+/// [`update_launcher_symlink`].
 pub fn update_launcher_symlink_to_current() -> Result<PathBuf> {
-    let current = current_binary_path()?;
+    let current = current_fixed_binary_path()?;
     update_launcher_symlink(&current)
-}
-
-/// Update launcher path to point at the stable channel binary.
-pub fn update_launcher_symlink_to_stable() -> Result<PathBuf> {
-    let stable = stable_binary_path()?;
-    update_launcher_symlink(&stable)
 }
 
 /// Resolve which client binary should be considered for launches, updates, and reloads.
 ///
 /// Order matters:
-/// - Prefer the published `current` channel first (active local build)
-/// - Self-dev sessions can fall back to an unpublished repo build from `target/selfdev` or `target/release`
-/// - Then the self-dev canary channel
-/// - Then launcher path
-/// - Then stable channel path
-/// - Finally currently running executable
+/// - Nix-managed non-self-dev sessions resolve to the launcher the package
+///   manager owns (see [`nix_managed_override_target`]).
+/// - Then the single fixed publish target `~/.jcode/current/jcode` (F20b/F20c:
+///   the one place a self-dev build is ever published).
+/// - Self-dev sessions may then fall back to an unpublished repo build from
+///   `target/selfdev` or `target/release`.
+/// - Then the launcher path, then the running executable.
 ///
 /// In nix-managed mode the nix profile owns the binary, so non-self-dev callers
-/// must ignore the self-managed `builds/` shadow (current/canary/shared-server/
-/// stable) and resolve straight to the launcher — the profile binary that `nix`
-/// updates on rebuild. This is what keeps the running server from drifting onto
-/// a stale self-dev build (the self-certifying-channel version-drift incident).
-/// Explicit self-dev sessions still opt into local builds. Returns `None` when
-/// the override does not apply, so callers fall through to normal resolution.
+/// must ignore the self-managed publish target and resolve straight to the
+/// launcher -- the profile binary that `nix` updates on rebuild. This is what
+/// keeps the running server from drifting onto a stale self-dev build (the
+/// self-certifying-channel version-drift incident). Explicit self-dev sessions
+/// still opt into local builds. Returns `None` when the override does not apply,
+/// so callers fall through to normal resolution.
 fn nix_managed_launcher_override(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     nix_managed_override_target(is_externally_managed(), is_selfdev_session)
 }
@@ -621,35 +617,23 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
         return Some(nix);
     }
 
-    // F20b: the single atomic fixed path is the source of truth. Every self-dev
-    // publish rename-publishes into it, so prefer it ahead of the legacy channel
-    // symlinks (kept below as a dead fallback until F20c removes them).
+    // The single atomic fixed path is the source of truth: every self-dev
+    // publish rename-publishes into it, so a complete binary is always what a
+    // reader observes.
     if let Some(fixed) = existing_binary(current_fixed_binary_path(), "current-fixed") {
         return Some(fixed);
     }
 
-    if let Some(current) = existing_binary(current_binary_path(), "current") {
-        return Some(current);
-    }
-
-    if is_selfdev_session {
-        if let Some(repo_dir) = get_repo_dir()
-            && let Some(dev) = find_dev_binary(&repo_dir)
-            && dev.exists()
-        {
-            return Some((dev, "dev"));
-        }
-        if let Some(canary) = existing_binary(canary_binary_path(), "canary") {
-            return Some(canary);
-        }
+    if is_selfdev_session
+        && let Some(repo_dir) = get_repo_dir()
+        && let Some(dev) = find_dev_binary(&repo_dir)
+        && dev.exists()
+    {
+        return Some((dev, "dev"));
     }
 
     if let Some(launcher) = existing_binary(launcher_binary_path(), "launcher") {
         return Some(launcher);
-    }
-
-    if let Some(stable) = existing_binary(stable_binary_path(), "stable") {
-        return Some(stable);
     }
 
     std::env::current_exe().ok().map(|exe| (exe, "current"))
@@ -657,103 +641,20 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
 
 /// Resolve the binary that the shared daemon should spawn or reload into.
 ///
-/// This intentionally does not follow the fast-moving `current` channel. The
-/// shared server should only run binaries that were explicitly promoted onto the
-/// shared-server channel (or stable as fallback), so local dirty self-dev builds
-/// stop taking out every client by accident.
+/// F20c collapsed this onto the same single fixed publish target the clients
+/// use. There is no separate `shared-server` channel to promote onto or drift
+/// behind any more: the daemon reloads into whatever was last atomically
+/// published, which is by construction a complete, smoke-tested binary.
 pub fn shared_server_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     if let Some(nix) = nix_managed_launcher_override(is_selfdev_session) {
         return Some(nix);
     }
 
-    // F20b: route the daemon onto the single atomic fixed path first. This is the
-    // one publish target now (rename-published, so always a complete binary), so
-    // the shared-server/stable channel lookups below are a dead fallback (F20c).
     if let Some(fixed) = existing_binary(current_fixed_binary_path(), "current-fixed") {
         return Some(fixed);
     }
 
-    let shared_server = existing_binary(shared_server_binary_path(), "shared-server");
-    if is_selfdev_session {
-        if let Some(shared_server) = shared_server {
-            return Some(shared_server);
-        }
-    } else if let Some(shared_server) = shared_server
-        && shared_server_channel_is_current_enough()
-    {
-        return Some(shared_server);
-    }
-
-    if let Some(stable) = existing_binary(stable_binary_path(), "stable") {
-        return Some(stable);
-    }
-
     std::env::current_exe().ok().map(|exe| (exe, "current"))
-}
-
-fn shared_server_channel_is_current_enough() -> bool {
-    let shared = read_shared_server_version().ok().flatten();
-    let Some(shared) = shared
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return false;
-    };
-
-    let stable = read_stable_version().ok().flatten();
-    if stable
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some_and(|stable| stable == shared)
-    {
-        return true;
-    }
-
-    let current = read_current_version().ok().flatten();
-    current
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some_and(|current| current == shared)
-}
-
-fn normalize_version_marker(value: &str) -> String {
-    let value = value.trim();
-    let value = value.strip_prefix('v').unwrap_or(value);
-    value
-        .split([' ', '(', ')'])
-        .next()
-        .unwrap_or(value)
-        .trim()
-        .to_string()
-}
-
-pub fn version_matches_installed_channel(version: &str, git_hash: &str) -> bool {
-    let version = normalize_version_marker(version);
-    let git_hash = git_hash.trim();
-    let mut saw_marker = false;
-    for marker in [read_stable_version(), read_current_version()] {
-        let Some(marker) = marker.ok().flatten() else {
-            continue;
-        };
-        let marker_trimmed = marker.trim();
-        if marker_trimmed.is_empty() {
-            continue;
-        }
-        saw_marker = true;
-        if normalize_version_marker(marker_trimmed) == version {
-            return true;
-        }
-        if !git_hash.is_empty()
-            && git_hash != "unknown"
-            && (marker_trimmed == git_hash || marker_trimmed.starts_with(git_hash))
-        {
-            return true;
-        }
-    }
-    !saw_marker
 }
 
 /// Resolve the best binary to use for `/reload`.

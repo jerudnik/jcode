@@ -358,23 +358,14 @@ fn collect_reload_target_candidates(
         }
     }
 
-    if let Ok(path) = build::shared_server_binary_path()
+    // F20c: the stable/shared-server channels are gone; the only published
+    // binary is the single fixed target.
+    if let Ok(path) = build::current_fixed_binary_path()
         && path.exists()
     {
         candidates.push(target_candidate(
-            "channel",
-            "shared-server",
-            path,
-            false,
-            Vec::new(),
-        ));
-    }
-    if let Ok(path) = build::stable_binary_path()
-        && path.exists()
-    {
-        candidates.push(target_candidate(
-            "channel",
-            "stable",
+            "published",
+            "current-fixed",
             path,
             false,
             Vec::new(),

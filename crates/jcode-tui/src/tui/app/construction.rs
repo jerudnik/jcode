@@ -1,18 +1,6 @@
 use super::*;
 use crate::tui::keybind;
 
-fn stable_version_if_available() -> Option<String> {
-    match crate::build::read_stable_version() {
-        Ok(version) => version,
-        Err(error) => {
-            crate::logging::debug(&format!(
-                "Stable version lookup unavailable during startup: {error}"
-            ));
-            None
-        }
-    }
-}
-
 fn current_binary_mtime() -> Option<std::time::SystemTime> {
     let path = match std::env::current_exe() {
         Ok(path) => path,
@@ -251,9 +239,6 @@ impl App {
             swarm_plan_phases_by_id: std::collections::BTreeMap::new(),
             swarm_plan_version: None,
             swarm_plan_swarm_id: None,
-            known_stable_version: stable_version_if_available(),
-            last_version_check: Some(Instant::now()),
-            pending_migration: None,
             remote_client_count: None,
             resume_session_id: None,
             requested_exit_code: None,
@@ -676,9 +661,6 @@ impl App {
             swarm_plan_phases_by_id: std::collections::BTreeMap::new(),
             swarm_plan_version: None,
             swarm_plan_swarm_id: None,
-            known_stable_version: stable_version_if_available(),
-            last_version_check: Some(Instant::now()),
-            pending_migration: None,
             remote_client_count: None,
             resume_session_id: None,
             requested_exit_code: None,

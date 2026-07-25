@@ -149,7 +149,7 @@ struct DoctorReport {
 
 fn client_identity() -> ClientIdentity {
     let path = running_binary_path()
-        .or_else(|| crate::build::current_binary_path().ok())
+        .or_else(|| crate::build::current_fixed_binary_path().ok())
         .unwrap_or_default();
     let origin = Origin::classify(&path);
 
