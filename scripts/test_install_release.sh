@@ -8,10 +8,11 @@ trap 'rm -rf "$tmp"' EXIT
 fake_bin="$tmp/fake-bin"
 fake_repo="$tmp/repo"
 home="$tmp/home"
-mkdir -p "$fake_bin" "$fake_repo/scripts/lib" "$home/.jcode/builds/versions/abc123"
+mkdir -p "$fake_bin" "$fake_repo/scripts/lib" "$home/.jcode/current"
 cp "$repo_root/scripts/install_release.sh" "$fake_repo/scripts/"
 cp "$repo_root/scripts/lib/configure_path.sh" "$fake_repo/scripts/lib/"
-printf 'selfdev-bytes\n' >"$home/.jcode/builds/versions/abc123/jcode"
+# A previously published binary must be replaced in place by the new publish.
+printf 'stale-bytes\n' >"$home/.jcode/current/jcode"
 
 cat >"$fake_bin/git" <<EOF
 #!/usr/bin/env bash
@@ -40,13 +41,21 @@ HOME="$home" \
   JCODE_SKIP_SERVER_RELOAD=1 \
   bash "$fake_repo/scripts/install_release.sh" --fast >/dev/null
 
-release="$home/.jcode/builds/versions/abc123-release/jcode"
-test -x "$release"
-test "$(cat "$home/.jcode/builds/versions/abc123/jcode")" = "selfdev-bytes"
-test "$(cat "$home/.jcode/builds/current-version")" = "abc123-release"
-test "$(cat "$home/.jcode/builds/stable-version")" = "abc123-release"
-test "$(readlink "$home/.jcode/builds/current/jcode")" = "$release"
-test "$(readlink "$home/.jcode/builds/stable/jcode")" = "$release"
-test "$(readlink "$home/.local/bin/jcode")" = "$home/.jcode/builds/current/jcode"
+# F20c: exactly one publish target, and the launcher points at it.
+published="$home/.jcode/current/jcode"
+test -x "$published"
+test "$(cat "$published")" != "stale-bytes"
+test "$(readlink "$home/.local/bin/jcode")" = "$published"
 
-echo "install_release profile-qualified label test: ok"
+# No channel/version-store residue may be recreated: those paths are no longer
+# read by anything, so writing them would be stale state by construction.
+test ! -e "$home/.jcode/builds/stable"
+test ! -e "$home/.jcode/builds/current"
+test ! -e "$home/.jcode/builds/versions"
+test ! -e "$home/.jcode/builds/stable-version"
+test ! -e "$home/.jcode/builds/current-version"
+
+# The staged temp must not survive a successful publish.
+test -z "$(find "$home/.jcode/current" -name '.jcode-publish-*' -print -quit)"
+
+echo "install_release fixed-path publish test: ok"

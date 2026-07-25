@@ -253,12 +253,20 @@ class R10ReleaseAcquisitionTests(unittest.TestCase):
         result = fixture.run_install()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+        # F20c: exactly one publish target, and the launcher points at it.
+        published = fixture.home / ".jcode" / "current" / "jcode"
+        self.assertTrue(published.is_file())
+        self.assertEqual(os.readlink(fixture.install_dir / "jcode"), str(published))
+
+        # The retired version store / channel symlinks must not be recreated:
+        # nothing reads them, so writing them would be stale state by
+        # construction.
         builds = fixture.home / ".jcode" / "builds"
-        versions = sorted(p.name for p in (builds / "versions").iterdir())
-        self.assertEqual(versions, ["9.8.7"])
-        self.assertEqual((builds / "stable-version").read_text(), "9.8.7\n")
-        self.assertEqual(os.readlink(builds / "stable" / "jcode"), str(builds / "versions" / "9.8.7" / "jcode"))
-        self.assertEqual(os.readlink(fixture.install_dir / "jcode"), str(builds / "stable" / "jcode"))
+        for residue in ("versions", "stable", "current", "stable-version", "current-version"):
+            self.assertFalse((builds / residue).exists(), f"{residue} must not be recreated")
+
+        # A successful publish leaves no staged temp behind.
+        self.assertEqual(list((fixture.home / ".jcode" / "current").glob(".jcode-publish-*")), [])
         self.assertFalse(fixture.reload_log.exists(), "server reload must be default-off")
 
     def test_reload_is_explicit_opt_in_only(self) -> None:
@@ -272,12 +280,25 @@ class R10ReleaseAcquisitionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(opt_in_fixture.reload_log.read_text().count("reload "), 1)
 
-    def test_rust_updater_requires_sha256sums_asset(self) -> None:
+    def test_rust_updater_cannot_acquire_releases_at_all(self) -> None:
+        """F20c retired in-binary release acquisition.
+
+        The strongest possible statement of the old checksum requirement is
+        that there is no download path left to verify: jcode never fetches a
+        release asset and installs it over itself. Update is nix-managed or
+        source-only (git pull + local build).
+        """
         source = UPDATE_RS.read_text()
-        self.assertIn("fn verify_asset_checksum_required", source)
-        self.assertIn("does not include SHA256SUMS; refusing to install unchecked asset", source)
-        self.assertIn("verify_asset_checksum_text(&contents, &asset.name, bytes)?", source)
-        self.assertNotIn("skipping checksum verification", source)
+        for banned in (
+            "download_and_install",
+            "verify_asset_checksum",
+            "SHA256SUMS",
+            "releases/download",
+            "api.github.com",
+        ):
+            self.assertNotIn(banned, source, f"{banned} must not survive F20c")
+        # And the honest replacement is present.
+        self.assertIn("run_git_pull_ff_only", source)
 
     def test_release_entrypoints_are_draft_only_until_checksums_publish(self) -> None:
         release_yml = RELEASE_YML.read_text()

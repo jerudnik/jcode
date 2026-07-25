@@ -42,14 +42,14 @@ case "$OS" in
     JCODE_HOME="${LOCALAPPDATA:?LOCALAPPDATA not set}/jcode"
     LAUNCHER_DIR="${JCODE_INSTALL_DIR:-$LOCALAPPDATA/jcode/bin}"
     LAUNCHER="$LAUNCHER_DIR/jcode.exe"
-    BUILDS_DIR="$JCODE_HOME/builds"
+    BINARY_DIRS=("$JCODE_HOME/current" "$JCODE_HOME/builds")
     USER_DATA_DIR="$JCODE_HOME"
     ;;
   *)
     JCODE_HOME="$HOME/.jcode"
     LAUNCHER_DIR="${JCODE_INSTALL_DIR:-$HOME/.local/bin}"
     LAUNCHER="$LAUNCHER_DIR/jcode"
-    BUILDS_DIR="$JCODE_HOME/builds"
+    BINARY_DIRS=("$JCODE_HOME/current" "$JCODE_HOME/builds")
     USER_DATA_DIR="$JCODE_HOME"
     ;;
 esac
@@ -57,7 +57,12 @@ esac
 # Collect removal targets.
 TARGETS=()
 [ -e "$LAUNCHER" ] || [ -L "$LAUNCHER" ] && TARGETS+=("$LAUNCHER (launcher)")
-[ -d "$BUILDS_DIR" ] && TARGETS+=("$BUILDS_DIR (installed binaries: stable/current/canary/versions)")
+# F20c: jcode publishes to the single fixed path ~/.jcode/current/jcode. The
+# legacy ~/.jcode/builds tree (stable/current/canary/versions channels) is no
+# longer written, so it is only removed here to clean up older installs.
+for binary_dir in "${BINARY_DIRS[@]}"; do
+  [ -d "$binary_dir" ] && TARGETS+=("$binary_dir (installed binaries)")
+done
 if [ "$PURGE" = true ] && [ -d "$USER_DATA_DIR" ]; then
   TARGETS+=("$USER_DATA_DIR (ALL user data: config, auth, sessions, logs, memory)")
 fi
@@ -118,7 +123,9 @@ remove "$LAUNCHER"
 if [ "$PURGE" = true ]; then
   remove "$USER_DATA_DIR"
 else
-  remove "$BUILDS_DIR"
+  for binary_dir in "${BINARY_DIRS[@]}"; do
+    remove "$binary_dir"
+  done
 fi
 if [ -f "$SELFDEV_WRAPPER" ] && grep -q "jcode" "$SELFDEV_WRAPPER" 2>/dev/null; then
   remove "$SELFDEV_WRAPPER"
