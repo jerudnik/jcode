@@ -196,9 +196,14 @@ fn resolved_named_profile_skips_non_chat_models_when_picking_newest_default() {
 #[test]
 fn minimax_token_plan_keys_resolve_to_china_endpoint_without_changing_international_default() {
     let _lock = crate::storage::lock_test_env();
-    let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION"]);
+    let _guard = EnvGuard::save(&["OPENAI_API_KEY", "JCODE_MINIMAX_REGION", "JCODE_HOME"]);
     crate::env::remove_var("OPENAI_API_KEY");
     crate::env::remove_var("JCODE_MINIMAX_REGION");
+    // Region resolution falls back to the *stored* credential when no key hint
+    // or env var is given. Without an isolated home this reads the developer's
+    // real auth file, so the result depends on whose machine runs the suite.
+    let temp = tempfile::tempdir().expect("tempdir");
+    crate::env::set_var("JCODE_HOME", temp.path());
 
     let international = resolve_openai_compatible_profile(MINIMAX_PROFILE);
     assert_eq!(international.api_base, "https://api.minimax.io/v1");

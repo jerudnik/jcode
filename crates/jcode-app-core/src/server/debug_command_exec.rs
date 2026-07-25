@@ -850,9 +850,26 @@ mod tests {
             "expected reload acknowledgement output, got: {}",
             output
         );
+        // Reload persists a reload context so the restarted process can
+        // recover its session. Assert on that, not on the build manifest:
+        // reload does not build, so it has no history to record, and asserting
+        // a file the code never writes made this check green against nothing.
+        let context_written = std::fs::read_dir(temp_home.path())
+            .expect("temp JCODE_HOME should be readable")
+            .flatten()
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("reload-context-")
+            });
         assert!(
-            temp_home.path().join("builds/manifest.json").exists(),
-            "selfdev reload state should be confined to the temporary JCODE_HOME"
+            context_written,
+            "selfdev reload state should be written inside the temporary JCODE_HOME"
+        );
+        assert!(
+            !temp_home.path().join("builds").exists(),
+            "reload must not recreate the retired `builds/` layout"
         );
     }
 

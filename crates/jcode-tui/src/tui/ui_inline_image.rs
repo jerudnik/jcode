@@ -356,21 +356,42 @@ pub(crate) fn ensure_drawable(id: u64, target_cols: u16, target_rows: u16) -> bo
         mermaid::InlineFitReadiness::NeedsPrewarm
     };
 
-    match readiness {
-        mermaid::InlineFitReadiness::Ready => true,
-        mermaid::InlineFitReadiness::Unsupported => {
-            // Non-Kitty fallback renderers manage their own protocol state;
-            // just make sure the bytes are decoded, off-thread if possible.
-            if materialized {
-                true
-            } else {
-                schedule_prewarm(id, target_cols, target_rows);
-                false
-            }
-        }
-        mermaid::InlineFitReadiness::NeedsPrewarm => {
+    match draw_action(materialized, readiness) {
+        DrawAction::DrawNow => true,
+        DrawAction::Prewarm => {
             schedule_prewarm(id, target_cols, target_rows);
             false
+        }
+    }
+}
+
+/// What [`ensure_drawable`] should do for a given image state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DrawAction {
+    /// The draw path can run cheaply this frame.
+    DrawNow,
+    /// Schedule background preparation and skip drawing this frame.
+    Prewarm,
+}
+
+/// The decision half of [`ensure_drawable`], split out from the global image
+/// caches and the process-wide terminal picker.
+///
+/// The picker is a process-global `OnceLock` that any other test can
+/// initialize (and never un-initialize), so a test that reached this logic
+/// through `ensure_drawable` silently asserted a different branch depending on
+/// which tests ran before it in the same process.
+pub(crate) fn draw_action(
+    materialized: bool,
+    readiness: mermaid::InlineFitReadiness,
+) -> DrawAction {
+    match readiness {
+        mermaid::InlineFitReadiness::Ready => DrawAction::DrawNow,
+        // Non-Kitty fallback renderers manage their own protocol state; the
+        // only requirement is that the bytes are already decoded.
+        mermaid::InlineFitReadiness::Unsupported if materialized => DrawAction::DrawNow,
+        mermaid::InlineFitReadiness::Unsupported | mermaid::InlineFitReadiness::NeedsPrewarm => {
+            DrawAction::Prewarm
         }
     }
 }
@@ -813,16 +834,31 @@ mod tests {
     }
 
     #[test]
-    fn ensure_drawable_true_for_materialized_image_without_kitty() {
-        // In tests no picker is initialized, so the stable-fit path reports
-        // Unsupported; a materialized image must still be drawable so the
-        // fallback renderers can run.
-        let id = mermaid::inline_image_id("image/png", MATERIALIZE_PNG_B64);
-        register_payload(id, "image/png", MATERIALIZE_PNG_B64);
-        assert!(materialize_visible(id));
-        assert!(
-            ensure_drawable(id, 80, 10),
+    fn materialized_image_draws_now_on_non_kitty_protocols() {
+        // On a non-Kitty protocol the stable-fit path reports Unsupported. A
+        // materialized image must still draw, so the fallback renderers can
+        // run; only an undecoded one is worth prewarming.
+        assert_eq!(
+            draw_action(true, mermaid::InlineFitReadiness::Unsupported),
+            DrawAction::DrawNow,
             "materialized image must be drawable on non-Kitty protocols"
+        );
+        assert_eq!(
+            draw_action(false, mermaid::InlineFitReadiness::Unsupported),
+            DrawAction::Prewarm
+        );
+        assert_eq!(
+            draw_action(true, mermaid::InlineFitReadiness::Ready),
+            DrawAction::DrawNow
+        );
+        assert_eq!(
+            draw_action(true, mermaid::InlineFitReadiness::NeedsPrewarm),
+            DrawAction::Prewarm,
+            "a decoded image whose Kitty fit state is stale must be re-prewarmed"
+        );
+        assert_eq!(
+            draw_action(false, mermaid::InlineFitReadiness::NeedsPrewarm),
+            DrawAction::Prewarm
         );
     }
 
