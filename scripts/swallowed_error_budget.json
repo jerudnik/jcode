@@ -1,5 +1,5 @@
 {
-  "total": 3107,
+  "total": 3104,
   "totals_by_pattern": {
     "dot_ok": 1152,
     "let_underscore": 1138,
@@ -2265,11 +2265,6 @@
       "dot_ok": 4,
       "let_underscore": 2,
       "unwrap_or_default": 1
-    },
-    "crates/jcode-update-core/src/lib.rs": {
-      "dot_ok": 3,
-      "let_underscore": 0,
-      "unwrap_or_default": 0
     },
     "crates/jcode-usage-types/src/lib.rs": {
       "dot_ok": 0,

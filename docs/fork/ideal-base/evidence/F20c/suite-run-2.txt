@@ -1,0 +1,16 @@
+=== RUN 2 (after cargo clean of the touched crates): 2026-07-25T03:03:12Z HEAD=d82eb5a42 ===
+
+--- cargo: build-support + selfdev-types (serial) ---
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.79s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+--- cargo: app-core selfdev (serial) ---
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 1127 filtered out; finished in 3.04s
+
+--- python: R10 acquisition ---
+Ran 6 tests in 1.214s
+
+OK
+
+--- shell: install_release fixed-path publish ---
+install_release fixed-path publish test: ok

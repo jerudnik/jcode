@@ -1,0 +1,86 @@
+preflight: cargo not on PATH; re-entering repo Nix dev shell...
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+rerere-cache: imported 99 recorded resolution(s)
+install-git-hooks: installed pre-push branch rail guard
+install-git-hooks: installed pre-commit surface-contract guard
+fork: main in sync with github/main (c2dbab58d)
+[1;34m▸ swallowed-error ratchet[0m
+Swallowed-error budget improved:
+  - total swallowed-error-like count shrank: 3104 -> 3058
+  - dot_ok count shrank: 1152 -> 1131
+  - let_underscore count shrank: 1138 -> 1120
+  - unwrap_or_default count shrank: 817 -> 807
+  - swallowed-error-like usage shrank: crates/jcode-app-core/src/tool/selfdev/reload.rs (11 -> 5)
+  - swallowed-error-like usage shrank: crates/jcode-app-core/src/tool/selfdev/setup.rs (7 -> 5)
+  - swallowed-error-like usage shrank: crates/jcode-base/src/auth/mod.rs (8 -> 7)
+  - swallowed-error-like usage shrank: crates/jcode-build-support/src/lib.rs (20 -> 15)
+  - swallowed-error-like usage shrank: crates/jcode-build-support/src/paths.rs (22 -> 21)
+  - swallowed-error-like usage shrank: crates/jcode-tui/src/tui/ui_status.rs (2 -> 1)
+  - swallowed-error-like usage removed: crates/jcode-app-core/src/update.rs (19 -> 0)
+  - swallowed-error-like usage removed: crates/jcode-tui/src/tui/app/tui_lifecycle.rs (11 -> 0)
+Consider running: scripts/check_swallowed_error_budget.py --update
+[1;34m▸ panic-prone ratchet[0m
+Panic-prone budget OK: total=59 files=25
+[1;34m▸ code-size ratchet[0m
+Code-size budget improved:
+  - oversized file shrank: crates/jcode-app-core/src/server.rs (2399 -> 2383 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/server/swarm.rs (3677 -> 3543 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/server/util.rs (1563 -> 1448 LOC)
+  - oversized file shrank: crates/jcode-base/src/auth/mod.rs (1481 -> 1451 LOC)
+  - oversized file shrank: crates/jcode-provider-bedrock/src/lib.rs (1916 -> 1477 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app.rs (2362 -> 2318 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/auth.rs (2976 -> 2969 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/helpers.rs (1567 -> 1515 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/navigation.rs (1751 -> 1695 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/remote/server_events.rs (2866 -> 2848 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/ui.rs (3388 -> 3367 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/ui_header.rs (1629 -> 1612 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/ui_viewport.rs (1361 -> 1301 LOC)
+  - oversized file no longer exceeds 1200 LOC: crates/jcode-app-core/src/update.rs (1715 -> OK)
+  - oversized file no longer exceeds 1200 LOC: crates/jcode-build-support/src/lib.rs (1403 -> OK)
+  - oversized file no longer exceeds 1200 LOC: crates/jcode-tui/src/tui/app/tui_lifecycle.rs (1251 -> OK)
+Consider running: scripts/check_code_size_budget.py --update
+[1;34m▸ test-size ratchet[0m
+Test-size budget improved:
+  - oversized test file shrank: crates/jcode-app-core/src/agent_tests.rs (2406 -> 2381 LOC)
+  - oversized test file shrank: crates/jcode-app-core/src/server/comm_session_tests.rs (1395 -> 1281 LOC)
+  - oversized test file shrank: crates/jcode-provider-openrouter-runtime/src/openrouter_tests.rs (2923 -> 2912 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests.rs (1660 -> 1610 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/commands_accounts_01/part_01.rs (1538 -> 1518 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/remote_events_reload_01/part_01.rs (1808 -> 1758 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/remote_events_reload_04.rs (2483 -> 2474 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/scroll_copy_02/part_01.rs (1415 -> 1414 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/scroll_copy_03.rs (1718 -> 1655 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/state_model_poke_02/part_01.rs (1337 -> 1318 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/state_model_poke_03.rs (2614 -> 2598 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/ui_messages/tests.rs (1985 -> 1983 LOC)
+  - oversized test file no longer exceeds 1200 LOC: crates/jcode-app-core/src/tool/selfdev/tests.rs (1341 -> OK)
+  - oversized test file no longer exceeds 1200 LOC: crates/jcode-build-support/src/tests.rs (1211 -> OK)
+  - oversized test file no longer exceeds 1200 LOC: crates/jcode-desktop/src/session_launch/tests.rs (1207 -> OK)
+  - oversized test file no longer exceeds 1200 LOC: crates/jcode-tui/src/tui/app/tests/scroll_copy_02/part_02.rs (1203 -> OK)
+Consider running: scripts/check_test_size_budget.py --update
+[1;34m▸ wildcard-reexport ratchet[0m
+wildcard re-export budget check passed (total=16)
+[1;34m▸ dependency boundaries[0m
+dependency boundary check passed
+[1;34m▸ warning budget[0m
+Warning budget OK: current=0 baseline=0
+  (clippy/fmt scoped to files changed vs origin/main + working tree)
+[1;34m▸ rustfmt --check (fork-touched)[0m
+[1;34m▸ cargo clippy (fork-touched)[0m
+
+[1m── preflight summary ──[0m
+  [32m✓[0m swallowed-error ratchet
+  [32m✓[0m panic-prone ratchet
+  [32m✓[0m code-size ratchet
+  [32m✓[0m test-size ratchet
+  [32m✓[0m wildcard-reexport ratchet
+  [32m✓[0m dependency boundaries
+  [32m✓[0m warning budget
+  [32m✓[0m rustfmt --check (fork-touched)
+  [32m✓[0m cargo clippy (fork-touched)
+
+[1;32mAll preflight gates passed.[0m

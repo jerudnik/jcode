@@ -158,10 +158,10 @@ pub fn publish_current_fixed(source: &Path) -> Result<PathBuf> {
 
 /// Atomically publish `source` into `dest_dir` as `dest_dir/<binary_name>`,
 /// staging into a private temp copy, smoke-testing it, then `rename(2)`-ing it
-/// into place. This is the ONE atomic-swap primitive shared by the versioned
-/// store and the F20b fixed reload path; the source-truncation regression test
-/// guards it. When `cleanup_empty_dir` is set, a failed publish removes a
-/// freshly-created (still-empty) `dest_dir` so a bad install leaves no residue.
+/// into place. This is the ONE atomic-swap primitive behind the single fixed
+/// publish target; the source-truncation regression test guards it. A failed
+/// publish leaves the previously published binary untouched and removes its
+/// staged temp, so a bad build can never be observed as published.
 fn atomic_publish_binary(source: &Path, dest_dir: &Path) -> Result<PathBuf> {
     let source_metadata = std::fs::metadata(source)
         .with_context(|| format!("Binary not found at {}", source.display()))?;
