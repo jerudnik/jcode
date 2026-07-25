@@ -233,8 +233,7 @@ fn expand_level_caps_grow_monotonically() {
         ImageExpandLevel::Fit.anchored_cap_rows() < ImageExpandLevel::Large.anchored_cap_rows()
     );
     assert!(
-        ImageExpandLevel::Large.anchored_cap_rows()
-            < ImageExpandLevel::Full.anchored_cap_rows()
+        ImageExpandLevel::Large.anchored_cap_rows() < ImageExpandLevel::Full.anchored_cap_rows()
     );
     // Full must stay under kitty's virtual-placement row limit (296) so
     // stable fit rendering keeps working at every level.
@@ -494,8 +493,7 @@ fn anchored_image_lines_round_trip_through_region_scan() {
     assert_eq!(parsed.len(), 1);
     let (hash, rows, cols) = parsed[0];
     assert_eq!(hash, 0xABCD);
-    let (expected_rows, expected_cols) =
-        fit_geometry_anchored(600, 400, 80, ImageExpandLevel::Fit);
+    let (expected_rows, expected_cols) = fit_geometry_anchored(600, 400, 80, ImageExpandLevel::Fit);
     assert_eq!(rows, expected_rows);
     assert_eq!(cols, expected_cols);
     // Marker line is followed by rows-1 blank placeholder lines.

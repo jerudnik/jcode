@@ -3,7 +3,7 @@ use super::{
     extract_bracketed_system_message, format_countdown_until, inferred_reasoning_efforts,
     partition_queued_messages, pretty_model_display_name, resume_invocation_args,
 };
-use crate::ambient::{AmbientManager, Priority, ScheduleRequest, ScheduleTarget};
+use crate::ambient::{Priority, ScheduleTarget, ScheduledItem};
 use crate::terminal_launch::{detected_resume_terminal, shell_command};
 use crate::tui::session_picker::ResumeTarget;
 use chrono::{Duration as ChronoDuration, Utc};
@@ -291,73 +291,51 @@ fn format_countdown_until_handles_subminute_and_minutes() {
 
 #[test]
 fn gather_ambient_info_filters_to_session_reminders_when_ambient_disabled() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
-
-    let mut manager = AmbientManager::new().expect("ambient manager");
-    let first_due = Utc::now() + ChronoDuration::minutes(5);
-    let second_due = Utc::now() + ChronoDuration::minutes(10);
-
-    manager
-        .schedule(ScheduleRequest {
-            wake_in_minutes: None,
-            wake_at: Some(first_due),
-            context: "ambient context".to_string(),
+    // `ambient_widget_data_from` is pure over the slice it is handed, so this
+    // regression builds the items directly instead of routing through
+    // `AmbientManager`.
+    //
+    // The manager resolves its queue path from `JCODE_HOME` at construction
+    // time and loads `ambient/queue.json` from disk. That made the observed
+    // count depend on state this test does not own: it failed once with
+    // `queue_count == 8` after scheduling three items, and 8 = 5 loaded + 3
+    // scheduled is unreachable from the fresh temp home the test sets up. The
+    // manager had therefore resolved some other home, which a fresh tempdir
+    // cannot explain and which no assertion here could diagnose.
+    //
+    // Constructing the items removes the filesystem from a test about queue
+    // filtering entirely.
+    fn item(id: &str, minutes: i64, description: &str, target: ScheduleTarget) -> ScheduledItem {
+        ScheduledItem {
+            id: id.to_string(),
+            scheduled_for: Utc::now() + ChronoDuration::minutes(minutes),
+            context: format!("{description} context"),
             priority: Priority::Normal,
-            target: ScheduleTarget::Ambient,
-            created_by_session: "ambient".to_string(),
-            working_dir: None,
-            task_description: Some("ambient work".to_string()),
-            relevant_files: Vec::new(),
-            git_branch: None,
-            additional_context: None,
-        })
-        .expect("schedule ambient item");
-    manager
-        .schedule(ScheduleRequest {
-            wake_in_minutes: None,
-            wake_at: Some(first_due),
-            context: "first context".to_string(),
-            priority: Priority::Normal,
-            target: ScheduleTarget::Session {
-                session_id: "session_1".to_string(),
-            },
+            target,
             created_by_session: "session_1".to_string(),
+            created_at: Utc::now(),
             working_dir: None,
-            task_description: Some("first reminder".to_string()),
+            task_description: Some(description.to_string()),
             relevant_files: Vec::new(),
             git_branch: None,
             additional_context: None,
-        })
-        .expect("schedule first reminder");
-    manager
-        .schedule(ScheduleRequest {
-            wake_in_minutes: None,
-            wake_at: Some(second_due),
-            context: "second context".to_string(),
-            priority: Priority::Normal,
-            target: ScheduleTarget::Session {
-                session_id: "session_1".to_string(),
-            },
-            created_by_session: "session_1".to_string(),
-            working_dir: None,
-            task_description: Some("second reminder".to_string()),
-            relevant_files: Vec::new(),
-            git_branch: None,
-            additional_context: None,
-        })
-        .expect("schedule second reminder");
+        }
+    }
 
-    // This regression verifies queue filtering, not queue persistence or the
-    // asynchronous cache scheduler. Use the manager's in-memory queue so an
-    // unrelated background writer cannot replace the temp-home queue file.
-    let info = ambient_widget_data_from(
-        crate::ambient::AmbientState::default(),
-        manager.queue().items(),
-        false,
-    )
-    .expect("ambient info");
+    let session = || ScheduleTarget::Session {
+        session_id: "session_1".to_string(),
+    };
+    let items = vec![
+        item("sched_ambient", 5, "ambient work", ScheduleTarget::Ambient),
+        item("sched_first", 5, "first reminder", session()),
+        item("sched_second", 10, "second reminder", session()),
+    ];
+
+    let info = ambient_widget_data_from(crate::ambient::AmbientState::default(), &items, false)
+        .expect("ambient info");
+
+    // Ambient is disabled, so the widget must show only the two directly
+    // delivered session reminders while still counting the whole queue.
     assert!(info.show_widget);
     assert_eq!(info.queue_count, 3);
     assert_eq!(info.reminder_count, 2);
