@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -291,6 +292,33 @@ pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
         test_harness_home().as_deref(),
         dirs::home_dir(),
     )
+}
+
+/// Filter an ambient directory override (`$XDG_CONFIG_HOME`, `%LOCALAPPDATA%`,
+/// ...) so it cannot defeat a redirected home.
+///
+/// These variables are not derived from the home directory, so the redirect in
+/// [`user_home_path`] does not cover them. Two cases have to stay distinct:
+///
+/// - the variable points somewhere neutral (a temp dir, a custom layout): honor
+///   it, since ignoring it would break users with non-default setups and tests
+///   that deliberately point it at a fixture;
+/// - the variable points *inside the real user home* while the home is
+///   redirected: drop it. This is the case Linux CI hits, where
+///   `XDG_CONFIG_HOME=/home/runner/.config`, and honoring it let sandboxed runs
+///   read the runner's real configs.
+///
+/// Returns `None` when the override must be ignored, so callers can fall
+/// through to their home-relative default.
+pub fn sanitize_ambient_dir_override(value: Option<OsString>) -> Option<PathBuf> {
+    let path = PathBuf::from(value?);
+    if !home_is_redirected() {
+        return Some(path);
+    }
+    match dirs::home_dir() {
+        Some(real_home) if path.starts_with(&real_home) => None,
+        _ => Some(path),
+    }
 }
 
 /// Assert that `path` is *not* under the real user home.
@@ -882,5 +910,41 @@ mod empty_relative_tests {
             "expected an absolute home root, got {}",
             redirected.display()
         );
+    }
+}
+
+#[cfg(test)]
+mod sanitize_override_tests {
+    use super::*;
+
+    /// The whole point of the filter: an override aimed inside the real home is
+    /// dropped while the home is redirected (the Linux CI case, where
+    /// `XDG_CONFIG_HOME=/home/runner/.config`), so callers fall through to
+    /// their sandboxed default.
+    #[test]
+    fn drops_an_override_pointing_into_the_real_home() {
+        let real_home = dirs::home_dir().expect("home");
+        assert!(home_is_redirected(), "tests run under the harness redirect");
+        assert_eq!(
+            sanitize_ambient_dir_override(Some(real_home.join(".config").into_os_string())),
+            None
+        );
+    }
+
+    /// A neutral override is honored: tests point `$XDG_CONFIG_HOME` at fixture
+    /// dirs on purpose, and users have non-default layouts. Dropping those too
+    /// would trade one bug for another.
+    #[test]
+    fn honors_a_neutral_override() {
+        let temp = std::env::temp_dir().join("jcode-neutral-override");
+        assert_eq!(
+            sanitize_ambient_dir_override(Some(temp.clone().into_os_string())),
+            Some(temp)
+        );
+    }
+
+    #[test]
+    fn absent_override_stays_absent() {
+        assert_eq!(sanitize_ambient_dir_override(None), None);
     }
 }

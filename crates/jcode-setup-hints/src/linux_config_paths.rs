@@ -24,29 +24,19 @@ pub(crate) fn niri_config_path() -> Option<PathBuf> {
 
 /// `$XDG_CONFIG_HOME`, defaulting to `~/.config`.
 pub(crate) fn xdg_config_home() -> Option<PathBuf> {
-    xdg_config_home_from(
-        std::env::var_os("XDG_CONFIG_HOME"),
-        jcode_storage::home_is_redirected(),
-    )
+    xdg_config_home_from(std::env::var_os("XDG_CONFIG_HOME"))
 }
 
-/// Pure rule behind [`xdg_config_home`], with both ambient inputs lifted into
-/// arguments so every arm is testable without mutating process env.
+/// Pure rule behind [`xdg_config_home`], with the ambient env read lifted into
+/// an argument so both arms are testable without mutating process env.
 ///
-/// `$XDG_CONFIG_HOME` is *not* derived from the home directory, so the home
-/// redirect does not cover it: on a machine where it points at the real
-/// `~/.config` (Linux CI does exactly this), honoring it inside a test harness
-/// reads the developer's real compositor configs -- the leak this module was
-/// extracted to close. So a redirected home wins over the env var, and the env
-/// var wins everywhere else.
-fn xdg_config_home_from(
-    xdg: Option<std::ffi::OsString>,
-    home_is_redirected: bool,
-) -> Option<PathBuf> {
-    if home_is_redirected {
-        return jcode_storage::user_home_path(".config").ok();
-    }
-    xdg.map(PathBuf::from)
+/// See [`jcode_storage::sanitize_ambient_dir_override`] for why the env value
+/// is filtered rather than trusted: `$XDG_CONFIG_HOME` is not derived from the
+/// home directory, so on a machine where it points at the real `~/.config`
+/// (Linux CI does exactly this) honoring it inside a harness read the runner's
+/// real compositor configs.
+fn xdg_config_home_from(xdg: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    jcode_storage::sanitize_ambient_dir_override(xdg)
         .or_else(|| jcode_storage::user_home_path(".config").ok())
 }
 
@@ -87,25 +77,13 @@ pub(crate) fn kde_globalshortcutsrc_path() -> Option<PathBuf> {
 
 /// Directory for jcode's hidden KDE launcher desktop files.
 pub(crate) fn kde_applications_dir() -> Option<PathBuf> {
-    kde_applications_dir_from(
-        std::env::var_os("XDG_DATA_HOME"),
-        jcode_storage::home_is_redirected(),
-    )
+    kde_applications_dir_from(std::env::var_os("XDG_DATA_HOME"))
 }
 
-/// Pure rule behind [`kde_applications_dir`]. See [`xdg_config_home_from`] for
-/// why a redirected home outranks `$XDG_DATA_HOME`.
-fn kde_applications_dir_from(
-    xdg_data: Option<std::ffi::OsString>,
-    home_is_redirected: bool,
-) -> Option<PathBuf> {
-    let base = if home_is_redirected {
-        jcode_storage::user_home_path(".local/share").ok()?
-    } else {
-        xdg_data
-            .map(PathBuf::from)
-            .or_else(|| jcode_storage::user_home_path(".local/share").ok())?
-    };
+/// Pure rule behind [`kde_applications_dir`]. See [`xdg_config_home_from`].
+fn kde_applications_dir_from(xdg_data: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let base = jcode_storage::sanitize_ambient_dir_override(xdg_data)
+        .or_else(|| jcode_storage::user_home_path(".local/share").ok())?;
     Some(base.join("applications"))
 }
 
@@ -120,13 +98,12 @@ mod tests {
     #[test]
     fn redirected_home_outranks_an_explicit_xdg_var() {
         let real_looking = Some(std::ffi::OsString::from("/home/runner/.config"));
-        let resolved =
-            xdg_config_home_from(real_looking, /* home_is_redirected */ true).expect("resolves");
+        let resolved = xdg_config_home_from(real_looking).expect("resolves");
         jcode_storage::assert_redirected_away_from_real_home(&resolved, "xdg_config_home");
         assert!(resolved.ends_with(".config"), "got {}", resolved.display());
 
         let data = Some(std::ffi::OsString::from("/home/runner/.local/share"));
-        let resolved = kde_applications_dir_from(data, true).expect("resolves");
+        let resolved = kde_applications_dir_from(data).expect("resolves");
         jcode_storage::assert_redirected_away_from_real_home(&resolved, "kde_applications_dir");
         assert!(
             resolved.ends_with("applications"),
@@ -135,16 +112,16 @@ mod tests {
         );
     }
 
-    /// With the real home in play, `$XDG_*` is authoritative: a Linux user with
-    /// a non-default layout still gets their own paths.
+    /// A neutral `$XDG_*` (custom layout, or a fixture dir a test points it at)
+    /// is still authoritative -- only one aimed inside the real home is dropped.
     #[test]
-    fn explicit_xdg_wins_when_the_home_is_not_redirected() {
+    fn neutral_xdg_is_still_honored() {
         assert_eq!(
-            xdg_config_home_from(Some("/xdg-config".into()), false),
+            xdg_config_home_from(Some("/xdg-config".into())),
             Some(PathBuf::from("/xdg-config"))
         );
         assert_eq!(
-            kde_applications_dir_from(Some("/xdg-data".into()), false),
+            kde_applications_dir_from(Some("/xdg-data".into())),
             Some(PathBuf::from("/xdg-data/applications"))
         );
     }
@@ -153,11 +130,8 @@ mod tests {
     #[test]
     fn xdg_fallback_stays_inside_the_redirected_home() {
         for (what, path) in [
-            ("xdg_config_home", xdg_config_home_from(None, false)),
-            (
-                "kde_applications_dir",
-                kde_applications_dir_from(None, false),
-            ),
+            ("xdg_config_home", xdg_config_home_from(None)),
+            ("kde_applications_dir", kde_applications_dir_from(None)),
         ] {
             let path = path.unwrap_or_else(|| panic!("{what} resolved to None"));
             jcode_storage::assert_redirected_away_from_real_home(&path, what);
