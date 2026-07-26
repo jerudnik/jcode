@@ -183,9 +183,9 @@ fn resume_invocation_args_omits_blank_socket() {
 /// (`$JCODE_HOME/current/jcode`); the old `builds/current` channel is no longer
 /// read by any resolver, so a fixture writing it would silently stop pinning.
 fn pinned_resume_test_home() -> (
-    crate::tui::app::test_support::TestEnvWriteScope,
-    tempfile::TempDir,
     EnvVarGuard,
+    tempfile::TempDir,
+    crate::tui::app::test_support::TestEnvWriteScope,
 ) {
     let env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -193,7 +193,15 @@ fn pinned_resume_test_home() -> (
     std::fs::create_dir_all(&current).expect("create current dir");
     std::fs::write(current.join("jcode"), b"#!/bin/sh\n").expect("write fake jcode binary");
     let home = EnvVarGuard::set("JCODE_HOME", temp.path());
-    (env_lock, temp, home)
+    // Tuple fields drop in DECLARATION order, so the lease must come last: it
+    // has to outlive the `EnvVarGuard` that restores `JCODE_HOME`. Returned the
+    // other way round, this fixture released the lease first and then restored
+    // the variable, leaving a window in which the next test to take the lease
+    // had its `JCODE_HOME` overwritten by this one's teardown. That is exactly
+    // how `build_resume_command_uses_imported_jcode_session_for_codex` failed
+    // on Linux CI: resolution fell through to `current_exe()` and the assert
+    // saw the test binary (`jcode_tui-<hash>`) instead of `jcode`.
+    (home, temp, env_lock)
 }
 
 #[test]

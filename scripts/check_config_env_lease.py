@@ -42,10 +42,18 @@ STATIC_MUTEX = re.compile(r"static\s+\w+\s*:\s*(?:std::sync::)?Mutex")
 
 TEST_ATTR = re.compile(r"#\[(?:tokio::)?test\b")
 FN_NAME = re.compile(r"\bfn\s+(\w+)")
-# `set_var("KEY", ...)` / `remove_var("KEY")`
-LITERAL_MUTATION = re.compile(r"(?:set_var|remove_var)\(\s*\"([A-Za-z_0-9]+)\"")
+# Every in-tree way to mutate the ambient environment.
+#
+# `EnvVarGuard::set` is the *idiomatic* mutator in this repo and was originally
+# missing here, which made the gate blind to 67 call sites and let an unleased
+# `JCODE_HOME` mutation reach CI. The guard restores on drop but explicitly
+# does not provide exclusion ("Pair this with lock_test_env"), so it needs a
+# lease exactly as much as a raw `set_var` does.
+MUTATORS = r"(?:set_var|remove_var|EnvVarGuard::set)"
+# `set_var("KEY", ...)` / `remove_var("KEY")` / `EnvVarGuard::set("KEY", ...)`
+LITERAL_MUTATION = re.compile(MUTATORS + r"\(\s*\"([A-Za-z_0-9]+)\"")
 # `set_var(key, ...)` where `key` is a local bound to a string literal.
-VARIABLE_MUTATION = re.compile(r"(?:set_var|remove_var)\(\s*(\w+)\s*[,)]")
+VARIABLE_MUTATION = re.compile(MUTATORS + r"\(\s*(\w+)\s*[,)]")
 LOCAL_STRING_BINDING = re.compile(
     r"let\s+(\w+)\s*(?::\s*&\s*str\s*)?=\s*\"([A-Za-z_0-9]+)\"\s*;"
 )

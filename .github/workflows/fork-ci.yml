@@ -209,6 +209,14 @@ jobs:
       - name: Enforce jcode-tui render-lock discipline
         run: python3 scripts/check_tui_render_lock.py
 
+      # A fixture that returns its env lease before its EnvVarGuard tears down
+      # in the wrong order: exclusion is released while the environment is
+      # still being restored, so the next test to take the lease has its
+      # JCODE_HOME silently overwritten. This surfaced only after F28 restored
+      # parallelism, and only on Linux, as an assertion naming nothing relevant.
+      - name: Enforce env-lease drop order in test fixtures
+        run: python3 scripts/check_env_lease_drop_order.py
+
       - name: Enforce swallowed-error usage ratchet
         run: python3 scripts/check_swallowed_error_budget.py
 
