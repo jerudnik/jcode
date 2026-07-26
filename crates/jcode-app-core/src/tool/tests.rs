@@ -311,6 +311,15 @@ fn test_resolve_tool_name_oauth_aliases() {
 
 #[tokio::test]
 async fn test_batch_resolves_function_namespaced_tools() {
+    // Read lease: this test spawns a real subprocess. Spawning reads
+    // process-global environment state (the `bash` argv[0] is resolved through
+    // PATH, and the child inherits `environ` wholesale). Sibling tests in this
+    // same binary mutate the environment via `crate::env::set_var`, whose own
+    // safety comment states the hazard: those writes can race with concurrent
+    // environment access. A read lease excludes writers for the duration of the
+    // spawn while still letting these subprocess tests run concurrently with
+    // each other, so it costs no parallelism between them.
+    let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     let ctx = ToolContext {
@@ -337,11 +346,31 @@ async fn test_batch_resolves_function_namespaced_tools() {
         .await
         .expect("namespaced batch subcalls should execute");
 
-    assert!(result.output.contains("Completed: 2 succeeded, 0 failed"));
-    assert!(!result.output.contains("Unknown tool"));
-    assert!(result.output.contains("--- [1] bash ---"));
-    assert!(result.output.contains("--- [2] bash ---"));
-    assert!(!result.output.contains("functions."));
+    // Bare `assert!(contains(..))` discards the batch output, which is the only
+    // thing that says WHY a subcall failed. This test failed once on Linux CI
+    // and the log carried nothing but the predicate, making it undiagnosable
+    // from the run alone. Every assertion here now prints the full output.
+    let out = &result.output;
+    assert!(
+        out.contains("Completed: 2 succeeded, 0 failed"),
+        "both namespaced subcalls should succeed; full batch output was:\n{out}"
+    );
+    assert!(
+        !out.contains("Unknown tool"),
+        "namespaced names must resolve, not fall through as unknown:\n{out}"
+    );
+    assert!(
+        out.contains("--- [1] bash ---"),
+        "first subcall should be attributed to `bash`:\n{out}"
+    );
+    assert!(
+        out.contains("--- [2] bash ---"),
+        "second subcall should be attributed to `bash`:\n{out}"
+    );
+    assert!(
+        !out.contains("functions."),
+        "the `functions.` namespace prefix must be stripped:\n{out}"
+    );
 }
 
 #[tokio::test]
@@ -374,6 +403,15 @@ async fn test_batch_rejects_function_namespaced_batch_recursion() {
 
 #[tokio::test]
 async fn test_batch_resolves_oauth_names() {
+    // Read lease: this test spawns a real subprocess. Spawning reads
+    // process-global environment state (the `bash` argv[0] is resolved through
+    // PATH, and the child inherits `environ` wholesale). Sibling tests in this
+    // same binary mutate the environment via `crate::env::set_var`, whose own
+    // safety comment states the hazard: those writes can race with concurrent
+    // environment access. A read lease excludes writers for the duration of the
+    // spawn while still letting these subprocess tests run concurrently with
+    // each other, so it costs no parallelism between them.
+    let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     // Use an isolated temp dir, not the shared system temp dir.
@@ -399,6 +437,15 @@ async fn test_batch_resolves_oauth_names() {
 
 #[tokio::test]
 async fn registry_execute_enforces_session_tool_policy_after_alias_resolution() {
+    // Read lease: this test spawns a real subprocess. Spawning reads
+    // process-global environment state (the `bash` argv[0] is resolved through
+    // PATH, and the child inherits `environ` wholesale). Sibling tests in this
+    // same binary mutate the environment via `crate::env::set_var`, whose own
+    // safety comment states the hazard: those writes can race with concurrent
+    // environment access. A read lease excludes writers for the duration of the
+    // spawn while still letting these subprocess tests run concurrently with
+    // each other, so it costs no parallelism between them.
+    let _env = crate::storage::lock_test_env_read();
     let provider: Arc<dyn Provider> = Arc::new(MockProvider);
     let registry = Registry::new(provider).await;
     // Isolated temp dir (see `test_batch_resolves_oauth_names`): the policy is
