@@ -1983,9 +1983,21 @@ fn test_debug_command_side_panel_latency_bench_reports_immediate_redraw() {
         .unwrap_or_default();
     // Default-parallel debug tests compete with hundreds of unrelated CPU-heavy
     // cases, so wall-clock p95 is not a stable 150ms correctness boundary. Keep
-    // the release 60fps contract strict and use a one-second debug ceiling that
-    // still detects hangs or grossly pathological redraws.
-    let budget_ms = if cfg!(debug_assertions) { 1_000.0 } else { 16.0 };
+    // the release 60fps contract strict and use a one-second ceiling otherwise
+    // that still detects hangs or grossly pathological redraws.
+    //
+    // The discriminator is optimization, not `debug_assertions`. The `selfdev`
+    // profile inherits `release` (so assertions are compiled out) while pinning
+    // `opt-level = 0`, and that combination held unoptimized code to the strict
+    // 16ms budget: it failed at 16.55ms as soon as the suite ran without
+    // `--test-threads=1`. `is_optimized_build()` reads the real opt-level that
+    // Cargo hands to the build script, so the 60fps contract stays strict
+    // exactly where the build can honour it.
+    let budget_ms = if jcode_build_meta::is_optimized_build() {
+        16.0
+    } else {
+        1_000.0
+    };
     assert!(
         p95 < budget_ms,
         "headless side-panel p95 latency {p95:.2}ms should stay within \
