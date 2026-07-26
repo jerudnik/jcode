@@ -62,15 +62,36 @@ need_ref "$fork_vendor"; need_ref "$fork_distro"; need_ref "$fork_main"; need_re
 echo "=== Fork health: $repo ==="
 
 # ── 1) Branch set ────────────────────────────────────────────────────────────
+# The invariant is that the three rails exist, not that nothing else does.
+# Requiring an exact match made this check fail for the entire lifetime of any
+# topic branch, which is the normal way work reaches main, so it was
+# permanently red and had stopped carrying information. Missing rails are a real
+# breakage and still fail. Topic branches are reported for visibility, and stale
+# ones are called out, since a topic branch already merged into main is residue
+# worth deleting rather than a violation.
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  expected=$'distro/nix\nmain\nvendor/upstream'
+  rails=$'distro/nix\nmain\nvendor/upstream'
   actual="$(gh api "repos/$repo/branches" --paginate --jq '.[].name' \
     | grep -v '^automation/' | sort)"
-  if [ "$actual" = "$expected" ]; then
+  missing="$(comm -23 <(printf '%s\n' "$rails") <(printf '%s\n' "$actual"))"
+  topics="$(comm -13 <(printf '%s\n' "$rails") <(printf '%s\n' "$actual"))"
+
+  if [ -n "$missing" ]; then
+    fail "missing maintained rail(s) on $repo:"
+    printf '%s\n' "$missing" | sed 's/^/      /' >&2
+  elif [ -z "$topics" ]; then
     ok "branch set is exactly {main, distro/nix, vendor/upstream}"
   else
-    fail "unexpected branch set on $repo:"
-    diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | sed 's/^/      /' >&2 || true
+    ok "all three rails present ($(printf '%s\n' "$topics" | wc -l | tr -d ' ') topic branch(es) alongside)"
+    while IFS= read -r topic; do
+      [ -n "$topic" ] || continue
+      if git fetch -q "$fork_remote" "$topic" 2>/dev/null \
+        && [ -z "$(git diff --stat "$fork_main" FETCH_HEAD 2>/dev/null)" ]; then
+        warn "topic branch '$topic' has no content beyond $main_branch; safe to delete"
+      else
+        printf 'INFO: topic branch: %s\n' "$topic"
+      fi
+    done <<< "$topics"
   fi
 else
   warn "gh unavailable or unauthenticated; skipping remote branch-set check"
