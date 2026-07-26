@@ -601,9 +601,13 @@ mod tests {
     use super::*;
 
     /// Serialize tests that mutate `JCODE_HOME`.
+    ///
+    /// Shares the crate-wide lock rather than owning a private one: these run
+    /// in the same test binary as the ambient-root tests, which mutate the same
+    /// process-global variable, so two independent mutexes would not exclude
+    /// each other at all.
     fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::lock_test_env_write()
     }
 
     #[cfg(unix)]

@@ -57,7 +57,7 @@
     "crates/jcode-provider-openai-runtime/src/openai_stream_runtime.rs": 1632,
     "crates/jcode-provider-openrouter-runtime/src/lib.rs": 2770,
     "crates/jcode-render-core/src/math.rs": 1250,
-    "crates/jcode-setup-hints/src/lib.rs": 2370,
+    "crates/jcode-setup-hints/src/lib.rs": 2369,
     "crates/jcode-telemetry-core/src/lib.rs": 1940,
     "crates/jcode-tui-mermaid/src/mermaid_cache_render.rs": 1337,
     "crates/jcode-tui-mermaid/src/mermaid_viewport.rs": 1351,

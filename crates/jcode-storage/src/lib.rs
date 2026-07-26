@@ -1,12 +1,28 @@
 use anyhow::Result;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 mod active_pids;
+
+/// Serializes tests that mutate the process environment.
+///
+/// One lock for the whole crate, not one per test module: `JCODE_HOME` is
+/// process-global, so a private mutex per module only excludes that module
+/// against itself and lets the others run concurrently. That is exactly the
+/// race that made the launcher-dir tests flake in the `jcode` binary.
+///
+/// The richer `TestEnvWriteLease` lives in `jcode-base`, which sits *above*
+/// this crate and so cannot be used here.
+#[cfg(test)]
+pub(crate) fn lock_test_env_write() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 pub use active_pids::{
     PidMarkerSweep, SessionCounts, SessionPidMarkerObservations, SessionPidMarkerRemoval,
     SessionPresence, StreamingGuard, active_pids_dir, active_session_ids,
@@ -90,33 +106,37 @@ pub fn jcode_dir() -> Result<PathBuf> {
 /// `jcode_dir().ok()`, which reads like a swallowed error even though it isn't.
 pub fn jcode_dir_opt() -> Option<PathBuf> {
     resolve_jcode_dir(
-        std::env::var_os("JCODE_HOME").as_deref(),
+        jcode_home_override().as_deref().map(Path::new),
         test_harness_home(),
         dirs::home_dir(),
     )
 }
 
+/// The `JCODE_HOME` override, with blank values rejected.
+///
+/// Every ambient root reads this variable, so the "is it actually set to
+/// something" rule belongs in one place. A whitespace-only value is a
+/// *relative* path: taken literally it puts the jcode home under the current
+/// working directory, which is how a directory named "\t" ended up in the repo
+/// root full of telemetry and session data. Three of the four roots had the
+/// same defect, so filtering per root would have left it live somewhere.
+///
+/// Returns `None` when unset or blank, so callers fall through to the harness
+/// home and then the real platform location.
+fn jcode_home_override() -> Option<OsString> {
+    std::env::var_os("JCODE_HOME")
+        .filter(|value| !value.is_empty())
+        .filter(|value| !value.to_string_lossy().trim().is_empty())
+}
+
 /// Pure resolution rule behind [`jcode_dir_opt`]. See [`resolve_app_config_dir`]
 /// for why the ambient inputs are arguments.
-///
-/// A blank or whitespace-only `JCODE_HOME` is ignored rather than trusted. It
-/// used to be taken literally, so `JCODE_HOME="\t"` resolved to a relative path
-/// and every consumer wrote real state (telemetry ids, sessions, build
-/// requests) into a directory literally named `"\t"` under the *current working
-/// directory*. A test that set that value to prove blank overrides are ignored
-/// was itself creating one in the repo root. `launcher_dir` already trimmed its
-/// overrides this way; this is the same rule applied to the ambient root that
-/// actually gets written to.
 fn resolve_jcode_dir(
-    jcode_home: Option<&OsStr>,
+    jcode_home: Option<&Path>,
     harness_home: Option<PathBuf>,
     real_home: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    if let Some(path) = jcode_home
-        .map(Path::new)
-        .filter(|path| !path.as_os_str().is_empty())
-        .filter(|path| !path.to_string_lossy().trim().is_empty())
-    {
+    if let Some(path) = jcode_home {
         return Some(path.to_path_buf());
     }
 
@@ -251,7 +271,7 @@ pub fn durable_state_dir() -> PathBuf {
 /// according to which models the developer had personally selected.
 pub fn app_config_dir() -> Result<PathBuf> {
     resolve_app_config_dir(
-        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        jcode_home_override().as_deref().map(Path::new),
         test_harness_home().as_deref(),
         dirs::config_dir(),
     )
@@ -289,7 +309,7 @@ fn resolve_app_config_dir(
 /// cross-test channel, and the writes accumulate in real user state.
 pub fn app_cache_dir() -> Result<PathBuf> {
     resolve_app_cache_dir(
-        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        jcode_home_override().as_deref().map(Path::new),
         test_harness_home().as_deref(),
         dirs::cache_dir(),
     )
@@ -326,7 +346,7 @@ fn resolve_app_cache_dir(
 pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
     resolve_user_home_path(
         relative.as_ref(),
-        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        jcode_home_override().as_deref().map(Path::new),
         test_harness_home().as_deref(),
         dirs::home_dir(),
     )
@@ -354,7 +374,7 @@ pub fn user_home_path_opt(relative: impl AsRef<Path>) -> Option<PathBuf> {
     );
     resolve_user_home_path_opt(
         relative,
-        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        jcode_home_override().as_deref().map(Path::new),
         test_harness_home().as_deref(),
         dirs::home_dir(),
     )
@@ -426,7 +446,11 @@ pub fn assert_redirected_away_from_real_home(path: &Path, what: &str) {
 /// is exactly the hand-rolled check that missed the harness home in the Cursor
 /// auth path.
 pub fn home_is_redirected() -> bool {
-    std::env::var_os("JCODE_HOME").is_some() || test_harness_home().is_some()
+    // Must use the same blank-rejecting rule as the roots themselves. A bare
+    // `is_some()` reports "redirected" for a blank `JCODE_HOME` that no root
+    // actually honors, which would make callers sandbox a path while the real
+    // resolution fell through to the developer's home.
+    jcode_home_override().is_some() || test_harness_home().is_some()
 }
 
 /// Pure resolution rule behind [`user_home_path`]. See
@@ -1025,7 +1049,7 @@ mod home_isolation_tests {
         );
     }
 
-    /// A blank `JCODE_HOME` must not be trusted as a real path.
+    /// A blank `JCODE_HOME` must not be trusted as a real path, at *any* root.
     ///
     /// Taken literally, `JCODE_HOME="\t"` is a *relative* path, so every
     /// consumer wrote real state (telemetry ids, sessions, selfdev build
@@ -1034,41 +1058,91 @@ mod home_isolation_tests {
     /// and it was reachable from a shipped binary, not just tests: the repo
     /// root accumulated one from the suite itself.
     ///
-    /// Reverting `resolve_jcode_dir` to `PathBuf::from(value)` fails this.
+    /// Drives the *public* entry points through the real environment rather
+    /// than the pure resolvers, because the defect was in how each root read
+    /// the variable, which a resolver taking pre-parsed arguments cannot see.
+    /// Covers all four because three had the identical defect; testing only the
+    /// one that happened to leak would leave the rest live.
+    ///
+    /// Reverting `jcode_home_override` to a bare `var_os` fails this.
     #[test]
-    fn blank_jcode_home_falls_back_instead_of_creating_a_relative_dir() {
-        let harness = PathBuf::from("/tmp/harness-home");
-        let real_home = PathBuf::from("/Users/real");
+    fn blank_jcode_home_falls_back_at_every_ambient_root() {
+        let _lease = crate::lock_test_env_write();
+        let previous = std::env::var_os("JCODE_HOME");
 
         for blank in ["", " ", "\t", "\n", "  \t "] {
-            let resolved = resolve_jcode_dir(
-                Some(OsStr::new(blank)),
-                Some(harness.clone()),
-                Some(real_home.clone()),
-            )
-            .expect("a blank override must still resolve somewhere");
+            // SAFETY: mutation is serialized by the test-environment lease.
+            unsafe { std::env::set_var("JCODE_HOME", blank) };
+
+            let roots = [
+                ("jcode_dir", jcode_dir().expect("jcode dir")),
+                ("app_config_dir", app_config_dir().expect("config dir")),
+                ("app_cache_dir", app_cache_dir().expect("cache dir")),
+                (
+                    "user_home_path",
+                    user_home_path(".aws/credentials").expect("user home path"),
+                ),
+            ];
+
+            for (name, resolved) in roots {
+                assert!(
+                    resolved.is_absolute(),
+                    "{name} resolved to a relative path for JCODE_HOME={blank:?}, \
+                     which lands under the current working directory: {}",
+                    resolved.display()
+                );
+            }
+        }
+
+        // A real override is still honored, at the root that leaked.
+        // SAFETY: same lease.
+        unsafe { std::env::set_var("JCODE_HOME", "/tmp/pinned") };
+        assert_eq!(jcode_dir().expect("explicit override"), PathBuf::from("/tmp/pinned"));
+
+        // SAFETY: same lease; restore what the process had.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("JCODE_HOME", value),
+                None => std::env::remove_var("JCODE_HOME"),
+            }
+        }
+    }
+
+    /// The blank-rejecting rule itself, which every root now shares.
+    #[test]
+    fn jcode_home_override_rejects_blank_values_and_keeps_real_ones() {
+        let _lease = crate::lock_test_env_write();
+        let previous = std::env::var_os("JCODE_HOME");
+
+        for blank in ["", " ", "\t", "\n", "  \t "] {
+            // SAFETY: mutation is serialized by the test-environment lease.
+            unsafe { std::env::set_var("JCODE_HOME", blank) };
             assert_eq!(
-                resolved, harness,
-                "JCODE_HOME={blank:?} must be ignored in favor of the harness home"
+                jcode_home_override(),
+                None,
+                "JCODE_HOME={blank:?} must be treated as unset"
             );
             assert!(
-                resolved.is_absolute(),
-                "JCODE_HOME={blank:?} resolved to a relative path, which lands \
-                 under the current working directory: {}",
-                resolved.display()
+                !home_is_redirected() || test_harness_home().is_some(),
+                "JCODE_HOME={blank:?} must not report the home as redirected"
             );
         }
 
-        // A real override still wins outright.
+        // SAFETY: same lease.
+        unsafe { std::env::set_var("JCODE_HOME", "/tmp/pinned") };
         assert_eq!(
-            resolve_jcode_dir(
-                Some(OsStr::new("/tmp/pinned")),
-                Some(harness),
-                Some(real_home)
-            )
-            .expect("explicit override"),
-            PathBuf::from("/tmp/pinned")
+            jcode_home_override(),
+            Some(OsString::from("/tmp/pinned")),
+            "a real override must survive"
         );
+
+        // SAFETY: same lease; restore what the process had.
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("JCODE_HOME", value),
+                None => std::env::remove_var("JCODE_HOME"),
+            }
+        }
     }
 }
 
