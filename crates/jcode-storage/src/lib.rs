@@ -1021,8 +1021,12 @@ mod home_isolation_tests {
                     let via_result =
                         resolve_user_home_path(relative, jcode_home, harness_home, real.clone())
                             .ok();
-                    let via_option =
-                        resolve_user_home_path_opt(relative, jcode_home, harness_home, real.clone());
+                    let via_option = resolve_user_home_path_opt(
+                        relative,
+                        jcode_home,
+                        harness_home,
+                        real.clone(),
+                    );
                     assert_eq!(
                         via_result, via_option,
                         "resolvers disagreed for jcode_home={jcode_home:?} \
@@ -1097,7 +1101,10 @@ mod home_isolation_tests {
         // A real override is still honored, at the root that leaked.
         // SAFETY: same lease.
         unsafe { std::env::set_var("JCODE_HOME", "/tmp/pinned") };
-        assert_eq!(jcode_dir().expect("explicit override"), PathBuf::from("/tmp/pinned"));
+        assert_eq!(
+            jcode_dir().expect("explicit override"),
+            PathBuf::from("/tmp/pinned")
+        );
 
         // SAFETY: same lease; restore what the process had.
         unsafe {
