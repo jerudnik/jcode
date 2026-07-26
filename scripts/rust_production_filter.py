@@ -364,7 +364,15 @@ def _cfg_test_item_ranges(masked_code: str) -> list[tuple[int, int]]:
 
 def production_lines_from_text(source: str) -> list[str]:
     masked_code = _mask_rust_non_code(source)
-    production_chars = list(source)
+    # Return the *masked* text, not the original: comments and string literals
+    # are not code, so a budget scanning these lines must not count a pattern
+    # that merely appears in prose or inside an embedded snippet of another
+    # language. Without this, documenting why a pattern is avoided scores the
+    # same as using it, and JavaScript in a Rust string literal (see
+    # `tool/computer/win.rs`, which calls `ObjC.unwrap(...)`) is counted as a
+    # Rust panic site. Masking preserves offsets and newlines, so line numbers
+    # and `#[cfg(test)]` spans are unaffected.
+    production_chars = list(masked_code)
     if _file_requires_test(masked_code):
         _blank_span(production_chars, 0, len(production_chars))
         return "".join(production_chars).splitlines()
