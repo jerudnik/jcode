@@ -5,10 +5,10 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "F20c",
-    "state": "in_progress",
-    "commit": null,
-    "updated_at": "2026-07-25T02:02:53Z",
-    "summary": "Coordinator owns F20c; blast radius declared. Cutting release acquisition first, then the channel/version store."
+    "state": "accepted",
+    "commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
+    "updated_at": "2026-07-26T04:19:10Z",
+    "summary": "Distribution surface retired: jcode-update-core deleted, version store and channel matrix cut, installers and R10 fixture removed, doctor detects retired-layout residue. All 11 preflight gates green and full workspace suite double green (6622/0 twice) at the final HEAD. Five real defects root-caused en route (four ambient-state class); follow-up filed as F29."
   },
   "nodes": {
     "W0": {
@@ -438,11 +438,18 @@
       "updated_at": "2026-07-25T00:07:58Z"
     },
     "F20c": {
-      "state": "in_progress",
-      "commit": null,
-      "evidence": [],
-      "summary": "Coordinator owns F20c; blast radius declared. Cutting release acquisition first, then the channel/version store.",
-      "updated_at": "2026-07-25T02:02:53Z"
+      "state": "accepted",
+      "commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F20c/README.md",
+        "docs/fork/ideal-base/evidence/F20c/removal-grep-clean.txt",
+        "docs/fork/ideal-base/evidence/F20c/retired-layout-detection.txt",
+        "docs/fork/ideal-base/evidence/F20c/suite-run-1.txt",
+        "docs/fork/ideal-base/evidence/F20c/suite-run-2.txt",
+        "docs/fork/ideal-base/evidence/F20c/preflight.txt"
+      ],
+      "summary": "Distribution surface retired: jcode-update-core deleted, version store and channel matrix cut, installers and R10 fixture removed, doctor detects retired-layout residue. All 11 preflight gates green and full workspace suite double green (6622/0 twice) at the final HEAD. Five real defects root-caused en route (four ambient-state class); follow-up filed as F29.",
+      "updated_at": "2026-07-26T04:19:10Z"
     },
     "F29": {
       "state": "pending",
