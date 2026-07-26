@@ -2644,3 +2644,25 @@ fn test_rewind_targets_match_rendered_transcript_numbering() {
         "sanity: raw stored counting diverges, which is why rewind must not use it"
     );
 }
+
+/// `Session::create` delegates to `create_with_id` rather than repeating the
+/// field literal. The only field whose derivation changed in that refactor is
+/// `short_name`, which is now recovered from the generated memorable id
+/// instead of being passed through directly, so pin that equivalence here.
+#[test]
+fn create_populates_short_name_from_generated_id() {
+    let session = Session::create(None, None);
+    let short_name = session
+        .short_name
+        .as_deref()
+        .expect("create() must populate a short name");
+    assert!(
+        !short_name.is_empty(),
+        "short name should not be blank: {short_name:?}"
+    );
+    assert_eq!(
+        Some(short_name),
+        extract_session_name(&session.id),
+        "short name must match the one encoded in the session id"
+    );
+}

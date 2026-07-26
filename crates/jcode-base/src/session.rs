@@ -799,7 +799,6 @@ impl Session {
     }
 
     pub fn create(parent_id: Option<String>, title: Option<String>) -> Self {
-        let now = Utc::now();
         // Keep memorable identities distinct across all currently active
         // sessions. This naturally covers swarm members and survives a server
         // reload because active PID markers retain their encoded short names.
@@ -807,50 +806,11 @@ impl Session {
             .into_iter()
             .filter_map(|session_id| extract_session_name(&session_id).map(str::to_string))
             .collect::<HashSet<_>>();
-        let (id, short_name) = new_memorable_session_id_avoiding(&used_names);
-        let is_debug = default_is_test_session();
-        let mut session = Self {
-            id,
-            parent_id,
-            title,
-            custom_title: None,
-            created_at: now,
-            updated_at: now,
-            messages: Vec::new(),
-            compaction: None,
-            provider_session_id: None,
-            provider_key: None,
-            model: None,
-            route_api_method: None,
-            reasoning_effort: None,
-            subagent_model: None,
-            improve_mode: None,
-            autoreview_enabled: None,
-            autojudge_enabled: None,
-            is_canary: false,
-            testing_build: None,
-            working_dir: current_working_dir_string(),
-            short_name: Some(short_name),
-            status: SessionStatus::Active,
-            last_pid: Some(std::process::id()),
-            last_active_at: Some(now),
-            is_debug,
-            saved: false,
-            save_label: None,
-            assistant: None,
-            env_snapshots: Vec::new(),
-            memory_injections: Vec::new(),
-            replay_events: Vec::new(),
-            persist_state: SessionPersistState::default(),
-            provider_messages_cache: Vec::new(),
-            provider_message_prefix_hashes_cache: Vec::new(),
-            provider_messages_cache_len: 0,
-            provider_messages_cache_mode: PersistVectorMode::Full,
-            memory_profile_cache: SessionMemoryProfileCache::default(),
-            memory_profile_dirty: false,
-        };
-        session.reset_persist_state(false);
-        session
+        let (id, _short_name) = new_memorable_session_id_avoiding(&used_names);
+        // Delegate rather than repeat the 40-field literal: the two paths
+        // differed only in how the id was obtained, and `create_with_id`
+        // recovers the short name from a memorable id anyway.
+        Self::create_with_id(id, parent_id, title)
     }
 
     /// Mark this session as a debug/test session
@@ -1058,13 +1018,10 @@ request in this new forked session, using the inherited conversation only as con
 
     /// Fault-injection hook: force terminal persistence to fail for one session.
     ///
-    /// Gated on the test cfg rather than `debug_assertions`, because the two are
-    /// not equivalent in this workspace: the `selfdev` profile inherits
-    /// `release`, which compiles assertions out. Under that profile this hook
-    /// vanished, the forced failure never fired, and four
-    /// `client_disconnect_cleanup` tests failed asserting `Failed` while
-    /// observing `Persisted` -- a profile artifact that looked like a
-    /// concurrency bug.
+    /// Gated on the test cfg, not `debug_assertions`: the `selfdev` profile
+    /// inherits `release`, so assertions compile out and this hook silently
+    /// vanished, failing four `client_disconnect_cleanup` tests under that
+    /// profile alone.
     fn maybe_force_terminal_save_failure(&self) -> Result<()> {
         #[cfg(any(test, feature = "test-support"))]
         if matches!(
@@ -1077,9 +1034,7 @@ request in this new forked session, using the inherited conversation only as con
     }
 
     /// Fault-injection hook: re-register a PID marker after it is observed.
-    ///
-    /// Gated on the test cfg for the same reason as
-    /// [`Self::maybe_force_terminal_save_failure`].
+    /// Test-cfg gated for the same reason as the hook above.
     fn maybe_replace_terminal_marker_after_observe(&self) {
         #[cfg(any(test, feature = "test-support"))]
         if matches!(
