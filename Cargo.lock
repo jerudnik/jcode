@@ -3334,7 +3334,6 @@ dependencies = [
  "chrono",
  "core-graphics",
  "crossterm",
- "dirs",
  "futures",
  "glob",
  "global-hotkey",
@@ -3355,6 +3354,7 @@ dependencies = [
  "jcode-selfdev-types",
  "jcode-session-types",
  "jcode-setup-hints",
+ "jcode-storage",
  "jcode-swarm-core",
  "jcode-task-types",
  "jcode-terminal-image",
@@ -4139,7 +4139,7 @@ name = "jcode-terminal-launch"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs",
+ "jcode-storage",
 ]
 
 [[package]]

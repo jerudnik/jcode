@@ -6,8 +6,6 @@
 #
 # Format: path:line  # reason
 
-crates/jcode-app-core/src/tool/open.rs:239  # TODO: state why this cannot use jcode-storage
-crates/jcode-app-core/src/tool/open.rs:244  # TODO: state why this cannot use jcode-storage
 crates/jcode-base/src/browser.rs:676  # TODO: state why this cannot use jcode-storage
 crates/jcode-base/src/browser.rs:681  # TODO: state why this cannot use jcode-storage
 crates/jcode-base/src/browser.rs:692  # TODO: state why this cannot use jcode-storage
@@ -19,8 +17,6 @@ crates/jcode-base/src/surface_workspace.rs:224  # TODO: state why this cannot us
 crates/jcode-provider-copilot-runtime/src/copilot_tests.rs:705  # regression test: names the real home in order to assert machine_id never resolves under it
 crates/jcode-provider-openai-runtime/src/openai_tests.rs:131  # TODO: state why this cannot use jcode-storage
 crates/jcode-provider-openrouter/src/lib.rs:807  # regression test: names the real home in order to assert the model caches never resolve under it
-crates/jcode-terminal-launch/src/lib.rs:191  # TODO: state why this cannot use jcode-storage
-crates/jcode-terminal-launch/src/lib.rs:471  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/remote_diff.rs:92  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/ui_frame_metrics_flicker.rs:350  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/ui_header.rs:494  # TODO: state why this cannot use jcode-storage
