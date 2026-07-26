@@ -213,6 +213,14 @@ if [ "$ratchets_only" -eq 0 ]; then
       run "cargo clippy (fork-touched)" clippy_scoped
     fi
   fi
+
+  # Real-home isolation. Runs an actual suite (~2 min), so it is opt-in locally
+  # via PREFLIGHT_HOME_ISOLATION=1; CI asserts the same invariant for free with
+  # --verify-only after its own test steps. Placed here rather than with the
+  # fast ratchets because it compiles and runs tests.
+  if [ "${PREFLIGHT_HOME_ISOLATION:-0}" = "1" ]; then
+    run "real-home isolation" bash scripts/check_real_home_isolation.sh
+  fi
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────

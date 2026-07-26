@@ -183,6 +183,14 @@ jobs:
           CARGO_BIN="$(rustup which cargo)"
           "$CARGO_BIN" build --release --target ${{ matrix.target }}
 
+      - name: Snapshot real home before tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        # Paired with the verify step after the test runs. Brackets rather than
+        # assuming a clean HOME so the same gate works on a developer machine.
+        run: |
+          scripts/check_real_home_isolation.sh --snapshot
+
       - name: Compile library and binary tests
         shell: bash
         run: |
@@ -220,6 +228,15 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/check_powershell_syntax.ps1
+
+      - name: Enforce real-home test isolation (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        # Cheap assertion, not a second suite: the test steps above already ran
+        # in this job, so any test that resolved the real ~/.jcode instead of
+        # its per-process temp home shows up as a delta against the snapshot.
+        run: |
+          scripts/check_real_home_isolation.sh --verify-only
 
       - name: Enforce warning budget (Linux)
         if: runner.os == 'Linux'
