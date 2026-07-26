@@ -104,6 +104,27 @@ run "config env lease"         python3 scripts/check_config_env_lease.py
 run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
 
+# Unused-dependency gate, mirroring the "Enforce no unused dependencies" step in
+# both ci.yml and fork-ci.yml. This was added after F20c: deleting the release
+# acquisition subsystem orphaned jcode-app-core's flate2/sha2/tar, which every
+# local gate passed over and CI caught only after the PR was opened. cargo
+# machete is a manifest/source text scan, so it is fast and needs no build.
+#
+# cargo-machete is not in the repo devShell (flake.nix is owned by distro/nix,
+# see docs/BRANCHING.md), so the gate is skipped when absent rather than
+# failing. The skip is reported in the summary so a missing tool can never be
+# mistaken for a pass.
+if command -v cargo-machete >/dev/null 2>&1; then
+  run "unused dependencies"    cargo-machete
+elif cargo machete --help >/dev/null 2>&1; then
+  run "unused dependencies"    cargo machete
+else
+  names+=("unused dependencies"); states+=("skip")
+  printf '\033[1;34m▸ unused dependencies\033[0m\n'
+  printf 'cargo-machete not found; CI still enforces this. Install with:\n'
+  printf '  nix shell nixpkgs#cargo-machete   (or: cargo install cargo-machete --locked)\n'
+fi
+
 # Lint any fork-owned workflow files that changed (mirrors the nix.yml step).
 if command -v actionlint >/dev/null 2>&1; then
   changed_wf=$(git diff --name-only --diff-filter=d HEAD -- '.github/workflows/*.yml' 2>/dev/null || true)
@@ -225,16 +246,25 @@ fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 printf '\n\033[1m── preflight summary ──\033[0m\n'
+skipped=0
 for i in "${!names[@]}"; do
-  if [ "${states[$i]}" = "pass" ]; then
-    printf '  \033[32m✓\033[0m %s\n' "${names[$i]}"
-  else
-    printf '  \033[31m✗ %s\033[0m\n' "${names[$i]}"
-  fi
+  case "${states[$i]}" in
+    pass) printf '  \033[32m✓\033[0m %s\n' "${names[$i]}" ;;
+    # A skipped gate is neither a pass nor a failure: the check did not run
+    # here, but CI still enforces it. Rendering it as ✗ would contradict the
+    # "all gates passed" footer; rendering it as ✓ would hide the hole.
+    skip) printf '  \033[33m—\033[0m %s \033[33m(skipped, enforced in CI)\033[0m\n' "${names[$i]}"
+          skipped=$((skipped + 1)) ;;
+    *)    printf '  \033[31m✗ %s\033[0m\n' "${names[$i]}" ;;
+  esac
 done
 
 if [ "$overall" -eq 0 ]; then
-  printf '\n\033[1;32mAll preflight gates passed.\033[0m\n'
+  if [ "$skipped" -gt 0 ]; then
+    printf '\n\033[1;32mAll preflight gates passed\033[0m \033[33m(%d skipped; CI still enforces them).\033[0m\n' "$skipped"
+  else
+    printf '\n\033[1;32mAll preflight gates passed.\033[0m\n'
+  fi
 else
   printf '\n\033[1;31mPreflight found failures above. Fix before pushing.\033[0m\n'
 fi
