@@ -282,17 +282,15 @@ jobs:
             cargo test --target aarch64-apple-darwin \
             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
 
-      # jcode-tui runs single-threaded: the suite shares process-global TUI
-      # view state (mermaid ACTIVE_DIAGRAMS, render/frame caches) and ambient
-      # env (JCODE_HOME) behind a test-env/render lock that a minority of tests
-      # apply inconsistently, so high parallelism produces cross-test pollution
-      # and timing flakes. This is a test-harness artifact, not a product race:
-      # the runtime is multi-process (each swarm agent is its own OS process via
-      # current_exe/spawn hook), so no two live App contexts ever share these
-      # Parallelism restored by F28: render-state tests now take the shared
-      # render lock (enforced by scripts/check_tui_render_lock.py, which fails
-      # the Quality Guardrails rail if an unlocked mutator reappears). Verified
-      # green over 3 consecutive full parallel rounds.
+      # Parallelism restored by F28. The suite shares process-global TUI view
+      # state (mermaid ACTIVE_DIAGRAMS, render/frame caches) and ambient env
+      # (JCODE_HOME); every mutator now takes the shared render lock, enforced
+      # by scripts/check_tui_render_lock.py, which fails the Quality Guardrails
+      # rail if an unlocked mutator reappears. This was only ever a test-harness
+      # concern, not a product race: the runtime is multi-process (each swarm
+      # agent is its own OS process via the current_exe/spawn hook), so no two
+      # live App contexts share this state. Verified green over 3 consecutive
+      # full parallel rounds.
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
