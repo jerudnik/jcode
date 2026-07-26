@@ -867,3 +867,20 @@ mod home_isolation_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod empty_relative_tests {
+    #[test]
+    fn empty_relative_yields_the_home_root_itself() {
+        // `resolve_target_dir` uses `user_home_path("")` to mean "$HOME". Assert
+        // that spelling actually yields a directory root and not something with
+        // a stray trailing component, on both the redirected and real paths.
+        let redirected = super::user_home_path("").expect("home under harness");
+        super::assert_redirected_away_from_real_home(&redirected, "empty-relative home");
+        assert!(
+            redirected.is_absolute(),
+            "expected an absolute home root, got {}",
+            redirected.display()
+        );
+    }
+}

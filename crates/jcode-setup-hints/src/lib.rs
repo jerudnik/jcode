@@ -342,7 +342,11 @@ fn record_launch_dirs_inner(
     let support_dir = mac_hotkey_support_dir()?;
     std::fs::create_dir_all(&support_dir)?;
 
-    if should_record_last_dir(dir, dirs::home_dir().as_deref()) {
+    // The "is this the home dir itself" check must compare against the same
+    // (possibly redirected) home everything else resolves, or a sandboxed run
+    // compares against the developer's real home and records the wrong answer.
+    let home = jcode_storage::user_home_path("").ok();
+    if should_record_last_dir(dir, home.as_deref()) {
         std::fs::write(mac_hotkey_last_dir_file()?, format!("{}\n", dir.display()))?;
     }
 
@@ -366,11 +370,10 @@ fn should_record_last_dir(dir: &std::path::Path, home: Option<&std::path::Path>)
 
 #[cfg(target_os = "macos")]
 fn mac_hotkey_launch_agent_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not find home directory")?;
-    Ok(home
-        .join("Library")
-        .join("LaunchAgents")
-        .join("com.jcode.hotkey.plist"))
+    // Resolved through jcode-storage so a test harness writes its LaunchAgent
+    // plist into the sandbox rather than the developer's real ~/Library.
+    jcode_storage::user_home_path("Library/LaunchAgents/com.jcode.hotkey.plist")
+        .context("Could not find home directory")
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -1252,70 +1255,20 @@ fn macos_launch_hotkeys_notice(state: &SetupHintsState) -> Option<StartupHints> 
 // ===========================================================================
 
 /// Detect the running compositor/window manager from the session environment.
+#[cfg(any(test, target_os = "linux"))]
+mod linux_config_paths;
+// The module compiles under `test` too (its resolvers are unit-tested on every
+// platform), but every *caller* in this file is Linux-only, so importing the
+// names off Linux is an unused import.
+#[cfg(target_os = "linux")]
+use linux_config_paths::{
+    flat_compositor_config_path, kde_applications_dir, kde_globalshortcutsrc_path,
+    niri_config_path, xdg_config_home,
+};
+
 #[cfg(target_os = "linux")]
 fn detect_linux_compositor() -> Option<linux_env::LinuxCompositor> {
     linux_env::detect_compositor_from(&|key| std::env::var(key).ok())
-}
-
-/// Path to the niri config file, honoring `$XDG_CONFIG_HOME`.
-#[cfg(any(test, target_os = "linux"))]
-fn niri_config_path() -> Option<PathBuf> {
-    Some(xdg_config_home()?.join("niri").join("config.kdl"))
-}
-
-/// `$XDG_CONFIG_HOME`, defaulting to `~/.config`.
-#[cfg(any(test, target_os = "linux"))]
-fn xdg_config_home() -> Option<PathBuf> {
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
-}
-
-/// Config file jcode manages for a flat (`#`-commented) compositor config.
-/// For i3 the legacy `~/.i3/config` location is honored when the XDG path is
-/// missing. GNOME/KDE do not use a spliceable config file and return `None`.
-#[cfg(target_os = "linux")]
-fn flat_compositor_config_path(comp: linux_env::LinuxCompositor) -> Option<PathBuf> {
-    use linux_env::LinuxCompositor;
-    let base = xdg_config_home()?;
-    match comp {
-        LinuxCompositor::Niri => niri_config_path(),
-        LinuxCompositor::Hyprland => Some(base.join("hypr").join("hyprland.conf")),
-        LinuxCompositor::Sway => Some(base.join("sway").join("config")),
-        LinuxCompositor::Bspwm => Some(base.join("sxhkd").join("sxhkdrc")),
-        LinuxCompositor::I3 => {
-            let xdg = base.join("i3").join("config");
-            if xdg.exists() {
-                return Some(xdg);
-            }
-            let legacy = dirs::home_dir()?.join(".i3").join("config");
-            if legacy.exists() {
-                Some(legacy)
-            } else {
-                Some(xdg)
-            }
-        }
-        LinuxCompositor::Gnome
-        | LinuxCompositor::Kde
-        | LinuxCompositor::Cinnamon
-        | LinuxCompositor::Mate
-        | LinuxCompositor::Xfce => None,
-    }
-}
-
-/// KDE's global-shortcuts registry file.
-#[cfg(target_os = "linux")]
-fn kde_globalshortcutsrc_path() -> Option<PathBuf> {
-    Some(xdg_config_home()?.join("kglobalshortcutsrc"))
-}
-
-/// Directory for jcode's hidden KDE launcher desktop files.
-#[cfg(target_os = "linux")]
-fn kde_applications_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("share")))?;
-    Some(base.join("applications"))
 }
 
 /// The config file jcode would manage for the *current* session's compositor.

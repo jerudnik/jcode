@@ -161,10 +161,13 @@ pub fn parse_omniwm(text: &str) -> Vec<DiscoveredBinding> {
 
 /// Read and parse OmniWM's config, if present.
 pub fn read_omniwm() -> Vec<DiscoveredBinding> {
-    let Some(home) = dirs::home_dir() else {
+    // `user_home_path` rather than `dirs::home_dir()`: this reads a config file
+    // outside jcode, so under a test harness it must resolve into the sandbox.
+    // Reading the real one made discovery tests depend on whether the developer
+    // happens to run OmniWM.
+    let Ok(path) = jcode_storage::user_home_path(".config/omniwm/settings.toml") else {
         return Vec::new();
     };
-    let path = home.join(".config/omniwm/settings.toml");
     read_to_string(&path)
         .map(|t| parse_omniwm(&t))
         .unwrap_or_default()
@@ -228,11 +231,12 @@ fn aerospace_action_label(value: &toml::Value) -> String {
 
 /// Read and parse AeroSpace's config from either supported location.
 pub fn read_aerospace() -> Vec<DiscoveredBinding> {
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
+    // See `read_omniwm`: resolved through jcode-storage so a test harness sees
+    // the sandbox instead of the developer's real AeroSpace config.
     for rel in [".aerospace.toml", ".config/aerospace/aerospace.toml"] {
-        let path = home.join(rel);
+        let Ok(path) = jcode_storage::user_home_path(rel) else {
+            continue;
+        };
         if let Some(text) = read_to_string(&path) {
             return parse_aerospace(&text);
         }
@@ -299,11 +303,12 @@ pub fn parse_skhd(text: &str) -> Vec<DiscoveredBinding> {
 
 /// Read and parse skhd's config from either supported location.
 pub fn read_skhd() -> Vec<DiscoveredBinding> {
-    let Some(home) = dirs::home_dir() else {
-        return Vec::new();
-    };
+    // See `read_omniwm`: resolved through jcode-storage so a test harness sees
+    // the sandbox instead of the developer's real skhd config.
     for rel in [".config/skhd/skhdrc", ".skhdrc"] {
-        let path = home.join(rel);
+        let Ok(path) = jcode_storage::user_home_path(rel) else {
+            continue;
+        };
         if let Some(text) = read_to_string(&path) {
             return parse_skhd(&text);
         }

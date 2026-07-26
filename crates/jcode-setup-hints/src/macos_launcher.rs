@@ -98,14 +98,15 @@ pub(super) fn install_macos_app_launcher() -> Result<(PathBuf, MacTerminalKind)>
     Ok((app_dir, terminal))
 }
 
+// Both resolve through jcode-storage so a test harness installs its launcher
+// bundle into the sandbox rather than creating `~/Applications/Jcode.app` on
+// the developer's machine.
 fn macos_app_launcher_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not find home directory")?;
-    Ok(home.join("Applications").join("Jcode.app"))
+    jcode_storage::user_home_path("Applications/Jcode.app").context("Could not find home directory")
 }
 
 fn legacy_macos_app_launcher_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not find home directory")?;
-    Ok(home.join("Applications").join("jcode.app"))
+    jcode_storage::user_home_path("Applications/jcode.app").context("Could not find home directory")
 }
 
 fn macos_app_launcher_info_plist_path(app_dir: &Path) -> PathBuf {

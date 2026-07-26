@@ -19,17 +19,6 @@ crates/jcode-base/src/surface_workspace.rs:224  # TODO: state why this cannot us
 crates/jcode-provider-copilot-runtime/src/copilot_tests.rs:705  # regression test: names the real home in order to assert machine_id never resolves under it
 crates/jcode-provider-openai-runtime/src/openai_tests.rs:131  # TODO: state why this cannot use jcode-storage
 crates/jcode-provider-openrouter/src/lib.rs:807  # regression test: names the real home in order to assert the model caches never resolve under it
-crates/jcode-setup-hints/src/keymap/external.rs:164  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/keymap/external.rs:231  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/keymap/external.rs:302  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/launch_hotkeys.rs:216  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/lib.rs:1271  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/lib.rs:1291  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/lib.rs:1317  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/lib.rs:345  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/lib.rs:369  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/macos_launcher.rs:102  # TODO: state why this cannot use jcode-storage
-crates/jcode-setup-hints/src/macos_launcher.rs:107  # TODO: state why this cannot use jcode-storage
 crates/jcode-terminal-launch/src/lib.rs:191  # TODO: state why this cannot use jcode-storage
 crates/jcode-terminal-launch/src/lib.rs:471  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/remote_diff.rs:92  # TODO: state why this cannot use jcode-storage
