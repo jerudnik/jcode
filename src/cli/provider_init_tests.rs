@@ -7,17 +7,21 @@ use crate::external_auth::{
 };
 use crate::provider_catalog::{self, resolve_login_selection, resolve_openai_compatible_profile};
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
 use tempfile::TempDir;
 
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    let mutex = ENV_LOCK.get_or_init(|| Mutex::new(()));
-    match mutex.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    }
+/// Exclude against the *process-global* test-environment lease, not a private
+/// mutex.
+///
+/// These tests mutate `JCODE_HOME`, `HOME` and friends, which are process-wide.
+/// A local `Mutex` only serializes this module against itself, so it ran
+/// concurrently with every other module that takes `storage::lock_test_env()`
+/// and clobbered their environment mid-test. That is what made
+/// `selfdev_tests::test_launcher_dir_uses_trimmed_install_dir_before_jcode_home`
+/// flake (~1 run in 10 locally, and on macOS CI): it set `JCODE_INSTALL_DIR`
+/// and `JCODE_HOME` under the real lease, and a test here reset `JCODE_HOME`
+/// before the assertion read it back.
+fn lock_env() -> crate::storage::TestEnvWriteLease {
+    crate::storage::lock_test_env()
 }
 
 #[test]
