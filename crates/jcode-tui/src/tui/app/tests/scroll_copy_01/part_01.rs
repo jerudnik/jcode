@@ -561,6 +561,11 @@ fn test_notification_file_activity_repaint_does_not_leave_trailing_digit_artifac
     );
 }
 
+/// Sentinel painted directly into the backend to stand in for stale cells the
+/// renderer failed to repaint. It must not appear in any real rendered text,
+/// including the randomly chosen client identity in the header.
+const GHOST_MARKER: &str = "ZZZZ";
+
 #[test]
 fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_mutation() {
     let _lock = scroll_render_test_lock();
@@ -594,8 +599,14 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
         app.scroll_offset += 1;
         clean = render_and_snap(&app, &mut terminal);
     }
+    // The marker must be a string that cannot occur in real UI text. A bare
+    // 'Z' used to be enough until the header started rendering the randomly
+    // chosen client identity: one of the 157 animal names is "zebra", so
+    // roughly one run in 157 rendered "client: Zebra" and failed here before
+    // anything was injected. Matching the full four-character marker keeps the
+    // assertion about the ghost rather than about which animal was drawn.
     assert!(
-        !clean.contains('Z'),
+        !clean.contains(GHOST_MARKER),
         "ghost marker must not be present before injection:\n{clean}"
     );
     let target_row = clean
@@ -608,7 +619,7 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
         .expect("expected file activity suffix")
         + "read lines 1-9".len();
 
-    let ghost = ratatui::buffer::Buffer::with_lines(["ZZZZ"]);
+    let ghost = ratatui::buffer::Buffer::with_lines([GHOST_MARKER]);
     let updates = ghost
         .content()
         .iter()
@@ -623,7 +634,7 @@ fn test_file_activity_scroll_reproduces_trailing_ghost_after_native_scroll_like_
     let scrolled = render_and_snap(&app, &mut terminal);
 
     assert!(
-        scrolled.contains('Z'),
+        scrolled.contains(GHOST_MARKER),
         "expected an injected ghost marker to remain after scroll-like repaint:\n{scrolled}"
     );
 }
