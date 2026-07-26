@@ -447,3 +447,33 @@ fn find_vscdb_missing_returns_error() {
         assert!(err.to_string().contains("not found"));
     }
 }
+
+#[test]
+fn cursor_auth_appdata_override_yields_to_a_redirected_home() {
+    use std::path::PathBuf;
+    let appdata = Some(PathBuf::from("/appdata"));
+
+    // A redirected home (JCODE_HOME or the test harness) always wins, on every
+    // platform: otherwise a sandboxed Windows run would read the developer's
+    // real Cursor credentials.
+    assert_eq!(
+        super::cursor_auth_appdata_override(appdata.clone(), true),
+        None,
+        "%APPDATA% must not escape a redirected home"
+    );
+
+    // With the real home in play the rule is platform-specific, and this
+    // assertion is what makes the Windows arm testable off Windows.
+    let resolved = super::cursor_auth_appdata_override(appdata, false);
+    if cfg!(target_os = "windows") {
+        assert_eq!(
+            resolved,
+            Some(PathBuf::from("/appdata").join("Cursor").join("auth.json"))
+        );
+    } else {
+        assert_eq!(resolved, None, "%APPDATA% is Windows-only");
+    }
+
+    // A missing %APPDATA% falls through to home-relative resolution.
+    assert_eq!(super::cursor_auth_appdata_override(None, false), None);
+}

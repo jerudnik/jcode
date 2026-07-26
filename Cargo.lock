@@ -4248,9 +4248,9 @@ dependencies = [
 name = "jcode-tui-markdown"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "image",
  "jcode-render-core",
+ "jcode-storage",
  "jcode-tui-mermaid",
  "jcode-tui-workspace",
  "pulldown-cmark",
@@ -4270,9 +4270,9 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "crossterm",
- "dirs",
  "image",
  "jcode-plan",
+ "jcode-storage",
  "jcode-tui-workspace",
  "mermaid-rs-renderer",
  "ratatui",
@@ -4360,8 +4360,8 @@ dependencies = [
 name = "jcode-tui-visual-debug"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "jcode-logging",
+ "jcode-storage",
  "ratatui",
  "regex",
  "serde",

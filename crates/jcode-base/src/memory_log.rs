@@ -466,7 +466,9 @@ mod tests {
         );
         assert_eq!(
             resolved,
-            crate::storage::jcode_dir().expect("storage home").join("logs"),
+            crate::storage::jcode_dir()
+                .expect("storage home")
+                .join("logs"),
             "memory log dir must be exactly <jcode_dir>/logs"
         );
     }

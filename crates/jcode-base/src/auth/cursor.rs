@@ -363,39 +363,53 @@ fn config_file_path() -> Result<PathBuf> {
 }
 
 /// Resolve Cursor CLI/device-login auth file path.
+///
+/// Every arm resolves through [`crate::storage::user_home_path`] so the
+/// onboarding sandbox and tests (`JCODE_HOME`) redirect it like every other
+/// external-CLI auth detector. Previously only the Linux arm had an explicit
+/// `JCODE_HOME` check, and that check guarded just its first branch: the
+/// fallback called `dirs::config_dir()` ambiently and leaked the developer's
+/// real `~/.config/cursor/auth.json` into the sandbox. Keeping the per-OS
+/// difference to a relative path means the resolution logic is shared and
+/// exercised by the tests on whichever platform they run.
 pub fn cursor_auth_file_path() -> Result<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .or_else(|| crate::storage::user_home_path("AppData/Roaming").ok())
-            .ok_or_else(|| anyhow::anyhow!("No APPDATA directory found"))?;
-        return Ok(appdata.join("Cursor").join("auth.json"));
+    if let Some(path) = cursor_auth_appdata_override(
+        std::env::var_os("APPDATA").map(PathBuf::from),
+        crate::storage::home_is_redirected(),
+    ) {
+        return Ok(path);
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        crate::storage::user_home_path(".cursor/auth.json")
-            .context("No home directory found for Cursor auth.json")
-    }
+    crate::storage::user_home_path(CURSOR_AUTH_RELATIVE)
+        .context("No home directory found for Cursor auth.json")
+}
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        // Honor JCODE_HOME isolation (used by the onboarding sandbox and tests)
-        // the same way every other external-CLI auth detector does. Without this,
-        // Cursor would leak the real `~/.config/cursor/auth.json` into a sandbox
-        // while Codex/Claude/Gemini/Copilot correctly look under
-        // `$JCODE_HOME/external/...`, so a fresh-install sandbox would show only
-        // Cursor as importable.
-        if std::env::var_os("JCODE_HOME").is_some() {
-            return crate::storage::user_home_path(".config/cursor/auth.json")
-                .context("No home directory found for Cursor auth.json");
-        }
+/// Relative location of Cursor's auth file within the user home, per platform.
+#[cfg(target_os = "windows")]
+const CURSOR_AUTH_RELATIVE: &str = "AppData/Roaming/Cursor/auth.json";
+#[cfg(target_os = "macos")]
+const CURSOR_AUTH_RELATIVE: &str = ".cursor/auth.json";
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+const CURSOR_AUTH_RELATIVE: &str = ".config/cursor/auth.json";
 
-        let config_dir =
-            dirs::config_dir().ok_or_else(|| anyhow::anyhow!("No config directory found"))?;
-        Ok(config_dir.join("cursor").join("auth.json"))
+/// Windows resolves Cursor's auth file through `%APPDATA%`, which is not
+/// derived from the home directory and so is not covered by the home redirect.
+///
+/// This is a pure function taking both ambient inputs as arguments, and is
+/// compiled on every platform, so the Windows-only rule is exercised by the
+/// test suite wherever it runs instead of hiding inside a `cfg` block that only
+/// a Windows CI job could type-check. `%APPDATA%` is honored only when the home
+/// is *not* redirected: under `JCODE_HOME` or a test harness the sandbox wins,
+/// otherwise a sandboxed Windows run would read the real credentials -- the
+/// same leak the Linux arm had.
+fn cursor_auth_appdata_override(
+    appdata: Option<PathBuf>,
+    home_is_redirected: bool,
+) -> Option<PathBuf> {
+    if home_is_redirected || !cfg!(target_os = "windows") {
+        return None;
     }
+    Some(appdata?.join("Cursor").join("auth.json"))
 }
 
 /// Load direct Cursor tokens from env or Cursor's auth.json.

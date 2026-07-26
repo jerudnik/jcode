@@ -48,9 +48,11 @@ pub(super) struct CachedDiagram {
 
 impl MermaidCache {
     pub(super) fn new() -> Self {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("jcode")
+        // `app_cache_dir()` already appends `jcode` and honors the harness
+        // redirect; `dirs::cache_dir()` wrote rendered diagrams into the
+        // developer's real cache during tests.
+        let cache_dir = jcode_storage::app_cache_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("jcode"))
             .join("mermaid");
 
         let _ = fs::create_dir_all(&cache_dir);
@@ -1333,5 +1335,19 @@ mod font_prewarm_tests {
             crate::SVG_FONT_DB_PREWARM_STARTED.get().is_some(),
             "first mermaid sighting must kick off the font-DB prewarm"
         );
+    }
+}
+
+#[cfg(test)]
+mod ambient_root_tests {
+    /// Regression: `MermaidCache::new()` resolved `dirs::cache_dir()` directly,
+    /// so constructing a cache under test wrote rendered diagrams into the
+    /// developer's real cache directory. Asserting "not under the real home"
+    /// rather than a fixed path, because the harness redirect target is a
+    /// per-process random temp dir.
+    #[test]
+    fn mermaid_cache_dir_is_not_under_the_real_home() {
+        let cache = super::MermaidCache::new();
+        jcode_storage::assert_redirected_away_from_real_home(&cache.cache_dir, "mermaid cache dir");
     }
 }

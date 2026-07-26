@@ -8,7 +8,6 @@
 
 crates/jcode-app-core/src/tool/open.rs:239  # TODO: state why this cannot use jcode-storage
 crates/jcode-app-core/src/tool/open.rs:244  # TODO: state why this cannot use jcode-storage
-crates/jcode-base/src/auth/cursor.rs:396  # TODO: state why this cannot use jcode-storage
 crates/jcode-base/src/browser.rs:676  # TODO: state why this cannot use jcode-storage
 crates/jcode-base/src/browser.rs:681  # TODO: state why this cannot use jcode-storage
 crates/jcode-base/src/browser.rs:692  # TODO: state why this cannot use jcode-storage
@@ -33,12 +32,7 @@ crates/jcode-setup-hints/src/macos_launcher.rs:102  # TODO: state why this canno
 crates/jcode-setup-hints/src/macos_launcher.rs:107  # TODO: state why this cannot use jcode-storage
 crates/jcode-terminal-launch/src/lib.rs:191  # TODO: state why this cannot use jcode-storage
 crates/jcode-terminal-launch/src/lib.rs:471  # TODO: state why this cannot use jcode-storage
-crates/jcode-tui-markdown/src/markdown_latex_image.rs:295  # TODO: state why this cannot use jcode-storage
-crates/jcode-tui-mermaid/src/mermaid_cache_render.rs:51  # TODO: state why this cannot use jcode-storage
-crates/jcode-tui-visual-debug/src/lib.rs:336  # TODO: state why this cannot use jcode-storage
-crates/jcode-tui/src/tui/app/debug.rs:730  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/remote_diff.rs:92  # TODO: state why this cannot use jcode-storage
-crates/jcode-tui/src/tui/test_harness.rs:467  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/ui_frame_metrics_flicker.rs:350  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/tui/ui_header.rs:494  # TODO: state why this cannot use jcode-storage
 crates/jcode-tui/src/video_export.rs:44  # TODO: state why this cannot use jcode-storage

@@ -103,7 +103,9 @@ mod ambient_root_tests {
     /// isolation. Reverting the body to a hand-rolled resolver fails this.
     #[test]
     fn mobile_server_paths_never_resolve_into_the_real_home() {
-        let real = dirs::home_dir().expect("developer home exists").join(".jcode");
+        let real = dirs::home_dir()
+            .expect("developer home exists")
+            .join(".jcode");
 
         assert_ne!(
             jcode_home(),

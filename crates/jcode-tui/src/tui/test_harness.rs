@@ -464,9 +464,10 @@ impl TestBundle {
 
     /// Get default bundle output path.
     pub fn default_path(name: &str) -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("jcode")
+        // See `debug.rs`: `app_config_dir()` supplies the `jcode` segment and
+        // the JCODE_HOME / harness redirect that `dirs::config_dir()` lacks.
+        crate::storage::app_config_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
             .join("test-bundles")
             .join(format!("{}.json", sanitize_filename(name)))
     }
@@ -914,5 +915,26 @@ mod tests {
     fn test_strip_ansi() {
         let input = "\x1b[32mgreen\x1b[0m text";
         assert_eq!(strip_ansi(input), "green text");
+    }
+}
+
+#[cfg(test)]
+mod ambient_root_tests {
+    use super::*;
+
+    /// Regression: both of these resolved `dirs::config_dir()` directly, so
+    /// `/record stop` and test-bundle saves wrote into the developer's real
+    /// config dir even from a sandboxed run. Asserting "not under the real
+    /// home" rather than a fixed path, because the harness redirect target is a
+    /// per-process random temp dir.
+    #[test]
+    fn test_bundle_default_path_is_not_under_the_real_home() {
+        let path = TestBundle::default_path("demo");
+        crate::storage::assert_redirected_away_from_real_home(&path, "test-bundle path");
+        assert!(
+            path.ends_with("demo.json"),
+            "unexpected file name: {}",
+            path.display()
+        );
     }
 }

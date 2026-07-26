@@ -333,9 +333,11 @@ pub fn record_frame(frame: FrameCapture) {
 
 /// Get the debug output path
 fn debug_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("jcode")
+    // `app_config_dir()` already appends `jcode`, and it is what honors
+    // `JCODE_HOME` and the test-harness redirect. Resolving `dirs::config_dir()`
+    // here wrote visual-debug output into the developer's real config dir.
+    jcode_storage::app_config_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
         .join("visual-debug.txt")
 }
 
@@ -853,5 +855,21 @@ pub fn check_shift_enter_anomaly(
             "INPUT CONTAINS 'shift'+'enter' - possible hint leak: {:?}",
             input_text
         ));
+    }
+}
+
+#[cfg(test)]
+mod ambient_root_tests {
+    /// Regression: this resolved `dirs::config_dir()` directly, so enabling
+    /// visual debug under test wrote into the developer's real config dir.
+    #[test]
+    fn debug_path_is_not_under_the_real_home() {
+        let path = super::debug_path();
+        jcode_storage::assert_redirected_away_from_real_home(&path, "visual-debug path");
+        assert!(
+            path.ends_with("visual-debug.txt"),
+            "unexpected: {}",
+            path.display()
+        );
     }
 }

@@ -239,6 +239,39 @@ fn resolve_app_config_dir(
     Ok(config_dir.join("jcode"))
 }
 
+/// The platform cache directory for jcode (`~/.cache/jcode`,
+/// `~/Library/Caches/jcode`), isolated on the same rule as [`app_config_dir`].
+///
+/// A fourth ambient root. It was missing from this module while three separate
+/// crates resolved it themselves through `dirs::cache_dir()`, so mermaid
+/// renders and LaTeX images were written into the developer's real cache during
+/// tests. Cache contents are derived data, which is exactly why this is easy to
+/// overlook and still wrong: a stale entry keyed on content the test wrote is a
+/// cross-test channel, and the writes accumulate in real user state.
+pub fn app_cache_dir() -> Result<PathBuf> {
+    resolve_app_cache_dir(
+        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        test_harness_home().as_deref(),
+        dirs::cache_dir(),
+    )
+}
+
+/// Pure resolution rule behind [`app_cache_dir`]. See [`resolve_app_config_dir`]
+/// for why the ambient inputs are arguments.
+fn resolve_app_cache_dir(
+    jcode_home: Option<&Path>,
+    harness_home: Option<&Path>,
+    platform_cache_dir: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(path) = jcode_home.or(harness_home) {
+        return Ok(path.join("cache").join("jcode"));
+    }
+
+    let cache_dir =
+        platform_cache_dir.ok_or_else(|| anyhow::anyhow!("No cache directory found"))?;
+    Ok(cache_dir.join("jcode"))
+}
+
 /// Resolve a path under the user's home directory, but sandbox it under
 /// `$JCODE_HOME/external/` when `JCODE_HOME` is set.
 ///
@@ -258,6 +291,48 @@ pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
         test_harness_home().as_deref(),
         dirs::home_dir(),
     )
+}
+
+/// Assert that `path` is *not* under the real user home.
+///
+/// The regression tests for ambient roots all need to say "this resolved
+/// somewhere other than the developer's real home". They cannot assert a fixed
+/// path, because the test-harness redirect target is a per-process random temp
+/// dir. Each one was reaching for `dirs::home_dir()` itself, which meant four
+/// copies of the idiom and four crates carrying a `dirs` dev-dependency that
+/// the ambient-roots gate then had to be told to ignore -- weakening the very
+/// gate they exist to support.
+///
+/// Exposing the *assertion* rather than the home directory keeps the escape
+/// hatch unusable for anything else: there is no way to spell "give me the real
+/// home" with this, only "check that you did not land in it".
+///
+/// Panics with the offending path when the check fails.
+#[track_caller]
+pub fn assert_redirected_away_from_real_home(path: &Path, what: &str) {
+    let Some(real_home) = dirs::home_dir() else {
+        return;
+    };
+    assert!(
+        !path.starts_with(&real_home),
+        "{what} escaped the test-harness redirect and resolved under the real \
+         home: {}",
+        path.display()
+    );
+}
+
+/// Whether ambient home resolution is currently redirected away from the real
+/// user home (by `JCODE_HOME` or the per-process test-harness home).
+///
+/// Callers that resolve a path from a platform environment variable rather than
+/// from the home directory (Windows `%APPDATA%`, say) need this: they must keep
+/// honoring that variable in production, but must *not* let it escape the
+/// sandbox under a harness. Exposing the predicate keeps that decision in one
+/// place instead of re-deriving `JCODE_HOME.is_some()` at each call site, which
+/// is exactly the hand-rolled check that missed the harness home in the Cursor
+/// auth path.
+pub fn home_is_redirected() -> bool {
+    std::env::var_os("JCODE_HOME").is_some() || test_harness_home().is_some()
 }
 
 /// Pure resolution rule behind [`user_home_path`]. See
@@ -685,10 +760,12 @@ mod home_isolation_tests {
     fn every_ambient_root_redirects_under_a_test_harness() {
         let real_home = dirs::home_dir().expect("home dir");
         let real_config = dirs::config_dir().expect("config dir");
+        let real_cache = dirs::cache_dir().expect("cache dir");
 
-        let roots: [(&str, PathBuf); 3] = [
+        let roots: [(&str, PathBuf); 4] = [
             ("jcode_dir", jcode_dir().expect("jcode_dir")),
             ("app_config_dir", app_config_dir().expect("app_config_dir")),
+            ("app_cache_dir", app_cache_dir().expect("app_cache_dir")),
             (
                 "user_home_path",
                 user_home_path(".aws/credentials").expect("user_home_path"),
@@ -696,6 +773,11 @@ mod home_isolation_tests {
         ];
 
         for (name, resolved) in roots {
+            assert!(
+                !resolved.starts_with(&real_cache),
+                "{name} resolved into the developer's real cache dir: {}",
+                resolved.display()
+            );
             assert!(
                 !resolved.starts_with(&real_config),
                 "{name} resolved into the developer's real config dir: {}",
