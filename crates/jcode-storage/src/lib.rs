@@ -202,13 +202,40 @@ pub fn durable_state_dir() -> PathBuf {
 /// `~/.config/jcode` on Linux). When `JCODE_HOME` is set, sandbox this under
 /// `$JCODE_HOME/config/jcode` so self-dev/tests do not leak into the user's
 /// real config directory.
+///
+/// Like [`jcode_dir`], an unset `JCODE_HOME` under a test harness redirects to
+/// the per-process temp home instead of the developer's real config dir. The
+/// platform config dir is a *second* ambient root, distinct from `~/.jcode`,
+/// so isolating only [`jcode_dir`] left this half of the surface exposed:
+/// `model_picker_usage.json` lives here, feeds the picker's sort key, and made
+/// `test_model_picker_preserves_recommendation_priority_order` pass or fail
+/// according to which models the developer had personally selected.
 pub fn app_config_dir() -> Result<PathBuf> {
-    if let Ok(path) = std::env::var("JCODE_HOME") {
-        return Ok(PathBuf::from(path).join("config").join("jcode"));
+    resolve_app_config_dir(
+        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        test_harness_home().as_deref(),
+        dirs::config_dir(),
+    )
+}
+
+/// Pure resolution rule behind [`app_config_dir`].
+///
+/// Takes its three ambient inputs as arguments so every branch is testable
+/// without mutating process env. Mutating `JCODE_HOME` in a test would race
+/// each concurrently running test through the global config-cache
+/// fingerprint, which is the exact defect class
+/// `scripts/check_config_env_lease.py` gates.
+fn resolve_app_config_dir(
+    jcode_home: Option<&Path>,
+    harness_home: Option<&Path>,
+    platform_config_dir: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(path) = jcode_home.or(harness_home) {
+        return Ok(path.join("config").join("jcode"));
     }
 
     let config_dir =
-        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("No config directory found"))?;
+        platform_config_dir.ok_or_else(|| anyhow::anyhow!("No config directory found"))?;
     Ok(config_dir.join("jcode"))
 }
 
@@ -217,8 +244,30 @@ pub fn app_config_dir() -> Result<PathBuf> {
 ///
 /// This keeps external provider auth files isolated during tests and sandboxed
 /// runs without changing default on-disk locations for normal users.
+///
+/// Third ambient root, isolated on the same rule as [`jcode_dir`] and
+/// [`app_config_dir`]: with `JCODE_HOME` unset under a test harness this
+/// resolves under the per-process temp home. Without that, a test asking for
+/// something like `.aws/credentials` reads the developer's real one, so the
+/// suite's verdict depends on which providers the developer happens to have
+/// configured.
 pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
-    let relative = relative.as_ref();
+    resolve_user_home_path(
+        relative.as_ref(),
+        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        test_harness_home().as_deref(),
+        dirs::home_dir(),
+    )
+}
+
+/// Pure resolution rule behind [`user_home_path`]. See
+/// [`resolve_app_config_dir`] for why the ambient inputs are arguments.
+fn resolve_user_home_path(
+    relative: &Path,
+    jcode_home: Option<&Path>,
+    harness_home: Option<&Path>,
+    real_home: Option<PathBuf>,
+) -> Result<PathBuf> {
     if relative.is_absolute() {
         anyhow::bail!(
             "user_home_path expects a relative path, got {}",
@@ -226,11 +275,11 @@ pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
         );
     }
 
-    if let Ok(path) = std::env::var("JCODE_HOME") {
-        return Ok(PathBuf::from(path).join("external").join(relative));
+    if let Some(path) = jcode_home.or(harness_home) {
+        return Ok(path.join("external").join(relative));
     }
 
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home directory"))?;
+    let home = real_home.ok_or_else(|| anyhow::anyhow!("No home directory"))?;
     Ok(home.join(relative))
 }
 
@@ -611,6 +660,128 @@ mod home_isolation_tests {
             redirected.is_dir(),
             "the redirect target must exist: {}",
             redirected.display()
+        );
+    }
+
+    /// Every ambient root must redirect, not just `~/.jcode`.
+    ///
+    /// `jcode_dir` was isolated first, which left two other roots resolving to
+    /// real user state: the platform config dir (`app_config_dir`) and the home
+    /// dir itself (`user_home_path`). The config dir holds
+    /// `model_picker_usage.json`, whose contents feed the model picker's sort
+    /// key, so five TUI tests passed or failed based on which models the
+    /// developer had personally selected. Enumerated as one test so adding a
+    /// fourth root without isolating it is visibly an omission.
+    ///
+    /// Asserted as "never under a real user root" rather than "always under
+    /// the harness home": sibling tests in this binary set `JCODE_HOME` to
+    /// their own temp dirs without restoring it, so the live wrappers may
+    /// legitimately resolve there. Both destinations are isolated, which is
+    /// the property that matters, and phrasing it this way makes the test
+    /// independent of execution order. The exact redirect is pinned by
+    /// `ambient_roots_keep_their_real_locations_outside_tests` against the
+    /// pure resolvers, where no env can interfere.
+    #[test]
+    fn every_ambient_root_redirects_under_a_test_harness() {
+        let real_home = dirs::home_dir().expect("home dir");
+        let real_config = dirs::config_dir().expect("config dir");
+
+        let roots: [(&str, PathBuf); 3] = [
+            ("jcode_dir", jcode_dir().expect("jcode_dir")),
+            ("app_config_dir", app_config_dir().expect("app_config_dir")),
+            (
+                "user_home_path",
+                user_home_path(".aws/credentials").expect("user_home_path"),
+            ),
+        ];
+
+        for (name, resolved) in roots {
+            assert!(
+                !resolved.starts_with(&real_config),
+                "{name} resolved into the developer's real config dir: {}",
+                resolved.display()
+            );
+            // Checked after the config dir because on some platforms the
+            // config dir is itself under the home dir, and the more specific
+            // message is the more useful one.
+            assert!(
+                !resolved.starts_with(&real_home),
+                "{name} resolved into the developer's real home: {}",
+                resolved.display()
+            );
+        }
+    }
+
+    /// The redirect must not change where real users' files live.
+    ///
+    /// Pins the non-test behaviour of each root, so isolating a root cannot
+    /// silently relocate a shipped binary's state. Drives the pure resolvers
+    /// with explicit inputs, which is the only way to exercise the
+    /// non-harness branch from inside a harness.
+    #[test]
+    fn ambient_roots_keep_their_real_locations_outside_tests() {
+        let real_home = PathBuf::from("/home/real");
+        let real_config = PathBuf::from("/home/real/.config");
+
+        // No JCODE_HOME, no harness: the real platform locations, unchanged.
+        assert_eq!(
+            resolve_app_config_dir(None, None, Some(real_config.clone())).expect("app config"),
+            real_config.join("jcode"),
+            "a shipped binary must still use the platform config dir"
+        );
+        assert_eq!(
+            resolve_user_home_path(
+                Path::new(".aws/credentials"),
+                None,
+                None,
+                Some(real_home.clone())
+            )
+            .expect("user home path"),
+            real_home.join(".aws/credentials"),
+            "a shipped binary must still use the real home dir"
+        );
+
+        // Harness with no JCODE_HOME: redirected away from the real roots.
+        let harness = PathBuf::from("/tmp/harness-home");
+        assert_eq!(
+            resolve_app_config_dir(None, Some(&harness), Some(real_config.clone()))
+                .expect("app config"),
+            harness.join("config").join("jcode")
+        );
+        assert_eq!(
+            resolve_user_home_path(
+                Path::new(".aws/credentials"),
+                None,
+                Some(&harness),
+                Some(real_home.clone())
+            )
+            .expect("user home path"),
+            harness.join("external").join(".aws/credentials")
+        );
+
+        // JCODE_HOME wins outright, including over the harness redirect, so an
+        // explicitly sandboxed run lands exactly where it asked to.
+        let pinned = PathBuf::from("/tmp/pinned-home");
+        assert_eq!(
+            resolve_app_config_dir(Some(&pinned), Some(&harness), Some(real_config))
+                .expect("app config"),
+            pinned.join("config").join("jcode")
+        );
+        assert_eq!(
+            resolve_user_home_path(
+                Path::new(".aws/credentials"),
+                Some(&pinned),
+                Some(&harness),
+                Some(real_home)
+            )
+            .expect("user home path"),
+            pinned.join("external").join(".aws/credentials")
+        );
+
+        // An absolute relative-path argument is still rejected.
+        assert!(
+            resolve_user_home_path(Path::new("/etc/passwd"), None, None, None).is_err(),
+            "absolute paths must be rejected"
         );
     }
 }
