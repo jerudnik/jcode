@@ -443,6 +443,13 @@
       "evidence": [],
       "summary": "Coordinator owns F20c; blast radius declared. Cutting release acquisition first, then the channel/version store.",
       "updated_at": "2026-07-25T02:02:53Z"
+    },
+    "F29": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": "Filed from the F20c ambient-state defect cluster (5 flakes, one class). Inventory complete in investigations/ambient-roots/README.md: 41 crate sites + 8 cli sites, classified A/B/C with feasibility notes.",
+      "updated_at": "2026-07-26T03:22:00Z"
     }
   }
 }

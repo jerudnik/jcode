@@ -1067,6 +1067,61 @@
         "parent": "W4"
       },
       {
+        "id": "F29",
+        "content": "Route every ambient filesystem root through the isolated jcode-storage helpers: eliminate the 41 direct dirs:: call sites in crates (plus 8 in src/cli) that bypass jcode_dir()/app_config_dir()/user_home_path() test isolation. Class A first (JCODE_HOME bypass defects: memory_log, copilot machine_id, changelog state, openrouter cache, mobile_server, browser fallback), then class B (platform config/cache dirs, the model-picker read-leak shape), then class C (home reads for ~ expansion and external discovery). For leaf crates without a storage dependency, prefer injected path parameters over new dep edges where cleaner. Add a grep gate in the F20c-removal-gate style with a monotonically shrinking allowlist that names offenders file:line. Full inventory: docs/fork/ideal-base/investigations/ambient-roots/README.md.",
+        "kind": "implement",
+        "depends_on": [
+          "F28"
+        ],
+        "priority": 70,
+        "owned_paths": [
+          "scripts/check_ambient_roots.sh",
+          "crates/jcode-base/src/memory_log.rs",
+          "crates/jcode-base/src/mobile_server.rs",
+          "crates/jcode-base/src/browser.rs",
+          "crates/jcode-base/src/hooks.rs",
+          "crates/jcode-base/src/surface_workspace.rs",
+          "crates/jcode-base/src/auth/cursor.rs",
+          "crates/jcode-base/src/config/config_file.rs",
+          "crates/jcode-setup-hints/src/**",
+          "crates/jcode-terminal-launch/src/lib.rs",
+          "crates/jcode-provider-openrouter/src/lib.rs",
+          "crates/jcode-provider-copilot-runtime/src/lib.rs",
+          "crates/jcode-provider-openai-runtime/src/openai_tests.rs",
+          "crates/jcode-app-core/src/tool/open.rs",
+          "crates/jcode-tui/src/tui/ui_changelog.rs",
+          "crates/jcode-tui/src/tui/ui_header.rs",
+          "crates/jcode-tui/src/tui/remote_diff.rs",
+          "crates/jcode-tui/src/tui/test_harness.rs",
+          "crates/jcode-tui/src/tui/app/debug.rs",
+          "crates/jcode-tui/src/video_export.rs",
+          "crates/jcode-tui-visual-debug/src/lib.rs",
+          "crates/jcode-tui-mermaid/src/mermaid_cache_render.rs",
+          "crates/jcode-tui-markdown/src/markdown_latex_image.rs",
+          "src/cli/commands.rs",
+          "src/cli/commands/doctor.rs",
+          "src/cli/commands/menubar.rs",
+          "src/cli/login.rs",
+          "src/cli/auth_test/types.rs",
+          "docs/fork/ideal-base/investigations/ambient-roots/**",
+          "docs/fork/ideal-base/evidence/F29/**"
+        ],
+        "acceptance_gates": [
+          "Zero direct dirs:: root calls outside jcode-storage, or every remaining site is on the checked-in allowlist with a stated reason; gate fails naming offenders file:line",
+          "Gate proven non-vacuous in both directions (planted offender fails; clean tree passes)",
+          "Class A sites honor JCODE_HOME via jcode_dir()/helpers; covered by unit tests that fail on revert",
+          "Full workspace suite green twice from clean state"
+        ],
+        "evidence": [
+          "gate output before/after with offender counts",
+          "planted-offender failure transcript",
+          "suite runs"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W4"
+      },
+      {
         "id": "F27",
         "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
         "kind": "verify",
@@ -1076,7 +1131,8 @@
           "F24",
           "F25",
           "F26",
-          "F28"
+          "F28",
+          "F29"
         ],
         "priority": 70,
         "owned_paths": [
@@ -2258,6 +2314,61 @@
       "parent": "W4"
     },
     {
+      "id": "F29",
+      "content": "Route every ambient filesystem root through the isolated jcode-storage helpers: eliminate the 41 direct dirs:: call sites in crates (plus 8 in src/cli) that bypass jcode_dir()/app_config_dir()/user_home_path() test isolation. Class A first (JCODE_HOME bypass defects: memory_log, copilot machine_id, changelog state, openrouter cache, mobile_server, browser fallback), then class B (platform config/cache dirs, the model-picker read-leak shape), then class C (home reads for ~ expansion and external discovery). For leaf crates without a storage dependency, prefer injected path parameters over new dep edges where cleaner. Add a grep gate in the F20c-removal-gate style with a monotonically shrinking allowlist that names offenders file:line. Full inventory: docs/fork/ideal-base/investigations/ambient-roots/README.md.",
+      "kind": "implement",
+      "depends_on": [
+        "F28"
+      ],
+      "priority": 70,
+      "owned_paths": [
+        "scripts/check_ambient_roots.sh",
+        "crates/jcode-base/src/memory_log.rs",
+        "crates/jcode-base/src/mobile_server.rs",
+        "crates/jcode-base/src/browser.rs",
+        "crates/jcode-base/src/hooks.rs",
+        "crates/jcode-base/src/surface_workspace.rs",
+        "crates/jcode-base/src/auth/cursor.rs",
+        "crates/jcode-base/src/config/config_file.rs",
+        "crates/jcode-setup-hints/src/**",
+        "crates/jcode-terminal-launch/src/lib.rs",
+        "crates/jcode-provider-openrouter/src/lib.rs",
+        "crates/jcode-provider-copilot-runtime/src/lib.rs",
+        "crates/jcode-provider-openai-runtime/src/openai_tests.rs",
+        "crates/jcode-app-core/src/tool/open.rs",
+        "crates/jcode-tui/src/tui/ui_changelog.rs",
+        "crates/jcode-tui/src/tui/ui_header.rs",
+        "crates/jcode-tui/src/tui/remote_diff.rs",
+        "crates/jcode-tui/src/tui/test_harness.rs",
+        "crates/jcode-tui/src/tui/app/debug.rs",
+        "crates/jcode-tui/src/video_export.rs",
+        "crates/jcode-tui-visual-debug/src/lib.rs",
+        "crates/jcode-tui-mermaid/src/mermaid_cache_render.rs",
+        "crates/jcode-tui-markdown/src/markdown_latex_image.rs",
+        "src/cli/commands.rs",
+        "src/cli/commands/doctor.rs",
+        "src/cli/commands/menubar.rs",
+        "src/cli/login.rs",
+        "src/cli/auth_test/types.rs",
+        "docs/fork/ideal-base/investigations/ambient-roots/**",
+        "docs/fork/ideal-base/evidence/F29/**"
+      ],
+      "acceptance_gates": [
+        "Zero direct dirs:: root calls outside jcode-storage, or every remaining site is on the checked-in allowlist with a stated reason; gate fails naming offenders file:line",
+        "Gate proven non-vacuous in both directions (planted offender fails; clean tree passes)",
+        "Class A sites honor JCODE_HOME via jcode_dir()/helpers; covered by unit tests that fail on revert",
+        "Full workspace suite green twice from clean state"
+      ],
+      "evidence": [
+        "gate output before/after with offender counts",
+        "planted-offender failure transcript",
+        "suite runs"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W4"
+    },
+    {
       "id": "F27",
       "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
       "kind": "verify",
@@ -2267,7 +2378,8 @@
         "F24",
         "F25",
         "F26",
-        "F28"
+        "F28",
+        "F29"
       ],
       "priority": 70,
       "owned_paths": [
@@ -2593,7 +2705,8 @@
       "nodes": [
         "F15",
         "F16",
-        "F21"
+        "F21",
+        "F29"
       ],
       "class": "deterministic"
     },
