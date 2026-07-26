@@ -1056,8 +1056,17 @@ request in this new forked session, using the inherited conversation only as con
         self.status = SessionStatus::Crashed { message };
     }
 
+    /// Fault-injection hook: force terminal persistence to fail for one session.
+    ///
+    /// Gated on the test cfg rather than `debug_assertions`, because the two are
+    /// not equivalent in this workspace: the `selfdev` profile inherits
+    /// `release`, which compiles assertions out. Under that profile this hook
+    /// vanished, the forced failure never fired, and four
+    /// `client_disconnect_cleanup` tests failed asserting `Failed` while
+    /// observing `Persisted` -- a profile artifact that looked like a
+    /// concurrency bug.
     fn maybe_force_terminal_save_failure(&self) -> Result<()> {
-        #[cfg(debug_assertions)]
+        #[cfg(any(test, feature = "test-support"))]
         if matches!(
             std::env::var("JCODE_TEST_FAIL_TERMINAL_SAVE_FOR_SESSION"),
             Ok(session_id) if session_id == self.id
@@ -1067,8 +1076,12 @@ request in this new forked session, using the inherited conversation only as con
         Ok(())
     }
 
+    /// Fault-injection hook: re-register a PID marker after it is observed.
+    ///
+    /// Gated on the test cfg for the same reason as
+    /// [`Self::maybe_force_terminal_save_failure`].
     fn maybe_replace_terminal_marker_after_observe(&self) {
-        #[cfg(debug_assertions)]
+        #[cfg(any(test, feature = "test-support"))]
         if matches!(
             std::env::var("JCODE_TEST_REPLACE_TERMINAL_MARKER_AFTER_OBSERVE_FOR_SESSION"),
             Ok(session_id) if session_id == self.id

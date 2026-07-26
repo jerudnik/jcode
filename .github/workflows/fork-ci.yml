@@ -202,6 +202,13 @@ jobs:
       - name: Enforce panic-prone usage ratchet
         run: python3 scripts/check_panic_budget.py
 
+      # Keeps the jcode-tui suite runnable in parallel: a test that mutates
+      # process-global render state without the shared lock reintroduces the
+      # cross-thread pollution that F28 removed, and would otherwise only show
+      # up as an intermittent failure long after the fact.
+      - name: Enforce jcode-tui render-lock discipline
+        run: python3 scripts/check_tui_render_lock.py
+
       - name: Enforce swallowed-error usage ratchet
         run: python3 scripts/check_swallowed_error_budget.py
 
@@ -282,27 +289,23 @@ jobs:
       # and timing flakes. This is a test-harness artifact, not a product race:
       # the runtime is multi-process (each swarm agent is its own OS process via
       # current_exe/spawn hook), so no two live App contexts ever share these
-      # globals in production. Serial is reliably green and still runs every test
-      # and catches injected regressions. Follow-up F28 hardens the lock
-      # discipline so parallelism can be restored.
+      # Parallelism restored by F28: render-state tests now take the shared
+      # render lock (enforced by scripts/check_tui_render_lock.py, which fails
+      # the Quality Guardrails rail if an unlocked mutator reappears). Verified
+      # green over 3 consecutive full parallel rounds.
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target aarch64-apple-darwin -p jcode-tui --lib \
-            -- --test-threads=1
+            cargo test --target aarch64-apple-darwin -p jcode-tui --lib
 
-      # Serialized for the same process-global-pollution reason as jcode-tui:
-      # jcode-app-core tests toggle process env (JCODE_DISABLED_TOOLS/JCODE_TOOLS
-      # etc. via crate::env::set_var, which has no serialization lock), so a
-      # parallel agent_tests run can disable `bash` while tool::tests executes a
-      # shell_exec, flaking test_batch_resolves_*. Runtime is multi-process, so
-      # this is a test-harness artifact, not a product race. Follow-up F28
-      # hardens the env-lock discipline so parallelism can be restored.
+      # Parallelism restored by F28. The env-toggling tests hold the
+      # `lock_test_env` lease, which serializes exactly the cases that need it
+      # instead of the whole suite. Verified green over 3 consecutive full
+      # parallel rounds.
       - name: Run jcode-app-core library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target aarch64-apple-darwin -p jcode-app-core --lib \
-            -- --test-threads=1
+            cargo test --target aarch64-apple-darwin -p jcode-app-core --lib
 
       - name: Compile integration test binaries
         run: |
@@ -366,23 +369,17 @@ jobs:
             cargo test --target x86_64-unknown-linux-gnu \
             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
 
-      # Single-threaded for the same test-harness-hermeticity reason as the
-      # macOS jcode-tui step above (see that comment). Runtime is multi-process,
-      # so this is not masking a product race.
+      # Parallelism restored by F28; see the macOS jcode-tui step above.
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib \
-            -- --test-threads=1
+            cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib
 
-      # Serialized for the same reason as the macOS jcode-app-core step above:
-      # process-global env toggles (JCODE_DISABLED_TOOLS etc.) race tool::tests
-      # under parallelism. See that comment and F28.
+      # Parallelism restored by F28; see the macOS jcode-app-core step above.
       - name: Run jcode-app-core library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target x86_64-unknown-linux-gnu -p jcode-app-core --lib \
-            -- --test-threads=1
+            cargo test --target x86_64-unknown-linux-gnu -p jcode-app-core --lib
 
       - name: Compile integration test binaries
         run: |
