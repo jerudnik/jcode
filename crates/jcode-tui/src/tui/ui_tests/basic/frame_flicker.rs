@@ -320,10 +320,6 @@ fn make_prepared_chat_frame_with_content_bytes(
     make_prepared_chat_frame(make_prepared_messages_with_content_bytes(bytes, marker))
 }
 
-fn make_oversized_prepared_chat_frame(marker: &str) -> Arc<PreparedChatFrame> {
-    make_prepared_chat_frame(make_oversized_prepared_messages(marker))
-}
-
 #[test]
 fn test_calculate_input_lines_empty() {
     assert_eq!(calculate_input_lines("", 80), 1);

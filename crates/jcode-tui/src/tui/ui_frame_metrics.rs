@@ -334,6 +334,9 @@ const FLICKER_UI_NOTICE_MAX_AGE_MS: u64 = 30_000;
 
 static FRAME_PERF_STATS: OnceLock<Mutex<FramePerfStats>> = OnceLock::new();
 static SLOW_FRAME_HISTORY: OnceLock<Mutex<SlowFrameHistory>> = OnceLock::new();
+// Only the production accessor reads this; under `cfg(test)` the history is
+// per-thread (see `flicker_frame_history`).
+#[cfg(not(test))]
 static FLICKER_FRAME_HISTORY: OnceLock<Mutex<FlickerFrameHistory>> = OnceLock::new();
 static FRAME_RESOURCE_START: OnceLock<Mutex<Option<FrameResourceStart>>> = OnceLock::new();
 
@@ -345,8 +348,37 @@ fn slow_frame_history() -> &'static Mutex<SlowFrameHistory> {
     SLOW_FRAME_HISTORY.get_or_init(|| Mutex::new(SlowFrameHistory::default()))
 }
 
+/// Flicker history, process-global in production and per-thread under test.
+///
+/// In production this is one history for one TUI, which is what the flicker
+/// diagnostics are describing. Under `cargo test` it is shared by every test
+/// in the binary, and *every* `ui::draw` records a sample, so a test that
+/// clears the history and then asserts on its contents is racing every other
+/// rendering test running in parallel. That is not hypothetical: with the full
+/// `tui::ui::tests` filter, `test_changelog_overlay_repeated_renders_are_stable`
+/// failed ~1 run in 6 with "buffered_samples: 2, expected 3", one sample short
+/// because a sibling test cleared the history mid-assertion.
+///
+/// Cargo gives each test its own thread, so thread-local storage under
+/// `cfg(test)` makes the isolation exact rather than cooperative: a test can no
+/// longer see or clobber another's samples, and `clear_..._for_tests()` becomes
+/// a statement about *this* test only. The `Mutex` is kept in both shapes so
+/// callers are identical; under test it is simply never contended.
+#[cfg(not(test))]
 fn flicker_frame_history() -> &'static Mutex<FlickerFrameHistory> {
     FLICKER_FRAME_HISTORY.get_or_init(|| Mutex::new(FlickerFrameHistory::default()))
+}
+
+#[cfg(test)]
+fn flicker_frame_history() -> &'static Mutex<FlickerFrameHistory> {
+    thread_local! {
+        static PER_TEST_HISTORY: &'static Mutex<FlickerFrameHistory> =
+            Box::leak(Box::new(Mutex::new(FlickerFrameHistory::default())));
+    }
+    // Leaked once per test thread, which is bounded by the test count and
+    // reclaimed when the process exits. Borrowing from the thread-local
+    // directly would not satisfy the `'static` the callers expect.
+    PER_TEST_HISTORY.with(|history| *history)
 }
 
 fn frame_resource_start() -> &'static Mutex<Option<FrameResourceStart>> {
