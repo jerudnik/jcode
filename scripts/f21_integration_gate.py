@@ -389,6 +389,53 @@ def phase_updater(store_path: Path | None) -> list[Check]:
 # --------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------
+# phase: residue
+# --------------------------------------------------------------------------
+
+
+def home_inventory(home: Path) -> set[str]:
+    """Top-level entries of a jcode home, as a comparable set."""
+    if not home.exists():
+        return set()
+    return {p.name for p in home.iterdir()}
+
+
+def phase_residue(before: set[str], after: set[str], session_delta: int) -> list[Check]:
+    """The gate must not deposit anything in the developer's real jcode home.
+
+    This is not tidiness. A `--workspace` run once leaked thousands of stub
+    sessions into `~/.jcode/sessions/`, and tests have read real credentials
+    from it. A gate that dirties the machine it measures cannot be run twice
+    from clean state, which is precisely what F21 asks for.
+    """
+    added = sorted(after - before)
+    return [
+        Check(
+            name="residue.real_home_untouched",
+            ok=not added,
+            fingerprint="added=" + (",".join(added) if added else "none"),
+            detail=f"new top-level entries in the real jcode home: {added}",
+        ),
+        Check(
+            name="residue.no_leaked_sessions",
+            ok=session_delta == 0,
+            fingerprint=f"session_delta={session_delta}",
+            detail=f"sessions created in the real home during the gate: {session_delta}",
+        ),
+    ]
+
+
+def real_jcode_home() -> Path:
+    override = os.environ.get("JCODE_HOME")
+    return Path(override) if override else Path.home() / ".jcode"
+
+
+def session_count(home: Path) -> int:
+    sessions = home / "sessions"
+    return len(list(sessions.iterdir())) if sessions.is_dir() else 0
+
+
 def do_run(index: int, args: argparse.Namespace, commit: str) -> RunResult:
     result = RunResult(index=index, commit=commit)
 
@@ -404,6 +451,18 @@ def do_run(index: int, args: argparse.Namespace, commit: str) -> RunResult:
         result.checks.extend(phase_install(store_path))
         result.checks.extend(phase_updater(store_path))
 
+    return result
+
+
+def do_run_with_residue(index: int, args: argparse.Namespace, commit: str) -> RunResult:
+    """Wrap a run with a before/after inventory of the real jcode home."""
+    home = real_jcode_home()
+    before, sessions_before = home_inventory(home), session_count(home)
+    result = do_run(index, args, commit)
+    after, sessions_after = home_inventory(home), session_count(home)
+    result.checks.extend(
+        phase_residue(before, after, sessions_after - sessions_before)
+    )
     return result
 
 
@@ -496,6 +555,16 @@ def self_test() -> int:
     p, f = parse_test_result("no summary here")
     check("absent summary is not a pass", (p, f) == (0, 0))
 
+    clean = phase_residue({"a", "b"}, {"a", "b"}, 0)
+    check("an untouched home passes residue", all(c.ok for c in clean))
+    dirty = phase_residue({"a"}, {"a", "sessions"}, 0)
+    check("a new home entry is caught", not dirty[0].ok)
+    leaked = phase_residue({"a"}, {"a"}, 3)
+    check("leaked sessions are caught", not leaked[1].ok)
+    # Removal is not residue: a run that cleans up is not a failure.
+    removed = phase_residue({"a", "b"}, {"a"}, 0)
+    check("removal is not reported as residue", all(c.ok for c in removed))
+
     for label in failures:
         print(f"SELF-TEST FAIL: {label}")
     if failures:
@@ -535,15 +604,26 @@ def main() -> int:
     runs = []
     for i in range(1, args.runs + 1):
         print(f"=== F21 run {i}/{args.runs} @ {commit[:12]} ===", flush=True)
-        run = do_run(i, args, commit)
+        run = do_run_with_residue(i, args, commit)
         for c in run.checks:
             print(f"  [{'PASS' if c.ok else 'FAIL'}] {c.name}: {c.fingerprint} ({c.duration_s:.1f}s)", flush=True)
         runs.append(run)
 
-    # A commit re-read after the runs guards against the tree moving mid-gate.
+    # Re-read source identity after the runs. Checking only the commit is not
+    # enough: editing a tracked file mid-gate leaves HEAD unchanged while the
+    # runs no longer share one source. That happened during development and
+    # showed up only as a `-dirty` suffix in an install fingerprint, so check
+    # dirtiness too.
     final_commit = git_commit()
     if final_commit != commit:
         print(f"source identity changed mid-gate: {commit} -> {final_commit}", file=sys.stderr)
+        return 2
+    if git_is_dirty() and not args.allow_dirty:
+        print(
+            "working tree became dirty during the gate, so the runs did not "
+            "share one source identity",
+            file=sys.stderr,
+        )
         return 2
 
     deterministic, diffs = compare(runs)
