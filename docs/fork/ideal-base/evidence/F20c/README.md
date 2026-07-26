@@ -104,16 +104,29 @@ correctly flagged. Both `expansions` and `all_nodes` copies verified identical.
 
 ## Gates
 
-- `./scripts/preflight.sh` — **all 9 gates pass** (`preflight.txt`). The four
+- `./scripts/preflight.sh` — **all 11 gates pass** (`preflight.txt`,
+  regenerated at the final branch HEAD). During the original cut, the four
   ratchets that initially failed were cleared by changing the code, never by
   `--update`: `env::var_os` instead of `.ok()` for an absent env var; a
   diagnostic that returns `Result` instead of silently swallowing its own scan
   failure; folding the new flag into `run_doctor_command` instead of adding a
   wrapper; and splitting the over-budget `selfdev/tests.rs` into
-  `reconcile_tests.rs`.
-- Deterministic suite run twice, second run after `cargo clean` of the touched
-  crates: `suite-run-1.txt`, `suite-run-2.txt`. Identical results both times
-  (38 + 32 Rust tests, 6 R10 python tests, installer publish test, `bash -n`).
+  `reconcile_tests.rs`. Two `--update` transfers were later legitimate and are
+  documented in their commits: the code-size baseline after the
+  `ui_frame_metrics` flicker extraction *shrank* the tracked set (105 -> 100),
+  and the swallowed-error baseline after the same move *shrank* the total
+  (3104 -> 3059) because the ledger keys by file path.
+- **Full workspace suite run twice at the final HEAD** (`suite-run-1.txt`,
+  `suite-run-2.txt`): 6622 passed / 0 failed both runs. Getting here surfaced
+  five real defects, each root-caused and fixed at the source rather than
+  retried away — four were one defect class (ambient/process-global state):
+  the model-picker read leak through the real platform config dir
+  (`b43bdd899`), the process-global flicker history raced by parallel TUI
+  tests (`b7bdef31b`), a churn test hardcoding an incidental count
+  (`d67b5c4c4`), and a session-name allocator concurrency bug that skipped
+  free identities (`a5bda6356`). The full ambient-surface inventory that fell
+  out of this is filed as railway node F29
+  (`investigations/ambient-roots/README.md`).
 
 ## Evidence artifacts
 
@@ -121,8 +134,8 @@ correctly flagged. Both `expansions` and `all_nodes` copies verified identical.
 |---|---|
 | `removal-grep-clean.txt` | 28 retired symbols, 0 surviving references; deleted-artifact checks; pointer to the executable layout assertions |
 | `retired-layout-detection.txt` | Real pre-F20c machine: 8 entries / 4.5 GiB detected, stranded launcher flagged, clean correctly refused |
-| `suite-run-1.txt`, `suite-run-2.txt` | Deterministic suite, double green, second from clean |
-| `preflight.txt` | All 9 preflight gates green |
+| `suite-run-1.txt`, `suite-run-2.txt` | Full workspace suite, double green (6622/0 both runs) at the final HEAD |
+| `preflight.txt` | All 11 preflight gates green at the final HEAD |
 
 ## Reproduce
 
