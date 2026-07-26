@@ -693,3 +693,29 @@ fn wi4_copilot_premium_preserves_values_and_fallback() {
         jcode_base::env::remove_var("JCODE_COPILOT_PREMIUM");
     }
 }
+
+/// The machine id used to be resolved with `dirs::home_dir().join(".jcode")`,
+/// which ignores `JCODE_HOME` and the test-harness redirect, so any process
+/// that touched a Copilot provider read (and, on first use, created) a
+/// `machine_id` in the developer's real `~/.jcode`. Reverting the resolver to
+/// `dirs::home_dir()` fails this.
+#[test]
+fn machine_id_never_resolves_into_the_real_home() {
+    let resolved = CopilotApiProvider::machine_id_path();
+    let real = dirs::home_dir()
+        .expect("developer home exists")
+        .join(".jcode")
+        .join("machine_id");
+
+    assert_ne!(
+        resolved, real,
+        "machine id must honor the storage redirect, not the real home"
+    );
+    assert_eq!(
+        resolved,
+        jcode_base::storage::jcode_dir()
+            .expect("storage home")
+            .join("machine_id"),
+        "machine id must be exactly <jcode_dir>/machine_id"
+    );
+}

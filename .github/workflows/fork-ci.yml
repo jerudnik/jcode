@@ -217,6 +217,17 @@ jobs:
       - name: Enforce env-lease drop order in test fixtures
         run: python3 scripts/check_env_lease_drop_order.py
 
+      # Any `dirs::home_dir()` outside jcode-storage opts that call site out of
+      # the test-harness redirect. This is the static half of the ambient-root
+      # defense: check_real_home_isolation.sh catches writes into the real home,
+      # and jcode-storage's own test proves the helpers redirect, but neither can
+      # see a caller that never asks the helpers. That gap let memory logs, the
+      # copilot machine_id, and the openrouter model caches write to the real
+      # ~/.jcode with JCODE_HOME set, and let the model picker read the
+      # developer's own usage history.
+      - name: Enforce ambient filesystem roots route through jcode-storage
+        run: scripts/check_ambient_roots.sh
+
       - name: Enforce swallowed-error usage ratchet
         run: python3 scripts/check_swallowed_error_budget.py
 

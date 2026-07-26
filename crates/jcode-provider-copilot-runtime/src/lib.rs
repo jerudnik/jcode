@@ -202,11 +202,23 @@ impl CopilotApiProvider {
             .unwrap_or(2000)
     }
 
+    /// Where the persistent machine id lives.
+    ///
+    /// Split out from `get_or_create_machine_id` so the path rule can be
+    /// asserted without the create-and-write side effect: a test that called
+    /// the outer function to check the path would itself create the file it was
+    /// trying to prove nothing creates in the real home.
+    pub(crate) fn machine_id_path() -> std::path::PathBuf {
+        // `jcode_dir()` honors `JCODE_HOME` and the test-harness redirect;
+        // resolving the home directly meant a redirected process still read and
+        // created `machine_id` in the developer's real `~/.jcode`.
+        jcode_base::storage::jcode_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from(".").join(".jcode"))
+            .join("machine_id")
+    }
+
     fn get_or_create_machine_id() -> String {
-        let machine_id_path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".jcode")
-            .join("machine_id");
+        let machine_id_path = Self::machine_id_path();
         if let Ok(id) = std::fs::read_to_string(&machine_id_path) {
             let id = id.trim().to_string();
             if !id.is_empty() {

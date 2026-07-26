@@ -49,7 +49,11 @@ impl MemoryLogger {
 }
 
 fn log_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".jcode").join("logs"))
+    // Must go through the storage helper, not `dirs::home_dir()`: the helper is
+    // what honors `JCODE_HOME` and redirects under a test harness. Resolving the
+    // home directly here wrote memory logs into the developer's real `~/.jcode`
+    // even when the process had been redirected elsewhere.
+    crate::storage::jcode_dir().ok().map(|d| d.join("logs"))
 }
 
 fn ensure_logger(date: &str) -> bool {
@@ -439,6 +443,33 @@ fn cleanup_old_memory_logs_in(dir: &std::path::Path, now: chrono::DateTime<Local
 mod tests {
     use super::*;
     use std::time::{Duration, SystemTime};
+
+    /// `log_dir()` resolved the home with `dirs::home_dir()`, which ignores
+    /// `JCODE_HOME` and the test-harness redirect, so memory logs written during
+    /// a test landed in the developer's real `~/.jcode/logs`.
+    ///
+    /// Asserting "not the real home" rather than a fixed path is deliberate:
+    /// the redirect target is a random per-process temp dir, and pinning it
+    /// would test the harness rather than this function. Reverting `log_dir()`
+    /// to `dirs::home_dir()` fails this.
+    #[test]
+    fn log_dir_never_resolves_into_the_real_home() {
+        let resolved = log_dir().expect("log dir resolves under a test harness");
+        let real = dirs::home_dir()
+            .expect("developer home exists")
+            .join(".jcode")
+            .join("logs");
+
+        assert_ne!(
+            resolved, real,
+            "memory log dir must honor the storage redirect, not the real home"
+        );
+        assert_eq!(
+            resolved,
+            crate::storage::jcode_dir().expect("storage home").join("logs"),
+            "memory log dir must be exactly <jcode_dir>/logs"
+        );
+    }
 
     #[test]
     fn memory_log_cleanup_respects_14_day_window() {

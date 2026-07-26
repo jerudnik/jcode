@@ -3991,6 +3991,7 @@ dependencies = [
  "jcode-core",
  "jcode-logging",
  "jcode-message-types",
+ "jcode-storage",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
