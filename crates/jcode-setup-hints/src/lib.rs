@@ -1262,8 +1262,7 @@ mod linux_config_paths;
 // names off Linux is an unused import.
 #[cfg(target_os = "linux")]
 use linux_config_paths::{
-    flat_compositor_config_path, kde_applications_dir, kde_globalshortcutsrc_path,
-    niri_config_path,
+    flat_compositor_config_path, kde_applications_dir, kde_globalshortcutsrc_path, niri_config_path,
 };
 
 #[cfg(target_os = "linux")]
