@@ -345,7 +345,7 @@ fn record_launch_dirs_inner(
     // The "is this the home dir itself" check must compare against the same
     // (possibly redirected) home everything else resolves, or a sandboxed run
     // compares against the developer's real home and records the wrong answer.
-    let home = jcode_storage::user_home_path("").ok();
+    let home = jcode_storage::user_home_path_opt("");
     if should_record_last_dir(dir, home.as_deref()) {
         std::fs::write(mac_hotkey_last_dir_file()?, format!("{}\n", dir.display()))?;
     }

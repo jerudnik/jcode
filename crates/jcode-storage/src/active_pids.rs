@@ -6,7 +6,7 @@
 //! low-level concern shared by session management, dictation, and crash
 //! recovery, none of which should pull the full `session` module into scope.
 
-use crate::jcode_dir;
+use crate::{jcode_dir, jcode_dir_opt};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 #[cfg(unix)]
@@ -23,7 +23,7 @@ struct PidMarkerLock {
 
 impl PidMarkerLock {
     fn open_lock_file() -> Option<File> {
-        let home = jcode_dir().ok()?;
+        let home = jcode_dir_opt()?;
         std::fs::create_dir_all(&home).ok()?;
         OpenOptions::new()
             .create(true)
@@ -63,7 +63,7 @@ impl Drop for PidMarkerLock {
 
 /// Directory holding one file per active session ID (`~/.jcode/active_pids`).
 pub fn active_pids_dir() -> Option<PathBuf> {
-    jcode_dir().ok().map(|d| d.join("active_pids"))
+    jcode_dir_opt().map(|d| d.join("active_pids"))
 }
 
 /// Directory holding per-session "currently streaming" markers. A marker file
@@ -71,7 +71,7 @@ pub fn active_pids_dir() -> Option<PathBuf> {
 /// file content is the owning process PID so stale markers (from crashed
 /// processes) can be detected and ignored.
 pub fn streaming_pids_dir() -> Option<std::path::PathBuf> {
-    jcode_dir().ok().map(|d| d.join("streaming_pids"))
+    jcode_dir_opt().map(|d| d.join("streaming_pids"))
 }
 
 /// Record that `session_id` is owned by process `pid`.

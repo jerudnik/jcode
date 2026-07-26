@@ -37,7 +37,7 @@ pub(crate) fn xdg_config_home() -> Option<PathBuf> {
 /// real compositor configs.
 fn xdg_config_home_from(xdg: Option<std::ffi::OsString>) -> Option<PathBuf> {
     jcode_storage::sanitize_ambient_dir_override(xdg)
-        .or_else(|| jcode_storage::user_home_path(".config").ok())
+        .or_else(|| jcode_storage::user_home_path_opt(".config"))
 }
 
 /// Config file jcode manages for a flat (`#`-commented) compositor config.
@@ -55,7 +55,7 @@ pub(crate) fn flat_compositor_config_path(comp: LinuxCompositor) -> Option<PathB
             if xdg.exists() {
                 return Some(xdg);
             }
-            let legacy = jcode_storage::user_home_path(".i3/config").ok()?;
+            let legacy = jcode_storage::user_home_path_opt(".i3/config")?;
             if legacy.exists() {
                 Some(legacy)
             } else {
@@ -83,7 +83,7 @@ pub(crate) fn kde_applications_dir() -> Option<PathBuf> {
 /// Pure rule behind [`kde_applications_dir`]. See [`xdg_config_home_from`].
 fn kde_applications_dir_from(xdg_data: Option<std::ffi::OsString>) -> Option<PathBuf> {
     let base = jcode_storage::sanitize_ambient_dir_override(xdg_data)
-        .or_else(|| jcode_storage::user_home_path(".local/share").ok())?;
+        .or_else(|| jcode_storage::user_home_path_opt(".local/share"))?;
     Some(base.join("applications"))
 }
 

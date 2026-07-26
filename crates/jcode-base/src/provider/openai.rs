@@ -90,7 +90,7 @@ pub fn resolve_api_base() -> String {
 /// Returns `None` when the file/keys are missing, the URL is not absolute
 /// http(s), or the provider's `wire_api` is not `responses`.
 fn codex_config_responses_base() -> Option<String> {
-    let path = crate::storage::user_home_path(".codex/config.toml").ok()?;
+    let path = crate::storage::user_home_path_opt(".codex/config.toml")?;
     let contents = std::fs::read_to_string(&path).ok()?;
     let value: toml::Value = contents.parse().ok()?;
 

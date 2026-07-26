@@ -77,16 +77,27 @@ fn ensure_private_runtime_dir(path: &Path) {
 }
 
 pub fn jcode_dir() -> Result<PathBuf> {
+    jcode_dir_opt().ok_or_else(|| anyhow::anyhow!("No home directory"))
+}
+
+/// [`jcode_dir`] for callers that treat a missing home as "feature
+/// unavailable" and have no error channel to report into.
+///
+/// This is the primitive and [`jcode_dir`] wraps it, rather than the reverse:
+/// the only way this resolution fails is a missing home directory, which is
+/// exactly what these callers mean by `None`, so there is no error to discard.
+/// Stating that once here keeps ~20 call sites from each writing
+/// `jcode_dir().ok()`, which reads like a swallowed error even though it isn't.
+pub fn jcode_dir_opt() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("JCODE_HOME") {
-        return Ok(PathBuf::from(path));
+        return Some(PathBuf::from(path));
     }
 
     if let Some(dir) = test_harness_home() {
-        return Ok(dir);
+        return Some(dir);
     }
 
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("No home directory"))?;
-    Ok(home.join(".jcode"))
+    Some(dirs::home_dir()?.join(".jcode"))
 }
 
 /// Per-process fallback home for test binaries that never set `JCODE_HOME`.
@@ -294,6 +305,34 @@ pub fn user_home_path(relative: impl AsRef<Path>) -> Result<PathBuf> {
     )
 }
 
+/// [`user_home_path`] for callers that treat a missing home as "feature
+/// unavailable" and have no error channel to report into.
+///
+/// Exists so those callers do not each write `user_home_path(..).ok()`, which
+/// silently discards *both* of the failure modes below. Only the first is a
+/// legitimate `None`:
+///
+/// - no home directory: genuinely absent, and the caller's `None` branch (skip
+///   the optional config file, fall back to another location) is correct;
+/// - a caller passed an absolute path: a programmer error that `.ok()` turns
+///   into a silent wrong answer, since the caller's fallback then runs as if
+///   the home were missing. That stays a panic, because it is a bug in the
+///   call site rather than a property of the machine.
+pub fn user_home_path_opt(relative: impl AsRef<Path>) -> Option<PathBuf> {
+    let relative = relative.as_ref();
+    assert!(
+        !relative.is_absolute(),
+        "user_home_path_opt expects a relative path, got {}",
+        relative.display()
+    );
+    resolve_user_home_path_opt(
+        relative,
+        std::env::var_os("JCODE_HOME").as_deref().map(Path::new),
+        test_harness_home().as_deref(),
+        dirs::home_dir(),
+    )
+}
+
 /// Filter an ambient directory override (`$XDG_CONFIG_HOME`, `%LOCALAPPDATA%`,
 /// ...) so it cannot defeat a redirected home.
 ///
@@ -378,12 +417,28 @@ fn resolve_user_home_path(
         );
     }
 
+    resolve_user_home_path_opt(relative, jcode_home, harness_home, real_home)
+        .ok_or_else(|| anyhow::anyhow!("No home directory"))
+}
+
+/// [`resolve_user_home_path`] minus the absolute-path rejection, which is the
+/// caller's contract rather than a property of the machine.
+///
+/// Split out so [`user_home_path_opt`] does not have to collapse a `Result`
+/// with two distinct failure modes into one `None`: it asserts the contract
+/// itself and reaches this, so a missing home stays the only `None`.
+fn resolve_user_home_path_opt(
+    relative: &Path,
+    jcode_home: Option<&Path>,
+    harness_home: Option<&Path>,
+    real_home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    debug_assert!(!relative.is_absolute());
     if let Some(path) = jcode_home.or(harness_home) {
-        return Ok(path.join("external").join(relative));
+        return Some(path.join("external").join(relative));
     }
 
-    let home = real_home.ok_or_else(|| anyhow::anyhow!("No home directory"))?;
-    Ok(home.join(relative))
+    Some(real_home?.join(relative))
 }
 
 /// Best-effort startup hardening for local config dirs that may store credentials.
@@ -892,6 +947,54 @@ mod home_isolation_tests {
         assert!(
             resolve_user_home_path(Path::new("/etc/passwd"), None, None, None).is_err(),
             "absolute paths must be rejected"
+        );
+    }
+
+    /// The `Result` and `Option` forms must not drift apart.
+    ///
+    /// `user_home_path_opt` exists so ~20 call sites stop writing
+    /// `user_home_path(..).ok()`, which is only safe while the two agree on
+    /// every input except the absolute-path contract that the `_opt` form
+    /// asserts before it ever reaches the resolver. Pin that here, since a
+    /// divergence would silently redirect real files.
+    #[test]
+    fn result_and_option_resolvers_agree_on_every_ambient_combination() {
+        let real_home = PathBuf::from("/Users/real");
+        let harness = PathBuf::from("/tmp/harness-home");
+        let pinned = PathBuf::from("/tmp/pinned-home");
+        let relative = Path::new(".aws/credentials");
+
+        for jcode_home in [None, Some(pinned.as_path())] {
+            for harness_home in [None, Some(harness.as_path())] {
+                for real in [None, Some(real_home.clone())] {
+                    let via_result =
+                        resolve_user_home_path(relative, jcode_home, harness_home, real.clone())
+                            .ok();
+                    let via_option =
+                        resolve_user_home_path_opt(relative, jcode_home, harness_home, real.clone());
+                    assert_eq!(
+                        via_result, via_option,
+                        "resolvers disagreed for jcode_home={jcode_home:?} \
+                         harness={harness_home:?} real_home={real:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A missing home is the *only* way the `Option` form yields `None`.
+    #[test]
+    fn option_resolver_returns_none_only_when_the_home_is_missing() {
+        let relative = Path::new(".aws/credentials");
+        assert_eq!(
+            resolve_user_home_path_opt(relative, None, None, None),
+            None,
+            "no home anywhere must be None"
+        );
+        assert!(
+            resolve_user_home_path_opt(relative, None, None, Some(PathBuf::from("/Users/real")))
+                .is_some(),
+            "a present home must always resolve"
         );
     }
 }

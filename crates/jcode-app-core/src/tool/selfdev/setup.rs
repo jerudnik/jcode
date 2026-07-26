@@ -198,7 +198,7 @@ impl SelfDevTool {
     /// logs, build channels, sockets, and repo checkout) so the agent can locate
     /// configuration without guessing platform-specific locations.
     pub(super) async fn do_find_config(&self, ctx: &ToolContext) -> Result<ToolOutput> {
-        let jcode_home = storage::jcode_dir().ok();
+        let jcode_home = storage::jcode_dir_opt();
         let config_path = jcode_home.as_ref().map(|home| home.join("config.toml"));
         let logs_dir = storage::logs_dir().ok();
         let repo_dir = SelfDevTool::resolve_repo_dir(ctx.working_dir.as_deref());

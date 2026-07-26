@@ -53,7 +53,7 @@ fn log_dir() -> Option<PathBuf> {
     // what honors `JCODE_HOME` and redirects under a test harness. Resolving the
     // home directly here wrote memory logs into the developer's real `~/.jcode`
     // even when the process had been redirected elsewhere.
-    crate::storage::jcode_dir().ok().map(|d| d.join("logs"))
+    crate::storage::jcode_dir_opt().map(|d| d.join("logs"))
 }
 
 fn ensure_logger(date: &str) -> bool {

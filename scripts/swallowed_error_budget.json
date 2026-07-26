@@ -1,9 +1,9 @@
 {
-  "total": 3059,
+  "total": 3034,
   "totals_by_pattern": {
-    "dot_ok": 1130,
+    "dot_ok": 1107,
     "let_underscore": 1121,
-    "unwrap_or_default": 808
+    "unwrap_or_default": 806
   },
   "tracked_files": {
     "crates/jcode-app-core/src/agent.rs": {
@@ -382,7 +382,7 @@
       "unwrap_or_default": 1
     },
     "crates/jcode-app-core/src/telemetry_state.rs": {
-      "dot_ok": 18,
+      "dot_ok": 16,
       "let_underscore": 7,
       "unwrap_or_default": 0
     },
@@ -527,7 +527,7 @@
       "unwrap_or_default": 2
     },
     "crates/jcode-app-core/src/tool/selfdev/setup.rs": {
-      "dot_ok": 5,
+      "dot_ok": 4,
       "let_underscore": 0,
       "unwrap_or_default": 0
     },
@@ -599,10 +599,10 @@
     "crates/jcode-base/src/auth/copilot.rs": {
       "dot_ok": 5,
       "let_underscore": 1,
-      "unwrap_or_default": 8
+      "unwrap_or_default": 7
     },
     "crates/jcode-base/src/auth/cursor.rs": {
-      "dot_ok": 10,
+      "dot_ok": 8,
       "let_underscore": 5,
       "unwrap_or_default": 0
     },
@@ -632,7 +632,7 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-base/src/auth/mod.rs": {
-      "dot_ok": 3,
+      "dot_ok": 2,
       "let_underscore": 0,
       "unwrap_or_default": 4
     },
@@ -692,7 +692,7 @@
       "unwrap_or_default": 1
     },
     "crates/jcode-base/src/config/config_file.rs": {
-      "dot_ok": 3,
+      "dot_ok": 0,
       "let_underscore": 1,
       "unwrap_or_default": 4
     },
@@ -767,7 +767,7 @@
       "unwrap_or_default": 2
     },
     "crates/jcode-base/src/mcp/schema_cache.rs": {
-      "dot_ok": 1,
+      "dot_ok": 0,
       "let_underscore": 1,
       "unwrap_or_default": 0
     },
@@ -887,7 +887,7 @@
       "unwrap_or_default": 3
     },
     "crates/jcode-base/src/provider/openai.rs": {
-      "dot_ok": 3,
+      "dot_ok": 2,
       "let_underscore": 0,
       "unwrap_or_default": 0
     },
@@ -1459,7 +1459,7 @@
     "crates/jcode-provider-copilot-runtime/src/lib.rs": {
       "dot_ok": 5,
       "let_underscore": 20,
-      "unwrap_or_default": 2
+      "unwrap_or_default": 1
     },
     "crates/jcode-provider-core/src/attempt_tracker.rs": {
       "dot_ok": 0,
@@ -1637,7 +1637,7 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-setup-hints/src/macos_terminal.rs": {
-      "dot_ok": 5,
+      "dot_ok": 4,
       "let_underscore": 0,
       "unwrap_or_default": 2
     },
@@ -1647,7 +1647,7 @@
       "unwrap_or_default": 6
     },
     "crates/jcode-storage/src/active_pids.rs": {
-      "dot_ok": 21,
+      "dot_ok": 18,
       "let_underscore": 6,
       "unwrap_or_default": 3
     },
@@ -1672,7 +1672,7 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-telemetry-core/src/state_support.rs": {
-      "dot_ok": 19,
+      "dot_ok": 17,
       "let_underscore": 7,
       "unwrap_or_default": 0
     },
@@ -1982,7 +1982,7 @@
       "unwrap_or_default": 10
     },
     "crates/jcode-tui/src/tui/app/remote/reconnect.rs": {
-      "dot_ok": 4,
+      "dot_ok": 3,
       "let_underscore": 5,
       "unwrap_or_default": 3
     },
@@ -2017,7 +2017,7 @@
       "unwrap_or_default": 1
     },
     "crates/jcode-tui/src/tui/app/state_ui.rs": {
-      "dot_ok": 4,
+      "dot_ok": 3,
       "let_underscore": 9,
       "unwrap_or_default": 11
     },
@@ -2037,7 +2037,7 @@
       "unwrap_or_default": 1
     },
     "crates/jcode-tui/src/tui/app/support.rs": {
-      "dot_ok": 2,
+      "dot_ok": 1,
       "let_underscore": 0,
       "unwrap_or_default": 0
     },
@@ -2137,7 +2137,7 @@
       "unwrap_or_default": 4
     },
     "crates/jcode-tui/src/tui/session_picker/loading.rs": {
-      "dot_ok": 37,
+      "dot_ok": 34,
       "let_underscore": 1,
       "unwrap_or_default": 24
     },

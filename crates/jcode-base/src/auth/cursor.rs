@@ -258,7 +258,7 @@ fn cursor_vscdb_paths() -> Vec<PathBuf> {
 
     relatives
         .into_iter()
-        .filter_map(|relative| crate::storage::user_home_path(relative).ok())
+        .filter_map(crate::storage::user_home_path_opt)
         .collect()
 }
 
