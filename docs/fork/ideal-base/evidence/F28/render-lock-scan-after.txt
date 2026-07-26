@@ -1,0 +1,4 @@
+render-state tests holding the lock: 45
+render-state tests WITHOUT the lock: 0
+
+OK: within baseline (0).

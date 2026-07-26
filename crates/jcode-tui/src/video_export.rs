@@ -111,6 +111,29 @@ fn swarm_export_font_size(base_font_size: f64, pane_count: u16, cols: u16, rows:
     }
 }
 
+/// Sets mermaid video-export mode for as long as it is held, and clears it on
+/// drop.
+///
+/// The manual set/clear pairs this replaces leaked the mode on every early
+/// return: each export function propagates errors with `?` between the two
+/// calls, so a failed replay left the process-global flag set and changed how
+/// subsequent renders behaved. Tying it to a scope makes the reset
+/// unconditional, including on panic.
+struct VideoExportModeGuard;
+
+impl VideoExportModeGuard {
+    fn enter() -> Self {
+        crate::tui::mermaid::set_video_export_mode(true);
+        Self
+    }
+}
+
+impl Drop for VideoExportModeGuard {
+    fn drop(&mut self) {
+        crate::tui::mermaid::set_video_export_mode(false);
+    }
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "Video export entrypoint mirrors CLI/render configuration knobs"
@@ -125,7 +148,7 @@ pub async fn export_video(
     fps: u32,
     centered_override: Option<bool>,
 ) -> Result<()> {
-    crate::tui::mermaid::set_video_export_mode(true);
+    let _export_mode = VideoExportModeGuard::enter();
     let mut app = crate::tui::App::new_for_replay(session.clone());
     if let Some(centered) = centered_override {
         app.set_centered(centered);
@@ -140,8 +163,6 @@ pub async fn export_video(
     let frames = app
         .run_headless_replay(timeline, speed, width, height, fps)
         .await?;
-
-    crate::tui::mermaid::set_video_export_mode(false);
 
     let font_px = font_size * 96.0 / 72.0;
     let cell_w = (font_px * 0.6).ceil() as u32;
@@ -174,7 +195,7 @@ pub async fn export_swarm_video(
         anyhow::bail!("No swarm replay panes to export");
     }
 
-    crate::tui::mermaid::set_video_export_mode(true);
+    let _export_mode = VideoExportModeGuard::enter();
 
     let pane_count = panes.len() as u16;
     let (cols, rows) = swarm_export_grid(pane_count);
@@ -218,7 +239,6 @@ pub async fn export_swarm_video(
     }
 
     let frames = crate::replay::compose_swarm_buffers(&rendered_panes, width, height, fps, cols);
-    crate::tui::mermaid::set_video_export_mode(false);
 
     let font_px = font_size * 96.0 / 72.0;
     let cell_w = (font_px * 0.6).ceil() as u32;
