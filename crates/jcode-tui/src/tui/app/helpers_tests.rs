@@ -8,34 +8,7 @@ use crate::terminal_launch::{detected_resume_terminal, shell_command};
 use crate::tui::session_picker::ResumeTarget;
 use chrono::{Duration as ChronoDuration, Utc};
 
-struct EnvVarGuard {
-    key: &'static str,
-    prev: Option<std::ffi::OsString>,
-}
-
-impl EnvVarGuard {
-    fn set_value(key: &'static str, value: &str) -> Self {
-        let prev = std::env::var_os(key);
-        crate::env::set_var(key, value);
-        Self { key, prev }
-    }
-
-    fn set_path(key: &'static str, value: &std::path::Path) -> Self {
-        let prev = std::env::var_os(key);
-        crate::env::set_var(key, value);
-        Self { key, prev }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(prev) = self.prev.take() {
-            crate::env::set_var(self.key, prev);
-        } else {
-            crate::env::remove_var(self.key);
-        }
-    }
-}
+use crate::storage::EnvVarGuard;
 
 #[test]
 fn extract_bracketed_system_message_strips_wrapper() {
@@ -154,7 +127,7 @@ fn swarm_effort_display_labels_are_marked_beta() {
 #[test]
 fn detected_resume_terminal_recognizes_handterm_term_program() {
     let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let _guard = EnvVarGuard::set_value("TERM_PROGRAM", "handterm");
+    let _guard = EnvVarGuard::set("TERM_PROGRAM", "handterm");
     assert_eq!(detected_resume_terminal().as_deref(), Some("handterm"));
 }
 
@@ -219,7 +192,7 @@ fn pinned_resume_test_home() -> (
     let current = temp.path().join("current");
     std::fs::create_dir_all(&current).expect("create current dir");
     std::fs::write(current.join("jcode"), b"#!/bin/sh\n").expect("write fake jcode binary");
-    let home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let home = EnvVarGuard::set("JCODE_HOME", temp.path());
     (env_lock, temp, home)
 }
 
@@ -392,7 +365,7 @@ fn invalidate_todos_cache_backdates_entry_so_next_gather_refetches() {
 
     let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
     clear_todos_cache_for_tests();
 
     let session_id = "freshness-test-session";

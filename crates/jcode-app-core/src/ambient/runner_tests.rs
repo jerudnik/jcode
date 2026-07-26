@@ -10,28 +10,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
-struct EnvVarGuard {
-    key: &'static str,
-    prev: Option<std::ffi::OsString>,
-}
-
-impl EnvVarGuard {
-    fn set_path(key: &'static str, value: &std::path::Path) -> Self {
-        let prev = std::env::var_os(key);
-        crate::env::set_var(key, value);
-        Self { key, prev }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(prev) = self.prev.take() {
-            crate::env::set_var(self.key, prev);
-        } else {
-            crate::env::remove_var(self.key);
-        }
-    }
-}
+use crate::storage::EnvVarGuard;
 
 struct TestProvider;
 
@@ -105,7 +84,7 @@ impl Provider for StreamingTestProvider {
 async fn runner_stays_alive_to_service_schedules_when_ambient_disabled() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
 
     let provider: Arc<dyn Provider> = Arc::new(TestProvider);
     let runner = AmbientRunnerHandle::new(Arc::new(crate::safety::SafetySystem::new()));
@@ -125,7 +104,7 @@ async fn runner_stays_alive_to_service_schedules_when_ambient_disabled() {
 async fn spawn_target_creates_one_child_session_and_runs_task() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
 
     let provider = StreamingTestProvider::default();
     provider.queue_response(vec![

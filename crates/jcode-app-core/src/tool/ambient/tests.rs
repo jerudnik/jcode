@@ -415,8 +415,7 @@ fn test_parse_schedule_target_rejects_removed_session_alias() {
 async fn test_schedule_tool_defaults_to_resuming_originating_session() {
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let prev_home = std::env::var_os("JCODE_HOME");
-    crate::env::set_var("JCODE_HOME", temp.path());
+    let _home = crate::storage::EnvVarGuard::set("JCODE_HOME", temp.path());
 
     let tool = ScheduleTool::new();
     let input = json!({
@@ -455,12 +454,6 @@ async fn test_schedule_tool_defaults_to_resuming_originating_session() {
             session_id: "origin_session".to_string()
         }
     );
-
-    if let Some(prev) = prev_home {
-        crate::env::set_var("JCODE_HOME", prev);
-    } else {
-        crate::env::remove_var("JCODE_HOME");
-    }
 }
 
 #[test]
