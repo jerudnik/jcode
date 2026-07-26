@@ -59,3 +59,57 @@ rebuilds them); worktrees and evidence are not.
 - Emergency floor: if free space drops below ~10 GiB, rows #4 and #6 (rotated
   logs, re-downloadable registry) are safe to take immediately without touching
   the live repo build or any evidence.
+
+---
+
+## Provenance of "where did this come from?" state (2026-07-26)
+
+Three pieces of local/remote state had no obvious owner when noticed. All three
+are now traced. Recorded here because the cost of re-deriving provenance is
+what makes people leave unexplained state alone indefinitely.
+
+### `~/.jcode/ambient/queue.json` — was a defect, fixed
+
+Held six scheduled items despite ambient mode being disabled
+(`state.json` = `Disabled`, `total_cycles: 0`). Not user-created: every item
+carried `created_by_session: "ambient"` and a uniform five-minute offset, the
+shape the TUI ambient-widget test constructed before `4c2d66c21` made it
+filesystem-free. A test suite was writing into live user state.
+
+Undeliverable by construction: with ambient disabled the runner drains only
+direct-delivery targets, and nothing surfaces the queue, so the items
+accumulated silently. Last leaked entry (07-25 10:08Z) predates the fix
+(10:29Z) by 21 minutes; nothing leaked after. Cleared, backup at
+`~/.jcode/ambient/queue.testleak-backup.json`. The residual fragile mechanism
+(a hand-rolled `JCODE_HOME` restore that a panic would skip) was replaced with
+a shared RAII guard in `09faa4627`.
+
+### `jerudnik/jcode-recovery-archive` — deliberate, keep
+
+Created 2026-07-17 during fork normalization; documented in
+`docs/fork/normalization/STATUS.md` and the `2026-07-17-post-promotion-checkpoint`
+evidence package. Verified against GitHub rather than trusting the doc: still
+**private**, still **42 branches**, `pushed_at` unchanged at 2026-07-17T20:57Z.
+No script or workflow pushes to it. The 19 gitleaks hits were test/example
+patterns already reachable from public `main`, so it introduced no new exposure.
+
+| Target | Size | Kind | Delete WHEN | Reversible? |
+|--------|------|------|-------------|-------------|
+| `jerudnik/jcode-recovery-archive` (remote) | ~364 MB | one-shot private ref archive | **Not while the hard fork is in flight.** This is insurance against exactly the branch-history loss the fork risks. Revisit only after the fork lands and `main` is stable. | **no** — 41 local branches + a detached worktree tip; some tips may exist nowhere else |
+
+### The six stashes — five are dead, one is live
+
+Each has a deliberate descriptive message, so none are mystery state. Status
+determined by reverse-applying each stash hunk against `HEAD`:
+
+| Stash | Subject | Verdict |
+|-------|---------|---------|
+| `{0}` | `f17-local-variant-full` (76 files) | **Redundant** — byte-identical to branch `f17-local-dirty-backup`. Drop the stash, keep the branch. |
+| `{1}` | F02 aborted after Anthropic 429 (7 files) | **Superseded** — F02 was accepted at `2b5607882` after 3 review rounds. This is the attempt that failed review; the shipped activity-lease system is live in 8 files. |
+| `{2}` | config-hotpath part 3 | **Landed** — the exact `Config::load()` → `config()` change is in the tree. |
+| `{3}` | config-hotpath part 2 (7 files) | **Landed** — all reads converted. The one remaining `Config::load()` in `inline_interactive/helpers.rs` is `save_agent_model_override`, a *write* that needs an owned mutable copy; correctly untouched. |
+| `{4}` | config warn-once + sidecar dedup (4 files) | **Superseded by better** — both halves shipped in stronger form: `warn_unknown_config_keys_once_with` (injectable for testing) and a sidecar diagnostic that reports a `suppressed` count plus a recovery notice, neither of which the stash's plain `HashSet` did. |
+| `{5}` | `latent-outcomes-agent-mesh.md` condensation | **LIVE** — the only one with unmerged content. The doc is still byte-identical to the stash's base (unchanged since `4920ba714`, 2026-07-02), so this 288→219 line condensation was never applied and never superseded. Apply or discard on the merits; it is a judgement call about the proposal, not a mechanical one. |
+
+Dropping `{0}`–`{4}` reclaims negligible disk (stashes are cheap objects); the
+value is removing five decoys so the one live stash is visible.
