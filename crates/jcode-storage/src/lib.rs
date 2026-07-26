@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -89,15 +89,42 @@ pub fn jcode_dir() -> Result<PathBuf> {
 /// Stating that once here keeps ~20 call sites from each writing
 /// `jcode_dir().ok()`, which reads like a swallowed error even though it isn't.
 pub fn jcode_dir_opt() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("JCODE_HOME") {
-        return Some(PathBuf::from(path));
+    resolve_jcode_dir(
+        std::env::var_os("JCODE_HOME").as_deref(),
+        test_harness_home(),
+        dirs::home_dir(),
+    )
+}
+
+/// Pure resolution rule behind [`jcode_dir_opt`]. See [`resolve_app_config_dir`]
+/// for why the ambient inputs are arguments.
+///
+/// A blank or whitespace-only `JCODE_HOME` is ignored rather than trusted. It
+/// used to be taken literally, so `JCODE_HOME="\t"` resolved to a relative path
+/// and every consumer wrote real state (telemetry ids, sessions, build
+/// requests) into a directory literally named `"\t"` under the *current working
+/// directory*. A test that set that value to prove blank overrides are ignored
+/// was itself creating one in the repo root. `launcher_dir` already trimmed its
+/// overrides this way; this is the same rule applied to the ambient root that
+/// actually gets written to.
+fn resolve_jcode_dir(
+    jcode_home: Option<&OsStr>,
+    harness_home: Option<PathBuf>,
+    real_home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(path) = jcode_home
+        .map(Path::new)
+        .filter(|path| !path.as_os_str().is_empty())
+        .filter(|path| !path.to_string_lossy().trim().is_empty())
+    {
+        return Some(path.to_path_buf());
     }
 
-    if let Some(dir) = test_harness_home() {
+    if let Some(dir) = harness_home {
         return Some(dir);
     }
 
-    Some(dirs::home_dir()?.join(".jcode"))
+    Some(real_home?.join(".jcode"))
 }
 
 /// Per-process fallback home for test binaries that never set `JCODE_HOME`.
@@ -995,6 +1022,52 @@ mod home_isolation_tests {
             resolve_user_home_path_opt(relative, None, None, Some(PathBuf::from("/Users/real")))
                 .is_some(),
             "a present home must always resolve"
+        );
+    }
+
+    /// A blank `JCODE_HOME` must not be trusted as a real path.
+    ///
+    /// Taken literally, `JCODE_HOME="\t"` is a *relative* path, so every
+    /// consumer wrote real state (telemetry ids, sessions, selfdev build
+    /// requests) into a directory named `"\t"` under the current working
+    /// directory. That is exactly the ambient-root escape F29 exists to close,
+    /// and it was reachable from a shipped binary, not just tests: the repo
+    /// root accumulated one from the suite itself.
+    ///
+    /// Reverting `resolve_jcode_dir` to `PathBuf::from(value)` fails this.
+    #[test]
+    fn blank_jcode_home_falls_back_instead_of_creating_a_relative_dir() {
+        let harness = PathBuf::from("/tmp/harness-home");
+        let real_home = PathBuf::from("/Users/real");
+
+        for blank in ["", " ", "\t", "\n", "  \t "] {
+            let resolved = resolve_jcode_dir(
+                Some(OsStr::new(blank)),
+                Some(harness.clone()),
+                Some(real_home.clone()),
+            )
+            .expect("a blank override must still resolve somewhere");
+            assert_eq!(
+                resolved, harness,
+                "JCODE_HOME={blank:?} must be ignored in favor of the harness home"
+            );
+            assert!(
+                resolved.is_absolute(),
+                "JCODE_HOME={blank:?} resolved to a relative path, which lands \
+                 under the current working directory: {}",
+                resolved.display()
+            );
+        }
+
+        // A real override still wins outright.
+        assert_eq!(
+            resolve_jcode_dir(
+                Some(OsStr::new("/tmp/pinned")),
+                Some(harness),
+                Some(real_home)
+            )
+            .expect("explicit override"),
+            PathBuf::from("/tmp/pinned")
         );
     }
 }
