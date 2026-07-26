@@ -265,16 +265,22 @@ pub fn new_memorable_session_id_avoiding(used_names: &HashSet<String>) -> (Strin
     let rand: u64 = rand::random();
 
     let cursor = session_name_cursor();
+    // One cursor advance per allocation, then a *local* scan from that start.
+    // The previous shape did a separate `fetch_add` per probe, which broke the
+    // "use every free name before reusing" promise under concurrency: with
+    // another thread allocating at the same time, this thread's N probes get
+    // interleaved counter values, which can map to duplicate indices mod N and
+    // skip free names entirely (observed as a 1-in-10 test failure, but the
+    // same reuse could hit concurrent real session creation). A local scan
+    // visits each index exactly once, so a free name is found whenever one
+    // exists in the caller's `used_names` snapshot.
+    let start = cursor.fetch_add(1, Ordering::Relaxed);
     let word = (0..SESSION_NAMES.len())
-        .find_map(|_| {
-            let idx = cursor.fetch_add(1, Ordering::Relaxed) % SESSION_NAMES.len();
-            let (word, _) = SESSION_NAMES[idx];
+        .find_map(|offset| {
+            let (word, _) = SESSION_NAMES[(start + offset) % SESSION_NAMES.len()];
             (!used_names.contains(word)).then_some(word)
         })
-        .unwrap_or_else(|| {
-            let idx = cursor.fetch_add(1, Ordering::Relaxed) % SESSION_NAMES.len();
-            SESSION_NAMES[idx].0
-        });
+        .unwrap_or_else(|| SESSION_NAMES[start % SESSION_NAMES.len()].0);
 
     let short_name = word.to_string();
     let full_id = format!("session_{}_{ts}_{rand:016x}", word);

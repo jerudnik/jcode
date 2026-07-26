@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F20b",
+    "node": "F28",
     "state": "accepted",
-    "commit": "c01518181",
-    "updated_at": "2026-07-25T00:07:58Z",
-    "summary": "Self-dev reload collapsed to one atomic fixed path ~/.jcode/current/jcode; client+daemon resolvers prefer it; atomicity preserved (truncation test) and no channel drift/downgrade (resolver tests). Low-noise reload summary. Legacy channels left dead for F20c."
+    "commit": "2df5a891ca7a86524e75d80bf71002cb43172622",
+    "updated_at": "2026-07-26T10:17:30Z",
+    "summary": "F28 accepted: jcode-tui/jcode-app-core test parallelism restored and the --test-threads=1 caps removed from all four fork-ci rails, verified by a fully green run 30196812205 at this HEAD (Linux 6531 passed/0 failed, macOS 6544/0, Quality Guardrails, Nix build, security gate). All four gates met: static scan finds zero unlocked render-cache mutators (45 locked) and runs in CI; the video_export leak was removed rather than proven inert, having turned out worse than the node's 'cosmetic' description (an unconditional-reset bug leaking process-global export mode on any early return or panic, now an RAII guard); suite green over >=3 parallel rounds uncapped in both crates. Two proxies were found to be lying about the build and fixed at the source: debug_assertions gated out both session fault-injection hooks under selfdev (now cfg(any(test, feature=\"test-support\"))), and optimization level now comes from the build script's real OPT_LEVEL. Two earlier attempts were discarded because measurement contradicted them. Three real ambient-state defects were found and fixed en route: two fixtures released their env lease before restoring JCODE_HOME (tuple fields drop in declaration order, verified in a scratch crate), now gated by check_env_lease_drop_order.py; and three subprocess-spawning tool tests took no env lease at all while siblings mutated the environment, now holding read leases."
   },
   "nodes": {
     "W0": {
@@ -269,11 +269,15 @@
       "updated_at": "2026-07-24T05:01:46Z"
     },
     "F21": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "191b27093221171fb25bf549b4c413f3b97483d1",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F21/README.md",
+        "docs/fork/ideal-base/evidence/F21/two-run-manifest.md",
+        "docs/fork/ideal-base/evidence/F21/two-run.json"
+      ],
+      "summary": "F21 accepted: full CI/package/updater gate green twice from clean state at one commit. 12/12 checks agree across both runs including the nix store path (fa0mbkdylvqnr3r66dx9if4m743y01d9); run 2 reproduced the derivation without rebuilding. Determinism judged on normalized per-check fingerprints, not raw logs; suite fingerprints pin pass counts so silent test-count drift cannot pass. Gate proven non-vacuous three ways: comparator sabotage, real checks run against a source binary presented as the package (4/6 correctly refused), and residue sabotage. Three assumed APIs were checked against source and found wrong before use. Found and fixed a real Linux-only F28 regression en route: test fixtures released their env lease before restoring JCODE_HOME (two independent instances), now gated structurally by check_env_lease_drop_order.py.",
+      "updated_at": "2026-07-26T09:04:08Z"
     },
     "F22": {
       "state": "pending",
@@ -318,11 +322,14 @@
       "updated_at": null
     },
     "F28": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "2df5a891ca7a86524e75d80bf71002cb43172622",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F28/SCOPE.md",
+        "docs/fork/ideal-base/evidence/F28/RESULT.md"
+      ],
+      "summary": "F28 accepted: jcode-tui/jcode-app-core test parallelism restored and the --test-threads=1 caps removed from all four fork-ci rails, verified by a fully green run 30196812205 at this HEAD (Linux 6531 passed/0 failed, macOS 6544/0, Quality Guardrails, Nix build, security gate). All four gates met: static scan finds zero unlocked render-cache mutators (45 locked) and runs in CI; the video_export leak was removed rather than proven inert, having turned out worse than the node's 'cosmetic' description (an unconditional-reset bug leaking process-global export mode on any early return or panic, now an RAII guard); suite green over >=3 parallel rounds uncapped in both crates. Two proxies were found to be lying about the build and fixed at the source: debug_assertions gated out both session fault-injection hooks under selfdev (now cfg(any(test, feature=\"test-support\"))), and optimization level now comes from the build script's real OPT_LEVEL. Two earlier attempts were discarded because measurement contradicted them. Three real ambient-state defects were found and fixed en route: two fixtures released their env lease before restoring JCODE_HOME (tuple fields drop in declaration order, verified in a scratch crate), now gated by check_env_lease_drop_order.py; and three subprocess-spawning tool tests took no env lease at all while siblings mutated the environment, now holding read leases.",
+      "updated_at": "2026-07-26T10:17:30Z"
     },
     "G01": {
       "state": "pending",
@@ -438,11 +445,25 @@
       "updated_at": "2026-07-25T00:07:58Z"
     },
     "F20c": {
+      "state": "accepted",
+      "commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F20c/README.md",
+        "docs/fork/ideal-base/evidence/F20c/removal-grep-clean.txt",
+        "docs/fork/ideal-base/evidence/F20c/retired-layout-detection.txt",
+        "docs/fork/ideal-base/evidence/F20c/suite-run-1.txt",
+        "docs/fork/ideal-base/evidence/F20c/suite-run-2.txt",
+        "docs/fork/ideal-base/evidence/F20c/preflight.txt"
+      ],
+      "summary": "Distribution surface retired: jcode-update-core deleted, version store and channel matrix cut, installers and R10 fixture removed, doctor detects retired-layout residue. All 11 preflight gates green and full workspace suite double green (6622/0 twice) at the final HEAD. Five real defects root-caused en route (four ambient-state class); follow-up filed as F29.",
+      "updated_at": "2026-07-26T04:19:10Z"
+    },
+    "F29": {
       "state": "pending",
       "commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Filed from the F20c ambient-state defect cluster (5 flakes, one class). Inventory complete in investigations/ambient-roots/README.md: 41 crate sites + 8 cli sites, classified A/B/C with feasibility notes.",
+      "updated_at": "2026-07-26T03:22:00Z"
     }
   }
 }

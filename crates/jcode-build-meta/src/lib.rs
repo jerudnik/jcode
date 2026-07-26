@@ -35,3 +35,39 @@ pub const BUILD_SOURCE_DIR: &str = env!("JCODE_BUILD_SOURCE_DIR");
 pub const fn is_release_build() -> bool {
     option_env!("JCODE_RELEASE_BUILD").is_some()
 }
+
+/// Cargo's optimization level for this build (`"0"`, `"1"`, `"2"`, `"3"`,
+/// `"s"`, `"z"`, or `"unknown"`).
+///
+/// Cargo exposes `OPT_LEVEL` to build scripts only, so it is forwarded here for
+/// crate code that needs it.
+pub const OPT_LEVEL: &str = env!("JCODE_OPT_LEVEL");
+
+/// Whether the compiler actually optimized this build.
+///
+/// `cfg!(debug_assertions)` is commonly used as a proxy for this and is wrong
+/// for at least one profile in this workspace: `selfdev` inherits `release`, so
+/// assertions are compiled out, while pinning `opt-level = 0`. Wall-clock
+/// performance assertions must key off this instead, or they impose optimized
+/// timings on unoptimized binaries.
+pub const fn is_optimized_build() -> bool {
+    // `str` comparison is not const-stable, so compare the raw bytes.
+    matches!(OPT_LEVEL.as_bytes(), b"1" | b"2" | b"3" | b"s" | b"z")
+}
+
+#[cfg(test)]
+mod opt_level_tests {
+    /// The forwarded opt-level must reflect the profile actually in use, or the
+    /// performance assertions keyed off it silently pick the wrong budget.
+    #[test]
+    fn opt_level_is_forwarded_and_classified() {
+        let lvl = super::OPT_LEVEL;
+        assert_ne!(lvl, "unknown", "build script failed to forward OPT_LEVEL");
+        assert_eq!(
+            super::is_optimized_build(),
+            lvl != "0",
+            "opt-level {lvl} classified incorrectly"
+        );
+        println!("OPT_LEVEL={lvl} optimized={}", super::is_optimized_build());
+    }
+}

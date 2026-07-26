@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY="" OPENAI_API_KEY="" GEMINI_API_KEY="" \
 
 JCODE_BIN="${JCODE_BIN:-}"
 if [[ -z "$JCODE_BIN" ]]; then
-    for candidate in "$REPO/target/selfdev/jcode" "$HOME/.jcode/builds/shared-server/jcode"; do
+    for candidate in "$REPO/target/selfdev/jcode" "${JCODE_HOME:-$HOME/.jcode}/current/jcode"; do
         [[ -x "$candidate" ]] && { JCODE_BIN="$candidate"; break; }
     done
 fi

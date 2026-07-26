@@ -207,14 +207,6 @@ pub async fn run_self_dev(
                     server_running = wait_for_reloading_server().await;
                 }
                 crate::server::ReloadPhase::Failed => {
-                    if let Ok(Some(version)) =
-                        build::rollback_pending_activation_for_session(&session_id)
-                    {
-                        logging::warn(&format!(
-                            "Rolled back failed pending activation for build {} while resuming self-dev session",
-                            version
-                        ));
-                    }
                     logging::warn(&format!(
                         "Reload state=failed while resuming self-dev session on {}: {}; recent_state={}",
                         crate::server::socket_path().display(),
@@ -235,15 +227,6 @@ pub async fn run_self_dev(
             )
             .await;
         }
-    }
-
-    if server_running
-        && let Ok(Some(version)) = build::complete_pending_activation_for_session(&session_id)
-    {
-        logging::info(&format!(
-            "Marked pending self-dev activation as successful for build {}",
-            version
-        ));
     }
 
     if !server_running {

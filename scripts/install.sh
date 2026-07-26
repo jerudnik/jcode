@@ -59,16 +59,22 @@ URL_TGZ="https://github.com/$REPO/releases/download/$VERSION/$ARTIFACT.tar.gz"
 URL_BIN="https://github.com/$REPO/releases/download/$VERSION/$ARTIFACT"
 URL_SHA256SUMS="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
 
+# F20b/F20c: jcode resolves every client and daemon to ONE fixed binary path,
+# ~/.jcode/current/jcode. The old version store plus the
+# stable/current/shared-server/canary channel symlinks were deleted, so writing
+# them here would create state that nothing reads.
+# The publish target must be the directory the RESOLVER reads. That is
+# jcode_dir() (crates/jcode-storage), which is $JCODE_HOME or $HOME/.jcode on
+# every platform -- it has no LOCALAPPDATA branch, unlike launcher_dir(). A
+# Windows install that published to %LOCALAPPDATA%\jcode\current would write
+# somewhere no in-binary resolver ever looks.
 if [ "$IS_WINDOWS" = true ]; then
   EXE=".exe"
-  builds_dir="$LOCALAPPDATA/jcode/builds"
 else
   EXE=""
-  builds_dir="$HOME/.jcode/builds"
 fi
-stable_dir="$builds_dir/stable"
-current_dir="$builds_dir/current"
-version_dir="$builds_dir/versions"
+jcode_home="${JCODE_HOME:-$HOME/.jcode}"
+current_dir="$jcode_home/current"
 launcher_path="$INSTALL_DIR/jcode${EXE}"
 
 EXISTING=""
@@ -138,10 +144,13 @@ if [ -n "$download_mode" ]; then
   verify_download_checksum "$downloaded_asset"
 fi
 
-mkdir -p "$INSTALL_DIR" "$stable_dir" "$current_dir" "$version_dir"
+mkdir -p "$INSTALL_DIR" "$current_dir"
 
 version="${VERSION#v}"
-dest_version_dir="$version_dir/$version"
+# Unpack into a private staging dir; the binary is moved into the fixed publish
+# path with a single atomic rename below, so a running daemon can never exec a
+# half-written file.
+dest_version_dir="$tmpdir/staged-install"
 mkdir -p "$dest_version_dir"
 
 bin_name="jcode${EXE}"
@@ -195,28 +204,32 @@ if [ "$IS_TERMUX" = true ] && [ "$IS_WINDOWS" = false ]; then
   fi
 fi
 
+# Publish to the single fixed path. Sidecar files (the .bin payload and any
+# bundled libs) travel with it so a wrapper-shaped binary still resolves.
+find "$dest_version_dir" -maxdepth 1 -type f ! -name "$bin_name" \
+  -exec cp -f {} "$current_dir/" \; 2>/dev/null || true
+published="$current_dir/$bin_name"
+staged_publish="$current_dir/.jcode-publish-$$"
+mv -f "$dest_version_dir/$bin_name" "$staged_publish"
+chmod +x "$staged_publish" 2>/dev/null || true
+mv -f "$staged_publish" "$published"
+
 if [ "$IS_WINDOWS" = true ]; then
-  cp -f "$dest_version_dir/$bin_name" "$stable_dir/$bin_name"
-  printf '%s\n' "$version" > "$builds_dir/stable-version"
-  cp -f "$stable_dir/$bin_name" "$launcher_path"
-else
-  ln -sfn "$dest_version_dir/$bin_name" "$stable_dir/$bin_name"
-  printf '%s\n' "$version" > "$builds_dir/stable-version"
-  if [ "$IS_TERMUX" = true ]; then
-    rm -f "$launcher_path"
-    cat > "$launcher_path" <<EOF
+  cp -f "$published" "$launcher_path"
+elif [ "$IS_TERMUX" = true ]; then
+  rm -f "$launcher_path"
+  cat > "$launcher_path" <<EOF
 #!/usr/bin/env bash
 unset LD_PRELOAD
-exec "$stable_dir/$bin_name" "\$@"
+exec "$published" "\$@"
 EOF
-    chmod +x "$launcher_path"
-  else
-    ln -sfn "$stable_dir/$bin_name" "$launcher_path"
-  fi
+  chmod +x "$launcher_path"
+else
+  ln -sfn "$published" "$launcher_path"
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
-  xattr -d com.apple.quarantine "$dest_version_dir/$bin_name" 2>/dev/null || true
+  xattr -d com.apple.quarantine "$published" 2>/dev/null || true
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -231,7 +244,7 @@ fi
 # best-effort; JCODE_SKIP_SERVER_RELOAD remains a hard disable for wrappers.
 if [ "${JCODE_RELOAD_SERVER:-}" = "1" ] && [ "${JCODE_SKIP_SERVER_RELOAD:-}" != "1" ]; then
   reload_bin="$launcher_path"
-  [ -x "$reload_bin" ] || reload_bin="$stable_dir/$bin_name"
+  [ -x "$reload_bin" ] || reload_bin="$published"
   if [ -x "$reload_bin" ]; then
     if "$reload_bin" server reload </dev/null >/dev/null 2>&1; then
       info "Reloaded the running jcode server onto $VERSION (if one was active)."

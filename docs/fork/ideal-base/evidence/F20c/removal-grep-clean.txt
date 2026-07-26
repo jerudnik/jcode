@@ -1,0 +1,63 @@
+F20c removal grep-clean report
+generated: 2026-07-25T23:24:11Z  HEAD=ae785bbe1
+
+Every symbol below was part of the retired distribution surface:
+the GitHub-release acquisition subsystem and the multi-channel/version
+binary store. Scope: all git-tracked files, excluding docs/ (records
+history), .rerere-cache/ (git merge-resolution blobs), and the generator
+script itself (it names every symbol).
+
+Regenerate with scripts/f20c_removal_report.sh, which exits non-zero if
+any retired symbol returns.
+
+SYMBOL                                         REFS
+---------------------------------------------- ----
+install_binary_at_version                      0
+install_version                                0
+install_local_release                          0
+update_stable_symlink                          0
+update_current_symlink                         0
+update_shared_server_symlink                   0
+update_canary_symlink                          0
+promote_version_to_shared_server               0
+advance_shared_server_if_tracking_stable       0
+repair_stale_shared_server_channel             0
+reconcile_stale_pending_activation             0
+PendingActivation                              0
+CanaryStatus                                   0
+CrashInfo                                      0
+BinaryChoice                                   0
+stable_binary_path                             0
+current_binary_path                            0
+shared_server_binary_path                      0
+canary_binary_path                             0
+stable_version_file                            0
+current_version_file                           0
+read_stable_version                            0
+jcode_update_core                              0
+jcode-update-core                              0
+version_matches_installed_channel              0
+normalize_version_marker                       0
+update_launcher_symlink_to_stable              0
+cleanup_empty_dir                              0
+
+TOTAL surviving references: 0
+
+Deleted artifacts:
+  ok  crates/jcode-update-core absent
+  ok  examples/promote_build.rs absent
+
+Grep proves the symbols are gone; it cannot prove no writer recreates
+the on-disk layout. That is asserted executably instead:
+
+  tests/test_r10_release_acquisition.py
+    after a full install, builds/{versions,stable,current,*-version} must
+    not exist and no staged temp may survive
+  scripts/test_install_release.sh
+    same assertions for the local-release installer
+  .github/scripts/verify_windows_install.ps1
+    same assertions for the Windows installer
+  scripts/test_reload.py (check 9)
+    a live machine must have no retired channel present
+  jcode-build-support tests::retired_version_store_is_detected_and_sized
+    leftovers from a pre-F20c machine are found, sized, and reported

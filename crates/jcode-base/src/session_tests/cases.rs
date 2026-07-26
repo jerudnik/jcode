@@ -25,6 +25,75 @@ fn exited_child_pid() -> Result<u32> {
     Ok(pid)
 }
 
+/// Append a plain text message.
+///
+/// `add_message` takes a content-block vector, so every call site spelled out
+/// the same three-line `ContentBlock::Text` literal. None of them varied in
+/// anything but the role and the text.
+fn add_text_message(session: &mut Session, role: Role, text: impl Into<String>) {
+    session.add_message(
+        role,
+        vec![ContentBlock::Text {
+            text: text.into(),
+            cache_control: None,
+        }],
+    );
+}
+
+/// A text `StoredMessage` with the incidental fields defaulted.
+///
+/// Every field below `content` was spelled out identically at each call site
+/// and none of them were what the surrounding tests asserted on.
+fn text_message(id: &str, role: Role, text: &str) -> StoredMessage {
+    StoredMessage {
+        id: id.to_string(),
+        role,
+        content: vec![ContentBlock::Text {
+            text: text.to_string(),
+            cache_control: None,
+        }],
+        display_role: None,
+        timestamp: Some(Utc::now()),
+        tool_duration_ms: None,
+        token_usage: None,
+    }
+}
+
+/// An `EnvSnapshot` for `session_id` rooted at `working_dir`.
+///
+/// The startup-stub tests differ only in the self-dev/canary flags, so those
+/// stay parameters and the other fifteen fields are fixed here.
+fn env_snapshot_fixture(
+    session_id: &str,
+    working_dir: &std::path::Path,
+    is_selfdev: bool,
+    is_canary: bool,
+) -> EnvSnapshot {
+    EnvSnapshot {
+        captured_at: Utc::now(),
+        reason: "resume".to_string(),
+        session_id: session_id.to_string(),
+        working_dir: Some(working_dir.to_string_lossy().to_string()),
+        provider: "openai".to_string(),
+        model: "gpt-5.4".to_string(),
+        jcode_version: "test".to_string(),
+        jcode_git_hash: Some("abc123".to_string()),
+        jcode_git_dirty: Some(false),
+        os: "linux".to_string(),
+        arch: "x86_64".to_string(),
+        pid: 123,
+        is_selfdev,
+        is_debug: false,
+        is_canary,
+        testing_build: if is_canary {
+            Some("self-dev".to_string())
+        } else {
+            None
+        },
+        working_git: None,
+    }
+}
+
 fn active_marker_path(session_id: &str) -> Result<std::path::PathBuf> {
     Ok(crate::storage::active_pids_dir()
         .ok_or_else(|| anyhow!("active PID marker directory unavailable"))?
@@ -371,13 +440,7 @@ fn test_debug_memory_profile_reports_messages_and_provider_cache() {
         None,
         Some("Memory profile".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "hello world".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "hello world".to_string());
     session.add_message(
         Role::Assistant,
         vec![
@@ -490,13 +553,7 @@ fn initial_session_context_is_persisted_once_and_not_overwritten() {
     assert!(!session.ensure_initial_session_context_message());
     assert_eq!(session.messages.len(), 1);
 
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "hello".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "hello".to_string());
     assert!(!session.ensure_initial_session_context_message());
     assert_eq!(session.messages.len(), 2);
 }
@@ -607,13 +664,7 @@ fn initial_session_context_does_not_refresh_after_real_conversation() -> Result<
         Some("Late cwd refresh".to_string()),
     );
     assert!(session.ensure_initial_session_context_message());
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "hello".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "hello".to_string());
 
     session.working_dir = Some(second_dir.path().display().to_string());
     assert!(!session.refresh_initial_session_context_message());
@@ -634,13 +685,7 @@ fn existing_non_empty_session_does_not_get_retroactive_session_context() {
         None,
         Some("Existing".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "already started".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "already started".to_string());
 
     assert!(!session.ensure_initial_session_context_message());
     assert_eq!(session.messages.len(), 1);
@@ -671,37 +716,13 @@ fn load_startup_stub_preserves_metadata_but_skips_heavy_vectors() -> Result<()> 
     session.provider_key = Some("openai".to_string());
     session.route_api_method = Some("openai-api".to_string());
     session.set_canary("self-dev");
-    session.append_stored_message(StoredMessage {
-        id: "msg_1".to_string(),
-        role: Role::User,
-        content: vec![ContentBlock::Text {
-            text: "hello world".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: Some(Utc::now()),
-        tool_duration_ms: None,
-        token_usage: None,
-    });
-    session.record_env_snapshot(EnvSnapshot {
-        captured_at: Utc::now(),
-        reason: "resume".to_string(),
-        session_id: session_id.to_string(),
-        working_dir: Some(temp_home.path().to_string_lossy().to_string()),
-        provider: "openai".to_string(),
-        model: "gpt-5.4".to_string(),
-        jcode_version: "test".to_string(),
-        jcode_git_hash: Some("abc123".to_string()),
-        jcode_git_dirty: Some(false),
-        os: "linux".to_string(),
-        arch: "x86_64".to_string(),
-        pid: 123,
-        is_selfdev: true,
-        is_debug: false,
-        is_canary: true,
-        testing_build: Some("self-dev".to_string()),
-        working_git: None,
-    });
+    session.append_stored_message(text_message("msg_1", Role::User, "hello world"));
+    session.record_env_snapshot(env_snapshot_fixture(
+        session_id,
+        temp_home.path(),
+        true,
+        true,
+    ));
     session.record_memory_injection(
         "summary".to_string(),
         "content".to_string(),
@@ -745,37 +766,17 @@ fn load_for_remote_startup_preserves_messages_and_replay_but_skips_heavy_vectors
     );
     session.model = Some("gpt-5.4".to_string());
     session.reasoning_effort = Some("medium".to_string());
-    session.append_stored_message(StoredMessage {
-        id: "msg_remote_1".to_string(),
-        role: Role::Assistant,
-        content: vec![ContentBlock::Text {
-            text: "hello remote startup".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: Some(Utc::now()),
-        tool_duration_ms: None,
-        token_usage: None,
-    });
-    session.record_env_snapshot(EnvSnapshot {
-        captured_at: Utc::now(),
-        reason: "resume".to_string(),
-        session_id: session_id.to_string(),
-        working_dir: Some(temp_home.path().to_string_lossy().to_string()),
-        provider: "openai".to_string(),
-        model: "gpt-5.4".to_string(),
-        jcode_version: "test".to_string(),
-        jcode_git_hash: Some("abc123".to_string()),
-        jcode_git_dirty: Some(false),
-        os: "linux".to_string(),
-        arch: "x86_64".to_string(),
-        pid: 123,
-        is_selfdev: false,
-        is_debug: false,
-        is_canary: false,
-        testing_build: None,
-        working_git: None,
-    });
+    session.append_stored_message(text_message(
+        "msg_remote_1",
+        Role::Assistant,
+        "hello remote startup",
+    ));
+    session.record_env_snapshot(env_snapshot_fixture(
+        session_id,
+        temp_home.path(),
+        false,
+        false,
+    ));
     session.record_memory_injection(
         "summary".to_string(),
         "content".to_string(),
@@ -820,18 +821,7 @@ fn assistant_session_meta_survives_save_and_all_load_paths() -> Result<()> {
         last_validation: Some("cargo test passed".to_string()),
         persona: None,
     });
-    session.append_stored_message(StoredMessage {
-        id: "msg_assistant_1".to_string(),
-        role: Role::User,
-        content: vec![ContentBlock::Text {
-            text: "status?".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: Some(Utc::now()),
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    session.append_stored_message(text_message("msg_assistant_1", Role::User, "status?"));
     session.save()?;
 
     // Full load (server restore_session path).
@@ -916,13 +906,7 @@ fn test_recover_crashed_sessions_preserves_debug_flag() -> Result<()> {
     );
     crashed.is_debug = true;
     crashed.mark_crashed(Some("test crash".to_string()));
-    crashed.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "hello".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut crashed, Role::User, "hello".to_string());
     crashed.save()?;
 
     let recovered_ids = recover_crashed_sessions()?;
@@ -1125,13 +1109,7 @@ fn test_save_appends_journal_and_load_replays_it() -> Result<()> {
         None,
         Some("journal append test".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "first".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "first".to_string());
     session.save()?;
 
     let snapshot_path = session_path("session_journal_append_test")?;
@@ -1139,13 +1117,7 @@ fn test_save_appends_journal_and_load_replays_it() -> Result<()> {
     assert!(snapshot_path.exists());
     assert!(!journal_path.exists());
 
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "second".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "second".to_string());
     session.save()?;
 
     assert!(journal_path.exists());
@@ -1172,22 +1144,10 @@ fn test_save_checkpoints_after_full_mutation_and_clears_journal() -> Result<()> 
         None,
         Some("checkpoint test".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "one".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "one".to_string());
     session.save()?;
 
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "two".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "two".to_string());
     session.save()?;
 
     let journal_path = session_journal_path("session_journal_checkpoint_test")?;
@@ -1221,31 +1181,13 @@ fn test_journal_replay_skips_corrupt_line_and_keeps_tail() -> Result<()> {
         None,
         Some("corrupt journal test".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "first".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "first".to_string());
     session.save()?;
 
     // Two good journal entries.
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "second".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "second".to_string());
     session.save()?;
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "third".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "third".to_string());
     session.save()?;
 
     // Corrupt the middle line (torn write) but keep the final line intact.
@@ -1284,29 +1226,11 @@ fn test_journal_replay_salvages_glued_entries_on_torn_line() -> Result<()> {
         None,
         Some("glued journal test".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "first".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "first".to_string());
     session.save()?;
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "second".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "second".to_string());
     session.save()?;
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "third".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "third".to_string());
     session.save()?;
 
     // Simulate a torn append glued to the next complete entry: half of entry 1
@@ -1341,21 +1265,9 @@ fn test_corrupt_journal_heals_via_checkpoint_on_next_save() -> Result<()> {
         None,
         Some("heal journal test".to_string()),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "first".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "first".to_string());
     session.save()?;
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "second".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "second".to_string());
     session.save()?;
 
     // Corrupt the only journal line.
@@ -1373,13 +1285,7 @@ fn test_corrupt_journal_heals_via_checkpoint_on_next_save() -> Result<()> {
 
     // The next save checkpoints a full snapshot and removes the corrupt journal,
     // so the bad line is never replayed again.
-    loaded.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "after heal".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut loaded, Role::User, "after heal".to_string());
     loaded.save()?;
     assert!(!journal_path.exists());
 
@@ -1583,20 +1489,12 @@ fn test_render_messages_shows_auto_poke_continuations_as_system_not_user() {
         Some("auto poke render test".to_string()),
     );
 
-    session.add_message(
+    add_text_message(
+        &mut session,
         Role::User,
-        vec![ContentBlock::Text {
-            text: "please fix the login bug".to_string(),
-            cache_control: None,
-        }],
+        "please fix the login bug".to_string(),
     );
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "Working on it.".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "Working on it.".to_string());
     session.add_message(
         Role::User,
         vec![ContentBlock::Text {
@@ -1887,13 +1785,7 @@ fn test_render_messages_hides_internal_system_reminders() {
     );
 
     assert!(session.ensure_initial_session_context_message());
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "visible prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "visible prompt".to_string());
 
     let rendered = render_messages(&session);
     assert_eq!(rendered.len(), 1);
@@ -1909,27 +1801,9 @@ fn test_render_messages_shows_recent_compacted_history_by_default() {
         Some("render compacted history test".to_string()),
     );
 
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "old prompt".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "old response".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "current prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "old prompt".to_string());
+    add_text_message(&mut session, Role::Assistant, "old response".to_string());
+    add_text_message(&mut session, Role::User, "current prompt".to_string());
     session.compaction = Some(StoredCompactionState {
         summary_text: "old prompt and response".to_string(),
         openai_encrypted_content: None,
@@ -1958,27 +1832,9 @@ fn test_render_messages_can_expand_compacted_history_window() {
         Some("render compacted history expand test".to_string()),
     );
 
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "old prompt".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "old response".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "current prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "old prompt".to_string());
+    add_text_message(&mut session, Role::Assistant, "old response".to_string());
+    add_text_message(&mut session, Role::User, "current prompt".to_string());
     session.compaction = Some(StoredCompactionState {
         summary_text: "old prompt and response".to_string(),
         openai_encrypted_content: None,
@@ -2046,13 +1902,7 @@ fn test_compacted_history_truncates_only_when_long_and_many_turns() {
         }
     }
     // Current (uncompacted) prompt after the compacted prefix.
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "current prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "current prompt".to_string());
 
     let compacted_count = prefix_turns * 5; // every prefix message is compacted
     session.compaction = Some(StoredCompactionState {
@@ -2099,13 +1949,7 @@ fn test_compacted_history_never_truncates_single_long_turn() {
     );
 
     // A single turn with a huge number of visible messages (well over 80).
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "the one long prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "the one long prompt".to_string());
     for r in 0..150 {
         session.add_message(
             Role::Assistant,
@@ -2115,13 +1959,7 @@ fn test_compacted_history_never_truncates_single_long_turn() {
             }],
         );
     }
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "current prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "current prompt".to_string());
 
     let compacted_count = 151; // prompt + 150 responses
     session.compaction = Some(StoredCompactionState {
@@ -2149,41 +1987,23 @@ fn test_compacted_history_window_counts_renderable_messages_not_hidden_reminders
         Some("render compacted history hidden budget test".to_string()),
     );
 
-    session.add_message(
+    add_text_message(&mut session, Role::User, "older visible prompt".to_string());
+    add_text_message(
+        &mut session,
         Role::User,
-        vec![ContentBlock::Text {
-            text: "older visible prompt".to_string(),
-            cache_control: None,
-        }],
+        "<system-reminder>hidden reminder one</system-reminder>".to_string(),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "<system-reminder>hidden reminder one</system-reminder>".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.add_message(
+    add_text_message(
+        &mut session,
         Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "previous visible assistant response".to_string(),
-            cache_control: None,
-        }],
+        "previous visible assistant response".to_string(),
     );
-    session.add_message(
+    add_text_message(
+        &mut session,
         Role::User,
-        vec![ContentBlock::Text {
-            text: "<system-reminder>hidden reminder two</system-reminder>".to_string(),
-            cache_control: None,
-        }],
+        "<system-reminder>hidden reminder two</system-reminder>".to_string(),
     );
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "current prompt".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "current prompt".to_string());
     session.compaction = Some(StoredCompactionState {
         summary_text: "older compacted context".to_string(),
         openai_encrypted_content: None,
@@ -2296,15 +2116,9 @@ fn reasoning_trace_survives_session_save_and_load() -> Result<()> {
     session.append_stored_message(StoredMessage {
         id: "msg_assistant".to_string(),
         role: Role::Assistant,
-        content: vec![
-            ContentBlock::ReasoningTrace {
-                text: "step 1: consider the run loop ordering".to_string(),
-            },
-            ContentBlock::Text {
-                text: "Here is my answer.".to_string(),
-                cache_control: None,
-            },
-        ],
+        content: vec![ContentBlock::ReasoningTrace {
+            text: "step 1: consider the run loop ordering".to_string(),
+        }],
         display_role: None,
         timestamp: Some(Utc::now()),
         tool_duration_ms: None,
@@ -2468,13 +2282,7 @@ fn test_render_images_attached_label_message_does_not_shift_prompt_ordinals() {
 #[test]
 fn fork_notice_is_model_visible_but_hidden_from_transcript() {
     let mut session = Session::create(None, None);
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "original request".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "original request".to_string());
 
     session.append_fork_notice("session_parent_abc", "otter");
 
@@ -2558,13 +2366,7 @@ fn test_rewind_targets_match_rendered_transcript_numbering() {
     );
 
     // Turn 1: prompt, assistant tool call, tool result, assistant answer.
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "prompt-1".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "prompt-1".to_string());
     session.add_message(
         Role::Assistant,
         vec![ContentBlock::ToolUse {
@@ -2584,29 +2386,11 @@ fn test_rewind_targets_match_rendered_transcript_numbering() {
             is_error: None,
         }],
     );
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "answer-1".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::Assistant, "answer-1".to_string());
 
     // Turn 2: prompt + answer.
-    session.add_message(
-        Role::User,
-        vec![ContentBlock::Text {
-            text: "prompt-2".to_string(),
-            cache_control: None,
-        }],
-    );
-    session.add_message(
-        Role::Assistant,
-        vec![ContentBlock::Text {
-            text: "answer-2".to_string(),
-            cache_control: None,
-        }],
-    );
+    add_text_message(&mut session, Role::User, "prompt-2".to_string());
+    add_text_message(&mut session, Role::Assistant, "answer-2".to_string());
 
     // The numbered /rewind list shows user/assistant transcript entries only:
     // 1 prompt-1, 2 answer-1, 3 prompt-2, 4 answer-2.
@@ -2642,5 +2426,27 @@ fn test_rewind_targets_match_rendered_transcript_numbering() {
         session.stored_len_for_visible_conversation_message(3),
         Some(3),
         "sanity: raw stored counting diverges, which is why rewind must not use it"
+    );
+}
+
+/// `Session::create` delegates to `create_with_id` rather than repeating the
+/// field literal. The only field whose derivation changed in that refactor is
+/// `short_name`, which is now recovered from the generated memorable id
+/// instead of being passed through directly, so pin that equivalence here.
+#[test]
+fn create_populates_short_name_from_generated_id() {
+    let session = Session::create(None, None);
+    let short_name = session
+        .short_name
+        .as_deref()
+        .expect("create() must populate a short name");
+    assert!(
+        !short_name.is_empty(),
+        "short name should not be blank: {short_name:?}"
+    );
+    assert_eq!(
+        Some(short_name),
+        extract_session_name(&session.id),
+        "short name must match the one encoded in the session id"
     );
 }

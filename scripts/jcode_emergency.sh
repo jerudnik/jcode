@@ -23,7 +23,10 @@ set -euo pipefail
 
 JCODE_HOME="${JCODE_HOME:-$HOME/.jcode}"
 LOG="$JCODE_HOME/emergency.log"
-BUILDS="$JCODE_HOME/builds"
+# F20b/F20c: the one atomic publish target every client and daemon resolves to.
+# The stable/shared-server channels this used to rescue from and repoint were
+# deleted; rescuing from them would resurrect a binary nothing can update.
+PUBLISHED_BIN="$JCODE_HOME/current/jcode"
 SUMMON_STAMP="$JCODE_HOME/state/emergency-summon-stamp"
 SUMMON_COOLDOWN_SECS="${EMERGENCY_SUMMON_COOLDOWN_SECS:-3600}"
 
@@ -74,7 +77,7 @@ rollback() {
     fi
 
     local candidates=()
-    [[ -x "$BUILDS/stable/jcode" ]] && candidates+=("$BUILDS/stable/jcode")
+    [[ -x "$PUBLISHED_BIN" ]] && candidates+=("$PUBLISHED_BIN")
     local nix_bin
     nix_bin="$(nix_binary || true)"
     [[ -n "$nix_bin" ]] && candidates+=("$nix_bin")
@@ -86,15 +89,9 @@ rollback() {
             continue
         fi
         log "ROLLBACK candidate passed smoke test: $bin"
-        # Repoint shared-server at the known-good payload so future reloads
-        # and the sentinel's normal rescue path also use it. Resolve symlinks
-        # to an immutable payload when possible.
-        local payload
-        payload="$(readlink -f "$bin" 2>/dev/null || echo "$bin")"
-        if [[ -d "$BUILDS/shared-server" ]]; then
-            ln -sfn "$payload" "$BUILDS/shared-server/jcode"
-            log "ROLLBACK repointed shared-server -> $payload"
-        fi
+        # No channel to repoint: the sentinel rescues from the same published
+        # binary this rollback just smoke-tested, so a successful rollback is
+        # already the state future reloads and rescues will observe.
         log "ROLLBACK spawning daemon via $bin serve"
         nohup "$bin" serve >>"$JCODE_HOME/emergency-rescue.out" 2>&1 &
         disown || true
@@ -156,7 +153,7 @@ summon() {
         echo "- Daemon exit marker: $JCODE_HOME/state/shutdown-watchdog.json"
         echo "- Recent daemon logs: $JCODE_HOME/logs/ (newest jcode-*.log)"
         echo "- Rescue spawn output: $JCODE_HOME/emergency-rescue.out"
-        echo "- Builds: $BUILDS (channels: stable, shared-server, current)"
+        echo "- Published binary: $PUBLISHED_BIN (the single reload target)"
         echo
         echo "Suggested checks: stale socket file, port/file locks, corrupt"
         echo "config ($JCODE_HOME/config*.toml), disk full, binary smoke"

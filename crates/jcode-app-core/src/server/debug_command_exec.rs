@@ -630,14 +630,7 @@ pub(super) async fn execute_debug_command(
         let source = crate::build::current_source_state(&repo_dir)?;
         let hash = source.version_label.clone();
         let published = crate::build::publish_local_current_build_for_source(&repo_dir, &source)?;
-        crate::build::smoke_test_server_binary(&published.versioned_path)?;
-        crate::build::update_shared_server_symlink(&hash)?;
-        crate::build::update_canary_symlink(&hash)?;
-
-        let mut manifest = crate::build::BuildManifest::load()?;
-        manifest.canary = Some(hash.clone());
-        manifest.canary_status = Some(crate::build::CanaryStatus::Testing);
-        manifest.save()?;
+        crate::build::smoke_test_server_binary(&published.published_path)?;
 
         let jcode_dir = crate::storage::jcode_dir()?;
         let info_path = jcode_dir.join("reload-info");
@@ -857,9 +850,26 @@ mod tests {
             "expected reload acknowledgement output, got: {}",
             output
         );
+        // Reload persists a reload context so the restarted process can
+        // recover its session. Assert on that, not on the build manifest:
+        // reload does not build, so it has no history to record, and asserting
+        // a file the code never writes made this check green against nothing.
+        let context_written = std::fs::read_dir(temp_home.path())
+            .expect("temp JCODE_HOME should be readable")
+            .flatten()
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("reload-context-")
+            });
         assert!(
-            temp_home.path().join("builds/manifest.json").exists(),
-            "selfdev reload state should be confined to the temporary JCODE_HOME"
+            context_written,
+            "selfdev reload state should be written inside the temporary JCODE_HOME"
+        );
+        assert!(
+            !temp_home.path().join("builds").exists(),
+            "reload must not recreate the retired `builds/` layout"
         );
     }
 

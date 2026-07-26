@@ -374,5 +374,45 @@ pub fn lock_test_env() -> TestEnvWriteLease {
     lock_test_env_write()
 }
 
+/// Restore an environment variable when the guard drops.
+///
+/// Tests that redirect `JCODE_HOME` at a temporary directory must restore the
+/// previous value on *every* exit path. Hand-rolled `set_var` / restore pairs
+/// skip the restore when the body panics or returns early, which leaves the
+/// rest of the process pointed at a deleted tempdir, or worse, leaves a later
+/// test writing into the developer's real `~/.jcode`. That is not theoretical:
+/// a TUI test constructed a real `AmbientManager` under a manual guard and
+/// leaked scheduled items into the developer's live ambient queue, where they
+/// sat undeliverable until someone read the file.
+///
+/// Pair this with [`lock_test_env`], which provides the mutual exclusion; this
+/// guard only provides the restore.
+#[cfg(any(test, feature = "test-support"))]
+pub struct EnvVarGuard {
+    key: std::ffi::OsString,
+    prev: Option<std::ffi::OsString>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl EnvVarGuard {
+    /// Set `key` to `value` for the guard's lifetime.
+    pub fn set(key: impl Into<std::ffi::OsString>, value: impl AsRef<std::ffi::OsStr>) -> Self {
+        let key = key.into();
+        let prev = std::env::var_os(&key);
+        jcode_core::env::set_var(&key, value);
+        Self { key, prev }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        match self.prev.take() {
+            Some(prev) => jcode_core::env::set_var(&self.key, prev),
+            None => jcode_core::env::remove_var(&self.key),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

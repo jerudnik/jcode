@@ -2090,8 +2090,8 @@ pub fn run_version_command(emit_json: bool) -> Result<()> {
 
 /// Show binary identity diagnostics: which client binary, which daemon, and
 /// whether they match. See `commands/doctor.rs`.
-pub fn run_doctor_command(emit_json: bool) -> Result<()> {
-    doctor::run_doctor_command(emit_json)
+pub fn run_doctor_command(emit_json: bool, clean_retired_layout: bool) -> Result<()> {
+    doctor::run_doctor_command(emit_json, clean_retired_layout)
 }
 
 pub async fn run_usage_command(emit_json: bool) -> Result<()> {

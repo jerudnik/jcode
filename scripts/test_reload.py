@@ -287,31 +287,38 @@ def test_reload_info_file():
             info_path.unlink()
 
 
-@test("9. Canary binary path exists (build manifest)")
-def test_canary_binary_path():
-    home = pathlib.Path.home()
-    manifest_path = home / ".jcode" / "build-manifest.json"
+@test("9. Published build is the single fixed path")
+def test_published_build_is_fixed_path():
+    """F20c: there is exactly one publish target.
 
-    if not manifest_path.exists():
+    The old check read `canary`/`stable` hashes out of build-manifest.json and
+    looked for `builds/canary/jcode`, then deliberately never failed - so it
+    could not detect anything. The channels are gone; what must hold now is
+    that the published binary lives at `~/.jcode/current/jcode` and that the
+    retired channel layout is not present.
+    """
+    home = pathlib.Path.home()
+    published = home / ".jcode" / "current" / "jcode"
+
+    if not published.exists():
         if verbose:
-            print("     No build manifest found - skipping canary check")
+            print("     No local published build - skipping (nix-managed or fresh checkout)")
         return
 
-    with open(manifest_path) as f:
-        manifest = json.load(f)
-
-    canary_hash = manifest.get("canary")
+    assert published.is_file(), f"{published} must be a real file, not a symlink"
     if verbose:
-        print(f"     canary hash: {canary_hash}")
-        print(f"     stable hash: {manifest.get('stable')}")
-        print(f"     canary_status: {manifest.get('canary_status')}")
+        print(f"     published: {published}")
 
-    if canary_hash:
-        canary_binary = home / ".jcode" / "builds" / "canary" / "jcode"
-        exists = canary_binary.exists()
-        if verbose:
-            print(f"     canary binary at {canary_binary}: exists={exists}")
-        # Don't fail if it doesn't exist - it may be a symlink or not set up yet
+    builds = home / ".jcode" / "builds"
+    for residue in ("canary", "stable", "current", "versions"):
+        assert not (builds / residue).exists(), (
+            f"retired channel {builds / residue} still present; "
+            "nothing reads it, so it can only serve stale binaries"
+        )
+
+    # A completed publish leaves no staged temp behind.
+    staged = list((home / ".jcode" / "current").glob(".jcode-publish-*"))
+    assert not staged, f"staged publish temps survived: {staged}"
 
 
 @test("10. Graceful shutdown: idle sessions are skipped immediately")

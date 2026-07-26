@@ -16,6 +16,15 @@ fn test_redraw_interval_uses_low_frequency_during_remote_startup_phase() {
     // harness reuses a worker thread. Redraw policy must use the supplied
     // TuiState rather than inheriting that unrelated prior frame.
     crate::tui::ui::set_tail_catchup_active(true);
+    // The flicker frame history is process-global, and under cfg(test) the
+    // age-based expiry in recent_flicker_ui_notice() is compiled out. Any
+    // earlier test in this binary that recorded a flicker event therefore
+    // leaves one visible forever, `has_notification()` reports true, and this
+    // state takes the fast-redraw branch (16ms) instead of the startup cadence.
+    // That is a real ordering dependency, not a flake: running
+    // test_flicker_frame_history_detects_layout_oscillation immediately before
+    // this test fails it 100% of the time.
+    clear_flicker_frame_history_for_tests();
     // Pin a Full-tier policy so the assertion is deterministic regardless of
     // ambient machine load: crate::perf::profile() is a load-sensitive
     // OnceLock, and on a saturated host it can latch a degraded tier that
@@ -309,10 +318,6 @@ fn make_prepared_chat_frame_with_content_bytes(
     marker: &str,
 ) -> Arc<PreparedChatFrame> {
     make_prepared_chat_frame(make_prepared_messages_with_content_bytes(bytes, marker))
-}
-
-fn make_oversized_prepared_chat_frame(marker: &str) -> Arc<PreparedChatFrame> {
-    make_prepared_chat_frame(make_oversized_prepared_messages(marker))
 }
 
 #[test]

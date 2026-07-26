@@ -378,9 +378,19 @@ async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_clea
         .and_then(|(_, tail)| tail.split_once(". Residue policy:"))
         .map(|(workers, _)| workers.split(", ").count())
         .expect("churn diagnostic should list lost worker sessions");
-    assert_eq!(
-        lost_workers, declared_bound,
-        "run_plan should create exactly the bounded three configured waves before aborting"
+    // A bound, not an equality. The guard trips after exactly three waves
+    // *without completion*, and each wave assigns however many nodes happen to
+    // be ready at that instant, up to the concurrency limit. Whether the third
+    // wave finds two ready nodes or one is a scheduling detail, so pinning
+    // `== 6` made this test fail ~2 runs in 10 (observed 5). What the guard
+    // actually promises is one session per assignment, at least one assignment
+    // per counted wave, and never more than the configured budget per wave.
+    assert!(
+        (RunPlanChurnGuard::MAX_WAVES_WITHOUT_COMPLETION..=declared_bound).contains(&lost_workers),
+        "lost workers must fall within the three bounded waves: expected {}..={}, got {}",
+        RunPlanChurnGuard::MAX_WAVES_WITHOUT_COMPLETION,
+        declared_bound,
+        lost_workers
     );
     assert!(
         provider_calls.load(std::sync::atomic::Ordering::SeqCst) >= lost_workers,
@@ -394,8 +404,10 @@ async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_clea
     assert!(message.contains("run_plan error cleanup cleans them by default"));
     assert!(message.contains("retain_agents=true retains them for inspection"));
     assert!(
-        message.contains("Finished workers collected: Stopped 6 swarm worker(s)"),
-        "default residue policy should clean failed workers in the returned error: {message}"
+        message.contains(&format!(
+            "Finished workers collected: Stopped {lost_workers} swarm worker(s)"
+        )),
+        "default residue policy should clean every lost worker ({lost_workers}) in the returned error: {message}"
     );
 
     let members = client

@@ -51,29 +51,63 @@ pub fn hot_restart(session_id: &str) -> Result<()> {
     Err(anyhow::anyhow!("Failed to exec {:?}: {}", exe, err))
 }
 
+/// Resolve the explicit migrate target for the next reload exec, if any.
+///
+/// `JCODE_MIGRATE_BINARY` may name a binary directly. When it names a path that
+/// no longer exists (the case F20c created by retiring the `stable` channel that
+/// used to populate it), fall back to the nix-managed binary so the escape hatch
+/// still lands on a real, package-manager-owned generation instead of silently
+/// doing nothing. Returns `None` when there is no usable target, so the caller
+/// falls through to normal reload resolution.
+fn migrate_target() -> Option<std::path::PathBuf> {
+    let requested = std::env::var_os("JCODE_MIGRATE_BINARY")?;
+    let requested = std::path::PathBuf::from(requested.to_string_lossy().trim());
+    if requested.as_os_str().is_empty() {
+        return None;
+    }
+    if requested.exists() {
+        return Some(requested);
+    }
+
+    match build::nix_managed_fallback_binary() {
+        Some(fallback) => {
+            crate::logging::warn(&format!(
+                "Migration binary {:?} not found; using nix-managed binary {:?}",
+                requested, fallback
+            ));
+            Some(fallback)
+        }
+        None => {
+            crate::logging::warn(&format!(
+                "Migration binary {:?} not found and no nix-managed binary available; \
+                 falling back to normal reload resolution",
+                requested
+            ));
+            None
+        }
+    }
+}
+
 pub fn hot_reload(session_id: &str) -> Result<()> {
     let cwd = std::env::current_dir()?;
 
     crate::env::set_var("JCODE_RESUMING", "1");
 
-    if let Ok(migrate_binary) = std::env::var("JCODE_MIGRATE_BINARY") {
-        let binary_path = std::path::PathBuf::from(&migrate_binary);
-        if binary_path.exists() {
-            crate::logging::info("Migrating to stable binary...");
-            let mut cmd = ProcessCommand::new(&binary_path);
-            cmd.arg("--resume")
-                .arg(session_id)
-                .arg("--no-update")
-                .env_remove("JCODE_MIGRATE_BINARY")
-                .current_dir(cwd);
-            let err = crate::platform::replace_process(&mut cmd);
-            return Err(anyhow::anyhow!("Failed to exec {:?}: {}", binary_path, err));
-        } else {
-            crate::logging::warn(&format!(
-                "Migration binary not found at {:?}, falling back to local binary",
-                binary_path
-            ));
-        }
+    // Escape hatch: `JCODE_MIGRATE_BINARY` pins the next exec to an explicit
+    // binary. F20c retired the `stable` channel that used to populate it, so the
+    // fallback is now the nix-managed binary (the package manager's generation,
+    // rolled back with `home-manager`/`nix profile rollback`). An unset or
+    // missing target simply falls through to normal reload resolution.
+    if let Some(binary_path) = migrate_target() {
+        crate::logging::info(&format!("Migrating to binary {:?}...", binary_path));
+        let mut cmd = ProcessCommand::new(&binary_path);
+        cmd.arg("--resume")
+            .arg(session_id)
+            .arg("--no-update")
+            .env_remove("JCODE_MIGRATE_BINARY")
+            .current_dir(&cwd);
+        let err = crate::platform::replace_process(&mut cmd);
+        return Err(anyhow::anyhow!("Failed to exec {:?}: {}", binary_path, err));
     }
 
     let is_selfdev = crate::cli::selfdev::client_selfdev_requested();
@@ -129,72 +163,33 @@ pub fn hot_reload(session_id: &str) -> Result<()> {
     ))
 }
 
+/// `/update` from inside a live session.
+///
+/// F20c removed the GitHub-release download path, so for a source checkout an
+/// update *is* a pull + rebuild: delegate to the rebuild path, which already
+/// pulls, builds, publishes, and re-execs into the fresh binary. Nix-managed
+/// installs are inert here (the package manager owns the binary), so we print
+/// the honest guidance and resume the session instead of pretending to update.
 pub fn hot_update(session_id: &str) -> Result<()> {
-    let cwd = std::env::current_dir()?;
-
-    update::print_centered("Checking for updates...");
-
-    match update::check_for_update_blocking() {
-        Ok(Some(release)) => {
-            let current = jcode_build_meta::VERSION;
-            update::print_centered(&format!(
-                "Update available: {} -> {}",
-                current, release.tag_name
-            ));
-            update::print_centered(&format!("Downloading {}...", release.tag_name));
-
-            match update::download_and_install_blocking_with_progress(&release, |progress| {
-                update::print_centered(&format!(
-                    "{} {}",
-                    release.tag_name,
-                    update::format_download_progress_bar(progress)
-                ));
-            }) {
-                Ok(path) => {
-                    update::print_centered(&format!("✓ Installed {}", release.tag_name));
-                    reload_server_after_update("installed update");
-
-                    let is_selfdev = crate::cli::selfdev::client_selfdev_requested();
-                    let exe = build::client_update_candidate(is_selfdev)
-                        .map(|(p, _)| p)
-                        .unwrap_or(path);
-
-                    update::print_centered(&format!("Restarting with session {}...", session_id));
-
-                    crate::env::set_var("JCODE_RESUMING", "1");
-
-                    let mut cmd = ProcessCommand::new(&exe);
-                    if is_selfdev {
-                        cmd.arg("self-dev");
-                    }
-                    cmd.arg("--resume")
-                        .arg(session_id)
-                        .arg("--no-update")
-                        .current_dir(&cwd);
-                    let err = crate::platform::replace_process(&mut cmd);
-                    return Err(anyhow::anyhow!("Failed to exec {:?}: {}", exe, err));
-                }
-                Err(e) => {
-                    update::print_centered(&format!("✗ Download failed: {}", e));
-                    update::print_centered("Resuming session with current version...");
-                }
-            }
-        }
-        Ok(None) => {
-            if repair_stale_shared_server_after_update_check() {
-                reload_server_after_update("repaired stale server target");
-            }
-            update::print_centered(&format!(
-                "Already up to date ({})",
-                jcode_build_meta::VERSION
-            ));
-        }
-        Err(e) => {
-            update::print_centered(&format!("✗ Update check failed: {}", e));
-            update::print_centered("Resuming session with current version...");
-        }
+    if build::is_externally_managed() {
+        print_nix_managed_update_guidance();
+        return resume_session_with_current_binary(session_id);
     }
 
+    if get_repo_dir().is_none() {
+        update::print_centered("No jcode source checkout found; nothing to update.");
+        update::print_centered("Install jcode with nix to receive updates.");
+        return resume_session_with_current_binary(session_id);
+    }
+
+    hot_rebuild(session_id)
+}
+
+/// Re-exec the *current* binary to resume `session_id` unchanged. Used when an
+/// update turns out to be a no-op (nix-managed, or no source checkout) so the
+/// session still comes back instead of dropping the user at a shell.
+fn resume_session_with_current_binary(session_id: &str) -> Result<()> {
+    let cwd = std::env::current_dir()?;
     crate::env::set_var("JCODE_RESUMING", "1");
     let exe = std::env::current_exe()?;
     let is_selfdev = crate::cli::selfdev::client_selfdev_requested();
@@ -208,6 +203,14 @@ pub fn hot_update(session_id: &str) -> Result<()> {
         .current_dir(&cwd);
     let err = crate::platform::replace_process(&mut cmd);
     Err(anyhow::anyhow!("Failed to exec {:?}: {}", exe, err))
+}
+
+fn print_nix_managed_update_guidance() {
+    update::print_centered("jcode is managed by nix; self-update is disabled.");
+    update::print_centered("Update it the way you installed it:");
+    update::print_centered("  home-manager:  rebuild your home-manager generation");
+    update::print_centered("  nix profile:   nix profile upgrade jcode  (or your flake ref)");
+    update::print_centered("  flake input:   nix flake update jcode  then rebuild");
 }
 
 pub fn get_repo_dir() -> Option<std::path::PathBuf> {
@@ -298,8 +301,8 @@ pub fn run_auto_update() -> Result<()> {
         anyhow::bail!("cargo build failed");
     }
 
-    if let Err(e) = build::install_local_release(&repo_dir) {
-        crate::logging::warn(&format!("auto-update install failed: {}", e));
+    if let Err(e) = build::publish_local_current_build(&repo_dir) {
+        crate::logging::warn(&format!("auto-update publish failed: {}", e));
     }
 
     let hash = ProcessCommand::new("git")
@@ -332,55 +335,15 @@ pub fn run_auto_update() -> Result<()> {
 
 pub fn run_update() -> Result<()> {
     // Nix/externally managed installs are updated by the package manager, not by
-    // downloading a GitHub release over the read-only store path. Surface honest
-    // guidance instead of attempting an install that would silently drift the
-    // launcher off the managed binary.
+    // jcode. Surface honest guidance instead of attempting an install that would
+    // fail against the read-only store path (or drift the launcher off it).
     if build::is_externally_managed() {
-        update::print_centered("jcode is managed by nix; self-update is disabled.");
-        update::print_centered("Update it the way you installed it:");
-        update::print_centered("  home-manager:  rebuild your home-manager generation");
-        update::print_centered("  nix profile:   nix profile upgrade jcode  (or your flake ref)");
-        update::print_centered("  flake input:   nix flake update jcode  then rebuild");
+        print_nix_managed_update_guidance();
         return Ok(());
     }
 
-    if update::is_release_build() {
-        update::print_centered("Checking GitHub for latest release...");
-        match update::check_for_update_blocking() {
-            Ok(Some(release)) => {
-                update::print_centered(&format!(
-                    "Downloading {} \u{2192} {}...",
-                    jcode_build_meta::VERSION,
-                    release.tag_name
-                ));
-                let _path =
-                    update::download_and_install_blocking_with_progress(&release, |progress| {
-                        update::print_centered(&format!(
-                            "{} {}",
-                            release.tag_name,
-                            update::format_download_progress_bar(progress)
-                        ));
-                    })?;
-                update::print_centered(&format!("✅ Updated to {}", release.tag_name));
-                reload_server_after_update("installed update");
-                update::print_centered("Restart jcode to use the new version.");
-            }
-            Ok(None) => {
-                if repair_stale_shared_server_after_update_check() {
-                    reload_server_after_update("repaired stale server target");
-                }
-                update::print_centered(&format!(
-                    "Already up to date ({})",
-                    jcode_build_meta::VERSION
-                ));
-            }
-            Err(e) => {
-                anyhow::bail!("Update check failed: {}", e);
-            }
-        }
-        return Ok(());
-    }
-
+    // F20c: there is no release-acquisition path left. A non-nix install updates
+    // from its own source checkout.
     let repo_dir =
         get_repo_dir().ok_or_else(|| anyhow::anyhow!("Could not find jcode repository"))?;
 
@@ -399,8 +362,8 @@ pub fn run_update() -> Result<()> {
         anyhow::bail!("cargo build failed");
     }
 
-    if let Err(e) = build::install_local_release(&repo_dir) {
-        update::print_centered(&format!("Warning: install failed: {}", e));
+    if let Err(e) = build::publish_local_current_build(&repo_dir) {
+        update::print_centered(&format!("Warning: publish failed: {}", e));
     }
 
     let hash = ProcessCommand::new("git")
@@ -410,35 +373,9 @@ pub fn run_update() -> Result<()> {
 
     let hash = String::from_utf8_lossy(&hash.stdout);
     update::print_centered(&format!("Successfully updated to {}", hash.trim()));
+    reload_server_after_update("source update");
 
     Ok(())
-}
-
-fn repair_stale_shared_server_after_update_check() -> bool {
-    match build::repair_stale_shared_server_channel() {
-        Ok(build::SharedServerRepair::Repaired {
-            previous,
-            repaired_to,
-        }) => {
-            crate::logging::info(&format!(
-                "update: repaired stale shared-server channel {:?} -> {}",
-                previous, repaired_to
-            ));
-            update::print_centered(&format!(
-                "Repaired stale server reload target: {}",
-                repaired_to
-            ));
-            true
-        }
-        Ok(build::SharedServerRepair::AlreadyCurrent) => false,
-        Err(error) => {
-            crate::logging::warn(&format!(
-                "update: failed to repair stale shared-server channel: {}",
-                error
-            ));
-            false
-        }
-    }
 }
 
 fn reload_server_after_update(reason: &str) {
