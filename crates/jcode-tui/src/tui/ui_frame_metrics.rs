@@ -274,13 +274,11 @@ pub(super) struct FullPrepPhaseMetrics {
     pub compose_ms: f64,
 }
 
-
 #[derive(Default)]
 struct SlowFrameHistory {
     samples: VecDeque<SlowFrameSample>,
     last_log_at_ms: Option<u64>,
 }
-
 
 const SLOW_FRAME_HISTORY_MAX_SAMPLES: usize = 128;
 const SLOW_FRAME_LOG_INTERVAL_MS: u64 = 1_000;
@@ -296,7 +294,6 @@ fn frame_perf_stats() -> &'static Mutex<FramePerfStats> {
 fn slow_frame_history() -> &'static Mutex<SlowFrameHistory> {
     SLOW_FRAME_HISTORY.get_or_init(|| Mutex::new(SlowFrameHistory::default()))
 }
-
 
 fn frame_resource_start() -> &'static Mutex<Option<FrameResourceStart>> {
     FRAME_RESOURCE_START.get_or_init(|| Mutex::new(None))
@@ -319,7 +316,6 @@ fn slow_frame_threshold_ms() -> f64 {
             .unwrap_or(40.0)
     })
 }
-
 
 fn with_frame_perf_stats_mut(f: impl FnOnce(&mut FramePerfStats)) {
     let mut stats = frame_perf_stats()
@@ -559,7 +555,6 @@ pub(super) fn viewport_stability_hash(
     hasher.finish()
 }
 
-
 fn duration_ms(elapsed: Duration) -> f64 {
     elapsed.as_secs_f64() * 1000.0
 }
@@ -745,7 +740,6 @@ fn clock_ticks_per_second() -> Option<f64> {
     None
 }
 
-
 pub(super) fn finalize_frame_metrics(
     app: &dyn TuiState,
     total_start: Instant,
@@ -816,7 +810,6 @@ pub(super) fn finalize_frame_metrics(
         });
     }
 }
-
 
 pub(crate) fn record_slow_frame_sample(sample: SlowFrameSample) {
     let mut history = slow_frame_history()
@@ -898,7 +891,6 @@ pub(crate) fn clear_slow_frame_history_for_tests() {
     reset_frame_perf_stats();
     set_last_chat_scrollbar_visible(false);
 }
-
 
 #[cfg(test)]
 mod draw_call_tests {
