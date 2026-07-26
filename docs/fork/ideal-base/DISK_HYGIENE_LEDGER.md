@@ -19,6 +19,19 @@ The F17 CI-validation campaign spun up many throwaway `CARGO_TARGET_DIR`,
 
 Data volume as of this update: ~67 GiB free (79%). No emergency pressure.
 
+## Update 2026-07-26 (F20c close-out)
+
+`nix store gc` reclaimed **112 GiB** (45G -> 157G free; volume now ~68% used).
+No disk pressure remains. `target/` sits at ~90 GiB and stays disposable per
+rows #1/#2 (defer to F21's clean-state rebuilds). New post-F20c-merge facts
+for row #3: `~/.jcode/builds` is 4.6 GiB across 24 versions, and the live
+launcher chain is stranded on the *old* path
+(`~/.local/bin/jcode -> ~/.jcode/builds/current/jcode -> versions/59521d509-dirty`,
+a dirty Jul 20 build that wins PATH over the nix-managed v0.46.0; the
+post-F20c fixed path `~/.jcode/current/jcode` does not exist yet). Republish
+and relink **after** the F20c PR merges, then reclaim `builds/`. Six git
+stashes also remain; triage before dropping.
+
 Rule of engagement (unchanged): never delete a live git worktree
 (`git worktree list`) or an evidence bundle referenced by a node's
 `evidence[]`. Build `target/` and cargo caches are always reversible (a rebuild
