@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F20c",
+    "node": "F21",
     "state": "accepted",
-    "commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
-    "updated_at": "2026-07-26T04:19:10Z",
-    "summary": "Distribution surface retired: jcode-update-core deleted, version store and channel matrix cut, installers and R10 fixture removed, doctor detects retired-layout residue. All 11 preflight gates green and full workspace suite double green (6622/0 twice) at the final HEAD. Five real defects root-caused en route (four ambient-state class); follow-up filed as F29."
+    "commit": "191b27093221171fb25bf549b4c413f3b97483d1",
+    "updated_at": "2026-07-26T09:04:08Z",
+    "summary": "F21 accepted: full CI/package/updater gate green twice from clean state at one commit. 12/12 checks agree across both runs including the nix store path (fa0mbkdylvqnr3r66dx9if4m743y01d9); run 2 reproduced the derivation without rebuilding. Determinism judged on normalized per-check fingerprints, not raw logs; suite fingerprints pin pass counts so silent test-count drift cannot pass. Gate proven non-vacuous three ways: comparator sabotage, real checks run against a source binary presented as the package (4/6 correctly refused), and residue sabotage. Three assumed APIs were checked against source and found wrong before use. Found and fixed a real Linux-only F28 regression en route: test fixtures released their env lease before restoring JCODE_HOME (two independent instances), now gated structurally by check_env_lease_drop_order.py."
   },
   "nodes": {
     "W0": {
@@ -269,11 +269,15 @@
       "updated_at": "2026-07-24T05:01:46Z"
     },
     "F21": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "commit": "191b27093221171fb25bf549b4c413f3b97483d1",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F21/README.md",
+        "docs/fork/ideal-base/evidence/F21/two-run-manifest.md",
+        "docs/fork/ideal-base/evidence/F21/two-run.json"
+      ],
+      "summary": "F21 accepted: full CI/package/updater gate green twice from clean state at one commit. 12/12 checks agree across both runs including the nix store path (fa0mbkdylvqnr3r66dx9if4m743y01d9); run 2 reproduced the derivation without rebuilding. Determinism judged on normalized per-check fingerprints, not raw logs; suite fingerprints pin pass counts so silent test-count drift cannot pass. Gate proven non-vacuous three ways: comparator sabotage, real checks run against a source binary presented as the package (4/6 correctly refused), and residue sabotage. Three assumed APIs were checked against source and found wrong before use. Found and fixed a real Linux-only F28 regression en route: test fixtures released their env lease before restoring JCODE_HOME (two independent instances), now gated structurally by check_env_lease_drop_order.py.",
+      "updated_at": "2026-07-26T09:04:08Z"
     },
     "F22": {
       "state": "pending",
