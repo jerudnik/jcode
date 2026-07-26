@@ -663,6 +663,10 @@ fn build_messages_sanitizes_missing_tool_output_ids() {
 
 #[test]
 fn wi4_copilot_premium_preserves_values_and_fallback() {
+    // `JCODE_COPILOT_PREMIUM` feeds jcode-base's global config cache
+    // fingerprint, so mutating it without the shared test environment lease
+    // races every other concurrently running test in the process.
+    let _guard = jcode_base::storage::lock_test_env();
     let previous = std::env::var_os("JCODE_COPILOT_PREMIUM");
 
     jcode_base::env::set_var("JCODE_COPILOT_PREMIUM", "0");

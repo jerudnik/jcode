@@ -31,13 +31,26 @@ $installScript = Join-Path $repoRoot 'scripts\install.ps1'
     -SkipAlacrittySetup `
     -SkipHotkeySetup
 
+# F20c: the installer publishes to ONE fixed path. The version store and the
+# stable channel it used to assert here were deleted, so asserting them would
+# only re-pin state no resolver reads.
 $launcherPath = Join-Path $installDir 'jcode.exe'
-$versionDir = Join-Path $localAppData ('jcode\builds\versions\' + $Version.TrimStart('v') + '\jcode.exe')
-$stablePath = Join-Path $localAppData 'jcode\builds\stable\jcode.exe'
+# The verifier must assert the path the RESOLVER reads (jcode_dir() = JCODE_HOME
+# here), not the installer's own notion of where it wrote. Asserting the
+# installer's path would let a writer/reader divergence pass CI.
+$publishedPath = Join-Path $jcodeHome 'current\jcode.exe'
 
-foreach ($path in @($launcherPath, $versionDir, $stablePath)) {
+foreach ($path in @($launcherPath, $publishedPath)) {
     if (-not (Test-Path -LiteralPath $path)) {
         throw "Expected installed file missing: $path"
+    }
+}
+
+# The retired layout must not be recreated by the installer.
+foreach ($residue in @('builds\versions', 'builds\stable', 'builds\current')) {
+    $residuePath = Join-Path $jcodeHome $residue
+    if (Test-Path -LiteralPath $residuePath) {
+        throw "Retired distribution layout was recreated: $residuePath"
     }
 }
 
@@ -59,6 +72,11 @@ if ($versionOutput -notmatch 'jcode') {
 
 if (-not (Test-Path -LiteralPath $launcherPath)) {
     throw "Launcher missing after reinstall: $launcherPath"
+}
+
+# Reinstall republishes in place rather than accumulating versions.
+if (-not (Test-Path -LiteralPath $publishedPath)) {
+    throw "Published binary missing after reinstall: $publishedPath"
 }
 
 Write-Host "Windows install verification passed for $Version" -ForegroundColor Green

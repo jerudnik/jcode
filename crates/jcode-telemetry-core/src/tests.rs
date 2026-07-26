@@ -33,8 +33,57 @@ fn lock_test_env() -> std::sync::MutexGuard<'static, ()> {
     global_test_lock()
 }
 
-fn lock_telemetry_test_state() -> std::sync::MutexGuard<'static, ()> {
-    global_test_lock()
+/// Serializes session tests *and* isolates them from the developer's real
+/// jcode home and environment.
+///
+/// `begin_session_with_mode` is a no-op when `is_enabled()` is false, and
+/// `is_enabled()` consults `JCODE_NO_TELEMETRY`, `DO_NOT_TRACK`, and a
+/// `~/.jcode/no_telemetry` marker file. On a machine that has opted out (a
+/// perfectly normal state for a developer) every session test silently
+/// recorded nothing, then panicked while holding `SESSION_STATE`, poisoning
+/// the lock and cascading `PoisonError` into the rest of the suite. Tests must
+/// not depend on whether the person running them opted out of telemetry.
+struct TelemetrySessionTestEnv {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _home: tempfile::TempDir,
+    prev_home: Option<std::ffi::OsString>,
+    prev_no_telemetry: Option<std::ffi::OsString>,
+    prev_do_not_track: Option<std::ffi::OsString>,
+}
+
+impl Drop for TelemetrySessionTestEnv {
+    fn drop(&mut self) {
+        restore_env("JCODE_HOME", self.prev_home.take());
+        restore_env("JCODE_NO_TELEMETRY", self.prev_no_telemetry.take());
+        restore_env("DO_NOT_TRACK", self.prev_do_not_track.take());
+    }
+}
+
+fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+    match value {
+        Some(value) => jcode_core::env::set_var(key, value),
+        None => jcode_core::env::remove_var(key),
+    }
+}
+
+fn lock_telemetry_test_state() -> TelemetrySessionTestEnv {
+    let lock = global_test_lock();
+    let home = tempfile::TempDir::new().expect("create temp JCODE_HOME");
+    let env = TelemetrySessionTestEnv {
+        prev_home: std::env::var_os("JCODE_HOME"),
+        prev_no_telemetry: std::env::var_os("JCODE_NO_TELEMETRY"),
+        prev_do_not_track: std::env::var_os("DO_NOT_TRACK"),
+        _lock: lock,
+        _home: home,
+    };
+    jcode_core::env::set_var("JCODE_HOME", env._home.path());
+    jcode_core::env::remove_var("JCODE_NO_TELEMETRY");
+    jcode_core::env::remove_var("DO_NOT_TRACK");
+    assert!(
+        is_enabled(),
+        "session tests require telemetry enabled inside the isolated home"
+    );
+    env
 }
 
 #[test]

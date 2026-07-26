@@ -1,0 +1,26 @@
+# Real-machine retired-layout detection (F20c)
+# captured: 2026-07-25T03:06:46Z
+#
+# This box was installed before F20c, so it is the honest test case:
+# the launcher still resolves into the retired layout.
+
+$ jcode doctor
+client:  /Users/jrudnik/labs/jcode/target/selfdev/jcode  origin=source  0.46.0 (d82eb5a42) +dirty
+  built-from: /Users/jrudnik/labs/jcode
+nix:     /nix/store/8fg6b03y23kaw0np1n6cvplh77qga8v1-jcode-nix-managed/bin/jcode  v0.46.0 (2ccf43f)
+github:  main c2dbab58 checked_at=1784948810
+server:  /var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/jcode.sock  pid=90605  🏰 castle  v0.46.0-dev (59521d509) started 2026-07-25T01:54:02.836719+00:00
+verdict: RECONNECT -- build mismatch: client 0.46.0 (d82eb5a42) != server v0.46.0-dev (59521d509); run `jcode server reload`
+drift:   running binary is not the nix-installed one (running d82eb5a4 vs nix 2ccf43f) -- repoint ~/.local/bin/jcode or relaunch; nix build is behind github main (2ccf43f vs c2dbab58) -- run `nix flake update jcode`
+retired: 8 leftover entries under ~/.jcode/builds (4.5 GiB) -- the pre-F20c version store; nothing reads it
+  WARNING: the launcher still resolves into the retired layout, so `jcode` on PATH runs a binary nothing can update. Reinstall or run `jcode selfdev` to republish and relink.
+fallback: nix run github:jerudnik/jcode -- doctor   (or `jcode server reload`)
+
+$ jcode doctor --clean-retired-layout   # must refuse, launcher is stranded
+Error: refusing to clean: the launcher still resolves into /Users/jrudnik/.jcode/builds/versions
+That binary is what `jcode` on PATH runs today, and nothing can update it anymore.
+Re-point the launcher first (reinstall, or run `jcode selfdev` in the repo to republish), then re-run this command.
+exit=0
+
+$ du -sh ~/.jcode/builds
+4.6G	/Users/jrudnik/.jcode/builds

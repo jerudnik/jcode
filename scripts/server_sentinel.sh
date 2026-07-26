@@ -5,8 +5,10 @@
 # without exec'ing a successor (e.g. the 2026-07-19 reload -> accept-loop-failure
 # race), stranding every attached client until a human respawns it. This script
 # is the deliberately dumb safety net: it shares no code with the harness it
-# guards, observes liveness with the *stable* binary, and after a generous
-# grace period respawns the daemon using the approved shared-server channel.
+# guards, and after a generous grace period respawns the daemon from the single
+# published binary (F20c: the stable/shared-server channels it used to rescue
+# from were deleted, so rescuing from them would either do nothing or resurrect
+# a binary nothing can update).
 #
 # It never kills anything, never selects builds, and never touches sessions.
 # Worst case it does nothing and you are exactly where you'd be without it.
@@ -20,8 +22,11 @@
 set -euo pipefail
 
 JCODE_HOME="${JCODE_HOME:-$HOME/.jcode}"
-STABLE_BIN="$JCODE_HOME/builds/stable/jcode"
-SHARED_BIN="$JCODE_HOME/builds/shared-server/jcode"
+# The one atomic publish target every client and daemon resolves to (F20b/F20c).
+PUBLISHED_BIN="$JCODE_HOME/current/jcode"
+# The package-managed binary, used when this install is nix-managed and there is
+# no self-managed publish.
+LAUNCHER_BIN="${JCODE_LAUNCHER_BIN:-$HOME/.local/bin/jcode}"
 LOG="$JCODE_HOME/sentinel.log"
 # Under launchd TMPDIR is unset; resolve the per-user temp dir the same way
 # the daemon does (macOS confstr) before falling back to /tmp.
@@ -85,16 +90,17 @@ intentional_shutdown() {
 }
 
 rescue_binary() {
-    # Prefer the approved shared-server channel (what a healthy reload would
-    # have exec'd); fall back to stable. Never the raw dev build.
-    if [[ -x "$SHARED_BIN" ]]; then echo "$SHARED_BIN"; else echo "$STABLE_BIN"; fi
+    # Prefer the published binary (exactly what a healthy reload would have
+    # exec'd); fall back to the launcher, which on a nix-managed install is the
+    # package-owned binary. Never the raw dev build.
+    if [[ -x "$PUBLISHED_BIN" ]]; then echo "$PUBLISHED_BIN"; else echo "$LAUNCHER_BIN"; fi
 }
 
 rescue() {
     local bin
     bin="$(rescue_binary)"
     if [[ ! -x "$bin" ]]; then
-        log "RESCUE_SKIPPED no executable rescue binary (checked $SHARED_BIN, $STABLE_BIN)"
+        log "RESCUE_SKIPPED no executable rescue binary (checked $PUBLISHED_BIN, $LAUNCHER_BIN)"
         return 1
     fi
     log "RESCUE spawning daemon via $bin serve"

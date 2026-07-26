@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use std::process::Command as ProcessCommand;
 
 use crate::{build, logging, perf, server, startup_profile, storage, telemetry, update};
 
@@ -271,71 +270,51 @@ fn spawn_background_update_check(args: &Args) {
         return;
     }
 
-    if update::is_release_build() {
-        std::thread::spawn(move || match update::check_and_maybe_update(auto_update) {
-            update::UpdateCheckResult::UpdateAvailable {
-                current, latest, ..
-            } => {
-                logging::info(&format!("Update available: {} -> {}", current, latest));
-            }
-            update::UpdateCheckResult::UpdateInstalled { version, path } => {
-                logging::info(&format!("Updated to {}. Restarting...", version));
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                let args: Vec<String> = std::env::args().skip(1).collect();
-                let exec_path = build::client_update_candidate(false)
-                    .map(|(p, _)| p)
-                    .unwrap_or(path);
-                let err = crate::platform::replace_process(
-                    ProcessCommand::new(&exec_path)
-                        .args(&args)
-                        .arg("--no-update"),
-                );
-                eprintln!("Failed to exec new binary: {}", err);
-            }
-            update::UpdateCheckResult::Error(e) => {
-                logging::info(&format!("Update check failed: {}", e));
-            }
-            update::UpdateCheckResult::NoUpdate => {}
-        });
-    } else {
-        std::thread::spawn(move || {
-            use crate::bus::{Bus, BusEvent, UpdateStatus};
+    // F20c removed the GitHub-release acquisition path, so a packaged release
+    // build has nothing to check: nix owns the binary and updates it out of
+    // band. Only a source checkout has a meaningful background check (is the
+    // local repo behind its upstream?), which is what the branch below does.
+    if update::is_release_build() || build::is_externally_managed() {
+        return;
+    }
 
-            let start = std::time::Instant::now();
-            Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Checking));
-            if let Some(update_available) = hot_exec::check_for_updates()
-                && update_available
-            {
-                Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Available {
-                    current: jcode_build_meta::VERSION.to_string(),
-                    latest: "latest source".to_string(),
+    std::thread::spawn(move || {
+        use crate::bus::{Bus, BusEvent, UpdateStatus};
+
+        let start = std::time::Instant::now();
+        Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Checking));
+        if let Some(update_available) = hot_exec::check_for_updates()
+            && update_available
+        {
+            Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Available {
+                current: jcode_build_meta::VERSION.to_string(),
+                latest: "latest source".to_string(),
+            }));
+            if auto_update {
+                logging::info("Update available - auto-updating...");
+                Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Installing {
+                    version: "latest source".to_string(),
                 }));
-                if auto_update {
-                    logging::info("Update available - auto-updating...");
-                    Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Installing {
-                        version: "latest source".to_string(),
-                    }));
-                    if let Err(e) = hot_exec::run_auto_update() {
-                        Bus::global()
-                            .publish(BusEvent::UpdateStatus(UpdateStatus::Error(e.to_string())));
-                        logging::error(&format!(
-                            "Auto-update failed: {}. Continuing with current version.",
-                            e
-                        ));
-                    }
-                } else {
-                    logging::info("Update available! Run `jcode update` or `/reload` to update.");
+                if let Err(e) = hot_exec::run_auto_update() {
+                    Bus::global()
+                        .publish(BusEvent::UpdateStatus(UpdateStatus::Error(e.to_string())));
+                    logging::error(&format!(
+                        "Auto-update failed: {}. Continuing with current version.",
+                        e
+                    ));
                 }
             } else {
-                Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::UpToDate));
+                logging::info("Update available! Run `jcode update` or `/reload` to update.");
             }
-            logging::info(&format!(
-                "[TIMING] background_update_check: auto_update={}, total={}ms",
-                auto_update,
-                start.elapsed().as_millis()
-            ));
-        });
-    }
+        } else {
+            Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::UpToDate));
+        }
+        logging::info(&format!(
+            "[TIMING] background_update_check: auto_update={}, total={}ms",
+            auto_update,
+            start.elapsed().as_millis()
+        ));
+    });
 }
 
 fn should_spawn_background_update_check(args: &Args) -> bool {

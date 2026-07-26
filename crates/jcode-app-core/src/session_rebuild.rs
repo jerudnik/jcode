@@ -14,7 +14,7 @@ pub fn hot_rebuild(session_id: &str) -> Result<()> {
     pull_latest_changes_for_rebuild(&repo_dir);
     run_release_build(&repo_dir)?;
     run_release_tests(&repo_dir)?;
-    install_local_release_with_warning(&repo_dir);
+    publish_local_build_with_warning(&repo_dir);
 
     let is_selfdev = jcode_selfdev_types::client_selfdev_requested();
     let exe = rebuild_reload_candidate(&repo_dir, is_selfdev);
@@ -66,9 +66,9 @@ fn run_cargo_release_step(repo_dir: &Path, args: &[&str]) -> Result<ExitStatus> 
         .status()?)
 }
 
-fn install_local_release_with_warning(repo_dir: &Path) {
-    if let Err(e) = build::install_local_release(repo_dir) {
-        eprintln!("Warning: install failed: {}", e);
+fn publish_local_build_with_warning(repo_dir: &Path) {
+    if let Err(e) = build::publish_local_current_build(repo_dir) {
+        eprintln!("Warning: publish failed: {}", e);
     }
 }
 
@@ -105,7 +105,7 @@ fn run_background_session_rebuild(session_id: String) {
     if !background_release_tests(&publisher, &repo_dir) {
         return;
     }
-    background_install_local_release(&publisher, &repo_dir);
+    background_publish_local_build(&publisher, &repo_dir);
     publish_rebuild_ready_or_error(publisher, &repo_dir);
 }
 
@@ -204,10 +204,10 @@ fn background_release_tests(publisher: &BackgroundRebuildPublisher, repo_dir: &P
     true
 }
 
-fn background_install_local_release(publisher: &BackgroundRebuildPublisher, repo_dir: &Path) {
-    if let Err(error) = build::install_local_release(repo_dir) {
+fn background_publish_local_build(publisher: &BackgroundRebuildPublisher, repo_dir: &Path) {
+    if let Err(error) = build::publish_local_current_build(repo_dir) {
         publisher.status(format!(
-            "Install warning: {}. Will reload from the repo build if needed.",
+            "Publish warning: {}. Will reload from the repo build if needed.",
             error
         ));
     }

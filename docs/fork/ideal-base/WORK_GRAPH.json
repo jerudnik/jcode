@@ -794,26 +794,48 @@
       },
       {
         "id": "F20c",
-        "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, release/windows/freebsd workflows, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
+        "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
         "kind": "implement",
         "depends_on": [
-          "F20b"
+          "F20b",
+          "F17"
         ],
         "priority": 72,
         "owned_paths": [
           "crates/jcode-update-core/**",
           "crates/jcode-build-support/src/lib.rs",
+          "crates/jcode-build-support/src/paths.rs",
+          "crates/jcode-build-support/src/storage_helpers.rs",
+          "crates/jcode-build-support/src/tests.rs",
+          "crates/jcode-build-support/src/fixed_path_resolver_tests.rs",
+          "crates/jcode-build-support/src/atomic_publish_tests.rs",
+          "crates/jcode-build-support/examples/**",
+          "crates/jcode-app-core/src/update.rs",
+          "crates/jcode-app-core/src/build.rs",
+          "crates/jcode-app-core/src/session_rebuild.rs",
+          "crates/jcode-app-core/src/server/util.rs",
+          "crates/jcode-app-core/src/server/debug_command_exec.rs",
+          "crates/jcode-app-core/src/tool/selfdev/**",
+          "src/cli/hot_exec.rs",
+          "src/cli/startup.rs",
+          "src/cli/selfdev.rs",
           "scripts/install.sh",
           "scripts/install.ps1",
           "scripts/install_release.sh",
           "scripts/quick-release.sh",
           "scripts/uninstall.sh",
           "scripts/test_install_release.sh",
+          ".github/scripts/verify_windows_install.ps1",
           "scripts/generate_release_notes.sh",
-          ".github/workflows/release.yml",
-          ".github/workflows/windows-smoke.yml",
-          ".github/workflows/freebsd-smoke.yml",
           "tests/test_r10_release_acquisition.py",
+          "crates/jcode-tui/src/tui/app.rs",
+          "crates/jcode-tui/src/tui/app/debug_cmds.rs",
+          "crates/jcode-tui/src/tui/app/local.rs",
+          "crates/jcode-tui/src/tui/app/construction.rs",
+          "crates/jcode-tui/src/tui/app/debug_profile.rs",
+          "crates/jcode-tui/src/tui/app/state_ui_maintenance.rs",
+          "crates/jcode-selfdev-types/src/lib.rs",
+          "crates/jcode-app-core/src/server.rs",
           "docs/fork/ideal-base/evidence/F20c/**"
         ],
         "acceptance_gates": [
@@ -1045,6 +1067,61 @@
         "parent": "W4"
       },
       {
+        "id": "F29",
+        "content": "Route every ambient filesystem root through the isolated jcode-storage helpers: eliminate the 41 direct dirs:: call sites in crates (plus 8 in src/cli) that bypass jcode_dir()/app_config_dir()/user_home_path() test isolation. Class A first (JCODE_HOME bypass defects: memory_log, copilot machine_id, changelog state, openrouter cache, mobile_server, browser fallback), then class B (platform config/cache dirs, the model-picker read-leak shape), then class C (home reads for ~ expansion and external discovery). For leaf crates without a storage dependency, prefer injected path parameters over new dep edges where cleaner. Add a grep gate in the F20c-removal-gate style with a monotonically shrinking allowlist that names offenders file:line. Full inventory: docs/fork/ideal-base/investigations/ambient-roots/README.md.",
+        "kind": "implement",
+        "depends_on": [
+          "F28"
+        ],
+        "priority": 70,
+        "owned_paths": [
+          "scripts/check_ambient_roots.sh",
+          "crates/jcode-base/src/memory_log.rs",
+          "crates/jcode-base/src/mobile_server.rs",
+          "crates/jcode-base/src/browser.rs",
+          "crates/jcode-base/src/hooks.rs",
+          "crates/jcode-base/src/surface_workspace.rs",
+          "crates/jcode-base/src/auth/cursor.rs",
+          "crates/jcode-base/src/config/config_file.rs",
+          "crates/jcode-setup-hints/src/**",
+          "crates/jcode-terminal-launch/src/lib.rs",
+          "crates/jcode-provider-openrouter/src/lib.rs",
+          "crates/jcode-provider-copilot-runtime/src/lib.rs",
+          "crates/jcode-provider-openai-runtime/src/openai_tests.rs",
+          "crates/jcode-app-core/src/tool/open.rs",
+          "crates/jcode-tui/src/tui/ui_changelog.rs",
+          "crates/jcode-tui/src/tui/ui_header.rs",
+          "crates/jcode-tui/src/tui/remote_diff.rs",
+          "crates/jcode-tui/src/tui/test_harness.rs",
+          "crates/jcode-tui/src/tui/app/debug.rs",
+          "crates/jcode-tui/src/video_export.rs",
+          "crates/jcode-tui-visual-debug/src/lib.rs",
+          "crates/jcode-tui-mermaid/src/mermaid_cache_render.rs",
+          "crates/jcode-tui-markdown/src/markdown_latex_image.rs",
+          "src/cli/commands.rs",
+          "src/cli/commands/doctor.rs",
+          "src/cli/commands/menubar.rs",
+          "src/cli/login.rs",
+          "src/cli/auth_test/types.rs",
+          "docs/fork/ideal-base/investigations/ambient-roots/**",
+          "docs/fork/ideal-base/evidence/F29/**"
+        ],
+        "acceptance_gates": [
+          "Zero direct dirs:: root calls outside jcode-storage, or every remaining site is on the checked-in allowlist with a stated reason; gate fails naming offenders file:line",
+          "Gate proven non-vacuous in both directions (planted offender fails; clean tree passes)",
+          "Class A sites honor JCODE_HOME via jcode_dir()/helpers; covered by unit tests that fail on revert",
+          "Full workspace suite green twice from clean state"
+        ],
+        "evidence": [
+          "gate output before/after with offender counts",
+          "planted-offender failure transcript",
+          "suite runs"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W4"
+      },
+      {
         "id": "F27",
         "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
         "kind": "verify",
@@ -1054,7 +1131,8 @@
           "F24",
           "F25",
           "F26",
-          "F28"
+          "F28",
+          "F29"
         ],
         "priority": 70,
         "owned_paths": [
@@ -1965,26 +2043,48 @@
     },
     {
       "id": "F20c",
-      "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, release/windows/freebsd workflows, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
+      "content": "Retire the now-dead distribution surface: delete the GitHub-release acquisition subsystem (download/resume/checksum, install scripts, the jcode-update-core crate, and the R10 acquisition fixture) and the hand-rolled version store plus stable/current/shared-server/canary channel machinery and its advance/repair/pending-activation code, leaving update nix/source-only.",
       "kind": "implement",
       "depends_on": [
-        "F20b"
+        "F20b",
+        "F17"
       ],
       "priority": 72,
       "owned_paths": [
         "crates/jcode-update-core/**",
         "crates/jcode-build-support/src/lib.rs",
+        "crates/jcode-build-support/src/paths.rs",
+        "crates/jcode-build-support/src/storage_helpers.rs",
+        "crates/jcode-build-support/src/tests.rs",
+        "crates/jcode-build-support/src/fixed_path_resolver_tests.rs",
+        "crates/jcode-build-support/src/atomic_publish_tests.rs",
+        "crates/jcode-build-support/examples/**",
+        "crates/jcode-app-core/src/update.rs",
+        "crates/jcode-app-core/src/build.rs",
+        "crates/jcode-app-core/src/session_rebuild.rs",
+        "crates/jcode-app-core/src/server/util.rs",
+        "crates/jcode-app-core/src/server/debug_command_exec.rs",
+        "crates/jcode-app-core/src/tool/selfdev/**",
+        "src/cli/hot_exec.rs",
+        "src/cli/startup.rs",
+        "src/cli/selfdev.rs",
         "scripts/install.sh",
         "scripts/install.ps1",
         "scripts/install_release.sh",
         "scripts/quick-release.sh",
         "scripts/uninstall.sh",
         "scripts/test_install_release.sh",
+        ".github/scripts/verify_windows_install.ps1",
         "scripts/generate_release_notes.sh",
-        ".github/workflows/release.yml",
-        ".github/workflows/windows-smoke.yml",
-        ".github/workflows/freebsd-smoke.yml",
         "tests/test_r10_release_acquisition.py",
+        "crates/jcode-tui/src/tui/app.rs",
+        "crates/jcode-tui/src/tui/app/debug_cmds.rs",
+        "crates/jcode-tui/src/tui/app/local.rs",
+        "crates/jcode-tui/src/tui/app/construction.rs",
+        "crates/jcode-tui/src/tui/app/debug_profile.rs",
+        "crates/jcode-tui/src/tui/app/state_ui_maintenance.rs",
+        "crates/jcode-selfdev-types/src/lib.rs",
+        "crates/jcode-app-core/src/server.rs",
         "docs/fork/ideal-base/evidence/F20c/**"
       ],
       "acceptance_gates": [
@@ -2214,6 +2314,61 @@
       "parent": "W4"
     },
     {
+      "id": "F29",
+      "content": "Route every ambient filesystem root through the isolated jcode-storage helpers: eliminate the 41 direct dirs:: call sites in crates (plus 8 in src/cli) that bypass jcode_dir()/app_config_dir()/user_home_path() test isolation. Class A first (JCODE_HOME bypass defects: memory_log, copilot machine_id, changelog state, openrouter cache, mobile_server, browser fallback), then class B (platform config/cache dirs, the model-picker read-leak shape), then class C (home reads for ~ expansion and external discovery). For leaf crates without a storage dependency, prefer injected path parameters over new dep edges where cleaner. Add a grep gate in the F20c-removal-gate style with a monotonically shrinking allowlist that names offenders file:line. Full inventory: docs/fork/ideal-base/investigations/ambient-roots/README.md.",
+      "kind": "implement",
+      "depends_on": [
+        "F28"
+      ],
+      "priority": 70,
+      "owned_paths": [
+        "scripts/check_ambient_roots.sh",
+        "crates/jcode-base/src/memory_log.rs",
+        "crates/jcode-base/src/mobile_server.rs",
+        "crates/jcode-base/src/browser.rs",
+        "crates/jcode-base/src/hooks.rs",
+        "crates/jcode-base/src/surface_workspace.rs",
+        "crates/jcode-base/src/auth/cursor.rs",
+        "crates/jcode-base/src/config/config_file.rs",
+        "crates/jcode-setup-hints/src/**",
+        "crates/jcode-terminal-launch/src/lib.rs",
+        "crates/jcode-provider-openrouter/src/lib.rs",
+        "crates/jcode-provider-copilot-runtime/src/lib.rs",
+        "crates/jcode-provider-openai-runtime/src/openai_tests.rs",
+        "crates/jcode-app-core/src/tool/open.rs",
+        "crates/jcode-tui/src/tui/ui_changelog.rs",
+        "crates/jcode-tui/src/tui/ui_header.rs",
+        "crates/jcode-tui/src/tui/remote_diff.rs",
+        "crates/jcode-tui/src/tui/test_harness.rs",
+        "crates/jcode-tui/src/tui/app/debug.rs",
+        "crates/jcode-tui/src/video_export.rs",
+        "crates/jcode-tui-visual-debug/src/lib.rs",
+        "crates/jcode-tui-mermaid/src/mermaid_cache_render.rs",
+        "crates/jcode-tui-markdown/src/markdown_latex_image.rs",
+        "src/cli/commands.rs",
+        "src/cli/commands/doctor.rs",
+        "src/cli/commands/menubar.rs",
+        "src/cli/login.rs",
+        "src/cli/auth_test/types.rs",
+        "docs/fork/ideal-base/investigations/ambient-roots/**",
+        "docs/fork/ideal-base/evidence/F29/**"
+      ],
+      "acceptance_gates": [
+        "Zero direct dirs:: root calls outside jcode-storage, or every remaining site is on the checked-in allowlist with a stated reason; gate fails naming offenders file:line",
+        "Gate proven non-vacuous in both directions (planted offender fails; clean tree passes)",
+        "Class A sites honor JCODE_HOME via jcode_dir()/helpers; covered by unit tests that fail on revert",
+        "Full workspace suite green twice from clean state"
+      ],
+      "evidence": [
+        "gate output before/after with offender counts",
+        "planted-offender failure transcript",
+        "suite runs"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W4"
+    },
+    {
       "id": "F27",
       "content": "Independently verify all hardening and durable-state hygiene changes and inject any cleanup or policy gaps.",
       "kind": "verify",
@@ -2223,7 +2378,8 @@
         "F24",
         "F25",
         "F26",
-        "F28"
+        "F28",
+        "F29"
       ],
       "priority": 70,
       "owned_paths": [
@@ -2549,7 +2705,8 @@
       "nodes": [
         "F15",
         "F16",
-        "F21"
+        "F21",
+        "F29"
       ],
       "class": "deterministic"
     },

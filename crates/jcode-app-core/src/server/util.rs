@@ -358,23 +358,14 @@ fn collect_reload_target_candidates(
         }
     }
 
-    if let Ok(path) = build::shared_server_binary_path()
+    // F20c: the stable/shared-server channels are gone; the only published
+    // binary is the single fixed target.
+    if let Ok(path) = build::current_fixed_binary_path()
         && path.exists()
     {
         candidates.push(target_candidate(
-            "channel",
-            "shared-server",
-            path,
-            false,
-            Vec::new(),
-        ));
-    }
-    if let Ok(path) = build::stable_binary_path()
-        && path.exists()
-    {
-        candidates.push(target_candidate(
-            "channel",
-            "stable",
+            "published",
+            "current-fixed",
             path,
             false,
             Vec::new(),
@@ -1263,111 +1254,59 @@ mod pick_newest_candidate_tests {
 #[cfg(test)]
 mod newest_reload_candidate_integration_tests {
     //! End-to-end-ish coverage that drives `newest_reload_candidate` through the
-    //! REAL channel resolution (`build::shared_server_update_candidate`) against
-    //! a temp `JCODE_HOME`. This reproduces the field "/update -> new client,
-    //! stale server" state and proves the fix: a self-dev daemon now reloads into
-    //! the freshly installed release instead of its old pinned binary.
+    //! REAL resolver (`build::shared_server_update_candidate`) against a temp
+    //! `JCODE_HOME`.
+    //!
+    //! F20c collapsed the stable/current/shared-server channel matrix onto a
+    //! single fixed publish target, which deletes the whole class of
+    //! "daemon pinned to a stale channel" bugs these tests used to reproduce.
+    //! What still needs guarding is the part that survived: a daemon must pick
+    //! up a newly published binary, and must NOT report a phantom update
+    //! against its own install when the candidate is a wrapper whose payload is
+    //! what it is actually running.
     use super::{newer_binary_available, newest_reload_candidate};
     use crate::build;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
-    fn install_versioned_binary(version: &str, mtime: SystemTime) -> std::path::PathBuf {
-        // A real, distinct file per version so mtimes are independently settable
-        // (install hard-links the source, which would share an inode/mtime).
-        let dir = build::builds_dir()
-            .expect("builds dir")
-            .join("versions")
-            .join(version);
-        std::fs::create_dir_all(&dir).expect("create version dir");
-        let path = dir.join(build::binary_name());
-        std::fs::write(&path, format!("binary for {version}")).expect("write binary");
+    struct HomeGuard<L> {
+        _temp: tempfile::TempDir,
+        prev: Option<std::ffi::OsString>,
+        _lock: L,
+    }
+
+    impl<L> HomeGuard<L> {
+        fn with_lock(lock: L) -> Self {
+            let temp = tempfile::TempDir::new().expect("temp dir");
+            let prev = std::env::var_os("JCODE_HOME");
+            crate::env::set_var("JCODE_HOME", temp.path());
+            Self {
+                _temp: temp,
+                prev,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl<L> Drop for HomeGuard<L> {
+        fn drop(&mut self) {
+            match self.prev.take() {
+                Some(prev) => crate::env::set_var("JCODE_HOME", prev),
+                None => crate::env::remove_var("JCODE_HOME"),
+            }
+        }
+    }
+
+    /// Write the single fixed publish target with a controlled mtime.
+    fn publish_fixed_binary(contents: &str, mtime: SystemTime) -> PathBuf {
+        let path = build::current_fixed_binary_path().expect("fixed path");
+        std::fs::create_dir_all(path.parent().expect("fixed dir")).expect("create fixed dir");
+        std::fs::write(&path, contents).expect("write published binary");
         std::fs::File::open(&path)
-            .expect("open binary")
+            .expect("open published binary")
             .set_modified(mtime)
             .expect("set mtime");
         path
-    }
-
-    fn candidate_version_for(is_selfdev: bool) -> Option<String> {
-        let (path, _label) = newest_reload_candidate(is_selfdev)?;
-        let canonical = std::fs::canonicalize(&path).unwrap_or(path);
-        canonical
-            .parent()
-            .and_then(Path::file_name)
-            .map(|n| n.to_string_lossy().into_owned())
-    }
-
-    #[test]
-    fn selfdev_daemon_reloads_into_fresh_release_after_update() {
-        let _guard = crate::storage::lock_test_env();
-        let temp = tempfile::TempDir::new().expect("temp dir");
-        let prev_home = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
-
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        // Field state: shared-server pinned to an OLD self-dev build; stable
-        // lags. Then `/update` installs a NEWER release and advances
-        // stable/current (but NOT the pinned shared-server channel).
-        let old_selfdev = "3f160da1-dirty-e756d52efca9";
-        let new_release = "0.15.0";
-        install_versioned_binary(old_selfdev, base);
-        install_versioned_binary(new_release, base + Duration::from_secs(60));
-
-        build::update_shared_server_symlink(old_selfdev).expect("pin shared-server");
-        build::update_stable_symlink(new_release).expect("stable advanced by update");
-        build::update_current_symlink(new_release).expect("current advanced by update");
-
-        // The self-dev session's reload target must now be the fresh release, not
-        // the stale pinned build. This is the fix.
-        assert_eq!(
-            candidate_version_for(true).as_deref(),
-            Some(new_release),
-            "self-dev daemon should reload into the freshly installed release"
-        );
-        // The normal session is unaffected (already healed to stable/release).
-        assert_eq!(
-            candidate_version_for(false).as_deref(),
-            Some(new_release),
-            "normal daemon should also target the fresh release"
-        );
-
-        if let Some(prev_home) = prev_home {
-            crate::env::set_var("JCODE_HOME", prev_home);
-        } else {
-            crate::env::remove_var("JCODE_HOME");
-        }
-    }
-
-    #[test]
-    fn selfdev_pin_is_preserved_when_it_is_the_freshest_build() {
-        let _guard = crate::storage::lock_test_env();
-        let temp = tempfile::TempDir::new().expect("temp dir");
-        let prev_home = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
-
-        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        // A deliberately-promoted self-dev build that is NEWER than stable must
-        // still be honored: the whole point of pinning shared-server.
-        let stable_old = "0.14.3";
-        let selfdev_new = "56f43c3d-dirty-deadbeef";
-        install_versioned_binary(stable_old, base);
-        install_versioned_binary(selfdev_new, base + Duration::from_secs(120));
-
-        build::update_stable_symlink(stable_old).expect("stable");
-        build::update_shared_server_symlink(selfdev_new).expect("pin newer self-dev");
-
-        assert_eq!(
-            candidate_version_for(true).as_deref(),
-            Some(selfdev_new),
-            "a fresher self-dev pin must be preserved for self-dev sessions"
-        );
-
-        if let Some(prev_home) = prev_home {
-            crate::env::set_var("JCODE_HOME", prev_home);
-        } else {
-            crate::env::remove_var("JCODE_HOME");
-        }
     }
 
     /// Re-implements `server_has_newer_binary`'s decision against an *injected*
@@ -1397,118 +1336,70 @@ mod newest_reload_candidate_integration_tests {
         )
     }
 
-    /// The question that matters for shipped users: after a NORMAL (non-self-dev)
-    /// `/update`, does the long-lived daemon actually advertise + apply the
-    /// upgrade on reconnect?
-    ///
-    /// Models a normal install: `shared-server` was tracking `stable`, the daemon
-    /// is running the old release, and `/update` installs a newer release and
-    /// advances stable/current/shared-server. We then drive the REAL
-    /// update-detection core and reload-target resolver and assert both:
-    /// (1) the daemon reports `server_has_update = true`, and
-    /// (2) the binary it reloads into is the freshly installed release.
+    /// The question that matters for users: after a publish (self-dev build or
+    /// `/update` rebuild), does the long-lived daemon advertise the upgrade and
+    /// resolve its reload target to the newly published binary?
     #[test]
-    fn normal_user_daemon_detects_and_targets_update_after_update() {
-        let _guard = crate::storage::lock_test_env();
-        let temp = tempfile::TempDir::new().expect("temp dir");
-        let prev_home = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
+    fn daemon_detects_and_targets_a_newly_published_binary() {
+        let _home = HomeGuard::with_lock(crate::storage::lock_test_env());
 
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-        let old_release = "0.14.3";
-        let new_release = "0.15.0";
-        let old_path = install_versioned_binary(old_release, base);
-        install_versioned_binary(new_release, base + Duration::from_secs(60));
+        // The running daemon is an older binary living somewhere else on disk.
+        let old_dir = tempfile::TempDir::new().expect("old dir");
+        let old_path = old_dir.path().join(build::binary_name());
+        std::fs::write(&old_path, "old daemon binary").expect("write old binary");
+        std::fs::File::open(&old_path)
+            .expect("open old binary")
+            .set_modified(base)
+            .expect("set mtime");
 
-        // Pre-update state: every channel on the old release (shared-server
-        // tracking stable). This is the steady state for a normal user.
-        build::update_stable_symlink(old_release).expect("stable old");
-        build::update_current_symlink(old_release).expect("current old");
-        build::update_shared_server_symlink(old_release).expect("shared old");
+        let published =
+            publish_fixed_binary("new published binary", base + Duration::from_secs(60));
 
-        // `/update` installs the new release and advances the channels. Because
-        // shared-server was tracking stable, it advances too.
-        build::advance_shared_server_if_tracking_stable(new_release).expect("advance shared");
-        build::update_stable_symlink(new_release).expect("stable new");
-        build::update_current_symlink(new_release).expect("current new");
-
-        // (1) The daemon (still the OLD binary) must now SEE the update so it
-        // reports server_has_update = true to reconnecting clients.
         assert!(
             daemon_reports_update(&old_path, base),
-            "normal-user daemon should report a server update after /update advanced the channels"
+            "daemon should report an update once a newer binary is published"
         );
-
-        // (2) The binary it reloads into must be the freshly installed release.
-        assert_eq!(
-            candidate_version_for(false).as_deref(),
-            Some(new_release),
-            "normal-user daemon should reload into the freshly installed release"
-        );
-
-        if let Some(prev_home) = prev_home {
-            crate::env::set_var("JCODE_HOME", prev_home);
+        for is_selfdev in [false, true] {
+            let (target, _label) = newest_reload_candidate(is_selfdev).expect("reload candidate");
+            assert_eq!(
+                std::fs::canonicalize(&target).expect("canonical target"),
+                std::fs::canonicalize(&published).expect("canonical published"),
+                "reload target must be the single fixed publish path (is_selfdev={is_selfdev})"
+            );
         }
     }
 
-    /// Install a release-archive-style version dir: a tiny `jcode` wrapper
-    /// script plus the real `jcode-linux-x86_64.bin` payload, with independently
-    /// settable mtimes. This is exactly what `/update`'s tar.gz install path
-    /// produces on disk.
-    fn install_release_style_binary(
-        version: &str,
-        wrapper_mtime: SystemTime,
-        payload_mtime: SystemTime,
-    ) -> (std::path::PathBuf, std::path::PathBuf) {
-        let dir = build::builds_dir()
-            .expect("builds dir")
-            .join("versions")
-            .join(version);
-        std::fs::create_dir_all(&dir).expect("create version dir");
-        let payload = dir.join("jcode-linux-x86_64.bin");
-        std::fs::write(&payload, format!("payload for {version}")).expect("write payload");
-        std::fs::File::open(&payload)
-            .expect("open payload")
-            .set_modified(payload_mtime)
-            .expect("set payload mtime");
-        let wrapper = dir.join(build::binary_name());
-        std::fs::write(
-            &wrapper,
-            "#!/usr/bin/env sh\nexec ./jcode-linux-x86_64.bin \"$@\"\n",
-        )
-        .expect("write wrapper");
-        std::fs::File::open(&wrapper)
-            .expect("open wrapper")
-            .set_modified(wrapper_mtime)
-            .expect("set wrapper mtime");
-        (wrapper, payload)
-    }
-
-    /// Regression test for the post-`/update` infinite reload loop: release
-    /// archives install a wrapper script + `.bin` payload, and the install copy
-    /// loop can write the wrapper AFTER the payload. The running daemon's
-    /// `current_exe()` is the payload, while the channel candidate resolves to
-    /// the wrapper. Comparing wrapper-vs-payload mtimes made the freshly
-    /// updated daemon report "newer binary available" against ITS OWN install
-    /// forever -> the client force-reloaded the server in a loop and the
-    /// session never attached.
+    /// Regression test for the post-update infinite reload loop: when the
+    /// published target is a wrapper script that execs a payload, the running
+    /// daemon's `current_exe()` is the payload while the candidate resolves to
+    /// the wrapper. Comparing wrapper-vs-payload mtimes made a freshly updated
+    /// daemon report "newer binary available" against ITS OWN install forever,
+    /// so the client force-reloaded the server in a loop and the session never
+    /// attached. F20b's wrapper->payload resolution is what prevents this.
     #[test]
-    fn freshly_updated_release_daemon_reports_no_phantom_update() {
-        let _guard = crate::storage::lock_test_env();
-        let temp = tempfile::TempDir::new().expect("temp dir");
-        let prev_home = std::env::var_os("JCODE_HOME");
-        crate::env::set_var("JCODE_HOME", temp.path());
+    fn freshly_published_daemon_reports_no_phantom_update() {
+        let _home = HomeGuard::with_lock(crate::storage::lock_test_env());
 
         let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+        let fixed_dir = build::current_fixed_binary_path()
+            .expect("fixed path")
+            .parent()
+            .expect("fixed dir")
+            .to_path_buf();
+        std::fs::create_dir_all(&fixed_dir).expect("create fixed dir");
+        let payload = fixed_dir.join("jcode-linux-x86_64.bin");
+        std::fs::write(&payload, "payload").expect("write payload");
+        std::fs::File::open(&payload)
+            .expect("open payload")
+            .set_modified(base)
+            .expect("set payload mtime");
         // Wrapper written strictly AFTER the payload (the bad copy order).
-        let (wrapper, payload) =
-            install_release_style_binary("0.25.1", base + Duration::from_secs(5), base);
-        build::update_stable_symlink("0.25.1").expect("stable");
-        build::update_current_symlink("0.25.1").expect("current");
-        build::update_shared_server_symlink("0.25.1").expect("shared");
+        let wrapper = publish_fixed_binary(
+            "#!/usr/bin/env sh\nexec ./jcode-linux-x86_64.bin \"$@\"\n",
+            base + Duration::from_secs(5),
+        );
 
-        // The daemon runs the payload; the candidate is the wrapper. Same
-        // logical install -> no update must be reported.
         let payload_mtime = std::fs::metadata(&payload)
             .expect("payload metadata")
             .modified()
@@ -1525,12 +1416,6 @@ mod newest_reload_candidate_integration_tests {
             .modified()
             .expect("wrapper mtime");
         assert!(wrapper_mtime > payload_mtime);
-
-        if let Some(prev_home) = prev_home {
-            crate::env::set_var("JCODE_HOME", prev_home);
-        } else {
-            crate::env::remove_var("JCODE_HOME");
-        }
     }
 }
 

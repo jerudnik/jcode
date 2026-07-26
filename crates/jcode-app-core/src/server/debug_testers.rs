@@ -110,28 +110,15 @@ async fn spawn_tester(opts: serde_json::Value) -> Result<String> {
     let cols = opts.get("cols").and_then(|v| v.as_u64()).unwrap_or(120) as u16;
     let rows = opts.get("rows").and_then(|v| v.as_u64()).unwrap_or(40) as u16;
 
+    // F20c: one fixed publish target, so tester spawns resolve to it (or the
+    // running executable when nothing has been published yet).
     let binary_path = if let Some(b) = binary {
         PathBuf::from(b)
-    } else if let Ok(current) = crate::build::current_binary_path() {
-        if current.exists() {
-            current
-        } else if let Ok(canary) = crate::build::canary_binary_path() {
-            if canary.exists() {
-                canary
-            } else {
-                std::env::current_exe()?
-            }
-        } else {
-            std::env::current_exe()?
-        }
-    } else if let Ok(canary) = crate::build::canary_binary_path() {
-        if canary.exists() {
-            canary
-        } else {
-            std::env::current_exe()?
-        }
     } else {
-        std::env::current_exe()?
+        match crate::build::current_fixed_binary_path() {
+            Ok(current) if current.exists() => current,
+            _ => std::env::current_exe()?,
+        }
     };
 
     if !binary_path.exists() {

@@ -236,18 +236,10 @@ impl SelfDevTool {
                 .unwrap_or_else(|| "not found (run `selfdev setup`)".to_string())
         ));
 
-        output.push_str("\n### Build channels\n\n");
+        output.push_str("\n### Binaries\n\n");
         output.push_str(&format!(
-            "**current:** {}\n",
-            format_path(build::current_binary_path().ok().as_deref())
-        ));
-        output.push_str(&format!(
-            "**stable:** {}\n",
-            format_path(build::stable_binary_path().ok().as_deref())
-        ));
-        output.push_str(&format!(
-            "**shared-server:** {}\n",
-            format_path(build::shared_server_binary_path().ok().as_deref())
+            "**published (current):** {}\n",
+            format_path(build::current_fixed_binary_path().ok().as_deref())
         ));
         output.push_str(&format!(
             "**launcher:** {}\n",

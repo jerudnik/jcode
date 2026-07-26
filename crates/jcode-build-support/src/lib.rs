@@ -4,15 +4,14 @@ mod source_state;
 mod storage_helpers;
 
 pub use paths::{
-    SELFDEV_CARGO_PROFILE, binary_name, binary_stem, client_update_candidate,
+    RetiredLayoutResidue, SELFDEV_CARGO_PROFILE, binary_name, binary_stem, client_update_candidate,
     current_binary_build_time_string, current_binary_built_at, current_fixed_binary_path,
     current_fixed_dir, find_dev_binary, find_repo_in_ancestors, get_repo_dir,
     is_externally_managed, is_jcode_repo, launcher_binary_path, launcher_dir,
     nix_managed_fallback_binary, preferred_reload_candidate, release_binary_path,
-    resolve_binary_payload, run_selfdev_build, selfdev_binary_path, selfdev_build_command,
-    selfdev_build_command_for_target, shared_server_update_candidate,
-    update_launcher_symlink_to_current, update_launcher_symlink_to_stable,
-    version_matches_installed_channel,
+    resolve_binary_payload, retired_layout_dir, retired_layout_residue, run_selfdev_build,
+    selfdev_binary_path, selfdev_build_command, selfdev_build_command_for_target,
+    shared_server_update_candidate, update_launcher_symlink_to_current,
 };
 pub use source_state::{
     current_build_info, current_git_diff, current_git_hash, current_git_hash_full,
@@ -20,16 +19,11 @@ pub use source_state::{
     repo_build_version, repo_scope_key, worktree_scope_key,
 };
 pub use storage_helpers::{
-    build_log_path, build_progress_path, builds_dir, canary_binary_path, clear_build_progress,
-    clear_migration_context, current_binary_path, current_version_file, load_migration_context,
-    manifest_path, migration_context_path, read_build_progress, read_current_version,
-    read_shared_server_version, read_stable_version, save_migration_context,
-    shared_server_binary_path, shared_server_version_file, stable_binary_path, stable_version_file,
-    version_binary_path, write_build_progress,
+    build_log_path, build_progress_path, clear_build_progress, manifest_path, read_build_progress,
+    write_build_progress,
 };
 
 use anyhow::{Context, Result};
-use chrono::Utc;
 use jcode_storage as storage;
 use serde::{Deserialize, Serialize};
 #[cfg(unix)]
@@ -40,9 +34,8 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 pub use jcode_selfdev_types::{
-    BinaryChoice, BinaryVersionReport, BuildInfo, CanaryStatus, CrashInfo, DevBinarySourceMetadata,
-    MigrationContext, PendingActivation, PublishedBuild, RuntimeIdentityProjection,
-    SelfDevBuildCommand, SelfDevBuildTarget, SourceState,
+    BinaryVersionReport, BuildInfo, DevBinarySourceMetadata, PublishedBuild,
+    RuntimeIdentityProjection, SelfDevBuildCommand, SelfDevBuildTarget, SourceState,
 };
 
 fn metadata_version_label(metadata: &DevBinarySourceMetadata) -> String {
@@ -70,7 +63,8 @@ fn runtime_identity_projection_from_metadata(
     }
 }
 
-fn read_dev_binary_source_metadata(binary: &Path) -> Option<DevBinarySourceMetadata> {
+/// Read the source sidecar written next to a published self-dev binary.
+pub fn read_dev_binary_source_metadata(binary: &Path) -> Option<DevBinarySourceMetadata> {
     storage::read_json(&binary_source_metadata_path(binary)).ok()
 }
 
@@ -114,37 +108,43 @@ pub fn current_runtime_identity_projection(
     runtime_identity_projection_for_binary(&current_exe, activation_channel)
 }
 
-/// Manifest tracking build versions and their status
+/// Manifest of recent self-dev builds.
+///
+/// F20c retired the canary/stable/pending-activation state machine along with
+/// the multi-channel version store it coordinated: with one atomic fixed
+/// publish target there is no second channel to roll back to, and a failed
+/// publish simply leaves the previous binary in place. What remains is the
+/// build history the `self_dev status` view reports.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BuildManifest {
-    /// Current stable build hash (known good)
-    pub stable: Option<String>,
-    /// Current canary build hash (being tested)
-    pub canary: Option<String>,
-    /// Session ID testing the canary build
-    pub canary_session: Option<String>,
-    /// Status of canary testing
-    pub canary_status: Option<CanaryStatus>,
-    /// History of recent builds
+    /// History of recent builds, newest first.
     #[serde(default)]
     pub history: Vec<BuildInfo>,
-    /// Last crash information (if canary crashed)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_crash: Option<CrashInfo>,
-    /// Pending activation being validated across reload/resume.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_activation: Option<PendingActivation>,
 }
 
 impl BuildManifest {
-    /// Load manifest from disk
+    /// Load manifest from disk.
+    ///
+    /// F20c moved the manifest out of `~/.jcode/builds/` (which is now the
+    /// retired layout that `doctor --clean-retired-layout` deletes). Build
+    /// history from the old location is migrated forward once rather than
+    /// silently dropped; a failed migration is not fatal, since history is
+    /// informational.
     pub fn load() -> Result<Self> {
         let path = manifest_path()?;
         if path.exists() {
-            storage::read_json(&path)
-        } else {
-            Ok(Self::default())
+            return storage::read_json(&path);
         }
+
+        let legacy = storage_helpers::legacy_manifest_path()?;
+        if legacy.exists()
+            && let Ok(migrated) = storage::read_json::<Self>(&legacy)
+        {
+            let _ = migrated.save();
+            return Ok(migrated);
+        }
+
+        Ok(Self::default())
     }
 
     /// Save manifest to disk
@@ -153,265 +153,29 @@ impl BuildManifest {
         storage::write_json(&path, self)
     }
 
-    /// Check if we should use stable or canary for a given session
-    pub fn binary_for_session(&self, session_id: &str) -> BinaryChoice {
-        // If this session is the canary tester, use canary
-        if let Some(ref canary_session) = self.canary_session
-            && canary_session == session_id
-            && let Some(ref canary) = self.canary
-        {
-            return BinaryChoice::Canary(canary.clone());
-        }
-        // Otherwise use stable
-        if let Some(ref stable) = self.stable {
-            BinaryChoice::Stable(stable.clone())
-        } else {
-            BinaryChoice::Current
-        }
-    }
-
-    /// Start canary testing for a session
-    pub fn start_canary(&mut self, hash: &str, session_id: &str) -> Result<()> {
-        self.canary = Some(hash.to_string());
-        self.canary_session = Some(session_id.to_string());
-        self.canary_status = Some(CanaryStatus::Testing);
-        self.save()
-    }
-
-    /// Mark canary as passed
-    pub fn mark_canary_passed(&mut self) -> Result<()> {
-        self.canary_status = Some(CanaryStatus::Passed);
-        self.save()
-    }
-
-    /// Mark canary as failed
-    pub fn mark_canary_failed(&mut self) -> Result<()> {
-        self.canary_status = Some(CanaryStatus::Failed);
-        self.save()
-    }
-
-    /// Record a crash
-    pub fn record_crash(
-        &mut self,
-        hash: &str,
-        exit_code: i32,
-        stderr: &str,
-        diff: Option<String>,
-    ) -> Result<()> {
-        self.last_crash = Some(CrashInfo {
-            build_hash: hash.to_string(),
-            exit_code,
-            stderr: stderr.chars().take(4096).collect(), // Truncate
-            crashed_at: Utc::now(),
-            diff,
-        });
-        self.canary_status = Some(CanaryStatus::Failed);
-        self.save()
-    }
-
-    /// Clear crash info after it's been handled
-    pub fn clear_crash(&mut self) -> Result<()> {
-        self.last_crash = None;
-        self.save()
-    }
-
-    pub fn set_pending_activation(&mut self, activation: PendingActivation) -> Result<()> {
-        self.pending_activation = Some(activation);
-        self.save()
-    }
-
-    pub fn clear_pending_activation(&mut self) -> Result<()> {
-        self.pending_activation = None;
-        self.save()
-    }
-
-    /// Add build to history
+    /// Add build to history, keeping the most recent 20.
     pub fn add_to_history(&mut self, info: BuildInfo) -> Result<()> {
-        // Keep last 20 builds
         self.history.insert(0, info);
         self.history.truncate(20);
         self.save()
     }
 }
 
-pub fn complete_pending_activation_for_session(session_id: &str) -> Result<Option<String>> {
-    let mut manifest = BuildManifest::load()?;
-    let Some(pending) = manifest.pending_activation.clone() else {
-        return Ok(None);
-    };
-    if pending.session_id != session_id {
-        return Ok(None);
-    }
-
-    manifest.canary = Some(pending.new_version.clone());
-    manifest.canary_session = Some(session_id.to_string());
-    manifest.canary_status = Some(CanaryStatus::Passed);
-    manifest.pending_activation = None;
-    manifest.last_crash = None;
-    manifest.save()?;
-    Ok(Some(pending.new_version))
-}
-
-pub fn rollback_pending_activation_for_session(session_id: &str) -> Result<Option<String>> {
-    let mut manifest = BuildManifest::load()?;
-    let Some(pending) = manifest.pending_activation.clone() else {
-        return Ok(None);
-    };
-    if pending.session_id != session_id {
-        return Ok(None);
-    }
-
-    if let Some(previous) = pending.previous_current_version.as_deref() {
-        update_current_symlink(previous)?;
-        update_launcher_symlink_to_current()?;
-    }
-    if let Some(previous) = pending.previous_shared_server_version.as_deref() {
-        update_shared_server_symlink(previous)?;
-    }
-    manifest.canary_status = Some(CanaryStatus::Failed);
-    manifest.pending_activation = None;
-    manifest.save()?;
-    Ok(Some(pending.new_version))
-}
-
-/// Outcome of a stale pending-activation reconciliation pass.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PendingReconcileOutcome {
-    /// No pending activation record exists.
-    NoPending,
-    /// The record is younger than the minimum age; leave it alone.
-    StillFresh,
-    /// The initiating session is still alive; it owns the record.
-    InitiatorAlive,
-    /// Candidate verified; activation completed for the given version.
-    Completed(String),
-    /// Candidate missing or mismatched; symlinks rolled back for the version.
-    RolledBack(String),
-    /// A different live canary session exists; record cleared without
-    /// touching canary state or symlinks.
-    Skipped(String),
-}
-
-/// True only if the pending candidate's installed binary exists and its
-/// `.source.json` sidecar matches the pending record's identity. Missing
-/// files, read errors, or field mismatches all return false, never panic
-/// (same contract as [`dev_binary_matches_source`]).
-fn pending_candidate_is_valid(pending: &PendingActivation) -> bool {
-    let Ok(binary) = version_binary_path(&pending.new_version) else {
-        return false;
-    };
-    if !binary.is_file() {
-        return false;
-    }
-    let Some(metadata) = read_dev_binary_source_metadata(&binary) else {
-        return false;
-    };
-    if metadata.version_label != pending.new_version {
-        return false;
-    }
-    match pending.source_fingerprint.as_deref() {
-        Some(fingerprint) => metadata.source_fingerprint == fingerprint,
-        None => true,
-    }
-}
-
-/// Reconcile a pending activation whose initiating session died mid-cycle.
-///
-/// Only acts on records older than `min_age` whose initiator is no longer
-/// alive (per `session_is_alive`). A verified candidate is completed via
-/// [`complete_pending_activation_for_session`]; an unverifiable one is rolled
-/// back via [`rollback_pending_activation_for_session`]. If a *different*
-/// live session is currently canary-testing, the stale record is cleared
-/// without touching canary state or symlinks. Rollback only restores a
-/// symlink whose current target still points at the pending version, so a
-/// later publish is never clobbered.
-pub fn reconcile_stale_pending_activation(
-    min_age: chrono::Duration,
-    session_is_alive: impl Fn(&str) -> bool,
-) -> Result<PendingReconcileOutcome> {
-    let mut manifest = BuildManifest::load()?;
-    let Some(pending) = manifest.pending_activation.clone() else {
-        return Ok(PendingReconcileOutcome::NoPending);
-    };
-    if Utc::now() - pending.requested_at < min_age {
-        return Ok(PendingReconcileOutcome::StillFresh);
-    }
-    if session_is_alive(&pending.session_id) {
-        return Ok(PendingReconcileOutcome::InitiatorAlive);
-    }
-
-    // Canary guard: a different live session is actively canary-testing.
-    // Do not touch canary fields or symlinks; just drop the stale record.
-    if let Some(other) = manifest.canary_session.clone()
-        && other != pending.session_id
-        && session_is_alive(&other)
-    {
-        manifest.pending_activation = None;
-        manifest.save()?;
-        return Ok(PendingReconcileOutcome::Skipped(pending.new_version));
-    }
-
-    if pending_candidate_is_valid(&pending) {
-        complete_pending_activation_for_session(&pending.session_id)?;
-        return Ok(PendingReconcileOutcome::Completed(pending.new_version));
-    }
-
-    // Invalid candidate: roll back, but only restore symlinks whose current
-    // target still equals the pending version (someone may have published a
-    // newer build since; never clobber it).
-    let mut adjusted = pending.clone();
-    if read_current_version()?.as_deref() != Some(pending.new_version.as_str()) {
-        adjusted.previous_current_version = None;
-    }
-    if read_shared_server_version()?.as_deref() != Some(pending.new_version.as_str()) {
-        adjusted.previous_shared_server_version = None;
-    }
-    if adjusted != pending {
-        manifest.pending_activation = Some(adjusted);
-        manifest.save()?;
-    }
-    rollback_pending_activation_for_session(&pending.session_id)?;
-    Ok(PendingReconcileOutcome::RolledBack(pending.new_version))
-}
-
-/// Install a binary at a specific immutable version path.
-pub fn install_binary_at_version(source: &std::path::Path, version: &str) -> Result<PathBuf> {
-    let builds_root = builds_dir()?;
-    install_binary_at_version_in_builds_dir(source, version, &builds_root)
-}
-
 /// Atomically publish `source` as the single fixed reload target
-/// `~/.jcode/current/jcode` (F20b). Reuses [`atomic_publish_binary`] so it gets
-/// the exact stage->fsync->smoke->rename guarantee the version store has. The
-/// `current/` directory is persistent (it may already hold the last good
-/// binary), so a failed publish must NOT remove it: pass `cleanup_empty_dir =
-/// false` and let the prior published binary stand.
+/// `~/.jcode/current/jcode` (F20b): stage -> fsync -> smoke -> rename, so a
+/// concurrent reader only ever observes a complete, smoke-tested binary.
 pub fn publish_current_fixed(source: &Path) -> Result<PathBuf> {
     let dest_dir = paths::current_fixed_dir()?;
-    atomic_publish_binary(source, &dest_dir, false)
-}
-
-fn install_binary_at_version_in_builds_dir(
-    source: &std::path::Path,
-    version: &str,
-    builds_root: &Path,
-) -> Result<PathBuf> {
-    let dest_dir = builds_root.join("versions").join(version);
-    let cleanup_empty_dir = true;
-    atomic_publish_binary(source, &dest_dir, cleanup_empty_dir)
+    atomic_publish_binary(source, &dest_dir)
 }
 
 /// Atomically publish `source` into `dest_dir` as `dest_dir/<binary_name>`,
 /// staging into a private temp copy, smoke-testing it, then `rename(2)`-ing it
-/// into place. This is the ONE atomic-swap primitive shared by the versioned
-/// store and the F20b fixed reload path; the source-truncation regression test
-/// guards it. When `cleanup_empty_dir` is set, a failed publish removes a
-/// freshly-created (still-empty) `dest_dir` so a bad install leaves no residue.
-fn atomic_publish_binary(
-    source: &Path,
-    dest_dir: &Path,
-    cleanup_empty_dir: bool,
-) -> Result<PathBuf> {
+/// into place. This is the ONE atomic-swap primitive behind the single fixed
+/// publish target; the source-truncation regression test guards it. A failed
+/// publish leaves the previously published binary untouched and removes its
+/// staged temp, so a bad build can never be observed as published.
+fn atomic_publish_binary(source: &Path, dest_dir: &Path) -> Result<PathBuf> {
     let source_metadata = std::fs::metadata(source)
         .with_context(|| format!("Binary not found at {}", source.display()))?;
     if !source_metadata.is_file() {
@@ -421,15 +185,7 @@ fn atomic_publish_binary(
     storage::ensure_dir(dest_dir)?;
 
     let dest = dest_dir.join(binary_name());
-    let staged = match copy_binary_to_staging_path(source, dest_dir) {
-        Ok(staged) => staged,
-        Err(err) => {
-            if cleanup_empty_dir {
-                let _ = std::fs::remove_dir(dest_dir);
-            }
-            return Err(err);
-        }
-    };
+    let staged = copy_binary_to_staging_path(source, dest_dir)?;
 
     let install_result = (|| {
         run_after_install_stage_hook(source, &staged);
@@ -439,10 +195,10 @@ fn atomic_publish_binary(
     })();
 
     if install_result.is_err() {
+        // The destination directory is persistent (it may already hold the last
+        // good binary), so a failed publish only drops its own staged temp and
+        // lets the previously published binary stand.
         let _ = std::fs::remove_file(&staged);
-        if cleanup_empty_dir && !dest.exists() {
-            let _ = std::fs::remove_dir(dest_dir);
-        }
     }
 
     install_result
@@ -585,7 +341,7 @@ static INSTALL_STAGE_HOOK: std::sync::Mutex<Option<InstallStageHook>> = std::syn
 
 /// One process-global lock serializing EVERY test that touches shared publish
 /// state: the `INSTALL_STAGE_HOOK` static and the `JCODE_HOME` env var. The
-/// publish path (`install_binary_at_version`, `publish_current_fixed`) reads the
+/// publish path (`publish_current_fixed`) reads the
 /// global hook, and resolution reads `JCODE_HOME`, so any two tests exercising
 /// those must not overlap under multithreaded runs. All test modules in this
 /// crate acquire this before arming the hook or mutating `JCODE_HOME`.
@@ -1043,49 +799,15 @@ pub fn smoke_test_server_binary(binary: &Path) -> Result<()> {
     smoke_test_binary(binary)
 }
 
-fn update_channel_symlink(channel: &str, version: &str) -> Result<PathBuf> {
-    let channel_dir = builds_dir()?.join(channel);
-    storage::ensure_dir(&channel_dir)?;
-
-    let link_path = channel_dir.join(binary_name());
-    let target = version_binary_path(version)?;
-    if !target.exists() {
-        anyhow::bail!("Version binary not found at {:?}", target);
-    }
-
-    let temp = channel_dir.join(format!(
-        ".{}-{}-{}",
-        binary_stem(),
-        channel,
-        std::process::id()
-    ));
-    crate::platform_support::atomic_symlink_swap(&target, &link_path, &temp)?;
-
-    Ok(link_path)
-}
-
-/// Update stable symlink to point to a version and publish stable-version marker.
-pub fn update_stable_symlink(version: &str) -> Result<PathBuf> {
-    let stable_link = update_channel_symlink("stable", version)?;
-    std::fs::write(stable_version_file()?, version)?;
-    Ok(stable_link)
-}
-
-/// Update current symlink to point to a version and publish current-version marker.
-pub fn update_current_symlink(version: &str) -> Result<PathBuf> {
-    let current_link = update_channel_symlink("current", version)?;
-    std::fs::write(current_version_file()?, version)?;
-    Ok(current_link)
-}
-
-/// Update the shared server symlink to point to a version and publish the
-/// shared-server-version marker.
-pub fn update_shared_server_symlink(version: &str) -> Result<PathBuf> {
-    let shared_link = update_channel_symlink("shared-server", version)?;
-    std::fs::write(shared_server_version_file()?, version)?;
-    Ok(shared_link)
-}
-
+/// Publish a freshly built self-dev binary onto the single fixed reload target.
+///
+/// F20b made `~/.jcode/current/jcode` the one atomic publish target; F20c
+/// removed the versioned store and the stable/current/shared-server channel
+/// symlinks that used to shadow it. The publish sequence is therefore:
+/// validate the binary really came from `source`, atomically
+/// stage->fsync->smoke->rename it into the fixed path, write the source
+/// sidecar next to the published binary, and re-verify the *published* copy
+/// reports the expected identity.
 pub fn publish_local_current_build_for_source(
     repo_dir: &Path,
     source: &SourceState,
@@ -1097,10 +819,9 @@ pub fn publish_local_current_build_for_source(
     }
 
     validate_dev_binary_matches_source(repo_dir, &binary, source)?;
-    let previous_current_version = read_current_version()?;
-    let versioned_path = install_binary_at_version(&binary, &source.version_label)?;
-    write_dev_binary_source_metadata(&versioned_path, source)?;
-    let installed_report = read_binary_version_report(&versioned_path)?;
+    let published_path = publish_current_fixed(&binary)?;
+    write_dev_binary_source_metadata(&published_path, source)?;
+    let installed_report = read_binary_version_report(&published_path)?;
     if installed_report
         .version
         .as_deref()
@@ -1109,231 +830,25 @@ pub fn publish_local_current_build_for_source(
     {
         anyhow::bail!(
             "Binary smoke test for {} returned JSON without a version field",
-            versioned_path.display()
+            published_path.display()
         );
     }
-    validate_binary_version_matches_source_report(&installed_report, &versioned_path, source)?;
-    // F20b: publish the validated binary to the single fixed reload target
-    // (~/.jcode/current/jcode) atomically. This is the new source of truth that
-    // every resolver prefers; the legacy channel writes below remain until F20c
-    // removes them. Publish from the already-smoke-tested versioned copy.
-    publish_current_fixed(&versioned_path)?;
-    let current_link = update_current_symlink(&source.version_label)?;
+    validate_binary_version_matches_source_report(&installed_report, &published_path, source)?;
     let launcher_link = update_launcher_symlink_to_current()?;
 
     Ok(PublishedBuild {
         version: source.version_label.clone(),
         source_fingerprint: source.fingerprint.clone(),
-        versioned_path,
-        current_link,
+        published_path,
         launcher_link,
-        previous_current_version,
     })
 }
 
-/// Install the local release binary into immutable versions and make it the active `current`
-/// build + launcher, while keeping `stable` untouched.
+/// Build-state-free convenience wrapper: publish whatever is currently built in
+/// `repo_dir` for the repo's current source state.
 pub fn publish_local_current_build(repo_dir: &std::path::Path) -> Result<PathBuf> {
     let source = current_source_state(repo_dir)?;
-    Ok(publish_local_current_build_for_source(repo_dir, &source)?.versioned_path)
-}
-
-/// Promote an already installed immutable version onto the shared server channel.
-pub fn promote_version_to_shared_server(version: &str) -> Result<Option<String>> {
-    let previous = read_shared_server_version()?;
-    update_shared_server_symlink(version)?;
-    Ok(previous)
-}
-
-/// Returns true when the `shared-server` channel is merely tracking the
-/// `stable` channel rather than pinned to a deliberately-promoted build (e.g. a
-/// local self-dev binary).
-///
-/// Updates only advance `current`/`stable`, so the long-lived daemon's reload
-/// target (`shared-server`) can drift behind an update. When the channel was
-/// just following stable we want updates to carry it forward automatically;
-/// when it was explicitly promoted to a self-dev build we must leave it alone
-/// so an update never silently wipes that build out from under a force reload.
-///
-/// A never-promoted (missing/empty) shared-server marker counts as "tracking":
-/// there is no deliberate build to protect, so it is safe for updates to begin
-/// populating the channel.
-pub fn shared_server_tracks_stable() -> Result<bool> {
-    let shared = read_shared_server_version()?;
-    let shared = shared.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let Some(shared) = shared else {
-        return Ok(true);
-    };
-    let stable = read_stable_version()?;
-    let stable = stable.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    Ok(stable == Some(shared))
-}
-
-/// Advance the `shared-server` channel to `version`, but only when it is
-/// currently tracking `stable` (see [`shared_server_tracks_stable`]). Returns
-/// `Ok(true)` when the channel was advanced.
-///
-/// Callers in the update path MUST invoke this *before* moving the `stable`
-/// marker, otherwise the pre-update comparison would always disagree.
-pub fn advance_shared_server_if_tracking_stable(version: &str) -> Result<bool> {
-    if shared_server_tracks_stable()? {
-        update_shared_server_symlink(version)?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
-}
-
-/// Outcome of [`repair_stale_shared_server_channel`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SharedServerRepair {
-    /// The `shared-server` channel was repointed at the installed `stable`
-    /// release because stable was strictly newer on disk.
-    Repaired {
-        previous: Option<String>,
-        repaired_to: String,
-    },
-    /// Nothing to do: shared-server is already at/newer than stable, or there is
-    /// no usable stable target.
-    AlreadyCurrent,
-}
-
-/// Drag a *stale* `shared-server` channel forward to the installed `stable`
-/// release so a long-lived daemon can actually reload into a newer binary.
-///
-/// This is the client-side counterpart to [`advance_shared_server_if_tracking_stable`].
-/// Updates advance `stable` but only advance `shared-server` *during the install
-/// path*; a client that is already on the newest release (so `/update` is a
-/// no-op) never re-runs that install path, leaving a long-lived older daemon
-/// pinned to its old `shared-server` binary forever. A newer client that detects
-/// an older server calls this to repoint `shared-server` -> `stable` before
-/// asking the server to reload, so the forced reload has a strictly-newer target
-/// to exec into instead of re-execing the same old binary (the "current client,
-/// stale server" report).
-///
-/// Safety: we only repair when the `stable` binary is *strictly newer by mtime*
-/// than the current `shared-server` binary. That preserves a deliberately-pinned
-/// self-dev `shared-server` build whenever it is at least as fresh as stable (the
-/// case the pin exists to protect), and never downgrades the channel.
-pub fn repair_stale_shared_server_channel() -> Result<SharedServerRepair> {
-    let stable_version = read_stable_version()?;
-    let Some(stable_version) = stable_version
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
-        return Ok(SharedServerRepair::AlreadyCurrent);
-    };
-
-    let stable_binary = stable_binary_path()?;
-    if !stable_binary.exists() {
-        return Ok(SharedServerRepair::AlreadyCurrent);
-    }
-
-    // If shared-server already resolves to the same version marker, there is
-    // nothing to repair.
-    let previous = read_shared_server_version()?;
-    if previous.as_deref().map(str::trim).filter(|s| !s.is_empty()) == Some(stable_version) {
-        return Ok(SharedServerRepair::AlreadyCurrent);
-    }
-    if previous
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .is_some_and(|previous| !is_release_channel_marker(previous))
-    {
-        return Ok(SharedServerRepair::AlreadyCurrent);
-    }
-
-    // Only repair when stable is strictly newer than the current shared-server
-    // binary on disk. This never downgrades, and it preserves a self-dev pin
-    // that is fresher than stable.
-    let shared_binary = shared_server_binary_path()?;
-    if !shared_server_binary_is_strictly_older_than(&shared_binary, &stable_binary) {
-        return Ok(SharedServerRepair::AlreadyCurrent);
-    }
-
-    update_shared_server_symlink(stable_version)?;
-    Ok(SharedServerRepair::Repaired {
-        previous: previous
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string),
-        repaired_to: stable_version.to_string(),
-    })
-}
-
-fn is_release_channel_marker(marker: &str) -> bool {
-    let marker = marker.trim();
-    let marker = marker.strip_prefix('v').unwrap_or(marker);
-    marker.starts_with("main-")
-        || marker
-            .split('.')
-            .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_digit()))
-}
-
-/// True when `shared` exists and is strictly older (by mtime) than `stable`, or
-/// when `shared` is missing entirely (nothing to protect). Any mtime
-/// uncertainty on an existing shared binary is treated as "not older" so we
-/// never repair away an unverifiable (possibly newer) pinned build.
-///
-/// Both paths are resolved through [`resolve_binary_payload`] so release
-/// installs (wrapper script + `.bin` payload) compare the payloads that
-/// actually run instead of the tiny wrapper scripts, whose mtimes carry no
-/// version information.
-fn shared_server_binary_is_strictly_older_than(
-    shared: &std::path::Path,
-    stable: &std::path::Path,
-) -> bool {
-    let mtime = |p: &std::path::Path| {
-        std::fs::metadata(resolve_binary_payload(p))
-            .ok()
-            .and_then(|m| m.modified().ok())
-    };
-    let stable_mtime = match mtime(stable) {
-        Some(m) => m,
-        None => return false,
-    };
-    if !shared.exists() {
-        // No deliberate pin on disk; safe to point the channel at stable.
-        return true;
-    }
-    match mtime(shared) {
-        Some(shared_mtime) => shared_mtime < stable_mtime,
-        None => false,
-    }
-}
-
-/// Install release binary into immutable versions, promote it to stable, and also make it the
-/// active current/launcher build.
-pub fn install_local_release(repo_dir: &std::path::Path) -> Result<PathBuf> {
-    let source = release_binary_path(repo_dir);
-    if !source.exists() {
-        anyhow::bail!("Binary not found at {:?}", source);
-    }
-
-    let version = repo_build_version(repo_dir)?;
-
-    let versioned = install_binary_at_version(&source, &version)?;
-    update_stable_symlink(&version)?;
-    update_current_symlink(&version)?;
-    update_shared_server_symlink(&version)?;
-    update_launcher_symlink_to_current()?;
-
-    Ok(versioned)
-}
-
-/// Copy binary to versioned location
-pub fn install_version(repo_dir: &std::path::Path, hash: &str) -> Result<PathBuf> {
-    let source = release_binary_path(repo_dir);
-    install_binary_at_version(&source, hash)
-}
-
-/// Update canary symlink to point to a version
-pub fn update_canary_symlink(hash: &str) -> Result<()> {
-    let _ = update_channel_symlink("canary", hash)?;
-    Ok(())
+    Ok(publish_local_current_build_for_source(repo_dir, &source)?.published_path)
 }
 
 #[cfg(test)]

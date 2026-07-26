@@ -1,0 +1,187 @@
+{
+  "commit": "2add7453f3a63fa362cffe99e6aa1e41af0d98cf",
+  "deterministic": true,
+  "diffs": [],
+  "runs": [
+    {
+      "index": 1,
+      "commit": "2add7453f3a63fa362cffe99e6aa1e41af0d98cf",
+      "checks": [
+        {
+          "name": "suites.jcode-base",
+          "ok": true,
+          "fingerprint": "passed=1205 failed=0",
+          "detail": "exit=0 passed=1205 failed=0",
+          "duration_s": 32.143821001052856
+        },
+        {
+          "name": "suites.jcode-tui",
+          "ok": true,
+          "fingerprint": "passed=1867 failed=0",
+          "detail": "exit=0 passed=1867 failed=0",
+          "duration_s": 281.76359510421753
+        },
+        {
+          "name": "suites.jcode-app-core",
+          "ok": true,
+          "fingerprint": "passed=1136 failed=0",
+          "detail": "exit=0 passed=1136 failed=0",
+          "duration_s": 70.82336282730103
+        },
+        {
+          "name": "package.nix_build",
+          "ok": true,
+          "fingerprint": "fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0",
+          "detail": "/nix/store/fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0",
+          "duration_s": 249.7128450870514
+        },
+        {
+          "name": "install.assets",
+          "ok": true,
+          "fingerprint": "present=bin/jcode,share/jcode/web/jcode-mobile",
+          "detail": "all required assets installed",
+          "duration_s": 0.0
+        },
+        {
+          "name": "install.mobile_entrypoint",
+          "ok": true,
+          "fingerprint": "index.html=yes",
+          "detail": "/nix/store/fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0/share/jcode/web/jcode-mobile/index.html",
+          "duration_s": 0.0
+        },
+        {
+          "name": "install.launches",
+          "ok": true,
+          "fingerprint": "jcode v0.46.0 (2add745)",
+          "detail": "exit=0 version='jcode v0.46.0 (2add745)' stderr=",
+          "duration_s": 0.5467922687530518
+        },
+        {
+          "name": "updater.declines_self_update",
+          "ok": true,
+          "fingerprint": "declined=True downloaded=False",
+          "detail": "exit=0 out=jcode is managed by nix; self-update is disabled.\n                      Update it the way you installed it:\n               home-manager:  rebuild your home-manager generation\n          nix profile:   nix profile upgrade jcode  (or your flake ref)\n               flake input:   nix flake update jcode  then rebuild\n\u001b[90m\n  jcode collects anonymous usage statistics (install count, version, OS,\n  session activity, tool counts, and crash/exit reasons). No code, filenames,\n  prompts, or personal data is sent.\n  To opt out: export JCODE_NO_TELEMETRY=1\n  Details: https://github.com/1jehuang/jcode/blob/",
+          "duration_s": 0.46468091011047363
+        },
+        {
+          "name": "updater.no_retired_layout_written",
+          "ok": true,
+          "fingerprint": "builds_dir=absent",
+          "detail": "/var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/f21-home-co3fw8nm/builds",
+          "duration_s": 0.0
+        },
+        {
+          "name": "updater.doctor_origin",
+          "ok": true,
+          "fingerprint": "origin=nix",
+          "detail": "exit=0 out={\n  \"client\": {\n    \"path\": \"/nix/store/fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0/bin/jcode\",\n    \"origin\": \"nix\",\n    \"version\": \"0.46.0\",\n    \"git_hash\": \"2add745\",\n    \"dirty\": null,\n    \"build_source_dir\": null\n  },\n  \"server\": {\n    \"running\": false,\n    \"socket\": \"/var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/jcode.sock\",\n    \"pid\": null,\n    \"name\": null,\n    \"version\": null,\n    \"gi",
+          "duration_s": 0.74680495262146
+        },
+        {
+          "name": "residue.real_home_untouched",
+          "ok": true,
+          "fingerprint": "added=none",
+          "detail": "new top-level entries in the real jcode home: []",
+          "duration_s": 0.0
+        },
+        {
+          "name": "residue.no_leaked_sessions",
+          "ok": true,
+          "fingerprint": "session_delta=0",
+          "detail": "sessions created in the real home during the gate: 0",
+          "duration_s": 0.0
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "commit": "2add7453f3a63fa362cffe99e6aa1e41af0d98cf",
+      "checks": [
+        {
+          "name": "suites.jcode-base",
+          "ok": true,
+          "fingerprint": "passed=1205 failed=0",
+          "detail": "exit=0 passed=1205 failed=0",
+          "duration_s": 22.9894540309906
+        },
+        {
+          "name": "suites.jcode-tui",
+          "ok": true,
+          "fingerprint": "passed=1867 failed=0",
+          "detail": "exit=0 passed=1867 failed=0",
+          "duration_s": 106.64729619026184
+        },
+        {
+          "name": "suites.jcode-app-core",
+          "ok": true,
+          "fingerprint": "passed=1136 failed=0",
+          "detail": "exit=0 passed=1136 failed=0",
+          "duration_s": 56.017565965652466
+        },
+        {
+          "name": "package.nix_build",
+          "ok": true,
+          "fingerprint": "fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0",
+          "detail": "/nix/store/fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0",
+          "duration_s": 2.326242208480835
+        },
+        {
+          "name": "install.assets",
+          "ok": true,
+          "fingerprint": "present=bin/jcode,share/jcode/web/jcode-mobile",
+          "detail": "all required assets installed",
+          "duration_s": 0.0
+        },
+        {
+          "name": "install.mobile_entrypoint",
+          "ok": true,
+          "fingerprint": "index.html=yes",
+          "detail": "/nix/store/fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0/share/jcode/web/jcode-mobile/index.html",
+          "duration_s": 0.0
+        },
+        {
+          "name": "install.launches",
+          "ok": true,
+          "fingerprint": "jcode v0.46.0 (2add745)",
+          "detail": "exit=0 version='jcode v0.46.0 (2add745)' stderr=",
+          "duration_s": 0.01413583755493164
+        },
+        {
+          "name": "updater.declines_self_update",
+          "ok": true,
+          "fingerprint": "declined=True downloaded=False",
+          "detail": "exit=0 out=jcode is managed by nix; self-update is disabled.\n                      Update it the way you installed it:\n               home-manager:  rebuild your home-manager generation\n          nix profile:   nix profile upgrade jcode  (or your flake ref)\n               flake input:   nix flake update jcode  then rebuild\n\u001b[90m\n  jcode collects anonymous usage statistics (install count, version, OS,\n  session activity, tool counts, and crash/exit reasons). No code, filenames,\n  prompts, or personal data is sent.\n  To opt out: export JCODE_NO_TELEMETRY=1\n  Details: https://github.com/1jehuang/jcode/blob/",
+          "duration_s": 0.2775580883026123
+        },
+        {
+          "name": "updater.no_retired_layout_written",
+          "ok": true,
+          "fingerprint": "builds_dir=absent",
+          "detail": "/var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/f21-home-mj6dr_3e/builds",
+          "duration_s": 0.0
+        },
+        {
+          "name": "updater.doctor_origin",
+          "ok": true,
+          "fingerprint": "origin=nix",
+          "detail": "exit=0 out={\n  \"client\": {\n    \"path\": \"/nix/store/fa0mbkdylvqnr3r66dx9if4m743y01d9-jcode-0.46.0/bin/jcode\",\n    \"origin\": \"nix\",\n    \"version\": \"0.46.0\",\n    \"git_hash\": \"2add745\",\n    \"dirty\": null,\n    \"build_source_dir\": null\n  },\n  \"server\": {\n    \"running\": false,\n    \"socket\": \"/var/folders/vg/85zkszl95c7_cww1mt_sxxfc0000gp/T/jcode.sock\",\n    \"pid\": null,\n    \"name\": null,\n    \"version\": null,\n    \"gi",
+          "duration_s": 0.510141134262085
+        },
+        {
+          "name": "residue.real_home_untouched",
+          "ok": true,
+          "fingerprint": "added=none",
+          "detail": "new top-level entries in the real jcode home: []",
+          "duration_s": 0.0
+        },
+        {
+          "name": "residue.no_leaked_sessions",
+          "ok": true,
+          "fingerprint": "session_delta=0",
+          "detail": "sessions created in the real home during the gate: 0",
+          "duration_s": 0.0
+        }
+      ]
+    }
+  ]
+}

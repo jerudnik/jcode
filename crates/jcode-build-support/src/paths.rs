@@ -1,8 +1,4 @@
-use super::{
-    SelfDevBuildCommand, SelfDevBuildTarget, canary_binary_path, current_binary_path,
-    read_current_version, read_shared_server_version, read_stable_version,
-    shared_server_binary_path, stable_binary_path,
-};
+use super::{SelfDevBuildCommand, SelfDevBuildTarget};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use jcode_storage as storage;
@@ -490,15 +486,17 @@ pub fn current_fixed_dir() -> Result<PathBuf> {
 /// The single atomic fixed reload target: `~/.jcode/current/jcode`.
 ///
 /// A real file (not a symlink), atomically rename-published on every self-dev
-/// build via the same stage->fsync->smoke->rename primitive the version store
-/// uses. This is the F20b source of truth; the legacy `builds/<channel>/jcode`
-/// symlinks remain as a dead fallback until F20c removes them.
+/// build via the stage->fsync->smoke->rename primitive. This is the ONLY
+/// publish target: F20c deleted the version store and the
+/// `builds/<channel>/jcode` symlinks that used to shadow it, so every client
+/// and daemon resolver reads exactly this path.
 pub fn current_fixed_binary_path() -> Result<PathBuf> {
     Ok(current_fixed_dir()?.join(binary_name()))
 }
 
 /// The nix-managed binary to fall back onto — the escape-hatch target for the
-/// migrate hatch (`JCODE_MIGRATE_BINARY`) once F20c retires the stable channel.
+/// migrate hatch (`JCODE_MIGRATE_BINARY`) now that F20c has retired the
+/// channels it used to point at.
 ///
 /// Resolves the launcher (`~/.local/bin/jcode`) or the running executable the
 /// way [`nix_managed_override_target`] does when externally managed, but only
@@ -568,35 +566,35 @@ fn update_launcher_symlink(target: &Path) -> Result<PathBuf> {
     Ok(launcher)
 }
 
-/// Update launcher path to point at the current channel binary.
+/// Point the launcher (`~/.local/bin/jcode`) at the single fixed publish target.
+///
+/// F20c retired the `builds/current` channel symlink this used to follow, so the
+/// launcher now resolves straight to `~/.jcode/current/jcode`. Nix-managed
+/// installs own the launcher and are left untouched by
+/// [`update_launcher_symlink`].
 pub fn update_launcher_symlink_to_current() -> Result<PathBuf> {
-    let current = current_binary_path()?;
+    let current = current_fixed_binary_path()?;
     update_launcher_symlink(&current)
-}
-
-/// Update launcher path to point at the stable channel binary.
-pub fn update_launcher_symlink_to_stable() -> Result<PathBuf> {
-    let stable = stable_binary_path()?;
-    update_launcher_symlink(&stable)
 }
 
 /// Resolve which client binary should be considered for launches, updates, and reloads.
 ///
 /// Order matters:
-/// - Prefer the published `current` channel first (active local build)
-/// - Self-dev sessions can fall back to an unpublished repo build from `target/selfdev` or `target/release`
-/// - Then the self-dev canary channel
-/// - Then launcher path
-/// - Then stable channel path
-/// - Finally currently running executable
+/// - Nix-managed non-self-dev sessions resolve to the launcher the package
+///   manager owns (see [`nix_managed_override_target`]).
+/// - Then the single fixed publish target `~/.jcode/current/jcode` (F20b/F20c:
+///   the one place a self-dev build is ever published).
+/// - Self-dev sessions may then fall back to an unpublished repo build from
+///   `target/selfdev` or `target/release`.
+/// - Then the launcher path, then the running executable.
 ///
 /// In nix-managed mode the nix profile owns the binary, so non-self-dev callers
-/// must ignore the self-managed `builds/` shadow (current/canary/shared-server/
-/// stable) and resolve straight to the launcher — the profile binary that `nix`
-/// updates on rebuild. This is what keeps the running server from drifting onto
-/// a stale self-dev build (the self-certifying-channel version-drift incident).
-/// Explicit self-dev sessions still opt into local builds. Returns `None` when
-/// the override does not apply, so callers fall through to normal resolution.
+/// must ignore the self-managed publish target and resolve straight to the
+/// launcher -- the profile binary that `nix` updates on rebuild. This is what
+/// keeps the running server from drifting onto a stale self-dev build (the
+/// self-certifying-channel version-drift incident). Explicit self-dev sessions
+/// still opt into local builds. Returns `None` when the override does not apply,
+/// so callers fall through to normal resolution.
 fn nix_managed_launcher_override(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     nix_managed_override_target(is_externally_managed(), is_selfdev_session)
 }
@@ -621,35 +619,23 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
         return Some(nix);
     }
 
-    // F20b: the single atomic fixed path is the source of truth. Every self-dev
-    // publish rename-publishes into it, so prefer it ahead of the legacy channel
-    // symlinks (kept below as a dead fallback until F20c removes them).
+    // The single atomic fixed path is the source of truth: every self-dev
+    // publish rename-publishes into it, so a complete binary is always what a
+    // reader observes.
     if let Some(fixed) = existing_binary(current_fixed_binary_path(), "current-fixed") {
         return Some(fixed);
     }
 
-    if let Some(current) = existing_binary(current_binary_path(), "current") {
-        return Some(current);
-    }
-
-    if is_selfdev_session {
-        if let Some(repo_dir) = get_repo_dir()
-            && let Some(dev) = find_dev_binary(&repo_dir)
-            && dev.exists()
-        {
-            return Some((dev, "dev"));
-        }
-        if let Some(canary) = existing_binary(canary_binary_path(), "canary") {
-            return Some(canary);
-        }
+    if is_selfdev_session
+        && let Some(repo_dir) = get_repo_dir()
+        && let Some(dev) = find_dev_binary(&repo_dir)
+        && dev.exists()
+    {
+        return Some((dev, "dev"));
     }
 
     if let Some(launcher) = existing_binary(launcher_binary_path(), "launcher") {
         return Some(launcher);
-    }
-
-    if let Some(stable) = existing_binary(stable_binary_path(), "stable") {
-        return Some(stable);
     }
 
     std::env::current_exe().ok().map(|exe| (exe, "current"))
@@ -657,103 +643,20 @@ pub fn client_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'s
 
 /// Resolve the binary that the shared daemon should spawn or reload into.
 ///
-/// This intentionally does not follow the fast-moving `current` channel. The
-/// shared server should only run binaries that were explicitly promoted onto the
-/// shared-server channel (or stable as fallback), so local dirty self-dev builds
-/// stop taking out every client by accident.
+/// F20c collapsed this onto the same single fixed publish target the clients
+/// use. There is no separate `shared-server` channel to promote onto or drift
+/// behind any more: the daemon reloads into whatever was last atomically
+/// published, which is by construction a complete, smoke-tested binary.
 pub fn shared_server_update_candidate(is_selfdev_session: bool) -> Option<(PathBuf, &'static str)> {
     if let Some(nix) = nix_managed_launcher_override(is_selfdev_session) {
         return Some(nix);
     }
 
-    // F20b: route the daemon onto the single atomic fixed path first. This is the
-    // one publish target now (rename-published, so always a complete binary), so
-    // the shared-server/stable channel lookups below are a dead fallback (F20c).
     if let Some(fixed) = existing_binary(current_fixed_binary_path(), "current-fixed") {
         return Some(fixed);
     }
 
-    let shared_server = existing_binary(shared_server_binary_path(), "shared-server");
-    if is_selfdev_session {
-        if let Some(shared_server) = shared_server {
-            return Some(shared_server);
-        }
-    } else if let Some(shared_server) = shared_server
-        && shared_server_channel_is_current_enough()
-    {
-        return Some(shared_server);
-    }
-
-    if let Some(stable) = existing_binary(stable_binary_path(), "stable") {
-        return Some(stable);
-    }
-
     std::env::current_exe().ok().map(|exe| (exe, "current"))
-}
-
-fn shared_server_channel_is_current_enough() -> bool {
-    let shared = read_shared_server_version().ok().flatten();
-    let Some(shared) = shared
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return false;
-    };
-
-    let stable = read_stable_version().ok().flatten();
-    if stable
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some_and(|stable| stable == shared)
-    {
-        return true;
-    }
-
-    let current = read_current_version().ok().flatten();
-    current
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .is_some_and(|current| current == shared)
-}
-
-fn normalize_version_marker(value: &str) -> String {
-    let value = value.trim();
-    let value = value.strip_prefix('v').unwrap_or(value);
-    value
-        .split([' ', '(', ')'])
-        .next()
-        .unwrap_or(value)
-        .trim()
-        .to_string()
-}
-
-pub fn version_matches_installed_channel(version: &str, git_hash: &str) -> bool {
-    let version = normalize_version_marker(version);
-    let git_hash = git_hash.trim();
-    let mut saw_marker = false;
-    for marker in [read_stable_version(), read_current_version()] {
-        let Some(marker) = marker.ok().flatten() else {
-            continue;
-        };
-        let marker_trimmed = marker.trim();
-        if marker_trimmed.is_empty() {
-            continue;
-        }
-        saw_marker = true;
-        if normalize_version_marker(marker_trimmed) == version {
-            return true;
-        }
-        if !git_hash.is_empty()
-            && git_hash != "unknown"
-            && (marker_trimmed == git_hash || marker_trimmed.starts_with(git_hash))
-        {
-            return true;
-        }
-    }
-    !saw_marker
 }
 
 /// Resolve the best binary to use for `/reload`.
@@ -1133,4 +1036,138 @@ mod tests {
         assert!(mtime(&nix_resolved).is_some() && mtime(&selfdev_resolved).is_some());
         drop((store, selfdev, wrapper_dir));
     }
+}
+
+/// The retired distribution layout F20c deleted the readers for.
+///
+/// These are the `~/.jcode/builds/` entries that the version store and the
+/// stable/current/shared-server/canary channels used to write. After F20c no
+/// resolver consults any of them, which is precisely why they are dangerous to
+/// leave in place: a launcher symlink still pointing into `builds/current/`
+/// keeps serving whatever binary was published there before the cut, forever,
+/// while every in-process code path believes the fixed path is authoritative.
+const RETIRED_LAYOUT_ENTRIES: &[&str] = &[
+    "versions",
+    "stable",
+    "current",
+    "canary",
+    "shared-server",
+    "stable-version",
+    "current-version",
+    "shared-server-version",
+    // The manifest lived here before F20c. It is migrated forward on first
+    // load, so by cleanup time this is a copy, not the only copy.
+    "manifest.json",
+];
+
+/// A leftover from the pre-F20c distribution layout, with enough detail to
+/// explain the risk and size the cleanup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredLayoutResidue {
+    /// Absolute path of the leftover entry under `~/.jcode/builds/`.
+    pub path: PathBuf,
+    /// Total bytes it occupies (0 when unreadable).
+    pub bytes: u64,
+    /// True when the launcher symlink still resolves into this entry, i.e. the
+    /// machine is still *executing* out of the retired layout.
+    pub launcher_points_here: bool,
+}
+
+/// Enumerate pre-F20c distribution residue under the jcode home.
+///
+/// Returns an empty vec on a clean machine. This reports only; removal is an
+/// explicit user action (`jcode doctor --clean-retired-layout` / `uninstall.sh`)
+/// because these directories can hold the only copy of a binary a user is
+/// currently running.
+/// The retired pre-F20c distribution directory. Nothing writes here; it exists
+/// only so diagnostics and cleanup can name and remove it.
+pub fn retired_layout_dir() -> Result<PathBuf> {
+    Ok(storage::jcode_dir()?.join("builds"))
+}
+
+pub fn retired_layout_residue() -> Result<Vec<RetiredLayoutResidue>> {
+    let builds = retired_layout_dir()?;
+    let launcher_chain = launcher_binary_path()
+        .ok()
+        .map(|link| symlink_chain(&link))
+        .unwrap_or_default();
+
+    let mut found = Vec::new();
+    for entry in RETIRED_LAYOUT_ENTRIES {
+        let path = builds.join(entry);
+        if !path.exists() && path.symlink_metadata().is_err() {
+            continue;
+        }
+        let resolved = std::fs::canonicalize(&path).ok();
+        // Every hop must be checked, not just the final payload. A launcher
+        // that goes `~/.local/bin/jcode -> builds/stable/jcode -> <payload>`
+        // canonicalizes straight past `builds/`, so a single canonicalize
+        // would report "not stranded" and let the cleanup delete the very
+        // symlink the launcher traverses.
+        let launcher_points_here = launcher_chain.iter().any(|hop| {
+            resolved
+                .as_ref()
+                .is_some_and(|resolved| hop.starts_with(resolved))
+                || hop.starts_with(&path)
+        });
+        found.push(RetiredLayoutResidue {
+            bytes: directory_size(&path),
+            path,
+            launcher_points_here,
+        });
+    }
+    Ok(found)
+}
+
+/// Every path traversed when resolving `start`, including `start` itself, each
+/// intermediate symlink, and the final payload.
+///
+/// Bounded to a small number of hops so a symlink cycle can never hang a
+/// diagnostic. Each hop is also recorded in canonicalized form (when it
+/// resolves) so callers can compare against a canonicalized directory.
+fn symlink_chain(start: &Path) -> Vec<PathBuf> {
+    const MAX_HOPS: usize = 32;
+    let mut chain = Vec::new();
+    let mut cursor = start.to_path_buf();
+
+    for _ in 0..MAX_HOPS {
+        if chain.contains(&cursor) {
+            break;
+        }
+        chain.push(cursor.clone());
+        if let Ok(canonical) = std::fs::canonicalize(&cursor)
+            && !chain.contains(&canonical)
+        {
+            chain.push(canonical);
+        }
+        let Ok(next) = std::fs::read_link(&cursor) else {
+            break;
+        };
+        cursor = if next.is_absolute() {
+            next
+        } else {
+            match cursor.parent() {
+                Some(parent) => parent.join(next),
+                None => next,
+            }
+        };
+    }
+    chain
+}
+
+/// Recursive on-disk size, symlink-safe (never follows links out of the tree).
+fn directory_size(path: &Path) -> u64 {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return 0;
+    };
+    if !meta.is_dir() {
+        return meta.len();
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| directory_size(&entry.path()))
+        .sum()
 }

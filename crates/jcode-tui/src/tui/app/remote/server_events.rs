@@ -1549,29 +1549,11 @@ pub(in crate::tui::app) fn handle_server_event(
                 }
                 app.clear_remote_startup_phase();
                 if client_detected_stale {
-                    // The client independently measured the server's release as
-                    // older than its own. This covers both a pre-self-heal daemon
-                    // (server_has_update: None) AND a daemon that self-reports
-                    // "no update" because its own shared-server channel still
-                    // points at its old binary (the "current client, stale
-                    // server" report). Repair the channel client-side so the
-                    // forced reload below has a strictly-newer binary to exec
-                    // into instead of re-execing the same old build.
-                    match crate::build::repair_stale_shared_server_channel() {
-                        Ok(crate::build::SharedServerRepair::Repaired { repaired_to, .. }) => {
-                            crate::logging::info(&format!(
-                                "stale-server repair: repointed shared-server channel to {} before reloading older server",
-                                repaired_to
-                            ));
-                        }
-                        Ok(crate::build::SharedServerRepair::AlreadyCurrent) => {}
-                        Err(err) => {
-                            crate::logging::warn(&format!(
-                                "stale-server repair: failed to repoint shared-server channel: {}",
-                                err
-                            ));
-                        }
-                    }
+                    // The client independently measured the server's release
+                    // as older than its own. F20c removed the shared-server
+                    // channel that used to need client-side repair here: with a
+                    // single fixed publish target the forced reload below
+                    // already execs into the newest published binary.
                     app.set_status_notice(
                         "Connected server is an older release; reloading it before attach",
                     );

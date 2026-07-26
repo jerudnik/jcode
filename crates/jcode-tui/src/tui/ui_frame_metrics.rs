@@ -5,6 +5,15 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+#[path = "ui_frame_metrics_flicker.rs"]
+mod flicker;
+#[cfg(test)]
+pub(crate) use flicker::clear_flicker_frame_history_for_tests;
+pub(crate) use flicker::{
+    FLICKER_NOTICE_COPY_KEY, FlickerFrameSample, debug_flicker_frame_history,
+    recent_flicker_copy_target_for_key, recent_flicker_ui_notice, record_flicker_frame_sample,
+};
+
 const SLOW_DRAW_ATTRIBUTION_THRESHOLD_MS: f64 = 40.0;
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -265,76 +274,17 @@ pub(super) struct FullPrepPhaseMetrics {
     pub compose_ms: f64,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub(crate) struct FlickerFrameSample {
-    pub timestamp_ms: u64,
-    pub session_id: Option<String>,
-    pub session_name: Option<String>,
-    pub display_messages_version: u64,
-    pub diff_mode: String,
-    pub centered: bool,
-    pub is_processing: bool,
-    pub auto_scroll_paused: bool,
-    pub scroll: usize,
-    pub visible_end: usize,
-    pub visible_lines: usize,
-    pub total_wrapped_lines: usize,
-    pub prompt_preview_lines: u16,
-    pub messages_area_width: u16,
-    pub messages_area_height: u16,
-    pub content_width: u16,
-    pub chat_scrollbar_visible: bool,
-    pub visible_hash: u64,
-    pub visible_streaming_hash: u64,
-    pub visible_batch_progress_hash: u64,
-    pub total_ms: f64,
-    pub prepare_ms: f64,
-    pub draw_ms: f64,
-}
-
-#[derive(Clone, Debug, Serialize)]
-struct FlickerEvent {
-    pub timestamp_ms: u64,
-    kind: String,
-    pub session_id: Option<String>,
-    pub session_name: Option<String>,
-    previous: FlickerFrameSample,
-    current: FlickerFrameSample,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct FlickerUiNotice {
-    pub(crate) summary: String,
-    pub(crate) hint: String,
-}
-
-// Keep this outside h/j/k/l for the same reason as COPY_BADGE_KEYS.
-pub(super) const FLICKER_NOTICE_COPY_KEY: char = 'z';
-
 #[derive(Default)]
 struct SlowFrameHistory {
     samples: VecDeque<SlowFrameSample>,
     last_log_at_ms: Option<u64>,
 }
 
-#[derive(Default)]
-struct FlickerFrameHistory {
-    samples: VecDeque<FlickerFrameSample>,
-    events: VecDeque<FlickerEvent>,
-    last_log_at_ms: Option<u64>,
-}
-
 const SLOW_FRAME_HISTORY_MAX_SAMPLES: usize = 128;
 const SLOW_FRAME_LOG_INTERVAL_MS: u64 = 1_000;
-const FLICKER_HISTORY_MAX_SAMPLES: usize = 256;
-const FLICKER_HISTORY_MAX_EVENTS: usize = 128;
-const FLICKER_LOG_INTERVAL_MS: u64 = 500;
-#[cfg(not(test))]
-const FLICKER_UI_NOTICE_MAX_AGE_MS: u64 = 30_000;
 
 static FRAME_PERF_STATS: OnceLock<Mutex<FramePerfStats>> = OnceLock::new();
 static SLOW_FRAME_HISTORY: OnceLock<Mutex<SlowFrameHistory>> = OnceLock::new();
-static FLICKER_FRAME_HISTORY: OnceLock<Mutex<FlickerFrameHistory>> = OnceLock::new();
 static FRAME_RESOURCE_START: OnceLock<Mutex<Option<FrameResourceStart>>> = OnceLock::new();
 
 fn frame_perf_stats() -> &'static Mutex<FramePerfStats> {
@@ -343,10 +293,6 @@ fn frame_perf_stats() -> &'static Mutex<FramePerfStats> {
 
 fn slow_frame_history() -> &'static Mutex<SlowFrameHistory> {
     SLOW_FRAME_HISTORY.get_or_init(|| Mutex::new(SlowFrameHistory::default()))
-}
-
-fn flicker_frame_history() -> &'static Mutex<FlickerFrameHistory> {
-    FLICKER_FRAME_HISTORY.get_or_init(|| Mutex::new(FlickerFrameHistory::default()))
 }
 
 fn frame_resource_start() -> &'static Mutex<Option<FrameResourceStart>> {
@@ -369,29 +315,6 @@ fn slow_frame_threshold_ms() -> f64 {
             .filter(|value| value.is_finite() && *value > 0.0)
             .unwrap_or(40.0)
     })
-}
-
-fn flicker_detection_enabled() -> bool {
-    #[cfg(test)]
-    {
-        true
-    }
-
-    #[cfg(not(test))]
-    {
-        static ENABLED: OnceLock<bool> = OnceLock::new();
-        *ENABLED.get_or_init(|| {
-            std::env::var("JCODE_TUI_FLICKER_DETECTION")
-                .ok()
-                .map(|raw| {
-                    matches!(
-                        raw.trim().to_ascii_lowercase().as_str(),
-                        "1" | "true" | "yes" | "on"
-                    )
-                })
-                .unwrap_or(false)
-        })
-    }
 }
 
 fn with_frame_perf_stats_mut(f: impl FnOnce(&mut FramePerfStats)) {
@@ -632,64 +555,6 @@ pub(super) fn viewport_stability_hash(
     hasher.finish()
 }
 
-fn same_flicker_state_key(a: &FlickerFrameSample, b: &FlickerFrameSample) -> bool {
-    a.session_id == b.session_id
-        && a.display_messages_version == b.display_messages_version
-        && a.diff_mode == b.diff_mode
-        && a.centered == b.centered
-        && a.is_processing == b.is_processing
-        && a.auto_scroll_paused == b.auto_scroll_paused
-        && a.scroll == b.scroll
-        && a.visible_end == b.visible_end
-        && a.visible_lines == b.visible_lines
-        && a.total_wrapped_lines == b.total_wrapped_lines
-        && a.prompt_preview_lines == b.prompt_preview_lines
-        && a.messages_area_width == b.messages_area_width
-        && a.messages_area_height == b.messages_area_height
-        && a.visible_streaming_hash == b.visible_streaming_hash
-        && a.visible_batch_progress_hash == b.visible_batch_progress_hash
-}
-
-fn same_flicker_context_key(a: &FlickerFrameSample, b: &FlickerFrameSample) -> bool {
-    a.session_id == b.session_id
-        && a.display_messages_version == b.display_messages_version
-        && a.diff_mode == b.diff_mode
-        && a.centered == b.centered
-        && a.is_processing == b.is_processing
-        && a.auto_scroll_paused == b.auto_scroll_paused
-        && a.messages_area_width == b.messages_area_width
-        && a.messages_area_height == b.messages_area_height
-}
-
-fn sample_has_visible_transient_content(sample: &FlickerFrameSample) -> bool {
-    sample.visible_streaming_hash != 0 || sample.visible_batch_progress_hash != 0
-}
-
-fn push_flicker_event(history: &mut FlickerFrameHistory, event: FlickerEvent) {
-    history.events.push_back(event.clone());
-    while history.events.len() > FLICKER_HISTORY_MAX_EVENTS {
-        history.events.pop_front();
-    }
-
-    let severe = event.kind.contains("oscillation");
-    let should_log = severe
-        || history
-            .last_log_at_ms
-            .map(|last| event.timestamp_ms.saturating_sub(last) >= FLICKER_LOG_INTERVAL_MS)
-            .unwrap_or(true);
-    if should_log {
-        history.last_log_at_ms = Some(event.timestamp_ms);
-        if let Ok(payload) = serde_json::to_string(&event) {
-            crate::logging::warn(&format!("TUI_FLICKER_EVENT {}", payload));
-        } else {
-            crate::logging::warn(&format!(
-                "TUI_FLICKER_EVENT kind={} session={:?}",
-                event.kind, event.session_name
-            ));
-        }
-    }
-}
-
 fn duration_ms(elapsed: Duration) -> f64 {
     elapsed.as_secs_f64() * 1000.0
 }
@@ -875,115 +740,6 @@ fn clock_ticks_per_second() -> Option<f64> {
     None
 }
 
-fn maybe_record_flicker_event(history: &mut FlickerFrameHistory, current: &FlickerFrameSample) {
-    let Some(previous) = history.samples.back().cloned() else {
-        return;
-    };
-
-    let len = history.samples.len();
-    if len >= 2 {
-        let earlier = history.samples.get(len - 2).cloned();
-        if let Some(earlier) = earlier
-            && same_flicker_state_key(&earlier, current)
-            && same_flicker_state_key(&earlier, &previous)
-            && earlier.visible_hash == current.visible_hash
-            && earlier.chat_scrollbar_visible == current.chat_scrollbar_visible
-            && earlier.content_width == current.content_width
-            && (earlier.chat_scrollbar_visible != previous.chat_scrollbar_visible
-                || earlier.content_width != previous.content_width)
-        {
-            push_flicker_event(
-                history,
-                FlickerEvent {
-                    timestamp_ms: current.timestamp_ms,
-                    kind: "layout_oscillation".to_string(),
-                    session_id: current.session_id.clone(),
-                    session_name: current.session_name.clone(),
-                    previous,
-                    current: current.clone(),
-                },
-            );
-            return;
-        }
-    }
-
-    if len >= 2 {
-        let earlier = history.samples.get(len - 2).cloned();
-        if let Some(earlier) = earlier
-            && same_flicker_context_key(&earlier, current)
-            && same_flicker_context_key(&earlier, &previous)
-            && !current.auto_scroll_paused
-            && earlier.visible_hash == current.visible_hash
-            && earlier.content_width == current.content_width
-            && earlier.chat_scrollbar_visible == current.chat_scrollbar_visible
-            && (previous.visible_hash != current.visible_hash
-                || previous.content_width != current.content_width
-                || previous.chat_scrollbar_visible != current.chat_scrollbar_visible)
-        {
-            push_flicker_event(
-                history,
-                FlickerEvent {
-                    timestamp_ms: current.timestamp_ms,
-                    kind: "layout_feedback_oscillation".to_string(),
-                    session_id: current.session_id.clone(),
-                    session_name: current.session_name.clone(),
-                    previous,
-                    current: current.clone(),
-                },
-            );
-            return;
-        }
-    }
-
-    if same_flicker_state_key(&previous, current) {
-        if previous.chat_scrollbar_visible != current.chat_scrollbar_visible
-            || previous.content_width != current.content_width
-        {
-            push_flicker_event(
-                history,
-                FlickerEvent {
-                    timestamp_ms: current.timestamp_ms,
-                    kind: "layout_toggle_same_state".to_string(),
-                    session_id: current.session_id.clone(),
-                    session_name: current.session_name.clone(),
-                    previous: previous.clone(),
-                    current: current.clone(),
-                },
-            );
-        } else if previous.visible_hash != current.visible_hash
-            && !sample_has_visible_transient_content(&previous)
-            && !sample_has_visible_transient_content(current)
-        {
-            push_flicker_event(
-                history,
-                FlickerEvent {
-                    timestamp_ms: current.timestamp_ms,
-                    kind: "visible_hash_changed_same_state".to_string(),
-                    session_id: current.session_id.clone(),
-                    session_name: current.session_name.clone(),
-                    previous,
-                    current: current.clone(),
-                },
-            );
-        }
-    }
-}
-
-pub(crate) fn record_flicker_frame_sample(sample: FlickerFrameSample) {
-    if !flicker_detection_enabled() {
-        return;
-    }
-
-    let mut history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    maybe_record_flicker_event(&mut history, &sample);
-    history.samples.push_back(sample);
-    while history.samples.len() > FLICKER_HISTORY_MAX_SAMPLES {
-        history.samples.pop_front();
-    }
-}
-
 pub(super) fn finalize_frame_metrics(
     app: &dyn TuiState,
     total_start: Instant,
@@ -1053,114 +809,6 @@ pub(super) fn finalize_frame_metrics(
             perf,
         });
     }
-}
-
-pub(crate) fn debug_flicker_frame_history(limit: usize) -> serde_json::Value {
-    let history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let take_samples = limit.clamp(1, FLICKER_HISTORY_MAX_SAMPLES);
-    let samples: Vec<FlickerFrameSample> = history
-        .samples
-        .iter()
-        .rev()
-        .take(take_samples)
-        .cloned()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let events: Vec<FlickerEvent> = history
-        .events
-        .iter()
-        .rev()
-        .take(limit.clamp(1, FLICKER_HISTORY_MAX_EVENTS))
-        .cloned()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-
-    serde_json::json!({
-        "enabled": flicker_detection_enabled(),
-        "buffered_samples": history.samples.len(),
-        "returned_samples": samples.len(),
-        "buffered_events": history.events.len(),
-        "returned_events": events.len(),
-        "summary": {
-            "layout_toggle_events": events.iter().filter(|event| event.kind == "layout_toggle_same_state").count(),
-            "layout_oscillation_events": events.iter().filter(|event| event.kind == "layout_oscillation").count(),
-            "layout_feedback_oscillation_events": events.iter().filter(|event| event.kind == "layout_feedback_oscillation").count(),
-            "visible_hash_change_events": events.iter().filter(|event| event.kind == "visible_hash_changed_same_state").count(),
-        },
-        "events": events,
-        "samples": samples,
-    })
-}
-
-fn flicker_event_label(kind: &str) -> &str {
-    match kind {
-        "layout_toggle_same_state" => "layout toggle",
-        "layout_oscillation" => "layout oscillation",
-        "layout_feedback_oscillation" => "layout feedback oscillation",
-        "visible_hash_changed_same_state" => "same-state redraw",
-        _ => kind,
-    }
-}
-
-fn abbreviate_flicker_log_path(path: &std::path::Path) -> String {
-    let rendered = path.display().to_string();
-    if let Some(home) = dirs::home_dir() {
-        let home = home.display().to_string();
-        if rendered == home {
-            return "~".to_string();
-        }
-        if let Some(rest) = rendered.strip_prefix(&home) {
-            return format!("~{}", rest);
-        }
-    }
-    rendered
-}
-
-pub(crate) fn recent_flicker_ui_notice() -> Option<FlickerUiNotice> {
-    if !flicker_detection_enabled() {
-        return None;
-    }
-
-    let history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let event = history.events.back()?.clone();
-    drop(history);
-
-    #[cfg(not(test))]
-    {
-        let now = wall_clock_ms();
-        if now.saturating_sub(event.timestamp_ms) > FLICKER_UI_NOTICE_MAX_AGE_MS {
-            return None;
-        }
-    }
-
-    let log_hint = crate::logging::log_path()
-        .map(|path| abbreviate_flicker_log_path(&path))
-        .unwrap_or_else(|| "~/.jcode/logs/".to_string());
-    let summary = format!("⚠ flicker detected ({})", flicker_event_label(&event.kind));
-    let hint = format!("logs: {} · debug: client:flicker-frames 32", log_hint);
-    Some(FlickerUiNotice { summary, hint })
-}
-
-pub(crate) fn recent_flicker_copy_target_for_key(key: char) -> Option<VisibleCopyTarget> {
-    if !key.eq_ignore_ascii_case(&FLICKER_NOTICE_COPY_KEY) {
-        return None;
-    }
-
-    let notice = recent_flicker_ui_notice()?;
-    Some(VisibleCopyTarget {
-        key: FLICKER_NOTICE_COPY_KEY,
-        kind_label: "flicker hint".to_string(),
-        copied_notice: "Copied flicker hint".to_string(),
-        content: notice.hint,
-    })
 }
 
 pub(crate) fn record_slow_frame_sample(sample: SlowFrameSample) {
@@ -1241,17 +889,6 @@ pub(crate) fn clear_slow_frame_history_for_tests() {
     history.samples.clear();
     history.last_log_at_ms = None;
     reset_frame_perf_stats();
-    set_last_chat_scrollbar_visible(false);
-}
-
-#[cfg(test)]
-pub(crate) fn clear_flicker_frame_history_for_tests() {
-    let mut history = flicker_frame_history()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    history.samples.clear();
-    history.events.clear();
-    history.last_log_at_ms = None;
     set_last_chat_scrollbar_visible(false);
 }
 

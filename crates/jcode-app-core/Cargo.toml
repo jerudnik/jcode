@@ -53,7 +53,6 @@ jcode-import-core = { path = "../jcode-import-core" }
 
 # OAuth
 base64 = "0.22"
-sha2 = "0.10"
 rand = "0.9.3"
 url = "2"
 open = "5"               # Open URLs in browser
@@ -64,7 +63,6 @@ jcode-provider-core = { path = "../jcode-provider-core" }
 # NOTE: jcode-app-core does NOT depend on any jcode-tui-* crate. They were
 # unused dead dependency edges here (the TUI declares them itself). Removing
 # them stops a jcode-tui-* edit from cascading a recompile through app-core.
-jcode-update-core = { path = "../jcode-update-core" }
 jcode-terminal-image = { path = "../jcode-terminal-image" }
 
 # Streaming
@@ -99,9 +97,6 @@ jcode-task-types = { path = "../jcode-task-types" }
 jcode-tool-core = { path = "../jcode-tool-core" }
 jcode-tool-types = { path = "../jcode-tool-types" }
 
-# Archive extraction (for auto-update)
-flate2 = "1"
-tar = "0.4"
 tempfile = "3"
 agentgrep = { git = "https://github.com/1jehuang/agentgrep.git", tag = "v0.1.6" }
 

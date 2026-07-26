@@ -146,6 +146,17 @@ fn main() {
     println!("cargo:rustc-env=JCODE_PKG_VERSION={}", pkg_version);
     println!("cargo:rustc-env=JCODE_BUILD_SOURCE_DIR={}", source_dir);
 
+    // Cargo hands the real optimization level to build scripts only, never to
+    // crate code, and `cfg!(debug_assertions)` is not a stand-in for it: the
+    // `selfdev` profile inherits `release` (assertions compiled out) while
+    // pinning `opt-level = 0`. Forward it so wall-clock performance assertions
+    // can require the 60fps contract exactly where the build can honour it,
+    // instead of failing on unoptimized binaries.
+    println!(
+        "cargo:rustc-env=JCODE_OPT_LEVEL={}",
+        std::env::var("OPT_LEVEL").unwrap_or_else(|_| "unknown".to_string())
+    );
+
     // Forward JCODE_RELEASE_BUILD env var if set (CI sets this for release binaries)
     if std::env::var("JCODE_RELEASE_BUILD").is_ok() {
         println!("cargo:rustc-env=JCODE_RELEASE_BUILD=1");

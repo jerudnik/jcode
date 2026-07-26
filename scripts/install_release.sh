@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
-# Install the current release binary into the immutable version store,
-# update the stable + current channel symlinks, and point the launcher at current.
+# Build the current source and publish it to jcode's single fixed binary path,
+# then point the launcher at it.
+#
+# F20b made ~/.jcode/current/jcode the ONE path every jcode client and daemon
+# resolves to, and F20c deleted the version store plus the
+# stable/current/shared-server/canary channel symlinks this script used to
+# write. Writing those channels now would produce state that nothing reads, so
+# this publishes to the fixed path instead.
 #
 # Paths after install:
-# - ~/.jcode/builds/versions/<hash>-<profile>/jcode (immutable)
-# - ~/.jcode/builds/stable/jcode -> .../versions/<hash>-<profile>/jcode
-# - ~/.jcode/builds/current/jcode -> .../versions/<hash>-<profile>/jcode
-# - ~/.local/bin/jcode -> ~/.jcode/builds/current/jcode (launcher)
+# - ~/.jcode/current/jcode          (the single fixed publish target)
+# - ~/.local/bin/jcode -> ~/.jcode/current/jcode (launcher)
+#
+# The publish is a staged copy + atomic rename, matching the Rust publish path
+# (crates/jcode-build-support: publish_current_fixed), so a running daemon can
+# never exec a half-written binary.
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -57,40 +65,28 @@ if [[ -z "$hash" ]]; then
   hash="$(date +%Y%m%d%H%M%S)"
 fi
 
-# A selfdev publication uses the bare source label (for example `abc123` or
-# `abc123-dirty-<fingerprint>`). Keep release bytes under a profile-qualified
-# label so publishing the same source from selfdev cannot replace an immutable
-# release binary in place.
+# Label is now purely informational (there is one publish target, so nothing is
+# addressed by label any more), but keeping the profile qualifier makes the
+# "which bytes are live" message unambiguous.
 version_label="${hash}-${profile}"
 
-# Install versioned binary into ~/.jcode/builds/versions/<hash>-<profile>/
-builds_dir="$HOME/.jcode/builds"
-version_dir="$builds_dir/versions/$version_label"
-mkdir -p "$version_dir"
-install -m 755 "$bin" "$version_dir/jcode"
-
-# Update stable symlink
-stable_dir="$builds_dir/stable"
-mkdir -p "$stable_dir"
-ln -sfn "$version_dir/jcode" "$stable_dir/jcode"
-
-# Update stable-version marker
-printf '%s\n' "$version_label" >"$builds_dir/stable-version"
-
-# Update current symlink + marker
-current_dir="$builds_dir/current"
+# Publish to the single fixed target via stage + atomic rename, so a concurrent
+# reader (a daemon about to exec) only ever observes a complete binary.
+jcode_home="${JCODE_HOME:-$HOME/.jcode}"
+current_dir="$jcode_home/current"
 mkdir -p "$current_dir"
-ln -sfn "$version_dir/jcode" "$current_dir/jcode"
-printf '%s\n' "$version_label" >"$builds_dir/current-version"
+staged="$current_dir/.jcode-publish-$$"
+trap 'rm -f "$staged"' EXIT
+install -m 755 "$bin" "$staged"
+mv -f "$staged" "$current_dir/jcode"
+trap - EXIT
 
-# Update launcher path to current channel
+# Point the launcher at the fixed path.
 install_dir="${JCODE_INSTALL_DIR:-$HOME/.local/bin}"
 mkdir -p "$install_dir"
 ln -sfn "$current_dir/jcode" "$install_dir/jcode"
 
-echo "Installed: $version_dir/jcode"
-echo "Updated stable symlink: $stable_dir/jcode -> $version_dir/jcode"
-echo "Updated current symlink: $current_dir/jcode -> $version_dir/jcode"
+echo "Published: $current_dir/jcode ($version_label)"
 echo "Updated launcher symlink: $install_dir/jcode -> $current_dir/jcode"
 
 # R01 owns live daemon target selection. Reload is therefore explicit opt-in and

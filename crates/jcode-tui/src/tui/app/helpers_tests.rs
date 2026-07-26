@@ -3,39 +3,12 @@ use super::{
     extract_bracketed_system_message, format_countdown_until, inferred_reasoning_efforts,
     partition_queued_messages, pretty_model_display_name, resume_invocation_args,
 };
-use crate::ambient::{AmbientManager, Priority, ScheduleRequest, ScheduleTarget};
+use crate::ambient::{Priority, ScheduleTarget, ScheduledItem};
 use crate::terminal_launch::{detected_resume_terminal, shell_command};
 use crate::tui::session_picker::ResumeTarget;
 use chrono::{Duration as ChronoDuration, Utc};
 
-struct EnvVarGuard {
-    key: &'static str,
-    prev: Option<std::ffi::OsString>,
-}
-
-impl EnvVarGuard {
-    fn set_value(key: &'static str, value: &str) -> Self {
-        let prev = std::env::var_os(key);
-        crate::env::set_var(key, value);
-        Self { key, prev }
-    }
-
-    fn set_path(key: &'static str, value: &std::path::Path) -> Self {
-        let prev = std::env::var_os(key);
-        crate::env::set_var(key, value);
-        Self { key, prev }
-    }
-}
-
-impl Drop for EnvVarGuard {
-    fn drop(&mut self) {
-        if let Some(prev) = self.prev.take() {
-            crate::env::set_var(self.key, prev);
-        } else {
-            crate::env::remove_var(self.key);
-        }
-    }
-}
+use crate::storage::EnvVarGuard;
 
 #[test]
 fn extract_bracketed_system_message_strips_wrapper() {
@@ -154,7 +127,7 @@ fn swarm_effort_display_labels_are_marked_beta() {
 #[test]
 fn detected_resume_terminal_recognizes_handterm_term_program() {
     let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let _guard = EnvVarGuard::set_value("TERM_PROGRAM", "handterm");
+    let _guard = EnvVarGuard::set("TERM_PROGRAM", "handterm");
     assert_eq!(detected_resume_terminal().as_deref(), Some("handterm"));
 }
 
@@ -200,23 +173,35 @@ fn resume_invocation_args_omits_blank_socket() {
     );
 }
 
-/// Pin JCODE_HOME to a tempdir containing a `builds/current/jcode` binary so
+/// Pin JCODE_HOME to a tempdir containing a published `current/jcode` binary so
 /// `launch_client_executable()` resolves deterministically, independent of
-/// whether the developer machine has a published local build channel and of
-/// other tests mutating JCODE_HOME in parallel. Returns the guards that keep
-/// the environment pinned for the duration of the test.
+/// whether the developer machine has a local published build and of other tests
+/// mutating JCODE_HOME in parallel. Returns the guards that keep the
+/// environment pinned for the duration of the test.
+///
+/// F20c: the fixture must write the SINGLE fixed publish path
+/// (`$JCODE_HOME/current/jcode`); the old `builds/current` channel is no longer
+/// read by any resolver, so a fixture writing it would silently stop pinning.
 fn pinned_resume_test_home() -> (
-    crate::tui::app::test_support::TestEnvWriteScope,
-    tempfile::TempDir,
     EnvVarGuard,
+    tempfile::TempDir,
+    crate::tui::app::test_support::TestEnvWriteScope,
 ) {
     let env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let current = temp.path().join("builds").join("current");
-    std::fs::create_dir_all(&current).expect("create builds/current");
+    let current = temp.path().join("current");
+    std::fs::create_dir_all(&current).expect("create current dir");
     std::fs::write(current.join("jcode"), b"#!/bin/sh\n").expect("write fake jcode binary");
-    let home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
-    (env_lock, temp, home)
+    let home = EnvVarGuard::set("JCODE_HOME", temp.path());
+    // Tuple fields drop in DECLARATION order, so the lease must come last: it
+    // has to outlive the `EnvVarGuard` that restores `JCODE_HOME`. Returned the
+    // other way round, this fixture released the lease first and then restored
+    // the variable, leaving a window in which the next test to take the lease
+    // had its `JCODE_HOME` overwritten by this one's teardown. That is exactly
+    // how `build_resume_command_uses_imported_jcode_session_for_codex` failed
+    // on Linux CI: resolution fell through to `current_exe()` and the assert
+    // saw the test binary (`jcode_tui-<hash>`) instead of `jcode`.
+    (home, temp, env_lock)
 }
 
 #[test]
@@ -287,73 +272,51 @@ fn format_countdown_until_handles_subminute_and_minutes() {
 
 #[test]
 fn gather_ambient_info_filters_to_session_reminders_when_ambient_disabled() {
-    let _env_lock = crate::tui::app::test_support::lock_test_env();
-    let temp = tempfile::tempdir().expect("tempdir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
-
-    let mut manager = AmbientManager::new().expect("ambient manager");
-    let first_due = Utc::now() + ChronoDuration::minutes(5);
-    let second_due = Utc::now() + ChronoDuration::minutes(10);
-
-    manager
-        .schedule(ScheduleRequest {
-            wake_in_minutes: None,
-            wake_at: Some(first_due),
-            context: "ambient context".to_string(),
+    // `ambient_widget_data_from` is pure over the slice it is handed, so this
+    // regression builds the items directly instead of routing through
+    // `AmbientManager`.
+    //
+    // The manager resolves its queue path from `JCODE_HOME` at construction
+    // time and loads `ambient/queue.json` from disk. That made the observed
+    // count depend on state this test does not own: it failed once with
+    // `queue_count == 8` after scheduling three items, and 8 = 5 loaded + 3
+    // scheduled is unreachable from the fresh temp home the test sets up. The
+    // manager had therefore resolved some other home, which a fresh tempdir
+    // cannot explain and which no assertion here could diagnose.
+    //
+    // Constructing the items removes the filesystem from a test about queue
+    // filtering entirely.
+    fn item(id: &str, minutes: i64, description: &str, target: ScheduleTarget) -> ScheduledItem {
+        ScheduledItem {
+            id: id.to_string(),
+            scheduled_for: Utc::now() + ChronoDuration::minutes(minutes),
+            context: format!("{description} context"),
             priority: Priority::Normal,
-            target: ScheduleTarget::Ambient,
-            created_by_session: "ambient".to_string(),
-            working_dir: None,
-            task_description: Some("ambient work".to_string()),
-            relevant_files: Vec::new(),
-            git_branch: None,
-            additional_context: None,
-        })
-        .expect("schedule ambient item");
-    manager
-        .schedule(ScheduleRequest {
-            wake_in_minutes: None,
-            wake_at: Some(first_due),
-            context: "first context".to_string(),
-            priority: Priority::Normal,
-            target: ScheduleTarget::Session {
-                session_id: "session_1".to_string(),
-            },
+            target,
             created_by_session: "session_1".to_string(),
+            created_at: Utc::now(),
             working_dir: None,
-            task_description: Some("first reminder".to_string()),
+            task_description: Some(description.to_string()),
             relevant_files: Vec::new(),
             git_branch: None,
             additional_context: None,
-        })
-        .expect("schedule first reminder");
-    manager
-        .schedule(ScheduleRequest {
-            wake_in_minutes: None,
-            wake_at: Some(second_due),
-            context: "second context".to_string(),
-            priority: Priority::Normal,
-            target: ScheduleTarget::Session {
-                session_id: "session_1".to_string(),
-            },
-            created_by_session: "session_1".to_string(),
-            working_dir: None,
-            task_description: Some("second reminder".to_string()),
-            relevant_files: Vec::new(),
-            git_branch: None,
-            additional_context: None,
-        })
-        .expect("schedule second reminder");
+        }
+    }
 
-    // This regression verifies queue filtering, not queue persistence or the
-    // asynchronous cache scheduler. Use the manager's in-memory queue so an
-    // unrelated background writer cannot replace the temp-home queue file.
-    let info = ambient_widget_data_from(
-        crate::ambient::AmbientState::default(),
-        manager.queue().items(),
-        false,
-    )
-    .expect("ambient info");
+    let session = || ScheduleTarget::Session {
+        session_id: "session_1".to_string(),
+    };
+    let items = vec![
+        item("sched_ambient", 5, "ambient work", ScheduleTarget::Ambient),
+        item("sched_first", 5, "first reminder", session()),
+        item("sched_second", 10, "second reminder", session()),
+    ];
+
+    let info = ambient_widget_data_from(crate::ambient::AmbientState::default(), &items, false)
+        .expect("ambient info");
+
+    // Ambient is disabled, so the widget must show only the two directly
+    // delivered session reminders while still counting the whole queue.
     assert!(info.show_widget);
     assert_eq!(info.queue_count, 3);
     assert_eq!(info.reminder_count, 2);
@@ -410,7 +373,7 @@ fn invalidate_todos_cache_backdates_entry_so_next_gather_refetches() {
 
     let _env_lock = crate::tui::app::test_support::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
-    let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
     clear_todos_cache_for_tests();
 
     let session_id = "freshness-test-session";

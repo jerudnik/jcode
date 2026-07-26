@@ -175,7 +175,7 @@ function Test-AssetChecksum {
 
     $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $AssetPath).Hash.ToLowerInvariant()
     if ($actual -ne $expected) {
-        Write-Err "Checksum mismatch for $AssetName: expected $expected, got $actual"
+        Write-Err "Checksum mismatch for ${AssetName}: expected $expected, got $actual"
     }
 
     Write-Info "Verified SHA256 checksum for $AssetName"
@@ -459,9 +459,18 @@ $TgzUrl = "https://github.com/$Repo/releases/download/$Version/$Artifact.tar.gz"
 $ExeUrl = "https://github.com/$Repo/releases/download/$Version/$Artifact.exe"
 $ChecksumUrl = "https://github.com/$Repo/releases/download/$Version/SHA256SUMS"
 
-$BuildsDir = Join-Path $env:LOCALAPPDATA "jcode\builds"
-$StableDir = Join-Path $BuildsDir "stable"
-$VersionDir = Join-Path $BuildsDir "versions\$VersionNum"
+# F20b/F20c: jcode resolves every client and daemon to ONE fixed binary path.
+# The version store and the stable/current channel symlinks were deleted, so
+# writing them here would create state that nothing reads.
+#
+# This must be the directory the RESOLVER reads: jcode_dir()
+# (crates/jcode-storage) is $JCODE_HOME or $USERPROFILE\.jcode and has no
+# LOCALAPPDATA branch, unlike launcher_dir(). Publishing to
+# %LOCALAPPDATA%\jcode\current would land where no in-binary resolver looks.
+# $JcodeHome is resolved once near the top of this script, the same way
+# jcode_dir() resolves it.
+$CurrentDir = Join-Path $JcodeHome "current"
+$StagingDir = Join-Path $env:TEMP "jcode-install-$PID"
 $LauncherPath = Join-Path $InstallDir "jcode.exe"
 
 $Existing = ""
@@ -528,11 +537,11 @@ if ($RequiresChecksum -and $DownloadMode) {
     Test-AssetChecksum -ChecksumPath $ChecksumPath -AssetName $DownloadedAsset -AssetPath $DownloadPath
 }
 
-foreach ($d in @($InstallDir, $StableDir, $VersionDir)) {
+foreach ($d in @($InstallDir, $CurrentDir, $StagingDir)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
-$DestBin = Join-Path $VersionDir "jcode.exe"
+$DestBin = Join-Path $StagingDir "jcode.exe"
 
 if ($DownloadMode -eq "tar") {
     Write-Info "Extracting..."
@@ -587,9 +596,13 @@ if ($DownloadMode -eq "tar") {
     Copy-Item -Path $BuiltBin -Destination $DestBin -Force
 }
 
-Copy-Item -Path $DestBin -Destination (Join-Path $StableDir "jcode.exe") -Force
-Set-Content -Path (Join-Path $BuildsDir "stable-version") -Value $VersionNum
-Copy-Item -Path (Join-Path $StableDir "jcode.exe") -Destination $LauncherPath -Force
+# Publish to the single fixed path, then copy it to the launcher. Windows has
+# no atomic replace for a running image, so the copy order matters: publish
+# first, and only then refresh the launcher.
+$PublishedBin = Join-Path $CurrentDir "jcode.exe"
+Copy-Item -Path $DestBin -Destination $PublishedBin -Force
+Copy-Item -Path $PublishedBin -Destination $LauncherPath -Force
+Remove-Item -Path $StagingDir -Recurse -Force -ErrorAction SilentlyContinue
 
 # R01 owns live daemon target selection. Reload is therefore explicit opt-in and
 # best-effort; JCODE_SKIP_SERVER_RELOAD remains a hard disable for wrappers.

@@ -3335,7 +3335,6 @@ dependencies = [
  "core-graphics",
  "crossterm",
  "dirs",
- "flate2",
  "futures",
  "glob",
  "global-hotkey",
@@ -3361,7 +3360,6 @@ dependencies = [
  "jcode-terminal-image",
  "jcode-tool-core",
  "jcode-tool-types",
- "jcode-update-core",
  "libc",
  "open",
  "rand 0.9.3",
@@ -3370,9 +3368,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "similar",
- "tar",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -4376,15 +4372,6 @@ name = "jcode-tui-workspace"
 version = "0.1.0"
 dependencies = [
  "ratatui",
-]
-
-[[package]]
-name = "jcode-update-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "serde",
- "sha2 0.10.9",
 ]
 
 [[package]]
