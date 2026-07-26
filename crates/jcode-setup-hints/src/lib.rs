@@ -1263,7 +1263,7 @@ mod linux_config_paths;
 #[cfg(target_os = "linux")]
 use linux_config_paths::{
     flat_compositor_config_path, kde_applications_dir, kde_globalshortcutsrc_path,
-    niri_config_path, xdg_config_home,
+    niri_config_path,
 };
 
 #[cfg(target_os = "linux")]
