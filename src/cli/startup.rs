@@ -273,12 +273,6 @@ fn report_main_error(error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::args::Args;
-    use clap::Parser;
-
-    fn parse_args(argv: &[&str]) -> Args {
-        Args::parse_from(argv)
-    }
 
     #[test]
     fn remote_working_dir_validation_requires_absolute_path() {
