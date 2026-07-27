@@ -1,12 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
 
-use crate::{build, logging, perf, server, startup_profile, storage, telemetry, update};
+use crate::{logging, perf, server, startup_profile, storage, telemetry};
 
-use super::{
-    args::{Args, Command},
-    dispatch, hot_exec, output, terminal,
-};
+use super::{args::Args, dispatch, output, terminal};
 
 pub async fn run() -> Result<()> {
     startup_profile::init();
@@ -110,7 +107,6 @@ pub async fn run() -> Result<()> {
 
     let args = parse_and_prepare_args()?;
     maybe_warn_nix_version_drift(&args);
-    spawn_background_update_check(&args);
 
     if let Err(e) = dispatch::run_main(args).await {
         report_main_error(&e);
@@ -262,78 +258,6 @@ fn remote_working_dir_is_absolute(path: &str) -> bool {
         && (bytes[2] == b'/' || bytes[2] == b'\\')
         && bytes[0].is_ascii_alphabetic()
 }
-fn spawn_background_update_check(args: &Args) {
-    let check_updates = should_spawn_background_update_check(args);
-    let auto_update = should_auto_install_update(args);
-
-    if !check_updates {
-        return;
-    }
-
-    // F20c removed the GitHub-release acquisition path, so a packaged release
-    // build has nothing to check: nix owns the binary and updates it out of
-    // band. Only a source checkout has a meaningful background check (is the
-    // local repo behind its upstream?), which is what the branch below does.
-    if update::is_release_build() || build::is_externally_managed() {
-        return;
-    }
-
-    std::thread::spawn(move || {
-        use crate::bus::{Bus, BusEvent, UpdateStatus};
-
-        let start = std::time::Instant::now();
-        Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Checking));
-        if let Some(update_available) = hot_exec::check_for_updates()
-            && update_available
-        {
-            Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Available {
-                current: jcode_build_meta::VERSION.to_string(),
-                latest: "latest source".to_string(),
-            }));
-            if auto_update {
-                logging::info("Update available - auto-updating...");
-                Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::Installing {
-                    version: "latest source".to_string(),
-                }));
-                if let Err(e) = hot_exec::run_auto_update() {
-                    Bus::global()
-                        .publish(BusEvent::UpdateStatus(UpdateStatus::Error(e.to_string())));
-                    logging::error(&format!(
-                        "Auto-update failed: {}. Continuing with current version.",
-                        e
-                    ));
-                }
-            } else {
-                logging::info("Update available! Run `jcode update` or `/reload` to update.");
-            }
-        } else {
-            Bus::global().publish(BusEvent::UpdateStatus(UpdateStatus::UpToDate));
-        }
-        logging::info(&format!(
-            "[TIMING] background_update_check: auto_update={}, total={}ms",
-            auto_update,
-            start.elapsed().as_millis()
-        ));
-    });
-}
-
-fn should_spawn_background_update_check(args: &Args) -> bool {
-    !args.quiet
-        && !args.no_update
-        && !matches!(
-            args.command,
-            Some(Command::Update)
-                | Some(Command::Serve { .. })
-                | Some(Command::Acp)
-                | Some(Command::McpServe { .. })
-        )
-        && args.resume.is_none()
-}
-
-fn should_auto_install_update(args: &Args) -> bool {
-    args.auto_update
-}
-
 fn report_main_error(error: &anyhow::Error) {
     let error_str = format!("{:?}", error);
     logging::error(&error_str);
@@ -349,30 +273,11 @@ fn report_main_error(error: &anyhow::Error) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::args::{Args, Command};
+    use crate::cli::args::Args;
     use clap::Parser;
 
     fn parse_args(argv: &[&str]) -> Args {
         Args::parse_from(argv)
-    }
-
-    #[test]
-    fn auto_install_allowed_without_live_terminal() {
-        let args = parse_args(&["jcode", "login"]);
-        assert!(should_auto_install_update(&args));
-    }
-
-    #[test]
-    fn auto_install_allowed_with_live_terminal_attached() {
-        let args = parse_args(&["jcode", "login"]);
-        assert!(should_auto_install_update(&args));
-    }
-
-    #[test]
-    fn auto_install_respects_explicit_disable_even_without_terminal() {
-        let mut args = parse_args(&["jcode", "login"]);
-        args.auto_update = false;
-        assert!(!should_auto_install_update(&args));
     }
 
     #[test]
@@ -389,13 +294,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn update_command_still_skips_background_check_before_auto_install_logic() {
-        let args = parse_args(&["jcode", "update"]);
-        assert!(matches!(args.command, Some(Command::Update)));
-        assert!(!should_spawn_background_update_check(&args));
-        assert!(should_auto_install_update(&args));
-    }
     #[test]
     fn external_provider_runtimes_register_and_instantiate() {
         register_external_provider_runtimes();

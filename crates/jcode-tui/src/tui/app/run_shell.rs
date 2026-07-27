@@ -342,9 +342,6 @@ impl App {
             super::handterm_native_scroll::HandtermNativeScrollClient::connect_from_env();
         // Subscribe to bus for background task completion notifications
         let mut bus_receiver = Bus::global().subscribe();
-        if let Some(status) = Bus::global().latest_update_status() {
-            self.handle_update_status(status);
-        }
 
         loop {
             self.sync_sleep_guard();
@@ -425,7 +422,6 @@ impl App {
         Ok(RunResult {
             reload_session: self.reload_requested.take(),
             rebuild_session: self.rebuild_requested.take(),
-            update_session: self.update_requested.take(),
             restart_session: self.restart_requested.take(),
             exit_code: self.requested_exit_code,
             session_id: Some(self.session.id.clone()),
@@ -515,10 +511,6 @@ impl App {
             needs_redraw = true;
 
             let mut bus_receiver_remote = Bus::global().subscribe();
-            if let Some(status) = Bus::global().latest_update_status() {
-                self.handle_update_status(status);
-                needs_redraw = true;
-            }
 
             // Main event loop
             loop {
@@ -625,7 +617,6 @@ impl App {
         Ok(RunResult {
             reload_session: self.reload_requested.take(),
             rebuild_session: self.rebuild_requested.take(),
-            update_session: self.update_requested.take(),
             restart_session: self.restart_requested.take(),
             exit_code: self.requested_exit_code,
             session_id: if self.is_remote {

@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, ExitStatus};
 
-use crate::bus::{Bus, BusEvent, ClientMaintenanceAction, SessionUpdateStatus};
+use crate::bus::{Bus, BusEvent, ClientMaintenanceAction, ClientRebuildStatus};
 use crate::{build, update};
 
 pub fn hot_rebuild(session_id: &str) -> Result<()> {
@@ -124,7 +124,7 @@ impl BackgroundRebuildPublisher {
     }
 
     fn status(&self, message: impl Into<String>) {
-        self.publish(SessionUpdateStatus::Status {
+        self.publish(ClientRebuildStatus::Status {
             session_id: self.session_id.clone(),
             action: self.action,
             message: message.into(),
@@ -132,7 +132,7 @@ impl BackgroundRebuildPublisher {
     }
 
     fn error(&self, message: impl Into<String>) {
-        self.publish(SessionUpdateStatus::Error {
+        self.publish(ClientRebuildStatus::Error {
             session_id: self.session_id.clone(),
             action: self.action,
             message: message.into(),
@@ -140,8 +140,8 @@ impl BackgroundRebuildPublisher {
     }
 
     fn ready(self, repo_dir: &Path) {
-        Bus::global().publish(BusEvent::SessionUpdateStatus(
-            SessionUpdateStatus::ReadyToReload {
+        Bus::global().publish(BusEvent::ClientRebuildStatus(
+            ClientRebuildStatus::ReadyToReload {
                 session_id: self.session_id,
                 action: self.action,
                 version: rebuild_version_label(repo_dir),
@@ -149,8 +149,8 @@ impl BackgroundRebuildPublisher {
         ));
     }
 
-    fn publish(&self, status: SessionUpdateStatus) {
-        Bus::global().publish(BusEvent::SessionUpdateStatus(status));
+    fn publish(&self, status: ClientRebuildStatus) {
+        Bus::global().publish(BusEvent::ClientRebuildStatus(status));
     }
 }
 

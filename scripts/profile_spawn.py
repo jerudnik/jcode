@@ -362,7 +362,7 @@ def profile_server_spawn(binary: str, sample_interval_s: float) -> dict | None:
     try:
         t0 = time.perf_counter()
         proc = subprocess.Popen(
-            [binary, "--no-update", "serve"],
+            [binary, "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             env=env,
@@ -419,7 +419,7 @@ def profile_client_spawn(binary: str, sample_interval_s: float, hold_s: float) -
                 pass
             os.execve(
                 binary,
-                [binary, "--no-update", "--socket", env["JCODE_SOCKET"]],
+                [binary, "--socket", env["JCODE_SOCKET"]],
                 env,
             )
             os._exit(127)

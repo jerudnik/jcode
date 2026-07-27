@@ -582,54 +582,11 @@ fn test_reload_requests_exit_when_newer_binary() {
 }
 
 #[test]
-fn test_background_update_ready_reloads_immediately_when_idle() {
-    let mut app = create_test_app();
-    let session_id = app.session.id.clone();
-
-    app.handle_session_update_status(SessionUpdateStatus::ReadyToReload {
-        session_id: session_id.clone(),
-        action: ClientMaintenanceAction::Update,
-        version: "v1.2.3".to_string(),
-    });
-
-    assert_eq!(app.reload_requested.as_deref(), Some(session_id.as_str()));
-    assert!(app.should_quit);
-}
-
-#[test]
-fn test_background_update_ready_waits_for_turn_to_finish() {
-    let mut app = create_test_app();
-    let session_id = app.session.id.clone();
-    app.is_processing = true;
-
-    app.handle_session_update_status(SessionUpdateStatus::ReadyToReload {
-        session_id: session_id.clone(),
-        action: ClientMaintenanceAction::Update,
-        version: "v1.2.3".to_string(),
-    });
-
-    assert!(app.reload_requested.is_none());
-    assert_eq!(
-        app.pending_background_client_reload
-            .as_ref()
-            .map(|(id, action)| (id.as_str(), *action)),
-        Some((session_id.as_str(), ClientMaintenanceAction::Update))
-    );
-    assert!(!app.should_quit);
-
-    app.is_processing = false;
-    crate::tui::app::local::handle_tick(&mut app);
-
-    assert_eq!(app.reload_requested.as_deref(), Some(session_id.as_str()));
-    assert!(app.should_quit);
-}
-
-#[test]
 fn test_background_rebuild_status_uses_compact_rebuild_card() {
     let mut app = create_test_app();
     let session_id = app.session.id.clone();
 
-    app.handle_session_update_status(SessionUpdateStatus::Status {
+    app.handle_client_rebuild_status(ClientRebuildStatus::Status {
         session_id,
         action: ClientMaintenanceAction::Rebuild,
         message: "Building release binary in the background...".to_string(),
@@ -649,167 +606,18 @@ fn test_background_rebuild_status_uses_compact_rebuild_card() {
 }
 
 #[test]
-fn test_startup_update_checking_stays_quiet_until_update_work_starts() {
+fn test_update_command_shows_nix_guidance_without_quitting() {
     let mut app = create_test_app();
-
-    app.handle_update_status(UpdateStatus::Checking);
-
-    assert!(
-        app.display_messages()
-            .iter()
-            .all(|message| message.title.as_deref() != Some("Update")),
-        "startup update checks should not show a card unless an update exists"
-    );
-    assert_eq!(app.status_notice(), None);
-
-    app.handle_update_status(UpdateStatus::Downloading {
-        version: "v1.2.3".to_string(),
-    });
-
-    let update_cards = app
-        .display_messages()
-        .iter()
-        .filter(|message| message.title.as_deref() == Some("Update"))
-        .count();
-    assert_eq!(update_cards, 1, "update statuses should update one card");
-    let message = app
-        .display_messages()
-        .last()
-        .expect("expected update display message");
-    assert!(message.content.contains("Status: downloading v1.2.3"));
-    assert!(message.content.contains("restart automatically"));
-    assert_eq!(
-        app.status_notice(),
-        Some("Updating to v1.2.3...".to_string())
-    );
-
-    app.handle_update_status(UpdateStatus::Installed {
-        version: "v1.2.3".to_string(),
-    });
-
-    let message = app
-        .display_messages()
-        .last()
-        .expect("expected update display message");
-    assert!(message.content.contains("Status: updated to v1.2.3"));
-    assert!(message.content.contains("Restarting now."));
-    assert_eq!(
-        app.status_notice(),
-        Some("Updated to v1.2.3; restarting...".to_string())
-    );
-}
-
-#[test]
-fn test_startup_update_up_to_date_removes_transient_card() {
-    let mut app = create_test_app();
-
-    app.handle_update_status(UpdateStatus::Checking);
-    assert!(
-        app.display_messages()
-            .iter()
-            .all(|message| message.title.as_deref() != Some("Update"))
-    );
-
-    app.handle_update_status(UpdateStatus::UpToDate);
-
-    assert!(
-        app.display_messages()
-            .iter()
-            .all(|message| message.title.as_deref() != Some("Update")),
-        "no-update startup checks should not leave a persistent update card"
-    );
-    assert!(app.background_client_action.is_none());
-    assert!(app.pending_background_client_reload.is_none());
-}
-
-#[test]
-fn test_startup_update_diverged_offers_merge_without_failure_card() {
-    let mut app = create_test_app();
-
-    app.handle_update_status(UpdateStatus::Checking);
-    app.handle_update_status(UpdateStatus::Error(
-        crate::update::GIT_PULL_DIVERGED_SUMMARY.to_string(),
-    ));
-
-    let message = app
-        .display_messages()
-        .last()
-        .expect("expected update display message");
-    assert_eq!(message.title.as_deref(), Some("Update"));
-    // The diverged card must NOT use the generic failure framing.
-    assert!(
-        !message.content.contains("Status: failed"),
-        "unexpected failure header: {}",
-        message.content
-    );
-    assert!(
-        !message
-            .content
-            .contains("Continuing with the current version."),
-        "unexpected continue footer: {}",
-        message.content
-    );
-    // It should explain the divergence and offer the merge-agent hotkey.
-    assert!(
-        message.content.contains("diverged"),
-        "missing divergence explanation: {}",
-        message.content
-    );
-    assert!(
-        message.content.to_lowercase().contains("agent"),
-        "missing merge-agent hint: {}",
-        message.content
-    );
-    assert!(app.pending_merge_offer.is_some());
-    assert!(app.background_client_action.is_none());
-}
-
-#[test]
-fn test_startup_update_diverged_offer_clears_on_submit() {
-    let mut app = create_test_app();
-    app.handle_update_status(UpdateStatus::Error(format!(
-        "Update failed: {}",
-        crate::update::GIT_PULL_DIVERGED_SUMMARY
-    )));
-    assert!(
-        app.pending_merge_offer.is_some(),
-        "prefixed divergence summary should still arm the offer"
-    );
-
-    app.input = "do something else".to_string();
-    app.cursor_pos = app.input.len();
+    app.input = "/update".to_string();
     app.submit_input();
-    assert!(
-        app.pending_merge_offer.is_none(),
-        "a fresh submission should drop the stale merge offer"
-    );
-}
-
-#[test]
-fn test_startup_update_error_replaces_checking_card() {
-    let mut app = create_test_app();
-
-    app.handle_update_status(UpdateStatus::Checking);
-    app.handle_update_status(UpdateStatus::Error("Check failed: offline".to_string()));
 
     let message = app
         .display_messages()
         .last()
-        .expect("expected update display message");
-    assert_eq!(message.title.as_deref(), Some("Update"));
-    assert!(message.content.contains("Status: failed"));
-    assert!(message.content.contains("Check failed: offline"));
-    assert!(
-        message
-            .content
-            .contains("Continuing with the current version.")
-    );
-    assert_eq!(
-        app.status_notice(),
-        Some("Update failed; continuing current version".to_string())
-    );
-    assert!(app.background_client_action.is_none());
-    assert!(app.pending_background_client_reload.is_none());
+        .expect("expected Nix update guidance");
+    assert_eq!(message.title.as_deref(), Some("Updates are managed by Nix"));
+    assert!(message.content.contains("nix flake update"));
+    assert!(!app.should_quit);
 }
 
 #[test]

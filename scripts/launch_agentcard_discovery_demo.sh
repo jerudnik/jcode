@@ -52,7 +52,6 @@ kitty \
   --directory "$DEMO_DIR" \
   "$JCODE_BIN" \
   --no-selfdev \
-  --no-update \
   --model "$MODEL" \
   --disable-base-tools \
   --tools bash,discover_tools \

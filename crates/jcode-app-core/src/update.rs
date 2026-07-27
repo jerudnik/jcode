@@ -1,4 +1,4 @@
-//! Source-only update surface.
+//! Nix-owned update guidance and source-rebuild helpers.
 //!
 //! F20a made jcode nix-native: a packaged binary lives in the read-only Nix
 //! store and is updated by the package manager, never by jcode itself. F20b
@@ -7,25 +7,26 @@
 //! verify/install-into-a-version-store) entirely: there is no longer any code
 //! path in which jcode fetches a release tarball and installs it over itself.
 //!
-//! What remains is the honest set of update mechanisms for this fork:
-//!
-//! * **nix-managed installs** -- `jcode update` prints the package-manager path
-//!   (`home-manager` rebuild / `nix profile upgrade`) and changes nothing.
-//! * **source checkouts** -- `git pull --ff-only` plus a local `cargo build`,
-//!   driven by [`crate::session_rebuild`] and `src/cli/hot_exec.rs`.
-//!
-//! Everything here is deterministic and offline except [`run_git_pull_ff_only`],
-//! which shells out to the user's own `git` against their own remote.
+//! End-user installation and updates are owned exclusively by the repository's
+//! Nix flake. `jcode update` and `/update` only show package-manager guidance.
+//! The remaining git helper is restricted to the explicit source-development
+//! rebuild flow in [`crate::session_rebuild`]; it is not a distribution path.
 
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// Summary emitted when `git pull` cannot reconcile the local and upstream
+pub const NIX_UPDATE_GUIDANCE: &str = "Jcode is distributed and updated through Nix.\n\
+Update it the way you installed it:\n\
+  Home Manager: rebuild your Home Manager generation\n\
+  nix profile:  nix profile upgrade jcode  (or your flake reference)\n\
+  flake input:  nix flake update jcode  then rebuild";
+
+/// Summary emitted when `git pull` cannot reconcile the local and tracked
 /// histories on its own (diverged branches, non-fast-forward, unrelated
 /// histories). Callers use this to recognize a divergence and offer a merge
 /// affordance instead of a generic failure.
 pub const GIT_PULL_DIVERGED_SUMMARY: &str =
-    "Local and upstream have diverged, so the update could not fast-forward.";
+    "The local and tracked branches have diverged, so the source rebuild could not fast-forward.";
 
 pub fn print_centered(msg: &str) {
     let width = crossterm::terminal::size()
@@ -62,13 +63,9 @@ fn unicode_display_width(s: &str) -> usize {
     w
 }
 
-pub fn is_release_build() -> bool {
-    jcode_build_meta::is_release_build()
-}
-
 /// Fast-forward the source checkout at `repo_dir`.
 ///
-/// This is the only remaining network-touching update primitive: it runs the
+/// This developer-only source-rebuild primitive runs the
 /// user's own `git` against their own remote. A non-fast-forward outcome is
 /// summarized (not swallowed) so the TUI can offer a merge affordance.
 pub fn run_git_pull_ff_only(repo_dir: &Path, quiet: bool) -> Result<()> {
@@ -104,7 +101,7 @@ pub fn summarize_git_pull_failure(stderr: &[u8]) -> String {
     }
 
     if text.contains("There is no tracking information for the current branch") {
-        return "git pull failed: current branch has no upstream tracking branch".to_string();
+        return "git pull failed: current branch has no remote tracking branch".to_string();
     }
 
     let line = text
@@ -120,7 +117,7 @@ pub fn summarize_git_pull_failure(stderr: &[u8]) -> String {
     }
 }
 
-/// Whether `git pull` stderr indicates the local and upstream branches have
+/// Whether `git pull` stderr indicates the local and tracked branches have
 /// diverged (and therefore need a manual merge/rebase, not a fast-forward).
 pub fn git_pull_failure_is_divergence(stderr: &str) -> bool {
     stderr.contains("Need to specify how to reconcile divergent branches")
@@ -134,26 +131,9 @@ pub fn summary_is_divergence(summary: &str) -> bool {
     summary == GIT_PULL_DIVERGED_SUMMARY
 }
 
-/// Start a background source update for `session_id`.
-///
-/// Source checkouts update by pull + rebuild, which is exactly what
-/// [`crate::session_rebuild::spawn_background_session_rebuild`] already does
-/// (with test gating and reload publication). Since F20c removed the release
-/// download path, "update" and "rebuild" are the same operation for every
-/// non-nix install, so this delegates rather than maintaining a second,
-/// subtly-different pipeline.
-pub fn spawn_background_session_update(session_id: String) {
-    crate::session_rebuild::spawn_background_session_rebuild(session_id);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_is_release_build() {
-        assert!(!is_release_build());
-    }
 
     #[test]
     fn test_summarize_git_pull_failure_diverged() {
@@ -170,7 +150,7 @@ mod tests {
         let stderr = b"There is no tracking information for the current branch.\n";
         assert_eq!(
             summarize_git_pull_failure(stderr),
-            "git pull failed: current branch has no upstream tracking branch"
+            "git pull failed: current branch has no remote tracking branch"
         );
     }
 

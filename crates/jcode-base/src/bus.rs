@@ -320,50 +320,32 @@ pub struct SidePanelUpdated {
     pub snapshot: SidePanelSnapshot,
 }
 
-#[derive(Clone, Debug)]
-pub enum UpdateStatus {
-    Checking,
-    Available { current: String, latest: String },
-    Downloading { version: String },
-    Installing { version: String },
-    Installed { version: String },
-    UpToDate,
-    Error(String),
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ClientMaintenanceAction {
-    Update,
     Rebuild,
 }
 
 impl ClientMaintenanceAction {
     pub fn noun(&self) -> &'static str {
         match self {
-            Self::Update => "update",
             Self::Rebuild => "rebuild",
         }
     }
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::Update => "Update",
             Self::Rebuild => "Rebuild",
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum SessionUpdateStatus {
+pub enum ClientRebuildStatus {
     Status {
         session_id: String,
         action: ClientMaintenanceAction,
         message: String,
-    },
-    NoUpdate {
-        session_id: String,
-        current: String,
     },
     ReadyToReload {
         session_id: String,
@@ -412,10 +394,8 @@ pub enum BusEvent {
     UiActivity(UiActivity),
     /// Local git status command completed off the UI thread
     GitStatusCompleted(GitStatusCompleted),
-    /// Update check status from background thread
-    UpdateStatus(UpdateStatus),
-    /// Interactive client update status for a specific session
-    SessionUpdateStatus(SessionUpdateStatus),
+    /// Developer source rebuild status for a specific session.
+    ClientRebuildStatus(ClientRebuildStatus),
     /// External dictation command completed with transcript text
     DictationCompleted {
         dictation_id: String,
@@ -464,11 +444,6 @@ pub struct Bus {
 
 const MODELS_UPDATED_DEBOUNCE: Duration = Duration::from_millis(750);
 
-fn latest_update_status() -> &'static Mutex<Option<UpdateStatus>> {
-    static STATE: OnceLock<Mutex<Option<UpdateStatus>>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(None))
-}
-
 #[derive(Default)]
 struct ModelsUpdatedPublishState {
     last_published_at: Option<Instant>,
@@ -512,20 +487,7 @@ impl Bus {
     }
 
     pub fn publish(&self, event: BusEvent) {
-        if let BusEvent::UpdateStatus(status) = &event {
-            let mut latest = latest_update_status()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            *latest = Some(status.clone());
-        }
         let _ = self.sender.send(event);
-    }
-
-    pub fn latest_update_status(&self) -> Option<UpdateStatus> {
-        latest_update_status()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
     }
 
     pub fn publish_models_updated(&self) {

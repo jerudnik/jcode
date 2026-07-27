@@ -314,7 +314,6 @@ async fn binary_integration_reload_handoff() -> Result<()> {
 
     let stderr_file = std::fs::File::create(&stderr_path)?;
     let mut child = Command::new(&server_binary)
-        .arg("--no-update")
         .arg("--socket")
         .arg(&socket_path)
         .arg("serve")
@@ -486,7 +485,6 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
     let mut command = Command::new(&release_binary);
     command
-        .arg("--no-update")
         .arg("--provider")
         .arg("antigravity")
         .arg("self-dev")
@@ -618,7 +616,6 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
 
     let mut command = Command::new(&starter_binary);
     command
-        .arg("--no-update")
         .arg("--provider")
         .arg("antigravity")
         .arg("self-dev")
@@ -805,7 +802,6 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
 
     let mut command = Command::new(&starter_binary);
     command
-        .arg("--no-update")
         .arg("--provider")
         .arg("antigravity")
         .arg("self-dev")

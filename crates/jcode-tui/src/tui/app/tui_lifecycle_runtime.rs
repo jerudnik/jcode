@@ -135,7 +135,7 @@ impl App {
     /// launched with. Only when none of those is known do we fabricate a fresh
     /// `ses_*` id. Fabricating eagerly is what caused issue #328: the re-exec
     /// would `jcode --resume <bogus-id>` and crash with "No session found
-    /// matching ..." after an auto-update, because the version-mismatch defer
+    /// matching ..." after a client reload, because the version-mismatch defer
     /// path returns before `remote_session_id` is ever assigned.
     pub(super) fn reload_handoff_session_id(&self) -> String {
         self.remote_session_id
@@ -661,7 +661,7 @@ pub(super) fn handle_dev_command(app: &mut App, trimmed: &str) -> bool {
     }
 
     if trimmed == "/update" {
-        app.start_background_client_update(app.session.id.clone());
+        app.show_nix_update_guidance();
         return true;
     }
 

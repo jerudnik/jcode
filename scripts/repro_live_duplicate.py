@@ -227,7 +227,6 @@ def launch_client(binary: str, env: dict, session_id: str, name: str) -> LiveCli
     proc = subprocess.Popen(
         [
             binary,
-            "--no-update",
             "--no-selfdev",
             "--socket", env["JCODE_SOCKET"],
             "--resume", session_id,
@@ -476,7 +475,7 @@ def main() -> int:
 
     server = subprocess.Popen(
         [binary, "serve", "--socket", env["JCODE_SOCKET"], "--debug-socket",
-         "--no-update", "--no-selfdev"],
+         "--no-selfdev"],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         preexec_fn=os.setsid,
     )
