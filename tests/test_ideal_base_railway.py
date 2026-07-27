@@ -19,10 +19,15 @@ SPEC.loader.exec_module(railway)
 
 class IdealBaseRailwayTests(unittest.TestCase):
     def test_repository_control_plane_is_valid(self) -> None:
+        # Counts are deliberately not asserted. This graph expands as nodes are
+        # accepted (`seed_and_expand` adds children), so pinning totals froze a
+        # moving number: the assertions said 38 nodes while the graph had grown
+        # to 46, and failed on the growth they were supposed to permit. What
+        # must hold is structural, so that is what is checked.
         graph, state, nodes = railway.validate_repository()
-        self.assertEqual(len(graph["root_nodes"]), 6)
-        self.assertEqual(len(graph["all_nodes"]), 38)
-        self.assertEqual(len(graph["audit_coverage"]), 25)
+        self.assertTrue(graph["root_nodes"])
+        self.assertTrue(graph["all_nodes"])
+        self.assertLessEqual(len(graph["all_nodes"]), len(nodes))
         coordinator_paths = set(graph["coordinator_owned_paths"])
         self.assertTrue(coordinator_paths)
         self.assertTrue(
@@ -33,13 +38,22 @@ class IdealBaseRailwayTests(unittest.TestCase):
         )
         self.assertEqual(set(state["nodes"]), set(nodes))
 
-    def test_initial_runnable_projection_contains_only_bootstrap_root(self) -> None:
+    def test_runnable_projection_is_a_single_unblocked_node(self) -> None:
+        # The projection must name exactly one next action (the railway is
+        # sequential by construction) and it must not be an already-accepted
+        # node. The specific id moves as work lands, so asserting it pinned the
+        # test to the bootstrap root W0 and broke the moment W0 was accepted.
         graph, state, nodes = railway.validate_repository()
         ready = railway.ready_nodes(graph, state, nodes)
-        self.assertEqual(
-            [(node["id"], node["action"]) for node in ready],
-            [("W0", "seed_and_expand")],
+        self.assertEqual(len(ready), 1, ready)
+        node = ready[0]
+        self.assertNotEqual(
+            state["nodes"].get(node["id"], {}).get("state"), "accepted"
         )
+        for dependency in node.get("depends_on", []):
+            self.assertEqual(
+                state["nodes"].get(dependency, {}).get("state"), "accepted"
+            )
 
     def test_bootstrap_prompt_covers_the_full_execution_protocol(self) -> None:
         prompt = railway.validate_bootstrap_prompt()
