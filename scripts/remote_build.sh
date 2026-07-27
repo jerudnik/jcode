@@ -338,6 +338,23 @@ if [[ "$SYNC_SOURCE" -eq 1 ]]; then
         --exclude 'assets/readme/' \
         "$LOCAL_DIR/" "$REMOTE:$REMOTE_DIR/"
 
+    # Project prompt and skill sources are build inputs, but .jcode may also
+    # contain ignored local artifacts. Clear the remote copy, then restore only
+    # paths tracked by Git so removed prompt inputs cannot remain stale.
+    (
+        empty_jcode_dir="$(mktemp -d)"
+        trap 'rm -rf "$empty_jcode_dir"' EXIT
+        "$RSYNC_BIN" -az --delete \
+            -e "$RSYNC_SSH_COMMAND" \
+            "$empty_jcode_dir/" "$REMOTE:$REMOTE_DIR/.jcode/"
+    )
+    if git -C "$LOCAL_DIR" ls-files -- .jcode | grep -q .; then
+        git -C "$LOCAL_DIR" ls-files -z -- .jcode | \
+            "$RSYNC_BIN" -avz --from0 --files-from=- \
+                -e "$RSYNC_SSH_COMMAND" \
+                "$LOCAL_DIR/" "$REMOTE:$REMOTE_DIR/"
+    fi
+
     metadata_file="$(mktemp)"
     trap 'rm -f "$metadata_file"' EXIT
     {

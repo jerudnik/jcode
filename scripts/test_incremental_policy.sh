@@ -246,6 +246,9 @@ cat >>"$fake_bin/rsync" <<'EOF'
 if [[ -n "${FAKE_RSYNC_LOG:-}" ]]; then
   printf '%s\n' "$*" >>"$FAKE_RSYNC_LOG"
 fi
+if [[ "$*" == *"--files-from=-"* ]] && [[ -n "${FAKE_RSYNC_STDIN_LOG:-}" ]]; then
+  cat >>"$FAKE_RSYNC_STDIN_LOG"
+fi
 if [[ "${FAKE_RSYNC_CREATE_DEST:-0}" == "1" ]]; then
   destination="${!#}"
   mkdir -p "$(dirname "$destination")"
@@ -269,16 +272,23 @@ grep -Fq 'cargo\ check' "$ssh_log" || fail 'remote check command was not forward
 grep -Fq '/nix/var/nix/profiles/default/bin/nix' "$ssh_log" || fail 'remote command omitted Nix recovery'
 
 metadata_repo="$tmp/remote-metadata-repo"
-mkdir -p "$metadata_repo/scripts"
+mkdir -p "$metadata_repo/scripts" "$metadata_repo/.jcode"
 cp "$repo_root/scripts/remote_build.sh" "$repo_root/scripts/remote_config.sh" "$metadata_repo/scripts/"
+printf '# project prompt\n' >"$metadata_repo/.jcode/prompt-overlay.md"
 git -C "$metadata_repo" init -q
-git -C "$metadata_repo" add scripts
+git -C "$metadata_repo" add scripts .jcode/prompt-overlay.md
 git -C "$metadata_repo" \
   -c user.name=Jcode -c user.email=jcode@example.invalid -c commit.gpgsign=false \
   commit -qm initial
 metadata_hash=$(git -C "$metadata_repo" rev-parse --short HEAD)
+rsync_log="$tmp/rsync.log"
 : >"$ssh_log"
+: >"$rsync_log"
+jcode_rsync_stdin_log="$tmp/jcode-rsync-stdin.log"
+: >"$jcode_rsync_stdin_log"
 FAKE_SSH_LOG="$ssh_log" \
+FAKE_RSYNC_LOG="$rsync_log" \
+FAKE_RSYNC_STDIN_LOG="$jcode_rsync_stdin_log" \
 JCODE_REMOTE_CONFIG="$tmp/missing-remote-config" \
 JCODE_REMOTE_SSH_BIN="$fake_bin/ssh" \
 JCODE_REMOTE_RSYNC_BIN="$fake_bin/rsync" \
@@ -288,6 +298,9 @@ JCODE_REMOTE_RSYNC_BIN="$fake_bin/rsync" \
 
 grep -Fq "JCODE_BUILD_GIT_HASH=$metadata_hash" "$ssh_log" || fail 'synced remote build did not force git metadata refresh'
 grep -Fq 'JCODE_BUILD_GIT_DIRTY=0' "$ssh_log" || fail 'synced remote build did not forward clean source state'
+grep -Eq -- '--delete .* fake-builder:/tmp/jcode-policy-test/.jcode/' "$rsync_log" || fail 'remote build did not clear stale .jcode inputs'
+grep -Fq -- '--from0 --files-from=-' "$rsync_log" || fail 'remote build did not use a tracked-only .jcode sync'
+tr '\0' '\n' <"$jcode_rsync_stdin_log" | grep -Fxq '.jcode/prompt-overlay.md' || fail 'remote build omitted tracked .jcode inputs'
 
 : >"$ssh_log"
 FAKE_SSH_LOG="$ssh_log" \
@@ -339,7 +352,6 @@ if grep -q 'CARGO_INCREMENTAL=' "$ssh_log"; then
   fail 'remote build ignored JCODE_INCREMENTAL_POLICY=profile-default'
 fi
 
-rsync_log="$tmp/rsync.log"
 remote_test_repo="$tmp/remote-test-repo"
 mkdir -p "$remote_test_repo/scripts"
 remote_test_repo=$(cd "$remote_test_repo" && pwd)
