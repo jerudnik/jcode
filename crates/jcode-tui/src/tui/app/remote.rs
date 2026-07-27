@@ -27,8 +27,6 @@ mod swarm_plan_core;
 mod swarm_status_core;
 mod workspace;
 
-#[cfg(test)]
-pub(super) use key_handling::reload_stale_remote_server_before_update;
 use queue_recovery::{
     recover_local_interleave_to_queue, recover_stranded_soft_interrupts,
     recover_undelivered_queued_continuation,
@@ -557,12 +555,8 @@ pub(super) async fn handle_bus_event(
         Ok(BusEvent::OnboardingModelValidated(result)) => {
             app.handle_onboarding_model_validated(result)
         }
-        Ok(BusEvent::UpdateStatus(status)) => {
-            app.handle_update_status(status);
-            true
-        }
-        Ok(BusEvent::SessionUpdateStatus(status)) => {
-            app.handle_session_update_status(status);
+        Ok(BusEvent::ClientRebuildStatus(status)) => {
+            app.handle_client_rebuild_status(status);
             true
         }
         Ok(BusEvent::DictationCompleted {

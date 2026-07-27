@@ -99,7 +99,7 @@ Most early users are expected to be on macOS, so macOS polish should be a produc
 
 Mac-specific work that should not be postponed too long:
 
-- native `.app` bundle
+- native `.app` bundle produced as a flake-owned Nix output
 - app icon and menu bar integration
 - command-key shortcuts
 - system light/dark appearance
@@ -466,7 +466,7 @@ These should be resolved before implementation moves past the fake-data prototyp
 4. Reuse the existing Jcode server protocol or introduce a desktop-specific event protocol crate?
 5. Should the first desktop binary support multi-surface mode or only one active surface?
 6. What is the minimum macOS version to support?
-7. What is the first distribution path: local `.app`, Homebrew cask, or signed/notarized DMG?
+7. Which flake-owned output shape should expose the desktop `.app`, and what signing/notarization steps can remain reproducible inside that Nix-owned path?
 
 ## Recommended immediate next step
 

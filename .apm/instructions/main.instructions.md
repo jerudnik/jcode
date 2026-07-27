@@ -5,31 +5,33 @@ applyTo: "**"
 
 # Repository contract
 
-This is the independent Jcode hard fork. The live repository and its `main` branch are authoritative; there is no upstream-tracking, patch-stack, or convergence contract. Read `docs/agent-workflows.md` before broad build, CI, release, swarm, or instruction work.
+This independent hard fork and its `main` branch are authoritative. There is no upstream-tracking, patch-stack, or convergence contract. Read `docs/agent-workflows.md` before broad build, CI, release, swarm, or instruction work.
 
 ## Work safely
 
-- Default to the TUI/CLI target. Touch desktop code or run desktop builds only when the task is desktop-specific.
-- Inspect the working tree before editing. Preserve unrelated and concurrent work, and commit only the files you own.
-- Make focused commits as work becomes valid. Do not push, publish, tag, or release unless the user requested it.
-- Prefer fixing and validating problems over merely reporting them. Avoid destructive or irreversible actions.
+- Default to TUI/CLI. Touch or build desktop code only for desktop-specific tasks.
+- Inspect the tree, preserve concurrent work, and commit only owned files in focused commits.
+- Do not push, publish, tag, release, or take destructive action unless requested. Prefer fixing and validating over reporting.
 
 ## Sources of truth
 
-- Agent instructions are authored in `.apm/instructions/*.instructions.md`; generated `AGENTS.md`, `CLAUDE.md`, and related surfaces are never hand-edited.
-- After instruction-source changes, run `apm compile --validate` and `apm compile`. Use `apm compile --dry-run` when placement may change.
-- Use current code, scripts, flake outputs, and workflow files as the authority for commands and check names. Discover volatile details live instead of copying them into prompt files.
-- Detailed procedures belong in `docs/agent-workflows.md`. Keep prompt-loaded files concise and free of duplicated command blocks.
+- Author instructions in `.apm/instructions/*.instructions.md`, never generated `AGENTS.md`, `CLAUDE.md`, or related surfaces. Then run `apm compile --validate` and `apm compile`; use `--dry-run` when placement may change.
+- Discover commands and checks from current code, scripts, flake outputs, and workflows. Keep procedures in `docs/agent-workflows.md` and prompt files concise.
+
+## Distribution authority
+
+- Repository-owned end-user distribution is Nix-only: `flake.nix` defines packages and public Cachix is the sole binary publication channel.
+- GitHub releases are metadata-only. Do not add executable assets, binary checksums, shell/PowerShell installers, Homebrew/AUR, signed app-store/TestFlight delivery, or Cargo publication.
+- Runtime update commands show Nix guidance only. Developer source rebuilds must not replace or mutate an end-user installation.
 
 ## Tools and delegation
 
-- Follow `.jcode/preferred-tools.md` for repository tool routing.
-- Use swarm for genuinely separable investigation, implementation, or independent review. Use a subagent for one isolated result. Keep model routing in `.jcode/swarm-prompt.md` and discover available routes with `swarm list_models`.
-- Give spawned workers a concrete task, label, and `subagent_type`. Protect ownership boundaries, prefer artifact-based handoffs, and clean up owned workers after completion.
+- Follow `.jcode/preferred-tools.md`. Use swarm for separable work or review and a subagent for one isolated result; routing lives in `.jcode/swarm-prompt.md` and available routes come from `swarm list_models`.
+- Give workers a task, label, and `subagent_type`; protect ownership, prefer artifact handoffs, and clean up owned workers.
 
 ## Validation and closeout
 
-- Run the narrowest useful check while iterating, then the relevant final gate from `docs/agent-workflows.md`.
-- Prefer local checks, Nix, remote builders, and the public Cachix cache over routine GitHub CI. Never print, copy, or commit credentials.
-- For self-development, use coordinated `selfdev` builds and reloads, then continue automatically and verify the running binary or UI.
-- If behavior, architecture, workflow, or ownership changed, update the nearest authoritative documentation in the same change.
+- Run narrow checks while iterating and the relevant final gate from `docs/agent-workflows.md`.
+- Prefer local checks, Nix, remote builders, and public Cachix over routine GitHub CI. Never expose credentials.
+- Use coordinated `selfdev` builds/reloads, continue automatically, and verify the running binary or UI.
+- Update the nearest authoritative documentation when behavior, architecture, workflow, or ownership changes.

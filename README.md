@@ -4,7 +4,7 @@
 
 [![Hard Fork](https://img.shields.io/badge/status-independent%20hard%20fork-blue?style=flat-square)](docs/BRANCHING.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](#platform-support)
+[![Nix platforms](https://img.shields.io/badge/Nix-Linux%20%7C%20macOS-blue?style=flat-square)](#platform-support)
 [![Last Commit](https://badgen.net/github/last-commit/jerudnik/jcode/main?icon=github)](https://github.com/jerudnik/jcode/commits/main)
 [![GitHub Stars](https://badgen.net/github/stars/jerudnik/jcode?icon=github)](https://github.com/jerudnik/jcode/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/nBe9vGyK9a)
@@ -45,8 +45,8 @@ Built for multi-session workflows, infinite customizability, and performance.
 nix run github:jerudnik/jcode/main
 ```
 
-Need Windows, Homebrew, source builds, provider setup, or tell your agent to set it up for you?
-[Jump to detailed installation](#detailed-installation).
+For profile installs, updates, Cachix, Home Manager, and developer builds, see
+[detailed installation](#detailed-installation).
 
 ---
 
@@ -733,119 +733,52 @@ opt-out and posts to the upstream maintainer's server. See
 
 ## Detailed Installation
 
-### Setup
+Jcode is an independent hard fork. Repository-owned end-user distribution is
+exclusively Nix-based: the flake defines the package and the public Cachix cache
+provides trusted prebuilt outputs when available. GitHub releases carry notes
+and source metadata only.
 
-If you want another agent to set up jcode for you, give it this prompt:
-
-```text
-Set up jcode on this machine for me.
-
-1. Detect the operating system, available package managers, and shell environment, then install jcode using the best matching command below instead of referring me somewhere else:
-
-   - macOS or Linux with Nix available:
-     nix profile install github:jerudnik/jcode/main
-
-   - From source on any supported development platform:
-     git clone https://github.com/jerudnik/jcode.git
-     cd jcode
-     cargo build --release
-     scripts/install_release.sh
-
-   - For local self-dev / refactor work on Linux x86_64, prefer:
-     scripts/dev_cargo.sh build --release -p jcode --bin jcode
-     scripts/dev_cargo.sh --print-setup
-     scripts/install_release.sh
-
-2. Verify that `jcode` is on my `PATH`.
-3. Launch `jcode` once in a new terminal window/session to confirm it starts successfully.
-4. Before attempting any interactive login flow, assess which providers are already available non-interactively and prefer those first. Check existing local credentials, config files, CLI sessions, and environment variables such as:
-   - Claude: `~/.jcode/auth.json`, `~/.claude/.credentials.json`, `~/.local/share/opencode/auth.json`, `ANTHROPIC_API_KEY`
-   - OpenAI: `~/.jcode/openai-auth.json`, `~/.codex/auth.json`, `OPENAI_API_KEY`
-   - Gemini: `~/.jcode/gemini_oauth.json`, `~/.gemini/oauth_creds.json`
-   - GitHub Copilot: existing auth under `~/.config/github-copilot/`
-   - Azure OpenAI: `~/.config/jcode/azure-openai.env`, `AZURE_OPENAI_*`, or an existing `az login`
-   - OpenRouter: `OPENROUTER_API_KEY`
-   - Fireworks: `~/.config/jcode/fireworks.env`, `FIREWORKS_API_KEY`
-   - MiniMax: `~/.config/jcode/minimax.env`, `MINIMAX_API_KEY`
-   - NVIDIA NIM: `~/.config/jcode/nvidia-nim.env`, `NVIDIA_API_KEY`
-   - Alibaba Cloud Coding Plan: existing jcode config/env if present
-5. Prefer whichever provider is already configured and verify it with `jcode auth-test --all-configured` or a provider-specific auth test when appropriate.
-6. Only if no usable provider is already configured, guide me through the minimal manual step needed:
-   - Claude: `jcode login --provider claude`
-   - GitHub Copilot: `jcode login --provider copilot`
-   - OpenAI: `jcode login --provider openai`
-   - Gemini: `jcode login --provider gemini`
-   - Azure OpenAI: `jcode login --provider azure`
-   - Fireworks: `jcode login --provider fireworks`
-   - MiniMax: `jcode login --provider minimax`
-   - NVIDIA NIM: `jcode login --provider nvidia-nim`
-   - Alibaba Cloud Coding Plan: `jcode login --provider alibaba-coding-plan`
-   - OpenRouter: help me set `OPENROUTER_API_KEY`
-   - Anthropic direct API: help me set `ANTHROPIC_API_KEY`
-7. After setup, run a simple smoke test with `jcode run "say hello"` and confirm it works.
-8. If I want browser automation, also check `jcode browser status`. If browser automation is not ready, run `jcode browser setup`, verify the built-in `browser` tool works, and explain any remaining manual step.
-9. Explain any manual step that still needs me, especially browser OAuth, device login, API key entry, or browser extension approval.
-```
-
-This is intended to be a copy-paste bootstrap prompt for jcode itself or any other coding agent.
-
-### Quick Install
+### Run or install
 
 ```bash
-# macOS & Linux with Nix
+# Run without installing
+nix run github:jerudnik/jcode/main
+
+# Install into the current Nix profile
 nix profile install github:jerudnik/jcode/main
 ```
 
-The hard fork currently treats its Nix flake and source tree as the authoritative
-distribution paths. Legacy package channels owned by the lineage project are not
-hard-fork releases.
+To ask another agent to perform setup, use:
 
-### From Source (all platforms)
-
-```bash
-git clone https://github.com/jerudnik/jcode.git
-cd jcode
-cargo build --release
+```text
+Set up Jcode from github:jerudnik/jcode/main using Nix. Enable the flake's
+Cachix substituter, install it with `nix profile install`, verify `jcode version`,
+and run `jcode run "say hello"` with an already configured provider. Do not use
+curl installers, release archives, Homebrew, AUR, Cargo registry packages, or a
+source build as an end-user installation path.
 ```
 
-For local self-dev / refactor work on Linux x86_64, prefer:
+### Update
 
 ```bash
-scripts/dev_cargo.sh build --release -p jcode --bin jcode
-scripts/dev_cargo.sh --print-setup
+# Profile installation
+nix profile upgrade jcode
+
+# Flake-input installation
+nix flake update jcode
+nix build .#jcode
 ```
 
-That wrapper automatically uses `sccache` when available, prefers a fast
-working local linker setup (`clang + lld`) instead of assuming every machine's
-`mold` configuration is valid, and can print the active linker/cache setup via
-`--print-setup` so slow-path builds are easier to diagnose.
+The exact command depends on how your Nix configuration names the input or
+profile entry. `jcode update` and the TUI `/update` command print this guidance.
+They never download, build, replace, or mutate the installed executable.
 
-Then symlink to your PATH:
+### Cachix binary cache
 
-```bash
-scripts/install_release.sh
-```
-
-### Nix (flake)
-
-This fork ships a [Nix flake](flake.nix)
-built with [crane](https://github.com/ipetkov/crane) and
-[flake-parts](https://flake.parts), with a public
-[Cachix](https://app.cachix.org/cache/jerudnik-jcode) binary cache so you can
-avoid long cold compiles when substitutes are available.
-
-Run it directly without installing:
-
-```bash
-nix run github:jerudnik/jcode
-```
-
-Add the binary cache so prebuilt outputs are fetched instead of compiled. The
-flake also advertises this via `nixConfig`, so `nix run`/`nix build` will offer
-to use it automatically:
+The flake advertises the public cache through `nixConfig`. Consumers can accept
+it per invocation with `--accept-flake-config`, or configure it permanently:
 
 ```nix
-# nix.conf / nixpkgs.config
 nix.settings = {
   substituters = [ "https://jerudnik-jcode.cachix.org" ];
   trusted-public-keys = [
@@ -854,64 +787,54 @@ nix.settings = {
 };
 ```
 
-Consume it as a flake input with the Home Manager module:
+### Home Manager or nixpkgs overlay
 
 ```nix
 {
   inputs.jcode.url = "github:jerudnik/jcode/main";
 
-  # In your Home Manager configuration:
+  # Home Manager
   imports = [ inputs.jcode.homeManagerModules.default ];
   programs.jcode.enable = true;
+
+  # Or expose pkgs.jcode through the overlay
+  nixpkgs.overlays = [ inputs.jcode.overlays.default ];
 }
 ```
 
-Or pull just the package via the overlay:
+See [docs/NIX.md](docs/NIX.md) for all flake outputs and configuration details.
 
-```nix
-nixpkgs.overlays = [ inputs.jcode.overlays.default ];
-# environment.systemPackages = [ pkgs.jcode ];
+### Developer source builds
+
+Contributors may build the checked-out source inside the Nix development shell:
+
+```bash
+nix develop
+scripts/dev_cargo.sh build -p jcode --bin jcode
 ```
 
-Exposed flake outputs for supported Linux and Darwin systems:
-
-| Output | Description |
-|---|---|
-| `packages.{default,jcode}` | The `jcode` binary built with crane |
-| `apps.default` | `nix run` entry point |
-| `overlays.default` | Adds `pkgs.jcode` to nixpkgs |
-| `homeManagerModules.default` / `homeModules.default` | Home Manager module (`programs.jcode`) |
-| `devShells.default` | Contributor shell (cargo, nextest, audit, watch) |
-| `checks` | Reproducible Nix build gate (`nix flake check`) |
-| `formatter` | `nixfmt-rfc-style` |
-
-See [docs/NIX.md](docs/NIX.md) for details.
+This is a development workflow, not an end-user distribution channel. Workspace
+crates are marked `publish = false` and are not published to a Cargo registry.
 
 ### Uninstall
 
-Removes installed binaries and the launcher but keeps your config, auth, and
-sessions so a clean reinstall picks up where you left off:
+Remove Jcode through the Nix mechanism that installed it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jerudnik/jcode/main/scripts/uninstall.sh | bash -s -- --yes
+nix profile remove jcode
 ```
 
-For a full wipe of everything including config, auth, sessions, logs, and
-memory (useful for recovering from a broken install):
+For Home Manager or NixOS, remove the Jcode module/package declaration and apply
+your configuration. These operations intentionally preserve `~/.jcode`. Delete
+that state directory separately only when you explicitly want to remove config,
+auth, sessions, logs, and memory.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/jerudnik/jcode/main/scripts/uninstall.sh | bash -s -- --purge --yes
-```
+### Platform support
 
-Add `--dry-run` to preview what would be removed without deleting anything.
-
-### Platform Support
-
-| Platform | Status |
+| Platform | Nix package status |
 |---|---|
-| **Linux** x86_64 / aarch64 | Fully supported |
-| **macOS** Apple Silicon | Supported |
-| **Windows** x86_64 | Builds and runs (native + WSL2), but **untested by this fork's CI** ([#19](https://github.com/jerudnik/jcode/issues/19)) |
-| **Termux** aarch64 / x86_64 | Source builds only; the former lineage installer is not a hard-fork distribution path |
+| **Linux** x86_64 / aarch64 | Supported by the flake |
+| **macOS** Apple Silicon | Supported by the flake |
+| **Windows** | No repository-owned end-user package; see [docs/WINDOWS.md](docs/WINDOWS.md) for architecture and developer status |
 
 </div>

@@ -105,6 +105,7 @@
               ./.jcode/swarm-prompt.md
               ./docs/agent-workflows.md
               ./docs/BRANCHING.md
+              ./docs/IOS_APP.md
               ./docs/NIX.md
               ./docs/SWARM_ARCHITECTURE.md
               ./docs/SWARM_TASK_GRAPH.md
@@ -113,10 +114,31 @@
               ./.github/workflows/docs-impact.yml
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
+              ./.github/workflows/ios.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
               ./.github/workflows/release.yml
+            ];
+          };
+
+          distributionPolicySrc = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              ./flake.nix
+              ./Cargo.toml
+              ./crates
+              ./scripts
+              ./src
+              ./tests
+              ./README.md
+              ./RELEASING.md
+              ./docs/BRANCHING.md
+              ./docs/IOS_APP.md
+              ./docs/NIX.md
+              ./docs/WINDOWS.md
+              ./docs/WRAPPERS.md
+              ./.github/workflows
             ];
           };
 
@@ -237,10 +259,23 @@
                     .github/workflows/docs-impact.yml \
                     .github/workflows/fork-ci.yml \
                     .github/workflows/fork-health.yml \
+                    .github/workflows/ios.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
                     .github/workflows/nix-update.yml \
                     .github/workflows/release.yml
+                  touch "$out"
+                '';
+
+            nix-distribution-policy =
+              pkgs.runCommand "jcode-nix-distribution-policy-check"
+                {
+                  src = distributionPolicySrc;
+                  nativeBuildInputs = [ pkgs.python3 ];
+                }
+                ''
+                  cd "$src"
+                  python3 tests/test_nix_distribution_policy.py
                   touch "$out"
                 '';
 

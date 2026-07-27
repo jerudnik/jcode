@@ -64,23 +64,6 @@ impl App {
         }
     }
 
-    fn remove_client_maintenance_message(
-        &mut self,
-        action: crate::bus::ClientMaintenanceAction,
-    ) -> bool {
-        let title = Self::client_maintenance_card_title(action);
-        let Some(idx) = self
-            .display_messages
-            .iter()
-            .rposition(|message| Self::is_client_maintenance_message(message, &title))
-        else {
-            return false;
-        };
-        self.display_messages.remove(idx);
-        self.bump_display_messages_version();
-        true
-    }
-
     pub(super) fn start_background_client_rebuild(&mut self, session_id: String) {
         self.start_background_client_maintenance(
             crate::bus::ClientMaintenanceAction::Rebuild,
@@ -88,11 +71,12 @@ impl App {
         );
     }
 
-    pub(super) fn start_background_client_update(&mut self, session_id: String) {
-        self.start_background_client_maintenance(
-            crate::bus::ClientMaintenanceAction::Update,
-            session_id,
+    pub(super) fn show_nix_update_guidance(&mut self) {
+        self.push_display_message(
+            DisplayMessage::system(crate::update::NIX_UPDATE_GUIDANCE)
+                .with_title("Updates are managed by Nix"),
         );
+        self.set_status_notice("Update Jcode through Nix");
     }
 
     fn start_background_client_maintenance(
@@ -113,113 +97,16 @@ impl App {
         self.background_client_action = Some(action);
         self.pending_background_client_reload = None;
 
-        match action {
-            crate::bus::ClientMaintenanceAction::Update => {
-                crate::update::spawn_background_session_update(session_id);
-            }
-            crate::bus::ClientMaintenanceAction::Rebuild => {
-                self.set_status_notice("Starting background rebuild...");
-                self.set_client_maintenance_message(
-                    action,
-                    Self::client_maintenance_card_message(
-                        action,
-                        "starting background rebuild",
-                        "Running in the background. jcode will reload automatically after the rebuild succeeds.",
-                    ),
-                );
-                crate::session_rebuild::spawn_background_session_rebuild(session_id);
-            }
-        }
-    }
-
-    pub(super) fn handle_update_status(&mut self, status: crate::bus::UpdateStatus) {
-        use crate::bus::{ClientMaintenanceAction, UpdateStatus};
-
-        let action = ClientMaintenanceAction::Update;
-        match status {
-            UpdateStatus::Checking => {
-                // Background update checks run at startup for normal sessions. Keep the
-                // UI quiet unless there is an update to report or work to perform.
-            }
-            UpdateStatus::Available { current, latest } => {
-                self.set_status_notice(format!("Update available: {} → {}", current, latest));
-                self.set_client_maintenance_message(
-                    action,
-                    Self::client_maintenance_card_message(
-                        action,
-                        format!("{} → {} available", current, latest),
-                        format!(
-                            "Current: `{}`\nLatest: `{}`\n\nRun `/update` to install, or wait while auto-update continues if enabled.",
-                            current, latest
-                        ),
-                    ),
-                );
-            }
-            UpdateStatus::Downloading { version } => {
-                self.background_client_action = Some(action);
-                self.set_status_notice(format!("Updating to {}...", version));
-                self.set_client_maintenance_message(
-                    action,
-                    Self::client_maintenance_card_message(
-                        action,
-                        format!("downloading {}", version),
-                        "jcode will restart automatically when the update is ready.",
-                    ),
-                );
-            }
-            UpdateStatus::Installing { version } => {
-                self.background_client_action = Some(action);
-                self.set_status_notice(format!("Installing {}...", version));
-                self.set_client_maintenance_message(
-                    action,
-                    Self::client_maintenance_card_message(
-                        action,
-                        format!("installing {}", version),
-                        "jcode will restart automatically when the update is ready.",
-                    ),
-                );
-            }
-            UpdateStatus::Installed { version } => {
-                self.background_client_action = None;
-                self.set_status_notice(format!("Updated to {}; restarting...", version));
-                self.set_client_maintenance_message(
-                    action,
-                    Self::client_maintenance_card_message(
-                        action,
-                        format!("updated to {}", version),
-                        "Restarting now.",
-                    ),
-                );
-            }
-            UpdateStatus::UpToDate => {
-                if self.background_client_action == Some(action) {
-                    self.background_client_action = None;
-                }
-                self.pending_background_client_reload = None;
-                self.remove_client_maintenance_message(action);
-            }
-            UpdateStatus::Error(error) => {
-                self.background_client_action = None;
-                self.pending_background_client_reload = None;
-                if crate::update::summary_is_divergence(&error)
-                    || crate::update::summary_is_divergence(
-                        error.trim_start_matches("Update failed: "),
-                    )
-                {
-                    self.offer_update_merge(action, &error);
-                } else {
-                    self.set_status_notice("Update failed; continuing current version");
-                    self.set_client_maintenance_message(
-                        action,
-                        Self::client_maintenance_card_message(
-                            action,
-                            "failed",
-                            format!("{}\n\nContinuing with the current version.", error),
-                        ),
-                    );
-                }
-            }
-        }
+        self.set_status_notice("Starting background rebuild...");
+        self.set_client_maintenance_message(
+            action,
+            Self::client_maintenance_card_message(
+                action,
+                "starting background rebuild",
+                "Running in the background. jcode will reload automatically after the rebuild succeeds.",
+            ),
+        );
+        crate::session_rebuild::spawn_background_session_rebuild(session_id);
     }
 
     pub(super) fn maybe_finish_background_client_reload(&mut self) -> bool {
@@ -245,15 +132,15 @@ impl App {
         true
     }
 
-    pub(super) fn handle_session_update_status(&mut self, status: crate::bus::SessionUpdateStatus) {
-        use crate::bus::{ClientMaintenanceAction, SessionUpdateStatus};
+    pub(super) fn handle_client_rebuild_status(&mut self, status: crate::bus::ClientRebuildStatus) {
+        use crate::bus::ClientRebuildStatus;
 
         let Some(active_session_id) = self.active_client_session_id().map(str::to_string) else {
             return;
         };
 
         match status {
-            SessionUpdateStatus::Status {
+            ClientRebuildStatus::Status {
                 session_id,
                 action,
                 message,
@@ -272,27 +159,7 @@ impl App {
                     ),
                 );
             }
-            SessionUpdateStatus::NoUpdate {
-                session_id,
-                current,
-            } => {
-                if session_id != active_session_id {
-                    return;
-                }
-                self.background_client_action = None;
-                self.pending_background_client_reload = None;
-                let message = format!("Already up to date ({})", current);
-                self.set_status_notice(&message);
-                self.set_client_maintenance_message(
-                    ClientMaintenanceAction::Update,
-                    Self::client_maintenance_card_message(
-                        ClientMaintenanceAction::Update,
-                        "already up to date",
-                        format!("Current version: `{}`", current),
-                    ),
-                );
-            }
-            SessionUpdateStatus::ReadyToReload {
+            ClientRebuildStatus::ReadyToReload {
                 session_id,
                 action,
                 version,
@@ -301,12 +168,7 @@ impl App {
                     return;
                 }
                 self.background_client_action = None;
-                let ready_message = match action {
-                    ClientMaintenanceAction::Update => format!("✅ Updated to {}.", version),
-                    ClientMaintenanceAction::Rebuild => {
-                        format!("✅ Rebuild finished ({}).", version)
-                    }
-                };
+                let ready_message = format!("✅ Rebuild finished ({}).", version);
                 if self.is_processing {
                     self.pending_background_client_reload = Some((session_id, action));
                     self.set_status_notice(format!(
@@ -331,7 +193,7 @@ impl App {
                 self.pending_background_client_reload = Some((session_id, action));
                 self.maybe_finish_background_client_reload();
             }
-            SessionUpdateStatus::Error {
+            ClientRebuildStatus::Error {
                 session_id,
                 action,
                 message,
@@ -418,10 +280,10 @@ impl App {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "the jcode repository".to_string());
         let prompt = format!(
-            "A jcode self-update could not fast-forward because the local checkout and upstream have diverged.\n\n\
+            "A Jcode source rebuild could not fast-forward because the local checkout and its tracking branch have diverged.\n\n\
 Repository: {repo}\n\
-Update error: {detail}\n\n\
-Please reconcile the local and upstream histories so the update can proceed:\n\
+Rebuild error: {detail}\n\n\
+Please reconcile the local and tracked histories so the rebuild can proceed:\n\
 1. Inspect the divergence (`git status`, `git fetch`, `git log --oneline --graph HEAD @{{u}}`).\n\
 2. Merge or rebase onto the upstream branch, resolving any conflicts.\n\
 3. Verify the build still works.\n\

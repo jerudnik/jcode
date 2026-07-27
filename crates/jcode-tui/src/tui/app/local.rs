@@ -226,12 +226,8 @@ pub(super) fn handle_bus_event(
             }
             true
         }
-        Ok(BusEvent::UpdateStatus(status)) => {
-            app.handle_update_status(status);
-            true
-        }
-        Ok(BusEvent::SessionUpdateStatus(status)) => {
-            app.handle_session_update_status(status);
+        Ok(BusEvent::ClientRebuildStatus(status)) => {
+            app.handle_client_rebuild_status(status);
             true
         }
         Ok(BusEvent::DictationCompleted {

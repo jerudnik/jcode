@@ -96,16 +96,13 @@ PREAMBLE
   printf '%s\n' "$artifacts"
   cat <<'TRAILER'
 
-Grep proves the symbols are gone; it cannot prove no writer recreates
-the on-disk layout. That is asserted executably instead:
+Grep proves the symbols are gone; the active end-user distribution contract is
+asserted executably by:
 
-  tests/test_r10_release_acquisition.py
-    after a full install, builds/{versions,stable,current,*-version} must
-    not exist and no staged temp may survive
-  scripts/test_install_release.sh
-    same assertions for the local-release installer
-  .github/scripts/verify_windows_install.ps1
-    same assertions for the Windows installer
+  tests/test_nix_distribution_policy.py
+    the flake and Cachix are the sole binary authority; installers, executable
+    release assets, third-party package publishers, runtime acquisition, and
+    Cargo registry publication must remain absent
   scripts/test_reload.py (check 9)
     a live machine must have no retired channel present
   jcode-build-support tests::retired_version_store_is_detected_and_sized

@@ -116,6 +116,7 @@ widgets, Mac Catalyst polish.
 
 ## CI
 
-A macOS job runs `swift test` in `ios/` plus `xcodegen` + `xcodebuild build`
-for the app target. TestFlight delivery can be re-added later (the previous
-Codemagic pipeline was removed with the prototype).
+A macOS job runs `swift test` in `ios/` plus `xcodegen` + an unsigned
+`xcodebuild build` for the simulator target. Signing and TestFlight upload are
+retired distribution paths. Any future end-user delivery must be designed as a
+flake-owned output under the repository's Nix-only distribution contract.

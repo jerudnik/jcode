@@ -245,7 +245,7 @@ force_trim() { # pid -> prints method used ("gdb_sudo" | "gdb" | "unavailable")
 WRAPPER="$(mktemp /tmp/jcode_memory_probe_wrapper.XXXXXX.sh)"
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
-exec "$CLIENT_BIN" --resume "$SESSION_ID" --no-update "\$@"
+exec "$CLIENT_BIN" --resume "$SESSION_ID" "\$@"
 EOF
 chmod +x "$WRAPPER"
 

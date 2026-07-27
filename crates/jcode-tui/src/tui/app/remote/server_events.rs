@@ -1543,7 +1543,7 @@ pub(in crate::tui::app) fn handle_server_event(
                 // real session id to resume. Without this, the handoff falls back
                 // to a freshly fabricated `ses_<ts>_<rand>` id that no store can
                 // ever resolve, leaving the user at a "No session found matching
-                // ..." shell prompt after an auto-update (issue #328).
+                // ..." shell prompt after a client reload or Nix generation switch (issue #328).
                 if !session_id.is_empty() {
                     app.pending_reload_session_id = Some(session_id.clone());
                 }

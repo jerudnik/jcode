@@ -344,7 +344,6 @@ def run_attempt(args: argparse.Namespace, case: BenchmarkCase, attempt: int, soc
         "--socket",
         str(socket_path),
         "--no-selfdev",
-        "--no-update",
         "--model",
         args.model,
         "-C",
@@ -460,7 +459,6 @@ def start_server(args: argparse.Namespace, socket_path: Path) -> subprocess.Pope
         "--socket",
         str(socket_path),
         "--no-selfdev",
-        "--no-update",
     ]
     if args.provider:
         command += ["--provider", args.provider]
