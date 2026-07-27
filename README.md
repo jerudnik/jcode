@@ -697,6 +697,16 @@ Notes:
 
 ---
 
+## Telemetry
+
+**Off by default, and there is no default destination.** Nothing is sent unless
+you both opt in (`JCODE_TELEMETRY=1`) and name a collector you operate
+(`JCODE_TELEMETRY_ENDPOINT`). This differs from upstream, which ships telemetry
+opt-out and posts to the upstream maintainer's server. See
+[Telemetry](docs/TELEMETRY.md).
+
+---
+
 ## Further Reading
 
 - [Ambient Mode / OpenClaw](docs/AMBIENT_MODE.md)
@@ -706,6 +716,7 @@ Notes:
 - [Server Architecture](docs/SERVER_ARCHITECTURE.md)
 - [Safety System](docs/SAFETY_SYSTEM.md)
 - [Sponsored Discovery Sponsor Onboarding](docs/SPONSORED_DISCOVERY_SPONSOR_ONBOARDING.md)
+- [Telemetry](docs/TELEMETRY.md)
 - [Windows Notes](docs/WINDOWS.md)
 - [Wrappers and Shell Integration](docs/WRAPPERS.md)
 - [Refactoring Notes](docs/REFACTORING.md)

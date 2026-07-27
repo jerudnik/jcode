@@ -49,6 +49,7 @@ struct TelemetrySessionTestEnv {
     prev_home: Option<std::ffi::OsString>,
     prev_no_telemetry: Option<std::ffi::OsString>,
     prev_do_not_track: Option<std::ffi::OsString>,
+    prev_opt_in: Option<std::ffi::OsString>,
 }
 
 impl Drop for TelemetrySessionTestEnv {
@@ -56,6 +57,7 @@ impl Drop for TelemetrySessionTestEnv {
         restore_env("JCODE_HOME", self.prev_home.take());
         restore_env("JCODE_NO_TELEMETRY", self.prev_no_telemetry.take());
         restore_env("DO_NOT_TRACK", self.prev_do_not_track.take());
+        restore_env("JCODE_TELEMETRY", self.prev_opt_in.take());
     }
 }
 
@@ -67,23 +69,110 @@ fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
 }
 
 fn lock_telemetry_test_state() -> TelemetrySessionTestEnv {
+    let env = isolated_telemetry_env();
+    // Telemetry is off by default in this fork, so session tests must opt in
+    // explicitly rather than inheriting an ambient default.
+    jcode_core::env::set_var("JCODE_TELEMETRY", "1");
+    assert!(
+        is_enabled(),
+        "session tests require telemetry enabled inside the isolated home"
+    );
+    env
+}
+
+/// Isolates `is_enabled()`'s entire input surface: a scratch `JCODE_HOME` with
+/// no marker files, and all three telemetry env vars cleared. Unlike
+/// [`lock_telemetry_test_state`] it asserts nothing, so tests can observe the
+/// default rather than a state the helper forced.
+fn isolated_telemetry_env() -> TelemetrySessionTestEnv {
     let lock = global_test_lock();
     let home = tempfile::TempDir::new().expect("create temp JCODE_HOME");
     let env = TelemetrySessionTestEnv {
         prev_home: std::env::var_os("JCODE_HOME"),
         prev_no_telemetry: std::env::var_os("JCODE_NO_TELEMETRY"),
         prev_do_not_track: std::env::var_os("DO_NOT_TRACK"),
+        prev_opt_in: std::env::var_os("JCODE_TELEMETRY"),
         _lock: lock,
         _home: home,
     };
     jcode_core::env::set_var("JCODE_HOME", env._home.path());
     jcode_core::env::remove_var("JCODE_NO_TELEMETRY");
     jcode_core::env::remove_var("DO_NOT_TRACK");
-    assert!(
-        is_enabled(),
-        "session tests require telemetry enabled inside the isolated home"
-    );
+    jcode_core::env::remove_var("JCODE_TELEMETRY");
     env
+}
+
+/// The fork's headline policy change: with nothing configured either way,
+/// nothing is sent. Upstream returned `true` here.
+#[test]
+fn telemetry_is_off_by_default() {
+    let env = isolated_telemetry_env();
+    assert!(
+        !is_enabled(),
+        "telemetry must be off unless the user explicitly opts in"
+    );
+    drop(env);
+}
+
+#[test]
+fn opt_in_env_var_enables_telemetry() {
+    let env = isolated_telemetry_env();
+    jcode_core::env::set_var("JCODE_TELEMETRY", "1");
+    assert!(is_enabled());
+    for truthy in ["true", "YES", " on "] {
+        jcode_core::env::set_var("JCODE_TELEMETRY", truthy);
+        assert!(is_enabled(), "{truthy:?} should read as opt-in");
+    }
+    drop(env);
+}
+
+/// `JCODE_TELEMETRY=0` is a user saying "no". Testing mere presence of the
+/// variable would turn that into a "yes".
+#[test]
+fn opt_in_env_var_requires_an_affirmative_value() {
+    let env = isolated_telemetry_env();
+    for falsy in ["0", "false", "no", "off", ""] {
+        jcode_core::env::set_var("JCODE_TELEMETRY", falsy);
+        assert!(!is_enabled(), "{falsy:?} must not read as opt-in");
+    }
+    drop(env);
+}
+
+#[test]
+fn opt_in_marker_file_enables_telemetry() {
+    let env = isolated_telemetry_env();
+    let dir = crate::storage::jcode_dir().expect("isolated jcode dir");
+    std::fs::create_dir_all(&dir).expect("create jcode dir");
+    std::fs::write(dir.join(crate::consent::TELEMETRY_OPT_IN_MARKER), "")
+        .expect("write opt-in marker");
+    assert!(is_enabled());
+    drop(env);
+}
+
+/// An explicit "off" must beat an explicit "on" regardless of which mechanism
+/// carries it, so a user who opted out cannot be re-enabled by a stray env var
+/// (or a leftover marker) from a script or a shared shell profile.
+#[test]
+fn explicit_opt_out_overrides_opt_in() {
+    let env = isolated_telemetry_env();
+    let dir = crate::storage::jcode_dir().expect("isolated jcode dir");
+    std::fs::create_dir_all(&dir).expect("create jcode dir");
+    std::fs::write(dir.join(crate::consent::TELEMETRY_OPT_IN_MARKER), "")
+        .expect("write opt-in marker");
+    jcode_core::env::set_var("JCODE_TELEMETRY", "1");
+    assert!(is_enabled(), "precondition: both opt-in paths active");
+
+    jcode_core::env::set_var("JCODE_NO_TELEMETRY", "1");
+    assert!(!is_enabled(), "JCODE_NO_TELEMETRY must win");
+    jcode_core::env::remove_var("JCODE_NO_TELEMETRY");
+
+    jcode_core::env::set_var("DO_NOT_TRACK", "1");
+    assert!(!is_enabled(), "DO_NOT_TRACK must win");
+    jcode_core::env::remove_var("DO_NOT_TRACK");
+
+    std::fs::write(dir.join("no_telemetry"), "").expect("write opt-out marker");
+    assert!(!is_enabled(), "no_telemetry marker must win");
+    drop(env);
 }
 
 #[test]
@@ -571,5 +660,59 @@ fn test_install_marker_tracks_current_telemetry_id() {
         jcode_core::env::set_var("JCODE_HOME", prev_home);
     } else {
         jcode_core::env::remove_var("JCODE_HOME");
+    }
+}
+
+/// Guards the fork's second privacy invariant: even an opted-in user sends
+/// nothing unless an operator explicitly names a collector. Upstream's default
+/// was a Cloudflare Worker this fork does not run.
+#[test]
+fn telemetry_endpoint_has_no_default() {
+    let _guard = lock_test_env();
+    let prev = std::env::var_os("JCODE_TELEMETRY_ENDPOINT");
+    jcode_core::env::remove_var("JCODE_TELEMETRY_ENDPOINT");
+    assert!(
+        crate::consent::telemetry_endpoint().is_none(),
+        "no endpoint may be baked in"
+    );
+
+    for blank in ["", "   "] {
+        jcode_core::env::set_var("JCODE_TELEMETRY_ENDPOINT", blank);
+        assert!(
+            crate::consent::telemetry_endpoint().is_none(),
+            "blank endpoint {blank:?} must not be treated as configured"
+        );
+    }
+
+    jcode_core::env::set_var("JCODE_TELEMETRY_ENDPOINT", " https://collector.example/v1 ");
+    assert_eq!(
+        crate::consent::telemetry_endpoint().as_deref(),
+        Some("https://collector.example/v1")
+    );
+    restore_env("JCODE_TELEMETRY_ENDPOINT", prev);
+}
+
+/// A source-level guard: the upstream maintainer's telemetry host must not
+/// reappear anywhere in this crate, whether as a default, a fallback, or a
+/// "temporary" constant. Behavioral tests would not catch a constant that is
+/// only reached on a path they do not exercise.
+#[test]
+fn upstream_telemetry_host_is_absent_from_source() {
+    // Every file in the crate, not just the one the constant used to live in:
+    // the policy moved to consent.rs once already, and a guard that only knows
+    // where something used to be stops guarding the moment it moves.
+    for (name, source) in [
+        ("lib.rs", include_str!("lib.rs")),
+        ("consent.rs", include_str!("consent.rs")),
+        ("lifecycle.rs", include_str!("lifecycle.rs")),
+        ("state_support.rs", include_str!("state_support.rs")),
+        ("tests.rs", include_str!("tests.rs")),
+    ] {
+        // Split so this test's own text does not match itself.
+        let host = concat!("jcode-telemetry.", "jeremyhuang55555", ".workers.dev");
+        assert!(
+            !source.contains(host),
+            "{name} must not reference the upstream telemetry host"
+        );
     }
 }

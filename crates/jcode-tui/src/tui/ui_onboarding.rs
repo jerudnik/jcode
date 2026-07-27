@@ -234,13 +234,16 @@ fn import_two_column_lines(prompt: &crate::tui::LoginImportPrompt) -> Vec<Line<'
 }
 
 /// Grayed telemetry notice shown at the very top of the onboarding screen.
+///
+/// This fork ships telemetry off by default, so the notice states that rather
+/// than upstream's "we collect, opt out if you object". A notice that claims
+/// collection is happening when it is not is just as wrong as the reverse.
 fn telemetry_header_lines(width: u16) -> Vec<Line<'static>> {
     let align = Alignment::Center;
     let dim = Style::default().fg(dim_color());
     let lines = vec![
-        "jcode collects anonymous usage statistics (version, OS, session",
-        "activity, and crash reasons). No code, prompts, or personal data.",
-        "Opt out anytime: export JCODE_NO_TELEMETRY=1",
+        "Telemetry is off. jcode sends no usage statistics unless you ask it to.",
+        "Opt in anytime: export JCODE_TELEMETRY=1",
     ];
     lines
         .into_iter()
