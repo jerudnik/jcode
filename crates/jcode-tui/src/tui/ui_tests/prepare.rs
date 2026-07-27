@@ -1,5 +1,26 @@
 use super::*;
 
+/// Renders every prepared line as plain text.
+fn rendered_text(prepared: &jcode_tui_messages::PreparedChatFrame) -> Vec<String> {
+    prepared
+        .materialize_all_lines()
+        .iter()
+        .map(extract_line_text)
+        .collect()
+}
+
+/// The rows of the live batch progress block. `prepare_messages` renders the
+/// whole chat surface including the header's "Updates" box, so tests must scope
+/// to these rows rather than asserting over every rendered line.
+fn live_batch_rows(rendered: &[String]) -> Vec<&String> {
+    rendered
+        .iter()
+        .filter(|line| {
+            line.contains("batch ·") || line.contains("bash $") || line.contains("completed")
+        })
+        .collect()
+}
+
 fn chat_swarm_member(session_id: &str) -> crate::protocol::SwarmMemberStatus {
     crate::protocol::SwarmMemberStatus {
         session_id: session_id.to_string(),
@@ -101,11 +122,7 @@ fn test_prepare_messages_places_live_swarm_card_beneath_matching_spawn_tool_call
     };
 
     let prepared = prepare::prepare_messages(&state, 110, 30);
-    let rendered = prepared
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>();
+    let rendered = rendered_text(&prepared);
     let tool_row = rendered
         .iter()
         .position(|line| line.contains("Spawn an authentication reviewer"))
@@ -191,11 +208,7 @@ fn test_prepare_messages_renders_nested_swarm_descendants_as_tree() {
         ..Default::default()
     };
 
-    let rendered = prepare::prepare_messages(&state, 110, 40)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>();
+    let rendered = rendered_text(&prepare::prepare_messages(&state, 110, 40));
     let all = rendered.join("\n");
     let root = rendered
         .iter()
@@ -252,12 +265,7 @@ fn test_prepare_messages_uses_exact_spawn_member_outside_gallery_subtree() {
         ..Default::default()
     };
 
-    let rendered = prepare::prepare_messages(&state, 110, 30)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let rendered = rendered_text(&prepare::prepare_messages(&state, 110, 30)).join("\n");
     assert!(
         rendered.contains("🐄 ● API reviewer"),
         "rendered={rendered}"
@@ -286,12 +294,7 @@ fn test_prepare_messages_matches_real_prefixed_spawn_result_without_input_metada
         ..Default::default()
     };
 
-    let rendered = prepare::prepare_messages(&state, 110, 30)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let rendered = rendered_text(&prepare::prepare_messages(&state, 110, 30)).join("\n");
     assert!(
         rendered.contains("🐄 ● API reviewer"),
         "rendered={rendered}"
@@ -319,12 +322,7 @@ fn test_prepare_messages_does_not_attach_member_to_unmatched_spawn_result() {
         ..Default::default()
     };
 
-    let rendered = prepare::prepare_messages(&state, 110, 30)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let rendered = rendered_text(&prepare::prepare_messages(&state, 110, 30)).join("\n");
     assert!(
         !rendered.contains("🐄 ● API reviewer"),
         "rendered={rendered}"
@@ -354,12 +352,7 @@ fn test_prepare_messages_matches_spawn_member_by_unique_label_when_result_is_ref
         ..Default::default()
     };
 
-    let rendered = prepare::prepare_messages(&state, 110, 30)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let rendered = rendered_text(&prepare::prepare_messages(&state, 110, 30)).join("\n");
     assert!(
         rendered.contains("🐄 ● API reviewer"),
         "rendered={rendered}"
@@ -391,12 +384,7 @@ fn test_prepare_messages_does_not_guess_when_spawn_label_is_ambiguous() {
         ..Default::default()
     };
 
-    let rendered = prepare::prepare_messages(&state, 110, 30)
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let rendered = rendered_text(&prepare::prepare_messages(&state, 110, 30)).join("\n");
     assert!(
         !rendered.contains("🐄 ● API reviewer"),
         "rendered={rendered}"
@@ -442,16 +430,9 @@ fn test_prepare_messages_live_batch_rows_do_not_soft_wrap_on_narrow_width() {
     };
 
     let prepared = prepare::prepare_messages(&state, 34, 20);
-    let rendered: Vec<String> = prepared
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect();
+    let rendered = rendered_text(&prepared);
 
-    let batch_rows: Vec<&String> = rendered
-        .iter()
-        .filter(|line| line.contains("batch") || line.contains("bash $ cargo"))
-        .collect();
+    let batch_rows = live_batch_rows(&rendered);
     assert!(batch_rows.len() >= 2, "rendered={rendered:?}");
     assert!(
         batch_rows.iter().all(|line| line.width() <= 33),
@@ -583,11 +564,7 @@ fn test_prepare_messages_shows_live_batch_progress_in_chat_history() {
     };
 
     let prepared = prepare::prepare_messages(&state, 100, 30);
-    let rendered: Vec<String> = prepared
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect();
+    let rendered = rendered_text(&prepared);
 
     assert!(
         rendered
@@ -608,12 +585,18 @@ fn test_prepare_messages_shows_live_batch_progress_in_chat_history() {
         "missing running batch subcall in {:?}",
         rendered
     );
+    let batch_rows = live_batch_rows(&rendered);
     assert!(
+        !batch_rows.is_empty(),
+        "expected to find live batch rows to assert on in {:?}",
         rendered
+    );
+    assert!(
+        batch_rows
             .iter()
             .all(|line| !line.contains("#1") && !line.contains("#2")),
         "live batch rows should align with completed rows in {:?}",
-        rendered
+        batch_rows
     );
 }
 
@@ -657,11 +640,7 @@ fn test_prepare_messages_places_live_batch_after_committed_assistant_text() {
     };
 
     let prepared = prepare::prepare_messages(&state, 100, 30);
-    let rendered: Vec<String> = prepared
-        .materialize_all_lines()
-        .iter()
-        .map(extract_line_text)
-        .collect();
+    let rendered = rendered_text(&prepared);
 
     let assistant_idx = rendered
         .iter()

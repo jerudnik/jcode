@@ -156,7 +156,11 @@ pub(super) fn get_grouped_changelog() -> Vec<ChangelogGroup> {
 /// Reads the last-seen commit hash from ~/.jcode/last_seen_changelog,
 /// filters the embedded changelog to only new entries, then saves the latest hash.
 /// Returns just the commit subjects (not the hashes).
-pub(super) fn get_unseen_changelog_entries() -> &'static Vec<String> {
+// Only the non-test path calls this; under `cfg(test)` `unseen_changelog_entries`
+// is pinned to deterministic content. Keep it compiled (so it cannot rot
+// untypechecked) but silence the resulting dead-code warning.
+#[cfg_attr(test, allow(dead_code))]
+fn get_unseen_changelog_entries() -> &'static Vec<String> {
     static ENTRIES: OnceLock<Vec<String>> = OnceLock::new();
     ENTRIES.get_or_init(|| {
         let all_entries = parse_changelog();
@@ -199,4 +203,73 @@ pub(super) fn get_unseen_changelog_entries() -> &'static Vec<String> {
 
         new_entries
     })
+}
+
+#[cfg(test)]
+fn unseen_changelog_entries_override() -> &'static std::sync::Mutex<Option<Vec<String>>> {
+    static OVERRIDE: OnceLock<std::sync::Mutex<Option<Vec<String>>>> = OnceLock::new();
+    OVERRIDE.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+pub(super) fn unseen_changelog_entries() -> Vec<String> {
+    #[cfg(test)]
+    {
+        // Under test the header is deterministic by default. The real
+        // implementation derives this from `jcode_build_meta::CHANGELOG` (baked
+        // in from the repository's git log) and from `~/.jcode/last_seen_changelog`,
+        // so leaving it live would make every test that renders a header depend
+        // on this checkout's commit subjects and on developer-machine state.
+        // Tests that care about the box's contents pin it explicitly with
+        // `pin_changelog_entries_for_tests`.
+        let guard = unseen_changelog_entries_override()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // No override set means "no unseen updates", not a failure to read one.
+        return match guard.as_ref() {
+            Some(entries) => entries.clone(),
+            None => Vec::new(),
+        };
+    }
+    #[cfg(not(test))]
+    get_unseen_changelog_entries().clone()
+}
+
+/// Pins the header's "Updates" box to fixed content for the guard's lifetime.
+///
+/// Without this, the box is built from `jcode_build_meta::CHANGELOG`, which is
+/// baked in at build time from the repository's real git log. Any test that
+/// renders the header therefore renders *this checkout's commit subjects*, so
+/// a test can pass for a year and then fail because of the wording of an
+/// unrelated commit. That is not hypothetical: a commit titled
+/// "ci: drop Windows CI and release builds (#19)" put the substring `#1` on
+/// screen and broke an assertion about batch-row numbering.
+///
+/// Restores the previous value on drop, including when the test panics, so a
+/// failing test cannot leak the override into whatever runs next on this
+/// thread.
+#[cfg(test)]
+#[must_use = "the override is reverted as soon as the guard is dropped"]
+pub(crate) fn pin_changelog_entries_for_tests(entries: Vec<String>) -> ChangelogEntriesGuard {
+    let previous = {
+        let mut guard = unseen_changelog_entries_override()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        (*guard).replace(entries)
+    };
+    ChangelogEntriesGuard { previous }
+}
+
+#[cfg(test)]
+pub(crate) struct ChangelogEntriesGuard {
+    previous: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+impl Drop for ChangelogEntriesGuard {
+    fn drop(&mut self) {
+        let mut guard = unseen_changelog_entries_override()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = self.previous.take();
+    }
 }

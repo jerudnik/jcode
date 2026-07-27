@@ -1,5 +1,5 @@
 use super::box_utils::render_rounded_box;
-use super::changelog::get_unseen_changelog_entries;
+use super::changelog::unseen_changelog_entries;
 use super::{
     TuiState, binary_age, dim_color, header_name_color, is_running_stable_release, semver,
     shorten_model_name,
@@ -8,34 +8,6 @@ use crate::auth::{AuthState, AuthStatus};
 use crate::tui::color_support::rgb;
 use crate::tui::connection_type_icon;
 use ratatui::prelude::*;
-#[cfg(test)]
-use std::sync::OnceLock;
-
-#[cfg(test)]
-fn unseen_changelog_entries_override() -> &'static std::sync::Mutex<Option<Vec<String>>> {
-    static OVERRIDE: OnceLock<std::sync::Mutex<Option<Vec<String>>>> = OnceLock::new();
-    OVERRIDE.get_or_init(|| std::sync::Mutex::new(None))
-}
-
-fn unseen_changelog_entries() -> Vec<String> {
-    #[cfg(test)]
-    {
-        if let Ok(guard) = unseen_changelog_entries_override().lock()
-            && let Some(entries) = guard.clone()
-        {
-            return entries;
-        }
-    }
-    get_unseen_changelog_entries().clone()
-}
-
-#[cfg(test)]
-pub(crate) fn set_unseen_changelog_entries_override_for_tests(entries: Option<Vec<String>>) {
-    let mut guard = unseen_changelog_entries_override()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *guard = entries;
-}
 
 pub(crate) fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
