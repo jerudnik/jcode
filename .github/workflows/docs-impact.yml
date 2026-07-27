@@ -1,0 +1,34 @@
+name: Docs Impact Advisory
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review-packet:
+    name: DOX Review Advisory
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build branch-wide DOX review packet
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 scripts/docs_impact_advisory.py \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"

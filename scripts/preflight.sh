@@ -107,6 +107,7 @@ run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.p
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py
 run "agent instructions"       python3 scripts/check_agent_instructions.py
+run "docs impact advisory"     python3 scripts/test_docs_impact_advisory.py
 run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
 

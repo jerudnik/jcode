@@ -119,6 +119,7 @@ Local checks are the normal feedback loop. Do not trigger or wait for GitHub Act
 
 Current workflow authority:
 
+- `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
 - `.github/workflows/fork-ci.yml` is the fork's blocking Rust and quality gate.
 - `.github/workflows/nix.yml` validates and builds the supported Nix surfaces.
 - `.github/workflows/security.yml` owns advisory security checks.
@@ -133,6 +134,12 @@ rg -n '^(name:|on:|jobs:|  [A-Za-z0-9_-]+:)' .github/workflows/*.yml
 ```
 
 Run `actionlint` for changed fork-owned workflows. Use GitHub CI for pull-request and release confirmation, not routine iteration.
+
+The docs-impact workflow runs when a pull request is opened, updated, reopened, or marked ready for review. It derives affected scopes from the tracked APM `applyTo` declarations and writes the changed paths, applicable instruction sources, and durable-contract review questions to the job summary. It has read-only repository permissions and the job is explicitly non-blocking. Packet-generation errors remain visible in the step logs but do not gate the pull request. Preview the same packet locally with:
+
+```bash
+python3 scripts/docs_impact_advisory.py --base <base-revision> --head <head-revision>
+```
 
 ## Releases
 

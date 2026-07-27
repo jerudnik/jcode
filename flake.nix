@@ -91,10 +91,12 @@
               ./scripts/clean_target.sh
               ./scripts/check_agent_instructions.py
               ./scripts/dev_cargo.sh
+              ./scripts/docs_impact_advisory.py
               ./scripts/preflight.sh
               ./scripts/prune_incremental.sh
               ./scripts/remote_build.sh
               ./scripts/remote_config.sh
+              ./scripts/test_docs_impact_advisory.py
               ./scripts/test_fast.sh
               ./scripts/test_incremental_policy.sh
               ./.apm/instructions
@@ -108,6 +110,7 @@
               ./docs/SWARM_TASK_GRAPH.md
               ./CONTRIBUTING.md
               ./RELEASING.md
+              ./.github/workflows/docs-impact.yml
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
               ./.github/workflows/security.yml
@@ -190,6 +193,21 @@
                   touch "$out"
                 '';
 
+            docs-impact-advisory =
+              pkgs.runCommand "jcode-docs-impact-advisory-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [
+                    pkgs.git
+                    pkgs.python3
+                  ];
+                }
+                ''
+                  cd "$src"
+                  python3 scripts/test_docs_impact_advisory.py
+                  touch "$out"
+                '';
+
             incremental-policy =
               pkgs.runCommand "jcode-incremental-policy-check"
                 {
@@ -216,6 +234,7 @@
                 ''
                   cd "$src"
                   actionlint \
+                    .github/workflows/docs-impact.yml \
                     .github/workflows/fork-ci.yml \
                     .github/workflows/fork-health.yml \
                     .github/workflows/security.yml \

@@ -37,12 +37,15 @@ REQUIRED_PATHS = ROOT_PRIMITIVES + tuple(CHILD_GENERATED.values()) + JCODE_PROMP
     Path("CONTRIBUTING.md"),
     Path("RELEASING.md"),
     Path("scripts/dev_cargo.sh"),
+    Path("scripts/docs_impact_advisory.py"),
     Path("scripts/test_fast.sh"),
+    Path("scripts/test_docs_impact_advisory.py"),
     Path("scripts/preflight.sh"),
     Path("scripts/remote_build.sh"),
     Path("scripts/clean_target.sh"),
     Path("scripts/prune_incremental.sh"),
     Path("scripts/test_incremental_policy.sh"),
+    Path(".github/workflows/docs-impact.yml"),
     Path(".github/workflows/fork-ci.yml"),
     Path(".github/workflows/nix.yml"),
     Path(".github/workflows/security.yml"),
@@ -50,12 +53,12 @@ REQUIRED_PATHS = ROOT_PRIMITIVES + tuple(CHILD_GENERATED.values()) + JCODE_PROMP
 )
 
 
-def read(relative: Path) -> str:
-    return (ROOT / relative).read_text(encoding="utf-8")
+def read(relative: Path, root: Path = ROOT) -> str:
+    return (root / relative).read_text(encoding="utf-8")
 
 
-def primitive(relative: Path) -> tuple[str, str]:
-    text = read(relative)
+def primitive(relative: Path, root: Path = ROOT) -> tuple[str, str]:
+    text = read(relative, root)
     parts = text.split("---", 2)
     if len(parts) != 3 or parts[0].strip():
         raise ValueError(f"{relative}: missing YAML frontmatter")
