@@ -51,7 +51,7 @@ jobs:
         if: steps.update.outputs.changed == 'true'
         run: |
           nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
-          nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+          nix flake check --accept-flake-config --no-build --all-systems
 
       - name: Open pull request against main
         if: steps.update.outputs.changed == 'true'
@@ -94,7 +94,7 @@ jobs:
             echo
             echo "### Validation"
             echo "- \`nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs\`"
-            echo "- \`nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1\`"
+            echo "- \`nix flake check --accept-flake-config --no-build --all-systems\`"
           } > "$body"
 
           git config user.name "github-actions[bot]"

@@ -191,7 +191,7 @@ Run the same Nix gates CI runs:
 
 ```sh
 nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
-nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+nix flake check --accept-flake-config --no-build --all-systems
 nix fmt
 ```
 

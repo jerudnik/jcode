@@ -41,6 +41,7 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
     "brew tap 1jehuang/jcode",
     "jcode-bin",
     "jcode update installs",
+    "--option eval-cores",
 )
 
 
@@ -80,6 +81,7 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
             "cargo publish",
             "DeterminateSystems/nix-installer-action",
             "flakehub",
+            "eval-cores",
         )
         workflow_dir = ROOT / ".github/workflows"
         workflows = list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml"))

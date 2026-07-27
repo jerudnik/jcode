@@ -98,7 +98,7 @@ jobs:
         run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
 
       - name: Evaluate flake checks
-        run: nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+        run: nix flake check --accept-flake-config --no-build --all-systems
 
       - name: Enforce Nix-only distribution policy
         run: nix build .#checks.x86_64-linux.nix-distribution-policy --print-build-logs
