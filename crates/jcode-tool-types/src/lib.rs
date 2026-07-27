@@ -86,11 +86,10 @@ pub fn resolve_tool_name(name: &str) -> &str {
         "file_write" => "write",
         "edit_file" => "edit",
         "file_edit" => "edit",
-        // The native grep tool was removed in favor of agentgrep, but models
-        // still frequently call `grep` (and OAuth's `file_grep`). agentgrep's
-        // grep mode accepts `pattern` as an alias for `query`, so these calls
-        // work as-is.
-        "grep" | "file_grep" => "agentgrep",
+        // The native glob/grep tools were removed in favor of agentgrep, but
+        // models still call those legacy names (and OAuth's `file_grep`).
+        // agentgrep accepts their legacy fields, so these calls work as-is.
+        "glob" | "grep" | "file_grep" => "agentgrep",
         "skill" | "Skill" => "skill_manage",
         "todoread" | "todowrite" | "todo_read" | "todo_write" | "todos" => "todo",
         other => other,
@@ -104,6 +103,7 @@ mod tests {
     #[test]
     fn resolve_tool_name_strips_function_namespace_before_alias_resolution() {
         assert_eq!(resolve_tool_name("functions.bash"), "bash");
+        assert_eq!(resolve_tool_name("functions.glob"), "agentgrep");
         assert_eq!(resolve_tool_name("functions.shell_exec"), "bash");
         assert_eq!(resolve_tool_name("functions.file_grep"), "agentgrep");
     }

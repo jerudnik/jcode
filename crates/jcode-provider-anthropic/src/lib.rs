@@ -267,22 +267,6 @@ pub fn format_content_blocks(blocks: &[ContentBlock], is_oauth: bool) -> Vec<Api
     result
 }
 
-/// Local tool names that are represented by the curated Claude-Code builtin
-/// definitions in OAuth mode. These keep their hand-tuned schemas/descriptions
-/// (which the Anthropic subscription endpoint expects) instead of the raw
-/// registry definitions; every other tool is forwarded as-is (see #409).
-const OAUTH_BUILTIN_LOCAL_TOOLS: &[&str] = &[
-    "subagent",
-    "bash",
-    "edit",
-    "glob",
-    "grep",
-    "read",
-    "schedule",
-    "skill_manage",
-    "write",
-];
-
 /// Anthropic accepts JSON Schema combinators inside object properties, but
 /// rejects `oneOf`, `anyOf`, and `allOf` at the input schema's top level. Keep
 /// the common object shape and widen top-level variants into one object whose
@@ -398,7 +382,7 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
                 },
             ),
             (
-                &["glob"],
+                &["agentgrep"],
                 ApiTool {
                     name: "Glob".to_string(),
                     description: "Fast file pattern matching tool.".to_string(),
@@ -407,7 +391,7 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
                 },
             ),
             (
-                &["grep"],
+                &["agentgrep"],
                 ApiTool {
                     name: "Grep".to_string(),
                     description: "A powerful search tool built on ripgrep.".to_string(),
@@ -452,6 +436,10 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
                 },
             ),
         ];
+        let curated_backings: std::collections::HashSet<&str> = curated
+            .iter()
+            .flat_map(|(backing, _)| backing.iter().copied())
+            .collect();
         let mut out: Vec<ApiTool> = curated
             .into_iter()
             .filter(|(backing, _)| has_backing(backing))
@@ -464,7 +452,7 @@ pub fn format_tools(tools: &[ToolDefinition], is_oauth: bool, cache_ttl_1h: bool
         // matching the documented "remap names, keep the full toolset" behavior
         // and the (deprecated) Claude CLI transport.
         for tool in tools {
-            if OAUTH_BUILTIN_LOCAL_TOOLS.contains(&tool.name.as_str()) {
+            if curated_backings.contains(tool.name.as_str()) {
                 continue;
             }
             out.push(ApiTool {
@@ -1033,8 +1021,7 @@ mod cache_prefix_invariant_tests {
             tool_def("read"),
             tool_def("write"),
             tool_def("edit"),
-            tool_def("glob"),
-            tool_def("grep"),
+            tool_def("agentgrep"),
             tool_def("subagent"),
             tool_def("websearch"),
             tool_def("webfetch"),
@@ -1068,8 +1055,7 @@ mod cache_prefix_invariant_tests {
 
     #[test]
     fn oauth_format_tools_drops_builtins_missing_from_registry() {
-        // subagent and glob no longer exist in the registry, so the curated
-        // Agent/Glob builtins must not be advertised (see #572).
+        // subagent is absent, while agentgrep backs both curated search tools.
         let registry = vec![
             tool_def("bash"),
             tool_def("read"),
@@ -1080,13 +1066,13 @@ mod cache_prefix_invariant_tests {
         let formatted = format_tools(&registry, true, false);
         let names: Vec<&str> = formatted.iter().map(|t| t.name.as_str()).collect();
 
-        for ghost in ["Agent", "Glob", "Grep", "ScheduleWakeup", "Skill"] {
+        for ghost in ["Agent", "ScheduleWakeup", "Skill"] {
             assert!(
                 !names.contains(&ghost),
                 "advertised ghost builtin {ghost} without a backing registry tool: {names:?}"
             );
         }
-        for present in ["Bash", "Read", "Write", "Edit", "agentgrep"] {
+        for present in ["Bash", "Read", "Write", "Edit", "Glob", "Grep"] {
             assert!(names.contains(&present), "missing {present} in {names:?}");
         }
     }

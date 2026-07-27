@@ -1,10 +1,15 @@
 # Downstream patch ledger
 
-Last audited: 2026-07-18
+Last audited: 2026-07-27
 
 Track downstream patches that may need to be upstreamed, watched, or retired.
 Permanent fork behavior can stay here too, but every temporary shim must have a
 retirement condition and validation command.
+
+Retired 2026-07-27: the downstream Anthropic OAuth allowlist and
+`oauth_extra_tools` setting were removed in favor of upstream's full registered
+tool forwarding. OAuth sessions now receive the same local and MCP tool surface
+as other Anthropic sessions, with curated Claude Code names for builtins.
 
 | Patch | Class | Status | Upstream ref | Retire condition | Validation |
 |---|---|---|---|---|---|
@@ -19,7 +24,6 @@ retirement condition and validation command.
 | Bounded + watchdog shutdown (`unregister_server_bounded`) | `feature(fork-maint)` | `permanent-downstream` | none | Keep; shutdown paths unregister with a bounded async cleanup and process-level watchdog so registry cleanup cannot wedge daemon exit. | `cargo test -p jcode-base unregister_server_bounded` |
 | Debug protocol error containment and atomic session destruction | `feature(fork-maint)` | `permanent-downstream` | none | Keep; command/helper failures return `DebugResponse { ok: false }` without dropping the debug socket, and destroying the active default session removes it and selects the lexicographically smallest remaining session in one lock-protected transition. | `cargo test -p jcode-app-core server::debug --lib` |
 | Selfdev stable-channel authority | `feature(fork-maint)` | `permanent-downstream` | none | Keep; selfdev status reads the persisted `stable-version` channel marker rather than the stale manifest projection. Debug selfdev-reload tests use a temporary `JCODE_HOME` and the crate-wide environment lock so they cannot mutate live activation state or race other environment-sensitive tests. | `cargo test -p jcode-app-core tool::selfdev::tests --lib` |
-| OAuth tool exposure as an allowlist | `feature(agent-tools)` | `permanent-downstream` | none | Upstream forwards the full registry to the Anthropic OAuth endpoint; the fork narrows it to an explicit `OAUTH_EXTRA_TOOLS` allowlist (websearch/webfetch/nix) appended to the curated identity tools, with a no-leak guarantee. Upstream's `oauth_format_tools_keeps_full_custom_toolset` test asserts the old forward-all behavior and is dropped on rebase. | `cargo test -p jcode-provider-anthropic` |
 | Shared `git rerere` conflict resolutions | `feature(fork-maint)` | `permanent-downstream` | none | Keep; fork-maintenance tooling lets the six-hour rail rebase replay known conflicts while genuinely new conflicts fail loudly for human resolution. `scripts/rerere-cache.sh` and `scripts/rerere-rebase.sh` share tracked `.rerere-cache/` recordings and are wired into `.github/workflows/sync.yml` and the devShell. | `shellcheck scripts/rerere-cache.sh scripts/rerere-rebase.sh && actionlint .github/workflows/sync.yml` |
 | `jcode doctor` binary-identity diagnostics | `feature(fork-maint)` | `permanent-downstream` | none | Keep; surfaces client vs daemon build identity/origin/verdict for the self-dev + Nix divergence problem. Zero new protocol (reads the server registry). | `cargo test -p jcode --lib doctor` |
 | Build-provenance source-dir stamp (NS4/G4) | `feature(fork-maint)` | `permanent-downstream` | none | Keep; stamps the source checkout path the binary was built from (`jcode_build_meta::BUILD_SOURCE_DIR`) and surfaces it as `doctor`'s `built-from:` line for source/selfdev origins only. Kept off `buildDepsOnly` (set in `package.nix` `buildMeta`, pinned to `nix-store` for Nix builds) so it never perturbs the crane dependency cache. Resolves "which checkout produced the running daemon" (G4 in `SELFDEV_NIX_DAEMON_DIVERGENCE.md`). | `cargo test -p jcode --lib doctor` |

@@ -79,8 +79,8 @@ OAuth. The remapped names are:
 - `read` → `Read`
 - `write` → `Write`
 - `edit` → `Edit`
-- `glob` → `Glob`
-- `grep` → `Grep`
+- `agentgrep` is advertised as both `Glob` and `Grep`; either response name
+  resolves back to `agentgrep`
 - `subagent` → `Agent`
 - `schedule` → `ScheduleWakeup`
 - `skill_manage` → `Skill`

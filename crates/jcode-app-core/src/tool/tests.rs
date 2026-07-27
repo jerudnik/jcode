@@ -104,7 +104,7 @@ async fn claude_identity_tool_names_resolve_to_registered_tools() {
     let registered: std::collections::HashSet<String> =
         registry.tool_names().await.into_iter().collect();
 
-    // Keep aligned with claude_code_identity_tools in
+    // Keep aligned with the curated OAuth builtin mappings in
     // crates/jcode-provider-anthropic/src/lib.rs. App-core cannot depend on the
     // provider crate without inverting the dependency graph.
     for advertised in [
@@ -118,10 +118,11 @@ async fn claude_identity_tool_names_resolve_to_registered_tools() {
         "Skill",
         "Write",
     ] {
-        let resolved = Registry::resolve_tool_name(advertised);
+        let local = jcode_provider_core::anthropic_map_tool_name_from_oauth(advertised);
+        let resolved = Registry::resolve_tool_name(&local);
         assert!(
             registered.contains(resolved),
-            "advertised Claude identity tool {advertised} resolves to unregistered tool {resolved}"
+            "advertised Claude identity tool {advertised} maps through {local} to unregistered tool {resolved}"
         );
     }
 }
