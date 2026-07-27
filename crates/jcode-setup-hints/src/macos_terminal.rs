@@ -112,7 +112,7 @@ fn config_preferred_macos_terminal() -> Option<MacTerminalKind> {
         #[serde(default)]
         terminal: jcode_config_types::TerminalConfig,
     }
-    let dir = storage::jcode_dir().ok()?;
+    let dir = storage::jcode_dir_opt()?;
     let text = std::fs::read_to_string(dir.join("config.toml")).ok()?;
     let wrapper = toml::from_str::<Wrapper>(&text).ok()?;
     let preferred = wrapper.terminal.preferred?;

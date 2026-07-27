@@ -3334,7 +3334,6 @@ dependencies = [
  "chrono",
  "core-graphics",
  "crossterm",
- "dirs",
  "futures",
  "glob",
  "global-hotkey",
@@ -3355,6 +3354,7 @@ dependencies = [
  "jcode-selfdev-types",
  "jcode-session-types",
  "jcode-setup-hints",
+ "jcode-storage",
  "jcode-swarm-core",
  "jcode-task-types",
  "jcode-terminal-image",
@@ -3991,6 +3991,7 @@ dependencies = [
  "jcode-core",
  "jcode-logging",
  "jcode-message-types",
+ "jcode-storage",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -4052,7 +4053,6 @@ name = "jcode-setup-hints"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs",
  "global-hotkey",
  "jcode-build-meta",
  "jcode-config-types",
@@ -4138,7 +4138,7 @@ name = "jcode-terminal-launch"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs",
+ "jcode-storage",
 ]
 
 [[package]]
@@ -4247,9 +4247,9 @@ dependencies = [
 name = "jcode-tui-markdown"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "image",
  "jcode-render-core",
+ "jcode-storage",
  "jcode-tui-mermaid",
  "jcode-tui-workspace",
  "pulldown-cmark",
@@ -4269,9 +4269,9 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "crossterm",
- "dirs",
  "image",
  "jcode-plan",
+ "jcode-storage",
  "jcode-tui-workspace",
  "mermaid-rs-renderer",
  "ratatui",
@@ -4359,8 +4359,8 @@ dependencies = [
 name = "jcode-tui-visual-debug"
 version = "0.1.0"
 dependencies = [
- "dirs",
  "jcode-logging",
+ "jcode-storage",
  "ratatui",
  "regex",
  "serde",

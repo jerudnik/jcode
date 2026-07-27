@@ -1,0 +1,32 @@
+# Remaining direct `dirs::` ambient-root call sites (F29 ratchet).
+#
+# Regenerate with `scripts/check_ambient_roots.sh --update`, which
+# refuses to grow this list. Every entry needs a reason: the point is
+# that the remaining sites are deliberate, not merely tolerated.
+#
+# Format: path:line  # reason
+
+crates/jcode-base/src/browser.rs:676  # TODO: state why this cannot use jcode-storage
+crates/jcode-base/src/browser.rs:681  # TODO: state why this cannot use jcode-storage
+crates/jcode-base/src/browser.rs:692  # TODO: state why this cannot use jcode-storage
+crates/jcode-base/src/config/config_file.rs:834  # TODO: state why this cannot use jcode-storage
+crates/jcode-base/src/hooks.rs:112  # TODO: state why this cannot use jcode-storage
+crates/jcode-base/src/memory_log.rs:458  # regression test: names the real home in order to assert log_dir() never resolves under it
+crates/jcode-base/src/mobile_server.rs:106  # regression test: names the real home in order to assert jcode_home() never resolves under it
+crates/jcode-base/src/surface_workspace.rs:224  # TODO: state why this cannot use jcode-storage
+crates/jcode-provider-copilot-runtime/src/copilot_tests.rs:705  # regression test: names the real home in order to assert machine_id never resolves under it
+crates/jcode-provider-openai-runtime/src/openai_tests.rs:131  # TODO: state why this cannot use jcode-storage
+crates/jcode-provider-openrouter/src/lib.rs:807  # regression test: names the real home in order to assert the model caches never resolve under it
+crates/jcode-tui/src/tui/remote_diff.rs:92  # TODO: state why this cannot use jcode-storage
+crates/jcode-tui/src/tui/ui_frame_metrics_flicker.rs:350  # TODO: state why this cannot use jcode-storage
+crates/jcode-tui/src/tui/ui_header.rs:494  # TODO: state why this cannot use jcode-storage
+crates/jcode-tui/src/video_export.rs:44  # TODO: state why this cannot use jcode-storage
+crates/jcode-tui/src/video_export.rs:68  # TODO: state why this cannot use jcode-storage
+src/cli/auth_test/types.rs:145  # TODO: state why this cannot use jcode-storage
+src/cli/commands.rs:1377  # TODO: state why this cannot use jcode-storage
+src/cli/commands.rs:528  # TODO: state why this cannot use jcode-storage
+src/cli/commands.rs:533  # TODO: state why this cannot use jcode-storage
+src/cli/commands/doctor.rs:417  # TODO: state why this cannot use jcode-storage
+src/cli/commands/menubar.rs:178  # TODO: state why this cannot use jcode-storage
+src/cli/commands/menubar.rs:193  # TODO: state why this cannot use jcode-storage
+src/cli/login.rs:1264  # TODO: state why this cannot use jcode-storage

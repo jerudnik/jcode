@@ -89,7 +89,7 @@ fn build_channel() -> String {
 /// Read the persisted telemetry id without creating one (read-only, so
 /// `/support` never mutates telemetry state).
 fn read_telemetry_id() -> Option<String> {
-    let path = crate::storage::jcode_dir().ok()?.join("telemetry_id");
+    let path = crate::storage::jcode_dir_opt()?.join("telemetry_id");
     let id = std::fs::read_to_string(path).ok()?;
     let id = id.trim().to_string();
     if id.is_empty() { None } else { Some(id) }

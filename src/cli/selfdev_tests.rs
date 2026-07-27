@@ -238,12 +238,31 @@ async fn test_wait_for_reloading_server_returns_true_for_live_listener() {
     assert!(wait_for_reloading_server().await);
 }
 
-/// Returns `(env, temp, lock)`. The lease is deliberately **last**: tuple fields
-/// drop in declaration order, so the lease must outlive the `EnvVarGuard` that
-/// restores `HOME`/`JCODE_HOME`. Ordered lease-first, teardown would restore
-/// those variables after releasing exclusion, clobbering whichever test had
-/// just acquired the lease.
-fn isolated_launcher_env() -> (EnvVarGuard, tempfile::TempDir, storage::TestEnvWriteLease) {
+/// Isolates `HOME`/`JCODE_HOME`/`JCODE_INSTALL_DIR` for launcher-path tests.
+///
+/// Returned as a struct, not a tuple, because the drop order is load-bearing
+/// and a tuple could not enforce it. Tuple *fields* drop in declaration order,
+/// but destructuring one into locals (`let (_env, temp, _lock) = ...`) drops
+/// those locals in **reverse** order, releasing the lease first and then
+/// restoring `HOME` over whichever test had already acquired it. That is what
+/// made `test_launcher_dir_ignores_blank_overrides_and_uses_home_default`
+/// flake: it observed the developer's real `HOME` with `USERPROFILE` cleared.
+/// A struct keeps declaration order authoritative no matter how callers bind it.
+struct LauncherEnv {
+    _env: EnvVarGuard,
+    temp: tempfile::TempDir,
+    // Declared last so it drops last: the lease must outlive the `EnvVarGuard`
+    // that restores `HOME`/`JCODE_HOME`, or teardown escapes the exclusion.
+    _lock: storage::TestEnvWriteLease,
+}
+
+impl LauncherEnv {
+    fn path(&self) -> &Path {
+        self.temp.path()
+    }
+}
+
+fn isolated_launcher_env() -> LauncherEnv {
     let lock = lock_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let env = EnvVarGuard::capture(&["JCODE_INSTALL_DIR", "JCODE_HOME", "HOME", "USERPROFILE"]);
@@ -251,7 +270,11 @@ fn isolated_launcher_env() -> (EnvVarGuard, tempfile::TempDir, storage::TestEnvW
     crate::env::set_var("USERPROFILE", temp.path());
     crate::env::remove_var("JCODE_INSTALL_DIR");
     crate::env::remove_var("JCODE_HOME");
-    (env, temp, lock)
+    LauncherEnv {
+        _env: env,
+        temp,
+        _lock: lock,
+    }
 }
 
 fn set_var<T: AsRef<OsStr>>(name: &str, value: T) {
@@ -260,9 +283,9 @@ fn set_var<T: AsRef<OsStr>>(name: &str, value: T) {
 
 #[test]
 fn test_launcher_dir_uses_trimmed_install_dir_before_jcode_home() {
-    let (_env, temp, _lock) = isolated_launcher_env();
-    let install_dir = temp.path().join("install bin");
-    let jcode_home = temp.path().join("jcode-home");
+    let env = isolated_launcher_env();
+    let install_dir = env.path().join("install bin");
+    let jcode_home = env.path().join("jcode-home");
     set_var(
         "JCODE_INSTALL_DIR",
         format!("  {}  ", install_dir.display()),
@@ -274,11 +297,11 @@ fn test_launcher_dir_uses_trimmed_install_dir_before_jcode_home() {
 
 #[test]
 fn test_launcher_dir_ignores_blank_overrides_and_uses_home_default() {
-    let (_env, temp, _lock) = isolated_launcher_env();
+    let env = isolated_launcher_env();
     set_var("JCODE_INSTALL_DIR", "   ");
     set_var("JCODE_HOME", "\t");
 
-    let expected = default_launcher_dir(temp.path());
+    let expected = default_launcher_dir(env.path());
     assert_eq!(build::launcher_dir().expect("launcher dir"), expected);
 }
 

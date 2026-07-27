@@ -356,7 +356,7 @@ impl App {
     }
 
     pub(super) fn restore_input_for_reload(session_id: &str) -> Option<RestoredReloadInput> {
-        let jcode_dir = crate::storage::jcode_dir().ok()?;
+        let jcode_dir = crate::storage::jcode_dir_opt()?;
         let path = jcode_dir.join(format!("client-input-{}", session_id));
         if !path.exists() {
             return None;

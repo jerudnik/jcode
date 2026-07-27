@@ -235,17 +235,23 @@ fn parse_target(target: &str) -> Result<Option<ParsedTarget>> {
 }
 
 fn expand_home(path: &str) -> Result<PathBuf> {
+    // Resolved through jcode-storage so `~` expansion under a test harness
+    // points into the sandbox instead of the developer's real home -- this is
+    // the expansion the `open` tool hands to the OS, so a test that opens `~`
+    // would otherwise act on real files.
+    let expand = |relative: &str| {
+        jcode_storage::user_home_path(relative)
+            .context("Could not determine home directory for '~'")
+    };
+
     if path == "~" {
-        return dirs::home_dir().context("Could not determine home directory for '~'");
+        return expand("");
     }
 
-    let rest = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\"));
-    if let Some(rest) = rest {
-        let home = dirs::home_dir().context("Could not determine home directory for '~'")?;
-        return Ok(home.join(rest));
+    match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        Some(rest) => expand(rest),
+        None => Ok(PathBuf::from(path)),
     }
-
-    Ok(PathBuf::from(path))
 }
 
 async fn perform_open(target: &ResolvedTarget) -> Result<OpenOutcome> {

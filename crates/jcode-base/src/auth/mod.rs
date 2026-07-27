@@ -69,7 +69,7 @@ static AUTH_STATUS_FAST_CACHE: std::sync::LazyLock<RwLock<Option<CachedAuthStatu
 
 fn auth_cache_home_key() -> AuthCacheHomeKey {
     AuthCacheHomeKey {
-        jcode_dir: crate::storage::jcode_dir().ok(),
+        jcode_dir: crate::storage::jcode_dir_opt(),
         home: std::env::var_os("HOME"),
         xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
     }

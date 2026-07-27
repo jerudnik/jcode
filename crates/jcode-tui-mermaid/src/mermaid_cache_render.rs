@@ -48,9 +48,9 @@ pub(super) struct CachedDiagram {
 
 impl MermaidCache {
     pub(super) fn new() -> Self {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("jcode")
+        // `app_cache_dir()` appends `jcode` and honors the harness redirect.
+        let cache_dir = jcode_storage::app_cache_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("jcode"))
             .join("mermaid");
 
         let _ = fs::create_dir_all(&cache_dir);

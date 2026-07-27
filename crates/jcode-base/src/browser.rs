@@ -33,11 +33,12 @@ const REQUIRED_BRIDGE_ACTION_PROBES: &[(&str, &str)] = &[
 ];
 
 fn jcode_dir() -> PathBuf {
-    storage::jcode_dir().unwrap_or_else(|_| {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".jcode")
-    })
+    // The fallback deliberately does not re-derive the home. `storage::jcode_dir()`
+    // only fails when no home can be resolved at all, and the old
+    // `dirs::home_dir()` arm silently un-isolated in exactly that case: a
+    // redirected harness that could not resolve a home would land back in the
+    // real `~/.jcode`. A relative path keeps the failure local and visible.
+    storage::jcode_dir().unwrap_or_else(|_| PathBuf::from(".").join(".jcode"))
 }
 
 fn browser_dir() -> PathBuf {

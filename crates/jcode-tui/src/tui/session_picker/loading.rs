@@ -200,7 +200,7 @@ fn write_grouped_session_list_disk_cache(
 }
 
 pub fn load_cached_sessions_grouped() -> Option<(Vec<ServerGroup>, Vec<SessionInfo>)> {
-    let sessions_dir = storage::jcode_dir().ok()?.join("sessions");
+    let sessions_dir = storage::jcode_dir_opt()?.join("sessions");
     let scan_limit = session_scan_limit();
     let path = session_list_disk_cache_path().ok()?;
     let cache: GroupedSessionListDiskCache = storage::read_json(&path).ok()?;
@@ -1978,7 +1978,7 @@ pub(crate) fn latest_external_cli_session_secs(
         ExternalCli::OpenCode => (".local/share/opencode/storage/session", "json"),
         ExternalCli::Cursor => (".cursor/projects", "jsonl"),
     };
-    let root = crate::storage::user_home_path(rel_root).ok()?;
+    let root = crate::storage::user_home_path_opt(rel_root)?;
     if !root.exists() {
         return None;
     }
@@ -2074,7 +2074,7 @@ fn load_codex_session_stub(path: &Path) -> Result<Option<SessionInfo>> {
 }
 
 fn find_codex_session_file(session_id: &str) -> Option<PathBuf> {
-    let root = crate::storage::user_home_path(".codex/sessions").ok()?;
+    let root = crate::storage::user_home_path_opt(".codex/sessions")?;
     if !root.exists() {
         return None;
     }

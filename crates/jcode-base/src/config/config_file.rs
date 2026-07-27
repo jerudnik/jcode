@@ -1,5 +1,5 @@
 use super::*;
-use crate::storage::jcode_dir;
+use crate::storage::{jcode_dir, jcode_dir_opt};
 use std::collections::hash_map::DefaultHasher;
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
@@ -20,16 +20,16 @@ struct UnknownConfigKeyWarningState {
 impl Config {
     /// Get the config file path
     pub fn path() -> Option<PathBuf> {
-        jcode_dir().ok().map(|d| d.join("config.toml"))
+        jcode_dir_opt().map(|d| d.join("config.toml"))
     }
 
     /// Get the declarative policy config path.
     pub fn policy_path() -> Option<PathBuf> {
-        jcode_dir().ok().map(|d| d.join("config.nix.toml"))
+        jcode_dir_opt().map(|d| d.join("config.nix.toml"))
     }
 
     fn lock_path() -> Option<PathBuf> {
-        jcode_dir().ok().map(|d| d.join("config.toml.lock"))
+        jcode_dir_opt().map(|d| d.join("config.toml.lock"))
     }
 
     /// Load config from file, with environment variable overrides

@@ -164,9 +164,12 @@ pub(super) fn get_unseen_changelog_entries() -> &'static Vec<String> {
             return Vec::new();
         }
 
-        let state_file = dirs::home_dir()
-            .map(|h| h.join(".jcode").join("last_seen_changelog"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".jcode/last_seen_changelog"));
+        // `jcode_dir()` honors `JCODE_HOME` and the test-harness redirect, so a
+        // redirected process no longer reads and rewrites the developer's real
+        // "last seen changelog" marker.
+        let state_file = crate::storage::jcode_dir()
+            .map(|d| d.join("last_seen_changelog"))
+            .unwrap_or_else(|_| std::path::PathBuf::from(".jcode/last_seen_changelog"));
 
         let last_seen_hash = std::fs::read_to_string(&state_file)
             .ok()

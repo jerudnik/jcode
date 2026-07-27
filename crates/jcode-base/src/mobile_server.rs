@@ -23,12 +23,13 @@ impl MobileServerStatus {
 }
 
 pub fn jcode_home() -> PathBuf {
-    if let Some(path) = std::env::var_os("JCODE_HOME") {
-        return PathBuf::from(path);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".jcode")
+    // Delegates rather than reimplementing. This function used to spell out its
+    // own `JCODE_HOME`-then-`dirs::home_dir()` rule, which is the canonical
+    // resolver's rule minus the test-harness redirect, so it drifted the moment
+    // the resolver grew one. Keeping the fallback here preserves the old
+    // infallible signature; `jcode_dir()` only fails when no home can be
+    // resolved at all.
+    crate::storage::jcode_dir().unwrap_or_else(|_| PathBuf::from(".").join(".jcode"))
 }
 
 pub fn status_path() -> PathBuf {
@@ -89,5 +90,39 @@ pub fn process_is_running(pid: u32) -> bool {
     {
         let _ = pid;
         false
+    }
+}
+
+#[cfg(test)]
+mod ambient_root_tests {
+    use super::*;
+
+    /// `jcode_home()` used to spell out its own `JCODE_HOME`-then-`dirs::home_dir()`
+    /// rule. That is the canonical resolver's rule minus the test-harness
+    /// redirect, so every path built from it (status file, log file) escaped
+    /// isolation. Reverting the body to a hand-rolled resolver fails this.
+    #[test]
+    fn mobile_server_paths_never_resolve_into_the_real_home() {
+        let real = dirs::home_dir()
+            .expect("developer home exists")
+            .join(".jcode");
+
+        assert_ne!(
+            jcode_home(),
+            real,
+            "mobile server home must honor the storage redirect"
+        );
+        assert_eq!(
+            jcode_home(),
+            crate::storage::jcode_dir().expect("storage home"),
+            "mobile server home must be exactly jcode_dir()"
+        );
+        for path in [status_path(), log_path()] {
+            assert!(
+                !path.starts_with(&real),
+                "derived path escaped the redirect: {}",
+                path.display()
+            );
+        }
     }
 }

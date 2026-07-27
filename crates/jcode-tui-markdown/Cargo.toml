@@ -8,7 +8,7 @@ publish = false
 jcode-render-core = { path = "../jcode-render-core" }
 jcode-tui-mermaid = { path = "../jcode-tui-mermaid", optional = true }
 jcode-tui-workspace = { path = "../jcode-tui-workspace" }
-dirs = "5"
+jcode-storage = { path = "../jcode-storage" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 pulldown-cmark = "0.12"
 ratatui = "0.30"
@@ -22,3 +22,5 @@ wait-timeout = "0.2"
 [features]
 default = ["mermaid-renderer"]
 mermaid-renderer = ["dep:jcode-tui-mermaid", "jcode-tui-mermaid/renderer"]
+
+[dev-dependencies]

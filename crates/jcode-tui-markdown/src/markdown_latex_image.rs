@@ -292,9 +292,12 @@ fn recolor_and_crop(path: &Path, dpi: u16) -> Result<(), String> {
 }
 
 fn cache_dir() -> Result<PathBuf, String> {
-    dirs::cache_dir()
-        .map(|path| path.join("jcode").join("latex"))
-        .ok_or_else(|| "no user cache directory is available".to_string())
+    // `app_cache_dir()` already appends `jcode` and honors the harness redirect;
+    // `dirs::cache_dir()` wrote rendered LaTeX images into the developer's real
+    // cache during tests.
+    jcode_storage::app_cache_dir()
+        .map(|path| path.join("latex"))
+        .map_err(|err| format!("no user cache directory is available: {err}"))
 }
 
 fn load_artifact(path: &Path) -> Result<Artifact, String> {
@@ -645,6 +648,24 @@ mod tests {
             "312 DPI should materially increase ink height: baseline={} readable={}",
             baseline.height,
             readable.height
+        );
+    }
+}
+
+#[cfg(test)]
+mod ambient_root_tests {
+    /// Regression: this resolved `dirs::cache_dir()` directly, so a test run
+    /// wrote rendered LaTeX PNGs into the developer's real cache directory.
+    /// Asserting "not under the real home" rather than a fixed path, because
+    /// the harness redirect target is a per-process random temp dir.
+    #[test]
+    fn latex_cache_dir_is_not_under_the_real_home() {
+        let dir = super::cache_dir().expect("latex cache dir");
+        jcode_storage::assert_redirected_away_from_real_home(&dir, "latex cache dir");
+        assert!(
+            dir.ends_with("latex"),
+            "unexpected suffix: {}",
+            dir.display()
         );
     }
 }

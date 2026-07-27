@@ -111,18 +111,26 @@ run "warning budget"           bash scripts/check_warning_budget.sh
 # machete is a manifest/source text scan, so it is fast and needs no build.
 #
 # cargo-machete is not in the repo devShell (flake.nix is owned by distro/nix,
-# see docs/BRANCHING.md), so the gate is skipped when absent rather than
-# failing. The skip is reported in the summary so a missing tool can never be
-# mistaken for a pass.
+# see docs/BRANCHING.md), so fetch it through `nix shell` when it is not already
+# on PATH. Only a machine with neither skips, and the skip is reported in the
+# summary so a missing tool can never be mistaken for a pass.
+#
+# The fallback was added after this gate's *second* escape: routing the ambient
+# filesystem roots through jcode-storage orphaned jcode-setup-hints' `dirs`, and
+# a local run that skipped the gate reported all-green while CI failed. A gate
+# that silently downgrades to "skip" on the machine where it would have caught
+# something is not a gate.
 if command -v cargo-machete >/dev/null 2>&1; then
   run "unused dependencies"    cargo-machete
 elif cargo machete --help >/dev/null 2>&1; then
   run "unused dependencies"    cargo machete
+elif command -v nix >/dev/null 2>&1; then
+  run "unused dependencies"    nix shell nixpkgs#cargo-machete --command cargo-machete
 else
   names+=("unused dependencies"); states+=("skip")
   printf '\033[1;34m▸ unused dependencies\033[0m\n'
-  printf 'cargo-machete not found; CI still enforces this. Install with:\n'
-  printf '  nix shell nixpkgs#cargo-machete   (or: cargo install cargo-machete --locked)\n'
+  printf 'cargo-machete and nix not found; CI still enforces this. Install with:\n'
+  printf '  cargo install cargo-machete --locked\n'
 fi
 
 # Lint any fork-owned workflow files that changed (mirrors the nix.yml step).

@@ -213,7 +213,10 @@ pub(crate) fn resolve_launch_hotkeys(
 /// Missing/stale dynamic targets fall back to `$HOME`, matching the shell-script
 /// launcher behavior.
 pub(crate) fn resolve_target_dir(dir: &str, last_dir_file: &str, last_repo_file: &str) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    // `user_home_path("")` yields the (possibly redirected) home itself, so
+    // `$HOME` and `~/` expansion land in the sandbox under a test harness
+    // instead of the developer's real home.
+    let home = jcode_storage::user_home_path("").unwrap_or_else(|_| PathBuf::from("/"));
     match dir {
         "$HOME" => home,
         "$LAST_DIR" => read_existing_dir(last_dir_file).unwrap_or(home),

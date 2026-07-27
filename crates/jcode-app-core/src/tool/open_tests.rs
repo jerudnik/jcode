@@ -95,6 +95,27 @@ fn expand_home_handles_plain_non_tilde_paths() {
     assert_eq!(path, PathBuf::from("docs/spec.pdf"));
 }
 
+/// The tilde arms feed a path straight to the OS `open` handler, so a test that
+/// opens `~/...` must not act on the developer's real files. Before F29 these
+/// called `dirs::home_dir()` and did exactly that; the assertion is "not under
+/// the real home" rather than a fixed path because the harness redirect target
+/// is a per-process temp dir.
+#[test]
+fn expand_home_tilde_arms_stay_inside_the_redirected_home() {
+    let bare = expand_home("~").expect("bare tilde expands");
+    jcode_storage::assert_redirected_away_from_real_home(&bare, "expand_home(\"~\")");
+
+    for spelling in ["~/notes.md", "~\\notes.md"] {
+        let path = expand_home(spelling).unwrap_or_else(|e| panic!("{spelling}: {e}"));
+        jcode_storage::assert_redirected_away_from_real_home(&path, spelling);
+        assert!(
+            path.ends_with("notes.md"),
+            "{spelling} lost its suffix: {}",
+            path.display()
+        );
+    }
+}
+
 fn window(id: u64, app_id: &str, ts: Option<(u64, u32)>) -> NiriWindow {
     NiriWindow {
         id,

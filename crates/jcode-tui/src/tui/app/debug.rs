@@ -727,9 +727,12 @@ pub(super) fn handle_debug_command(app: &mut App, trimmed: &str) -> bool {
         let json = test_harness::get_recorded_events_json();
         let event_count = json.matches("\"type\"").count();
 
-        let recording_dir = dirs::config_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("jcode")
+        // `app_config_dir()` already appends `jcode` and honors JCODE_HOME /
+        // the harness home; the old `dirs::config_dir()` call did neither, so
+        // `/record stop` wrote into the developer's real config dir even from
+        // a sandboxed run.
+        let recording_dir = crate::storage::app_config_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join("recordings");
         let _ = std::fs::create_dir_all(&recording_dir);
 

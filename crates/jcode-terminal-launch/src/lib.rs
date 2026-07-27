@@ -188,8 +188,10 @@ fn macos_app_installed(app_name: &str) -> bool {
     if system_app.is_dir() {
         return true;
     }
-    if let Some(home) = dirs::home_dir()
-        && home.join("Applications").join(app_name).is_dir()
+    // Resolved through jcode-storage so a test harness probes the sandbox
+    // rather than reporting on whichever apps the developer has installed.
+    if let Ok(user_app) = jcode_storage::user_home_path("Applications")
+        && user_app.join(app_name).is_dir()
     {
         return true;
     }
@@ -468,9 +470,9 @@ pub fn parse_hook_command(raw: &str) -> Result<Vec<String>> {
 /// since the hook is executed directly (no shell) and would otherwise fail.
 pub fn expand_home(program: &str) -> PathBuf {
     if let Some(rest) = program.strip_prefix("~/")
-        && let Some(home) = dirs::home_dir()
+        && let Ok(expanded) = jcode_storage::user_home_path(rest)
     {
-        return home.join(rest);
+        return expanded;
     }
     PathBuf::from(program)
 }
@@ -1032,5 +1034,24 @@ mod tests {
             env_value(&cmd, "JCODE_SPAWN_SESSION_ID").as_deref(),
             Some("ses_abc")
         );
+    }
+
+    /// `expand_home` produces the path a spawn hook is executed with (no shell
+    /// involved), so a test harness must not resolve it into the developer's
+    /// real home. Before F29 this used `dirs::home_dir()` and did.
+    #[test]
+    fn expand_home_stays_inside_the_redirected_home() {
+        let expanded = expand_home("~/bin/hook.sh");
+        jcode_storage::assert_redirected_away_from_real_home(&expanded, "expand_home");
+        assert!(
+            expanded.ends_with("bin/hook.sh"),
+            "suffix lost: {}",
+            expanded.display()
+        );
+
+        // Non-tilde programs pass through untouched, including bare names
+        // resolved later via PATH.
+        assert_eq!(expand_home("hook.sh"), PathBuf::from("hook.sh"));
+        assert_eq!(expand_home("/usr/bin/hook"), PathBuf::from("/usr/bin/hook"));
     }
 }

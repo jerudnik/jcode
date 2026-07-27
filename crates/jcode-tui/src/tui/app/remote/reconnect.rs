@@ -753,7 +753,7 @@ pub(super) fn load_reload_reconnect_hints(
 
     let has_client_reload_marker = session_to_resume
         .and_then(|sid| {
-            let jcode_dir = crate::storage::jcode_dir().ok()?;
+            let jcode_dir = crate::storage::jcode_dir_opt()?;
             let marker = jcode_dir.join(format!("client-reload-pending-{}", sid));
             if marker.exists() {
                 let info = std::fs::read_to_string(&marker).ok()?;

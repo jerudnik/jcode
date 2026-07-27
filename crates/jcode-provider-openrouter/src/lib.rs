@@ -346,15 +346,11 @@ fn configured_cache_namespace() -> String {
 
 fn cache_path_for_namespace(namespace: &str) -> PathBuf {
     let namespace = sanitize_cache_namespace(namespace);
-    if let Ok(path) = std::env::var("JCODE_HOME") {
-        return PathBuf::from(path)
-            .join("cache")
-            .join(format!("{}_models.json", namespace));
-    }
-
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".jcode")
+    // This used to re-implement the `JCODE_HOME`-then-home rule by hand, which
+    // meant it read the env var at call time and never saw the test-harness
+    // redirect. `jcode_dir()` is the canonical resolver for both.
+    jcode_storage::jcode_dir()
+        .unwrap_or_else(|_| PathBuf::from(".").join(".jcode"))
         .join("cache")
         .join(format!("{}_models.json", namespace))
 }
@@ -554,9 +550,11 @@ fn save_disk_cache_with_source_to_path(
 fn endpoints_cache_path(model: &str) -> PathBuf {
     let safe_name = model.replace('/', "__");
     let namespace = configured_cache_namespace();
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".jcode")
+    // Note this one did not even have the `JCODE_HOME` arm its sibling
+    // `cache_path_for_namespace` had, so a redirected home still wrote endpoint
+    // caches into the real `~/.jcode/cache`. Both now share one resolver.
+    jcode_storage::jcode_dir()
+        .unwrap_or_else(|_| PathBuf::from(".").join(".jcode"))
         .join("cache")
         .join(format!("{}_endpoints_{}.json", namespace, safe_name))
 }
@@ -798,6 +796,30 @@ pub fn rank_providers_from_endpoints(endpoints: &[EndpointInfo]) -> Vec<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both cache paths used to resolve the home themselves.
+    /// `cache_path_for_namespace` re-implemented the `JCODE_HOME` rule by hand
+    /// (so it missed the test-harness redirect) and `endpoints_cache_path` had
+    /// no `JCODE_HOME` arm at all, so it wrote into the real `~/.jcode/cache`
+    /// unconditionally. Reverting either to `dirs::home_dir()` fails this.
+    #[test]
+    fn model_caches_never_resolve_into_the_real_home() {
+        let real_cache = dirs::home_dir()
+            .expect("developer home exists")
+            .join(".jcode")
+            .join("cache");
+
+        for path in [
+            cache_path_for_namespace("openrouter"),
+            endpoints_cache_path("anthropic/claude-sonnet-4"),
+        ] {
+            assert!(
+                !path.starts_with(&real_cache),
+                "cache path must honor the storage redirect, got {}",
+                path.display()
+            );
+        }
+    }
 
     #[test]
     fn parse_model_spec_handles_provider_aliases_and_auto() {

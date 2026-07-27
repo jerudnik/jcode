@@ -431,34 +431,33 @@ pub fn trust_external_auth_source(source: ExternalCopilotAuthSource) -> Result<(
 }
 
 fn copilot_cli_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("JCODE_HOME") {
-        return PathBuf::from(path).join("external").join(".copilot");
-    }
-
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home).join(".copilot")
+    // `user_home_path` applies the `JCODE_HOME` rule *and* the test-harness
+    // redirect; the hand-rolled `JCODE_HOME` check this replaces knew only the
+    // former, so a harness run with `JCODE_HOME` unset read the developer's
+    // real `~/.copilot`.
+    crate::storage::user_home_path(".copilot").unwrap_or_default()
 }
 
 fn legacy_copilot_config_dir() -> PathBuf {
-    if let Ok(path) = std::env::var("JCODE_HOME") {
-        return PathBuf::from(path)
-            .join("external")
-            .join(".config")
-            .join("github-copilot");
+    // A redirected home outranks `$XDG_CONFIG_HOME` and `%LOCALAPPDATA%`:
+    // neither is derived from the home directory, so the redirect does not
+    // cover them, and on a machine where XDG points at the real `~/.config`
+    // (Linux CI does this) a sandboxed run would read the real Copilot config.
+    // Same rule as `linux_config_paths::xdg_config_home_from`.
+    if let Some(xdg) =
+        crate::storage::sanitize_ambient_dir_override(std::env::var_os("XDG_CONFIG_HOME"))
+    {
+        return xdg.join("github-copilot");
     }
 
-    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-        PathBuf::from(xdg).join("github-copilot")
-    } else if cfg!(windows) {
-        let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_default();
-            format!("{}/AppData/Local", home)
-        });
-        PathBuf::from(local_app_data).join("github-copilot")
-    } else {
-        let home = std::env::var("HOME").unwrap_or_default();
-        PathBuf::from(home).join(".config").join("github-copilot")
+    if cfg!(windows)
+        && let Some(local) =
+            crate::storage::sanitize_ambient_dir_override(std::env::var_os("LOCALAPPDATA"))
+    {
+        return local.join("github-copilot");
     }
+
+    crate::storage::user_home_path(".config/github-copilot").unwrap_or_default()
 }
 
 pub fn saved_hosts_path() -> PathBuf {
