@@ -10,8 +10,8 @@ This independent hard fork and its `main` branch are authoritative. There is no 
 ## Work safely
 
 - Default to TUI/CLI. Touch or build desktop code only for desktop-specific tasks.
-- Inspect the tree, preserve concurrent work, and commit only owned files in focused commits.
-- Do not push, publish, tag, release, or take destructive action unless requested. Prefer fixing and validating over reporting.
+- Before planning or changing Git, verify path, branch, HEAD, status, worktrees, ancestry, and authoritative remote; preserve other work.
+- After integration, verify remote SHA and delete owned merged branches/worktrees. Push, publish, tag, release, or act destructively only when requested.
 
 ## Sources of truth
 
