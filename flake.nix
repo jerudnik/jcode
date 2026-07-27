@@ -84,20 +84,36 @@
             fileset = lib.fileset.unions [
               ./flake.nix
               ./rust-toolchain.toml
+              ./apm.yml
+              ./apm.lock.yaml
               ./nix
               ./Cargo.toml
               ./scripts/clean_target.sh
+              ./scripts/check_agent_instructions.py
               ./scripts/dev_cargo.sh
               ./scripts/preflight.sh
               ./scripts/prune_incremental.sh
               ./scripts/remote_build.sh
               ./scripts/remote_config.sh
+              ./scripts/test_fast.sh
               ./scripts/test_incremental_policy.sh
+              ./.apm/instructions
+              ./.jcode/preferred-tools.md
+              ./.jcode/prompt-overlay.md
+              ./.jcode/swarm-prompt.md
+              ./docs/agent-workflows.md
+              ./docs/BRANCHING.md
+              ./docs/NIX.md
+              ./docs/SWARM_ARCHITECTURE.md
+              ./docs/SWARM_TASK_GRAPH.md
+              ./CONTRIBUTING.md
+              ./RELEASING.md
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
+              ./.github/workflows/release.yml
             ];
           };
 
@@ -162,6 +178,18 @@
                   touch "$out"
                 '';
 
+            agent-instructions =
+              pkgs.runCommand "jcode-agent-instructions-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [ pkgs.python3 ];
+                }
+                ''
+                  cd "$src"
+                  python3 scripts/check_agent_instructions.py
+                  touch "$out"
+                '';
+
             incremental-policy =
               pkgs.runCommand "jcode-incremental-policy-check"
                 {
@@ -192,7 +220,8 @@
                     .github/workflows/fork-health.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
-                    .github/workflows/nix-update.yml
+                    .github/workflows/nix-update.yml \
+                    .github/workflows/release.yml
                   touch "$out"
                 '';
 

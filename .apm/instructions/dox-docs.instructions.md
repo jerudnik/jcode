@@ -13,6 +13,7 @@ Code-adjacent reference for maintaining the downstream fork: branch topology, Ni
 
 - `BRANCHING.md` — branch roles, rebase flow, patch classes, and CI ownership.
 - `NIX.md` — flake packaging, Home Manager module, Cachix, and install/use notes.
+- `agent-workflows.md` — detailed agent build, test, selfdev, swarm, CI, and release procedures.
 - `fork/patch-ledger.md` — durable ledger for temporary shims, upstreamable patches, and permanent downstream features.
 - Other docs stay close to implementation and should not duplicate upstream docs unless the fork changes behavior.
 
@@ -23,6 +24,7 @@ Code-adjacent reference for maintaining the downstream fork: branch topology, Ni
 - Permanent downstream behavior can stay in the ledger, but label it clearly as `permanent-downstream`.
 - 4nix-facing packaging contracts belong in docs when they affect the `github:jerudnik/jcode/main` flake input.
 - Use direct, operational prose. Do not leave historical diary notes in durable docs.
+- Keep operational command blocks in `agent-workflows.md`; prompt-loaded files should link to it instead of copying them.
 
 ## Work Guidance
 

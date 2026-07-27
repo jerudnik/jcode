@@ -31,6 +31,15 @@ set -uo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root" || { printf 'preflight: cannot cd to repo root %s\n' "$repo_root" >&2; exit 2; }
 
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help)
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+  esac
+done
+
 # ── Toolchain guard ──────────────────────────────────────────────────────────
 # Several gates need cargo on PATH (rustfmt, clippy, and check_dependency_
 # boundaries.py which shells out to `cargo metadata`). Outside the Nix dev shell
@@ -68,10 +77,6 @@ for arg in "$@"; do
     --nix) use_nix=1 ;;
     --ratchets-only) ratchets_only=1 ;;
     --no-clippy) run_clippy=0 ;;
-    -h|--help)
-      sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
-      exit 0
-      ;;
     *) printf 'preflight: unknown option: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -101,6 +106,7 @@ run "test-size ratchet"        python3 scripts/check_test_size_budget.py
 run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.py
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py
+run "agent instructions"       python3 scripts/check_agent_instructions.py
 run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
 
