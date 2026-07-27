@@ -96,10 +96,20 @@ async fn graph_fixture_named(swarm_id: &str, coord: &str, worker: &str) -> Graph
 
 impl GraphFixture {
     async fn seed(&mut self, mode: &str, nodes: Vec<TaskGraphNodeSpec>) {
+        self.seed_replacing(mode, false, nodes).await;
+    }
+
+    async fn seed_replacing(
+        &mut self,
+        mode: &str,
+        replace_existing: bool,
+        nodes: Vec<TaskGraphNodeSpec>,
+    ) {
         handle_comm_seed_graph(
             1,
             self.coord.clone(),
             Some(mode.to_string()),
+            replace_existing,
             nodes,
             &self.client_tx,
             &self.swarm_members,
@@ -120,6 +130,7 @@ impl GraphFixture {
             1,
             self.coord.clone(),
             None,
+            false,
             nodes,
             &self.client_tx,
             &self.swarm_members,
@@ -158,6 +169,74 @@ async fn e2e_seed_defaults_to_deep_when_seeder_effort_is_swarm_deep() {
     );
 
     crate::session_effort::forget_session_effort(&fx.coord);
+}
+
+/// A new workflow must never merge with persisted nodes from an older graph.
+/// Non-empty reseeds are rejected unless the caller explicitly opts into an
+/// atomic replacement, which also clears stale metadata, progress, and plan
+/// participants while keeping the version monotonic.
+#[tokio::test]
+async fn e2e_seed_requires_explicit_replacement_and_clears_stale_state() {
+    let (_env, _runtime) = RuntimeEnvGuard::new();
+    let mut fx = graph_fixture_named("swarm-reseed", "coord-reseed", "worker-reseed").await;
+
+    fx.seed("deep", vec![node_spec("old", "explore", &[])])
+        .await;
+    let _ = fx.client_rx.recv().await.expect("initial seed response");
+
+    let (initial_version, initial_ids) = {
+        let mut plans = fx.swarm_plans.write().await;
+        let plan = plans.get_mut(&fx.swarm_id).expect("seeded plan");
+        plan.task_progress.insert("old".to_string(), Default::default());
+        plan.participants.insert("stale-participant".to_string());
+        assert!(plan.node_meta.contains_key("old"));
+        (
+            plan.version,
+            plan.items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    fx.seed_replacing("light", false, vec![node_spec("new", "implement", &[])])
+        .await;
+    let rejected = fx.client_rx.recv().await.expect("reseed rejection");
+    match rejected {
+        ServerEvent::Error { message, .. } => {
+            assert!(message.contains("replace_existing=true"), "{message}");
+        }
+        other => panic!("expected reseed error, got {other:?}"),
+    }
+    {
+        let plans = fx.swarm_plans.read().await;
+        let plan = &plans[&fx.swarm_id];
+        assert_eq!(plan.version, initial_version, "rejection must not mutate plan");
+        assert_eq!(
+            plan.items
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<Vec<_>>(),
+            initial_ids,
+            "rejection must preserve the complete deep graph, including its gate"
+        );
+        assert!(plan.task_progress.contains_key("old"));
+        assert!(plan.participants.contains("stale-participant"));
+    }
+
+    fx.seed_replacing("light", true, vec![node_spec("new", "implement", &[])])
+        .await;
+    let _ = fx.client_rx.recv().await.expect("replacement response");
+
+    let plans = fx.swarm_plans.read().await;
+    let plan = &plans[&fx.swarm_id];
+    assert_eq!(plan.version, initial_version + 1);
+    assert_eq!(plan.mode, "light");
+    assert_eq!(plan.items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["new"]);
+    assert!(!plan.node_meta.contains_key("old"));
+    assert!(plan.node_meta.contains_key("new"));
+    assert!(plan.task_progress.is_empty());
+    assert_eq!(plan.participants, HashSet::from([fx.coord.clone()]));
 }
 
 /// Counterpart: without a deep effort recorded (or with a plain reasoning level),
@@ -250,7 +329,7 @@ async fn e2e_seed_creates_plan_with_kinds_and_edges() {
 }
 
 #[tokio::test]
-async fn e2e_identical_seed_replay_succeeds_without_version_or_node_churn() {
+async fn e2e_identical_seed_without_replace_is_rejected_without_node_churn() {
     let (_env, _runtime) = RuntimeEnvGuard::new();
     let mut fx = graph_fixture_named("swarm-seed-replay", "coord-replay", "worker-replay").await;
     let nodes = vec![
@@ -270,19 +349,21 @@ async fn e2e_identical_seed_replay_succeeds_without_version_or_node_churn() {
 
     let plans = fx.swarm_plans.read().await;
     let plan = &plans[&fx.swarm_id];
-    assert_eq!(plan.version, version, "a replay must not bump plan version");
-    assert_eq!(plan.items.len(), item_count, "a replay must not add nodes");
+    assert_eq!(plan.version, version, "a rejected replay must not bump plan version");
+    assert_eq!(plan.items.len(), item_count, "a rejected replay must not add nodes");
     drop(plans);
     let events: Vec<_> = std::iter::from_fn(|| fx.client_rx.try_recv().ok()).collect();
     assert!(
-        events.iter().all(|event| !matches!(event, ServerEvent::Error { .. })),
-        "an identical replay must acknowledge success: {events:?}"
+        events.iter().any(|event| matches!(
+            event,
+            ServerEvent::Error { message, .. } if message.contains("replace_existing=true")
+        )),
+        "an identical raw-protocol replay must require an explicit lifecycle choice: {events:?}"
     );
-    assert!(events.iter().any(|event| matches!(event, ServerEvent::Done { .. })));
 }
 
 #[tokio::test]
-async fn e2e_seed_rejects_conflicting_existing_definition_without_mutation() {
+async fn e2e_seed_rejects_nonempty_existing_definition_without_mutation() {
     let (_env, _runtime) = RuntimeEnvGuard::new();
     let mut fx = graph_fixture_named("swarm-seed-conflict", "coord-conflict", "worker-conflict").await;
     fx.seed("light", vec![node_spec("shared", "explore", &[])])
@@ -325,7 +406,7 @@ async fn e2e_seed_rejects_conflicting_existing_definition_without_mutation() {
     let events: Vec<_> = std::iter::from_fn(|| fx.client_rx.try_recv().ok()).collect();
     assert!(events.iter().any(|event| matches!(
         event,
-        ServerEvent::Error { message, .. } if message.contains("duplicate node id 'shared'")
+        ServerEvent::Error { message, .. } if message.contains("replace_existing=true")
     )));
 }
 
@@ -912,6 +993,7 @@ async fn e2e_solo_seeder_is_elected_coordinator_and_can_assign() {
         1,
         seeder.clone(),
         Some("deep".to_string()),
+        false,
         vec![
             node_spec("explore", "explore", &[]),
             node_spec("synth", "synthesize", &["explore"]),
@@ -1016,6 +1098,7 @@ async fn e2e_seed_does_not_displace_live_coordinator() {
         1,
         worker.clone(),
         Some("deep".to_string()),
+        false,
         vec![node_spec("root", "explore", &[])],
         &client_tx,
         &swarm_members,
@@ -1301,8 +1384,9 @@ async fn e2e_assignee_can_complete_queued_assignment() {
     );
 }
 
-/// Regression: re-seeding a non-empty deep plan as light is a silent rigor
-/// downgrade (drops gates + artifact validation) and must be rejected.
+/// Regression: raw-protocol re-seeding of a non-empty deep plan as light must
+/// be rejected unless replacement is explicit. The tool itself defaults to
+/// replacement, which makes the lifecycle choice deterministically.
 #[tokio::test]
 async fn e2e_seed_rejects_light_downgrade_of_nonempty_deep_plan() {
     let (_env, _runtime) = RuntimeEnvGuard::new();
@@ -1323,7 +1407,7 @@ async fn e2e_seed_rejects_light_downgrade_of_nonempty_deep_plan() {
     let mut saw_downgrade_error = false;
     while let Ok(ev) = fx.client_rx.try_recv() {
         if let ServerEvent::Error { message, .. } = ev
-            && message.contains("deep-mode plan")
+            && message.contains("replace_existing=true")
         {
             saw_downgrade_error = true;
         }

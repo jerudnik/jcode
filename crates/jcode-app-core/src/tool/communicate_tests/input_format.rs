@@ -70,6 +70,29 @@ fn communicate_input_accepts_cleanup_lifecycle_flags() {
 }
 
 #[test]
+fn communicate_input_accepts_explicit_graph_replacement() {
+    let input: CommunicateInput = serde_json::from_value(serde_json::json!({
+        "action": "task_graph",
+        "replace_existing": true,
+        "nodes": [{"id": "fresh", "content": "fresh task"}]
+    }))
+    .expect("task graph replacement input should deserialize");
+
+    assert_eq!(input.replace_existing, Some(true));
+    assert!(input.replace_existing_graph());
+
+    let defaulted: CommunicateInput = serde_json::from_value(serde_json::json!({
+        "action": "task_graph",
+        "nodes": [{"id": "fresh", "content": "fresh task"}]
+    }))
+    .expect("task graph input should deserialize without lifecycle override");
+    assert!(
+        defaulted.replace_existing_graph(),
+        "task_graph must replace stale persisted state by default"
+    );
+}
+
+#[test]
 fn cleanup_candidates_default_to_owned_terminal_workers() {
     let members = vec![
         AgentInfo {

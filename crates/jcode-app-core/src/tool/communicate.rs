@@ -2093,6 +2093,9 @@ struct CommunicateInput {
     session_ids: Option<Vec<String>>,
     #[serde(default)]
     mode: Option<String>,
+    /// For task_graph, explicitly replace a non-empty persisted graph.
+    #[serde(default)]
+    replace_existing: Option<bool>,
     #[serde(default)]
     timeout_minutes: Option<u64>,
     #[serde(default)]
@@ -2158,6 +2161,14 @@ impl CommunicateInput {
             ));
         }
         Ok(label.to_string())
+    }
+
+    /// `task_graph` is a seed/new-workflow action, not an append operation.
+    /// Default to replacement so persisted graph state can never leak into a
+    /// fresh tool invocation. Callers extending a graph must use expand_node or
+    /// inject_gap instead.
+    fn replace_existing_graph(&self) -> bool {
+        self.replace_existing.unwrap_or(true)
     }
 }
 
@@ -2382,6 +2393,13 @@ impl Tool for CommunicateTool {
                     "type": "array",
                     "description": "Task-DAG node specs for task_graph (seed), expand_node (children), or inject_gap (gap/fix nodes). Each: {id, content, kind?, depends_on?, priority?}. kind is one of explore|implement|verify|fix|synthesize.",
                     "items": { "type": "object", "additionalProperties": true }
+                }),
+            );
+            props.insert(
+                "replace_existing".to_string(),
+                json!({
+                    "type": "boolean",
+                    "description": "For task_graph only. Defaults to true so every task_graph invocation starts a fresh workflow and atomically clears old nodes, metadata, progress, and participants. Set false only to make the server reject a non-empty graph instead of replacing it; use expand_node/inject_gap to extend an existing graph."
                 }),
             );
             props.insert(
@@ -2670,6 +2688,7 @@ impl Tool for CommunicateTool {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
                     mode: params.mode.clone(),
+                    replace_existing: params.replace_existing_graph(),
                     nodes: seed_nodes.clone(),
                 };
                 let mut response = send_request(request)
@@ -2719,6 +2738,7 @@ impl Tool for CommunicateTool {
                         id: REQUEST_ID,
                         session_id: ctx.session_id.clone(),
                         mode: params.mode.clone(),
+                        replace_existing: params.replace_existing_graph(),
                         nodes: seed_nodes.clone(),
                     })
                     .await

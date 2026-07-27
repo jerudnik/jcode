@@ -577,8 +577,8 @@ pub enum Request {
         reason: Option<String>,
     },
 
-    /// Seed the swarm task DAG in one call (the first agent's draft). Replaces or
-    /// initializes the shared plan with a validated graph of nodes + edges.
+    /// Seed the swarm task DAG in one call (the first agent's draft). Initializes
+    /// an empty shared plan, or replaces a non-empty one when explicitly requested.
     #[serde(rename = "comm_seed_graph")]
     CommSeedGraph {
         id: u64,
@@ -586,6 +586,10 @@ pub enum Request {
         /// "deep" (comprehensive, gated) or "light" (fan-out).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mode: Option<String>,
+        /// Explicitly replace a non-empty persisted graph. Defaults to false so
+        /// new workflows cannot silently merge into stale task state.
+        #[serde(default)]
+        replace_existing: bool,
         nodes: Vec<TaskGraphNodeSpec>,
     },
 

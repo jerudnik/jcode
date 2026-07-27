@@ -2269,12 +2269,14 @@ pub(super) async fn handle_client(
                 id,
                 session_id: req_session_id,
                 mode,
+                replace_existing,
                 nodes,
             } => {
                 super::comm_graph::handle_comm_seed_graph(
                     id,
                     req_session_id,
                     mode,
+                    replace_existing,
                     nodes,
                     &client_event_tx,
                     &swarm_members,
