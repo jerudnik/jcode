@@ -87,6 +87,21 @@ Use `--force-with-lease`, never plain `--force`, when updating `main`.
 The dev shell installs a pre-push guard that unconditionally refuses to
 recreate `vendor/upstream` or `distro/nix`.
 
+## Server-side rulesets
+
+Two GitHub repository rulesets enforce the model on the server, independent of
+the local hook:
+
+| Ruleset | Rule | Applies to |
+|---|---|---|
+| `protect-fork-rails` | `deletion` | `refs/heads/main` |
+| `no-stray-branches` | `creation` | everything except `main` and `automation/**` (admins bypass) |
+
+These are repository configuration, not files, so nothing in a clone reveals
+them. They listed the retired rails until the fork collapsed to one, and the
+stale entries blocked their own deletion. `scripts/fork-health.sh` check 4
+compares them against the rail set so they cannot drift out of sight again.
+
 ## Audits
 
 ```sh

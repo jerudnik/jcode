@@ -17,6 +17,7 @@
 #   1) fork-point tag exists and is an ancestor of main
 #   2) GitHub carries the rail (+ topic branches, reported; stale ones flagged)
 #   3) docs/BRANCHING.md's CI table names every workflow that exists
+#   4) GitHub rulesets still describe the current rail set
 #
 # Runs identically locally and in CI (.github/workflows/fork-health.yml).
 # Requires: git with the fork remote and tags fetched; gh (only for check 2,
@@ -123,6 +124,30 @@ if [ -z "$undocumented" ]; then
 else
   fail "workflows missing from the docs/BRANCHING.md CI table:"
   printf '%s' "$undocumented" | sed 's/^/      /' >&2
+fi
+
+# ── 4) Ruleset currency ──────────────────────────────────────────────────────
+# Branch protection lives in GitHub rulesets, which are repository config: no
+# file in a clone reveals them, so they drift silently. They named the retired
+# rails after those rails were deleted, and the stale entries were what blocked
+# the deletion. Assert they still describe the rail set. Reuses check 2's gh
+# availability. Docs: docs/BRANCHING.md "Server-side rulesets".
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  ruleset_refs="$(gh api "repos/$repo/rulesets" --jq '.[].id' 2>/dev/null \
+    | while read -r id; do
+        gh api "repos/$repo/rulesets/$id" \
+          --jq '.conditions.ref_name | (.include[], .exclude[])' 2>/dev/null
+      done | grep '^refs/heads/' | sed 's|^refs/heads/||' | sort -u || true)"
+  stale_rules="$(printf '%s\n' "$ruleset_refs" \
+    | grep -vx -e "$main_branch" -e 'automation/\*\*' || true)"
+  if [ -z "$ruleset_refs" ]; then
+    warn "no branch rulesets found on $repo; main is unprotected"
+  elif [ -z "$stale_rules" ]; then
+    ok "GitHub rulesets reference only the current rail"
+  else
+    fail "GitHub rulesets reference branches that are not rails:"
+    printf '%s\n' "$stale_rules" | sed 's/^/      /' >&2
+  fi
 fi
 
 # ── Payload report (informational) ───────────────────────────────────────────

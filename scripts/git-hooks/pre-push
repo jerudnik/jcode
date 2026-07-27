@@ -33,6 +33,14 @@ EOF
 # stdin; only the remote ref matters here, but all four must be consumed.
 # shellcheck disable=SC2034
 while read -r local_ref local_sha remote_ref remote_sha; do
+  # A deletion sends an all-zero local sha. Deleting a retired rail is exactly
+  # what this hook wants to happen, so never stand in its way; only refuse
+  # pushes that would create or advance one.
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+
   case "$remote_ref" in
     refs/heads/vendor/upstream) refuse_retired_rail vendor/upstream ;;
     refs/heads/distro/nix)      refuse_retired_rail distro/nix ;;
