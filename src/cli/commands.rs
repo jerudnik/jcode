@@ -1823,9 +1823,6 @@ pub fn run_pair_command(list: bool, revoke: Option<String>) -> Result<()> {
                 let last_seen = &device.last_seen;
                 eprintln!("  \x1b[36m{}\x1b[0m  ({})", device.name, device.id);
                 eprintln!("    Paired: {}  Last seen: {}", device.paired_at, last_seen);
-                if let Some(ref apns) = device.apns_token {
-                    eprintln!("    APNs: {}...", &apns[..apns.len().min(16)]);
-                }
                 eprintln!();
             }
         }
@@ -1858,22 +1855,8 @@ pub fn run_pair_command(list: bool, revoke: Option<String>) -> Result<()> {
 
     let code = registry.generate_pairing_code();
     let connect_host = resolve_connect_host(&gw_config.bind_addr);
-    let pair_uri = format!(
-        "jcode://pair?host={}&port={}&code={}",
-        connect_host, gw_config.port, code
-    );
-
     eprintln!();
-    eprintln!("  \x1b[1mScan with the jcode iOS app:\x1b[0m\n");
-    match crate::login_qr::render_unicode_qr(&pair_uri) {
-        Ok(qr) => {
-            for line in qr.lines() {
-                eprintln!("  {line}");
-            }
-        }
-        Err(_) => eprintln!("  \x1b[33m(QR code generation failed)\x1b[0m"),
-    }
-    eprintln!();
+    eprintln!("  \x1b[1mPair a browser client:\x1b[0m\n");
     eprintln!(
         "  Pairing code:  \x1b[1;37m{} {}\x1b[0m   \x1b[2m(expires in 5 minutes)\x1b[0m",
         &code[..3],
@@ -1885,6 +1868,10 @@ pub fn run_pair_command(list: bool, revoke: Option<String>) -> Result<()> {
     if connect_host != gw_config.bind_addr {
         eprintln!("  Bind address:  \x1b[2m{}\x1b[0m", bind_hint);
     }
+
+    eprintln!(
+        "\n  Open the mobile web surface with `jcode mobile-server start --open`, then enter the host and code."
+    );
 
     if connect_host == "<your-mac-hostname>" {
         eprintln!(

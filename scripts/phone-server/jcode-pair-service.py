@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Token-protected HTTP service that generates jcode pairing codes.
 
-GET /pair-code?t=<token> -> {"code": "123456", "host": "100.109.78.41", "port": 7643, "uri": "jcode://pair?..."}
+GET /pair-code?t=<token> -> {"code": "123456", "host": "100.109.78.41", "port": 7643}
 """
 import http.server, json, re, subprocess, os
 from urllib.parse import urlparse, parse_qs
@@ -43,8 +43,7 @@ class H(http.server.BaseHTTPRequestHandler):
             if not m:
                 return self._send(500, {'error': 'no code in output'})
             code = m.group(1) + m.group(2)
-            uri = f'jcode://pair?host={HOST}&port={PORT}&code={code}'
-            return self._send(200, {'code': code, 'host': HOST, 'port': PORT, 'uri': uri, 'expires_in': 300})
+            return self._send(200, {'code': code, 'host': HOST, 'port': PORT, 'expires_in': 300})
         except Exception as e:
             return self._send(500, {'error': str(e)})
 

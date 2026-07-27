@@ -22,6 +22,7 @@ This independent hard fork and its `main` branch are authoritative. There is no 
 
 - Repository-owned end-user distribution is Nix-only: `flake.nix` defines packages and public Cachix is the sole binary publication channel.
 - GitHub releases are metadata-only. Do not add executable assets, binary checksums, shell/PowerShell installers, Homebrew/AUR, signed app-store/TestFlight delivery, or Cargo publication.
+- The native iOS product is retired. Do not restore `ios/`, `docs/IOS_APP.md`, iOS/TestFlight workflows, Apple signing, APNs fields, or `jcode://pair` native pairing deep links. Preserve the packaged `web/jcode-mobile` browser surface.
 - Runtime update commands show Nix guidance only. Developer source rebuilds must not replace or mutate an end-user installation.
 
 ## Tools and delegation

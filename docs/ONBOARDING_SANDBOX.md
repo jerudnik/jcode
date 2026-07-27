@@ -131,9 +131,9 @@ Suggested fixture names:
 - `api-key-openrouter`
 - `external-opencode-approved`
 
-## Mobile onboarding simulator
+## Mobile web onboarding simulator
 
-The repo also has a resettable headless mobile simulator with predefined onboarding scenarios.
+The repo also has a resettable headless simulator for the browser-based mobile surface, with predefined onboarding scenarios.
 
 ```bash
 # Start the simulator in the background

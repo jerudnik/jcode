@@ -323,7 +323,7 @@ pub(crate) enum Command {
         action: MobileServerCommand,
     },
 
-    /// Generate a pairing code for iOS/web client
+    /// Generate a pairing code for a browser client
     Pair {
         /// List paired devices instead of generating a code
         #[arg(long)]

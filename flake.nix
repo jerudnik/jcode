@@ -105,7 +105,6 @@
               ./.jcode/swarm-prompt.md
               ./docs/agent-workflows.md
               ./docs/BRANCHING.md
-              ./docs/IOS_APP.md
               ./docs/NIX.md
               ./docs/SWARM_ARCHITECTURE.md
               ./docs/SWARM_TASK_GRAPH.md
@@ -114,7 +113,6 @@
               ./.github/workflows/docs-impact.yml
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
-              ./.github/workflows/ios.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
@@ -128,19 +126,33 @@
               ./flake.nix
               ./Cargo.toml
               ./crates
+              ./nix/package.nix
               ./scripts
               ./src
               ./tests
+              ./web/jcode-mobile
               ./README.md
               ./RELEASING.md
               ./docs/BRANCHING.md
-              ./docs/IOS_APP.md
               ./docs/NIX.md
+              ./docs/ONBOARDING_SANDBOX.md
               ./docs/WINDOWS.md
               ./docs/WRAPPERS.md
               ./.github/workflows
             ];
           };
+
+          # The policy derivation uses a deliberately narrow source tree, so
+          # check retired paths against the original flake checkout before the
+          # sandbox is assembled. Otherwise a restored path omitted from
+          # distributionPolicySrc would appear absent inside the derivation.
+          retiredPathViolations = lib.concatStringsSep "\n" (
+            lib.optional (builtins.pathExists ./ios) "ios"
+            ++ lib.optional (builtins.pathExists ./docs/IOS_APP.md) "docs/IOS_APP.md"
+            ++ lib.optional (builtins.pathExists ./.github/workflows/ios.yml) ".github/workflows/ios.yml"
+            ++ lib.optional (builtins.pathExists ./.github/workflows/ios-testflight.yml) ".github/workflows/ios-testflight.yml"
+            ++ lib.optional (builtins.pathExists ./scripts/phone-server/testflight-setup.py) "scripts/phone-server/testflight-setup.py"
+          );
 
           jcode = pkgs.callPackage ./nix/package.nix {
             inherit craneLib version;
@@ -259,7 +271,6 @@
                     .github/workflows/docs-impact.yml \
                     .github/workflows/fork-ci.yml \
                     .github/workflows/fork-health.yml \
-                    .github/workflows/ios.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
                     .github/workflows/nix-update.yml \
@@ -271,9 +282,14 @@
               pkgs.runCommand "jcode-nix-distribution-policy-check"
                 {
                   src = distributionPolicySrc;
+                  inherit retiredPathViolations;
                   nativeBuildInputs = [ pkgs.python3 ];
                 }
                 ''
+                  if [ -n "$retiredPathViolations" ]; then
+                    printf 'retired native-iOS path restored:\n%s\n' "$retiredPathViolations" >&2
+                    exit 1
+                  fi
                   cd "$src"
                   python3 tests/test_nix_distribution_policy.py
                   touch "$out"

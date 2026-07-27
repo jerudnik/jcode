@@ -62,7 +62,8 @@ attached.
 The flake and Cachix are the only repository-owned binary authority. Retired
 channels must not be recreated, including shell or PowerShell installers,
 Homebrew, AUR, GitHub executable assets, checksum manifests for those assets,
-signed app-store/TestFlight delivery, or Cargo registry publication.
+the native iOS application, signed app-store/TestFlight delivery, or Cargo
+registry publication.
 
 ## Verify after tagging
 

@@ -128,7 +128,6 @@ Every workflow lives on `main` with everything else.
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
 | `release.yml` | Metadata-only GitHub release notes; rejects attached assets | tag push matching `v*` |
-| `ios.yml` | Unsigned iOS tests and simulator compile check | push/PR touching iOS inputs or manual dispatch |
 | `ci.yml`, `freebsd-smoke.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
 
 The inherited upstream workflows are dispatch-only. They do not gate anything;
@@ -139,8 +138,9 @@ The inherited upstream workflows are dispatch-only. They do not gate anything;
 This independent hard fork builds and tests on macOS and Linux and distributes
 end-user binaries exclusively through the flake and public Cachix cache. Tagged
 GitHub releases contain notes and source metadata only. Shell/PowerShell
-installers, executable release assets, Homebrew, AUR, and Cargo registry
-publication are retired.
+installers, executable release assets, Homebrew, AUR, Cargo registry
+publication, and the native iOS application are retired. The packaged
+`web/jcode-mobile` browser surface remains the mobile control foundation.
 
 Windows CI was removed (issue #19): the build/test job, the PowerShell syntax
 job, the `cargo-xwin` cross-target check, the Windows release matrix, and

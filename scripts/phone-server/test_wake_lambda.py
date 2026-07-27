@@ -91,7 +91,7 @@ class WakeLambdaTests(unittest.TestCase):
         result = wake.fetch_pair_code(FakeSsm())
         self.assertEqual(result["code"], "123456")
         self.assertEqual(result["host"], "100.64.0.10")
-        self.assertEqual(result["uri"], "jcode://pair?host=100.64.0.10&port=7643&code=123456")
+        self.assertNotIn("uri", result)
 
 
 if __name__ == "__main__":

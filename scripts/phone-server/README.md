@@ -1,7 +1,7 @@
 # jcode phone server (managed cloud host)
 
 A self-managing EC2 host that runs `jcode serve` with the WebSocket gateway so
-phones (the iOS app, or SSH clients like Termius) can drive jcode sessions
+phones (the browser control surface, or SSH clients like Termius) can drive jcode sessions
 without any laptop in the loop. Billing safety is layered and each layer has
 been live-tested.
 
@@ -11,13 +11,13 @@ instance `i-08214cf66cd3f80c7` (m7i-flex.large), Elastic IP `54.196.207.97`.
 ## Architecture
 
 ```
-phone (jcode iOS app / Termius, connected through Tailscale)
+phone (jcode mobile web / Termius, connected through Tailscale)
   │  WebSocket :7643 (pair token auth, tailnet-only)
   ▼
 EC2 jcode server ──instance role──▶ AWS Bedrock (Opus 4.6 default)
   ▲
   │ tap wake link (API Gateway → wake lambda, bearer token from URL fragment)
-  │ "Pair this phone" button (lambda → SSM Run Command → `jcode pair`)
+  │ pairing-code button (lambda → SSM Run Command → `jcode pair`)
   │
 AWS Budget $10 ──▶ SNS jcode-guard-stop ──▶ breaker lambda ──▶ stop instance
                          └──▶ email
@@ -32,7 +32,7 @@ AWS Budget $10 ──▶ SNS jcode-guard-stop ──▶ breaker lambda ──▶
 | `units/idle-autostop.{service,timer}` | `/etc/systemd/system/` | 5-min check, poweroff after 30 min idle |
 | `idle-autostop.sh` | `/usr/local/bin/` | idle = no gateway/SSH clients AND jcode has no outbound :443 (not streaming) |
 | `jcode-pair-service.py` | `/usr/local/bin/` | Legacy tailnet-only fallback; normal pairing now uses SSM |
-| `wake-lambda.py` | Lambda `jcode-phone-wake` (behind API Gateway `8c3wp4cbag`) | wake page: starts instance, polls SSM health, generates pair codes through SSM |
+| `wake-lambda.py` | Lambda `jcode-phone-wake` (behind API Gateway `8c3wp4cbag`) | wake page: starts instance, polls SSM health, generates browser pairing codes through SSM |
 | `breaker-lambda.py` | Lambda `jcode-guard-breaker` | stops the instance; subscribed to SNS `jcode-guard-stop` |
 | `IAM-LEAST-PRIVILEGE.md` | repository documentation | scoped runtime/deploy policies and lockout-safe `jade-deploy` rotation plan |
 
@@ -62,7 +62,7 @@ The legacy `AWS/Billing/EstimatedCharges` alarms were removed because the accoun
 
 1. Bookmark the wake link (`https://<api-id>.execute-api.us-east-1.amazonaws.com/#t=<token>`, token stored at `~/.jcode/jcode-phone-wake-token` on the workstation). The URL fragment is not sent in HTTP requests; JavaScript exchanges it for an `Authorization: Bearer` header and keeps it in session storage.
 2. Tap it: the Lambda starts the instance and polls EC2/SSM every 5 s until ready.
-3. Tap "Pair this phone" → Lambda runs `jcode pair` through SSM → 6-digit code + `jcode://` deep link → opens the iOS app paired to `100.109.78.41:7643`.
+3. Open the packaged browser control surface with `jcode mobile-server start --open`, then tap "Generate pairing code" on the wake page and enter the reported host and 6-digit code.
 4. SSH fallback: connect through Tailscale to `ec2-user@100.109.78.41`, then run `phone`.
 
 ## Security notes

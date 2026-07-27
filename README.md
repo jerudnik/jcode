@@ -609,9 +609,9 @@ Skills are not all loaded on startup. The conversation is embedded as a semantic
 
 ---
 
-## iOS Application / Native OpenClaw
+## Mobile web control surface
 
-A native iOS application version of jcode is coming soon. This will allow you to work with jcode on your personal machine's environment from your phone, via Tailscale. Openclaw like features will be bundled with this iOS application. 
+Jcode ships a browser-based mobile surface through `jcode mobile-server`. It pairs with the WebSocket gateway using the host and six-digit code from `jcode pair`. The native iOS application and App Store/TestFlight delivery are retired.
 
 ---
 
@@ -621,7 +621,6 @@ Agents dont like to commit in dirty git state with active changes. Git was clear
 
 Build speed improvements: An incremental debug cargo build with cache enabled takes about 1 minute on my machine. The goal is 5-20 seconds. Refactors and crates seams should be able to make this happen. 
 
-<!-- Add iOS / native OpenClaw preview and fuller writeup here. -->
 
 ---
 

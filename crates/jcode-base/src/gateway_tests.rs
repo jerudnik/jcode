@@ -42,12 +42,15 @@ fn test_device_registry_token_auth() {
     let mut registry = DeviceRegistry::default();
 
     // Pair a device
-    let token = registry.pair_device("test-device-1".to_string(), "Test iPhone".to_string(), None);
+    let token = registry.pair_device(
+        "test-device-1".to_string(),
+        "Test Mobile Browser".to_string(),
+    );
 
     // Validate correct token
     assert!(registry.validate_token(&token).is_some());
     let device = registry.validate_token(&token).unwrap();
-    assert_eq!(device.name, "Test iPhone");
+    assert_eq!(device.name, "Test Mobile Browser");
     assert_eq!(device.id, "test-device-1");
 
     // Validate wrong token
@@ -65,12 +68,12 @@ fn test_device_re_pairing() {
     let mut registry = DeviceRegistry::default();
 
     // Pair same device twice
-    let token1 = registry.pair_device("device-1".to_string(), "iPhone v1".to_string(), None);
-    let token2 = registry.pair_device("device-1".to_string(), "iPhone v2".to_string(), None);
+    let token1 = registry.pair_device("device-1".to_string(), "Browser v1".to_string());
+    let token2 = registry.pair_device("device-1".to_string(), "Browser v2".to_string());
 
     // Only one device entry (old one replaced)
     assert_eq!(registry.devices.len(), 1);
-    assert_eq!(registry.devices[0].name, "iPhone v2");
+    assert_eq!(registry.devices[0].name, "Browser v2");
 
     // Old token should be invalid
     assert!(registry.validate_token(&token1).is_none());
@@ -533,10 +536,10 @@ fn test_authorize_ws_device_valid_token() {
     let temp = tempfile::tempdir().expect("temp home");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let mut registry = DeviceRegistry::default();
-    let token = registry.pair_device("dev-1".to_string(), "iPhone".to_string(), None);
+    let token = registry.pair_device("dev-1".to_string(), "Mobile Browser".to_string());
 
     let device = auth::authorize_ws_device(&registry, &token).expect("valid token authorizes");
-    assert_eq!(device.name, "iPhone");
+    assert_eq!(device.name, "Mobile Browser");
     assert_eq!(device.id, "dev-1");
 }
 
@@ -546,7 +549,7 @@ fn test_authorize_ws_device_rejects_unknown_and_revoked_with_401() {
     let temp = tempfile::tempdir().expect("temp home");
     let _home = EnvVarGuard::set_path("JCODE_HOME", temp.path());
     let mut registry = DeviceRegistry::default();
-    let token = registry.pair_device("dev-1".to_string(), "iPhone".to_string(), None);
+    let token = registry.pair_device("dev-1".to_string(), "Mobile Browser".to_string());
 
     // Unknown token -> 401 at handshake time.
     let unknown = "a".repeat(64);

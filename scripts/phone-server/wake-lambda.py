@@ -97,7 +97,6 @@ def fetch_pair_code(ssm):
         "code": code,
         "host": HOST,
         "port": PORT,
-        "uri": f"jcode://pair?host={HOST}&port={PORT}&code={code}",
         "expires_in": 300,
     }
 
@@ -113,10 +112,10 @@ body{font-family:-apple-system,system-ui;background:#101314;color:#eee;display:f
 #s{font-size:1.05em;line-height:1.5}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;background:#e6b450}
 .ok .dot{background:#4DD9A6}.ok #s b{color:#4DD9A6}.spin{opacity:.75;font-size:.9em;margin-top:14px}
 #pairbtn{display:none;margin-top:22px;background:#4DD9A6;color:#0c0f10;border:0;border-radius:12px;padding:14px 22px;font-size:1.05em;font-weight:600}
-#pairout{margin-top:16px;font-size:1em;line-height:1.6}#pairout .code{font-size:1.9em;letter-spacing:.18em;color:#4DD9A6;font-weight:700}#pairout a{color:#4DD9A6}
+#pairout{margin-top:16px;font-size:1em;line-height:1.6}#pairout .code{font-size:1.9em;letter-spacing:.18em;color:#4DD9A6;font-weight:700}
 </style></head><body><div class="card" id="c">
 <h1>jcode server</h1><p id="s"><span class="dot"></span>Authenticating…</p>
-<p class="spin" id="hint">checking every 5s…</p><button id="pairbtn">Pair this phone</button><div id="pairout"></div>
+<p class="spin" id="hint">checking every 5s…</p><button id="pairbtn">Generate pairing code</button><div id="pairout"></div>
 <script nonce="__NONCE__">
 const fragment = new URLSearchParams(location.hash.slice(1));
 if (fragment.get('t')) sessionStorage.setItem('jcode-wake-token', fragment.get('t'));
@@ -133,14 +132,14 @@ const api = async action => {
 async function poll(){
   try{
     const j=await api('status'),s=document.getElementById('s'),c=document.getElementById('c');
-    if(j.healthy){c.classList.add('ok');s.innerHTML='<span class="dot"></span><b>Ready.</b> Open the jcode app now.';document.getElementById('hint').textContent='server is up';document.getElementById('pairbtn').style.display='inline-block';return;}
+    if(j.healthy){c.classList.add('ok');s.innerHTML='<span class="dot"></span><b>Ready.</b> Open the mobile web surface.';document.getElementById('hint').textContent='server is up';document.getElementById('pairbtn').style.display='inline-block';return;}
     s.innerHTML='<span class="dot"></span>Instance: '+j.state+' · services warming up…';
   }catch(e){document.getElementById('s').textContent=e.message;document.getElementById('hint').textContent='';return;}
   setTimeout(poll,5000);
 }
 async function pair(){
   const o=document.getElementById('pairout');o.textContent='generating code…';
-  try{const j=await api('pair');if(j.code){o.innerHTML='<div class="code">'+j.code.slice(0,3)+' '+j.code.slice(3)+'</div><div>host '+j.host+':'+j.port+' · expires in 5 min</div><div style="margin-top:10px"><a href="'+j.uri+'">Open in jcode app</a></div>';}else{o.textContent='error: '+(j.error||'unknown');}}catch(e){o.textContent='error: '+e.message;}
+  try{const j=await api('pair');if(j.code){o.innerHTML='<div class="code">'+j.code.slice(0,3)+' '+j.code.slice(3)+'</div><div>host '+j.host+':'+j.port+' · expires in 5 min</div><div style="margin-top:10px">Enter these values in the mobile web surface.</div>';}else{o.textContent='error: '+(j.error||'unknown');}}catch(e){o.textContent='error: '+e.message;}
 }
 document.getElementById('pairbtn').addEventListener('click',pair);
 (async()=>{try{await api('wake');poll();}catch(e){document.getElementById('s').textContent=e.message;document.getElementById('hint').textContent='';}})();

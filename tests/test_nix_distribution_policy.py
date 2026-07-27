@@ -10,6 +10,10 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 RETIRED_PATHS = (
+    "ios",
+    "docs/IOS_APP.md",
+    ".github/workflows/ios.yml",
+    ".github/workflows/ios-testflight.yml",
     "scripts/install.sh",
     "scripts/install.ps1",
     "scripts/uninstall.sh",
@@ -18,17 +22,17 @@ RETIRED_PATHS = (
     "scripts/update_packages.sh",
     "scripts/quick-release.sh",
     "scripts/phone-server/testflight-setup.py",
-    ".github/workflows/ios-testflight.yml",
 )
 
 ACTIVE_DISTRIBUTION_DOCS = (
     "README.md",
     "RELEASING.md",
     "docs/BRANCHING.md",
-    "docs/IOS_APP.md",
     "docs/NIX.md",
     "docs/WINDOWS.md",
     "docs/WRAPPERS.md",
+    "docs/ONBOARDING_SANDBOX.md",
+    "scripts/phone-server/README.md",
 )
 
 FORBIDDEN_ACTIVE_DOC_TEXT = (
@@ -41,15 +45,36 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
     "brew tap 1jehuang/jcode",
     "jcode-bin",
     "jcode update installs",
+    "docs/IOS_APP.md",
+    ".github/workflows/ios.yml",
+    "native iOS application version",
+    "jcode iOS app",
+    "jcode://pair",
     "--option eval-cores",
 )
 
 
 class NixOnlyDistributionPolicy(unittest.TestCase):
-    def test_retired_distribution_entrypoints_are_absent(self) -> None:
+    def test_retired_paths_are_absent(self) -> None:
         for relative in RETIRED_PATHS:
             with self.subTest(path=relative):
-                self.assertFalse((ROOT / relative).exists(), f"retired distribution path returned: {relative}")
+                self.assertFalse((ROOT / relative).exists(), f"retired path returned: {relative}")
+
+    def test_native_ios_product_is_retired(self) -> None:
+        self.assertTrue((ROOT / "web/jcode-mobile/index.html").is_file())
+        package = (ROOT / "nix/package.nix").read_text()
+        self.assertIn("web/jcode-mobile", package)
+
+        banned_tokens = ("jcode://pair", "apns_token", "JCodeMobile", "APPSTORE_API_KEY")
+        active_roots = (ROOT / "src", ROOT / "crates", ROOT / "scripts", ROOT / ".github/workflows")
+        for root in active_roots:
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                text = path.read_text(errors="ignore")
+                for token in banned_tokens:
+                    with self.subTest(path=path.relative_to(ROOT), token=token):
+                        self.assertNotIn(token, text)
 
     def test_release_workflow_is_metadata_only(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
@@ -77,6 +102,8 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
             "xcodebuild archive",
             "-exportArchive",
             "APPSTORE_API_KEY",
+            "JCodeMobile",
+            "xcodebuild",
             "notarytool submit",
             "cargo publish",
             "DeterminateSystems/nix-installer-action",
@@ -103,12 +130,11 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         self.assertIn("nix build .#packages.${{ matrix.system }}.jcode", nix_workflow)
         self.assertIn("needs: [validate, build]", nix_workflow)
         self.assertIn("uses: ./.github/workflows/release.yml", nix_workflow)
-
-        ios_workflow = (ROOT / ".github/workflows/ios.yml").read_text()
-        self.assertIn("CODE_SIGNING_ALLOWED=NO", ios_workflow)
-        for banned in ("xcodebuild archive", "-exportArchive", "APPSTORE_API_KEY"):
-            with self.subTest(token=banned):
-                self.assertNotIn(banned, ios_workflow)
+        self.assertNotIn("ios.yml", nix_workflow)
+        self.assertIn("retiredPathViolations", flake)
+        self.assertIn("builtins.pathExists ./ios", flake)
+        self.assertIn("builtins.pathExists ./docs/IOS_APP.md", flake)
+        self.assertIn('if [ -n "$retiredPathViolations" ]', flake)
 
     def test_runtime_update_commands_cannot_acquire_or_replace_jcode(self) -> None:
         update = (ROOT / "crates/jcode-app-core/src/update.rs").read_text()
