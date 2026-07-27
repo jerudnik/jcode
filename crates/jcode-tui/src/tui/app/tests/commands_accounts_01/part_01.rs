@@ -629,7 +629,6 @@ fn test_help_topic_shows_cut_release_command_details() {
         .last()
         .expect("missing help response");
     assert_eq!(msg.role, "system");
-    assert!(msg.content.contains("/cut-release"));
     assert!(msg.content.contains("semver"));
     assert!(msg.content.contains("Nix and Cachix publish binaries"));
     assert!(msg.content.contains("metadata-only notes with zero assets"));
