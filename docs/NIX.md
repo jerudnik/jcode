@@ -1,9 +1,14 @@
 # Using jcode with Nix
 
-This fork ships a [Nix flake](https://nixos.wiki/wiki/Flakes) so jcode can be
-built, run, installed reproducibly, and reused as a flake input by downstream
-configurations. It exposes the package, an overlay, an app, a dev shell, CI
-checks, and a Home Manager module.
+This independent hard fork uses its [Nix flake](https://nixos.wiki/wiki/Flakes)
+as the sole repository-owned end-user distribution authority. The flake builds,
+runs, and installs Jcode reproducibly and exposes the package, overlay, app,
+development shell, checks, and Home Manager module. The public Cachix cache is
+the sole source of repository-published binary substitutes.
+
+GitHub releases are metadata-only. The repository does not publish executable
+release assets, shell or PowerShell installers, Homebrew or AUR packages, or
+Cargo registry packages.
 
 ## Branch
 
@@ -35,6 +40,27 @@ nix build github:jerudnik/jcode/main
 ./result/bin/jcode --version
 ```
 
+Install into a Nix profile:
+
+```sh
+nix profile install github:jerudnik/jcode/main
+```
+
+## Updating
+
+Update through the Nix mechanism that owns the installation:
+
+```sh
+nix profile upgrade jcode
+# or update the pinned flake input, then rebuild the owning configuration
+nix flake update jcode
+```
+
+`jcode update` and the TUI `/update` command print Nix package-manager guidance.
+They never fetch source or release assets, build a replacement, or mutate the
+installed executable. Explicit self-development rebuilds remain available only
+for contributors working from a checkout.
+
 ## Binary cache (skip building from source)
 
 A public Cachix cache (`jerudnik-jcode`) serves prebuilt outputs. Add it once and
@@ -60,7 +86,8 @@ safe to expose publicly and safe for others to consume.
 ### Maintaining the cache
 
 CI (`.github/workflows/nix.yml`) pushes successful build outputs automatically
-from `main` once the `CACHIX_AUTH_TOKEN` repo secret is set.
+from authoritative `main` and `v*` tags once the `CACHIX_AUTH_TOKEN` repo secret
+is set.
 Pull requests consume the cache read-only and do not push. To set up or re-key:
 
 1. The cache is `jerudnik-jcode` on Cachix.
@@ -169,9 +196,8 @@ nix fmt
 ```
 
 Rust quality gates such as `cargo fmt`, clippy, tests, and simulator checks are
-owned by the upstream `CI` workflow and its Rust toolchain. `cargo audit` runs in
-Nix CI as a report-only advisory job so dependency advisories are visible without
-blocking unrelated packaging changes.
+owned by the fork's maintained CI and pinned Rust toolchain. Dependency advisory
+policy is maintained separately from the Nix packaging checks.
 
 ### Self-development loop
 

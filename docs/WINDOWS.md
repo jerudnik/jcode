@@ -1,6 +1,7 @@
-# Windows Support Architecture
+# Windows Architecture and Distribution Status
 
-This document describes how jcode achieves cross-platform support for Linux, macOS, and Windows.
+This document describes Jcode's Windows-specific architecture. It does not imply
+that the independent hard fork currently distributes a Windows package.
 
 ## Status
 
@@ -9,20 +10,24 @@ This document describes how jcode achieves cross-platform support for Linux, mac
 - **Windows transport**: Implemented but untested (`src/transport/windows.rs`)
 - **Windows platform**: Implemented (`src/platform.rs` has `#[cfg(windows)]` branches)
 - **Windows CI**: Not yet set up
+- **End-user distribution**: Not provided. Repository-owned distribution is
+  exclusively Nix-based, and the flake does not currently expose a Windows
+  package.
 
 ## Design Principle
 
 **Zero cost on Unix.** The abstraction layer uses `#[cfg]` compile-time gates and type aliases so that Linux and macOS code paths compile to the exact same binary as before. Windows gets its own implementations behind `#[cfg(windows)]`. No traits, no dynamic dispatch, no runtime branching.
 
-## Install Paths
+## Distribution policy
 
-Current Windows install paths from `scripts/install.ps1`:
+The former PowerShell installer and GitHub executable assets are retired. Jcode
+does not publish a Windows executable, installer, archive, checksum manifest, or
+package-manager entry. A future Windows end-user offering must be designed as a
+flake-owned output and validated through the same Nix distribution policy as the
+maintained Linux and Darwin packages.
 
-- Launcher: `%LOCALAPPDATA%\\jcode\\bin\\jcode.exe`
-- Stable channel binary: `%LOCALAPPDATA%\\jcode\\builds\\stable\\jcode.exe`
-- Immutable versioned binaries: `%LOCALAPPDATA%\\jcode\\builds\\versions\\<version>\\jcode.exe`
-
-Unlike the current Unix self-dev/local-build flow, the PowerShell installer currently installs the stable channel rather than a separate `current` channel.
+Developers may still investigate or cross-check the `cfg(windows)` source. That
+work is source development, not a supported installation path.
 
 ## Transport Layer (`src/transport/`)
 
@@ -133,5 +138,5 @@ The vast majority of the codebase is platform-agnostic:
 
 1. **Windows CI** - Add GitHub Actions Windows runner, test compilation and basic IPC
 2. **Shell tool** - Detect platform and use `cmd.exe` or `pwsh.exe` on Windows
-3. **Self-update** - Handle Windows exe replacement (can't overwrite running binary)
+3. **Nix packaging** - Add a flake-owned Windows output before claiming end-user support
 4. **Testing** - Run full test suite on Windows

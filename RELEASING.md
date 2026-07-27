@@ -1,169 +1,94 @@
-# Releasing jcode
+# Releasing Jcode
 
-The hard fork publishes GitHub release assets from this repository. It has two
-release paths: a fast local path for hotfixes and CI for full releases. Inherited
-Homebrew and AUR publisher steps run only when their external credentials are
-configured; those third-party channels are not an authority for the hard fork.
+Jcode is an independent hard fork. `main` is the sole product authority and the
+immutable `fork-point` tag remains the quality-gate anchor. Repository-owned
+end-user distribution is exclusively Nix-based: `flake.nix` defines the package
+and the public `jerudnik-jcode` Cachix cache serves trusted build outputs.
 
-## Quick Release (local, ~2.5 minutes)
+GitHub releases are metadata-only. They contain release notes and source/tag
+metadata, never executable archives, checksums, installers, or package-manager
+payloads.
 
-For hotfixes and urgent updates. Builds Linux + macOS locally and uploads directly.
+## Release prerequisites
 
-```bash
-scripts/quick-release.sh v0.5.5                # Build + tag + release
-scripts/quick-release.sh v0.5.5 "Fix bug"      # With custom title
-scripts/quick-release.sh --dry-run v0.5.5       # Build only, don't publish
-```
+- The release commit is on `main` and the worktree is clean.
+- The version in the root `Cargo.toml` is final.
+- `Cargo.lock` and `flake.lock` are committed and coherent.
+- User-facing changes are represented in the versioned changelog input expected
+  by `scripts/generate_release_notes.sh`, when applicable.
+- Relevant Rust, policy, workflow, documentation, and Nix gates pass.
+- The public Cachix cache and its signing configuration are healthy.
 
-### How it works
+## Prepare and validate
 
-1. Builds Linux x86_64 natively and macOS aarch64 via osxcross **in parallel**
-2. Verifies both binaries (ELF and Mach-O checks)
-3. Creates a git tag and pushes it (this also triggers CI for the Windows build)
-4. Uploads both binaries to a GitHub Release via `gh release create`
-5. Users can immediately run `jcode update`
+1. Create a topic branch from `main` for version, changelog, and release-document
+   changes.
+2. Run the narrow checks while iterating, then the maintained final gates from
+   `docs/agent-workflows.md`.
+3. At minimum, validate:
 
-### Prerequisites
+   ```bash
+   nix develop -c python3 tests/test_nix_distribution_policy.py
+   nix flake check --accept-flake-config --all-systems
+   nix build .#packages.$(nix eval --raw --impure --expr builtins.currentSystem).jcode
+   ./result/bin/jcode --version
+   ```
 
-Already set up on the dev laptop (xps13):
+4. Merge the release preparation through the normal review path. Do not tag a
+   topic branch or an unmerged commit.
 
-- **osxcross** at `~/.osxcross` with macOS 14.5 SDK (darwin triple: `aarch64-apple-darwin23.5`)
-- **rustup** with `aarch64-apple-darwin` target installed
-- **`~/.cargo/config.toml`** has the osxcross linker configured
-- **`gh` CLI** authenticated with GitHub
+## Tag and publish
 
-### Timeline
-
-```
-0s     Start parallel builds (Linux native + macOS cross-compile)
-~90s   Linux build finishes
-~150s  macOS build finishes
-~153s  Binaries uploaded, release live
-         ✅ Linux + macOS users can `jcode update`
-~16m   CI finishes Windows build, uploads to same release
-         ✅ Windows users can `jcode update`
-```
-
-## CI Release (automated, ~11 min Linux+macOS, ~16 min Windows)
-
-Triggered automatically when a `v*` tag is pushed to GitHub.
-
-### Workflow: `.github/workflows/release.yml`
-
-```
-Tag push (v*)
-    │
-    ├─► build-linux-macos (parallel)
-    │     ├─► Linux x86_64   (ubuntu-latest)     ~8 min
-    │     └─► macOS aarch64  (macos-latest)       ~11 min
-    │
-    ├─► build-windows (parallel, non-blocking)
-    │     ├─► Windows x86_64 (windows-latest)     ~16 min
-    │     └─► Windows ARM64 (windows-11-arm)      ~16 min
-    │
-    ├─► release (after Linux + macOS complete)
-    │     ├─► Create GitHub Release with binaries
-    │     ├─► Update Homebrew formula (1jehuang/homebrew-jcode)
-    │     └─► Update AUR package (jcode-bin)
-    │
-    └─► upload-windows-assets (after Windows + release complete)
-          └─► Upload Windows binaries to existing release
-```
-
-Key design decisions:
-- **Windows does not block the release.** Linux and macOS binaries are published as soon as they're ready. Windows is added later.
-- **Shallow clones** (`fetch-depth: 1`) to minimize checkout time.
-- **`CARGO_INCREMENTAL=0`** for CI (incremental adds overhead on clean CI builds).
-- **sccache + rust-cache** for dependency caching across runs.
-- **mold linker** on Linux for faster linking.
-
-### Optional inherited package-manager integrations
-
-The release workflow contains inherited Homebrew and AUR update steps. They run
-only when the corresponding deployment secrets are present. Until the hard fork
-owns and configures those channels, Nix and this repository's GitHub release
-assets are the supported distribution authorities:
-
-- **Homebrew**: Updates `Formula/jcode.rb` in `1jehuang/homebrew-jcode` with new SHA256 hashes
-- **AUR**: Updates `PKGBUILD` and `.SRCINFO` in the `jcode-bin` AUR repo
-
-When configured, both are triggered by the `release` job after Linux + macOS
-builds complete.
-
-## Which to use
-
-| Scenario | Method | Time to Linux+macOS | Time to Windows |
-|----------|--------|-------------------|-----------------|
-| Hotfix / urgent bug | `scripts/quick-release.sh` | **~2.5 min** | ~16 min (CI) |
-| Regular release | Push `v*` tag | ~11 min | ~16 min |
-| External package credentials configured | Push `v*` tag | ~11 min | ~16 min |
-
-For configured external package channels, use the script first to publish the
-binaries, then let the CI tag push run the optional package updates. CI's
-`softprops/action-gh-release` will update the existing release created by the
-script.
-
-## Cross-Compilation Setup
-
-macOS binaries are cross-compiled from Linux using [osxcross](https://github.com/tpoechtrager/osxcross).
-
-### Current configuration
-
-| Component | Value |
-|-----------|-------|
-| SDK | macOS 14.5 |
-| SDK source | [joseluisq/macosx-sdks](https://github.com/joseluisq/macosx-sdks) |
-| Install location | `~/.osxcross/` |
-| Darwin triple | `aarch64-apple-darwin23.5` |
-| Linker | `aarch64-apple-darwin23.5-clang` |
-
-### Cargo config (`~/.cargo/config.toml`)
-
-```toml
-[target.aarch64-apple-darwin]
-linker = "aarch64-apple-darwin23.5-clang"
-
-[env]
-CC_aarch64_apple_darwin = "aarch64-apple-darwin23.5-clang"
-CXX_aarch64_apple_darwin = "aarch64-apple-darwin23.5-clang++"
-```
-
-### Rebuilding osxcross from scratch
+From an up-to-date, clean `main`:
 
 ```bash
-git clone https://github.com/tpoechtrager/osxcross /tmp/osxcross
-curl -L -o /tmp/osxcross/tarballs/MacOSX14.5.sdk.tar.xz \
-  https://github.com/joseluisq/macosx-sdks/releases/download/14.5/MacOSX14.5.sdk.tar.xz
-cd /tmp/osxcross && UNATTENDED=1 TARGET_DIR=~/.osxcross ./build.sh
-rustup target add aarch64-apple-darwin
+git fetch --all --prune
+git switch main
+git pull --ff-only
+git tag -s vX.Y.Z -m "Jcode vX.Y.Z"
+git push <fork-remote> vX.Y.Z
 ```
 
-Build takes ~5 minutes. Requires `clang`, `cmake`, `libxml2` (all available via pacman on Arch).
+Discover the configured fork remote with `git remote -v`; do not assume it is
+named `origin`.
 
-### Why osxcross (not zigbuild)
+A `v*` tag triggers two independent workflows:
 
-`cargo-zigbuild` can cross-compile pure Rust code to macOS, but jcode depends on crates that link against macOS system frameworks:
-- `arboard` (clipboard) - links `AppKit`, `Foundation`
-- `native-tls` / `security-framework` - links `Security`, `SystemConfiguration`
-- `objc2` - links Objective-C runtime
+- `.github/workflows/nix.yml` evaluates, builds, smoke-tests, and pushes the
+  tagged flake outputs to Cachix.
+- `.github/workflows/release.yml` verifies that the tagged commit belongs to
+  authoritative `main`, renders notes, and publishes a metadata-only GitHub
+  release. It fails if release assets are attached.
 
-These require actual macOS SDK headers and framework stubs, which osxcross provides.
+The flake and Cachix are the only repository-owned binary authority. Retired
+channels must not be recreated, including shell or PowerShell installers,
+Homebrew, AUR, GitHub executable assets, checksum manifests for those assets,
+signed app-store/TestFlight delivery, or Cargo registry publication.
 
-## Build Performance
+## Verify after tagging
 
-### Current timing (laptop, 8-core Intel Ultra 7 256V)
+- Confirm the Nix workflow succeeded for every maintained release system.
+- Confirm Cachix serves the tagged package closure.
+- Run the tagged package through Nix and check its version:
 
-| Build | Clean | Cached deps |
-|-------|-------|-------------|
-| Linux x86_64 (native) | ~90s | ~90s |
-| macOS aarch64 (cross) | ~3 min | ~2.5 min |
-| Both in parallel | ~3 min | ~2.5 min |
+  ```bash
+  nix run github:jerudnik/jcode/vX.Y.Z --accept-flake-config -- version
+  ```
 
-The bottleneck is compiling jcode itself (120k lines of Rust). Dependencies are cached and don't need recompilation. The `build.rs` timestamp causes a full recompile of the main crate on every build.
+- Confirm the GitHub release is public, contains the expected notes, and has zero
+  assets.
+- Confirm `main` and the immutable `fork-point` tag were not moved or rewritten.
 
-### Why not faster
+## Updating an installation
 
-- `opt-level = 1`, `codegen-units = 256`, `incremental = true` are already set in `[profile.release]`
-- 8 cores is the hardware limit
-- Splitting into workspace crates would allow partial recompilation (~1 min for small changes)
-- A 20+ core machine on LAN (not Tailscale) would cut build time to ~40-50s
+Updates are owned by the consumer's Nix configuration:
+
+```bash
+nix profile upgrade jcode
+# or update the pinned flake input, then rebuild the owning configuration
+nix flake update jcode
+```
+
+`jcode update` and `/update` only print Nix guidance. They never fetch, build,
+replace, or mutate the running executable. Explicit self-development rebuilds
+remain developer workflows and are not end-user distribution channels.
