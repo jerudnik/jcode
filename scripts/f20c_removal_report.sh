@@ -40,13 +40,11 @@ SYMBOLS=(
 #
 # docs/ records history and this script itself names every retired symbol, so
 # both are excluded or the report would always fail.
-# .rerere-cache/ holds recorded git merge resolutions: historical conflict
-# blobs, not shipping source.
 #
 # `git grep` is used rather than assembling an argv of tracked paths: it is
 # tracked-only by default, applies the pathspecs natively, and cannot blow
 # ARG_MAX as the tree grows.
-PATHSPECS=(-- . ':!:docs/**' ':!:.rerere-cache/**' ':!:scripts/f20c_removal_report.sh')
+PATHSPECS=(-- . ':!:docs/**' ':!:scripts/f20c_removal_report.sh')
 
 # Count tracked files containing $1. `git grep` exits 1 on no match, which is
 # the expected (clean) case, so the status is deliberately discarded here and
@@ -88,8 +86,7 @@ artifacts=$(
 Every symbol below was part of the retired distribution surface:
 the GitHub-release acquisition subsystem and the multi-channel/version
 binary store. Scope: all git-tracked files, excluding docs/ (records
-history), .rerere-cache/ (git merge-resolution blobs), and the generator
-script itself (it names every symbol).
+history) and the generator script itself (it names every symbol).
 
 Regenerate with scripts/f20c_removal_report.sh, which exits non-zero if
 any retired symbol returns.

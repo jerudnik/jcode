@@ -1,11 +1,10 @@
 F20c removal grep-clean report
-generated: 2026-07-25T23:24:11Z  HEAD=ae785bbe1
+generated: 2026-07-27T04:23:04Z  HEAD=c91cb4bac
 
 Every symbol below was part of the retired distribution surface:
 the GitHub-release acquisition subsystem and the multi-channel/version
 binary store. Scope: all git-tracked files, excluding docs/ (records
-history), .rerere-cache/ (git merge-resolution blobs), and the generator
-script itself (it names every symbol).
+history) and the generator script itself (it names every symbol).
 
 Regenerate with scripts/f20c_removal_report.sh, which exits non-zero if
 any retired symbol returns.

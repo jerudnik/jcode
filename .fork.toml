@@ -1,10 +1,15 @@
-# Fork rail configuration for 4nix tooling (fork-sync / fork-status / fork-doctor).
-# Consumed by `nix run github:jerudnik/4nix-utilities#fork-sync` and friends.
+# Fork rail configuration for 4nix tooling (fork-status / fork-doctor).
+# Consumed by `nix run github:jerudnik/4nix-utilities#fork-status` and friends.
+#
+# This is a hard fork (docs/BRANCHING.md): there is no vendor rail and no
+# automated sync. `upstream` remains declared as a read-only reference for
+# manual cherry-picks only; nothing rebases onto it. The divergence point is
+# the immutable `fork-point` tag.
 [fork]
 fork-remote = "github"
 upstream-remote = "upstream"
 upstream-branch = "master"
-vendor-branch = "vendor/upstream"
+fork-point-tag = "fork-point"
 packaging-branch = "distro/nix"
 main-branch = "main"
 fork-repo = "jerudnik/jcode"

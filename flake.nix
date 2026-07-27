@@ -136,22 +136,11 @@
             RUSTFLAGS = lib.optionalString pkgs.stdenv.hostPlatform.isLinux "-C link-arg=-fuse-ld=mold";
             shellHook = ''
               echo "jcode dev shell — rust $(rustc --version 2>/dev/null || echo '?')"
-              # Enable git rerere for this clone and import shared recorded
-              # conflict resolutions so local rebases self-heal like CI does.
-              if [ -x scripts/rerere-cache.sh ]; then
-                scripts/rerere-cache.sh setup || true
-              fi
               # Install a local pre-push guard that blocks accidental writes to
-              # distro/nix/vendor rails. It is idempotent and leaves user-owned
+              # the distro/nix rail. It is idempotent and leaves user-owned
               # hooks untouched.
               if [ -x scripts/install-git-hooks.sh ]; then
                 scripts/install-git-hooks.sh || true
-              fi
-              # Non-blocking fork-drift nudge: reads cached refs, never blocks on
-              # the network, auto fast-forwards only the unambiguously safe case.
-              # Disable with FORK_NUDGE_DISABLE=1.
-              if [ "''${FORK_NUDGE_DISABLE:-0}" != "1" ] && [ -x scripts/fork-nudge.sh ]; then
-                scripts/fork-nudge.sh || true
               fi
             '';
           };

@@ -1,82 +1,81 @@
 # Fork Sync Model
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-07-27
 
 See also:
 
+- [`../BRANCHING.md`](../BRANCHING.md) — the rail model and the `fork-point` tag
 - [`patch-ledger.md`](./patch-ledger.md)
 - [`../architecture/FORK_SUSTAINABILITY_MODEL.md`](../architecture/FORK_SUSTAINABILITY_MODEL.md)
-- [`../architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md`](../architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md)
-- [`../SERVER_LIFECYCLE_INVARIANTS.md`](../SERVER_LIFECYCLE_INVARIANTS.md)
 
-## Context
+## Current model: hard fork
 
-The fork (`jerudnik/jcode`) tracks upstream (`1jehuang/jcode`) but has diverged
-substantially. At the locally available refs on 2026-07-18, known-good baseline
-commit `41e86f3c9` carried 323 fork-only commits while `upstream/master` carried
-246 upstream-only commits. The fork leads the swarm, DAG, and comm subsystem.
+**There is no sync.** As of 2026-07-27 this is a hard fork of `1jehuang/jcode`.
+No branch tracks upstream, no scheduled job rebases onto it, and no rail is
+expected to converge with it. The divergence point is frozen as the immutable
+`fork-point` tag (`631935dd1d`).
 
-The W1/W2 control-plane event log, fold-derived DAG state, and
-artifact-dataflow are fork-authored on top of upstream's initial swarm engine.
-Upstream's active work on TUI, goals, providers, and discovery barely overlaps
-the fork's current focus.
+`upstream` stays configured as a read-only reference remote so individual fixes
+can still be read and cherry-picked. See "Taking a specific fix from upstream"
+in [`../BRANCHING.md`](../BRANCHING.md).
 
-## Current mechanism
+## What this replaced
 
-The implemented sync model is an automated three-rail rebase, not exact branch
-identity and not cherry-pick-only curation. Every six hours,
-`.github/workflows/sync.yml` attempts to:
+The previous model was an automated three-rail rebase: every six hours
+`sync.yml` fast-forwarded `vendor/upstream` to `upstream/master`, rebased
+`distro/nix` onto it, then rebased `main`, with a tracked `rerere` cache
+replaying known conflicts and a `sync-blocked` issue opened for novel ones.
 
-1. fast-forward `vendor/upstream` to `upstream/master`;
-2. rebase `distro/nix` onto that vendor rail;
-3. rebase `main` onto the resulting distro rail.
+It was retired on measured evidence, not fatigue:
 
-Tracked `rerere` recordings replay known conflicts. A genuinely new conflict
-stops the workflow and opens or updates a `sync-blocked` issue for human
-resolution. Successful rewritten rails are pushed with force-with-lease and
-validation is dispatched explicitly.
+| Signal | Value at retirement |
+|---|---|
+| `sync.yml` runs succeeded | 1 of last 30 (last success July 4) |
+| Time blocked on a one-line `release.yml` conflict | ~23 days |
+| Failure alerting | also broken (`Resource not accessible by integration`), so it failed silently |
+| Cost of one sync | 247 conflicted files, 651 hunks, 387 semantic Rust |
+| `.rerere-cache` size | 202k lines, 60% of all fork-new files |
+| Upstream commits touching only files we never modified | 52 of 678 |
+| Of those, cherry-picking cleanly | 20 |
 
-This automation provides continuous visibility and cheap replay where the
-conflict is already understood. It does not make upstream authoritative over
-fork-owned behavior. New upstream changes in those surfaces still require human
-review, adaptation, and a recorded conflict decision before the rails advance.
+The automation had already stopped delivering: it was failing silently, and its
+accounting cost (the rerere cache) had grown larger than the code it protected.
+Of the 20 cleanly-applying commits, 8 were judged worth taking and were
+harvested before the remote was demoted; the rest were desktop2 scaffolding,
+Windows/release plumbing owned by `distro/nix`, upstream's own telemetry
+worker, or an incoherent half-refactor whose other half lived in a
+fork-modified file.
 
 ## Fork-owned subsystems
 
-Upstream changes in these areas require explicit human adjudication when the
-automated rebase cannot preserve the fork's established behavior:
+These diverged deliberately and permanently. Upstream's versions are not a
+target to converge on:
 
-- swarm and comm
-- channel and shared-context removal
-- `mcp-serve`
-- supervision and lifecycle hardening
+- swarm and comm; the W1/W2 control-plane event log, fold-derived DAG state,
+  and artifact dataflow are fork-authored on top of upstream's initial engine
+- channel and shared-context removal (removed in-fork ahead of and independent
+  of upstream)
+- `mcp-serve`, a fork addition; see
+  [`../architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md`](../architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md)
+- supervision and lifecycle hardening; see
+  [`../SERVER_LIFECYCLE_INVARIANTS.md`](../SERVER_LIFECYCLE_INVARIANTS.md)
+- ambient storage roots, routed through `jcode-storage`
+- telemetry consent and destination; see [`../TELEMETRY.md`](../TELEMETRY.md)
 
-Channels and shared context are already removed in this fork ahead of, and
-independent of, upstream. That removal is part of the fork's control-plane
-direction rather than a temporary sync artifact.
+## Quality asymmetry
 
-`mcp-serve` is a fork addition. Its daemon-side safety contract is documented in
-[`../architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md`](../architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md).
+Upstream code generally does not satisfy this fork's gates: the warning budget,
+swallowed-error and panic ratchets, code-size ceilings, dependency boundaries,
+and the config env lease. Any harvested commit must be brought up to standard,
+never accommodated by raising a budget. The eight commits harvested at fork
+declaration needed three such fixes between them.
 
-Supervision and lifecycle hardening are fork-owned operational guardrails. Their
-invariants are documented in
-[`../SERVER_LIFECYCLE_INVARIANTS.md`](../SERVER_LIFECYCLE_INVARIANTS.md).
-
-## Why
-
-Removing upstream's channels in-fork is a permanent divergence. The shared
-`rerere` cache makes recurring conflict resolution cheap, while new conflicts
-still stop rather than silently choosing upstream or the fork.
-
-The trade is bounded automation with human authority at novel seams. That keeps
-routine upstream intake inexpensive without surrendering fork-owned subsystem
-decisions.
+This asymmetry is why the fork-touched clippy and rustfmt gates exist: lints are
+blocking in files this fork owns and advisory in untouched upstream files, with
+the boundary computed against `fork-point`.
 
 ## Upstreaming
 
-Fork-owned changes that upstream would plausibly want may be offered as pull
-requests. The channel removal is a good candidate because it matches upstream's
-own `SWARM_TASK_GRAPH` section 8a roadmap.
-
-Upstreaming is best-effort. The fork does not rely on upstream accepting these
-changes before continuing to own and harden its subsystem surface.
+Fork-owned changes that upstream would plausibly want may still be offered as
+pull requests, best-effort. The fork does not wait on upstream acceptance before
+continuing to own and harden its surface.

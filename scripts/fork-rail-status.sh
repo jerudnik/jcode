@@ -6,7 +6,8 @@ printf 'branch: %s\n' "$branch"
 
 case "$branch" in
   vendor/upstream)
-    echo "ERROR: vendor/upstream is clean upstream. Do not make downstream edits here." >&2
+    echo "ERROR: vendor/upstream was retired by the hard fork; the divergence point" >&2
+    echo "       is the immutable 'fork-point' tag. See docs/BRANCHING.md." >&2
     exit 2
     ;;
   distro/nix)

@@ -6,20 +6,23 @@
 # .github/workflows/fork-ci.yml so you can reproduce the CI verdict before (or
 # after) a push. The logic is byte-parallel to CI: run the tool over the whole
 # tree without -D warnings, then fail only when a lint's / rustfmt's primary
-# span lands in a file this fork modified relative to vendor/upstream. Vendor-
-# only drift is reported as a warning and tolerated, exactly like CI.
+# span lands in a file this fork modified relative to the fork point. Drift in
+# untouched upstream files is reported as a warning and tolerated, like CI.
 #
 # The fork-touched set is:
-#   git diff --name-only --diff-filter=d <vendor-ref> HEAD -- '*.rs' | sort -u
-# where <vendor-ref> resolves github/vendor/upstream, then origin/vendor/upstream
-# (override with --vendor-ref).
+#   git diff --name-only --diff-filter=d <base-ref> HEAD -- '*.rs' | sort -u
+# where <base-ref> is the `fork-point` tag: the upstream commit this fork
+# diverged from. It was the `vendor/upstream` branch tip until the hard fork
+# retired that rail; since the fork no longer follows upstream, the base is a
+# fixed historical commit and a tag says so more honestly than a branch nobody
+# advances. Override with --base-ref (--vendor-ref remains as an alias).
 #
 # cargo is invoked through scripts/dev_cargo.sh when present (Nix-aware); if
 # cargo is not on PATH but a flake.nix + nix exist, the whole cargo invocation
 # runs under `nix develop --command` so the repo toolchain is available.
 #
 # Usage:
-#   scripts/fork-touched-clippy.sh [--fmt] [--clippy] [--vendor-ref <ref>]
+#   scripts/fork-touched-clippy.sh [--fmt] [--clippy] [--base-ref <ref>]
 #
 # Modes (choose any combination; default is clippy only):
 #   (no flag)          run the clippy gate only
@@ -28,13 +31,14 @@
 #   --fmt --clippy     run both gates
 #
 # Options:
-#   --vendor-ref <ref> override the vendor base ref used for the touched set
+#   --base-ref <ref>   override the fork-point base ref used for the touched set
+#   --vendor-ref <ref> deprecated alias for --base-ref
 #   -h, --help         show this help and exit
 #
 # Exit codes:
-#   0  no fork-touched lint/format issues (vendor-only drift is a warning)
+#   0  no fork-touched lint/format issues (untouched-upstream drift is a warning)
 #   1  a lint / rustfmt diff lands in a fork-modified file
-#   2  usage error or the vendor ref could not be resolved
+#   2  usage error or the base ref could not be resolved
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
@@ -56,9 +60,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --fmt) do_fmt="true" ;;
     --clippy) do_clippy_explicit="true" ;;
-    --vendor-ref)
-      [[ $# -ge 2 ]] || { printf 'error: --vendor-ref requires an argument\n' >&2; exit 2; }
+    --base-ref|--vendor-ref)
+      [[ $# -ge 2 ]] || { printf 'error: %s requires an argument\n' "$1" >&2; exit 2; }
       vendor_ref_override="$2"; shift ;;
+    --base-ref=*) vendor_ref_override="${1#--base-ref=}" ;;
     --vendor-ref=*) vendor_ref_override="${1#--vendor-ref=}" ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'error: unknown option: %s\n' "$1" >&2; exit 2 ;;
@@ -117,6 +122,7 @@ cargo_to_file() {
 }
 
 # ── Resolve the vendor base ref ───────────────────────────────────────────────
+# Resolve the base commit the fork-touched set is computed against.
 resolve_vendor_ref() {
   local ref
   if [[ -n "$vendor_ref_override" ]]; then
@@ -124,29 +130,30 @@ resolve_vendor_ref() {
       printf '%s\n' "$vendor_ref_override"
       return 0
     fi
-    printf 'error: --vendor-ref %s does not resolve to a commit\n' "$vendor_ref_override" >&2
+    printf 'error: base ref %s does not resolve to a commit\n' "$vendor_ref_override" >&2
     return 1
   fi
-  for ref in github/vendor/upstream origin/vendor/upstream; do
+  # `fork-point` first: it is the post-hard-fork anchor and is immutable. The
+  # vendor branches are tried only as a fallback for clones fetched before the
+  # rail was retired.
+  for ref in fork-point github/vendor/upstream origin/vendor/upstream; do
     if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
       printf '%s\n' "$ref"
       return 0
     fi
   done
   cat >&2 <<'EOF'
-error: no vendor/upstream ref found (tried github/vendor/upstream, origin/vendor/upstream).
-Fetch one of the vendor bases first, e.g.:
-    git fetch --no-tags github vendor/upstream
-  or
-    git fetch --no-tags origin vendor/upstream
-Then re-run, or pass --vendor-ref <ref> explicitly.
+error: no fork-point ref found (tried fork-point, github/vendor/upstream, origin/vendor/upstream).
+The `fork-point` tag anchors the fork-touched file set. Fetch tags:
+    git fetch --tags github
+Then re-run, or pass --base-ref <ref> explicitly.
 EOF
   return 1
 }
 
 vendor_ref="$(resolve_vendor_ref)" || exit 2
 
-echo "=== fork-touched gate (vendor ref: $vendor_ref) ==="
+echo "=== fork-touched gate (base ref: $vendor_ref) ==="
 
 # Temp workspace, cleaned up on exit.
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/fork-touched-clippy.XXXXXX")"
@@ -196,7 +203,7 @@ run_clippy_gate() {
   fi
   vendor_only="$(comm -13 "$touched_file" "$flagged")"
   if [[ -n "$vendor_only" ]]; then
-    warn "vendor files carry clippy lints (upstream drift, not blocking):"
+    warn "untouched upstream files carry clippy lints (not blocking):"
     printf '%s\n' "$vendor_only"
   else
     ok "clippy clean across the whole tree."
@@ -224,7 +231,7 @@ run_fmt_gate() {
   fi
   vendor_only="$(comm -13 "$touched_file" "$flagged")"
   if [[ -n "$vendor_only" ]]; then
-    warn "vendor files fail rustfmt (upstream drift, not blocking):"
+    warn "untouched upstream files fail rustfmt (not blocking):"
     printf '%s\n' "$vendor_only"
   else
     ok "cargo fmt clean across the whole tree."

@@ -48,16 +48,17 @@ Agent-facing primitives are described once and distributed by **APM** (Agent Pac
 
 ## Fork and upstream workflow
 
-This fork is maintained as a downstream stack:
+This is a **hard fork** of `1jehuang/jcode`. It does not track upstream: there
+is no vendor rail, no scheduled sync, and no expectation of convergence. The
+divergence point is the immutable `fork-point` tag. See `docs/BRANCHING.md`.
 
-- `vendor/upstream` mirrors upstream `1jehuang/jcode`.
-- `distro/nix` carries reusable Nix packaging, Home Manager module, cache, release, and CI work.
-- `main` carries stable custom fork patches on top of `distro/nix`.
+- `distro/nix` carries reusable Nix packaging, Home Manager module, cache, release, and all CI workflow files.
+- `main` carries fork work on top of `distro/nix`.
 
 Rules:
 
-- Keep upstream mirror commits separate from downstream commits.
-- Prefer rebasing the downstream stack on upstream rather than merging upstream into `main`.
+- Never rebase a rail onto `upstream`. It is a read-only reference remote for reading code and cherry-picking individual fixes.
+- After harvesting an upstream commit, run `scripts/preflight.sh`. Upstream code often fails this fork's gates; fix the imported code rather than raising a budget to admit it. Applying cleanly is not evidence of correctness.
 - Use `--force-with-lease`, not plain `--force`, when updating maintained fork branches.
 - Track temporary shims and planned upstream work in `docs/fork/patch-ledger.md`.
 - Use commit prefixes that describe why downstream changes exist: `compat(...)`, `shim(...)`, `feature(...)`, `behavior(...)`, `distro(...)`, `docs(...)`, and `test(...)`.

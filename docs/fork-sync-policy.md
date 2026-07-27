@@ -1,16 +1,22 @@
-# Fork sync policy
+# Fork harvest policy
 
-Status: active since the v0.46 sync (2026-07-14). Supersedes "track upstream closely."
+Status: **superseded in part.** Since the 2026-07-27 hard fork there is no
+periodic sync, so the per-sync cadence below no longer runs. See
+[`fork/SYNC_MODEL.md`](./fork/SYNC_MODEL.md) for the current model and
+[`BRANCHING.md`](./BRANCHING.md) for the rails.
 
-The fork and upstream (1jehuang/jcode) have diverged deliberately. Upstream is a
-parts bin, not gospel. Evidence for the posture shift: upstream master's own CI
-is red (e2e `Server disconnected` failures shipped in the v0.46/v0.47-prep
-window), and several upstream changes have removed or fought seams this fork
-relies on.
+What survives is the *judgement*: how to decide whether an individual upstream
+commit is worth cherry-picking, and what must never be traded away to take one.
+Read this before harvesting anything from `upstream`.
 
-## Process per sync
+Upstream is a parts bin, not gospel. That posture predates the hard fork:
+upstream master's own CI was red (e2e `Server disconnected` failures in the
+v0.46/v0.47-prep window), and several upstream changes removed or fought seams
+this fork relies on.
 
-### (a) Inspect upstream delta since last sync
+## Process per harvest
+
+### (a) Inspect the upstream delta
 
 Classify every change (commit or feature-cluster):
 
@@ -41,15 +47,21 @@ without offering (or at least hinting at) a more elegant replacement, treat it
 with skepticism. Skipping it is a valid outcome. Record skipped changes below so
 future syncs don't re-litigate them.
 
-## Test policy during sync
+## Test and gate policy during a harvest
 
-- Done-condition for a sync is **fork-main parity plus adopted features
-  working**, not "all tests green." Upstream ships red tests; inheriting them
-  is not a regression on our side.
-- Known inherited-red tests must be listed in the sync commit message with
-  evidence (upstream CI run link).
+- **Applying cleanly is not evidence of correctness.** A patch that does not
+  textually conflict can still be wrong here: at the hard fork, one cleanly
+  applying commit added two modules whose call sites lived in a fork-modified
+  file, so taking it alone would have left orphaned dead code.
+- **Run `scripts/preflight.sh` after every harvest.** Upstream code routinely
+  fails this fork's gates. Of the eight commits harvested at fork declaration,
+  three needed follow-up fixes (an eight-argument function, a swallowed error,
+  a file pushed over the code-size ceiling).
+- **Fix the harvested code; never raise the budget to admit it.** If an
+  imported file breaks a ratchet, split or repair it.
 - Never weaken a fork test to make upstream code fit. Either adapt the code or
   skip the upstream change.
+- Use `git cherry-pick -x` so the upstream origin is recorded in the message.
 
 ## Fork seams (do not let upstream erode these)
 
@@ -62,7 +74,28 @@ future syncs don't re-litigate them.
 - Assistant profiles config.
 - Nix-managed packaging (`JCODE_NIX_MANAGED`, no auto-update).
 
-## Sync ledger
+## Harvest ledger
+
+### 2026-07-27 (hard fork declaration, final harvest)
+
+Of 678 upstream commits since the fork point, 52 touched only files this fork
+had never modified and 20 of those cherry-picked cleanly. Eight were taken:
+
+Adopted: openrouter SSE multi-data-line + CRLF boundary fix (#565), antigravity
+`thought_signature` self-heal (#482, #518), webfetch output capping and chrome
+stripping (~4x context reduction), bounded/reused external session history,
+terminal-image suppression on redirected stdout, onboarding credential sandbox
+isolation, `clean_target.sh --sweep`, and an OpenAI system-prompt pass-through
+test.
+
+Skipped: the `jcode-desktop2` skeleton and its follow-ups (a parallel UI stack
+this fork has no plan to carry), Windows/release plumbing and the Discord
+announcement workflow (`.github/workflows/**` is owned by `distro/nix`, and the
+Windows workflows are already dispatch-only), upstream's telemetry worker SQL
+(this fork does not operate that endpoint; see `TELEMETRY.md`), the sponsor
+attribution benchmark, and `refactor(update): split metadata and rate-limit
+state out of update.rs` (adds two modules but leaves their wiring in a
+fork-modified `update.rs`, so it applies cleanly and produces dead code).
 
 ### 2026-07-14 (upstream v0.45–v0.46, 221 commits)
 

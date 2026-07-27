@@ -148,7 +148,7 @@ fi
 
 # ── 2. Rust gates (codegen-free), scoped to THIS change ──────────────────────
 # fork-ci's blocking fmt/clippy gates run the whole-tree check but only FAIL
-# when a flagged file is fork-modified relative to vendor/upstream. Locally we
+# when a flagged file is fork-modified relative to the fork-point tag. Locally we
 # scope tighter: files changed by THIS branch/worktree vs origin/main. Rationale:
 #   * It catches anything the current change introduces (the thing a pre-push
 #     check exists for) without drowning in pre-existing fork debt.
