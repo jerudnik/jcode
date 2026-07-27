@@ -414,7 +414,10 @@ fn nix_installed_identity_with_running(running: Option<&Path>) -> Option<Install
 }
 
 fn cache_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".jcode").join("version-check-cache.json"))
+    // `dirs::home_dir().join(".jcode")` ignored JCODE_HOME entirely, so the
+    // version-check cache was read and written in the developer's real home
+    // even under a redirected harness.
+    crate::storage::jcode_dir_opt().map(|dir| dir.join("version-check-cache.json"))
 }
 
 fn now_secs() -> u64 {
@@ -751,6 +754,29 @@ pub fn run_doctor_command(emit_json: bool, clean_retired_layout: bool) -> Result
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// Regression: `cache_path` used `dirs::home_dir().join(".jcode")`, which
+    /// ignores JCODE_HOME outright, so `jcode doctor`'s version-check cache was
+    /// read and written in the developer's real home even under a redirected
+    /// test harness.
+    #[test]
+    fn version_check_cache_honors_jcode_home() {
+        let _guard = crate::storage::lock_test_env();
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let temp = tempfile::TempDir::new().expect("temp dir");
+
+        crate::env::set_var("JCODE_HOME", temp.path());
+        assert_eq!(
+            cache_path().expect("redirected cache path"),
+            temp.path().join("version-check-cache.json"),
+        );
+
+        if let Some(prev_home) = prev_home {
+            crate::env::set_var("JCODE_HOME", prev_home);
+        } else {
+            crate::env::remove_var("JCODE_HOME");
+        }
+    }
 
     #[test]
     fn classifies_nix_store_path() {

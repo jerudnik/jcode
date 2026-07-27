@@ -218,14 +218,11 @@ impl SurfaceWorkspaceStore {
 }
 
 pub fn surface_workspaces_dir() -> Result<PathBuf> {
-    let home = if let Some(path) = std::env::var_os("JCODE_HOME") {
-        PathBuf::from(path)
-    } else {
-        dirs::home_dir()
-            .context("could not determine home directory")?
-            .join(".jcode")
-    };
-    Ok(home.join("surface_workspaces"))
+    // Do not re-derive `~/.jcode` here. Hand-rolling the JCODE_HOME rule drops
+    // the test-harness redirect and the blank/whitespace guard that
+    // `jcode_dir()` applies, which is how workspace state used to land in the
+    // developer's real home under a redirected harness.
+    Ok(crate::storage::jcode_dir()?.join("surface_workspaces"))
 }
 
 pub fn sanitize_workspace_id(workspace_id: &str) -> Result<String> {
@@ -482,5 +479,39 @@ mod tests {
         assert!(sanitize_workspace_id("../bad").is_err());
         assert!(sanitize_workspace_id("bad/slash").is_err());
         assert_eq!(sanitize_workspace_id("").unwrap(), DEFAULT_WORKSPACE_ID);
+    }
+
+    /// Regression: `surface_workspaces_dir` hand-rolled the JCODE_HOME rule
+    /// (`var_os("JCODE_HOME")` else `home_dir().join(".jcode")`), which skipped
+    /// both the test-harness redirect and the blank-value guard. Under a
+    /// harness that redirects the home without setting JCODE_HOME, workspace
+    /// state landed in the developer's real `~/.jcode`.
+    #[test]
+    fn workspaces_dir_honors_jcode_home_and_rejects_blank_values() {
+        let _guard = crate::storage::lock_test_env();
+        let prev_home = std::env::var_os("JCODE_HOME");
+        let temp = tempdir().expect("temp dir");
+
+        crate::env::set_var("JCODE_HOME", temp.path());
+        assert_eq!(
+            surface_workspaces_dir().expect("redirected root"),
+            temp.path().join("surface_workspaces"),
+        );
+
+        // A whitespace-only override is a *relative* path; honoring it would
+        // resolve the workspace root under the current working directory.
+        crate::env::set_var("JCODE_HOME", "\t");
+        let blank = surface_workspaces_dir().expect("fallback root");
+        assert!(
+            blank.is_absolute(),
+            "blank JCODE_HOME resolved to a relative path: {}",
+            blank.display()
+        );
+
+        if let Some(prev_home) = prev_home {
+            crate::env::set_var("JCODE_HOME", prev_home);
+        } else {
+            crate::env::remove_var("JCODE_HOME");
+        }
     }
 }

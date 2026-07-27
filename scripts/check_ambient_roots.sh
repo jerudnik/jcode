@@ -177,6 +177,19 @@ if [ -n "$(printf '%s' "$stale" | tr -d '[:space:]')" ]; then
   status=1
 fi
 
+# An entry with a placeholder reason is worse than no entry: the gate's own
+# success message claims every site is allowlisted "with a stated reason", so
+# an unfilled `TODO` makes the gate assert something false. `--update` seeds
+# entries with that TODO precisely so they are visible; failing here is what
+# forces them to be filled in rather than accumulating.
+unstated=$(grep -n 'TODO: state why' "$allowlist_file" 2>/dev/null || true)
+if [ -n "$unstated" ]; then
+  printf 'FAIL: allowlist entr(ies) still carry a placeholder reason:\n' >&2
+  printf '%s\n' "$unstated" | sed 's/^/      /' >&2
+  printf '  Each site needs a real reason for why it cannot use jcode-storage.\n' >&2
+  status=1
+fi
+
 if [ "$status" -eq 0 ]; then
   if [ "$allow_count" -eq 0 ]; then
     printf 'ambient roots: ok (no direct dirs:: call sites outside jcode-storage)\n'

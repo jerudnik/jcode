@@ -1,3 +1,37 @@
+=== F29 gate evidence ===
+
+## After (current tree)
+ambient roots: ok (22 site(s), all allowlisted with a stated reason)
+
+## Non-vacuity 1: planted offender
+FAIL: direct dirs:: ambient-root call site(s) outside jcode-storage:
+      crates/jcode-base/src/hooks.rs:110
+          fn planted_offender() -> Option<std::path::PathBuf> { dirs::config_dir() }
+      crates/jcode-base/src/hooks.rs:113
+          && let Some(home) = dirs::home_dir()
+
+Resolve roots through jcode-storage instead:
+  ~/.jcode (honors JCODE_HOME) -> jcode_storage::jcode_dir()
+  platform config dir          -> jcode_storage::app_config_dir()
+  user home (~ expansion)      -> jcode_storage::user_home_path()
+For a leaf crate without a storage dependency, prefer taking the path
+as a parameter over adding a dep edge.
+FAIL: allowlist entr(ies) no longer match a real call site:
+      crates/jcode-base/src/hooks.rs:112
+  (the code moved; rerun with --update after confirming each site)
+planted exit=1
+
+## Non-vacuity 2: placeholder reason rejected
+FAIL: allowlist entr(ies) still carry a placeholder reason:
+      13:crates/jcode-base/src/hooks.rs:112  # TODO: state why this cannot use jcode-storage
+  Each site needs a real reason for why it cannot use jcode-storage.
+exit=1
+
+## Restored
+ambient roots: ok (22 site(s), all allowlisted with a stated reason)
+exit=0
+
+## Allowlist (22 sites, every reason stated)
 # Remaining direct `dirs::` ambient-root call sites (F29 ratchet).
 #
 # Regenerate with `scripts/check_ambient_roots.sh --update`, which
