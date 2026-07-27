@@ -85,7 +85,14 @@
               ./flake.nix
               ./rust-toolchain.toml
               ./nix
+              ./Cargo.toml
+              ./scripts/clean_target.sh
+              ./scripts/dev_cargo.sh
               ./scripts/preflight.sh
+              ./scripts/prune_incremental.sh
+              ./scripts/remote_build.sh
+              ./scripts/remote_config.sh
+              ./scripts/test_incremental_policy.sh
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
               ./.github/workflows/security.yml
@@ -136,8 +143,39 @@
                 }
                 ''
                   cd "$src"
-                  bash -n scripts/preflight.sh
-                  shellcheck -e SC2016 scripts/preflight.sh
+                  bash -n \
+                    scripts/clean_target.sh \
+                    scripts/dev_cargo.sh \
+                    scripts/preflight.sh \
+                    scripts/prune_incremental.sh \
+                    scripts/remote_build.sh \
+                    scripts/remote_config.sh \
+                    scripts/test_incremental_policy.sh
+                  shellcheck -x -e SC2016 \
+                    scripts/clean_target.sh \
+                    scripts/dev_cargo.sh \
+                    scripts/preflight.sh \
+                    scripts/prune_incremental.sh \
+                    scripts/remote_build.sh \
+                    scripts/remote_config.sh \
+                    scripts/test_incremental_policy.sh
+                  touch "$out"
+                '';
+
+            incremental-policy =
+              pkgs.runCommand "jcode-incremental-policy-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [
+                    pkgs.git
+                    pkgs.lsof
+                    pkgs.procps
+                    pkgs.stdenv.cc
+                  ];
+                }
+                ''
+                  cd "$src"
+                  bash scripts/test_incremental_policy.sh
                   touch "$out"
                 '';
 

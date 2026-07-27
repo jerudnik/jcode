@@ -53,6 +53,8 @@ SYNC_BACK_MODE="auto" # auto|always|never
 RELEASE=0
 SUBCOMMAND="build"
 SUBCOMMAND_SET=0
+EXPECT_GLOBAL_VALUE=0
+GLOBAL_ARGS=()
 POSITIONAL=()
 
 remote_connect_timeout() {
@@ -64,6 +66,12 @@ remote_connect_timeout() {
 }
 
 while [[ $# -gt 0 ]]; do
+    if [[ "$SUBCOMMAND_SET" -eq 0 && "$EXPECT_GLOBAL_VALUE" -eq 1 ]]; then
+        GLOBAL_ARGS+=("$1")
+        EXPECT_GLOBAL_VALUE=0
+        shift
+        continue
+    fi
     case "$1" in
         -r|--release)
             RELEASE=1
@@ -101,9 +109,23 @@ while [[ $# -gt 0 ]]; do
             break
             ;;
         *)
-            if [[ "$SUBCOMMAND_SET" -eq 0 && "$1" != -* ]]; then
-                SUBCOMMAND="$1"
-                SUBCOMMAND_SET=1
+            if [[ "$SUBCOMMAND_SET" -eq 0 ]]; then
+                case "$1" in
+                    +*)
+                        GLOBAL_ARGS+=("$1")
+                        ;;
+                    -C|-Z|--color|--config|--manifest-path|--target-dir)
+                        GLOBAL_ARGS+=("$1")
+                        EXPECT_GLOBAL_VALUE=1
+                        ;;
+                    -C*|-Z*|--color=*|--config=*|--manifest-path=*|--target-dir=*|-*)
+                        GLOBAL_ARGS+=("$1")
+                        ;;
+                    *)
+                        SUBCOMMAND="$1"
+                        SUBCOMMAND_SET=1
+                        ;;
+                esac
             else
                 POSITIONAL+=("$1")
             fi
@@ -111,6 +133,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ "$EXPECT_GLOBAL_VALUE" -eq 1 ]]; then
+    echo "error: Cargo global option requires a value" >&2
+    exit 2
+fi
 
 if [[ "$REMOTE_DIR" == *" "* ]]; then
     echo "error: remote dir cannot contain spaces: $REMOTE_DIR" >&2
@@ -144,12 +171,41 @@ remote_ssh() {
     "$SSH_BIN" "${SSH_OPTS[@]}" "$REMOTE" "$@"
 }
 
-CARGO_CMD=(cargo "$SUBCOMMAND")
+CARGO_CMD=(cargo)
+if [[ "${#GLOBAL_ARGS[@]}" -gt 0 ]]; then
+    CARGO_CMD+=("${GLOBAL_ARGS[@]}")
+fi
+CARGO_CMD+=("$SUBCOMMAND")
 if [[ "$RELEASE" -eq 1 ]]; then
     CARGO_CMD+=(--release)
 fi
 if [[ "${#POSITIONAL[@]}" -gt 0 ]]; then
     CARGO_CMD+=("${POSITIONAL[@]}")
+fi
+
+remote_incremental=""
+if [[ ${CARGO_INCREMENTAL+x} ]]; then
+    remote_incremental="$CARGO_INCREMENTAL"
+else
+    incremental_policy="${JCODE_INCREMENTAL_POLICY:-verification-off}"
+    case "$incremental_policy" in
+        verification-off|auto)
+            case "$SUBCOMMAND" in
+                test|check|clippy|bench|doc|rustdoc)
+                    remote_incremental=0
+                    ;;
+            esac
+            ;;
+        profile-default|keep|on)
+            ;;
+        off|0|false|no)
+            remote_incremental=0
+            ;;
+        *)
+            printf 'error: unsupported JCODE_INCREMENTAL_POLICY=%s (expected verification-off|profile-default|off)\n' "$incremental_policy" >&2
+            exit 2
+            ;;
+    esac
 fi
 
 sync_back=0
@@ -195,7 +251,41 @@ if [[ "$SUBCOMMAND" == "build" ]]; then
     done
 fi
 
-BINARY_PATH="target/${build_mode}/${artifact_name}"
+target_dir_value="target"
+expect_target_dir=0
+scan_target_dir_args() {
+    local arg
+    for arg in "$@"; do
+        if [[ "$expect_target_dir" -eq 1 ]]; then
+            target_dir_value="$arg"
+            expect_target_dir=0
+            continue
+        fi
+        case "$arg" in
+            --) return 0 ;;
+            --target-dir) expect_target_dir=1 ;;
+            --target-dir=*) target_dir_value="${arg#--target-dir=}" ;;
+        esac
+    done
+}
+if [[ "${#GLOBAL_ARGS[@]}" -gt 0 ]]; then
+    scan_target_dir_args "${GLOBAL_ARGS[@]}"
+fi
+if [[ "${#POSITIONAL[@]}" -gt 0 ]]; then
+    scan_target_dir_args "${POSITIONAL[@]}"
+fi
+
+BINARY_PATH="${target_dir_value%/}/${build_mode}/${artifact_name}"
+if [[ "$target_dir_value" == /* ]]; then
+    REMOTE_BINARY_PATH="$BINARY_PATH"
+    LOCAL_BINARY_PATH="$LOCAL_DIR/target/${build_mode}/${artifact_name}"
+elif [[ "/$target_dir_value/" == *"/../"* ]]; then
+    printf 'error: relative --target-dir must not contain .. path components: %s\n' "$target_dir_value" >&2
+    exit 2
+else
+    REMOTE_BINARY_PATH="$REMOTE_DIR/$BINARY_PATH"
+    LOCAL_BINARY_PATH="$LOCAL_DIR/$BINARY_PATH"
+fi
 
 local_git_hash=""
 local_git_date=""
@@ -264,7 +354,25 @@ else
 fi
 
 printf -v REMOTE_CARGO_CMD '%q ' "${CARGO_CMD[@]}"
-printf -v REMOTE_INNER_CMD 'cd %q && env JCODE_BUILD_METADATA_FILE=.jcode-build-meta %s' "$REMOTE_DIR" "$REMOTE_CARGO_CMD"
+REMOTE_ENV=(JCODE_BUILD_METADATA_FILE=.jcode-build-meta)
+if [[ "$SYNC_SOURCE" -eq 1 ]]; then
+    [[ -n "$local_git_hash" ]] && REMOTE_ENV+=("JCODE_BUILD_GIT_HASH=$local_git_hash")
+    [[ -n "$local_git_date" ]] && REMOTE_ENV+=("JCODE_BUILD_GIT_DATE=$local_git_date")
+    REMOTE_ENV+=("JCODE_BUILD_GIT_DIRTY=$local_git_dirty")
+    REMOTE_ENV+=("JCODE_BUILD_GIT_TAG=$local_git_tag")
+fi
+if [[ -n "$remote_incremental" ]]; then
+    REMOTE_ENV+=("CARGO_INCREMENTAL=$remote_incremental")
+fi
+printf -v REMOTE_ENV_CMD '%q ' "${REMOTE_ENV[@]}"
+printf -v REMOTE_PAYLOAD 'env %s%s' "$REMOTE_ENV_CMD" "$REMOTE_CARGO_CMD"
+printf -v REMOTE_INNER_CMD \
+    'cd %q && if command -v cargo >/dev/null 2>&1; then %s; elif command -v nix >/dev/null 2>&1; then nix develop . --command %s; elif [ -x /nix/var/nix/profiles/default/bin/nix ]; then /nix/var/nix/profiles/default/bin/nix develop . --command %s; else printf %q >&2; exit 127; fi' \
+    "$REMOTE_DIR" \
+    "$REMOTE_PAYLOAD" \
+    "$REMOTE_PAYLOAD" \
+    "$REMOTE_PAYLOAD" \
+    'remote_build: cargo and nix are unavailable on the remote host\n'
 printf -v REMOTE_RUN_CMD 'sh -lc %q' "$REMOTE_INNER_CMD"
 echo ""
 echo "[2/3] Running on remote..."
@@ -272,14 +380,14 @@ remote_ssh "$REMOTE_RUN_CMD 2>&1"
 
 echo ""
 if [[ "$sync_back" -eq 1 ]]; then
-    printf -v REMOTE_TEST_CMD 'test -f %q' "$REMOTE_DIR/$BINARY_PATH"
+    printf -v REMOTE_TEST_CMD 'test -f %q' "$REMOTE_BINARY_PATH"
     if remote_ssh "$REMOTE_TEST_CMD"; then
         echo "[3/3] Syncing built artifact back..."
-        mkdir -p "$(dirname "$LOCAL_DIR/$BINARY_PATH")"
-        "$RSYNC_BIN" -avz -e "$RSYNC_SSH_COMMAND" "$REMOTE:$REMOTE_DIR/$BINARY_PATH" "$LOCAL_DIR/$BINARY_PATH"
+        mkdir -p "$(dirname "$LOCAL_BINARY_PATH")"
+        "$RSYNC_BIN" -avz -e "$RSYNC_SSH_COMMAND" "$REMOTE:$REMOTE_BINARY_PATH" "$LOCAL_BINARY_PATH"
         echo ""
         echo "=== Remote cargo complete ==="
-        ls -la "$LOCAL_DIR/$BINARY_PATH"
+        ls -la "$LOCAL_BINARY_PATH"
     else
         echo "[3/3] Skipping sync-back: $BINARY_PATH not found on remote"
     fi
