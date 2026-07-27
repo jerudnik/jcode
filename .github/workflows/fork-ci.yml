@@ -2,8 +2,8 @@ name: Fork CI
 
 # The fork's actual CI gate for `main`. This fork ships to exactly two
 # surfaces: macOS/aarch64 (the maintainer's machines) and Nix (nix.yml).
-# Upstream's ci.yml is kept byte-close to the fork point and dispatch-only;
-# its Windows/FreeBSD/cross-check matrix is upstream's concern.
+# Upstream's ci.yml is inherited and dispatch-only. Windows CI was removed
+# entirely (issue #19); Windows remains a runtime target but is untested here.
 #
 # Tiering:
 #   blocking on push/PR: quality guardrails, macOS build and test execution,

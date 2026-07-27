@@ -60,7 +60,7 @@ jobs:
 
       - name: Check workflow syntax (fork-owned workflows)
         # Only lint the workflows this fork owns. Upstream's files (ci.yml,
-        # release.yml, windows-smoke.yml, freebsd-smoke.yml) are kept
+        # release.yml, freebsd-smoke.yml) are kept
         # byte-close to the fork point and are dispatch-only.
         run: |
           nix run nixpkgs#actionlint -- \

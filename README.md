@@ -927,7 +927,7 @@ Add `--dry-run` to preview what would be removed without deleting anything.
 |---|---|
 | **Linux** x86_64 / aarch64 | Fully supported |
 | **macOS** Apple Silicon | Supported |
-| **Windows** x86_64 | Supported (native + WSL2) |
+| **Windows** x86_64 | Builds and runs (native + WSL2), but **untested by this fork's CI** ([#19](https://github.com/jerudnik/jcode/issues/19)) |
 | **Termux** aarch64 / x86_64 | Supported with `pkg install glibc patchelf` |
 
 </div>

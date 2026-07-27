@@ -18,6 +18,7 @@
 #   2) GitHub carries the rail (+ topic branches, reported; stale ones flagged)
 #   3) docs/BRANCHING.md's CI table names every workflow that exists
 #   4) GitHub rulesets still describe the current rail set
+#   5) no Windows CI has crept back in (issue #19)
 #
 # Runs identically locally and in CI (.github/workflows/fork-health.yml).
 # Requires: git with the fork remote and tags fetched; gh (only for check 2,
@@ -148,6 +149,23 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
     fail "GitHub rulesets reference branches that are not rails:"
     printf '%s\n' "$stale_rules" | sed 's/^/      /' >&2
   fi
+fi
+
+# ── 5) Windows CI stays out ──────────────────────────────────────────────────
+# Windows CI was removed in issue #19: nothing consumes the artifacts, this
+# fork publishes no releases, and no maintainer runs Windows, so the jobs were
+# pure noise. Harvesting an upstream workflow change is the obvious way for
+# them to return, and they would return *silently*, as green jobs nobody asked
+# for. Windows remains a runtime target: cfg(windows) code, docs/WINDOWS.md,
+# and scripts/install.ps1 are deliberately still here, so this checks CI
+# configuration only.
+windows_ci="$(grep -rlEi 'windows-latest|windows-11|pc-windows-msvc|cargo xwin|shell: (pwsh|powershell)' \
+  .github/workflows/ 2>/dev/null || true)"
+if [ -z "$windows_ci" ]; then
+  ok "no Windows CI jobs (issue #19)"
+else
+  fail "Windows CI has returned to these workflows (see issue #19):"
+  printf '%s\n' "$windows_ci" | sed 's/^/      /' >&2
 fi
 
 # ── Payload report (informational) ───────────────────────────────────────────
