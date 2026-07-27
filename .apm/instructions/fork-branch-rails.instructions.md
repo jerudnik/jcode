@@ -1,28 +1,22 @@
 ---
-description: Fork branch rails and placement reminders for this downstream Jcode fork.
+description: Fork branch model and placement reminders for this hard fork of Jcode.
 applyTo: "**"
 ---
 
-# Fork branch rails
-
-When working in this forked upstream project, check the current branch before editing.
+# Fork branch model
 
 This is a **hard fork**: it does not track upstream, and there is no vendor
-rail or automated sync. The divergence point is the immutable `fork-point` tag.
-See `docs/BRANCHING.md`.
+mirror, packaging rail, or automated sync. The divergence point is the
+immutable `fork-point` tag, which the fork-touched clippy/rustfmt gates measure
+against, so never move or delete it. See `docs/BRANCHING.md`.
 
-Durable rails:
+There is one durable rail:
 
-- `distro/nix`: reusable Nix packaging only: flake outputs, packages, apps, overlays, Home Manager modules, cache, and **all** workflow files.
-- `main`: stable custom fork. Put fork behavior, shims, compatibility fixes, and app features here.
-- `stack/NN-topic`, `pr/topic`, or `exp/topic`: ordered review, upstream-PR, or disposable experiment work before folding into `main` or upstreaming.
+- `main`: everything. Fork behavior, shims, compatibility fixes, app features, packaging, and workflows.
 
-Before changing files, run:
-
-```sh
-git branch --show-current
-git remote -v
-```
+Topic branches (`stack/NN-topic`, `pr/topic`, `exp/topic`) start from `main` and
+fold back into it. Do not create durable remote topic branches. The pre-push
+hook refuses to recreate the retired `vendor/upstream` and `distro/nix` rails.
 
 Placement rule:
 

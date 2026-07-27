@@ -90,8 +90,8 @@ test.
 
 Skipped: the `jcode-desktop2` skeleton and its follow-ups (a parallel UI stack
 this fork has no plan to carry), Windows/release plumbing and the Discord
-announcement workflow (`.github/workflows/**` is owned by `distro/nix`, and the
-Windows workflows are already dispatch-only), upstream's telemetry worker SQL
+announcement workflow (this fork ships to macOS and Nix; the Windows workflows
+are already dispatch-only), upstream's telemetry worker SQL
 (this fork does not operate that endpoint; see `TELEMETRY.md`), the sponsor
 attribution benchmark, and `refactor(update): split metadata and rate-limit
 state out of update.rs` (adds two modules but leaves their wiring in a

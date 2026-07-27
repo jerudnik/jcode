@@ -7,12 +7,11 @@ name: Nix
 # does. Successful builds push to the public Cachix cache so downstream
 # flakes never rebuild from source.
 #
-# Upstream sync lives in sync.yml; flake.lock bumps in nix-update.yml;
-# cargo-audit policy in security.yml.
+# flake.lock bumps live in nix-update.yml; cargo-audit policy in security.yml.
 
 on:
   push:
-    branches: [distro/nix, main]
+    branches: [main]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -23,7 +22,7 @@ on:
       - "src/**"
       - ".github/workflows/nix.yml"
   pull_request:
-    branches: [distro/nix, main]
+    branches: [main]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -61,15 +60,13 @@ jobs:
 
       - name: Check workflow syntax (fork-owned workflows)
         # Only lint the workflows this fork owns. Upstream's files (ci.yml,
-        # release.yml, windows-smoke.yml, freebsd-smoke.yml, require-issue.yml)
-        # are kept byte-close to vendor/upstream -- linting them here would
-        # force body edits that reintroduce rebase conflicts.
+        # release.yml, windows-smoke.yml, freebsd-smoke.yml) are kept
+        # byte-close to the fork point and are dispatch-only.
         run: |
           nix run nixpkgs#actionlint -- \
             .github/workflows/fork-ci.yml \
             .github/workflows/fork-health.yml \
             .github/workflows/security.yml \
-            .github/workflows/sync.yml \
             .github/workflows/nix.yml \
             .github/workflows/nix-update.yml
 
@@ -122,7 +119,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
-      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/distro/nix' || github.ref == 'refs/heads/main') && secrets.CACHIX_AUTH_TOKEN != '' }}
+      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v5
 

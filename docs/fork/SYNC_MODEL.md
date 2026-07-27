@@ -22,9 +22,11 @@ in [`../BRANCHING.md`](../BRANCHING.md).
 ## What this replaced
 
 The previous model was an automated three-rail rebase: every six hours
-`sync.yml` fast-forwarded `vendor/upstream` to `upstream/master`, rebased
-`distro/nix` onto it, then rebased `main`, with a tracked `rerere` cache
-replaying known conflicts and a `sync-blocked` issue opened for novel ones.
+`sync.yml` fast-forwarded `vendor/upstream` to `upstream/master`, rebased the
+`distro/nix` packaging layer onto it, then rebased `main`, with a tracked
+`rerere` cache replaying known conflicts and a `sync-blocked` issue opened for
+novel ones. Both extra rails existed to serve that rebase, and both were
+retired with it; their payloads were already contained in `main`.
 
 It was retired on measured evidence, not fatigue:
 
@@ -42,7 +44,7 @@ The automation had already stopped delivering: it was failing silently, and its
 accounting cost (the rerere cache) had grown larger than the code it protected.
 Of the 20 cleanly-applying commits, 8 were judged worth taking and were
 harvested before the remote was demoted; the rest were desktop2 scaffolding,
-Windows/release plumbing owned by `distro/nix`, upstream's own telemetry
+Windows/release plumbing this fork does not ship, upstream's own telemetry
 worker, or an incoherent half-refactor whose other half lived in a
 fork-modified file.
 

@@ -8,7 +8,7 @@ name: FreeBSD Smoke
 # instead of a cross-compile that can never link platform C dependencies
 # (e.g. aws-lc-sys). See issue #416.
 
-# Fork policy (distro/nix layer): manual dispatch only. The fork ships to
+# Fork policy: manual dispatch only. The fork ships to
 # macOS + Nix; FreeBSD coverage is upstream's concern. Run this by hand before
 # sending a patch upstream that could plausibly affect FreeBSD.
 on:

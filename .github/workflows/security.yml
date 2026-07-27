@@ -60,8 +60,9 @@ jobs:
         run: |
           # Every triaged ignore must have a row in a triage doc, so the
           # config file and the rationale cannot drift apart. Upstream rows
-          # live in docs/SECURITY_DEPENDENCIES.md (vendor file, main layer may
-          # extend it); fork-only rows live in docs/fork/SECURITY_TRIAGE.md.
+          # live in docs/SECURITY_DEPENDENCIES.md (inherited upstream file,
+          # which the fork may extend); fork-only rows live in
+          # docs/fork/SECURITY_TRIAGE.md.
           missing=0
           while IFS= read -r id; do
             if ! grep -q "$id" docs/SECURITY_DEPENDENCIES.md docs/fork/SECURITY_TRIAGE.md 2>/dev/null; then

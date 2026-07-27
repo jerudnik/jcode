@@ -136,9 +136,9 @@
             RUSTFLAGS = lib.optionalString pkgs.stdenv.hostPlatform.isLinux "-C link-arg=-fuse-ld=mold";
             shellHook = ''
               echo "jcode dev shell — rust $(rustc --version 2>/dev/null || echo '?')"
-              # Install a local pre-push guard that blocks accidental writes to
-              # the distro/nix rail. It is idempotent and leaves user-owned
-              # hooks untouched.
+              # Install a local pre-push guard that refuses to recreate the
+              # rails this hard fork retired. It is idempotent and leaves
+              # user-owned hooks untouched.
               if [ -x scripts/install-git-hooks.sh ]; then
                 scripts/install-git-hooks.sh || true
               fi

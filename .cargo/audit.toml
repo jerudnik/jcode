@@ -12,7 +12,7 @@
 #     fails on vulnerabilities unless configured otherwise; do not add
 #     `--deny warnings` semantics here).
 #
-# Owned by the distro/nix layer (fork CI policy), like the workflows that
+# Part of fork CI policy, like the workflows that
 # consume it.
 
 [advisories]

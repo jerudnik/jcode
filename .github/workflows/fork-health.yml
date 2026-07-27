@@ -1,10 +1,8 @@
 name: Fork Health
 
-# Enforces the three-branch fork model invariants (see scripts/fork-health.sh):
-# exact branch set, mirror equality, rail ancestry, distro/nix scope, and
-# workflow ownership. Runs daily, after each Upstream Sync (which calls the
-# same script inline), and on demand. Drift opens/updates a single issue
-# instead of failing silently.
+# Enforces the single-rail fork model invariants (see scripts/fork-health.sh):
+# the fork-point tag still anchors main, and the rail exists. Runs daily and on
+# demand. Drift opens/updates a single issue instead of failing silently.
 
 on:
   schedule:
@@ -29,11 +27,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Fetch rails and upstream
-        run: |
-          git remote add upstream https://github.com/1jehuang/jcode.git 2>/dev/null || true
-          git fetch --prune origin vendor/upstream distro/nix main
-          git fetch --prune upstream master
+      - name: Fetch the rail and tags
+        run: git fetch --prune --tags origin main
 
       - name: Run fork health check
         id: health
@@ -41,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           scripts/fork-health.sh --repo "$GITHUB_REPOSITORY" \
-            --fork-remote origin --upstream-remote upstream | tee health.txt
+            --fork-remote origin | tee health.txt
           {
             echo "## Fork health"
             echo '```'

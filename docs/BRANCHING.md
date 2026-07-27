@@ -1,26 +1,14 @@
 # Fork branch maintenance
 
-This is a **hard fork** of `1jehuang/jcode`. It does not track upstream.
+This is a **hard fork** of `1jehuang/jcode`. It does not track upstream, and it
+has a single rail: `main`.
 
 ```mermaid
 gitGraph
   commit id: "fork-point (tag)"
-  branch "distro/nix"
-  checkout "distro/nix"
-  commit id: "flake packaging"
-  branch main
-  checkout main
   commit id: "fork work"
+  commit id: "..."
 ```
-
-## Branch roles
-
-| Branch | Contents | Rule |
-|---|---|---|
-| `distro/nix` | `fork-point` plus reusable flake packaging | Nix flake, lockfile, `nix/`, cache/Cachix, **all** workflows, and packaging docs only. |
-| `main` | `distro/nix` plus fork work | Daily development branch for app behavior, mobile/web/server work, tests, and fork docs. |
-
-`main` must be a descendant of `distro/nix`.
 
 ## The `fork-point` tag
 
@@ -30,15 +18,17 @@ this fork diverged from. It is immutable and must never be moved.
 It is load-bearing, not commemorative. The fork-touched clippy and rustfmt
 gates compute their file set as `git diff fork-point HEAD -- '*.rs'`, so lints
 are blocking in code this fork owns and merely advisory in untouched upstream
-code. Moving or deleting the tag silently changes what those gates measure.
-`scripts/fork-health.sh` check 2 verifies it is still an ancestor of both rails.
+code. Moving or deleting the tag silently changes what those gates measure, and
+the failure is quiet: the gate keeps passing while measuring the wrong thing.
+`scripts/fork-health.sh` check 1 exists to make that loud.
 
 ## Why the fork is hard
 
-The fork previously maintained a third rail, `vendor/upstream`: a byte-identical
-mirror of upstream `master`, fast-forwarded every six hours, with `distro/nix`
-and `main` rebased onto it. That model was retired for reasons that were
-measured rather than assumed:
+The fork previously maintained three rails. `vendor/upstream` was a
+byte-identical mirror of upstream `master`, fast-forwarded every six hours, and
+`distro/nix` was a packaging layer between that mirror and `main`, so a sync
+could rebase the stack without packaging changes colliding with fork work every
+time. Both were retired for reasons that were measured rather than assumed:
 
 - **It had already stopped working.** `sync.yml` failed 29 of its last 30 runs;
   the last success was July 4. It was blocked for roughly three weeks on a
@@ -54,20 +44,19 @@ measured rather than assumed:
   cleanly. Those 20 were triaged and the worthwhile 8 were taken; see the
   harvest commits preceding `c91cb4bac`.
 
+`distro/nix` followed `vendor/upstream` out because its whole purpose was
+surviving that rebase. With no sync, a packaging rail is a second branch to
+keep ancestral, three fork-health invariants to enforce, and a rule about which
+files may live where, all to solve a problem that no longer exists. Its payload
+was already fully contained in `main`, so retiring it moved no code.
+
 Divergence is intentional. This fork has substantially rewritten storage,
 telemetry consent, session handling, and CI policy, and has quality gates
 (warning budget, swallowed-error and panic ratchets, code-size ceilings,
 dependency boundaries) that upstream code does not satisfy.
 
 `upstream` remains configured as a **read-only reference remote**. Fetch it to
-read code or cherry-pick a specific fix; never rebase a rail onto it.
-
-## Placement rules
-
-- Put behavior changes on `main`.
-- Put reusable packaging and distribution glue, and **all** workflow files, on
-  `distro/nix`.
-- Use `--force-with-lease` for maintained branch updates.
+read code or cherry-pick a specific fix; never rebase the rail onto it.
 
 ## Taking a specific fix from upstream
 
@@ -85,15 +74,18 @@ harvested commit must be brought up to standard rather than the budget raised
 to accommodate it. Applying cleanly says a patch does not textually conflict;
 it says nothing about whether the result is correct here.
 
+See [fork-sync-policy.md](fork-sync-policy.md) for the harvest ledger of what
+has been adopted and skipped.
+
 ## Local development
 
-Work on `main` unless you are intentionally changing packaging. Topic branches
-should start from `main` and be folded back into `main`. Do not keep durable
-remote topic branches in this fork.
+Work on `main`. Topic branches should start from `main` and be folded back into
+it. Do not keep durable remote topic branches in this fork.
 
-The dev shell installs a pre-push guard that refuses accidental pushes to
-`distro/nix` (opt in with `JCODE_ALLOW_DISTRO_NIX_PUSH=1`) and unconditionally
-refuses to recreate `vendor/upstream`.
+Use `--force-with-lease`, never plain `--force`, when updating `main`.
+
+The dev shell installs a pre-push guard that unconditionally refuses to
+recreate `vendor/upstream` or `distro/nix`.
 
 ## Audits
 
@@ -101,21 +93,14 @@ refuses to recreate `vendor/upstream`.
 scripts/fork-health.sh
 ```
 
-Checks: the rail set is exactly `{main, distro/nix}`; `fork-point` is an
-ancestor of both; `distro/nix` is an ancestor of `main`; the `distro/nix`
-payload stays within the packaging/CI-policy scope; and `main` adds no workflow
-changes.
+Checks that `fork-point` is still an ancestor of `main` (so the fork-touched
+gates measure the right base), and that the rail exists on GitHub. Topic
+branches are reported, and ones already contained in `main` are flagged as
+residue worth deleting.
 
-Expected `distro/nix` touched areas are packaging and fork CI policy:
-`.github/workflows/**` (all workflow ownership lives here, never on `main`),
-`flake.nix`, `flake.lock`, `nix/**`, `.cargo/audit.toml`, `docs/NIX.md`,
-`docs/BRANCHING.md`, packaging-related README sections, and packaging/health
-helper scripts. The authoritative allowlist is `allowed_scope_regex` in
-`scripts/fork-health.sh`; update both together.
+## CI
 
-## CI ownership
-
-The `distro/nix` layer owns every file under `.github/workflows/`:
+Every workflow lives on `main` with everything else.
 
 | Workflow | Role | Trigger |
 |---|---|---|
@@ -123,8 +108,9 @@ The `distro/nix` layer owns every file under `.github/workflows/`:
 | `nix.yml` | Flake validation + x86_64-linux/aarch64-darwin builds + Cachix | push/PR touching build inputs |
 | `security.yml` | Secret scan + triaged cargo-audit gate; weekly full advisory report | push/PR touching deps, weekly |
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
-| `nix-update.yml` | Weekly `flake.lock` bump PR against `distro/nix` | weekly, manual |
-| `ci.yml`, `freebsd-smoke.yml`, `windows-smoke.yml`, `release.yml`, `require-issue.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
+| `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
+| `ios-testflight.yml` | iOS TestFlight upload | manual dispatch |
+| `ci.yml`, `freebsd-smoke.yml`, `windows-smoke.yml`, `release.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
 
-`main` must not modify `.github/workflows/`. `scripts/fork-health.sh` fails
-when it does.
+The inherited upstream workflows are kept byte-close to the fork point and are
+dispatch-only. They do not gate anything; `fork-ci.yml` does.

@@ -844,22 +844,16 @@ scripts/install_release.sh
 
 ### Nix (flake)
 
-This fork's `main` and `distro/nix` branches ship a [Nix flake](flake.nix)
+This fork ships a [Nix flake](flake.nix)
 built with [crane](https://github.com/ipetkov/crane) and
 [flake-parts](https://flake.parts), with a public
 [Cachix](https://app.cachix.org/cache/jerudnik-jcode) binary cache so you can
 avoid long cold compiles when substitutes are available.
 
-Run the stable custom fork directly without installing:
+Run it directly without installing:
 
 ```bash
-nix run github:jerudnik/jcode/main
-```
-
-Or use the reusable packaging rail directly:
-
-```bash
-nix run github:jerudnik/jcode/distro/nix
+nix run github:jerudnik/jcode
 ```
 
 Add the binary cache so prebuilt outputs are fetched instead of compiled. The

@@ -3,57 +3,39 @@ set -euo pipefail
 
 # Local safety rail for this fork's branch model.
 #
-# The rail order is:
-#   fork-point (tag) -> distro/nix -> main
-#
-# Day-to-day custom Jcode work belongs on main. `distro/nix` is intentionally
-# narrow: reusable flake/package/cache/CI glue only. This hook blocks the easy
-# accidental push path while keeping an explicit escape hatch for maintenance.
+# This is a hard fork with a single rail: `main`, anchored at the immutable
+# `fork-point` tag. The two former rails, `vendor/upstream` (a mirror of
+# upstream master) and `distro/nix` (a packaging layer that existed so upstream
+# could be rebased through the stack), both existed only to serve upstream
+# tracking and were retired with it. This hook refuses to recreate either,
+# because a resurrected rail is silently dead: nothing advances it, and the
+# fork-touched gates read the tag instead.
 
 remote_name="${1:-unknown}"
 remote_url="${2:-}"
 
-allow_distro="${JCODE_ALLOW_DISTRO_NIX_PUSH:-0}"
-
 blocked=0
 
+refuse_retired_rail() {
+  cat >&2 <<EOF
+error: refusing to push $1 to $remote_name ($remote_url)
+
+$1 was retired when this became a hard fork. There is one rail, \`main\`,
+and the divergence point is the immutable \`fork-point\` tag (see
+docs/BRANCHING.md). Its payload is already contained in main, so
+recreating the branch would resurrect something nothing maintains.
+
+EOF
+  blocked=1
+}
+
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" per ref on
+# stdin; only the remote ref matters here, but all four must be consumed.
+# shellcheck disable=SC2034
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
-    refs/heads/vendor/upstream)
-      # The vendor rail was retired by the hard fork; the divergence point is
-      # the immutable `fork-point` tag. Recreating the branch would resurrect a
-      # mirror nothing advances and that the fork-touched gates no longer read.
-      cat >&2 <<EOF
-error: refusing to push vendor/upstream to $remote_name ($remote_url)
-
-vendor/upstream was retired when this became a hard fork. The divergence point
-is the immutable \`fork-point\` tag (see docs/BRANCHING.md). There is no mirror
-to maintain, so this branch should not be recreated.
-
-EOF
-      blocked=1
-      ;;
-    refs/heads/distro/nix)
-      if [ "$allow_distro" != "1" ]; then
-        cat >&2 <<EOF
-error: refusing to push distro/nix to $remote_name ($remote_url)
-
-distro/nix is packaging/distribution only. Features, docs, behavior changes,
-mobile/web/server work, and normal fork customizations belong on main.
-
-If this is intentional packaging maintenance, rerun with:
-
-  JCODE_ALLOW_DISTRO_NIX_PUSH=1 git push ...
-
-If you accidentally committed feature work on distro/nix, move it instead:
-
-  git switch main
-  git cherry-pick <first-bad-commit>^..<last-bad-commit>
-
-EOF
-        blocked=1
-      fi
-      ;;
+    refs/heads/vendor/upstream) refuse_retired_rail vendor/upstream ;;
+    refs/heads/distro/nix)      refuse_retired_rail distro/nix ;;
   esac
 done
 

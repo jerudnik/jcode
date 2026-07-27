@@ -2,16 +2,14 @@ name: Fork CI
 
 # The fork's actual CI gate for `main`. This fork ships to exactly two
 # surfaces: macOS/aarch64 (the maintainer's machines) and Nix (nix.yml).
-# Upstream's ci.yml is kept byte-close to vendor/upstream and dispatch-only;
+# Upstream's ci.yml is kept byte-close to the fork point and dispatch-only;
 # its Windows/FreeBSD/cross-check matrix is upstream's concern.
 #
 # Tiering:
 #   blocking on push/PR: quality guardrails, macOS build and test execution,
 #                        and full Linux test execution
 #   scheduled runs    : repeat the same blocking Linux coverage weekly
-#
-# Owned by the distro/nix layer: `main` must carry no .github/workflows
-# diffs (enforced by scripts/fork-health.sh).
+
 
 on:
   push:
@@ -19,7 +17,6 @@ on:
     paths-ignore:
       - "docs/**"
       - "**.md"
-      - ".rerere-cache/**"
       - "backlog/**"
   pull_request:
     branches: [main]
@@ -114,17 +111,17 @@ jobs:
           key: fork-quality
           cache-all-crates: "true"
 
-      # Upstream's tip does not always pass `cargo fmt --check` under the
-      # current stable rustfmt (their own CI goes red on Format when that
-      # happens). Reformatting vendor code here would grow the fork diff, so
-      # this gate runs the full-tree check once but only *fails* when a
-      # flagged file is one this fork modified relative to vendor/upstream.
-      # Vendor-only drift is reported and tolerated until upstream fixes it.
+      # Inherited upstream code does not always pass `cargo fmt --check` under
+      # the current stable rustfmt. Reformatting files this fork has never
+      # touched would grow the fork diff for no benefit, so this gate runs the
+      # full-tree check once but only *fails* when a flagged file is one this
+      # fork modified relative to the `fork-point` tag. Drift confined to
+      # untouched upstream files is reported and tolerated.
       - name: Check formatting (blocking for fork-touched files)
         run: |
-          git fetch --no-tags --depth=1 origin vendor/upstream
+          git fetch --no-tags --depth=1 origin tag fork-point
           git diff --name-only --diff-filter=d \
-            origin/vendor/upstream HEAD -- '*.rs' | sort -u > /tmp/fork-touched
+            fork-point HEAD -- '*.rs' | sort -u > /tmp/fork-touched
           cargo fmt --all -- --check > /tmp/fmt-out 2>&1 || true
           grep '^Diff in ' /tmp/fmt-out \
             | sed "s|^Diff in $PWD/||; s|:[0-9]*:\$||" \
@@ -136,10 +133,10 @@ jobs:
             cat /tmp/fmt-out
             exit 1
           fi
-          vendor_only=$(comm -13 /tmp/fork-touched /tmp/fmt-flagged)
-          if [ -n "$vendor_only" ]; then
-            echo "::warning::vendor files fail rustfmt (upstream drift, not blocking):"
-            echo "$vendor_only"
+          untouched_only=$(comm -13 /tmp/fork-touched /tmp/fmt-flagged)
+          if [ -n "$untouched_only" ]; then
+            echo "::warning::untouched upstream files fail rustfmt (not blocking):"
+            echo "$untouched_only"
           else
             echo "cargo fmt clean across the whole tree."
           fi
@@ -149,7 +146,7 @@ jobs:
       - name: Check all targets and all features
         run: cargo check --all-targets --all-features
 
-      # Same vendor-tolerance policy as the formatting gate (and it reuses
+      # Same tolerance policy as the formatting gate (and it reuses
       # /tmp/fork-touched from that step): run clippy over the whole tree
       # without -D warnings so it completes, then fail only when a lint's
       # primary span lands in a fork-modified file. Hard compile errors are
@@ -179,10 +176,10 @@ jobs:
               | .rendered' /tmp/clippy.json
             exit 1
           fi
-          vendor_only=$(comm -13 /tmp/fork-touched /tmp/clippy-flagged)
-          if [ -n "$vendor_only" ]; then
-            echo "::warning::vendor files carry clippy lints (upstream drift, not blocking):"
-            echo "$vendor_only"
+          untouched_only=$(comm -13 /tmp/fork-touched /tmp/clippy-flagged)
+          if [ -n "$untouched_only" ]; then
+            echo "::warning::untouched upstream files carry clippy lints (not blocking):"
+            echo "$untouched_only"
           else
             echo "clippy clean across the whole tree."
           fi

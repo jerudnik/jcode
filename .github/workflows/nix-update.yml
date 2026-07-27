@@ -1,13 +1,8 @@
 name: Update flake.lock
 
-# Weekly dependency bump for the Nix flake inputs. Runs on its own schedule
-# (after the Monday 06:17 UTC upstream sync window), updates flake.lock on a
+# Weekly dependency bump for the Nix flake inputs. Updates flake.lock on a
 # temporary branch, validates the bump, and opens or refreshes a PR against
-# `distro/nix`.
-#
-# NOTE: scheduled workflows execute from the default branch (`main`), but the
-# job checks out and targets `distro/nix` explicitly, so the lock bump lands
-# in the packaging layer where it belongs.
+# `main`.
 
 on:
   schedule:
@@ -29,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: distro/nix
+          ref: main
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
@@ -58,7 +53,7 @@ jobs:
           nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
           nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
 
-      - name: Open pull request against distro/nix
+      - name: Open pull request against main
         if: steps.update.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,15 +104,15 @@ jobs:
           git commit -m "chore(nix): update flake.lock"
           git push --force-with-lease origin "$branch"
 
-          existing_pr="$(gh pr list --head "$branch" --base distro/nix --json number --jq '.[0].number // empty')"
+          existing_pr="$(gh pr list --head "$branch" --base main --json number --jq '.[0].number // empty')"
           if [ -n "$existing_pr" ]; then
             gh pr edit "$existing_pr" \
-              --base distro/nix \
+              --base main \
               --title "chore(nix): update flake.lock" \
               --body-file "$body"
           else
             gh pr create \
-              --base distro/nix \
+              --base main \
               --head "$branch" \
               --title "chore(nix): update flake.lock" \
               --body-file "$body"

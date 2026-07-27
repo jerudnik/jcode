@@ -110,9 +110,8 @@ run "warning budget"           bash scripts/check_warning_budget.sh
 # local gate passed over and CI caught only after the PR was opened. cargo
 # machete is a manifest/source text scan, so it is fast and needs no build.
 #
-# cargo-machete is not in the repo devShell (flake.nix is owned by distro/nix,
-# see docs/BRANCHING.md), so fetch it through `nix shell` when it is not already
-# on PATH. Only a machine with neither skips, and the skip is reported in the
+# cargo-machete is not in the repo devShell, so fetch it through `nix shell`
+# when it is not already on PATH. Only a machine with neither skips, and the skip is reported in the
 # summary so a missing tool can never be mistaken for a pass.
 #
 # The fallback was added after this gate's *second* escape: routing the ambient

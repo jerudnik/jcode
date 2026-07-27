@@ -1,22 +1,20 @@
 # Using jcode with Nix
 
-The `distro/nix` and `main` branches ship a
-[Nix flake](https://nixos.wiki/wiki/Flakes) so jcode can be built, run,
-installed reproducibly, and reused as a flake input by downstream
-configurations. The packaging layer exposes the package, an overlay, an app, a
-dev shell, CI checks, and a Home Manager module.
+This fork ships a [Nix flake](https://nixos.wiki/wiki/Flakes) so jcode can be
+built, run, installed reproducibly, and reused as a flake input by downstream
+configurations. It exposes the package, an overlay, an app, a dev shell, CI
+checks, and a Home Manager module.
 
-## Branches
+## Branch
 
-Use one of the branch-specific flake URLs:
+This is a hard fork with a single rail, so there is one flake URL:
 
 ```sh
-github:jerudnik/jcode/distro/nix # packaging layer only
-github:jerudnik/jcode/main       # stable custom fork
+github:jerudnik/jcode        # or .../jcode/main
 ```
 
-See [BRANCHING.md](BRANCHING.md) for the full downstream-only maintenance
-procedure.
+The former `distro/nix` packaging rail was retired; its payload is contained in
+`main`. See [BRANCHING.md](BRANCHING.md).
 
 ## Supported platforms
 
@@ -62,7 +60,7 @@ safe to expose publicly and safe for others to consume.
 ### Maintaining the cache
 
 CI (`.github/workflows/nix.yml`) pushes successful build outputs automatically
-from `distro/nix` and `main` once the `CACHIX_AUTH_TOKEN` repo secret is set.
+from `main` once the `CACHIX_AUTH_TOKEN` repo secret is set.
 Pull requests consume the cache read-only and do not push. To set up or re-key:
 
 1. The cache is `jerudnik-jcode` on Cachix.
@@ -76,20 +74,17 @@ Pull requests consume the cache read-only and do not push. To set up or re-key:
 Each maintenance concern has its own workflow (schedules run from `main`, the
 default branch):
 
-- **Upstream sync** (`sync.yml`) runs every six hours. It fast-forwards
-  `vendor/upstream` to `upstream/master`, rebases `distro/nix`, rebases
-  `main`, pushes with `--force-with-lease`, verifies rail health, and
-  dispatches Fork CI + Nix on the result. Recurring conflicts self-heal via
-  the shared rerere cache; a new conflict opens a `sync-blocked` issue.
-- **Fork health** (`fork-health.yml`) runs daily and enforces the
-  three-branch invariants via `scripts/fork-health.sh`.
-- **flake.lock updates** (`nix-update.yml`) run weekly on Monday at 06:47
-  UTC, after the 06:17 UTC sync window, and open a PR against `distro/nix`.
+- **Fork health** (`fork-health.yml`) runs daily and enforces the single-rail
+  invariants via `scripts/fork-health.sh`.
+- **flake.lock updates** (`nix-update.yml`) run weekly on Monday and open a PR
+  against `main`.
 
-To trigger any of them manually:
+There is no upstream sync workflow: this is a hard fork and upstream fixes are
+cherry-picked by hand (see [BRANCHING.md](BRANCHING.md)).
+
+To trigger either of them manually:
 
 ```sh
-gh workflow run "Upstream Sync" --repo jerudnik/jcode
 gh workflow run "Fork Health" --repo jerudnik/jcode
 gh workflow run "Update flake.lock" --repo jerudnik/jcode
 ```

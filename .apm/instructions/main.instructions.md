@@ -52,8 +52,7 @@ This is a **hard fork** of `1jehuang/jcode`. It does not track upstream: there
 is no vendor rail, no scheduled sync, and no expectation of convergence. The
 divergence point is the immutable `fork-point` tag. See `docs/BRANCHING.md`.
 
-- `distro/nix` carries reusable Nix packaging, Home Manager module, cache, release, and all CI workflow files.
-- `main` carries fork work on top of `distro/nix`.
+- `main` is the only rail and carries everything: fork work, packaging, and CI workflows.
 
 Rules:
 

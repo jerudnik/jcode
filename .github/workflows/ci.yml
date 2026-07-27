@@ -1,8 +1,8 @@
 name: CI
 
-# Fork policy (distro/nix layer): this is upstream's CI, kept byte-close to
-# vendor/upstream so it never conflicts on rebase. It does NOT gate the fork's
-# rails -- fork-ci.yml (macOS-first) does that. Keep this dispatchable so a
+# Fork policy: this is upstream's CI, kept byte-close to the fork point and
+# dispatch-only. It does NOT gate the fork's rail -- fork-ci.yml
+# (macOS-first) does that. Keep this dispatchable so a
 # branch can be validated against upstream's full matrix (Windows, xwin
 # cross-checks, Linux/macOS Build & Test) before opening an upstream PR.
 on:
