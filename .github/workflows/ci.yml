@@ -66,6 +66,10 @@ jobs:
         shell: bash
         run: python3 scripts/check_test_size_budget.py
 
+      - name: Run Rust production filter tests
+        shell: bash
+        run: python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'
+
       - name: Enforce panic-prone usage ratchet
         shell: bash
         run: python3 scripts/check_panic_budget.py
@@ -77,6 +81,14 @@ jobs:
       - name: Enforce crate dependency boundaries
         shell: bash
         run: python3 scripts/check_dependency_boundaries.py
+
+      - name: Enforce test env lease for config-fingerprint env vars
+        shell: bash
+        run: python3 scripts/check_config_env_lease.py
+
+      - name: Enforce F20c retired distribution surface stays removed
+        shell: bash
+        run: scripts/f20c_removal_report.sh --stdout > /dev/null
 
       - name: Enforce wildcard re-export ratchet
         shell: bash
@@ -166,9 +178,18 @@ jobs:
           # ("compiled by an incompatible version of rustc"). rust-cache already
           # caches target/ across runs, so a clean, wrapper-consistent build is
           # both correct and fast enough.
-          export RUSTC="$(rustup which rustc)"
+          RUSTC="$(rustup which rustc)"
+          export RUSTC
           CARGO_BIN="$(rustup which cargo)"
           "$CARGO_BIN" build --release --target ${{ matrix.target }}
+
+      - name: Snapshot real home before tests (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        # Paired with the verify step after the test runs. Brackets rather than
+        # assuming a clean HOME so the same gate works on a developer machine.
+        run: |
+          scripts/check_real_home_isolation.sh --snapshot
 
       - name: Compile library and binary tests
         shell: bash
@@ -207,6 +228,15 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/check_powershell_syntax.ps1
+
+      - name: Enforce real-home test isolation (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        # Cheap assertion, not a second suite: the test steps above already ran
+        # in this job, so any test that resolved the real ~/.jcode instead of
+        # its per-process temp home shows up as a delta against the snapshot.
+        run: |
+          scripts/check_real_home_isolation.sh --verify-only
 
       - name: Enforce warning budget (Linux)
         if: runner.os == 'Linux'
@@ -291,7 +321,8 @@ jobs:
             'build_shell_command_uses_cmd_and_executes_command',
             'pipe_name_is_stable_and_normalizes_case_and_separators',
             'pipe_name_falls_back_when_stem_is_empty',
-            'stream_pair_round_trips_bytes'
+            'stream_pair_round_trips_bytes',
+            'split_stream_supports_concurrent_read_and_write'
           )
 
           foreach ($testName in $tests) {
