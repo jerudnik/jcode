@@ -905,13 +905,7 @@ impl AnthropicProvider {
     /// Convert tool definitions to Anthropic API format
     /// Adds cache_control to the last tool for prompt caching
     fn format_tools(&self, tools: &[ToolDefinition], is_oauth: bool) -> Vec<ApiTool> {
-        let extra_allow = &jcode_base::config::config().tools.oauth_extra_tools;
-        jcode_provider_anthropic::format_tools_with_extras(
-            tools,
-            is_oauth,
-            is_cache_ttl_1h(),
-            extra_allow,
-        )
+        jcode_provider_anthropic::format_tools(tools, is_oauth, is_cache_ttl_1h())
     }
 }
 

@@ -14,7 +14,7 @@ non-test upstream lines.
 
 | File | +add | -del | Nature | Seam verdict |
 |------|-----:|-----:|--------|--------------|
-| `provider-anthropic/src/lib.rs` | 269 | 58 | extract upstream inline tool-list into a named fn + add `oauth_extra_tools` | **Mostly additive already**; the 58 deletions are an extract-refactor. Low residual risk. |
+| `provider-anthropic/src/lib.rs` | 269 | 58 | port upstream inline OAuth tool forwarding behavior | **Mostly additive already**; the 58 deletions are an extract-refactor. Low residual risk. |
 | `base/src/skill.rs` | 31 | 20 -> **0** | replace two `.jcode`/`.claude` if-blocks with a 4-dir loop | **DONE -> additive**: upstream's blocks restored byte-identical; `.apm`/`.agents` now load via a prepended loop. Zero upstream deletions. |
 | `src/cli/acp.rs` | 626 | 19 | large ACP feature build-out + small upstream call-site edits | **Leave**: 33:1 additive; the 19 deletions are unavoidable call-site rewrites. |
 | `base/src/mcp/protocol.rs` | 128 | 18 | custom `Deserialize` impl + `.apm`/config-merge | **Partly additive**: the custom deserializer is real; the import churn is forced by it. Low risk. |

@@ -14,10 +14,6 @@ name: Fork CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
-      - "backlog/**"
   pull_request:
     branches: [main]
   schedule:
@@ -192,6 +188,12 @@ jobs:
 
       - name: Enforce oversized-test ratchet
         run: python3 scripts/check_test_size_budget.py
+
+      - name: Enforce agent instruction contract
+        run: python3 scripts/check_agent_instructions.py
+
+      - name: Test docs impact advisory
+        run: python3 scripts/test_docs_impact_advisory.py
 
       - name: Run Rust production filter tests
         run: python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'

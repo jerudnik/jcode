@@ -2919,7 +2919,7 @@ fn single_session_issues_slash_toggles_local_issue_browser() {
     assert_eq!(app.side_panel().focus, DesktopSidePanelFocus::IssueList);
     assert!(app.draft.is_empty());
     assert!(app.messages.is_empty());
-    assert_eq!(app.side_panel().github_issues.repo, "1jehuang/jcode");
+    assert_eq!(app.side_panel().github_issues.repo, "jerudnik/jcode");
     assert_eq!(
         app.side_panel()
             .github_issues
@@ -2990,7 +2990,7 @@ fn single_session_issue_browser_investigate_injects_context() {
     };
     assert!(images.is_empty());
     assert!(message.contains("GitHub issue mission"));
-    assert!(message.contains("Repository: 1jehuang/jcode"));
+    assert!(message.contains("Repository: jerudnik/jcode"));
     assert!(message.contains("Issue: #337"));
     assert!(message.contains("Mission objective: investigate"));
     assert!(message.contains("Operating instructions:"));

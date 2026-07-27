@@ -1,6 +1,6 @@
 # Fork documentation index
 
-Last audited: 2026-07-18
+Last audited: 2026-07-27
 
 ## Active authority
 
@@ -30,16 +30,19 @@ runtime remains `8962bccb3-release`, selected by `current`, `stable`, and
 rollback bundles, sealed evidence, and private archives remain preserved. Recheck
 all live facts with `scripts/ideal_base_railway.py` before mutation.
 
-## Continuing fork policy
+## Hard-fork policy
 
-These repository-wide fork policies remain active beside the ideal-base control
-plane:
+The live repository and `main` are authoritative. There is no upstream sync,
+tracking cadence, patch stack, or patch-ledger maintenance obligation.
 
-- [`patch-ledger.md`](patch-ledger.md): downstream patches, ownership, retirement
-  conditions, and validation commands.
-- [`SYNC_MODEL.md`](SYNC_MODEL.md): monitored-curation policy for upstream work.
+- [`SYNC_MODEL.md`](SYNC_MODEL.md): independence, lineage, and the retired sync
+  model.
 - [`SECURITY_TRIAGE.md`](SECURITY_TRIAGE.md): fork-only security triage and advisory
   rows not already documented upstream.
+
+The former [`patch-ledger.md`](patch-ledger.md) and
+[`../fork-sync-policy.md`](../fork-sync-policy.md) are frozen historical records.
+Do not add entries or treat them as current maintenance policy.
 
 ## Frozen historical namespaces
 

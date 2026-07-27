@@ -18,17 +18,36 @@ cd "$repo_root"
 #      (guarded by a sentinel so a devshell that somehow lacks cargo can't loop).
 #   3. A rustup/cargo home install exists -> put it on PATH.
 #   4. Nothing found -> precise, actionable error naming both remedies.
+find_nix_bin() {
+  if command -v nix >/dev/null 2>&1; then
+    command -v nix
+    return 0
+  fi
+
+  local candidate
+  for candidate in \
+    /nix/var/nix/profiles/default/bin/nix \
+    "$HOME/.nix-profile/bin/nix" \
+    /run/current-system/sw/bin/nix; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if ! command -v cargo >/dev/null 2>&1; then
+  nix_bin="$(find_nix_bin || true)"
   if [[ -n "${IN_NIX_SHELL:-}" ]]; then
     printf 'dev_cargo: cargo not found even inside the Nix dev shell (IN_NIX_SHELL=%s).\n' \
       "${IN_NIX_SHELL}" >&2
     printf 'dev_cargo: the devshell is missing a Rust toolchain; check flake.nix.\n' >&2
     exit 127
-  elif [[ -z "${DEV_CARGO_NIX_REEXEC:-}" && -f "$repo_root/flake.nix" ]] \
-    && command -v nix >/dev/null 2>&1; then
+  elif [[ -z "${DEV_CARGO_NIX_REEXEC:-}" && -f "$repo_root/flake.nix" && -n "$nix_bin" ]]; then
     printf 'dev_cargo: cargo not on PATH; re-entering repo Nix dev shell...\n' >&2
     export DEV_CARGO_NIX_REEXEC=1
-    exec nix develop "$repo_root" --command "$repo_root/scripts/dev_cargo.sh" "$@"
+    exec "$nix_bin" develop "$repo_root" --command "$repo_root/scripts/dev_cargo.sh" "$@"
   elif [[ -x "$HOME/.cargo/bin/cargo" ]]; then
     printf 'dev_cargo: cargo not on PATH; using ~/.cargo/bin toolchain.\n' >&2
     export PATH="$HOME/.cargo/bin:$PATH"
@@ -56,6 +75,14 @@ selfdev_low_memory_status="disabled"
 feature_profile_status="default"
 build_jobs_status="cargo-default"
 git_meta_status="not-configured"
+incremental_policy_status="profile-default"
+active_build_marker=""
+
+cleanup_active_build_marker() {
+  [[ -n "$active_build_marker" ]] || return 0
+  rm -f "$active_build_marker"
+  rmdir "$(dirname "$active_build_marker")" 2>/dev/null || true
+}
 
 append_rustflags() {
   local new_flag="$1"
@@ -84,6 +111,115 @@ selected_profile() {
     esac
   done
   printf '%s\n' "$profile"
+}
+
+cargo_subcommand() {
+  local expect_value="false"
+  local arg
+  for arg in "$@"; do
+    if [[ "$expect_value" == "true" ]]; then
+      expect_value="false"
+      continue
+    fi
+    case "$arg" in
+      +*) ;;
+      --color|--config|--manifest-path|--target-dir|-C|-Z)
+        expect_value="true"
+        ;;
+      --color=*|--config=*|--manifest-path=*|--target-dir=*|-*) ;;
+      *)
+        printf '%s\n' "$arg"
+        return 0
+        ;;
+    esac
+  done
+  printf 'build\n'
+}
+
+selected_target_dir() {
+  local target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
+  local expect_value="false"
+  local arg
+  for arg in "$@"; do
+    if [[ "$expect_value" == "true" ]]; then
+      target_dir="$arg"
+      expect_value="false"
+      continue
+    fi
+    case "$arg" in
+      --) break ;;
+      --target-dir) expect_value="true" ;;
+      --target-dir=*) target_dir="${arg#--target-dir=}" ;;
+    esac
+  done
+  if [[ "$target_dir" != /* ]]; then
+    target_dir="$repo_root/$target_dir"
+  fi
+  printf '%s\n' "$target_dir"
+}
+
+automatic_prune_target_is_safe() {
+  local target_dir="$1"
+  case "${JCODE_INCREMENTAL_PRUNE_ALLOW_EXTERNAL:-0}" in
+    1|true|yes|on) return 0 ;;
+  esac
+
+  # Do not let lexical traversal pass a repository-prefix check.
+  if [[ "/$target_dir/" == *"/../"* ]]; then
+    return 1
+  fi
+  case "$target_dir" in
+    "$repo_root"|"$repo_root"/*) ;;
+    *) return 1 ;;
+  esac
+
+  # Resolve the nearest existing ancestor so a not-yet-created target beneath
+  # an in-repository symlink cannot escape the repository.
+  local existing_ancestor="$target_dir"
+  while [[ ! -e "$existing_ancestor" && "$existing_ancestor" != "/" ]]; do
+    existing_ancestor=$(dirname "$existing_ancestor")
+  done
+  [[ -d "$existing_ancestor" ]] || return 1
+  local resolved_ancestor
+  resolved_ancestor=$(cd "$existing_ancestor" && pwd -P)
+  case "$resolved_ancestor" in
+    "$repo_root"|"$repo_root"/*) ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+configure_incremental_policy() {
+  if [[ ${CARGO_INCREMENTAL+x} ]]; then
+    incremental_policy_status="explicit:${CARGO_INCREMENTAL}"
+    return 0
+  fi
+
+  local mode="${JCODE_INCREMENTAL_POLICY:-verification-off}"
+  case "$mode" in
+    verification-off|auto)
+      case "$(cargo_subcommand "$@")" in
+        test|check|clippy|bench|doc|rustdoc)
+          export CARGO_INCREMENTAL=0
+          incremental_policy_status="verification-off"
+          ;;
+        *)
+          incremental_policy_status="profile-default"
+          ;;
+      esac
+      ;;
+    profile-default|keep|on)
+      incremental_policy_status="profile-default"
+      ;;
+    off|0|false|no)
+      export CARGO_INCREMENTAL=0
+      incremental_policy_status="all-off"
+      ;;
+    *)
+      printf 'error: unsupported JCODE_INCREMENTAL_POLICY=%s (expected verification-off|profile-default|off)\n' "$mode" >&2
+      exit 2
+      ;;
+  esac
 }
 
 # Determine whether the effective build will use incremental compilation.
@@ -463,7 +599,6 @@ maybe_configure_low_memory_selfdev() {
 #   JCODE_FRONTEND_THREADS=<n>         (default 4; diminishing returns past 4)
 #   JCODE_DEV_TOOLCHAIN=<name>         (default: nightly when present)
 parallel_frontend_status="disabled"
-parallel_frontend_toolchain=""
 
 dev_nightly_toolchain() {
   # Prefer an explicit override, else a `+toolchain` already on the argv, else
@@ -549,7 +684,6 @@ configure_parallel_frontend() {
   local threads="${JCODE_FRONTEND_THREADS:-4}"
   [[ "$threads" =~ ^[0-9]+$ && "$threads" -ge 1 ]] || threads=4
 
-  parallel_frontend_toolchain="$tc"
   export RUSTUP_TOOLCHAIN="$tc"
   append_rustflags "-Zthreads=${threads}"
   parallel_frontend_status="enabled:${tc}:threads=${threads}"
@@ -634,6 +768,8 @@ build_jobs_status=$build_jobs_status
 cargo_build_jobs=${CARGO_BUILD_JOBS:-<unset>}
 feature_profile_status=$feature_profile_status
 git_meta_status=$git_meta_status
+incremental_policy_status=$incremental_policy_status
+cargo_incremental=${CARGO_INCREMENTAL:-<unset>}
 build_git_hash=${JCODE_BUILD_GIT_HASH:-<unset>}
 rustc_wrapper=${RUSTC_WRAPPER:-<unset>}
 linker_mode=$selected_linker_mode
@@ -732,7 +868,7 @@ clear_remote_down() {
 remote_resolve_endpoint() {
   local ssh_bin="$1" remote="$2"
   local hostname="$remote" port=22 uses_proxy="false"
-  local config line key value
+  local config key value
   if config="$("$ssh_bin" -G "$remote" 2>/dev/null)"; then
     while IFS=' ' read -r key value; do
       case "$key" in
@@ -885,11 +1021,43 @@ run_local_cargo() {
     return "$status"
   fi
 
-  exec cargo "${cargo_argv[@]}"
+  cargo "${cargo_argv[@]}"
+}
+
+maybe_prune_incremental_cache() {
+  local mode="${JCODE_INCREMENTAL_PRUNE:-auto}"
+  case "$mode" in
+    0|false|no|off) return 0 ;;
+    auto|1|true|yes|on) ;;
+    *)
+      printf 'error: unsupported JCODE_INCREMENTAL_PRUNE=%s (expected auto|off)\n' "$mode" >&2
+      return 2
+      ;;
+  esac
+
+  local target_dir
+  target_dir="$(selected_target_dir "${cargo_argv[@]}")"
+  if ! automatic_prune_target_is_safe "$target_dir"; then
+    log "skipping automatic incremental pruning outside the repository (set JCODE_INCREMENTAL_PRUNE_ALLOW_EXTERNAL=1 to opt in): $target_dir"
+    return 0
+  fi
+  active_build_marker="$target_dir/.jcode-active-builds/$$"
+  trap cleanup_active_build_marker EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  local status=0
+  bash "$repo_root/scripts/prune_incremental.sh" \
+    --apply --quiet --target-dir "$target_dir" --handoff-build-pid "$$" || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    log "incremental pruning could not safely hand off to Cargo; refusing to start"
+    return "$status"
+  fi
 }
 
 validate_feature_profile
 export_git_build_metadata
+configure_incremental_policy "$@"
 maybe_configure_low_memory_selfdev "$@"
 maybe_enable_sccache "$@"
 configure_parallel_frontend "$@"
@@ -922,4 +1090,5 @@ if [[ "${JCODE_REMOTE_CARGO:-0}" == "1" ]]; then
   fi
 fi
 
+maybe_prune_incremental_cache
 run_local_cargo

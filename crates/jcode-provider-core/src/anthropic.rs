@@ -353,6 +353,10 @@ mod tests {
         for (local, oauth) in [
             ("bash", "Bash"),
             ("read", "Read"),
+            ("write", "Write"),
+            ("edit", "Edit"),
+            ("glob", "Glob"),
+            ("grep", "Grep"),
             ("subagent", "Agent"),
             ("schedule", "ScheduleWakeup"),
             ("skill_manage", "Skill"),

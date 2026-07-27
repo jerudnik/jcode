@@ -26,6 +26,37 @@ fn test_comm_propose_plan_roundtrip() -> Result<()> {
 }
 
 #[test]
+fn test_comm_seed_graph_replace_existing_roundtrip_and_legacy_default() -> Result<()> {
+    let req = Request::CommSeedGraph {
+        id: 43,
+        session_id: "sess_a".to_string(),
+        mode: Some("deep".to_string()),
+        replace_existing: true,
+        nodes: Vec::new(),
+    };
+    let json = serde_json::to_string(&req)?;
+    let decoded = parse_request_json(&json)?;
+    let Request::CommSeedGraph {
+        replace_existing, ..
+    } = decoded
+    else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert!(replace_existing);
+
+    let legacy = r#"{"type":"comm_seed_graph","id":44,"session_id":"sess_a","nodes":[]}"#;
+    let decoded = parse_request_json(legacy)?;
+    let Request::CommSeedGraph {
+        replace_existing, ..
+    } = decoded
+    else {
+        return Err(anyhow!("wrong request type"));
+    };
+    assert!(!replace_existing);
+    Ok(())
+}
+
+#[test]
 fn test_stdin_response_roundtrip() -> Result<()> {
     let req = Request::StdinResponse {
         id: 99,

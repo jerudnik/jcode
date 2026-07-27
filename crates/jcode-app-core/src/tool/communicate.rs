@@ -5,7 +5,7 @@ use crate::background::TaskResult;
 use crate::plan::PlanItem;
 use crate::protocol::{
     AgentInfo, AgentStatusSnapshot, AwaitedMemberStatus, CommDeliveryMode, HistoryMessage,
-    PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, TaskGraphNodeSpec, ToolCallSummary,
+    PlanGraphStatus, Request, ServerEvent, SwarmFleetEntry, ToolCallSummary,
     comm_cleanup_candidate_session_ids, default_comm_await_target_statuses,
     default_comm_cleanup_target_statuses, default_comm_run_await_statuses,
     format_comm_awaited_members_with_reports, format_comm_context_history, format_comm_members,
@@ -17,8 +17,7 @@ use async_trait::async_trait;
 use jcode_swarm_core::validate_swarm_tldr;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::HashMap;
 
 const REQUEST_ID: u64 = 1;
 
@@ -27,7 +26,12 @@ const REQUEST_ID: u64 = 1;
 /// instead uses `agents.swarm_max_concurrent_agents` (high, configurable).
 const LIGHT_MODE_DEFAULT_CONCURRENCY: usize = 4;
 
+mod seed_graph;
 mod transport;
+use seed_graph::{
+    format_seed_remaps, plan_graph_node_ids, remap_conflicting_seed_nodes, seed_node_id_collision,
+    seed_retry_scope,
+};
 use transport::{send_request, send_request_with_timeout};
 
 fn fresh_spawn_request_nonce(ctx: &ToolContext) -> String {
@@ -52,95 +56,6 @@ fn ensure_success(response: &ServerEvent) -> Result<()> {
     } else {
         Ok(())
     }
-}
-
-fn seed_node_id_collision(response: &ServerEvent) -> Option<&str> {
-    let message = check_error(response)?;
-    let (_, tail) = message.split_once("duplicate node id '")?;
-    let (id, _) = tail.split_once('\'')?;
-    (!id.is_empty()).then_some(id)
-}
-
-fn plan_graph_node_ids(summary: &PlanGraphStatus) -> HashSet<String> {
-    summary
-        .ready_ids
-        .iter()
-        .chain(&summary.blocked_ids)
-        .chain(&summary.active_ids)
-        .chain(&summary.completed_ids)
-        .chain(&summary.failed_ids)
-        .chain(&summary.cycle_ids)
-        .chain(&summary.unresolved_dependency_ids)
-        .cloned()
-        .collect()
-}
-
-fn seed_retry_scope(ctx: &ToolContext) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    ctx.session_id.hash(&mut hasher);
-    ctx.message_id.hash(&mut hasher);
-    format!("seed-{:08x}", hasher.finish() as u32)
-}
-
-/// Rename only seed ids that collide with the existing durable plan, then rewrite
-/// intra-batch dependency edges to follow them. The scope is stable for a tool
-/// turn, so retrying the same call produces the same ids and is itself idempotent.
-fn remap_conflicting_seed_nodes(
-    nodes: &[TaskGraphNodeSpec],
-    occupied: &HashSet<String>,
-    conflicting_id: &str,
-    scope: &str,
-) -> (Vec<TaskGraphNodeSpec>, Vec<(String, String)>) {
-    let original_ids: HashSet<&str> = nodes.iter().map(|node| node.id.as_str()).collect();
-    let mut reserved = occupied.clone();
-    reserved.extend(original_ids.iter().map(|id| (*id).to_string()));
-    let mut mapping = HashMap::<String, String>::new();
-
-    if occupied.contains(conflicting_id) && nodes.iter().any(|node| node.id == conflicting_id) {
-        let node_id = conflicting_id.to_string();
-        let base = format!("{conflicting_id}::{scope}");
-        let mut candidate = base.clone();
-        let mut discriminator = 2usize;
-        while reserved.contains(&candidate) {
-            candidate = format!("{base}-{discriminator}");
-            discriminator += 1;
-        }
-        reserved.insert(candidate.clone());
-        mapping.insert(node_id, candidate);
-    }
-
-    let remapped = nodes
-        .iter()
-        .cloned()
-        .map(|mut node| {
-            if let Some(id) = mapping.get(&node.id) {
-                node.id = id.clone();
-            }
-            for dependency in &mut node.depends_on {
-                if let Some(id) = mapping.get(dependency) {
-                    *dependency = id.clone();
-                }
-            }
-            node
-        })
-        .collect();
-    let changes = nodes
-        .iter()
-        .filter_map(|node| {
-            mapping
-                .get(&node.id)
-                .map(|mapped| (node.id.clone(), mapped.clone()))
-        })
-        .collect();
-    (remapped, changes)
-}
-
-fn format_seed_remaps(changes: &[(String, String)]) -> String {
-    changes
-        .iter()
-        .map(|(from, to)| format!("{from} -> {to}"))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 async fn fetch_plan_status(session_id: &str) -> Result<PlanGraphStatus> {
@@ -2093,6 +2008,9 @@ struct CommunicateInput {
     session_ids: Option<Vec<String>>,
     #[serde(default)]
     mode: Option<String>,
+    /// For task_graph, explicitly replace a non-empty persisted graph.
+    #[serde(default)]
+    replace_existing: Option<bool>,
     #[serde(default)]
     timeout_minutes: Option<u64>,
     #[serde(default)]
@@ -2158,6 +2076,14 @@ impl CommunicateInput {
             ));
         }
         Ok(label.to_string())
+    }
+
+    /// `task_graph` is a seed/new-workflow action, not an append operation.
+    /// Default to replacement so persisted graph state can never leak into a
+    /// fresh tool invocation. Callers extending a graph must use expand_node or
+    /// inject_gap instead.
+    fn replace_existing_graph(&self) -> bool {
+        self.replace_existing.unwrap_or(true)
     }
 }
 
@@ -2382,6 +2308,13 @@ impl Tool for CommunicateTool {
                     "type": "array",
                     "description": "Task-DAG node specs for task_graph (seed), expand_node (children), or inject_gap (gap/fix nodes). Each: {id, content, kind?, depends_on?, priority?}. kind is one of explore|implement|verify|fix|synthesize.",
                     "items": { "type": "object", "additionalProperties": true }
+                }),
+            );
+            props.insert(
+                "replace_existing".to_string(),
+                json!({
+                    "type": "boolean",
+                    "description": "For task_graph only. Defaults to true so every task_graph invocation starts a fresh workflow and atomically clears old nodes, metadata, and progress while preserving live swarm participants. Replacement is rejected while any node is assigned or running. Set false only to make the server reject a non-empty graph instead of replacing it; use expand_node/inject_gap to extend an existing graph."
                 }),
             );
             props.insert(
@@ -2666,15 +2599,24 @@ impl Tool for CommunicateTool {
                 }
                 let count = nodes.len();
                 let mut seed_nodes = nodes.clone();
+                let replace_existing = params.replace_existing_graph();
                 let request = Request::CommSeedGraph {
                     id: REQUEST_ID,
                     session_id: ctx.session_id.clone(),
                     mode: params.mode.clone(),
+                    replace_existing,
                     nodes: seed_nodes.clone(),
                 };
                 let mut response = send_request(request)
                     .await
                     .map_err(|e| anyhow::anyhow!("Failed to seed task graph: {}", e))?;
+                if replace_existing {
+                    ensure_success(&response)?;
+                    return Ok(ToolOutput::new(format!(
+                        "Seeded task graph ({} nodes).",
+                        count
+                    )));
+                }
                 let mut changes = Vec::new();
                 let mut occupied = None;
                 // At most one durable collision can be resolved per request. The
@@ -2719,6 +2661,7 @@ impl Tool for CommunicateTool {
                         id: REQUEST_ID,
                         session_id: ctx.session_id.clone(),
                         mode: params.mode.clone(),
+                        replace_existing,
                         nodes: seed_nodes.clone(),
                     })
                     .await

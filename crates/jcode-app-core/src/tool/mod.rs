@@ -382,7 +382,7 @@ impl Registry {
     pub(crate) fn resolve_tool_name(name: &str) -> &str {
         match name {
             // Claude Code OAuth identity names. Keep this compatibility seam
-            // aligned with claude_code_identity_tools in jcode-provider-anthropic.
+            // aligned with the curated OAuth builtin mappings in jcode-provider-anthropic.
             "Agent" => "subagent",
             "Bash" => "bash",
             "Edit" => "edit",

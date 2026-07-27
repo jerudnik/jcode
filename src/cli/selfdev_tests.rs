@@ -1,4 +1,4 @@
-use super::wait_for_reloading_server;
+use super::{JCODE_REPO_URL, wait_for_reloading_server};
 use crate::build;
 use crate::{provider, session, storage, tool};
 use std::ffi::{OsStr, OsString};
@@ -7,6 +7,11 @@ use std::sync::Arc;
 
 fn lock_env() -> storage::TestEnvWriteLease {
     storage::lock_test_env()
+}
+
+#[test]
+fn selfdev_clone_source_is_the_hard_fork() {
+    assert_eq!(JCODE_REPO_URL, "https://github.com/jerudnik/jcode.git");
 }
 
 struct EnvVarGuard {

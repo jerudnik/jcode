@@ -58,6 +58,7 @@ async fn control_log_fold_tracks_maps_through_handler_sequence() {
         301,
         coordinator.to_string(),
         None,
+        false,
         vec![crate::protocol::TaskGraphNodeSpec {
             id: "n1".to_string(),
             content: "do the thing".to_string(),

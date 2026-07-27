@@ -1,6 +1,9 @@
 # Releasing jcode
 
-jcode has two release paths: a fast local path for hotfixes, and CI for full releases.
+The hard fork publishes GitHub release assets from this repository. It has two
+release paths: a fast local path for hotfixes and CI for full releases. Inherited
+Homebrew and AUR publisher steps run only when their external credentials are
+configured; those third-party channels are not an authority for the hard fork.
 
 ## Quick Release (local, ~2.5 minutes)
 
@@ -74,14 +77,18 @@ Key design decisions:
 - **sccache + rust-cache** for dependency caching across runs.
 - **mold linker** on Linux for faster linking.
 
-### Package manager updates
+### Optional inherited package-manager integrations
 
-CI handles Homebrew and AUR updates automatically:
+The release workflow contains inherited Homebrew and AUR update steps. They run
+only when the corresponding deployment secrets are present. Until the hard fork
+owns and configures those channels, Nix and this repository's GitHub release
+assets are the supported distribution authorities:
 
 - **Homebrew**: Updates `Formula/jcode.rb` in `1jehuang/homebrew-jcode` with new SHA256 hashes
 - **AUR**: Updates `PKGBUILD` and `.SRCINFO` in the `jcode-bin` AUR repo
 
-Both are triggered by the `release` job after Linux + macOS builds complete.
+When configured, both are triggered by the `release` job after Linux + macOS
+builds complete.
 
 ## Which to use
 
@@ -89,9 +96,12 @@ Both are triggered by the `release` job after Linux + macOS builds complete.
 |----------|--------|-------------------|-----------------|
 | Hotfix / urgent bug | `scripts/quick-release.sh` | **~2.5 min** | ~16 min (CI) |
 | Regular release | Push `v*` tag | ~11 min | ~16 min |
-| Need Homebrew/AUR | Push `v*` tag | ~11 min | ~16 min |
+| External package credentials configured | Push `v*` tag | ~11 min | ~16 min |
 
-For quick releases that also need Homebrew/AUR updates, use the script first (gets binaries out fast), then the CI tag push handles the package manager updates automatically. CI's `softprops/action-gh-release` will update the existing release created by the script.
+For configured external package channels, use the script first to publish the
+binaries, then let the CI tag push run the optional package updates. CI's
+`softprops/action-gh-release` will update the existing release created by the
+script.
 
 ## Cross-Compilation Setup
 

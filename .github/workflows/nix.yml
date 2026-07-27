@@ -20,7 +20,7 @@ on:
       - "Cargo.lock"
       - "crates/**"
       - "src/**"
-      - ".github/workflows/nix.yml"
+      - ".github/workflows/**"
   pull_request:
     branches: [main]
     paths:
@@ -31,7 +31,7 @@ on:
       - "Cargo.lock"
       - "crates/**"
       - "src/**"
-      - ".github/workflows/nix.yml"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:
@@ -59,16 +59,18 @@ jobs:
           skipPush: true
 
       - name: Check workflow syntax (fork-owned workflows)
-        # Only lint the workflows this fork owns. Upstream's files (ci.yml,
-        # release.yml, freebsd-smoke.yml) are kept
-        # byte-close to the fork point and are dispatch-only.
+        # Only lint the workflows this fork owns. Upstream's ci.yml and
+        # freebsd-smoke.yml are kept byte-close to the fork point and are
+        # dispatch-only.
         run: |
           nix run nixpkgs#actionlint -- \
+            .github/workflows/docs-impact.yml \
             .github/workflows/fork-ci.yml \
             .github/workflows/fork-health.yml \
             .github/workflows/security.yml \
             .github/workflows/nix.yml \
-            .github/workflows/nix-update.yml
+            .github/workflows/nix-update.yml \
+            .github/workflows/release.yml
 
       - name: Dry-run Linux package
         run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs

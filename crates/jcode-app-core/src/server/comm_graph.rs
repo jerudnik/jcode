@@ -211,6 +211,7 @@ pub(super) async fn handle_comm_seed_graph(
     id: u64,
     req_session_id: String,
     mode: Option<String>,
+    replace_existing: bool,
     nodes: Vec<TaskGraphNodeSpec>,
     client_event_tx: &mpsc::UnboundedSender<ServerEvent>,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -226,19 +227,15 @@ pub(super) async fn handle_comm_seed_graph(
         return;
     };
 
-    // A deep-mode seeder is usually a solo agent. Elect it coordinator (when no
-    // live coordinator exists) so it can actually dispatch the graph it seeds via
-    // the coordinator-gated assign/run_plan paths.
-    ensure_seeder_can_coordinate(
-        &swarm_id,
-        &req_session_id,
-        swarm_members,
-        swarm_coordinators,
-    )
-    .await;
-
     let specs: Vec<NodeSpec> = nodes.into_iter().map(spec_from_wire).collect();
     let count = specs.len();
+    let mut replacement_participants = swarms_by_id
+        .read()
+        .await
+        .get(&swarm_id)
+        .cloned()
+        .unwrap_or_else(HashSet::new);
+    replacement_participants.insert(req_session_id.clone());
 
     // Resolve the plan mode. The model is *asked* to pass `mode:"deep"` when it is
     // running at `swarm-deep` effort, but it frequently forgets. Rather than
@@ -257,37 +254,58 @@ pub(super) async fn handle_comm_seed_graph(
         let plan = plans
             .entry(swarm_id.clone())
             .or_insert_with(VersionedPlan::new);
-        if let Some(mode) = resolved_mode {
-            // Guard against silent rigor downgrades: re-seeding an existing deep
-            // plan as light would strip the gates + artifact validation from all
-            // nodes already in flight. Deepening (light -> deep) or re-stating
-            // the same mode is fine; only the downgrade of a non-empty deep plan
-            // is rejected.
-            let downgrades_deep = plan.mode.eq_ignore_ascii_case("deep")
-                && !mode.eq_ignore_ascii_case("deep")
-                && !plan.items.is_empty();
-            if downgrades_deep {
-                err(
-                    client_event_tx,
-                    id,
-                    "Seed rejected: this swarm already has a non-empty deep-mode plan; \
-                     seeding with mode=light would silently strip its gates and artifact \
-                     validation. Omit `mode` to keep deep, or finish/clear the current plan first."
-                        .to_string(),
-                );
-                return;
-            }
-            plan.mode = mode;
+        if !plan.items.is_empty() && !replace_existing {
+            err(
+                client_event_tx,
+                id,
+                format!(
+                    "Seed rejected: this swarm already has {} node(s). Use expand_node/inject_gap to extend it, or retry task_graph with replace_existing=true to start a fresh graph.",
+                    plan.items.len()
+                ),
+            );
+            return;
         }
-        plan.participants.insert(req_session_id.clone());
-        let mut graph = to_task_graph(plan);
-        let before = graph.clone();
+        let in_flight: Vec<&str> = plan
+            .items
+            .iter()
+            .filter(|item| {
+                let terminal = matches!(
+                    item.status.as_str(),
+                    "completed" | "done" | "failed" | "stopped" | "crashed"
+                );
+                matches!(item.status.as_str(), "running" | "running_stale")
+                    || (item.assigned_to.is_some() && !terminal)
+            })
+            .map(|item| item.id.as_str())
+            .collect();
+        if replace_existing && !in_flight.is_empty() {
+            err(
+                client_event_tx,
+                id,
+                format!(
+                    "Seed rejected: cannot replace a graph with in-flight node(s): {}. Complete, fail, stop, or requeue them before starting a fresh graph.",
+                    in_flight.join(", ")
+                ),
+            );
+            return;
+        }
+
+        // Seed into a fresh plan rather than lifting the persisted graph. This is
+        // the lifecycle boundary that prevents old nodes, node_meta, progress, or
+        // participants from leaking into a new workflow. Preserve only the
+        // monotonic version so clients cannot mistake replacement for stale data.
+        let mut replacement = VersionedPlan::new();
+        replacement.version = plan.version;
+        if let Some(mode) = resolved_mode {
+            replacement.mode = mode;
+        }
+        replacement.participants = replacement_participants;
+        let mut graph = to_task_graph(&replacement);
         match dag::seed(&mut graph, specs) {
             Ok(()) => {
-                if graph != before {
-                    apply_task_graph(plan, &graph);
-                    plan.version += 1;
-                }
+                apply_task_graph(&mut replacement, &graph);
+                replacement.version = replacement.version.saturating_add(1);
+                *plan = replacement;
                 Ok(())
             }
             Err(e) => Err(e),
@@ -296,6 +314,15 @@ pub(super) async fn handle_comm_seed_graph(
 
     match result {
         Ok(()) => {
+            // A deep-mode seeder is usually a solo agent. Elect it coordinator
+            // only after the seed succeeds so rejected calls cannot mutate roles.
+            ensure_seeder_can_coordinate(
+                &swarm_id,
+                &req_session_id,
+                swarm_members,
+                swarm_coordinators,
+            )
+            .await;
             finalize(
                 id,
                 &swarm_id,

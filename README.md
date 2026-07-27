@@ -2,11 +2,11 @@
 
 # jcode
 
-[![Latest Release](https://badgen.net/github/release/1jehuang/jcode?icon=github)](https://github.com/1jehuang/jcode/releases)
+[![Hard Fork](https://img.shields.io/badge/status-independent%20hard%20fork-blue?style=flat-square)](docs/BRANCHING.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](https://github.com/1jehuang/jcode/releases)
-[![Last Commit](https://badgen.net/github/last-commit/1jehuang/jcode/master?icon=github)](https://github.com/1jehuang/jcode/commits/master)
-[![GitHub Stars](https://badgen.net/github/stars/1jehuang/jcode?icon=github)](https://github.com/1jehuang/jcode/stargazers)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-blue?style=flat-square)](#platform-support)
+[![Last Commit](https://badgen.net/github/last-commit/jerudnik/jcode/main?icon=github)](https://github.com/jerudnik/jcode/commits/main)
+[![GitHub Stars](https://badgen.net/github/stars/jerudnik/jcode?icon=github)](https://github.com/jerudnik/jcode/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/nBe9vGyK9a)
 
 The next generation coding agent harness to raise the skill ceiling. <br>
@@ -26,6 +26,14 @@ Built for multi-session workflows, infinite customizability, and performance.
 
 ---
 
+> [!IMPORTANT]
+> This repository is the independently maintained Jcode **hard fork**. Its
+> `main` branch is the product authority. It does not track
+> `1jehuang/jcode`, maintain an upstream patch stack or patch ledger, or promise
+> future convergence. See [docs/BRANCHING.md](docs/BRANCHING.md).
+
+---
+
 <div align="center">
 
 ## Installation
@@ -33,8 +41,8 @@ Built for multi-session workflows, infinite customizability, and performance.
 </div>
 
 ```bash
-# macOS & Linux
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash
+# macOS & Linux with Nix
+nix run github:jerudnik/jcode/main
 ```
 
 Need Windows, Homebrew, source builds, provider setup, or tell your agent to set it up for you?
@@ -734,18 +742,11 @@ Set up jcode on this machine for me.
 
 1. Detect the operating system, available package managers, and shell environment, then install jcode using the best matching command below instead of referring me somewhere else:
 
-   - macOS with Homebrew available:
-     brew tap 1jehuang/jcode
-     brew install jcode
+   - macOS or Linux with Nix available:
+     nix profile install github:jerudnik/jcode/main
 
-   - macOS or Linux via install script:
-     curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash
-
-   - Windows PowerShell:
-     irm https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.ps1 | iex
-
-   - From source if the above paths are not appropriate:
-     git clone https://github.com/1jehuang/jcode.git
+   - From source on any supported development platform:
+     git clone https://github.com/jerudnik/jcode.git
      cd jcode
      cargo build --release
      scripts/install_release.sh
@@ -791,35 +792,18 @@ This is intended to be a copy-paste bootstrap prompt for jcode itself or any oth
 ### Quick Install
 
 ```bash
-# macOS & Linux
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash
+# macOS & Linux with Nix
+nix profile install github:jerudnik/jcode/main
 ```
 
-On Termux, install the glibc runtime and `patchelf` first so the installer can
-patch the downloaded Linux binary to Termux's glibc dynamic linker and create a
-launcher that avoids Termux's `LD_PRELOAD` shim:
-
-```bash
-pkg install glibc patchelf
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.sh | bash
-```
-
-```powershell
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.ps1 | iex
-```
-
-### macOS via Homebrew
-
-```bash
-brew tap 1jehuang/jcode
-brew install jcode
-```
+The hard fork currently treats its Nix flake and source tree as the authoritative
+distribution paths. Legacy package channels owned by the lineage project are not
+hard-fork releases.
 
 ### From Source (all platforms)
 
 ```bash
-git clone https://github.com/1jehuang/jcode.git
+git clone https://github.com/jerudnik/jcode.git
 cd jcode
 cargo build --release
 ```
@@ -909,14 +893,14 @@ Removes installed binaries and the launcher but keeps your config, auth, and
 sessions so a clean reinstall picks up where you left off:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/uninstall.sh | bash -s -- --yes
+curl -fsSL https://raw.githubusercontent.com/jerudnik/jcode/main/scripts/uninstall.sh | bash -s -- --yes
 ```
 
 For a full wipe of everything including config, auth, sessions, logs, and
 memory (useful for recovering from a broken install):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/uninstall.sh | bash -s -- --purge --yes
+curl -fsSL https://raw.githubusercontent.com/jerudnik/jcode/main/scripts/uninstall.sh | bash -s -- --purge --yes
 ```
 
 Add `--dry-run` to preview what would be removed without deleting anything.
@@ -928,6 +912,6 @@ Add `--dry-run` to preview what would be removed without deleting anything.
 | **Linux** x86_64 / aarch64 | Fully supported |
 | **macOS** Apple Silicon | Supported |
 | **Windows** x86_64 | Builds and runs (native + WSL2), but **untested by this fork's CI** ([#19](https://github.com/jerudnik/jcode/issues/19)) |
-| **Termux** aarch64 / x86_64 | Supported with `pkg install glibc patchelf` |
+| **Termux** aarch64 / x86_64 | Source builds only; the former lineage installer is not a hard-fork distribution path |
 
 </div>

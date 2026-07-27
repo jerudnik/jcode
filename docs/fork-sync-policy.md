@@ -1,13 +1,15 @@
-# Fork harvest policy
+# Retired upstream harvest policy
 
-Status: **superseded in part.** Since the 2026-07-27 hard fork there is no
-periodic sync, so the per-sync cadence below no longer runs. See
+Status: **retired.** Since the 2026-07-27 hard fork there is no periodic sync,
+upstream review cadence, harvest process, or adopted/skipped patch ledger. See
 [`fork/SYNC_MODEL.md`](./fork/SYNC_MODEL.md) for the current model and
 [`BRANCHING.md`](./BRANCHING.md) for the rails.
 
-What survives is the *judgement*: how to decide whether an individual upstream
-commit is worth cherry-picking, and what must never be traded away to take one.
-Read this before harvesting anything from `upstream`.
+If a specific external change is independently useful, treat it as an ordinary
+local code change and validate it against current Jcode architecture and gates.
+Everything below is preserved only as historical evidence and is non-normative.
+
+## Historical policy
 
 Upstream is a parts bin, not gospel. That posture predates the hard fork:
 upstream master's own CI was red (e2e `Server disconnected` failures in the

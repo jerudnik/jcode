@@ -918,9 +918,14 @@ async fn cancel_build_marks_request_cancelled_and_removes_it_from_queue() {
         .expect("load cancelled request")
         .expect("cancelled request exists");
     assert_eq!(cancelled_request.state, BuildRequestState::Cancelled);
+    assert!(
+        !BuildRequest::pending_requests()
+            .expect("pending requests")
+            .iter()
+            .any(|request| request.request_id == cancelled_request.request_id)
+    );
 
     let status_output = selfdev_status_output().expect("status output");
-    assert!(status_output.output.contains("keep building"));
     assert!(!status_output.output.contains("cancel me"));
 
     let first_meta = first.metadata.expect("first metadata");

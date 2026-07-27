@@ -66,22 +66,59 @@ log() { printf 'clean_target: %s\n' "$*" >&2; }
 
 human() {
   # Bytes -> human readable
-  numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || printf '%sB' "${1:-0}"
+  awk -v bytes="${1:-0}" 'BEGIN {
+    split("B KiB MiB GiB TiB", units, " ")
+    value = bytes + 0
+    unit = 1
+    while (value >= 1024 && unit < 5) { value /= 1024; unit++ }
+    if (unit == 1) printf "%.0f %s", value, units[unit]
+    else printf "%.2f %s", value, units[unit]
+  }'
 }
 
 dir_bytes() {
-  du -sb "$1" 2>/dev/null | awk '{print $1}'
+  du -sk "$1" 2>/dev/null | awk '{print $1 * 1024}'
 }
 
 # Is any rustc/cargo process currently operating inside this path?
 path_has_active_process() {
   local path="$1"
-  local p
-  for p in $(pgrep -x rustc 2>/dev/null) $(pgrep -x cargo 2>/dev/null); do
-    if tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -qF "$path"; then
+  local canonical
+  canonical=$(cd "$path" 2>/dev/null && pwd -P) || return 1
+
+  local saw_build_process=0
+  local pid
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] || continue
+    saw_build_process=1
+
+    local cmdline
+    cmdline=$(ps -ww -p "$pid" -o command= 2>/dev/null || true)
+    if [[ "$cmdline" == *"$canonical"* || "$cmdline" == *"$repo_root"* ]]; then
       return 0
     fi
-  done
+
+    local cwd=""
+    if [[ -e "/proc/$pid/cwd" ]]; then
+      cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+    elif command -v lsof >/dev/null 2>&1; then
+      cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1)
+    fi
+    if [[ -n "$cwd" && ( "$cwd" == "$repo_root" || "$cwd" == "$repo_root"/* ) ]]; then
+      return 0
+    fi
+  done < <(
+    for name in cargo rustc rustdoc; do
+      pgrep -x "$name" 2>/dev/null || true
+    done | sort -u
+  )
+
+  # If a build exists but this platform cannot expose its cwd, fail closed.
+  if [[ "$saw_build_process" -eq 1 ]] \
+    && [[ ! -d /proc ]] \
+    && ! command -v lsof >/dev/null 2>&1; then
+    return 0
+  fi
   return 1
 }
 
@@ -90,7 +127,7 @@ path_recently_active() {
   local path="$1"
   [[ -d "$path" ]] || return 1
   local recent
-  recent=$(find "$path" -maxdepth 3 -type f -newermt "-${activity_window_min} min" 2>/dev/null | head -1)
+  recent=$(find "$path" -maxdepth 3 -type f -mmin "-${activity_window_min}" -print 2>/dev/null | head -1 || true)
   [[ -n "$recent" ]]
 }
 

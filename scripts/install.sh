@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="1jehuang/jcode"
+REPO="jerudnik/jcode"
 IS_WINDOWS=false
 IS_TERMUX=false
 

@@ -25,49 +25,39 @@ jcode_load_remote_config() {
   config_file="$(jcode_remote_config_path)"
   [[ -n "$config_file" && -f "$config_file" ]] || return 0
 
-  local had_remote_cargo=0 remote_cargo=""
-  local had_remote_host=0 remote_host=""
-  local had_remote_dir=0 remote_dir=""
-  local had_remote_ssh_bin=0 remote_ssh_bin=""
-  local had_remote_rsync_bin=0 remote_rsync_bin=""
-
-  if [[ ${JCODE_REMOTE_CARGO+x} ]]; then
-    had_remote_cargo=1
-    remote_cargo="$JCODE_REMOTE_CARGO"
-  fi
-  if [[ ${JCODE_REMOTE_HOST+x} ]]; then
-    had_remote_host=1
-    remote_host="$JCODE_REMOTE_HOST"
-  fi
-  if [[ ${JCODE_REMOTE_DIR+x} ]]; then
-    had_remote_dir=1
-    remote_dir="$JCODE_REMOTE_DIR"
-  fi
-  if [[ ${JCODE_REMOTE_SSH_BIN+x} ]]; then
-    had_remote_ssh_bin=1
-    remote_ssh_bin="$JCODE_REMOTE_SSH_BIN"
-  fi
-  if [[ ${JCODE_REMOTE_RSYNC_BIN+x} ]]; then
-    had_remote_rsync_bin=1
-    remote_rsync_bin="$JCODE_REMOTE_RSYNC_BIN"
-  fi
+  local supported=(
+    JCODE_INCREMENTAL_POLICY
+    JCODE_REMOTE_CARGO
+    JCODE_REMOTE_CARGO_FALLBACK
+    JCODE_REMOTE_CONFIG
+    JCODE_REMOTE_CONNECT_TIMEOUT
+    JCODE_REMOTE_DIR
+    JCODE_REMOTE_DOWN_TTL
+    JCODE_REMOTE_HOST
+    JCODE_REMOTE_RECOVERY_TCP_TIMEOUT
+    JCODE_REMOTE_RSYNC_BIN
+    JCODE_REMOTE_RSYNC_SSH
+    JCODE_REMOTE_SERVER_ALIVE_COUNT_MAX
+    JCODE_REMOTE_SERVER_ALIVE_INTERVAL
+    JCODE_REMOTE_SSH_BIN
+    JCODE_REMOTE_TCP_PROBE
+    JCODE_REMOTE_TCP_TIMEOUT
+  )
+  local preserved_names=()
+  local preserved_values=()
+  local name
+  for name in "${supported[@]}"; do
+    if [[ ${!name+x} ]]; then
+      preserved_names+=("$name")
+      preserved_values+=("${!name}")
+    fi
+  done
 
   # shellcheck source=/dev/null
   source "$config_file"
 
-  if [[ "$had_remote_cargo" -eq 1 ]]; then
-    JCODE_REMOTE_CARGO="$remote_cargo"
-  fi
-  if [[ "$had_remote_host" -eq 1 ]]; then
-    JCODE_REMOTE_HOST="$remote_host"
-  fi
-  if [[ "$had_remote_dir" -eq 1 ]]; then
-    JCODE_REMOTE_DIR="$remote_dir"
-  fi
-  if [[ "$had_remote_ssh_bin" -eq 1 ]]; then
-    JCODE_REMOTE_SSH_BIN="$remote_ssh_bin"
-  fi
-  if [[ "$had_remote_rsync_bin" -eq 1 ]]; then
-    JCODE_REMOTE_RSYNC_BIN="$remote_rsync_bin"
-  fi
+  local i
+  for ((i = 0; i < ${#preserved_names[@]}; i++)); do
+    printf -v "${preserved_names[$i]}" '%s' "${preserved_values[$i]}"
+  done
 }

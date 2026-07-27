@@ -96,10 +96,20 @@ async fn graph_fixture_named(swarm_id: &str, coord: &str, worker: &str) -> Graph
 
 impl GraphFixture {
     async fn seed(&mut self, mode: &str, nodes: Vec<TaskGraphNodeSpec>) {
+        self.seed_replacing(mode, false, nodes).await;
+    }
+
+    async fn seed_replacing(
+        &mut self,
+        mode: &str,
+        replace_existing: bool,
+        nodes: Vec<TaskGraphNodeSpec>,
+    ) {
         handle_comm_seed_graph(
             1,
             self.coord.clone(),
             Some(mode.to_string()),
+            replace_existing,
             nodes,
             &self.client_tx,
             &self.swarm_members,
@@ -120,6 +130,7 @@ impl GraphFixture {
             1,
             self.coord.clone(),
             None,
+            false,
             nodes,
             &self.client_tx,
             &self.swarm_members,
@@ -250,39 +261,7 @@ async fn e2e_seed_creates_plan_with_kinds_and_edges() {
 }
 
 #[tokio::test]
-async fn e2e_identical_seed_replay_succeeds_without_version_or_node_churn() {
-    let (_env, _runtime) = RuntimeEnvGuard::new();
-    let mut fx = graph_fixture_named("swarm-seed-replay", "coord-replay", "worker-replay").await;
-    let nodes = vec![
-        node_spec("explore", "explore", &[]),
-        node_spec("synth", "synthesize", &["explore"]),
-    ];
-
-    fx.seed("deep", nodes.clone()).await;
-    while fx.client_rx.try_recv().is_ok() {}
-    let (version, item_count) = {
-        let plans = fx.swarm_plans.read().await;
-        let plan = &plans[&fx.swarm_id];
-        (plan.version, plan.items.len())
-    };
-
-    fx.seed("deep", nodes).await;
-
-    let plans = fx.swarm_plans.read().await;
-    let plan = &plans[&fx.swarm_id];
-    assert_eq!(plan.version, version, "a replay must not bump plan version");
-    assert_eq!(plan.items.len(), item_count, "a replay must not add nodes");
-    drop(plans);
-    let events: Vec<_> = std::iter::from_fn(|| fx.client_rx.try_recv().ok()).collect();
-    assert!(
-        events.iter().all(|event| !matches!(event, ServerEvent::Error { .. })),
-        "an identical replay must acknowledge success: {events:?}"
-    );
-    assert!(events.iter().any(|event| matches!(event, ServerEvent::Done { .. })));
-}
-
-#[tokio::test]
-async fn e2e_seed_rejects_conflicting_existing_definition_without_mutation() {
+async fn e2e_seed_rejects_nonempty_existing_definition_without_mutation() {
     let (_env, _runtime) = RuntimeEnvGuard::new();
     let mut fx = graph_fixture_named("swarm-seed-conflict", "coord-conflict", "worker-conflict").await;
     fx.seed("light", vec![node_spec("shared", "explore", &[])])
@@ -325,7 +304,7 @@ async fn e2e_seed_rejects_conflicting_existing_definition_without_mutation() {
     let events: Vec<_> = std::iter::from_fn(|| fx.client_rx.try_recv().ok()).collect();
     assert!(events.iter().any(|event| matches!(
         event,
-        ServerEvent::Error { message, .. } if message.contains("duplicate node id 'shared'")
+        ServerEvent::Error { message, .. } if message.contains("replace_existing=true")
     )));
 }
 
@@ -912,6 +891,7 @@ async fn e2e_solo_seeder_is_elected_coordinator_and_can_assign() {
         1,
         seeder.clone(),
         Some("deep".to_string()),
+        false,
         vec![
             node_spec("explore", "explore", &[]),
             node_spec("synth", "synthesize", &["explore"]),
@@ -1016,6 +996,7 @@ async fn e2e_seed_does_not_displace_live_coordinator() {
         1,
         worker.clone(),
         Some("deep".to_string()),
+        false,
         vec![node_spec("root", "explore", &[])],
         &client_tx,
         &swarm_members,
@@ -1301,8 +1282,9 @@ async fn e2e_assignee_can_complete_queued_assignment() {
     );
 }
 
-/// Regression: re-seeding a non-empty deep plan as light is a silent rigor
-/// downgrade (drops gates + artifact validation) and must be rejected.
+/// Regression: raw-protocol re-seeding of a non-empty deep plan as light must
+/// be rejected unless replacement is explicit. The tool itself defaults to
+/// replacement, which makes the lifecycle choice deterministically.
 #[tokio::test]
 async fn e2e_seed_rejects_light_downgrade_of_nonempty_deep_plan() {
     let (_env, _runtime) = RuntimeEnvGuard::new();
@@ -1323,7 +1305,7 @@ async fn e2e_seed_rejects_light_downgrade_of_nonempty_deep_plan() {
     let mut saw_downgrade_error = false;
     while let Ok(ev) = fx.client_rx.try_recv() {
         if let ServerEvent::Error { message, .. } = ev
-            && message.contains("deep-mode plan")
+            && message.contains("replace_existing=true")
         {
             saw_downgrade_error = true;
         }
