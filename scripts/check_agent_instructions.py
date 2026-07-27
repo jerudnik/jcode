@@ -8,7 +8,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Keep project-loaded policy compact enough to leave room for system and task
+# context. Warn before the hard 8 KiB ceiling so normal edits do not hit it
+# without notice.
 PROMPT_BUDGET_BYTES = 8 * 1024
+PROMPT_WARNING_BYTES = PROMPT_BUDGET_BYTES - 256
 GENERATED_AGENTS_OVERHEAD_BYTES = 512
 
 ROOT_PRIMITIVES = (
@@ -152,6 +156,13 @@ def main() -> int:
         errors.append(
             "compiled prompt budget exceeded: "
             f"{compiled_prompt_bytes} > {PROMPT_BUDGET_BYTES} bytes"
+        )
+    observed_prompt_bytes = max(prompt_bytes, compiled_prompt_bytes or 0)
+    if observed_prompt_bytes > PROMPT_WARNING_BYTES:
+        print(
+            "agent-instructions: warning: prompt budget has less than 256 bytes free: "
+            f"{observed_prompt_bytes}/{PROMPT_BUDGET_BYTES} bytes",
+            file=sys.stderr,
         )
 
     workflows = Path("docs/agent-workflows.md")

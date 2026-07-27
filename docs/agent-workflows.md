@@ -169,7 +169,7 @@ Run the repository drift check after any instruction change:
 python3 scripts/check_agent_instructions.py
 ```
 
-The check enforces the prompt budget, required source paths, link integrity, and the rule that operational command blocks live here rather than in prompt-loaded files.
+The check enforces the prompt budget, required source paths, link integrity, and the rule that operational command blocks live here rather than in prompt-loaded files. When ignored generated surfaces are present locally, it also verifies that their compiled bodies match the APM sources. Hermetic and CI checkouts validate the source projection because those generated files are intentionally not tracked.
 
 ## Closeout
 

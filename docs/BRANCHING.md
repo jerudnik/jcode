@@ -125,17 +125,18 @@ Every workflow lives on `main` with everything else.
 | `security.yml` | Secret scan + triaged cargo-audit gate; weekly full advisory report | push/PR touching deps, weekly |
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
+| `release.yml` | Fork release build and publication authority | tag push matching `v*` |
 | `ios-testflight.yml` | iOS TestFlight upload | manual dispatch |
-| `ci.yml`, `freebsd-smoke.yml`, `release.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
+| `ci.yml`, `freebsd-smoke.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
 
 The inherited upstream workflows are dispatch-only. They do not gate anything;
 `fork-ci.yml` does.
 
 ## Platforms
 
-This fork builds and tests on macOS and Linux, and ships through Nix. It
-publishes no GitHub releases; `scripts/install.sh` and `scripts/install.ps1`
-fetch upstream's.
+This fork builds and tests on macOS and Linux, ships through Nix, and publishes
+tagged GitHub release assets through `release.yml`. The legacy
+`scripts/install.sh` and `scripts/install.ps1` paths still fetch upstream's.
 
 Windows CI was removed (issue #19): the build/test job, the PowerShell syntax
 job, the `cargo-xwin` cross-target check, the Windows release matrix, and
