@@ -233,14 +233,17 @@ impl AntigravityProvider {
 
     async fn generate_content(
         &self,
-        model: &str,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-        system: &str,
-        resume_session_id: Option<&str>,
-        force_function_call: bool,
-        signature_policy: jcode_provider_gemini::SignaturePolicy,
+        request: GenerateContentRequest<'_>,
     ) -> Result<CodeAssistGenerateResponse> {
+        let GenerateContentRequest {
+            model,
+            messages,
+            tools,
+            system,
+            resume_session_id,
+            force_function_call,
+            signature_policy,
+        } = request;
         let mut tokens = antigravity_auth::load_or_refresh_tokens().await?;
         let project = match tokens
             .project_id
@@ -251,7 +254,16 @@ impl AntigravityProvider {
             None => {
                 let project_id = antigravity_auth::fetch_project_id(&tokens.access_token).await?;
                 tokens.project_id = Some(project_id.clone());
-                let _ = antigravity_auth::save_tokens(&tokens);
+                if let Err(err) = antigravity_auth::save_tokens(&tokens) {
+                    // Not fatal: the request proceeds with the id we just
+                    // fetched. But discarding this silently means every future
+                    // request re-fetches the project id, so the cost of a
+                    // broken token store shows up as latency with no
+                    // explanation anywhere.
+                    jcode_base::logging::warn(&format!(
+                        "failed to cache Antigravity project id: {err}"
+                    ));
+                }
                 project_id
             }
         };
@@ -377,6 +389,25 @@ impl AntigravityProvider {
     }
 }
 
+/// The inputs to one `generateContent` call.
+///
+/// Grouped into a struct rather than passed as eight positional parameters:
+/// the three call sites differ only in `force_function_call` and
+/// `signature_policy`, and with positional `bool`s the difference between a
+/// normal turn and a malformed-function-call retry was a bare `true`/`false`
+/// in the middle of six other arguments.
+struct GenerateContentRequest<'a> {
+    model: &'a str,
+    messages: &'a [Message],
+    tools: &'a [ToolDefinition],
+    system: &'a str,
+    resume_session_id: Option<&'a str>,
+    /// Force function-calling mode `ANY` instead of `AUTO`, the proven recovery
+    /// for a `MALFORMED_FUNCTION_CALL` empty turn.
+    force_function_call: bool,
+    signature_policy: jcode_provider_gemini::SignaturePolicy,
+}
+
 impl Default for AntigravityProvider {
     fn default() -> Self {
         Self::new()
@@ -432,15 +463,15 @@ impl Provider for AntigravityProvider {
             // and the model re-signs its new calls.
             let mut signature_policy = jcode_provider_gemini::SignaturePolicy::ReplayCarriedForward;
             let response = match provider
-                .generate_content(
-                    &model,
-                    &messages,
-                    &tools,
-                    &system,
-                    resume_session_id.as_deref(),
-                    false,
+                .generate_content(GenerateContentRequest {
+                    model: &model,
+                    messages: &messages,
+                    tools: &tools,
+                    system: &system,
+                    resume_session_id: resume_session_id.as_deref(),
+                    force_function_call: false,
                     signature_policy,
-                )
+                })
                 .await
             {
                 Ok(response) => response,
@@ -456,15 +487,15 @@ impl Provider for AntigravityProvider {
                     signature_policy =
                         jcode_provider_gemini::SignaturePolicy::DowngradeToolCallsToText;
                     match provider
-                        .generate_content(
-                            &model,
-                            &messages,
-                            &tools,
-                            &system,
-                            resume_session_id.as_deref(),
-                            false,
+                        .generate_content(GenerateContentRequest {
+                            model: &model,
+                            messages: &messages,
+                            tools: &tools,
+                            system: &system,
+                            resume_session_id: resume_session_id.as_deref(),
+                            force_function_call: false,
                             signature_policy,
-                        )
+                        })
                         .await
                     {
                         Ok(response) => response,
@@ -488,15 +519,15 @@ impl Provider for AntigravityProvider {
             while is_retryable_empty_turn(&response) && malformed_retries < MAX_MALFORMED_RETRIES {
                 malformed_retries += 1;
                 match provider
-                    .generate_content(
-                        &model,
-                        &messages,
-                        &tools,
-                        &system,
-                        resume_session_id.as_deref(),
-                        true,
+                    .generate_content(GenerateContentRequest {
+                        model: &model,
+                        messages: &messages,
+                        tools: &tools,
+                        system: &system,
+                        resume_session_id: resume_session_id.as_deref(),
+                        force_function_call: true,
                         signature_policy,
-                    )
+                    })
                     .await
                 {
                     Ok(retried) => response = retried,

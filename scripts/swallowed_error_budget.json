@@ -749,6 +749,11 @@
     "crates/jcode-base/src/import.rs": {
       "dot_ok": 3,
       "let_underscore": 0,
+      "unwrap_or_default": 0
+    },
+    "crates/jcode-base/src/import_external.rs": {
+      "dot_ok": 0,
+      "let_underscore": 0,
       "unwrap_or_default": 4
     },
     "crates/jcode-base/src/login_qr.rs": {
