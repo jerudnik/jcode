@@ -79,6 +79,21 @@
           # Version is the single source of truth from the root Cargo.toml.
           inherit ((craneLib.crateNameFromCargoToml { src = ./.; })) version;
 
+          checkSrc = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              ./flake.nix
+              ./rust-toolchain.toml
+              ./nix
+              ./scripts/preflight.sh
+              ./.github/workflows/fork-ci.yml
+              ./.github/workflows/fork-health.yml
+              ./.github/workflows/security.yml
+              ./.github/workflows/nix.yml
+              ./.github/workflows/nix-update.yml
+            ];
+          };
+
           jcode = pkgs.callPackage ./nix/package.nix {
             inherit craneLib version;
             # Stamp the binary with the flake's source revision when available
@@ -94,16 +109,79 @@
             inherit jcode;
           };
 
-          # CI gates run by `nix flake check`. We intentionally do NOT duplicate
-          # clippy/rustfmt/test here: those are owned by the upstream `ci.yml`
-          # against its pinned `stable` toolchain. Re-running them through the
-          # flake's rust-overlay toolchain only produces spurious version-skew
-          # failures. Dependency security auditing runs as a separate,
-          # non-blocking CI job. Package builds are covered by the workflow's
-          # trusted push/dispatch matrix; PR validation uses
-          # `nix flake check --no-build --all-systems` to evaluate every public
-          # flake surface without duplicating full package builds.
-          checks = { };
+          # CI gates run by `nix flake check`. Keep these cheap, local, and valid
+          # on every flake system: Rust clippy/fmt/tests and the package build are
+          # already covered by fork-ci.yml / nix.yml, while security auditing is a
+          # separate non-blocking workflow. These checks instead validate the Nix
+          # surface, local preflight entry point, fork-owned workflows, and pinned
+          # Rust-toolchain contract without network access or another full build.
+          checks = {
+            nix-format =
+              pkgs.runCommand "jcode-nix-format-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [ pkgs.nixfmt ];
+                }
+                ''
+                  cd "$src"
+                  nixfmt --check flake.nix nix/*.nix nix/modules/*.nix
+                  touch "$out"
+                '';
+
+            preflight-shell =
+              pkgs.runCommand "jcode-preflight-shell-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [ pkgs.shellcheck ];
+                }
+                ''
+                  cd "$src"
+                  bash -n scripts/preflight.sh
+                  shellcheck -e SC2016 scripts/preflight.sh
+                  touch "$out"
+                '';
+
+            workflow-syntax =
+              pkgs.runCommand "jcode-workflow-syntax-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [ pkgs.actionlint ];
+                }
+                ''
+                  cd "$src"
+                  actionlint \
+                    .github/workflows/fork-ci.yml \
+                    .github/workflows/fork-health.yml \
+                    .github/workflows/security.yml \
+                    .github/workflows/nix.yml \
+                    .github/workflows/nix-update.yml
+                  touch "$out"
+                '';
+
+            rust-toolchain-coherence =
+              pkgs.runCommand "jcode-rust-toolchain-coherence-check"
+                {
+                  src = checkSrc;
+                }
+                ''
+                  cd "$src"
+                  expected="${rustVersion}"
+                  toolchain_version=$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)
+                  flake_version=$(sed -n 's/^[[:space:]]*rustVersion = "\([^"]*\)";$/\1/p' flake.nix)
+
+                  if [ "$toolchain_version" != "$expected" ]; then
+                    echo "rust-toolchain.toml pins '$toolchain_version'; expected '$expected'" >&2
+                    exit 1
+                  fi
+
+                  if [ "$flake_version" != "$expected" ]; then
+                    echo "flake.nix pins '$flake_version'; expected '$expected'" >&2
+                    exit 1
+                  fi
+
+                  touch "$out"
+                '';
+          };
 
           devShells.default = craneLib.devShell {
             inherit (self') checks;
