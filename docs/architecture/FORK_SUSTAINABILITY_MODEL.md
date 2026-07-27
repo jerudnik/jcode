@@ -1,8 +1,15 @@
 # Fork Sustainability Model
 
+> [!WARNING]
+> Historical architecture record. This model was superseded on 2026-07-27 by
+> the independent hard-fork policy in
+> [`../fork/SYNC_MODEL.md`](../fork/SYNC_MODEL.md). Its sync, rebase, `rerere`,
+> and patch-accounting statements are preserved as evidence and are not current
+> maintenance instructions.
+
 Date: 2026-06-27 (refreshed 2026-06-29: mermaid worked example, test-suite
 evidence, NS4 provenance shipped)
-Status: cut-down target. Supersedes the prior tiered/feature-variant draft.
+Status: historical; superseded by the independent hard-fork model.
 Scope: keep a fast-moving upstream fork + in-repo Nix packaging + personal feature
 work sustainable, with the *minimum* machinery that actually pays for itself.
 

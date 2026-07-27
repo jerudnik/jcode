@@ -15,5 +15,5 @@ applyTo: "**"
 ## Child DOX index
 
 - `.apm/AGENTS.md`: APM sources and generation rules.
-- `docs/AGENTS.md`: fork maintenance and integration documentation.
+- `docs/AGENTS.md`: independent hard-fork maintenance and integration documentation.
 - `crates/jcode-desktop/AGENTS.md`: desktop-specific self-development guidance.

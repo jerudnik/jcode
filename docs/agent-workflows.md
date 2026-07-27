@@ -37,7 +37,7 @@ Use the fast suite when the change crosses several crates:
 scripts/test_fast.sh
 ```
 
-Run the fork guardrails before closeout for workspace-impacting changes or harvested upstream code:
+Run the hard-fork guardrails before closeout for workspace-impacting changes or imported external code:
 
 ```bash
 scripts/preflight.sh --ratchets-only

@@ -1,23 +1,25 @@
-# Fork Sync Model
+# Hard-Fork Independence Model
 
 Last reviewed: 2026-07-27
 
 See also:
 
 - [`../BRANCHING.md`](../BRANCHING.md) — the rail model and the `fork-point` tag
-- [`patch-ledger.md`](./patch-ledger.md)
 - [`../architecture/FORK_SUSTAINABILITY_MODEL.md`](../architecture/FORK_SUSTAINABILITY_MODEL.md)
+  — historical architecture that this model superseded
 
 ## Current model: hard fork
 
-**There is no sync.** As of 2026-07-27 this is a hard fork of `1jehuang/jcode`.
-No branch tracks upstream, no scheduled job rebases onto it, and no rail is
-expected to converge with it. The divergence point is frozen as the immutable
-`fork-point` tag (`631935dd1d`).
+**There is no sync or upstream-tracking contract.** As of 2026-07-27 this is an
+independently maintained hard fork descended from `1jehuang/jcode`. No branch
+tracks upstream, no scheduled process reviews its delta, no patch stack or patch
+ledger is maintained, and no rail is expected to converge with it. The lineage
+point is frozen as the immutable `fork-point` tag (`631935dd1d`).
 
-`upstream` stays configured as a read-only reference remote so individual fixes
-can still be read and cherry-picked. See "Taking a specific fix from upstream"
-in [`../BRANCHING.md`](../BRANCHING.md).
+If configured, `upstream` is optional read-only lineage/reference material, not
+a maintained relationship or backlog. A specific useful external change may be
+imported through the normal local review process; doing so creates no obligation
+to inspect adjacent or future upstream work.
 
 ## What this replaced
 
@@ -66,18 +68,19 @@ target to converge on:
 
 ## Quality asymmetry
 
-Upstream code generally does not satisfy this fork's gates: the warning budget,
+External code may not satisfy this repository's gates: the warning budget,
 swallowed-error and panic ratchets, code-size ceilings, dependency boundaries,
-and the config env lease. Any harvested commit must be brought up to standard,
-never accommodated by raising a budget. The eight commits harvested at fork
+and the config env lease. Any imported commit must be brought up to standard,
+never accommodated by raising a budget. The eight commits imported at fork
 declaration needed three such fixes between them.
 
 This asymmetry is why the fork-touched clippy and rustfmt gates exist: lints are
 blocking in files this fork owns and advisory in untouched upstream files, with
 the boundary computed against `fork-point`.
 
-## Upstreaming
+## External reuse and contribution
 
-Fork-owned changes that upstream would plausibly want may still be offered as
-pull requests, best-effort. The fork does not wait on upstream acceptance before
-continuing to own and harden its surface.
+Code may be reused from or contributed to any external project when useful, but
+that is ordinary collaboration rather than fork maintenance. Jcode has no
+upstreaming obligation and does not wait on another repository before owning,
+changing, or removing its product surface.

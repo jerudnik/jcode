@@ -1,5 +1,10 @@
 # Fork Sustainability Review Synthesis
 
+> [!WARNING]
+> Historical review record. The target model below was superseded on 2026-07-27
+> by [`../fork/SYNC_MODEL.md`](../fork/SYNC_MODEL.md). Preserve its findings as
+> evidence, but do not use its upstream-rebase language as current policy.
+
 Date: 2026-06-27
 Status: synthesis for the cut-down `FORK_SUSTAINABILITY_MODEL.md`.
 

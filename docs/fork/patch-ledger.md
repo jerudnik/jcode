@@ -1,10 +1,12 @@
-# Downstream patch ledger
+# Retired downstream patch ledger
 
-Last audited: 2026-07-27
+Frozen: 2026-07-27
 
-Track downstream patches that may need to be upstreamed, watched, or retired.
-Permanent fork behavior can stay here too, but every temporary shim must have a
-retirement condition and validation command.
+This is a historical snapshot from the former upstream-tracking model. It is not
+an active ownership, retirement, upstreaming, or maintenance authority. Do not
+add or update rows. Current code, tests, architecture docs, and issues define the
+independent hard fork's obligations. Some rows below intentionally describe
+sync machinery that no longer exists.
 
 Retired 2026-07-27: the downstream Anthropic OAuth allowlist and
 `oauth_extra_tools` setting were removed in favor of upstream's full registered

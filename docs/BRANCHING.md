@@ -1,7 +1,9 @@
-# Fork branch maintenance
+# Hard-fork branch maintenance
 
-This is a **hard fork** of `1jehuang/jcode`. It does not track upstream, and it
-has a single rail: `main`.
+This is an independently maintained **hard fork** descended from
+`1jehuang/jcode`. It has a single authoritative rail, `main`. It does not track,
+mirror, or periodically review upstream, and it maintains no downstream patch
+stack or patch ledger.
 
 ```mermaid
 gitGraph
@@ -55,12 +57,14 @@ telemetry consent, session handling, and CI policy, and has quality gates
 (warning budget, swallowed-error and panic ratchets, code-size ceilings,
 dependency boundaries) that upstream code does not satisfy.
 
-`upstream` remains configured as a **read-only reference remote**. Fetch it to
-read code or cherry-pick a specific fix; never rebase the rail onto it.
+An `upstream` remote may remain configured as optional **read-only lineage and
+reference material**. It is not a maintained relationship or source of work.
+Never rebase the rail onto it.
 
-## Taking a specific fix from upstream
+## Reusing a specific external fix
 
-There is no automated sync. To adopt an individual upstream fix:
+There is no sync or review cadence. If a specific change in the lineage project
+is independently useful, it may be imported like any other external change:
 
 ```sh
 git fetch upstream
@@ -68,14 +72,12 @@ git log --oneline fork-point..upstream/master   # browse
 git cherry-pick -x <sha>                        # -x records the origin
 ```
 
-Then run `scripts/preflight.sh`. Upstream code frequently does not satisfy this
-fork's gates (oversized files, swallowed errors, clippy lints), and the
-harvested commit must be brought up to standard rather than the budget raised
-to accommodate it. Applying cleanly says a patch does not textually conflict;
-it says nothing about whether the result is correct here.
-
-See [fork-sync-policy.md](fork-sync-policy.md) for the harvest ledger of what
-has been adopted and skipped.
+Then run `scripts/preflight.sh`. Imported code frequently does not satisfy this
+repository's gates (oversized files, swallowed errors, clippy lints), and it
+must be brought up to local standards rather than admitted by raising a budget.
+Applying cleanly says a patch does not textually conflict; it says nothing about
+whether the result is correct here. There is no obligation to review other
+upstream changes or record adopted and skipped commits in a ledger.
 
 ## Local development
 
@@ -134,9 +136,10 @@ The inherited upstream workflows are dispatch-only. They do not gate anything;
 
 ## Platforms
 
-This fork builds and tests on macOS and Linux, ships through Nix, and publishes
+This hard fork builds and tests on macOS and Linux, ships through Nix, and publishes
 tagged GitHub release assets through `release.yml`. The legacy
-`scripts/install.sh` and `scripts/install.ps1` paths still fetch upstream's.
+`scripts/install.sh` and `scripts/install.ps1` paths use those hard-fork assets;
+they do not install lineage-project releases.
 
 Windows CI was removed (issue #19): the build/test job, the PowerShell syntax
 job, the `cargo-xwin` cross-target check, the Windows release matrix, and

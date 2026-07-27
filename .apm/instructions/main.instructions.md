@@ -1,11 +1,11 @@
 ---
-description: Repository-wide working contract for the Jcode downstream fork.
+description: Repository-wide working contract for the independent Jcode hard fork.
 applyTo: "**"
 ---
 
 # Repository contract
 
-This is the downstream Jcode fork. Treat the live repository as authoritative and read `docs/agent-workflows.md` before broad build, CI, release, swarm, or instruction work.
+This is the independent Jcode hard fork. The live repository and its `main` branch are authoritative; there is no upstream-tracking, patch-stack, or convergence contract. Read `docs/agent-workflows.md` before broad build, CI, release, swarm, or instruction work.
 
 ## Work safely
 

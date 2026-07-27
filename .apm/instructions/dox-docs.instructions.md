@@ -1,5 +1,5 @@
 ---
-description: DOX contract for docs/ — fork maintenance, downstream patch ledger, and 4nix integration notes.
+description: DOX contract for docs/ — independent hard-fork maintenance and integration notes.
 applyTo: "docs/**"
 ---
 
@@ -7,21 +7,21 @@ applyTo: "docs/**"
 
 ## Purpose
 
-Code-adjacent reference for maintaining the downstream fork: branch topology, Nix packaging, GitHub workflow behavior, downstream patch ledger, and 4nix integration contracts.
+Code-adjacent reference for maintaining the independent hard fork: branch topology, Nix packaging, GitHub workflow behavior, product-specific architecture, and 4nix integration contracts.
 
 ## Ownership
 
-- `BRANCHING.md` — branch roles, rebase flow, patch classes, and CI ownership.
+- `BRANCHING.md` — single-rail hard-fork policy, external-code reuse, and CI ownership.
 - `NIX.md` — flake packaging, Home Manager module, Cachix, and install/use notes.
 - `agent-workflows.md` — detailed agent build, test, selfdev, swarm, CI, and release procedures.
-- `fork/patch-ledger.md` — durable ledger for temporary shims, upstreamable patches, and permanent downstream features.
-- Other docs stay close to implementation and should not duplicate upstream docs unless the fork changes behavior.
+- `fork/SYNC_MODEL.md` — repository independence, lineage, and the retired sync model.
+- `fork/patch-ledger.md` and `fork-sync-policy.md` are frozen historical records, not active maintenance authorities.
+- Other docs stay close to implementation and should describe current Jcode behavior without assuming another repository is authoritative.
 
 ## Local Contracts
 
 - Keep branch topology docs aligned with actual maintained branches and GitHub workflow names.
-- Every temporary shim, compatibility workaround, or planned upstream PR must have an entry in `docs/fork/patch-ledger.md` with a retire condition and validation command.
-- Permanent downstream behavior can stay in the ledger, but label it clearly as `permanent-downstream`.
+- Do not create upstream-tracking machinery, patch-stack obligations, or patch-ledger requirements. Record current behavior and rationale next to the owning code, tests, architecture doc, or issue.
 - 4nix-facing packaging contracts belong in docs when they affect the `github:jerudnik/jcode/main` flake input.
 - Use direct, operational prose. Do not leave historical diary notes in durable docs.
 - Keep operational command blocks in `agent-workflows.md`; prompt-loaded files should link to it instead of copying them.
@@ -30,7 +30,7 @@ Code-adjacent reference for maintaining the downstream fork: branch topology, Ni
 
 - Update docs in the same commit as branch, packaging, workflow, or fork-policy changes.
 - Prefer function-oriented validation language: say what behavior is proved and then list the command.
-- Avoid generic remote names in durable docs. Use `github`, `upstream`, and `forgejo`.
+- Avoid generic remote names in durable procedures. Discover configured remotes, and mention `upstream` only as optional lineage/reference material rather than a tracked authority.
 
 ## Verification
 

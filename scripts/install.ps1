@@ -5,10 +5,10 @@
     Downloads the latest jcode release and installs it to %LOCALAPPDATA%\jcode\bin.
 
     One-liner install:
-      irm https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.ps1 | iex
+      irm https://raw.githubusercontent.com/jerudnik/jcode/main/scripts/install.ps1 | iex
 
     Or download and run (allows parameters):
-      & ([scriptblock]::Create((irm https://raw.githubusercontent.com/1jehuang/jcode/master/scripts/install.ps1)))
+      & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jerudnik/jcode/main/scripts/install.ps1)))
 .PARAMETER InstallDir
     Override the installation directory (default: $env:LOCALAPPDATA\jcode\bin)
 .PARAMETER Version
@@ -38,7 +38,7 @@ if ($PSVersionTable.PSVersion.Major -lt 5) {
     exit 1
 }
 
-$Repo = "1jehuang/jcode"
+$Repo = "jerudnik/jcode"
 
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:LOCALAPPDATA "jcode\bin"

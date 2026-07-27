@@ -79,8 +79,9 @@ default branch):
 - **flake.lock updates** (`nix-update.yml`) run weekly on Monday and open a PR
   against `main`.
 
-There is no upstream sync workflow: this is a hard fork and upstream fixes are
-cherry-picked by hand (see [BRANCHING.md](BRANCHING.md)).
+There is no upstream sync or review workflow. This is an independent hard fork;
+external fixes are considered only when someone identifies a specific local
+need (see [BRANCHING.md](BRANCHING.md)).
 
 To trigger either of them manually:
 

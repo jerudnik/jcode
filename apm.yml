@@ -1,6 +1,6 @@
 name: jcode-fork
 version: 1.0.0
-description: APM project for the jerudnik jcode downstream fork
+description: APM project for the independent jerudnik Jcode hard fork
 author: john rudnik
 targets:
 - claude

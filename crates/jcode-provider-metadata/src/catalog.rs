@@ -10,7 +10,7 @@ pub const OPENCODE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "OPENCODE_API_KEY",
     api_key_aliases: &[],
     env_file: "opencode.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("minimax-m2.7"),
     requires_api_key: true,
 };
@@ -22,7 +22,7 @@ pub const OPENCODE_GO_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile
     api_key_env: "OPENCODE_GO_API_KEY",
     api_key_aliases: &[],
     env_file: "opencode-go.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
     requires_api_key: true,
 };
@@ -58,7 +58,7 @@ pub const AI302_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "302AI_API_KEY",
     api_key_aliases: &[],
     env_file: "302ai.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("qwen3-235b-a22b-instruct-2507"),
     requires_api_key: true,
 };
@@ -70,7 +70,7 @@ pub const BASETEN_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "BASETEN_API_KEY",
     api_key_aliases: &[],
     env_file: "baseten.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("zai-org/GLM-4.7"),
     requires_api_key: true,
 };
@@ -82,7 +82,7 @@ pub const CORTECS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "CORTECS_API_KEY",
     api_key_aliases: &[],
     env_file: "cortecs.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
     requires_api_key: true,
 };
@@ -194,7 +194,7 @@ pub const FIRMWARE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "FIRMWARE_API_KEY",
     api_key_aliases: &[],
     env_file: "firmware.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
     requires_api_key: true,
 };
@@ -206,7 +206,7 @@ pub const HUGGING_FACE_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfil
     api_key_env: "HF_TOKEN",
     api_key_aliases: &[],
     env_file: "huggingface.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("zai-org/GLM-4.7"),
     requires_api_key: true,
 };
@@ -218,7 +218,7 @@ pub const MOONSHOT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "MOONSHOT_API_KEY",
     api_key_aliases: &[],
     env_file: "moonshotai.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("kimi-k2.5"),
     requires_api_key: true,
 };
@@ -230,7 +230,7 @@ pub const NEBIUS_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "NEBIUS_API_KEY",
     api_key_aliases: &[],
     env_file: "nebius.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("openai/gpt-oss-120b"),
     requires_api_key: true,
 };
@@ -242,7 +242,7 @@ pub const SCALEWAY_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "SCALEWAY_API_KEY",
     api_key_aliases: &[],
     env_file: "scaleway.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("qwen3-coder-30b-a3b-instruct"),
     requires_api_key: true,
 };
@@ -254,7 +254,7 @@ pub const STACKIT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfile {
     api_key_env: "STACKIT_API_KEY",
     api_key_aliases: &[],
     env_file: "stackit.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: Some("openai/gpt-oss-120b"),
     requires_api_key: true,
 };
@@ -450,7 +450,7 @@ pub const OPENAI_COMPAT_PROFILE: OpenAiCompatibleProfile = OpenAiCompatibleProfi
     api_key_env: "OPENAI_COMPAT_API_KEY",
     api_key_aliases: &[],
     env_file: "openai-compatible.env",
-    setup_url: "https://github.com/1jehuang/jcode#openai-compatible-providers",
+    setup_url: "https://github.com/jerudnik/jcode#openai-compatible-providers",
     default_model: None,
     requires_api_key: true,
 };
