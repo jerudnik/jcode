@@ -1,9 +1,7 @@
 name: Release metadata
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
 
 concurrency:
   group: release-${{ github.ref }}

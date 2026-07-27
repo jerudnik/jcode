@@ -54,6 +54,8 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("metadata-only GitHub release", workflow)
         self.assertIn("must not contain binary assets", workflow)
+        self.assertIn("workflow_call", workflow)
+        self.assertNotIn("tags:", workflow)
         for banned in (
             "actions/upload-artifact",
             "actions/download-artifact",
@@ -94,6 +96,8 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         self.assertIn("cachix/cachix-action", nix_workflow)
         self.assertIn("Require Cachix publication for release tags", nix_workflow)
         self.assertIn("nix build .#packages.${{ matrix.system }}.jcode", nix_workflow)
+        self.assertIn("needs: [validate, build]", nix_workflow)
+        self.assertIn("uses: ./.github/workflows/release.yml", nix_workflow)
 
         ios_workflow = (ROOT / ".github/workflows/ios.yml").read_text()
         self.assertIn("CODE_SIGNING_ALLOWED=NO", ios_workflow)

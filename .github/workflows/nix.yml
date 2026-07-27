@@ -193,3 +193,11 @@ jobs:
         # the sandbox) and verify it actually runs.
         run: |
           ./result/bin/jcode --version
+
+  release-metadata:
+    name: publish metadata-only release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate, build]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml

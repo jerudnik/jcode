@@ -52,13 +52,12 @@ git push <fork-remote> vX.Y.Z
 Discover the configured fork remote with `git remote -v`; do not assume it is
 named `origin`.
 
-A `v*` tag triggers two independent workflows:
-
-- `.github/workflows/nix.yml` evaluates, builds, smoke-tests, and pushes the
-  tagged flake outputs to Cachix.
-- `.github/workflows/release.yml` verifies that the tagged commit belongs to
-  authoritative `main`, renders notes, and publishes a metadata-only GitHub
-  release. It fails if release assets are attached.
+A `v*` tag triggers `.github/workflows/nix.yml`, which evaluates, builds,
+smoke-tests, and pushes the tagged flake outputs to Cachix. Only after every
+required Nix/Cachix job succeeds does it call `.github/workflows/release.yml`
+to verify that the tagged commit belongs to authoritative `main`, render notes,
+and publish a metadata-only GitHub release. Publication fails if assets are
+attached.
 
 The flake and Cachix are the only repository-owned binary authority. Retired
 channels must not be recreated, including shell or PowerShell installers,
