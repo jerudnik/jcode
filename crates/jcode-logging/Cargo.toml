@@ -1,6 +1,7 @@
 [package]
 name = "jcode-logging"
 version = "0.1.0"
+publish = false
 edition = "2024"
 description = "File logging, structured events, and thread/task-local logging context for jcode"
 

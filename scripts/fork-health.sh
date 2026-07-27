@@ -113,7 +113,7 @@ fi
 # ── 3) CI table currency ─────────────────────────────────────────────────────
 # docs/BRANCHING.md documents what each workflow is for. A table that silently
 # omits a workflow is worse than no table: it reads as complete. This was not
-# hypothetical, ios-testflight.yml went undocumented until this check was
+# hypothetical, ios.yml went undocumented until this check was
 # written. Only presence is checked; the prose is a human's job.
 undocumented=""
 for wf in .github/workflows/*.yml; do

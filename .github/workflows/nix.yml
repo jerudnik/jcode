@@ -12,6 +12,7 @@ name: Nix
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "flake.nix"
       - "flake.lock"
@@ -20,6 +21,16 @@ on:
       - "Cargo.lock"
       - "crates/**"
       - "src/**"
+      - "scripts/**"
+      - "tests/**"
+      - ".apm/instructions/main.instructions.md"
+      - "README.md"
+      - "RELEASING.md"
+      - "docs/BRANCHING.md"
+      - "docs/IOS_APP.md"
+      - "docs/NIX.md"
+      - "docs/WINDOWS.md"
+      - "docs/WRAPPERS.md"
       - ".github/workflows/**"
   pull_request:
     branches: [main]
@@ -31,6 +42,16 @@ on:
       - "Cargo.lock"
       - "crates/**"
       - "src/**"
+      - "scripts/**"
+      - "tests/**"
+      - ".apm/instructions/main.instructions.md"
+      - "README.md"
+      - "RELEASING.md"
+      - "docs/BRANCHING.md"
+      - "docs/IOS_APP.md"
+      - "docs/NIX.md"
+      - "docs/WINDOWS.md"
+      - "docs/WRAPPERS.md"
       - ".github/workflows/**"
   workflow_dispatch:
 
@@ -67,6 +88,7 @@ jobs:
             .github/workflows/docs-impact.yml \
             .github/workflows/fork-ci.yml \
             .github/workflows/fork-health.yml \
+            .github/workflows/ios.yml \
             .github/workflows/security.yml \
             .github/workflows/nix.yml \
             .github/workflows/nix-update.yml \
@@ -77,6 +99,9 @@ jobs:
 
       - name: Evaluate flake checks
         run: nix flake check --accept-flake-config --no-build --all-systems --option eval-cores 1
+
+      - name: Enforce Nix-only distribution policy
+        run: nix build .#checks.x86_64-linux.nix-distribution-policy --print-build-logs
 
       - name: Verify flake.lock is committed
         if: github.event_name == 'pull_request'
@@ -121,24 +146,32 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     env:
-      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.CACHIX_AUTH_TOKEN != '' }}
+      CACHIX_CAN_PUSH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && secrets.CACHIX_AUTH_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v5
+
+      - name: Require Cachix publication for release tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          if [ "$CACHIX_CAN_PUSH" != "true" ]; then
+            echo "Tagged releases require CACHIX_AUTH_TOKEN; Cachix is the sole binary publication channel." >&2
+            exit 1
+          fi
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
       - name: Cachix (read/write public binary cache)
         if: env.CACHIX_CAN_PUSH == 'true'
-        continue-on-error: true
+        continue-on-error: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         uses: cachix/cachix-action@v17
         with:
           name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          # Build success is authoritative; cache upload is best-effort. Daemon
-          # mode pushes the full dependency build closure and can fail during
-          # post-job drain after the package already built and smoke-tested
-          # successfully. Push just the final result path.
+          # Main-branch cache upload is best-effort, but tag publication is a
+          # release requirement. Push just the final result path rather than
+          # relying on daemon post-job closure draining.
           useDaemon: false
           pathsToPush: ./result
           cachixArgs: -j2
