@@ -671,7 +671,7 @@ impl AcpConfig {
 }
 
 /// Controls which tools are sent to the model.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ToolConfig {
     /// Tool profile: "full" (default), "acp", "minimal"/"lite", or "none".
@@ -683,17 +683,6 @@ pub struct ToolConfig {
     pub disabled: Vec<String>,
     /// Disable all built-in tools unless `enabled` is provided.
     pub disable_base_tools: bool,
-}
-
-impl Default for ToolConfig {
-    fn default() -> Self {
-        Self {
-            profile: String::new(),
-            enabled: Vec::new(),
-            disabled: Vec::new(),
-            disable_base_tools: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
