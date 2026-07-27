@@ -78,6 +78,8 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
             "APPSTORE_API_KEY",
             "notarytool submit",
             "cargo publish",
+            "DeterminateSystems/nix-installer-action",
+            "flakehub",
         )
         workflow_dir = ROOT / ".github/workflows"
         workflows = list(workflow_dir.glob("*.yml")) + list(workflow_dir.glob("*.yaml"))
@@ -94,6 +96,7 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         self.assertIn("packages", flake)
         self.assertIn('tags: ["v*"]', nix_workflow)
         self.assertIn("cachix/cachix-action", nix_workflow)
+        self.assertIn("cachix/install-nix-action@v31", nix_workflow)
         self.assertIn("Require Cachix publication for release tags", nix_workflow)
         self.assertIn("nix build .#packages.${{ matrix.system }}.jcode", nix_workflow)
         self.assertIn("needs: [validate, build]", nix_workflow)

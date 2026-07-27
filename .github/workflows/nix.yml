@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: cachix/install-nix-action@v31
 
       - name: Cachix (read-only public binary cache)
         uses: cachix/cachix-action@v17
@@ -160,7 +160,7 @@ jobs:
           fi
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: cachix/install-nix-action@v31
 
       - name: Cachix (read/write public binary cache)
         if: env.CACHIX_CAN_PUSH == 'true'
