@@ -432,6 +432,55 @@ def validate_state(state: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> N
             )
 
 
+def expansion_violations(graph: dict[str, Any], state: dict[str, Any]) -> dict[str, str]:
+    """Roots whose recorded state contradicts their children, by root id.
+
+    ``validate_state`` only checks each record in isolation, so a root could sit
+    at ``pending`` while every one of its children was ``accepted`` and ``check``
+    would still report OK. That is not a harmless lag: ``ready_nodes`` treats a
+    pending root as unexpanded and re-emits ``seed_and_expand``, which invites
+    re-doing finished work. W3 reached exactly that state (nine accepted
+    children under a pending root) with the gate green, which is why this
+    exists.
+    """
+    records = state["nodes"]
+    violations: dict[str, str] = {}
+    for root_id, children in graph["expansions"].items():
+        if not children:
+            continue
+        root_state = records[root_id]["state"]
+        child_states = [records[child["id"]]["state"] for child in children]
+        if root_state == "pending" and any(
+            child != "pending" for child in child_states
+        ):
+            started = sorted(
+                child["id"]
+                for child in children
+                if records[child["id"]]["state"] != "pending"
+            )
+            violations[root_id] = (
+                f"{root_id}: root is pending but children have progressed "
+                f"({', '.join(started)}); a pending root is re-seeded as "
+                "unexpanded work"
+            )
+        elif root_state not in DEPENDENCY_COMPLETE and all(
+            child in DEPENDENCY_COMPLETE for child in child_states
+        ):
+            violations[root_id] = (
+                f"{root_id}: every child is complete but the root is "
+                f"{root_state!r}; close the wave or record why it cannot close"
+            )
+    return violations
+
+
+def validate_expansion_consistency(
+    graph: dict[str, Any], state: dict[str, Any]
+) -> None:
+    violations = expansion_violations(graph, state)
+    if violations:
+        raise RailwayError("; ".join(violations[key] for key in sorted(violations)))
+
+
 def validate_repository() -> tuple[
     dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]
 ]:
@@ -439,6 +488,7 @@ def validate_repository() -> tuple[
     state = load_json(STATE_PATH)
     nodes = validate_graph(graph)
     validate_state(state, nodes)
+    validate_expansion_consistency(graph, state)
     actual_hash = sha256(PROTECTED_PROMPT)
     if actual_hash != PROTECTED_PROMPT_SHA256:
         raise RailwayError(
@@ -545,7 +595,15 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def command_checkpoint(args: argparse.Namespace) -> int:
-    graph, state, nodes = validate_repository()
+    # Deliberately not `validate_repository()`: that also enforces expansion
+    # consistency, and a checkpoint is precisely how an inconsistent root is
+    # repaired. Gating entry on it would deadlock the only tool that can fix
+    # the problem. Consistency is enforced on the *resulting* state below, so
+    # a checkpoint may repair an inconsistency but never introduce one.
+    graph = load_json(GRAPH_PATH)
+    state = load_json(STATE_PATH)
+    nodes = validate_graph(graph)
+    validate_state(state, nodes)
     if args.node not in nodes:
         raise RailwayError(f"unknown node: {args.node}")
     if args.state not in ALLOWED_STATES:
@@ -600,9 +658,35 @@ def command_checkpoint(args: argparse.Namespace) -> int:
             "updated_at": args.updated_at,
             "summary": args.summary,
         }
+        # Validate the prospective state before it reaches disk. Writing first
+        # and validating after would leave a rejected state persisted, which is
+        # worse than the inconsistency being prevented.
+        #
+        # Consistency is judged as a delta, not an absolute: a checkpoint must
+        # not introduce or worsen a violation, but it must stay able to repair
+        # one. Demanding a globally clean result would deadlock repair whenever
+        # two roots drifted at once, since neither could be fixed first.
+        validate_state(latest, nodes)
+        before = expansion_violations(graph, state)
+        after = expansion_violations(graph, latest)
+        introduced = {
+            root: message
+            for root, message in after.items()
+            if before.get(root) != message
+        }
+        if introduced:
+            raise RailwayError(
+                "; ".join(introduced[key] for key in sorted(introduced))
+            )
         atomic_write_json(STATE_PATH, latest)
-    validate_repository()
     print(f"checkpointed {args.node} -> {args.state}")
+    remaining = expansion_violations(graph, latest)
+    if remaining:
+        # Surface, do not fail: the checkpoint was legitimate and is written.
+        # These are pre-existing inconsistencies that this checkpoint did not
+        # cause, and each needs its own repairing checkpoint.
+        for key in sorted(remaining):
+            print(f"warning: {remaining[key]}")
     return 0
 
 

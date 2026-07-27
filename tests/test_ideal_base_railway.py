@@ -38,22 +38,39 @@ class IdealBaseRailwayTests(unittest.TestCase):
         )
         self.assertEqual(set(state["nodes"]), set(nodes))
 
-    def test_runnable_projection_is_a_single_unblocked_node(self) -> None:
-        # The projection must name exactly one next action (the railway is
-        # sequential by construction) and it must not be an already-accepted
-        # node. The specific id moves as work lands, so asserting it pinned the
-        # test to the bootstrap root W0 and broke the moment W0 was accepted.
+    def test_runnable_projection_offers_only_genuinely_dispatchable_work(self) -> None:
+        """Every runnable node must be pending with its dependencies complete.
+
+        This deliberately does not assert a node count. It previously demanded
+        exactly one ("the railway is sequential by construction"), which was
+        never true: `validate_ownership` serializes only nodes with overlapping
+        owned paths, so disjoint work is meant to be dispatchable in parallel.
+        The assertion held by accident while waves happened to have one open
+        node, then broke the moment W4 opened with five disjoint children.
+        Assert the invariant that must always hold instead of a number that
+        the design intends to move.
+        """
         graph, state, nodes = railway.validate_repository()
         ready = railway.ready_nodes(graph, state, nodes)
-        self.assertEqual(len(ready), 1, ready)
-        node = ready[0]
-        self.assertNotEqual(
-            state["nodes"].get(node["id"], {}).get("state"), "accepted"
-        )
-        for dependency in node.get("depends_on", []):
+        self.assertTrue(ready, "railway must always offer some next action")
+        for node in ready:
+            record = state["nodes"].get(node["id"], {})
             self.assertEqual(
-                state["nodes"].get(dependency, {}).get("state"), "accepted"
+                record.get("state"),
+                "pending",
+                f"{node['id']} is offered as runnable but is {record.get('state')!r}",
             )
+            for dependency in node.get("depends_on", []):
+                self.assertIn(
+                    state["nodes"].get(dependency, {}).get("state"),
+                    railway.DEPENDENCY_COMPLETE,
+                    f"{node['id']} is runnable but depends on incomplete {dependency}",
+                )
+        self.assertEqual(
+            len({node["id"] for node in ready}),
+            len(ready),
+            "the projection must not repeat a node",
+        )
 
     def test_bootstrap_prompt_covers_the_full_execution_protocol(self) -> None:
         prompt = railway.validate_bootstrap_prompt()
@@ -123,6 +140,43 @@ class IdealBaseRailwayTests(unittest.TestCase):
         copied["nodes"]["W0"]["evidence"] = ["does/not/exist"]
         with self.assertRaisesRegex(railway.RailwayError, "missing evidence"):
             railway.validate_state(copied, nodes)
+
+    def test_root_state_must_not_contradict_its_children(self) -> None:
+        """A root's state and its children's states must tell the same story.
+
+        Per-node validation cannot catch this: every individual record can be
+        well-formed while the wave as a whole is incoherent. W3 really did sit
+        at ``pending`` with all nine children ``accepted`` and ``check``
+        reported OK, so ``next`` kept offering to seed an already-finished wave.
+        """
+        graph, state, _ = railway.validate_repository()
+        root_id = next(
+            root for root, children in graph["expansions"].items() if children
+        )
+        children = graph["expansions"][root_id]
+
+        # A pending root with any progressed child is re-seeded as new work.
+        copied = json.loads(json.dumps(state))
+        copied["nodes"][root_id]["state"] = "pending"
+        copied["nodes"][children[0]["id"]]["state"] = "in_progress"
+        with self.assertRaisesRegex(railway.RailwayError, "root is pending"):
+            railway.validate_expansion_consistency(graph, copied)
+
+        # A wave whose children are all complete must be closed, not left open.
+        copied = json.loads(json.dumps(state))
+        copied["nodes"][root_id]["state"] = "in_progress"
+        for child in children:
+            copied["nodes"][child["id"]]["state"] = "accepted"
+        with self.assertRaisesRegex(railway.RailwayError, "every child is complete"):
+            railway.validate_expansion_consistency(graph, copied)
+
+        # Coherent states pass: a fully accepted wave, and an untouched one.
+        copied["nodes"][root_id]["state"] = "accepted"
+        railway.validate_expansion_consistency(graph, copied)
+        copied["nodes"][root_id]["state"] = "pending"
+        for child in children:
+            copied["nodes"][child["id"]]["state"] = "pending"
+        railway.validate_expansion_consistency(graph, copied)
 
     def test_atomic_json_write_is_complete(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
