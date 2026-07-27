@@ -4,11 +4,11 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F28",
+    "node": "F29",
     "state": "accepted",
-    "commit": "2df5a891ca7a86524e75d80bf71002cb43172622",
-    "updated_at": "2026-07-26T10:17:30Z",
-    "summary": "F28 accepted: jcode-tui/jcode-app-core test parallelism restored and the --test-threads=1 caps removed from all four fork-ci rails, verified by a fully green run 30196812205 at this HEAD (Linux 6531 passed/0 failed, macOS 6544/0, Quality Guardrails, Nix build, security gate). All four gates met: static scan finds zero unlocked render-cache mutators (45 locked) and runs in CI; the video_export leak was removed rather than proven inert, having turned out worse than the node's 'cosmetic' description (an unconditional-reset bug leaking process-global export mode on any early return or panic, now an RAII guard); suite green over >=3 parallel rounds uncapped in both crates. Two proxies were found to be lying about the build and fixed at the source: debug_assertions gated out both session fault-injection hooks under selfdev (now cfg(any(test, feature=\"test-support\"))), and optimization level now comes from the build script's real OPT_LEVEL. Two earlier attempts were discarded because measurement contradicted them. Three real ambient-state defects were found and fixed en route: two fixtures released their env lease before restoring JCODE_HOME (tuple fields drop in declaration order, verified in a scratch crate), now gated by check_env_lease_drop_order.py; and three subprocess-spawning tool tests took no env lease at all while siblings mutated the environment, now holding read leases."
+    "commit": "caa445ed1",
+    "updated_at": "2026-07-27T03:22:43Z",
+    "summary": "Ambient roots routed through jcode-storage. 49 -> 22 direct dirs:: sites, all allowlisted with real stated reasons. 9 Class A defects fixed (7 from inventory + surface_workspaces_dir and doctor::cache_path, both found by auditing placeholder allowlist reasons). Gate now rejects placeholder reasons; non-vacuous both directions. Two tooling defects fixed: rust_production_filter counted comments/strings as production code (panic 59->56), preflight silently skipped the unused-dep gate. macOS flake root-caused to two env races, 3 failures -> 0 over 120 runs. Merged PR #34; all CI green."
   },
   "nodes": {
     "W0": {
@@ -459,11 +459,14 @@
       "updated_at": "2026-07-26T04:19:10Z"
     },
     "F29": {
-      "state": "pending",
-      "commit": null,
-      "evidence": [],
-      "summary": "Filed from the F20c ambient-state defect cluster (5 flakes, one class). Inventory complete in investigations/ambient-roots/README.md: 41 crate sites + 8 cli sites, classified A/B/C with feasibility notes.",
-      "updated_at": "2026-07-26T03:22:00Z"
+      "state": "accepted",
+      "commit": "caa445ed1",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F29/RESULT.md",
+        "docs/fork/ideal-base/evidence/F29/gate-after.txt"
+      ],
+      "summary": "Ambient roots routed through jcode-storage. 49 -> 22 direct dirs:: sites, all allowlisted with real stated reasons. 9 Class A defects fixed (7 from inventory + surface_workspaces_dir and doctor::cache_path, both found by auditing placeholder allowlist reasons). Gate now rejects placeholder reasons; non-vacuous both directions. Two tooling defects fixed: rust_production_filter counted comments/strings as production code (panic 59->56), preflight silently skipped the unused-dep gate. macOS flake root-caused to two env races, 3 failures -> 0 over 120 runs. Merged PR #34; all CI green.",
+      "updated_at": "2026-07-27T03:22:43Z"
     }
   }
 }
