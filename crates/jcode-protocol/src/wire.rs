@@ -576,7 +576,6 @@ pub enum Request {
         #[serde(skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
-
     /// Seed the swarm task DAG in one call (the first agent's draft). Initializes
     /// an empty shared plan, or replaces a non-empty one when explicitly requested.
     #[serde(rename = "comm_seed_graph")]
@@ -586,13 +585,10 @@ pub enum Request {
         /// "deep" (comprehensive, gated) or "light" (fan-out).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mode: Option<String>,
-        /// Explicitly replace a non-empty persisted graph. Defaults to false so
-        /// new workflows cannot silently merge into stale task state.
         #[serde(default)]
         replace_existing: bool,
         nodes: Vec<TaskGraphNodeSpec>,
     },
-
     /// Decompose a node the caller owns into a child sub-DAG (composite path). In
     /// deep mode a critique/verify gate is auto-inserted.
     #[serde(rename = "comm_expand_node")]

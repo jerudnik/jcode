@@ -93,6 +93,19 @@ fn communicate_input_accepts_explicit_graph_replacement() {
 }
 
 #[test]
+fn schema_advertises_graph_replacement_default() {
+    let schema = CommunicateTool::new().parameters_schema();
+    let property = &schema["properties"]["replace_existing"];
+    assert_eq!(property["type"], json!("boolean"));
+    assert!(
+        property["description"]
+            .as_str()
+            .expect("replace_existing description")
+            .contains("Defaults to true")
+    );
+}
+
+#[test]
 fn cleanup_candidates_default_to_owned_terminal_workers() {
     let members = vec![
         AgentInfo {

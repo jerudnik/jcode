@@ -2264,7 +2264,6 @@ pub(super) async fn handle_client(
                 )
                 .await;
             }
-
             Request::CommSeedGraph {
                 id,
                 session_id: req_session_id,
@@ -2289,7 +2288,6 @@ pub(super) async fn handle_client(
                 )
                 .await;
             }
-
             Request::CommExpandNode {
                 id,
                 session_id: req_session_id,

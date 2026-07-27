@@ -1422,13 +1422,6 @@ fn schema_advertises_supported_swarm_fields() {
     assert!(props.contains_key("prefer_spawn"));
     assert!(props.contains_key("session_ids"));
     assert!(props.contains_key("mode"));
-    assert!(props.contains_key("replace_existing"));
-    assert!(
-        props["replace_existing"]["description"]
-            .as_str()
-            .expect("replace_existing description")
-            .contains("Defaults to true")
-    );
     assert_eq!(
         props["mode"]["enum"],
         json!(["all", "any", "deep", "light"])
