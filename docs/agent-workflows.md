@@ -128,12 +128,12 @@ Current workflow authority:
 
 ### CI optimization: future work
 
-Self-hosted runners and further CI improvements are deferred until infrastructure is available:
+Completed and deferred CI optimization decisions:
 
-- **Self-hosted macOS runner:** The macOS job is the bottleneck (~20 min on GitHub-hosted). A self-hosted Apple Silicon runner with persistent caches would cut this to ~5 min. Requires a dedicated Mac mini or equivalent, runner registration, and cache management scripts.
-- **Self-hosted Linux runner:** The Linux test job (~11 min) and quality job (~3 min) would benefit from persistent Cargo target directories and Nix stores on a self-hosted Linux runner.
-- **security.yml split:** The security workflow could be split into always-running `secret-scan` and path-filtered `dependency-audit` jobs to skip cargo-audit on docs-only changes. Low priority since the whole workflow runs in ~44s.
-- **Combining check + clippy:** The quality job runs both `cargo check` and `cargo clippy` with the same flags. Clippy subsumes check, so one could be removed. Kept separate for cleaner error output on compile failures.
+- **DONE: security.yml split.** The security workflow has an always-running `secret-scan` job and a path-filtered `dependency-audit` job, so docs-only pull requests skip Rust, Nix, and cargo-audit setup.
+- **DECIDED: keep check + clippy separate.** Although Clippy subsumes `cargo check`, the cached time cost is negligible. Separate steps preserve cleaner compile-error output, distinguish compiler failures from lint failures, and retain the explicit Linux mergeability canary.
+- **DEFERRED: self-hosted macOS runner.** No runner hardware is registered. Provision an always-on Apple Silicon Mac mini or equivalent; register it with `./config.sh --url https://github.com/jerudnik/jcode --token <REG_TOKEN>` and labels `self-hosted, macOS, ARM64`; set `MACOS_RUNNER_LABELS` to `["self-hosted", "macOS", "ARM64"]` for a `${{ fromJSON(vars.MACOS_RUNNER_LABELS || '"macos-latest"') }}` fallback; persist `CARGO_TARGET_DIR=/persistent/cargo-target` and the Nix store; and schedule weekly stale Cargo-target cleanup and Nix garbage collection. Use an ephemeral runner or locked-down account, and never store secrets on its filesystem. Expected runtime is ~5 min instead of ~20 min.
+- **DEFERRED: self-hosted Linux runner.** No runner hardware is registered. Use the same registration command with labels `self-hosted, Linux, X64`; set `LINUX_RUNNER_LABELS` to `["self-hosted", "Linux", "X64"]` for a `${{ fromJSON(vars.LINUX_RUNNER_LABELS || '"ubuntu-latest"') }}` fallback; persist Cargo targets and the Nix store; and install mold permanently. Expected Linux test runtime is ~3–4 min instead of ~11 min. Prefer ephemeral runners or locked-down accounts, and never store secrets on the runner filesystem.
 
 Discover triggers and job names from the workflow files themselves:
 
