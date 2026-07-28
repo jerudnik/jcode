@@ -750,3 +750,53 @@ pre-existing. (b) When a global-state assertion fails, make it report its
 cause before hunting the culprit. (c) When a flake is fixed, ask what class it
 belongs to and gate the class. (d) Never trust a new gate that has not been
 observed failing.
+
+## D030. Post-distribution graph amendment: W4R/R07 governance barrier, R06/F30/D01, and validator support
+
+**Context.** The Nix-only distribution transition merged through PR #36
+(`78a08e4d4`), satisfying the activation condition the post-distribution
+orchestrator plan was waiting on. The plan's first mandated mutation is one
+graph-amendment pull request adding a recovery/governance barrier, closing the
+sticky-server defect lane, verifying the distribution handoff independently,
+and preparing documentation reconciliation. Pre-amendment counts re-audited as
+6 roots, 46 children, 52 state records; post-amendment counts are 7 roots, 50
+children, 57 state records, matching the plan.
+
+**Decisions.**
+
+- New root `W4R` (depends on W3, alongside W4) carries `R07`: required-check
+  contexts in one machine-readable file, merge-commit-only ruleset hardening,
+  the `STATE.json` reviewed/published commit schema split, ancestor-of-HEAD
+  validator semantics, and private recovery-archive ratification. R07 is the
+  publication barrier for every still-pending W4 implementation.
+- New W4 children: `R06` (sticky-server process-group signaling repair) and
+  `F30` (independent Nix-only / native-iOS retirement verification). New W5
+  child: `D01` (documentation reconciliation); `S01` now depends on `D01`.
+- Revised contracts: `F22` drops retired Homebrew host verification for
+  structured advisory ownership; `F24` owns no release workflow; `G03`/`G04`
+  become deterministic; `G05` becomes a Nix/Cachix acquisition smoke with no
+  release API. Audit items A16 and A23-A25 were reworded to match; A26 (D01)
+  and A27 (F30) were added.
+
+**Validator amendments forced by the graph shape** (the plan named A26 but did
+not enumerate these mechanics; recorded here rather than silently deviating):
+
+1. Per-wave expansion budget raised 10 to 12. W4 now has eleven children (R06
+   and F30 are explicitly parented to W4 by the plan), and the budget exists to
+   keep deep-gate reviews bounded, not to cap wave size at ten.
+2. Ordered audit IDs extended A01..A25 to A01..A27, and coverage may cite
+   D-prefix nodes. The plan maps A26 to D01, which the F/G-only citation rule
+   rejected. F30, as an F node, required coverage the plan did not name, so A27
+   covers it.
+3. `R06` depends on `F29` in addition to the plan's R01/R04/R07: F29 owns
+   `src/cli/commands.rs`, which R06 must edit for the signal call sites, and
+   the ownership validator requires same-wave overlaps to be dependency-ordered.
+   F29 is accepted, so this orders ownership without delaying R06.
+4. `D01` owns concrete documentation paths rather than `docs/**`: a
+   shallow-prefix glob would overlap W5 sibling evidence/review ownership
+   without dependency ordering.
+
+**Reopen triggers.** A future wave needing more than twelve children must raise
+the budget with its own decision; a documentation node beyond D01 must revisit
+the citation-prefix rule; a defensible legacy commit mapping failure reopens
+the affected node per R07 rather than weakening the ancestry rule.

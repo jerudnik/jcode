@@ -58,9 +58,10 @@ label.
 - Relevant pull requests perform a real Nix package build and launch the result.
 - The installed package serves `web/jcode-mobile` from an executable-adjacent or
   declared share path while running outside a source checkout.
-- Hermetic installer and Rust updater fixtures cover checksum absence/mismatch,
-  interrupted acquisition policy, invalid replacement, rollback, and exactly-once
-  daemon reload.
+- The packaged browser control surface passes pairing, subscribe/history,
+  send/cancel, disconnect/reconnect/resync, and stale-ack behavior against a
+  deterministic local gateway.
+- Windows and FreeBSD are not advertised as supported distribution surfaces.
 - Every failed acquisition or activation preserves the prior working runtime and
   channel pointers.
 
@@ -71,8 +72,6 @@ label.
   targets.
 - Every accepted security advisory has an owner, rationale, retirement condition,
   and expiry enforced by CI.
-- Homebrew publication uses pinned GitHub host identity rather than disabling host
-  checking.
 - Reproducible artifact scope is explicit, compatibility inputs are pinned, and
   artifacts carry verifiable source/version provenance and an SBOM.
 
@@ -94,9 +93,8 @@ named reason and required next action:
 
 - `aarch64-linux` build/smoke or an explicit best-effort support downgrade.
 - Minimal scheduled provider-doctor coverage and a fresh full pre-release tier.
-- Mobile/iOS simulator or device attach validation.
-- Windows and FreeBSD scheduled compile/install smoke if support remains advertised.
-- Disposable draft-release acquisition and live updater smoke.
+- Disposable Nix/Cachix acquisition of a pinned fork revision and launch smoke,
+  with no release API or installer path.
 
 No blocked gate may be described as passing.
 
@@ -110,6 +108,12 @@ No blocked gate may be described as passing.
   cleanup record leaks from the final matrix.
 - An independent Opus-class reviewer reports no unresolved blocker omission,
   material mis-ranking, or false validation claim.
+- Active documentation is source-backed: edited claims cite current source, tests,
+  CLI help, workflows, or deterministic behavior.
+- Local Markdown links and referenced repository paths pass the deterministic
+  documentation checker, and documented commands have safe existence or parser
+  evidence.
+- Generated instructions match their owning `.apm/instructions/` primitives.
 - The worktree is clean after the bounded signoff commit. Nothing is pushed unless
   separately authorized.
 

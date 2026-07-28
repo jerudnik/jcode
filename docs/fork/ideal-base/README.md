@@ -43,6 +43,8 @@ the railway validator.
 - [`AUDIT_COVERAGE.md`](AUDIT_COVERAGE.md): the complete 25-item source audit mapped to executable graph nodes.
 - [`EXECUTION_PROTOCOL.md`](EXECUTION_PROTOCOL.md): graph-first delegation, file ownership, artifact, review, and recovery rules.
 - [`COORDINATOR_BOOTSTRAP.md`](COORDINATOR_BOOTSTRAP.md): copy-paste prompt for a fresh coordinator session.
+- [`POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md`](POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md): activation-gated handoff for governance repair, remaining W4/W5 execution, and final signoff after the Nix-only transition.
+- [`D01_DOCUMENTATION_AUDIT.md`](D01_DOCUMENTATION_AUDIT.md): prepared source-backed finding register for post-W4 documentation reconciliation.
 - [`WORK_GRAPH.json`](WORK_GRAPH.json): machine-readable waves, dependencies, owned paths, gates, and required evidence.
 - [`STATE.json`](STATE.json): machine-readable cross-session progress checkpoint.
 - [`DECISIONS.md`](DECISIONS.md): append-only decisions and reopen triggers.

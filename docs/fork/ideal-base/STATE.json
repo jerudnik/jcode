@@ -469,6 +469,41 @@
       ],
       "summary": "Ambient roots routed through jcode-storage. 49 -> 22 direct dirs:: sites, all allowlisted with real stated reasons. 9 Class A defects fixed (7 from inventory + surface_workspaces_dir and doctor::cache_path, both found by auditing placeholder allowlist reasons). Gate now rejects placeholder reasons; non-vacuous both directions. Two tooling defects fixed: rust_production_filter counted comments/strings as production code (panic 59->56), preflight silently skipped the unused-dep gate. macOS flake root-caused to two env races, 3 failures -> 0 over 120 runs. Merged PR #34; all CI green.",
       "updated_at": "2026-07-27T03:22:43Z"
+    },
+    "W4R": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R07": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R06": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F30": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "D01": {
+      "state": "pending",
+      "commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
     }
   }
 }

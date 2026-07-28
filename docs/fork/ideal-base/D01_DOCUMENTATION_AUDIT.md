@@ -1,0 +1,92 @@
+# D01 general documentation audit input
+
+Recorded: 2026-07-27
+
+Status: `prepared_input`
+
+This document is the source-backed input register for D01. It records defects
+found before the distribution handoff so they survive into the ideal-base
+pipeline without expanding the active distribution change. It is not authority
+to start D01 early or to edit a path owned by another worker.
+
+At activation, D01-A must re-audit every item against the merged `main` tree.
+Each item must then be marked confirmed, superseded by the merged implementation,
+or converted into a separately owned product repair. The current source, tests,
+CLI help, workflows, flake outputs, and deterministic behavior remain more
+authoritative than this snapshot.
+
+## Execution boundary
+
+- Keep this register as research input while distribution and W4 owners are
+  active.
+- Start D01 only after the dependencies in
+  [`POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md`](POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md)
+  are accepted.
+- D01-A owns the resnapshot and exact path manifest.
+- D01-B through D01-F may edit in parallel only after D01-A assigns every
+  document to one owner.
+- D01-V starts after all editing lanes and must disposition every finding below.
+- A source defect discovered here becomes its own repair node and pull request;
+  D01 documents only the accepted result.
+
+## Confirmed finding register
+
+| ID | Severity | Lane | Finding and source evidence | Required disposition |
+| --- | --- | --- | --- | --- |
+| `D01-F01` | high | D01-B | Provider login runs live post-login validation unless `--no-validate` is supplied (`src/cli/login.rs:353-364`). The validation enables both basic and tool smoke requests (`src/cli/auth_test/run.rs:140-159`). `OAUTH.md:228-248` describes real `auth-test` requests but does not disclose automatic post-login validation, retry/spend risk, or the opt-out. | Document the default live behavior, distinguish network and spending paths, explain `--no-validate`, `--no-smoke`, and `--no-tool-smoke`, and ensure no example silently authorizes provider use. |
+| `D01-F02` | high | D01-B | `OAUTH.md:282-287` names `OPENAI_API_KEY` and `MiniMax-M2.7`; canonical metadata names `MINIMAX_API_KEY` and `MiniMax-M3` (`crates/jcode-provider-metadata/src/catalog.rs:334-343`). | Correct the preset metadata and anchor the claim to the canonical provider catalog. |
+| `D01-F03` | high | D01-C | `docs/MEMORY_BUDGET.md:68-70` states Mermaid limits of 64, 12, and 8. The implemented render, image-state, and source-cache limits are 512, 24, and 16 (`crates/jcode-tui-mermaid/src/mermaid_cache_render.rs:12`, `crates/jcode-tui-mermaid/src/lib.rs:487,648`). | Correct the active guardrail values, update their crate-split source paths, and verify the debug surfaces expose the same limits. |
+| `D01-F04` | medium | D01-C | `docs/MEMORY_ARCHITECTURE.md:3` calls graph support planned while `docs/MEMORY_ARCHITECTURE.md:723-728` calls it implemented. Its petgraph and storage examples at lines 104-133 and 670-684 do not describe the implemented HashMap graph (`crates/jcode-memory-types/src/graph.rs:229-256`). | Separate current behavior from roadmap material and describe the actual graph API and storage layout. |
+| `D01-F05` | medium | D01-C/D01-E | `docs/AMBIENT_MODE.md:3,922-962` and `docs/SAFETY_SYSTEM.md:3,509-539` remain design documents with unchecked implementation phases despite live ambient configuration/runtime and substantial safety persistence, notification, and channel code. Some advertised safety review commands remain unimplemented. | Record an explicit implemented/planned matrix. Do not mark proposed CLI, TUI review, custom-rule, webhook, or SMS behavior as current. D01-A must assign each file to exactly one of D01-C or D01-E before edits. |
+| `D01-F06` | medium | D01-D | `docs/PROVIDER_DOCTOR.md:12-13` says the command works with OpenAI-compatible providers, while native provider drivers are selected in `src/cli/provider_doctor.rs:23-45`. | Describe native and OpenAI-compatible coverage without hard-coding a list that can drift from provider metadata. |
+| `D01-F07` | medium | D01-F | `docs/CLOUDFLARE_EXPERIMENT_STRATEGY.md:4` calls `distro/nix` the current packaging rail. `docs/fork/SYNC_MODEL.md:11-22` defines the independent single-rail model. | Archive or explicitly reclassify the strategy and remove its claim of current branch authority. |
+| `D01-F08` | medium | D01-F | Ten non-archive Markdown links in the pre-handoff snapshot target `~/notes/...`, including server, interaction, modular architecture, desktop, and provider-session documents. These targets are unavailable to repository consumers. | Recount after the distribution merge. Import contract-critical material into the repository; otherwise label the reference as private project-management context rather than a durable dependency. |
+| `D01-F09` | medium | D01-A/D01-V | The documentation tree has no `docs/README.md` authority map. Root `README.md:718-730` links only a small unclassified subset. `scripts/check_agent_instructions.py:168-172` validates links only in `docs/agent-workflows.md`, and `scripts/ideal_base_railway.py:257-274` is intentionally scoped to ideal-base control documents. | Add the classified docs map and one deterministic general-doc checker for local links, maintained repository paths, and a narrow retired-claim denylist. Keep archives and frozen evidence outside current-policy rules. |
+| `D01-F10` | low | D01-B/D01-C | `OAUTH.md:26-34` and `docs/MEMORY_BUDGET.md:25-31` retain source paths from before the crate split. | Replace stale implementation references with current owning crates and files. |
+
+## Provisional distribution-owned surfaces
+
+The pre-handoff audit did not treat the following moving files as final:
+
+- `README.md`
+- `RELEASING.md`
+- `docs/BRANCHING.md`
+- `docs/DESKTOP_APP_ARCHITECTURE.md`
+- `docs/IOS_APP.md`
+- `docs/NIX.md`
+- `docs/WINDOWS.md`
+- `docs/WRAPPERS.md`
+- distribution and release workflow documentation
+- the root instruction primitive
+
+D01-A must inspect their merged content and F30 evidence before assigning
+corrections. It must not carry pre-handoff line numbers or assumptions forward
+without verification.
+
+## Rejected preliminary claims
+
+Do not reopen these claims without new source evidence:
+
+- `JCODE_SERVER_DISPLAY_NAME` is implemented in
+  `crates/jcode-app-core/src/server.rs` and covered by server tests.
+- No tracked `.DS_Store` was found in the audit snapshot.
+- The alleged obsolete render dependencies were not present in current Cargo
+  manifests.
+- `/resume` picker behavior and the `--resume` CLI option are distinct surfaces;
+  the preliminary report conflated them.
+- The preliminary scan did not establish a broken repository-relative Markdown
+  target. D01-V must still run the deterministic checker on the final tree.
+
+## D01-V acceptance additions
+
+D01-V must produce a final table mapping every `D01-Fxx` item to one of:
+
+- `corrected`, with the accepted commit and source evidence;
+- `superseded`, with the merged behavior that invalidated the finding;
+- `product_repair`, with the blocking repair node and accepted commit; or
+- `not_reproducible`, with deterministic evidence and independent review.
+
+No item may disappear through prose cleanup alone. The final D01 evidence must
+also include the classified document census, checker fixtures proving each rule
+is non-vacuous, command parser or `--help` evidence, generated-instruction drift
+results, and an independent source-to-prose review.
