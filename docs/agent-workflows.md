@@ -120,11 +120,20 @@ Local checks are the normal feedback loop. Do not trigger or wait for GitHub Act
 Current workflow authority:
 
 - `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
-- `.github/workflows/fork-ci.yml` is the fork's blocking Rust and quality gate.
-- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces.
-- `.github/workflows/security.yml` owns advisory security checks.
+- `.github/workflows/fork-ci.yml` is the fork's blocking Rust and quality gate. A `changes` router job detects modified paths via `dorny/paths-filter@v3` and gates expensive jobs (quality, macOS, Linux tests) on PRs. Push, schedule, and dispatch events run unconditionally. Branch protection requires only `Detect changes`; the conditional jobs are not required checks.
+- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces. Uses trigger-level `paths:` since it is not a required check.
+- `.github/workflows/security.yml` owns advisory security checks. Runs on every push/PR with no path filter because secret scanning must cover all files.
 - `.github/workflows/release.yml` owns release artifacts.
 - Inherited or dispatch-only workflows are not substitutes for the fork gates.
+
+### CI optimization: future work
+
+Self-hosted runners and further CI improvements are deferred until infrastructure is available:
+
+- **Self-hosted macOS runner:** The macOS job is the bottleneck (~20 min on GitHub-hosted). A self-hosted Apple Silicon runner with persistent caches would cut this to ~5 min. Requires a dedicated Mac mini or equivalent, runner registration, and cache management scripts.
+- **Self-hosted Linux runner:** The Linux test job (~11 min) and quality job (~3 min) would benefit from persistent Cargo target directories and Nix stores on a self-hosted Linux runner.
+- **security.yml split:** The security workflow could be split into always-running `secret-scan` and path-filtered `dependency-audit` jobs to skip cargo-audit on docs-only changes. Low priority since the whole workflow runs in ~44s.
+- **Combining check + clippy:** The quality job runs both `cargo check` and `cargo clippy` with the same flags. Clippy subsumes check, so one could be removed. Kept separate for cleaner error output on compile failures.
 
 Discover triggers and job names from the workflow files themselves:
 
