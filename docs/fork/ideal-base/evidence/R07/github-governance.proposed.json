@@ -4,10 +4,12 @@
   "expected_repository_id": 1238606714,
   "expected_github_actions_integration_id": 15368,
   "identifier_provenance": "Every identifier used below is verified live by the preflight read_asserts in sequences 1-6 immediately before the first write. No identifier is trusted because it appears in recon, in design.md, or in this file. A mismatch stops the apply before any write.",
+  "json_hash_canonicalization": "For every JSON SHA-256 in this document, first parse the object and apply the stated sanitization, then encode exactly as UTF-8 bytes from json.dumps(obj, sort_keys=True, separators=(',',':')). Do not add indentation or a trailing newline. Hash those exact bytes.",
   "template_variables": {
     "bootstrap_head_sha": "the reviewed head SHA of the bootstrap pull request, captured and independently reviewed under design.md section 11 barrier 2",
     "bootstrap_merge_sha": "the merge commit SHA returned by the bootstrap pull request's API merge and confirmed to be main's new tip under design.md section 11 barrier 4; this is the commit whose protected-path bytes were reviewed and are asserted unchanged by sequence 6",
     "protected_paths": [
+      ".github/scripts/",
       ".github/workflows/",
       "scripts/required-checks.json",
       "scripts/fork-health.sh",
@@ -44,7 +46,7 @@
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
-      "assert": "the response, sanitized by removing id, node_id, _links, source, created_at, updated_at, and current_user_can_bypass, is byte-identical (compared as parsed JSON, key order insensitive) to the embedded object below and its SHA-256 equals 8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124. This binds the numeric ruleset id to its full recon-recorded body, not only its name, before it is overwritten.",
+      "assert": "the response, sanitized by removing id, node_id, _links, source, created_at, updated_at, and current_user_can_bypass, is parsed-JSON-equal to the embedded object below and its SHA-256 under json_hash_canonicalization equals 8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124. This binds the numeric ruleset id to its full recon-recorded body, not only its name, before it is overwritten.",
       "expected_sanitized_body": {
         "name": "protect-fork-rails",
         "target": "branch",
@@ -62,7 +64,7 @@
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
-      "assert": "the response, sanitized the same way as sequence 3, is byte-identical to the embedded object below and its SHA-256 equals 1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f.",
+      "assert": "the response, sanitized the same way as sequence 3, is parsed-JSON-equal to the embedded object below and its SHA-256 under json_hash_canonicalization equals 1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f.",
       "expected_sanitized_body": {
         "name": "no-stray-branches",
         "target": "branch",
@@ -85,7 +87,7 @@
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/branches/main/protection",
-      "assert": "the response is byte-identical (parsed JSON, key order insensitive) to the embedded object below and its SHA-256 equals d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704. This is an exact object comparison, not a reference to design.md prose.",
+      "assert": "recursively remove every object member named url or contexts_url from the response; the sanitized response must be parsed-JSON-equal to the embedded object below and its SHA-256 under json_hash_canonicalization must equal d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704. This is an exact sanitized-object comparison, not a reference to design.md prose.",
       "expected_body": {
         "required_status_checks": {
           "strict": false,
@@ -108,10 +110,23 @@
     {
       "sequence": 6,
       "kind": "read_assert",
-      "method": "GET",
-      "endpoint": "repos/jerudnik/jcode/compare/${bootstrap_merge_sha}...refs/heads/main",
-      "assert": "This is the immediately-pre-write assertion against CURRENT main, not the historical bootstrap head that sequence 2 read. It closes the bootstrap-race gap: sequences 1-5 above prove repository identity, integration id, and ruleset/classic-protection state, but none of them re-reads the workflow definitions on main, so an intervening pull request that removed, renamed, or path-filtered a required workflow after the bootstrap merge would otherwise pass sequences 1-5 and only be discovered when sequence 8 or 11's required-context writes started failing every future pull request. Resolve current main's tip live from this same response (base_commit.sha for bootstrap_merge_sha, and the head commit of the comparison for current main); assert merge_base_commit.sha == bootstrap_merge_sha (bootstrap_merge_sha is an ancestor of current main; main was not rewritten), and assert the response's files array contains zero entries whose filename starts with any prefix in template_variables.protected_paths. A compare with zero commits ahead (current main == bootstrap_merge_sha) trivially satisfies this by returning an empty files array. This assertion, together with sequence 2's proof that bootstrap_merge_sha's predecessor head emitted all four contexts, is what proves current main can safely require all four contexts: the protected workflow bytes reviewed at bootstrap are proved byte-identical to what is on main right now, immediately before sequence 7's first write, not merely at some earlier historical instant.",
-      "on_mismatch": "stop before any write. If merge_base_commit.sha != bootstrap_merge_sha, main was rewritten since the bootstrap merge; treat as a governance incident, not routine drift. If any protected path appears in files, a governance-path change landed on main after the bootstrap merge without going through this document's write sequence; re-review current main's actual workflow/manifest state, capture a fresh bootstrap_merge_sha-equivalent baseline (or run the section 4 maintenance procedure if the change was legitimate maintenance), and re-run this preflight from sequence 1 before any write proceeds. Do not require a context whose current-main definition was not just proved identical to what was reviewed."
+      "method": "GET_AND_LOCAL_GIT",
+      "endpoint": "repos/jerudnik/jcode/commits/main",
+      "local_git": {
+        "prepare": [
+          "if test $(git rev-parse --is-shallow-repository) = true; then git fetch --no-tags --unshallow https://github.com/jerudnik/jcode.git refs/heads/main; fi",
+          "git fetch --no-tags https://github.com/jerudnik/jcode.git ${bootstrap_merge_sha} ${current_main_sha}"
+        ],
+        "assertions": [
+          "test $(git rev-parse --is-shallow-repository) = false",
+          "git cat-file -e ${bootstrap_merge_sha}^{commit}",
+          "git cat-file -e ${current_main_sha}^{commit}",
+          "git merge-base --is-ancestor ${bootstrap_merge_sha} ${current_main_sha}",
+          "git diff --quiet ${bootstrap_merge_sha} ${current_main_sha} -- .github/scripts/ .github/workflows/ scripts/required-checks.json scripts/fork-health.sh scripts/ideal_base_railway.py tests/test_ideal_base_railway.py docs/fork/ideal-base/evidence/R07/github-governance.proposed.json"
+        ]
+      },
+      "assert": "This is the immediately-pre-write assertion against CURRENT main, not the historical bootstrap head that sequence 2 read. Set current_main_sha to the endpoint response's full sha. In the apply operator's local clone, run local_git.prepare in order: if the clone is shallow, unshallow it read-only from the explicit jerudnik/jcode URL, then fetch both exact commits. Run every local_git assertion. The final path-limited git diff compares endpoint tree/blob identity for every protected path without an API file-count cap or silent truncation. It also handles renames explicitly: moving a protected path outside the protected prefixes is a deletion of the old protected path and fails; moving a path into a protected prefix is an addition and fails; moving within the protected set also fails. A zero diff, including current_main_sha == bootstrap_merge_sha, passes. Together with sequence 2's context-emission proof, this proves the reviewed protected bytes are exactly what current main contains immediately before sequence 7 requires the contexts.",
+      "on_mismatch": "stop before any write. If unshallow/fetch fails, either commit is unavailable, the clone remains shallow, or bootstrap_merge_sha is not an ancestor of current_main_sha, treat this as an unverifiable or rewritten main boundary and a governance incident. If git diff is non-zero, a protected path was added, deleted, renamed, or content-modified after the bootstrap merge; re-review current main's actual workflow/manifest state, capture a fresh bootstrap_merge_sha-equivalent baseline if appropriate, and re-run from sequence 1. Do not require a context whose current-main definition was not just proved identical to what was reviewed."
     },
     {
       "sequence": 7,
@@ -184,7 +199,16 @@
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
-      "assert": "sanitized body exactly equals sequence 7, including active enforcement, empty bypass_actors, and every rule parameter"
+      "assert": "sanitized body exactly equals sequence 7, including active enforcement, empty bypass_actors, and every rule parameter; then immediately repeat sequence 6 in full with a fresh GET repos/jerudnik/jcode/commits/main response and its new current_main_sha. The repeat must pass before sequence 9 may begin.",
+      "rollback_body": {
+        "name": "protect-fork-rails",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
+        "rules": [ { "type": "deletion" } ]
+      },
+      "on_mismatch": "If the ruleset read-back differs, or if the repeated sequence 6 detects a rewritten main boundary or any protected-path change, immediately PUT rollback_body to ruleset 18509013, read it back, sanitize it exactly as sequence 3, verify parsed equality and canonical hash equal sequence 3, and stop. rollback_body is the sequence-3 pre-write body with read-only source_type omitted. This rollback is mandatory while the first ruleset is the only surface changed."
     },
     {
       "sequence": 9,
@@ -249,7 +273,7 @@
     {
       "sequence": 14,
       "kind": "checkpoint",
-      "assert": "sequences 1, 2, 3, 4, 5, 6, 8, 9, 11, and 13 all passed; stop here on any mismatch"
+      "assert": "sequences 1, 2, 3, 4, 5, 6, 8 (including its immediate full repeat of sequence 6), 9, 11, and 13 all passed; stop here on any mismatch"
     },
     {
       "sequence": 15,
@@ -274,5 +298,5 @@
     }
   ],
   "abort_policy": "Stop before the next write whenever a read_assert or checkpoint fails. No write may run before sequences 1-6 have all passed. Never continue to sequence 15 unless sequence 14 passed.",
-  "residual_risk": "Every rule written here can be rewritten or deleted by the repository owner-admin, who is the accepted root of trust for this personal repository per DECISIONS.md D031. This apply document does not claim to prevent that; it makes the intended state explicit and machine-comparable, proves current main's protected-path bytes match what was reviewed immediately before the first write (sequence 6), and lets scripts/fork-health.sh --live and the governance fixtures detect any later drift."
+  "residual_risk": "Every rule written here can be rewritten or deleted by the repository owner-admin, who is the accepted root of trust for this personal repository per DECISIONS.md D031. This apply document does not claim to prevent that; it makes the intended state explicit and machine-comparable, proves current main's protected-path bytes match what was reviewed immediately before the first write (sequence 6), and repeats that proof immediately after sequence 8 while rollback remains available. GitHub's ruleset PUT has no expected-main-SHA precondition, so a residual race remains after that repeat and before the apply completes; the repeat narrows but cannot eliminate it. A protected-path merge observed by the repeat triggers rollback, and later drift is detected by scripts/fork-health.sh --live and the governance fixtures."
 }

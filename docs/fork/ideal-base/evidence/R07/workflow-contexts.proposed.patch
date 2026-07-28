@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/.github/workflows/governance-root.yml
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,45 @@
 +name: Governance Root
 +
 +# Audit gate: runs from the pull request head like any other workflow, so it
@@ -33,6 +33,7 @@
 +          set -euo pipefail
 +          base="$(git merge-base HEAD refs/remotes/origin/main)"
 +          protected=(
++            .github/scripts
 +            .github/workflows
 +            scripts/required-checks.json
 +            scripts/fork-health.sh

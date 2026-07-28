@@ -1,4 +1,4 @@
-# R07 design v2: reviewed publication and auditable governance
+# R07 design v4: reviewed publication and auditable governance
 
 Design baseline: `main` at `498249777c453c1d551aeb01fc45420d8ca0a585`.
 Primary evidence: `automation/r07-recon:docs/fork/ideal-base/evidence/R07/recon.md`.
@@ -10,7 +10,7 @@ are recorded beside this design.
 
 **This subsection is history, not current design.** The `workflows`-rule/trust-root/
 immutable-transition mechanism it describes was proposed in v1, rejected by the v1 gate, and is
-absent from every artifact in this v3 revision. It is retained here only so a reader can see why
+absent from every artifact in this v4 revision. It is retained here only so a reader can see why
 the current mechanism (§0a, §4) looks the way it does; do not treat any noun below as a live
 component.
 
@@ -42,53 +42,46 @@ Concretely, v2:
 
 The v2 STATE schema split and validator semantics, the equivalence ladder and mapping ledger, the
 archive plan, the workflow-contexts patch, fail-closed sequencing, and the remaining stop
-conditions were independently verified by the v1 gate and are unchanged in substance through v3.
+conditions were independently verified by the v1 gate and are unchanged in substance through v4.
 
-## 0a. What changed in v2 -> v3, and why
+## 0a. History: what changed in v2 -> v3, and why v3 still failed
 
-The v2 gate (`docs/fork/ideal-base/evidence/R07/design-v2-gate.md`, verdict FAIL) found two
-blocking gaps and one material gap in the mechanism that replaced the rejected `workflows` rule,
-plus an explicit checklist miss on residual history language. v3 fixes exactly those, changes
-nothing else, and does not reopen anything the v2 gate verified sound (the steady-state ruleset
-shape, STATE/mapping/archive artifacts, and workflow-contexts patch semantics).
+**This subsection is history, not current design.** The v2 gate found a bootstrap-to-apply race,
+an unbound maintenance window, inexact preflight comparisons, and overclaimed residual language.
+v3 attempted to close those with an immediately-pre-write current-`main` comparison, a
+transaction-bound maintenance procedure, embedded exact bodies/hashes, and narrower auditability
+claims. The v3 gate reproduced three defects against the live API: the compare endpoint's `files`
+array silently stopped at 300 entries, rename records placed the old path only in
+`previous_filename`, and a legitimate one-commit PR produced two commits in the compare range.
+It also recovered an unstated hash encoder, found sequence 5 omitted live-response sanitization,
+found `.github/scripts/` missing from the protected set, and identified a sequence-6-to-7 race.
 
-1. **Bootstrap-race fix (v2 gate finding 1, blocking).** v2's apply preflight proved the four
-   contexts were emitted on the *historical* bootstrap PR head (`github-governance.proposed.json`
-   sequence 2) but never re-proved that current `main`'s protected workflow bytes still matched
-   what was reviewed there. An intervening pull request could remove, rename, or path-filter a
-   required workflow between the bootstrap merge and the ruleset apply, and nothing in v2's
-   preflight would catch it before sequence 6 required all four contexts. v3 adds a new preflight
-   read (`github-governance.proposed.json` sequence 6) that resolves current `main`'s tip live,
-   compares it against the reviewed `bootstrap_merge_sha` with `GET .../compare/...`, and asserts
-   the diff touches none of the protected paths. This is the "immediately-pre-write assertion
-   against current main" the gate required (§4).
-2. **Maintenance-window binding (v2 gate finding 2, blocking).** v2's "later governance
-   maintenance" procedure dropped `Governance Root` from required checks repository-wide for an
-   unbound interval, with no PR/head/base identity capture, no SHA-conditioned merge, and no
-   proof that only the reviewed PR merged during the drop. v3 rewrites that procedure (§4) to the
-   same transaction-binding rigor v1's rejected immutable-transition protocol had for the
-   bootstrap step: exact PR/head/base capture, an API merge conditioned on the exact reviewed head
-   SHA, main-tip and two-parent verification, an executable single-commit proof that no other PR
-   merged in the window, immediate restoration of the byte-identical pre-change ruleset, and a
-   post-merge comparison run from both a pre-window and a post-window comparator implementation.
-   Where this still cannot prevent (only detect) a second PR merging during the drop because the
-   other three required contexts remain live, v3 says so explicitly and scopes that residual per
-   D031 rather than overclaiming prevention.
-3. **Exact preflight comparisons (v2 gate finding 3, material).** v2's preflight sequences 3-5
-   bound ruleset ids to names but not full bodies, never asserted `Governance Root` concluded
-   `failure` on the bootstrap PR despite design.md claiming that was a stop condition, and pointed
-   sequence 5's classic-protection comparison at a prose table instead of an exact object. v3
-   embeds the exact sanitized recon bodies and their SHA-256 hashes directly in
-   `github-governance.proposed.json` sequences 3-5, and sequence 2 now asserts `Governance Root`
-   concludes `failure` on the bootstrap head.
-4. **Residual history language (v2 gate finding 4, minor).** The surviving v1-rejection narrative
-   in v2's design.md was substantively fine — it rejected the old mechanism rather than
-   reintroducing it — but did not satisfy the re-gate checklist's literal zero-residual-reference
-   search. v3 relabels every such passage as explicit history (this subsection's own framing is
-   the pattern) and fixes the two overclaims the gate named directly: "no governance change can
-   land unnoticed" and "any owner change is detected" (§1, §3, §12) are qualified to what
-   final-state live comparison actually proves during and after the maintenance drop window,
-   rather than asserted as unconditional detection.
+## 0b. What changed in v3 -> v4, and why
+
+v4 repairs the v3 gate's complete five-item PASS list without changing the steady-state ruleset
+shape or the byte-identical STATE, mapping-ledger, and archive-manifest proposals.
+
+1. **Uncapped protected-path identity.** Sequence 6 now resolves `main` with a live GET,
+   unshallows the apply clone read-only when needed, fetches the exact returned commit plus
+   `bootstrap_merge_sha`, proves ancestry, and runs path-limited `git diff --quiet`. This compares
+   endpoint tree/blob identity without a response array or file-count cap. A rename out of the
+   protected set appears as deletion of its protected old path; a rename into it appears as addition.
+2. **Executable maintenance-window proof.** Maintenance step 7 re-reads `main` and requires its
+   tip still equal `merge_sha`, then requires `git rev-list --first-parent --merges
+   expected_base_sha..merge_sha` to contain exactly one SHA, `merge_sha`. Step 5's ordered
+   two-parent proof remains the binding to `expected_base_sha` and `head_sha`. Branch commits may
+   legitimately remain in the range; an intervening merge or any later direct commit fails.
+3. **Pinned hash and healthy classic-protection comparison.** The apply document pins
+   `json.dumps(obj, sort_keys=True, separators=(',',':'))`, UTF-8, with no trailing newline.
+   Sequence 5 recursively removes `url` and `contexts_url` before equality and hashing.
+4. **Complete protected helper coverage.** `.github/scripts/` is protected both in the apply
+   template and in `governance-root.yml`, because required workflows execute
+   `.github/scripts/run_with_timeout.py`.
+5. **Narrowed activation race with explicit residual.** Sequence 8 immediately repeats the full
+   sequence 6 assertion after the first ruleset read-back. A protected-path change triggers
+   restoration of the pre-write ruleset body and a stop while only that surface has changed.
+   GitHub exposes no expected-main-SHA precondition on a ruleset PUT, so a smaller residual race
+   remains after the repeat; v4 states it rather than claiming serialization it cannot provide.
 
 ## 1. Decisions
 
@@ -241,9 +234,10 @@ change loud on the PR that makes it (a red required context, and a named diff in
 than impossible to make. What this concretely proves, and only this: (a) at the moment a pull
 request's head is evaluated, `Governance Root` truthfully reports whether that PR's diff touches
 a protected path; (b) `github-governance.proposed.json` sequence 6 proves, immediately before the
-initial apply's first write, that current `main`'s protected-path bytes equal what was reviewed at
-the bootstrap merge (§4); and (c) the §4 maintenance procedure's window proof shows, after the
-fact, whether exactly one PR merged during a deliberate drop of the `Governance Root` requirement.
+initial apply's first write and again immediately after the first ruleset read-back, that current
+`main`'s protected-path bytes equal what was reviewed at the bootstrap merge (§4); and (c) the
+§4 maintenance procedure's tip and merge-commit proof shows, after the fact, whether only the
+reviewed merge landed during a deliberate drop of the `Governance Root` requirement.
 None of these is a continuous audit log, and none proves that every historical governance change
 was reviewed — only that the specific transitions this design controls (initial apply, and each
 maintenance window) are bounded and checked. Against non-owner actors the required contexts plus
@@ -267,6 +261,12 @@ exactly, bound to their expected names; the classic-protection exact baseline; a
 immediately before the first write, current `main`'s protected-path bytes proved identical to
 the reviewed bootstrap-merge state) so that no identifier or surface in this design is trusted on
 the strength of citation alone. The desired ruleset bodies are:
+
+Every embedded JSON SHA-256 uses one pinned encoder after the assertion's sanitization:
+`json.dumps(obj, sort_keys=True, separators=(',',':'))`, encoded as UTF-8 with no indentation and
+no trailing newline. Sequence 5 recursively removes every `url` and `contexts_url` member from the
+live classic-protection response before parsed-object equality and hashing; this is the same class
+of volatile-link sanitization sequences 3-4 state for rulesets.
 
 ```json
 {
@@ -345,8 +345,9 @@ Diff from the live state recorded by recon:
 | Classic protection | `strict:false`, `enforce_admins:false`, weak `Detect changes`, no PR rule | Delete only after the active ruleset is read back and verified. A contradictory second layer must not remain. |
 | Repository merge methods | merge, squash, rebase | merge only. |
 
-The recon baseline in the middle column is exact-compared, body and hash, by preflight sequences
-3-5 before any write; if live governance has drifted from what recon captured, the apply stops
+The recon baseline in the middle column is exact-compared, sanitized parsed body and canonically
+encoded hash, by preflight sequences 3-5 before any write; if live governance has drifted from
+what recon captured, the apply stops
 rather than overwriting an unreviewed state. Sequence 6, separately, proves current `main`'s
 protected-path bytes are unchanged since the bootstrap merge (below); it does not compare against
 recon, because recon predates the bootstrap PR that first wrote those paths.
@@ -361,9 +362,9 @@ These are external writes and require explicit confirmation immediately before e
 
 (History: v1 serialized the bootstrap merge with an immutable-tag-pinned required workflow,
 because the rejected `workflows` rule made a candidate-free trust root available at bootstrap
-time — see §0. That mechanism does not exist in v3.) The ordering constraint that actually holds
+time — see §0. That mechanism does not exist in v4.) The ordering constraint that actually holds
 is narrower, and v2 gate finding 1 showed that sequencing text alone is not sufficient to enforce
-it — an executable preflight assertion is required. v3's mechanism:
+it — an executable preflight assertion is required. v4's mechanism:
 
 1. The bootstrap pull request lands the four context definitions **before** any of them is
    required. It merges under the pre-R07 regime, where the only required context is the weak
@@ -383,17 +384,21 @@ it — an executable preflight assertion is required. v3's mechanism:
 3. The bootstrap merge is verified as main's new tip with the reviewed base/head parents
    (§11 barrier 4), and its resulting merge commit SHA is recorded as `bootstrap_merge_sha`.
 4. Immediately before the ruleset apply's first write, `github-governance.proposed.json`
-   sequence 6 resolves current `main`'s tip live and compares it against `bootstrap_merge_sha`
-   with the GitHub compare API. It asserts `bootstrap_merge_sha` is an ancestor of current `main`
-   (not rewritten) and that the diff between them touches none of the protected paths
-   (`.github/workflows/`, the manifest, `fork-health.sh`, the railway validator and its tests,
-   and this apply document itself — the same list `governance-root.yml` checks). Only after this
-   passes is the ruleset applied requiring all four contexts.
+   sequence 6 resolves current `main`'s exact SHA with `GET repos/jerudnik/jcode/commits/main`,
+   unshallows the apply clone read-only when needed, fetches that commit and
+   `bootstrap_merge_sha`, proves ancestry, and runs
+   `git diff --quiet bootstrap_merge_sha current_main_sha -- <protected
+   paths>`. The protected set is `.github/scripts/`, `.github/workflows/`, the manifest,
+   `fork-health.sh`, the railway validator and its tests, and this apply document itself — the
+   same list `governance-root.yml` checks. This path-limited tree comparison has no response cap;
+   a rename away from a protected prefix appears as deletion of the old protected path, and a
+   rename into one appears as addition. Only after this passes is the ruleset applied requiring
+   all four contexts.
 
 **What this proves about an intervening merge, precisely.** If another pull request merges
 between the bootstrap merge and the ruleset apply and does not touch a protected path, sequence 6
-observes an empty protected-path diff and passes: the four context definitions sequence 2 proved
-emitting are still exactly what is on `main`, so requiring them is safe. If an intervening pull
+observes an empty local protected-path tree diff and passes: the four context definitions sequence
+2 proved emitting are still exactly what is on `main`, so requiring them is safe. If an intervening pull
 request does touch a protected path — whether through an unauthorized bypass of `Governance Root`
 or through a legitimate, correctly-executed §4 maintenance window — sequence 6 fails closed: the
 apply stops, and the operator must re-review current `main`'s actual state (and, if the change was
@@ -402,15 +407,25 @@ claim that an intervening merge is safe merely because it happened; the claim is
 executable: an intervening merge that left the protected paths untouched is safe, and this is
 verified live at apply time rather than inferred from the historical bootstrap head.
 
+**Activation TOCTOU mitigation and residual.** Sequence 8 first reads back the ruleset written by
+sequence 7, then immediately obtains a fresh live `main` SHA and repeats sequence 6 in full. If the
+boundary was rewritten or any protected path changed, sequence 8 restores the exact pre-write
+ruleset body captured by sequence 3, verifies that restoration, and stops while no other surface
+has been changed. This catches a merge between the initial sequence 6 read and the first ruleset
+read-back. GitHub's ruleset PUT has no expected-main-SHA precondition, so the assertion and write
+cannot be made atomic: a smaller residual race remains after the repeat and before the apply
+finishes. The operator minimizes that interval and permits no concurrent merges, but v4 does not
+claim the platform serializes it.
+
 ### Later governance maintenance (transaction-bound)
 
-A subsequent legitimate change to `.github/workflows/**`, the manifest, the comparator, the
-railway validator, or `github-governance.proposed.json` will make `Governance Root` red, and a
+A subsequent legitimate change to `.github/scripts/**`, `.github/workflows/**`, the manifest, the
+comparator, the railway validator, or `github-governance.proposed.json` will make `Governance Root` red, and a
 red required context blocks the merge for that PR alone — the other three required contexts stay
 live and unaffected. v2 gate finding 2 found that dropping `Governance Root` from
 `required_status_checks` repository-wide for an unbound interval, with no PR/head/base capture and
 no proof only the reviewed PR merged in that interval, left this window exploitable by a wrong or
-sloppy PR merge, not only by the owner-admin's accepted authority. v3 binds the transaction the
+sloppy PR merge, not only by the owner-admin's accepted authority. v4 binds the transaction the
 same way the (history-only, rejected) v1 immutable-transition protocol bound the bootstrap step:
 
 1. **Capture identity before any write.** Record the exact PR number, source repository/ref, the
@@ -419,14 +434,15 @@ same way the (history-only, rejected) v1 immutable-transition protocol bound the
    and the manifest. Confirm `Governance Root` fails on `head_sha` and names exactly the protected
    paths this PR changes; capture that check-run output as evidence.
 2. **Record the pre-change ruleset, exactly.** Read the complete current `protect-fork-rails`
-   body and its SHA-256. This is the literal object restored in step 6, not a freshly authored
-   equivalent — restoration is defined as byte equality to this captured hash, not as re-applying
+   body and its SHA-256 using the apply document's pinned canonical encoder. This is the literal
+   object restored in step 6, not a freshly authored equivalent — restoration is defined as
+   parsed-body equality plus equality to this captured hash, not as re-applying
    `github-governance.proposed.json`'s target body (which differs from live state only by the
    temporary absence of `Governance Root`).
 3. **Drop the one context, read back, start the window clock.** `PUT` the ruleset with
-   `Governance Root` removed from `required_status_checks` and every other field byte-identical to
-   step 2's body. Read the ruleset back, record the sanitized post-change body and its hash, and
-   record the wall-clock window start.
+   `Governance Root` removed from `required_status_checks` and every other sanitized field
+   parsed-equal to step 2's body. Read the ruleset back, record the sanitized post-change body and
+   its canonical hash, and record the wall-clock window start.
 4. **Merge conditioned on the exact reviewed head.** `PUT
    /repos/jerudnik/jcode/pulls/{pr_number}/merge` with `sha: head_sha` and `merge_method: merge`.
    If the API rejects the head-SHA precondition (the PR's head moved since step 1's review), stop;
@@ -439,29 +455,38 @@ same way the (history-only, rejected) v1 immutable-transition protocol bound the
 6. **Restore the exact pre-change body, read back, close the window clock.** `PUT` the ruleset
    back to the literal body captured in step 2 (not a freshly authored one); read it back and
    confirm its hash equals step 2's hash exactly. Record the wall-clock window end.
-7. **Executable proof no other PR merged in the window.** `GET
-   repos/jerudnik/jcode/compare/{expected_base_sha}...refs/heads/main` and assert `commits` has
-   exactly one entry and its `sha` equals `merge_sha` from step 5. This is checked *after*
-   restoration, so it also catches anything that landed between steps 5 and 6. If more than one
-   commit appears, stop: treat this as a governance incident requiring out-of-band investigation,
-   not as routine maintenance to be closed by re-running step 6.
+7. **Executable proof no other merge or commit landed in the window.** Re-read
+   `GET repos/jerudnik/jcode/commits/main`, set `post_restore_main_sha` to its full `sha`, and assert
+   `post_restore_main_sha == merge_sha` from step 5. Unshallow the local clone read-only if needed,
+   fetch `expected_base_sha` and `post_restore_main_sha`, and run
+   `git rev-list --first-parent --merges expected_base_sha..post_restore_main_sha`; assert its
+   complete output has exactly one entry and that entry equals `merge_sha`. `--first-parent`
+   measures merges onto `main`, not merge commits that may exist inside the reviewed PR branch.
+   Do **not** assert the range has one total
+   commit: the reviewed branch's commits legitimately appear in the range. Step 5's ordered
+   two-parent proof (`parents == [expected_base_sha, head_sha]`) binds that sole merge to the exact
+   reviewed base and head; tip equality catches a later direct/non-merge commit as well. This is
+   checked after restoration, so it catches anything that landed between steps 5 and 6. On any
+   mismatch, stop and treat it as a governance incident requiring out-of-band investigation, not
+   as routine maintenance to be closed by re-running step 6.
 8. **Post-merge comparison from two independent comparator implementations.** Run
    `scripts/fork-health.sh --live` twice: once checked out at the *pre-window* `expected_base_sha`
    (the reviewed comparator as it existed before this PR could have altered its own judgment), and
    once at `merge_sha` (the new, post-merge comparator). Both runs must independently confirm the
-   restored `protect-fork-rails` body matches the byte-identical steady-state target. Record both
+   restored `protect-fork-rails` body matches the exact steady-state target. Record both
    transcripts; a disagreement between them is a stop, since it means the PR being merged changed
    what the comparator itself considers compliant.
 
 **What this does and does not close.** Steps 1-8 bind PR identity, condition the merge on the
-exact reviewed head SHA, and executably prove after the fact that exactly one commit landed on
-`main` during the window (step 7 subsumes "no wrong PR merged" and "no direct push happened").
+exact reviewed head SHA, and executably prove after the fact that `main` still ends at the reviewed
+`merge_sha` and the range contains exactly that one merge commit (step 7 subsumes "no wrong PR
+merged" and "no later direct push happened" while allowing the reviewed branch's own commits).
 What this cannot do, and does not claim to do: prevent a *second, ordinary* pull request from
 merging during the window through the normal PR flow, since `Fork CI Gate`, `Security Gate`, and
 `Nix Gate` remain required and unaffected by dropping `Governance Root` alone — full binding
 would require pausing all merges, which this platform's ruleset API does not offer short of
 making the branch fully unmergeable (a stronger and separately costly step outside this design's
-scope). Step 7 detects this case (any second commit fails the exactly-one-commit assertion) but
+scope). Step 7 detects this case (the tip differs and the range contains a second merge commit) but
 does not prevent it. This residual is scoped, not overclaimed, per D031: the owner-admin who runs
 this procedure is the accepted root of trust and controls when a second PR is allowed to merge in
 practice; the mechanism above exists to make it *provable after the fact* whether that discipline
@@ -488,7 +513,7 @@ Four contexts are required. Each is created on every pull request:
 
 | Context | Summary semantics |
 |---|---|
-| `Governance Root` | Audit gate for governance-path changes. Fails any pull request that touches `.github/workflows/**`, the manifest, the comparator, the railway validator, its tests, or the apply document, and names the offending paths. It runs from the PR head like every other job, so it detects rather than prevents; see §3 and §4. |
+| `Governance Root` | Audit gate for governance-path changes. Fails any pull request that touches `.github/scripts/**`, `.github/workflows/**`, the manifest, the comparator, the railway validator, its tests, or the apply document, and names the offending paths. It runs from the PR head like every other job, so it detects rather than prevents; see §3 and §4. |
 | `Fork CI Gate` | Requires `Detect changes` and `Governance Contract Gate` success. Quality must succeed iff `rust || scripts`; macOS/Linux must succeed iff `rust`. An applicable skip or inapplicable run fails. |
 | `Security Gate` | Requires dependency detection and secret scan success. Dependency audit must succeed iff `deps`; an unexplained skip fails. |
 | `Nix Gate` | Requires fast validation, matrix selection, and the real x86_64-linux package build/smoke success. |
@@ -776,13 +801,14 @@ Own `required-checks.json`, `fork-health.sh`, governance comparison code, tests,
 and evidence transcripts. Hand `workflow-contexts.proposed.patch` to the coordinator/workflow
 owner. Do not apply GitHub configuration.
 
-After activation, a pull request that modifies `.github/workflows/**` or an R07 governance file
+After activation, a pull request that modifies `.github/scripts/**`, `.github/workflows/**`, or an R07 governance file
 turns `Governance Root` red, and a red required context blocks the merge. A future legitimate
 governance change uses the transaction-bound maintenance procedure in §4: identity capture, one
 ruleset PUT that temporarily drops `Governance Root` from required checks (recording the exact
 pre-change body and hash), a SHA-conditioned merge, main-tip and two-parent verification, one PUT
-restoring the byte-identical pre-change body, an executable exactly-one-commit proof over the
-whole window, and a post-merge comparison from both a pre-window and a post-window comparator.
+restoring the exact pre-change body, a post-restoration tip-equality check plus an executable
+exactly-one-merge-commit proof over the whole window, and a post-merge comparison from both a
+pre-window and a post-window comparator.
 All writes and read-backs are evidence. Per D031 this window is under the owner-admin, who is the
 accepted root of trust; it is designed to be auditable and its boundaries provable, not
 unavailable.
@@ -851,8 +877,8 @@ The accepted residual risk is recorded rather than evidenced: no artifact can de
 the owner-admin will not rewrite a ruleset, because per D031 the owner-admin is the root of
 trust. The evidence above shows the specific, bounded set of things R07 actually proves: the
 server state matches the manifest at each live/scheduled comparison instant; the bootstrap
-transition and each §4 maintenance transaction are individually provable as single-commit,
-exact-head-conditioned, restored-to-hash windows; and a governance-path change that bypasses that
+transition and each §4 maintenance transaction are individually provable as exact-head-conditioned,
+tip-bound, exactly-one-merge-commit, restored-to-hash windows; and a governance-path change that bypasses that
 procedure is flagged the next time a comparison runs. It does not claim, and §1/§3 say so
 explicitly, that every historical change is captured in a continuous log or that detection is
 instantaneous rather than sample-point.
@@ -873,10 +899,12 @@ A result that would disprove this design is named in advance:
 - Sequence 6 finds current `main`'s tip is not a descendant of `bootstrap_merge_sha`, or finds a
   non-empty protected-path diff between them. Stop before the ruleset write; re-review current
   `main`'s actual state (§4).
-- During a §4 maintenance window, the exactly-one-commit compare-API check (§4 step 7) finds more
-  than one commit landed on `main`, or the pre-window and post-window `fork-health.sh --live`
-  transcripts (§4 step 8) disagree. Stop and treat it as a governance incident, not routine
-  maintenance.
+- Sequence 8's immediate repeat of sequence 6 sees a different protected-path state or rewritten
+  boundary. Restore and verify the sequence-3 ruleset body, then stop; do not continue activation.
+- During a §4 maintenance window, the post-restoration main tip differs from `merge_sha`, the
+  complete `git rev-list --first-parent --merges expected_base_sha..post_restore_main_sha` output is not exactly
+  `merge_sha`, or the pre-window and post-window `fork-health.sh --live` transcripts (§4 step 8)
+  disagree. Stop and treat it as a governance incident, not routine maintenance.
 - Any preflight identifier read-back differs from the value this design embeds (repository id,
   integration id, either ruleset id/name binding, or the classic-protection baseline). Stop; the
   apply document is describing a repository state that no longer exists.
