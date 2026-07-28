@@ -50,6 +50,15 @@ ARTIFACT_FIELDS = {
     "what_i_did_not_check",
 }
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# Post-distribution amendment (D030): W4 carries eleven children after the
+# R06 sticky-server and F30 distribution-verification nodes were added, so the
+# per-wave deep-gate review budget moved from 10 to 12.
+MAX_EXPANSION_CHILDREN = 12
+# Audit items A26 (documentation truth) and A27 (Nix-only distribution
+# verification) were added by the post-distribution amendment (D030).
+AUDIT_ID_COUNT = 27
+# Coverage may cite D (documentation), F, and G executable nodes.
+AUDIT_COVERAGE_PREFIXES = ("D", "F", "G")
 BOOTSTRAP_REQUIRED_TEXT = (
     "Read these files completely before mutation:",
     "python3 scripts/ideal_base_railway.py check",
@@ -321,7 +330,7 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
     if flattened != graph["all_nodes"]:
         raise RailwayError("all_nodes must exactly flatten expansions in root order")
     for parent, children in expansions.items():
-        if len(children) > 10:
+        if len(children) > MAX_EXPANSION_CHILDREN:
             raise RailwayError(
                 f"{parent}: expansion exceeds the deep-gate review budget"
             )
@@ -361,12 +370,14 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
     validate_ownership(nodes)
 
     coverage = graph.get("audit_coverage")
-    expected_audit_ids = [f"A{index:02d}" for index in range(1, 26)]
+    expected_audit_ids = [f"A{index:02d}" for index in range(1, AUDIT_ID_COUNT + 1)]
     if (
         not isinstance(coverage, list)
         or [row.get("id") for row in coverage] != expected_audit_ids
     ):
-        raise RailwayError("audit_coverage must contain ordered IDs A01 through A25")
+        raise RailwayError(
+            f"audit_coverage must contain ordered IDs A01 through A{AUDIT_ID_COUNT:02d}"
+        )
     covered_nodes: set[str] = set()
     for row in coverage:
         references = row.get("nodes")
@@ -375,15 +386,19 @@ def validate_graph(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for node_id in references:
             if node_id not in nodes:
                 raise RailwayError(f"{row['id']}: unknown graph node {node_id}")
-            if not node_id.startswith(("F", "G")):
+            if not node_id.startswith(AUDIT_COVERAGE_PREFIXES):
                 raise RailwayError(
-                    f"{row['id']}: coverage may cite only F/G executable nodes"
+                    f"{row['id']}: coverage may cite only D/F/G executable nodes"
                 )
             covered_nodes.add(node_id)
     executable_nodes = {node_id for node_id in nodes if node_id.startswith(("F", "G"))}
-    if covered_nodes != executable_nodes:
-        missing = sorted(executable_nodes - covered_nodes)
-        extra = sorted(covered_nodes - executable_nodes)
+    missing = sorted(executable_nodes - covered_nodes)
+    extra = sorted(
+        node_id
+        for node_id in covered_nodes - executable_nodes
+        if not node_id.startswith("D")
+    )
+    if missing or extra:
         raise RailwayError(f"audit coverage mismatch; missing={missing}, extra={extra}")
     return nodes
 

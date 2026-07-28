@@ -64,11 +64,21 @@
       "priority": 70
     },
     {
+      "id": "W4R",
+      "content": "Close recovery and governance: prove every accepted node is published on main, repair durable commit accounting, ratify private archives, and make branch protection self-checking. This barrier must close alongside W4 before W5.",
+      "kind": "implement",
+      "depends_on": [
+        "W3"
+      ],
+      "priority": 70
+    },
+    {
       "id": "W5",
       "content": "Disposition external gates, run final deterministic signoff twice, obtain independent critique, and synthesize the ideal-base verdict.",
       "kind": "verify",
       "depends_on": [
-        "W4"
+        "W4",
+        "W4R"
       ],
       "priority": 60
     }
@@ -883,7 +893,8 @@
         "kind": "implement",
         "depends_on": [
           "F03",
-          "F06"
+          "F06",
+          "R07"
         ],
         "priority": 88,
         "owned_paths": [
@@ -910,20 +921,23 @@
       },
       {
         "id": "F22",
-        "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
+        "content": "Enforce structured security-advisory ownership: every ignored advisory carries advisory ID, owner, rationale, affected surface, expiry date, and retirement condition in a machine-readable record. CI and preflight fail on undocumented or expired ignores, with fixtures that inject the current date so expiry tests are deterministic. The retired Homebrew host-verification requirement is removed with the Homebrew publication path.",
         "kind": "implement",
-        "depends_on": [],
+        "depends_on": [
+          "R07"
+        ],
         "priority": 100,
         "owned_paths": [
           ".cargo/audit.toml",
           "docs/SECURITY_DEPENDENCIES.md",
           ".github/workflows/security.yml",
-          ".github/workflows/release.yml",
           "docs/fork/ideal-base/evidence/F22/**"
         ],
         "acceptance_gates": [
-          "Expired ignore fails policy",
-          "Homebrew path uses pinned known_hosts and no StrictHostKeyChecking=no"
+          "Expired ignore fails policy in CI and preflight",
+          "Undocumented ignore fails policy",
+          "Advisory records are machine-readable with owner, rationale, affected surface, expiry, and retirement condition",
+          "Expiry fixtures inject the current date (deterministic)"
         ],
         "evidence": [
           "policy fixtures",
@@ -937,7 +951,9 @@
         "id": "F23",
         "content": "Add explicit downward quality targets and zero-growth critical-path budgets without demanding an all-at-once cleanup.",
         "kind": "implement",
-        "depends_on": [],
+        "depends_on": [
+          "R07"
+        ],
         "priority": 95,
         "owned_paths": [
           "scripts/*budget*",
@@ -958,17 +974,17 @@
       },
       {
         "id": "F24",
-        "content": "Pin compatibility build inputs and emit verifiable source/version provenance and SBOM for the declared reproducible artifact subset.",
+        "content": "Prove the reproducible Nix output scope and emit verifiable source/version provenance plus an SBOM for the declared reproducible artifact subset. Describe the exact scope, pin relevant inputs, compare two clean builds in that scope, and expose source revision, version, platform, derivation/output identity, and an SBOM without reintroducing release assets. This node owns no release workflow.",
         "kind": "implement",
         "depends_on": [
           "F21",
-          "F22"
+          "F22",
+          "F30"
         ],
         "priority": 90,
         "owned_paths": [
           "nix/**",
           "scripts/build_linux_compat.sh",
-          ".github/workflows/release.yml",
           "crates/jcode-build-meta/**",
           "docs/fork/ideal-base/evidence/F24/**"
         ],
@@ -988,7 +1004,9 @@
         "id": "F25",
         "content": "Centralize socket/metadata cleanup; diagnose and quarantine malformed swarm state; bound terminal control-log retention.",
         "kind": "implement",
-        "depends_on": [],
+        "depends_on": [
+          "R06"
+        ],
         "priority": 88,
         "owned_paths": [
           "crates/jcode-app-core/src/server/socket.rs",
@@ -1015,7 +1033,9 @@
         "id": "F26",
         "content": "Sweep dead active PID markers at startup/periodically and make telemetry active-session markers process-liveness aware; remove the uncompiled duplicate after equivalence review.",
         "kind": "implement",
-        "depends_on": [],
+        "depends_on": [
+          "R07"
+        ],
         "priority": 86,
         "owned_paths": [
           "crates/jcode-storage/src/active_pids.rs",
@@ -1132,7 +1152,10 @@
           "F25",
           "F26",
           "F28",
-          "F29"
+          "F29",
+          "R05",
+          "R06",
+          "F30"
         ],
         "priority": 70,
         "owned_paths": [
@@ -1149,6 +1172,98 @@
         "review_model": "opus",
         "class": "deterministic",
         "parent": "W4"
+      },
+      {
+        "id": "R06",
+        "content": "Repair sticky-server process-group signaling and unchecked server detachment (human-noticed-issues/STICKY_SERVER.md; revalidate line locations after the distribution merge). (a) In spawn_server_notify treat setsid() failure as a spawn error instead of silently starting a server in an inherited process group. (b) Preserve process-group signaling for a correctly detached server so helper descendants terminate with it. (c) When group signaling returns ESRCH but the positive PID is still live, signal that individual process and report the fallback truthfully, using the same policy for graceful SIGTERM and forced SIGKILL. (d) Never turn EPERM or another error into a fallback; surface it.",
+        "kind": "implement",
+        "depends_on": [
+          "R01",
+          "R04",
+          "R07",
+          "F29"
+        ],
+        "priority": 89,
+        "owned_paths": [
+          "src/cli/commands.rs",
+          "crates/jcode-base/src/platform.rs",
+          "crates/jcode-app-core/src/server/socket.rs",
+          "docs/fork/ideal-base/evidence/R06/**"
+        ],
+        "acceptance_gates": [
+          "setsid() failure is a spawn error, not a silent inherited-group server",
+          "Detached group leader with a descendant: descendant does not survive termination",
+          "Live non-group-leader child: group ESRCH falls back to the individual process for both SIGTERM and SIGKILL stages, reported truthfully",
+          "EPERM and other non-ESRCH errors are surfaced, never converted to fallback"
+        ],
+        "evidence": [
+          "deterministic Unix fixtures for both process shapes",
+          "focused platform/server/CLI/lifecycle test runs"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W4"
+      },
+      {
+        "id": "F30",
+        "content": "Independently verify the landed Nix-only distribution transition and native-iOS retirement against the exact merged result, injecting a bounded fix node for every gap. Prove: Nix/Home Manager/Cachix are the only supported end-user distribution paths; no tag-triggered binary publication, Homebrew, AUR, curl/PowerShell installer, release-asset acquisition, or self-overwrite path is active or documented as supported; source/selfdev update behavior is developer-only and never overwrites a Nix-managed binary; active native iOS source, TestFlight workflow/setup, and active iOS product documentation are absent; web/jcode-mobile and its packaged Nix assets remain intact; README, branch policy, Nix docs, agent workflow docs, flake source filters, workflow lint lists, tests, and instruction primitives agree; and a planted retired-distribution reference makes the policy gate fail.",
+        "kind": "verify",
+        "depends_on": [
+          "F20c",
+          "F21",
+          "R07"
+        ],
+        "priority": 85,
+        "owned_paths": [
+          "docs/fork/ideal-base/evidence/F30/**"
+        ],
+        "acceptance_gates": [
+          "Every retired distribution surface is proved absent from active code, workflows, and supported-docs claims",
+          "web/jcode-mobile packaged assets intact and served outside a source checkout",
+          "Planted retired-distribution reference makes the policy gate fail (non-vacuous proof)",
+          "Every discovered gap lands as an injected, separately owned fix node"
+        ],
+        "evidence": [
+          "distribution-surface audit ledger",
+          "planted-reference failure transcript",
+          "injected fix-node list"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W4"
+      }
+    ],
+    "W4R": [
+      {
+        "id": "R07",
+        "content": "Enforce reviewed publication and make governance self-checking. (a) Put the required pull-request check contexts in one machine-readable repository file and harden the main ruleset: deletion and non-fast-forward protection, changes through pull requests, zero required approvals, review-thread resolution, merge commits only, strict required checks, no silent administrator bypass. Every required context must be emitted for every pull request; fix conditional triggers or add an always-running summary gate first. (b) Extend the STATE.json schema to distinguish reviewed_commit from the published main-ancestral commit, map every legacy accepted node to its published identity by tree/patch equivalence, and reopen any node without a defensible mapping. (c) Change the validator from object-existence to ancestor-of-HEAD semantics for published commits, with CI history depth sufficient for the answer to be meaningful. (d) Ratify the private recovery archive: preserve every archive/stash-* tag and every non-main-ancestral reviewed commit as explicit archive refs in jerudnik/jcode-recovery-archive, verified with git ls-remote. Never move or delete existing tags, never push them to the public fork.",
+        "kind": "implement",
+        "depends_on": [],
+        "priority": 100,
+        "owned_paths": [
+          "scripts/fork-health.sh",
+          "scripts/required-checks.json",
+          "scripts/ideal_base_railway.py",
+          "tests/test_ideal_base_railway.py",
+          "docs/fork/ideal-base/evidence/R07/**"
+        ],
+        "acceptance_gates": [
+          "Ruleset API and a pull request show the intended server-side enforcement: PR required, zero approvals, merge commits only, strict required checks, no silent bypass",
+          "Every required context is present and green on the final R07 commit; a context that can be absent is never required",
+          "Governance fixtures prove rule shape without GitHub access and a live read-only mode compares the actual ruleset; fixtures reject missing PR enforcement, wrong approval count, non-merge methods, force-push permission, stale rails, and unexpected bypass actors",
+          "Every completed state record has a proved published main-ancestral identity or is reopened with an injected repair node",
+          "Reviewed identities and existing stash tags have verified private archive refs; redacted ls-remote proof recorded",
+          "An independent reviewer reports no bypass, lockout, or false-durability gap"
+        ],
+        "evidence": [
+          "sanitized ruleset JSON and merge-state proof",
+          "governance fixture transcripts including planted-failure cases",
+          "reviewed-to-published commit mapping ledger with equivalence method per node",
+          "archive manifest and verification output"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W4R"
       }
     ],
     "W5": [
@@ -1194,59 +1309,60 @@
       },
       {
         "id": "G03",
-        "content": "Run mobile/iOS simulator or device attach validation after local gateway fixtures remain green.",
+        "content": "Verify the packaged browser control surface against a deterministic local gateway: serve web/jcode-mobile from the Nix binary and exercise pairing, subscribe/history, send/cancel, disconnect/reconnect/resync, and stale-ack behavior. Call it a browser control surface, not a PWA; this is not an Apple or PWA publication gate.",
         "kind": "verify",
         "depends_on": [],
         "priority": 90,
         "owned_paths": [
           "docs/fork/ideal-base/evidence/G03/**"
         ],
-        "authorization": "Apple platform/signing/device access",
         "acceptance_gates": [
-          "Attach lifecycle passes or authorization_blocked with named next action"
+          "Pairing, subscribe/history, send/cancel, disconnect/reconnect/resync, and stale-ack pass against the deterministic local gateway",
+          "Packaged assets served from the Nix binary outside a source checkout"
         ],
         "evidence": [
-          "simulator/device result"
+          "local gateway fixture transcript"
         ],
         "review_model": "opus",
-        "class": "gated",
+        "class": "deterministic",
         "parent": "W5"
       },
       {
         "id": "G04",
-        "content": "Run scheduled Windows and FreeBSD compile/install smokes if those surfaces remain advertised.",
+        "content": "Prove Windows and FreeBSD are not advertised as supported distribution surfaces; retain platform code only as explicitly untested compatibility code if still useful. No scheduled installer or release smoke remains required for them.",
         "kind": "verify",
         "depends_on": [],
         "priority": 85,
         "owned_paths": [
           "docs/fork/ideal-base/evidence/G04/**"
         ],
-        "authorization": "platform runners or support downgrade",
         "acceptance_gates": [
-          "Scheduled smoke evidence or explicit support disposition"
+          "No active document, workflow, or flake output advertises Windows or FreeBSD as a supported distribution surface",
+          "Retained compatibility code is explicitly labeled untested"
         ],
         "evidence": [
-          "platform result"
+          "support-claim audit ledger"
         ],
         "review_model": "opus",
-        "class": "gated",
+        "class": "deterministic",
         "parent": "W5"
       },
       {
         "id": "G05",
-        "content": "Run disposable draft-release acquisition and live updater smoke without publishing a public release.",
+        "content": "Run an authorized disposable remote Nix/Cachix acquisition and launch smoke: acquire a pinned fork revision through Nix in a disposable environment, verify Cachix/substituter behavior without credentials, and launch the resulting binary. No release API or installer path.",
         "kind": "verify",
         "depends_on": [],
         "priority": 80,
         "owned_paths": [
           "docs/fork/ideal-base/evidence/G05/**"
         ],
-        "authorization": "disposable credentials/assets and network release API",
+        "authorization": "disposable environment with network access for Nix/Cachix acquisition",
         "acceptance_gates": [
-          "Draft acquisition/update succeeds and cleans up, or authorization_blocked"
+          "Pinned-revision Nix acquisition and binary launch succeed in a disposable environment, or authorization_blocked with named next action",
+          "No release API, installer, or credential use"
         ],
         "evidence": [
-          "redacted draft-release ledger"
+          "redacted acquisition ledger"
         ],
         "review_model": "opus",
         "class": "gated",
@@ -1258,7 +1374,8 @@
         "kind": "verify",
         "depends_on": [
           "F21",
-          "F27"
+          "F27",
+          "D01"
         ],
         "priority": 75,
         "owned_paths": [
@@ -1322,6 +1439,106 @@
         "evidence": [
           "final disposition",
           "commit and clean-state proof"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W5"
+      },
+      {
+        "id": "D01",
+        "content": "Reconcile all active Jcode documentation with the final source and support contracts without rewriting historical evidence. Execute the D01-A census and authority map first, then path-disjoint lanes D01-B through D01-F, then D01-V verification and synthesis; expand per POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md and disposition every D01-Fxx finding in D01_DOCUMENTATION_AUDIT.md as corrected, superseded, product_repair, or not_reproducible. Every edited claim cites current source, tests, CLI help, workflows, or deterministic behavior. Never document behavior the code does not have: inject a separately owned product repair and document the accepted result. Generated AGENTS.md/CLAUDE.md surfaces stay generated; edit only their .apm primitives and recompile.",
+        "kind": "verify",
+        "depends_on": [
+          "W4",
+          "W4R",
+          "F27",
+          "F30",
+          "R07"
+        ],
+        "priority": 55,
+        "owned_paths": [
+          "README.md",
+          "CONTRIBUTING.md",
+          "OAUTH.md",
+          "RELEASING.md",
+          "TELEMETRY.md",
+          "docs/AGENTCARD_DISCOVERY_DEMO.md",
+          "docs/AGENT_NATIVE_VCS_CORE_BEHAVIOR.md",
+          "docs/AGENT_TOOL_INTEGRATION.md",
+          "docs/AMBIENT_MODE.md",
+          "docs/ASSISTANT_PROFILE_PERSONAS.md",
+          "docs/AUTH_CREDENTIAL_SOURCES.md",
+          "docs/AWS_BEDROCK_PROVIDER.md",
+          "docs/BRANCHING.md",
+          "docs/BROWSER_PROVIDER_PROTOCOL.md",
+          "docs/CLOUDFLARE_EXPERIMENT_STRATEGY.md",
+          "docs/CODE_QUALITY_AUDIT_2026-04-18.md",
+          "docs/CRATE_OWNERSHIP_BOUNDARIES.md",
+          "docs/DESKTOP_APP_ARCHITECTURE.md",
+          "docs/DESKTOP_CODEBASE_ARCHITECTURE.md",
+          "docs/DESKTOP_SINGLE_SESSION_DESIGN.md",
+          "docs/DESKTOP_STABLE_HOST_RELOAD_STARTUP.md",
+          "docs/DESKTOP_SUPERAPP_WORKSPACE.md",
+          "docs/DISCOVERY_BENCHMARK.md",
+          "docs/GMAIL_COMPOSIO_BACKEND.md",
+          "docs/HOOKS.md",
+          "docs/INTERACTION_SURFACES.md",
+          "docs/INTERACTION_SURFACE_REQUIREMENTS.md",
+          "docs/INTERACTION_SURFACE_SECURE_ACCESS.md",
+          "docs/KEYMAP_CONFLICTS.md",
+          "docs/MEMORY_ARCHITECTURE.md",
+          "docs/MEMORY_BUDGET.md",
+          "docs/MERMAID_RENDERING_REDESIGN.md",
+          "docs/MODULAR_ARCHITECTURE_RFC.md",
+          "docs/MULTI_SESSION_CLIENT_ARCHITECTURE.md",
+          "docs/NIX.md",
+          "docs/ONBOARDING_SANDBOX.md",
+          "docs/OPENRELAY_DISCOVERY_TEST.md",
+          "docs/PERSONAL_INTERACTION_SURFACES.md",
+          "docs/PROVIDER_DOCTOR.md",
+          "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md",
+          "docs/REFACTORING.md",
+          "docs/RENDER_PARITY_ACCEPTANCE_CRITERIA.md",
+          "docs/RESUME_BEHAVIOR.md",
+          "docs/SAFETY_SYSTEM.md",
+          "docs/SECURITY_DEPENDENCIES.md",
+          "docs/SERVER_ARCHITECTURE.md",
+          "docs/SERVER_LIFECYCLE_INVARIANTS.md",
+          "docs/SOFT_INTERRUPT.md",
+          "docs/SPAWN_HOOK.md",
+          "docs/SPONSORED_DISCOVERY_SPONSOR_ONBOARDING.md",
+          "docs/SWARM_ARCHITECTURE.md",
+          "docs/SWARM_TASK_GRAPH.md",
+          "docs/TELEMETRY.md",
+          "docs/TERMINAL_BENCH.md",
+          "docs/WINDOWS.md",
+          "docs/WRAPPERS.md",
+          "docs/agent-workflows.md",
+          "docs/fork-sync-policy.md",
+          "docs/provider-model-catalog-audit.md",
+          "docs/architecture/**",
+          "docs/proposals/**",
+          "docs/README.md",
+          ".apm/instructions/**",
+          "scripts/check_docs*.py",
+          "tests/test_check_docs*.py",
+          "docs/fork/ideal-base/evidence/D01/**"
+        ],
+        "acceptance_gates": [
+          "Census accounts for every active top-level doc and maintained architecture/reference collection; docs/README.md classifies product use, operator/reference, architecture, proposals, and historical material",
+          "Every D01-Fxx finding has a reviewed corrected/superseded/product_repair/not_reproducible disposition with evidence",
+          "Every edited claim cites current source, tests, CLI help, workflows, or deterministic behavior",
+          "Deterministic docs checker passes for local links and referenced repository paths, proven non-vacuous with planted fixtures; retired-claim denylist excludes frozen evidence and historical archives",
+          "Documented commands have safe existence/parser evidence; no provider, install, release, daemon, network, or destructive command is executed for documentation proof",
+          "Generated instructions match their .apm primitives; apm compile --validate and drift check pass",
+          "Independent reviewer compares final prose to source, not prose in isolation"
+        ],
+        "evidence": [
+          "classified document census and ownership manifest",
+          "D01-Fxx disposition table",
+          "checker fixtures and planted-failure transcripts",
+          "command/parser evidence",
+          "generated-instruction drift results"
         ],
         "review_model": "opus",
         "class": "deterministic",
@@ -2130,7 +2347,8 @@
       "kind": "implement",
       "depends_on": [
         "F03",
-        "F06"
+        "F06",
+        "R07"
       ],
       "priority": 88,
       "owned_paths": [
@@ -2157,20 +2375,23 @@
     },
     {
       "id": "F22",
-      "content": "Add expiring security-advisory policy and strict GitHub host verification for Homebrew publication.",
+      "content": "Enforce structured security-advisory ownership: every ignored advisory carries advisory ID, owner, rationale, affected surface, expiry date, and retirement condition in a machine-readable record. CI and preflight fail on undocumented or expired ignores, with fixtures that inject the current date so expiry tests are deterministic. The retired Homebrew host-verification requirement is removed with the Homebrew publication path.",
       "kind": "implement",
-      "depends_on": [],
+      "depends_on": [
+        "R07"
+      ],
       "priority": 100,
       "owned_paths": [
         ".cargo/audit.toml",
         "docs/SECURITY_DEPENDENCIES.md",
         ".github/workflows/security.yml",
-        ".github/workflows/release.yml",
         "docs/fork/ideal-base/evidence/F22/**"
       ],
       "acceptance_gates": [
-        "Expired ignore fails policy",
-        "Homebrew path uses pinned known_hosts and no StrictHostKeyChecking=no"
+        "Expired ignore fails policy in CI and preflight",
+        "Undocumented ignore fails policy",
+        "Advisory records are machine-readable with owner, rationale, affected surface, expiry, and retirement condition",
+        "Expiry fixtures inject the current date (deterministic)"
       ],
       "evidence": [
         "policy fixtures",
@@ -2184,7 +2405,9 @@
       "id": "F23",
       "content": "Add explicit downward quality targets and zero-growth critical-path budgets without demanding an all-at-once cleanup.",
       "kind": "implement",
-      "depends_on": [],
+      "depends_on": [
+        "R07"
+      ],
       "priority": 95,
       "owned_paths": [
         "scripts/*budget*",
@@ -2205,17 +2428,17 @@
     },
     {
       "id": "F24",
-      "content": "Pin compatibility build inputs and emit verifiable source/version provenance and SBOM for the declared reproducible artifact subset.",
+      "content": "Prove the reproducible Nix output scope and emit verifiable source/version provenance plus an SBOM for the declared reproducible artifact subset. Describe the exact scope, pin relevant inputs, compare two clean builds in that scope, and expose source revision, version, platform, derivation/output identity, and an SBOM without reintroducing release assets. This node owns no release workflow.",
       "kind": "implement",
       "depends_on": [
         "F21",
-        "F22"
+        "F22",
+        "F30"
       ],
       "priority": 90,
       "owned_paths": [
         "nix/**",
         "scripts/build_linux_compat.sh",
-        ".github/workflows/release.yml",
         "crates/jcode-build-meta/**",
         "docs/fork/ideal-base/evidence/F24/**"
       ],
@@ -2235,7 +2458,9 @@
       "id": "F25",
       "content": "Centralize socket/metadata cleanup; diagnose and quarantine malformed swarm state; bound terminal control-log retention.",
       "kind": "implement",
-      "depends_on": [],
+      "depends_on": [
+        "R06"
+      ],
       "priority": 88,
       "owned_paths": [
         "crates/jcode-app-core/src/server/socket.rs",
@@ -2262,7 +2487,9 @@
       "id": "F26",
       "content": "Sweep dead active PID markers at startup/periodically and make telemetry active-session markers process-liveness aware; remove the uncompiled duplicate after equivalence review.",
       "kind": "implement",
-      "depends_on": [],
+      "depends_on": [
+        "R07"
+      ],
       "priority": 86,
       "owned_paths": [
         "crates/jcode-storage/src/active_pids.rs",
@@ -2379,7 +2606,10 @@
         "F25",
         "F26",
         "F28",
-        "F29"
+        "F29",
+        "R05",
+        "R06",
+        "F30"
       ],
       "priority": 70,
       "owned_paths": [
@@ -2396,6 +2626,96 @@
       "review_model": "opus",
       "class": "deterministic",
       "parent": "W4"
+    },
+    {
+      "id": "R06",
+      "content": "Repair sticky-server process-group signaling and unchecked server detachment (human-noticed-issues/STICKY_SERVER.md; revalidate line locations after the distribution merge). (a) In spawn_server_notify treat setsid() failure as a spawn error instead of silently starting a server in an inherited process group. (b) Preserve process-group signaling for a correctly detached server so helper descendants terminate with it. (c) When group signaling returns ESRCH but the positive PID is still live, signal that individual process and report the fallback truthfully, using the same policy for graceful SIGTERM and forced SIGKILL. (d) Never turn EPERM or another error into a fallback; surface it.",
+      "kind": "implement",
+      "depends_on": [
+        "R01",
+        "R04",
+        "R07",
+        "F29"
+      ],
+      "priority": 89,
+      "owned_paths": [
+        "src/cli/commands.rs",
+        "crates/jcode-base/src/platform.rs",
+        "crates/jcode-app-core/src/server/socket.rs",
+        "docs/fork/ideal-base/evidence/R06/**"
+      ],
+      "acceptance_gates": [
+        "setsid() failure is a spawn error, not a silent inherited-group server",
+        "Detached group leader with a descendant: descendant does not survive termination",
+        "Live non-group-leader child: group ESRCH falls back to the individual process for both SIGTERM and SIGKILL stages, reported truthfully",
+        "EPERM and other non-ESRCH errors are surfaced, never converted to fallback"
+      ],
+      "evidence": [
+        "deterministic Unix fixtures for both process shapes",
+        "focused platform/server/CLI/lifecycle test runs"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W4"
+    },
+    {
+      "id": "F30",
+      "content": "Independently verify the landed Nix-only distribution transition and native-iOS retirement against the exact merged result, injecting a bounded fix node for every gap. Prove: Nix/Home Manager/Cachix are the only supported end-user distribution paths; no tag-triggered binary publication, Homebrew, AUR, curl/PowerShell installer, release-asset acquisition, or self-overwrite path is active or documented as supported; source/selfdev update behavior is developer-only and never overwrites a Nix-managed binary; active native iOS source, TestFlight workflow/setup, and active iOS product documentation are absent; web/jcode-mobile and its packaged Nix assets remain intact; README, branch policy, Nix docs, agent workflow docs, flake source filters, workflow lint lists, tests, and instruction primitives agree; and a planted retired-distribution reference makes the policy gate fail.",
+      "kind": "verify",
+      "depends_on": [
+        "F20c",
+        "F21",
+        "R07"
+      ],
+      "priority": 85,
+      "owned_paths": [
+        "docs/fork/ideal-base/evidence/F30/**"
+      ],
+      "acceptance_gates": [
+        "Every retired distribution surface is proved absent from active code, workflows, and supported-docs claims",
+        "web/jcode-mobile packaged assets intact and served outside a source checkout",
+        "Planted retired-distribution reference makes the policy gate fail (non-vacuous proof)",
+        "Every discovered gap lands as an injected, separately owned fix node"
+      ],
+      "evidence": [
+        "distribution-surface audit ledger",
+        "planted-reference failure transcript",
+        "injected fix-node list"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W4"
+    },
+    {
+      "id": "R07",
+      "content": "Enforce reviewed publication and make governance self-checking. (a) Put the required pull-request check contexts in one machine-readable repository file and harden the main ruleset: deletion and non-fast-forward protection, changes through pull requests, zero required approvals, review-thread resolution, merge commits only, strict required checks, no silent administrator bypass. Every required context must be emitted for every pull request; fix conditional triggers or add an always-running summary gate first. (b) Extend the STATE.json schema to distinguish reviewed_commit from the published main-ancestral commit, map every legacy accepted node to its published identity by tree/patch equivalence, and reopen any node without a defensible mapping. (c) Change the validator from object-existence to ancestor-of-HEAD semantics for published commits, with CI history depth sufficient for the answer to be meaningful. (d) Ratify the private recovery archive: preserve every archive/stash-* tag and every non-main-ancestral reviewed commit as explicit archive refs in jerudnik/jcode-recovery-archive, verified with git ls-remote. Never move or delete existing tags, never push them to the public fork.",
+      "kind": "implement",
+      "depends_on": [],
+      "priority": 100,
+      "owned_paths": [
+        "scripts/fork-health.sh",
+        "scripts/required-checks.json",
+        "scripts/ideal_base_railway.py",
+        "tests/test_ideal_base_railway.py",
+        "docs/fork/ideal-base/evidence/R07/**"
+      ],
+      "acceptance_gates": [
+        "Ruleset API and a pull request show the intended server-side enforcement: PR required, zero approvals, merge commits only, strict required checks, no silent bypass",
+        "Every required context is present and green on the final R07 commit; a context that can be absent is never required",
+        "Governance fixtures prove rule shape without GitHub access and a live read-only mode compares the actual ruleset; fixtures reject missing PR enforcement, wrong approval count, non-merge methods, force-push permission, stale rails, and unexpected bypass actors",
+        "Every completed state record has a proved published main-ancestral identity or is reopened with an injected repair node",
+        "Reviewed identities and existing stash tags have verified private archive refs; redacted ls-remote proof recorded",
+        "An independent reviewer reports no bypass, lockout, or false-durability gap"
+      ],
+      "evidence": [
+        "sanitized ruleset JSON and merge-state proof",
+        "governance fixture transcripts including planted-failure cases",
+        "reviewed-to-published commit mapping ledger with equivalence method per node",
+        "archive manifest and verification output"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W4R"
     },
     {
       "id": "G01",
@@ -2439,59 +2759,60 @@
     },
     {
       "id": "G03",
-      "content": "Run mobile/iOS simulator or device attach validation after local gateway fixtures remain green.",
+      "content": "Verify the packaged browser control surface against a deterministic local gateway: serve web/jcode-mobile from the Nix binary and exercise pairing, subscribe/history, send/cancel, disconnect/reconnect/resync, and stale-ack behavior. Call it a browser control surface, not a PWA; this is not an Apple or PWA publication gate.",
       "kind": "verify",
       "depends_on": [],
       "priority": 90,
       "owned_paths": [
         "docs/fork/ideal-base/evidence/G03/**"
       ],
-      "authorization": "Apple platform/signing/device access",
       "acceptance_gates": [
-        "Attach lifecycle passes or authorization_blocked with named next action"
+        "Pairing, subscribe/history, send/cancel, disconnect/reconnect/resync, and stale-ack pass against the deterministic local gateway",
+        "Packaged assets served from the Nix binary outside a source checkout"
       ],
       "evidence": [
-        "simulator/device result"
+        "local gateway fixture transcript"
       ],
       "review_model": "opus",
-      "class": "gated",
+      "class": "deterministic",
       "parent": "W5"
     },
     {
       "id": "G04",
-      "content": "Run scheduled Windows and FreeBSD compile/install smokes if those surfaces remain advertised.",
+      "content": "Prove Windows and FreeBSD are not advertised as supported distribution surfaces; retain platform code only as explicitly untested compatibility code if still useful. No scheduled installer or release smoke remains required for them.",
       "kind": "verify",
       "depends_on": [],
       "priority": 85,
       "owned_paths": [
         "docs/fork/ideal-base/evidence/G04/**"
       ],
-      "authorization": "platform runners or support downgrade",
       "acceptance_gates": [
-        "Scheduled smoke evidence or explicit support disposition"
+        "No active document, workflow, or flake output advertises Windows or FreeBSD as a supported distribution surface",
+        "Retained compatibility code is explicitly labeled untested"
       ],
       "evidence": [
-        "platform result"
+        "support-claim audit ledger"
       ],
       "review_model": "opus",
-      "class": "gated",
+      "class": "deterministic",
       "parent": "W5"
     },
     {
       "id": "G05",
-      "content": "Run disposable draft-release acquisition and live updater smoke without publishing a public release.",
+      "content": "Run an authorized disposable remote Nix/Cachix acquisition and launch smoke: acquire a pinned fork revision through Nix in a disposable environment, verify Cachix/substituter behavior without credentials, and launch the resulting binary. No release API or installer path.",
       "kind": "verify",
       "depends_on": [],
       "priority": 80,
       "owned_paths": [
         "docs/fork/ideal-base/evidence/G05/**"
       ],
-      "authorization": "disposable credentials/assets and network release API",
+      "authorization": "disposable environment with network access for Nix/Cachix acquisition",
       "acceptance_gates": [
-        "Draft acquisition/update succeeds and cleans up, or authorization_blocked"
+        "Pinned-revision Nix acquisition and binary launch succeed in a disposable environment, or authorization_blocked with named next action",
+        "No release API, installer, or credential use"
       ],
       "evidence": [
-        "redacted draft-release ledger"
+        "redacted acquisition ledger"
       ],
       "review_model": "opus",
       "class": "gated",
@@ -2503,7 +2824,8 @@
       "kind": "verify",
       "depends_on": [
         "F21",
-        "F27"
+        "F27",
+        "D01"
       ],
       "priority": 75,
       "owned_paths": [
@@ -2567,6 +2889,106 @@
       "evidence": [
         "final disposition",
         "commit and clean-state proof"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W5"
+    },
+    {
+      "id": "D01",
+      "content": "Reconcile all active Jcode documentation with the final source and support contracts without rewriting historical evidence. Execute the D01-A census and authority map first, then path-disjoint lanes D01-B through D01-F, then D01-V verification and synthesis; expand per POST_DISTRIBUTION_ORCHESTRATOR_PLAN.md and disposition every D01-Fxx finding in D01_DOCUMENTATION_AUDIT.md as corrected, superseded, product_repair, or not_reproducible. Every edited claim cites current source, tests, CLI help, workflows, or deterministic behavior. Never document behavior the code does not have: inject a separately owned product repair and document the accepted result. Generated AGENTS.md/CLAUDE.md surfaces stay generated; edit only their .apm primitives and recompile.",
+      "kind": "verify",
+      "depends_on": [
+        "W4",
+        "W4R",
+        "F27",
+        "F30",
+        "R07"
+      ],
+      "priority": 55,
+      "owned_paths": [
+        "README.md",
+        "CONTRIBUTING.md",
+        "OAUTH.md",
+        "RELEASING.md",
+        "TELEMETRY.md",
+        "docs/AGENTCARD_DISCOVERY_DEMO.md",
+        "docs/AGENT_NATIVE_VCS_CORE_BEHAVIOR.md",
+        "docs/AGENT_TOOL_INTEGRATION.md",
+        "docs/AMBIENT_MODE.md",
+        "docs/ASSISTANT_PROFILE_PERSONAS.md",
+        "docs/AUTH_CREDENTIAL_SOURCES.md",
+        "docs/AWS_BEDROCK_PROVIDER.md",
+        "docs/BRANCHING.md",
+        "docs/BROWSER_PROVIDER_PROTOCOL.md",
+        "docs/CLOUDFLARE_EXPERIMENT_STRATEGY.md",
+        "docs/CODE_QUALITY_AUDIT_2026-04-18.md",
+        "docs/CRATE_OWNERSHIP_BOUNDARIES.md",
+        "docs/DESKTOP_APP_ARCHITECTURE.md",
+        "docs/DESKTOP_CODEBASE_ARCHITECTURE.md",
+        "docs/DESKTOP_SINGLE_SESSION_DESIGN.md",
+        "docs/DESKTOP_STABLE_HOST_RELOAD_STARTUP.md",
+        "docs/DESKTOP_SUPERAPP_WORKSPACE.md",
+        "docs/DISCOVERY_BENCHMARK.md",
+        "docs/GMAIL_COMPOSIO_BACKEND.md",
+        "docs/HOOKS.md",
+        "docs/INTERACTION_SURFACES.md",
+        "docs/INTERACTION_SURFACE_REQUIREMENTS.md",
+        "docs/INTERACTION_SURFACE_SECURE_ACCESS.md",
+        "docs/KEYMAP_CONFLICTS.md",
+        "docs/MEMORY_ARCHITECTURE.md",
+        "docs/MEMORY_BUDGET.md",
+        "docs/MERMAID_RENDERING_REDESIGN.md",
+        "docs/MODULAR_ARCHITECTURE_RFC.md",
+        "docs/MULTI_SESSION_CLIENT_ARCHITECTURE.md",
+        "docs/NIX.md",
+        "docs/ONBOARDING_SANDBOX.md",
+        "docs/OPENRELAY_DISCOVERY_TEST.md",
+        "docs/PERSONAL_INTERACTION_SURFACES.md",
+        "docs/PROVIDER_DOCTOR.md",
+        "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md",
+        "docs/REFACTORING.md",
+        "docs/RENDER_PARITY_ACCEPTANCE_CRITERIA.md",
+        "docs/RESUME_BEHAVIOR.md",
+        "docs/SAFETY_SYSTEM.md",
+        "docs/SECURITY_DEPENDENCIES.md",
+        "docs/SERVER_ARCHITECTURE.md",
+        "docs/SERVER_LIFECYCLE_INVARIANTS.md",
+        "docs/SOFT_INTERRUPT.md",
+        "docs/SPAWN_HOOK.md",
+        "docs/SPONSORED_DISCOVERY_SPONSOR_ONBOARDING.md",
+        "docs/SWARM_ARCHITECTURE.md",
+        "docs/SWARM_TASK_GRAPH.md",
+        "docs/TELEMETRY.md",
+        "docs/TERMINAL_BENCH.md",
+        "docs/WINDOWS.md",
+        "docs/WRAPPERS.md",
+        "docs/agent-workflows.md",
+        "docs/fork-sync-policy.md",
+        "docs/provider-model-catalog-audit.md",
+        "docs/architecture/**",
+        "docs/proposals/**",
+        "docs/README.md",
+        ".apm/instructions/**",
+        "scripts/check_docs*.py",
+        "tests/test_check_docs*.py",
+        "docs/fork/ideal-base/evidence/D01/**"
+      ],
+      "acceptance_gates": [
+        "Census accounts for every active top-level doc and maintained architecture/reference collection; docs/README.md classifies product use, operator/reference, architecture, proposals, and historical material",
+        "Every D01-Fxx finding has a reviewed corrected/superseded/product_repair/not_reproducible disposition with evidence",
+        "Every edited claim cites current source, tests, CLI help, workflows, or deterministic behavior",
+        "Deterministic docs checker passes for local links and referenced repository paths, proven non-vacuous with planted fixtures; retired-claim denylist excludes frozen evidence and historical archives",
+        "Documented commands have safe existence/parser evidence; no provider, install, release, daemon, network, or destructive command is executed for documentation proof",
+        "Generated instructions match their .apm primitives; apm compile --validate and drift check pass",
+        "Independent reviewer compares final prose to source, not prose in isolation"
+      ],
+      "evidence": [
+        "classified document census and ownership manifest",
+        "D01-Fxx disposition table",
+        "checker fixtures and planted-failure transcripts",
+        "command/parser evidence",
+        "generated-instruction drift results"
       ],
       "review_model": "opus",
       "class": "deterministic",
@@ -2712,7 +3134,7 @@
     },
     {
       "id": "A16",
-      "item": "Security advisory expiry and strict Homebrew host identity",
+      "item": "Structured, expiring security-advisory ownership policy",
       "nodes": [
         "F22"
       ],
@@ -2770,27 +3192,43 @@
     },
     {
       "id": "A23",
-      "item": "Mobile/iOS attach validation",
+      "item": "Packaged browser control surface verified against a deterministic local gateway",
       "nodes": [
         "G03"
       ],
-      "class": "gated"
+      "class": "deterministic"
     },
     {
       "id": "A24",
-      "item": "Windows and FreeBSD scheduled smoke",
+      "item": "Windows and FreeBSD proved not advertised as supported distribution surfaces",
       "nodes": [
         "G04"
       ],
-      "class": "gated"
+      "class": "deterministic"
     },
     {
       "id": "A25",
-      "item": "Disposable draft-release and live updater smoke",
+      "item": "Disposable Nix/Cachix pinned-revision acquisition and launch smoke",
       "nodes": [
         "G05"
       ],
       "class": "gated"
+    },
+    {
+      "id": "A26",
+      "item": "Active-documentation truth: source-backed claims, valid links and command evidence, generated-instruction coherence",
+      "nodes": [
+        "D01"
+      ],
+      "class": "deterministic"
+    },
+    {
+      "id": "A27",
+      "item": "Nix-only distribution and native-iOS retirement verification",
+      "nodes": [
+        "F30"
+      ],
+      "class": "deterministic"
     }
   ],
   "coordinator_owned_paths": [
