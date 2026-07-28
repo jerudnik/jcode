@@ -1,9 +1,21 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "repository": "jerudnik/jcode",
   "expected_repository_id": 1238606714,
   "expected_github_actions_integration_id": 15368,
-  "identifier_provenance": "Every identifier used below is verified live by the preflight read_asserts in sequences 1-4 immediately before the first write. No identifier is trusted because it appears in recon, in design.md, or in this file. A mismatch stops the apply before any write.",
+  "identifier_provenance": "Every identifier used below is verified live by the preflight read_asserts in sequences 1-6 immediately before the first write. No identifier is trusted because it appears in recon, in design.md, or in this file. A mismatch stops the apply before any write.",
+  "template_variables": {
+    "bootstrap_head_sha": "the reviewed head SHA of the bootstrap pull request, captured and independently reviewed under design.md section 11 barrier 2",
+    "bootstrap_merge_sha": "the merge commit SHA returned by the bootstrap pull request's API merge and confirmed to be main's new tip under design.md section 11 barrier 4; this is the commit whose protected-path bytes were reviewed and are asserted unchanged by sequence 6",
+    "protected_paths": [
+      ".github/workflows/",
+      "scripts/required-checks.json",
+      "scripts/fork-health.sh",
+      "scripts/ideal_base_railway.py",
+      "tests/test_ideal_base_railway.py",
+      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json"
+    ]
+  },
   "apply_only_after": [
     "the bootstrap pull request's complete number/source/head/target/base identity has been independently reviewed",
     "all four contexts were emitted on that exact bootstrap pull request by integration id 15368; Fork CI Gate, Security Gate, and Nix Gate concluded success. Governance Root is expected to conclude failure there, because the bootstrap pull request is itself a governance-path change; that expected failure is recorded in evidence and does not block, since no context is required yet under the pre-R07 regime",
@@ -24,35 +36,85 @@
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/commits/${bootstrap_head_sha}/check-runs",
-      "assert": "check runs named 'Governance Root', 'Fork CI Gate', 'Security Gate', and 'Nix Gate' are each present exactly once and each reports app.id == 15368 with app.slug == 'github-actions'; Fork CI Gate, Security Gate, and Nix Gate conclude 'success'. This is the live verification of the GitHub Actions integration id; the value is not taken from recon.",
-      "on_mismatch": "stop before any write; do not pin an integration id that was not observed emitting the required contexts"
+      "assert": "check runs named 'Governance Root', 'Fork CI Gate', 'Security Gate', and 'Nix Gate' are each present exactly once and each reports app.id == 15368 with app.slug == 'github-actions'; Fork CI Gate, Security Gate, and Nix Gate conclude 'success'; Governance Root concludes 'failure'. This is the live verification of the GitHub Actions integration id and of the audit gate's own wiring; the value is not taken from recon.",
+      "on_mismatch": "stop before any write; if a summary context is missing or non-success, do not pin an integration id that was not observed emitting the required contexts; if Governance Root did not conclude failure on this governance-path change, the audit gate is misconfigured and must be fixed before it is ever relied on, per design.md section 11 barrier 3"
     },
     {
       "sequence": 3,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
-      "assert": "name == 'protect-fork-rails', target == 'branch', source_type == 'Repository'; persist the sanitized body and its SHA-256. This binds the numeric ruleset id to the intended ruleset name before it is overwritten.",
-      "on_mismatch": "stop; resolve the ruleset id by name from GET repos/jerudnik/jcode/rulesets and re-review this document rather than writing to an unverified id"
+      "assert": "the response, sanitized by removing id, node_id, _links, source, created_at, updated_at, and current_user_can_bypass, is byte-identical (compared as parsed JSON, key order insensitive) to the embedded object below and its SHA-256 equals 8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124. This binds the numeric ruleset id to its full recon-recorded body, not only its name, before it is overwritten.",
+      "expected_sanitized_body": {
+        "name": "protect-fork-rails",
+        "target": "branch",
+        "source_type": "Repository",
+        "enforcement": "active",
+        "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
+        "rules": [ { "type": "deletion" } ],
+        "bypass_actors": []
+      },
+      "expected_sanitized_body_sha256": "8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124",
+      "on_mismatch": "stop; live governance for ruleset 18509013 has drifted from the reviewed recon body. Resolve the ruleset id by name from GET repos/jerudnik/jcode/rulesets and re-review this document rather than writing to an unverified or drifted body"
     },
     {
       "sequence": 4,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
-      "assert": "name == 'no-stray-branches', target == 'branch', source_type == 'Repository'; persist the sanitized body and its SHA-256.",
-      "on_mismatch": "stop; resolve the ruleset id by name and re-review this document"
+      "assert": "the response, sanitized the same way as sequence 3, is byte-identical to the embedded object below and its SHA-256 equals 1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f.",
+      "expected_sanitized_body": {
+        "name": "no-stray-branches",
+        "target": "branch",
+        "source_type": "Repository",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": ["~ALL"],
+            "exclude": ["refs/heads/main", "refs/heads/automation/**"]
+          }
+        },
+        "rules": [ { "type": "creation" } ],
+        "bypass_actors": [ { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" } ]
+      },
+      "expected_sanitized_body_sha256": "1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f",
+      "on_mismatch": "stop; live governance for ruleset 18509016 has drifted from the reviewed recon body. Resolve the ruleset id by name and re-review this document"
     },
     {
       "sequence": 5,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/branches/main/protection",
-      "assert": "the sanitized response equals the recon baseline recorded in design.md section 4; persist it and its SHA-256 so the deletion in sequence 12 is recoverable evidence",
-      "on_mismatch": "stop and re-review; do not overwrite live governance state whose baseline has drifted from the reviewed one"
+      "assert": "the response is byte-identical (parsed JSON, key order insensitive) to the embedded object below and its SHA-256 equals d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704. This is an exact object comparison, not a reference to design.md prose.",
+      "expected_body": {
+        "required_status_checks": {
+          "strict": false,
+          "contexts": ["Detect changes"],
+          "checks": [ { "context": "Detect changes", "app_id": null } ]
+        },
+        "required_signatures": { "enabled": false },
+        "enforce_admins": { "enabled": false },
+        "required_linear_history": { "enabled": false },
+        "allow_force_pushes": { "enabled": false },
+        "allow_deletions": { "enabled": false },
+        "block_creations": { "enabled": false },
+        "required_conversation_resolution": { "enabled": false },
+        "lock_branch": { "enabled": false },
+        "allow_fork_syncing": { "enabled": false }
+      },
+      "expected_body_sha256": "d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704",
+      "on_mismatch": "stop and re-review; do not overwrite live governance state whose baseline has drifted from the reviewed one. Persist the actual live body and its SHA-256 anyway so the deletion in sequence 15, if it later proceeds under a re-reviewed document, remains recoverable evidence."
     },
     {
       "sequence": 6,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/compare/${bootstrap_merge_sha}...refs/heads/main",
+      "assert": "This is the immediately-pre-write assertion against CURRENT main, not the historical bootstrap head that sequence 2 read. It closes the bootstrap-race gap: sequences 1-5 above prove repository identity, integration id, and ruleset/classic-protection state, but none of them re-reads the workflow definitions on main, so an intervening pull request that removed, renamed, or path-filtered a required workflow after the bootstrap merge would otherwise pass sequences 1-5 and only be discovered when sequence 8 or 11's required-context writes started failing every future pull request. Resolve current main's tip live from this same response (base_commit.sha for bootstrap_merge_sha, and the head commit of the comparison for current main); assert merge_base_commit.sha == bootstrap_merge_sha (bootstrap_merge_sha is an ancestor of current main; main was not rewritten), and assert the response's files array contains zero entries whose filename starts with any prefix in template_variables.protected_paths. A compare with zero commits ahead (current main == bootstrap_merge_sha) trivially satisfies this by returning an empty files array. This assertion, together with sequence 2's proof that bootstrap_merge_sha's predecessor head emitted all four contexts, is what proves current main can safely require all four contexts: the protected workflow bytes reviewed at bootstrap are proved byte-identical to what is on main right now, immediately before sequence 7's first write, not merely at some earlier historical instant.",
+      "on_mismatch": "stop before any write. If merge_base_commit.sha != bootstrap_merge_sha, main was rewritten since the bootstrap merge; treat as a governance incident, not routine drift. If any protected path appears in files, a governance-path change landed on main after the bootstrap merge without going through this document's write sequence; re-review current main's actual workflow/manifest state, capture a fresh bootstrap_merge_sha-equivalent baseline (or run the section 4 maintenance procedure if the change was legitimate maintenance), and re-run this preflight from sequence 1 before any write proceeds. Do not require a context whose current-main definition was not just proved identical to what was reviewed."
+    },
+    {
+      "sequence": 7,
       "kind": "write",
       "method": "PUT",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
@@ -118,21 +180,21 @@
       }
     },
     {
-      "sequence": 7,
+      "sequence": 8,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
-      "assert": "sanitized body exactly equals sequence 6, including active enforcement, empty bypass_actors, and every rule parameter"
+      "assert": "sanitized body exactly equals sequence 7, including active enforcement, empty bypass_actors, and every rule parameter"
     },
     {
-      "sequence": 8,
+      "sequence": 9,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rules/branches/main",
       "assert": "effective rule types are exactly deletion, non_fast_forward, pull_request, and required_status_checks, all sourced from ruleset 18509013"
     },
     {
-      "sequence": 9,
+      "sequence": 10,
       "kind": "write",
       "method": "PUT",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
@@ -160,14 +222,14 @@
       }
     },
     {
-      "sequence": 10,
+      "sequence": 11,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
-      "assert": "sanitized body exactly equals sequence 9, including active enforcement and empty bypass_actors"
+      "assert": "sanitized body exactly equals sequence 10, including active enforcement and empty bypass_actors"
     },
     {
-      "sequence": 11,
+      "sequence": 12,
       "kind": "write",
       "method": "PATCH",
       "endpoint": "repos/jerudnik/jcode",
@@ -178,39 +240,39 @@
       }
     },
     {
-      "sequence": 12,
+      "sequence": 13,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode",
       "assert": "allow_merge_commit=true, allow_squash_merge=false, allow_rebase_merge=false"
     },
     {
-      "sequence": 13,
+      "sequence": 14,
       "kind": "checkpoint",
-      "assert": "sequences 1, 2, 3, 4, 5, 7, 8, 10, and 12 all passed; stop here on any mismatch"
+      "assert": "sequences 1, 2, 3, 4, 5, 6, 8, 9, 11, and 13 all passed; stop here on any mismatch"
     },
     {
-      "sequence": 14,
+      "sequence": 15,
       "kind": "write",
       "method": "DELETE",
       "endpoint": "repos/jerudnik/jcode/branches/main/protection",
       "purpose": "remove contradictory classic protection only after the active ruleset and repository settings are proved"
     },
     {
-      "sequence": 15,
+      "sequence": 16,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/branches/main/protection",
       "expect_status": 404
     },
     {
-      "sequence": 16,
+      "sequence": 17,
       "kind": "read_assert",
       "method": "GET",
       "endpoint": "repos/jerudnik/jcode/rules/branches/main",
       "assert": "effective rule types are exactly deletion, non_fast_forward, pull_request, and required_status_checks, all sourced from ruleset 18509013"
     }
   ],
-  "abort_policy": "Stop before the next write whenever a read_assert or checkpoint fails. No write may run before sequences 1-5 have all passed. Never continue to sequence 14 unless sequence 13 passed.",
-  "residual_risk": "Every rule written here can be rewritten or deleted by the repository owner-admin, who is the accepted root of trust for this personal repository per DECISIONS.md D031. This apply document does not claim to prevent that; it makes the intended state explicit and machine-comparable so scripts/fork-health.sh --live and the governance fixtures detect any later drift."
+  "abort_policy": "Stop before the next write whenever a read_assert or checkpoint fails. No write may run before sequences 1-6 have all passed. Never continue to sequence 15 unless sequence 14 passed.",
+  "residual_risk": "Every rule written here can be rewritten or deleted by the repository owner-admin, who is the accepted root of trust for this personal repository per DECISIONS.md D031. This apply document does not claim to prevent that; it makes the intended state explicit and machine-comparable, proves current main's protected-path bytes match what was reviewed immediately before the first write (sequence 6), and lets scripts/fork-health.sh --live and the governance fixtures detect any later drift."
 }

@@ -3,10 +3,10 @@
 @@ -0,0 +1,44 @@
 +name: Governance Root
 +
-+# Audit gate, not a trust root (see DECISIONS.md D031): it runs from the pull
-+# request head like any other workflow, so it detects unlabelled governance
-+# drift rather than resisting an adversary. Governance-path changes go through
-+# the recorded maintenance procedure in design.md section 4.
++# Audit gate: runs from the pull request head like any other workflow, so it
++# detects an unreviewed governance-path change on the PR that makes it rather
++# than preventing one. Legitimate governance-path changes go through the
++# transaction-bound maintenance procedure in design.md section 4.
 +on:
 +  pull_request:
 +    branches: [main]
