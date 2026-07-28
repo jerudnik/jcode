@@ -3,8 +3,10 @@
 @@ -0,0 +1,44 @@
 +name: Governance Root
 +
-+# This workflow is selected by the main ruleset's required-workflow rule from
-+# refs/heads/main. It is intentionally independent of candidate scripts.
++# Audit gate, not a trust root (see DECISIONS.md D031): it runs from the pull
++# request head like any other workflow, so it detects unlabelled governance
++# drift rather than resisting an adversary. Governance-path changes go through
++# the recorded maintenance procedure in design.md section 4.
 +on:
 +  pull_request:
 +    branches: [main]
@@ -25,7 +27,7 @@
 +      - name: Fetch the trusted main boundary
 +        run: git fetch --force --no-tags origin main:refs/remotes/origin/main
 +
-+      - name: Refuse candidate-controlled governance changes
++      - name: Detect governance-path changes
 +        shell: bash
 +        run: |
 +          set -euo pipefail
@@ -37,11 +39,9 @@
 +            scripts/ideal_base_railway.py
 +            tests/test_ideal_base_railway.py
 +            docs/fork/ideal-base/evidence/R07/github-governance.proposed.json
-+            docs/fork/ideal-base/evidence/R07/governance-transition.proposed.template.json
-+            docs/fork/ideal-base/evidence/R07/governance-transition.workflow.template.yml
 +          )
 +          if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
-+            echo "::error::governance-root paths require an explicit ruleset maintenance procedure"
++            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (design.md section 4)"
 +            git diff --name-only "$base" HEAD -- "${protected[@]}"
 +            exit 1
 +          fi

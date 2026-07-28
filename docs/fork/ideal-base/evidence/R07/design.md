@@ -1,10 +1,46 @@
-# R07 design: reviewed publication and self-checking governance
+# R07 design v2: reviewed publication and auditable governance
 
 Design baseline: `main` at `498249777c453c1d551aeb01fc45420d8ca0a585`.
 Primary evidence: `automation/r07-recon:docs/fork/ideal-base/evidence/R07/recon.md`.
 This document makes no GitHub write, pushes no ref, and does not edit coordinator-owned
 `docs/fork/ideal-base/STATE.json` or any workflow. Exact coordinator/out-of-scope proposals
 are recorded beside this design.
+
+## 0. What changed in v2, and why
+
+Design v1 was gated adversarially and failed on one blocking finding: the repository-level
+`workflows` ruleset rule is organization/enterprise-scoped and is rejected with `422 Validation
+Failed` on `jerudnik/jcode`, a personal user-owned repository. v1 had made that rule the sole
+external trust root justifying zero required approvals. `DECISIONS.md` D031 resolves the
+trade-off: **the owner-admin is the accepted root of trust on this repository**, which was
+already true de facto because the owner can rewrite or delete any ruleset. R07's
+"self-checking" property is delivered by auditability, not by an anchor the platform will not
+sell us.
+
+Concretely, v2:
+
+1. removes the `workflows` rule from `github-governance.proposed.json` and every artifact that
+   referenced it;
+2. deletes `governance-transition.proposed.template.json` and
+   `governance-transition.workflow.template.yml`. Those two files existed only to bootstrap and
+   maintain the required-workflow pin (materialize a candidate-free workflow, protect an
+   immutable tag, pin the ruleset's workflow `ref`/`sha` to it, restore afterwards). With no
+   `workflows` rule there is nothing to pin, so the entire immutable-transition protocol is
+   dead code. Keeping it would describe an apply sequence that cannot run. The concurrency
+   freeze it provided is replaced by the ordinary ordering in §11: the bootstrap PR merges under
+   the pre-R07 regime, then the ruleset is applied against a main that already defines all four
+   contexts;
+3. replaces the assertion that `repository_id: 1238606714` and `integration_id: 15368` are
+   recon-derived with live preflight verification at apply time (§3, §4). The gate confirmed the
+   repository id is correct but does not appear in recon at all, and no recon line names 15368
+   either; both are now proved by read-back, not by citation;
+4. records the residual risk this accepts (§4, §13) instead of a stop-condition that can never
+   be satisfied.
+
+Everything else in v1 — the STATE schema split and validator semantics, the equivalence ladder
+and mapping ledger, the archive plan, the workflow-contexts patch, fail-closed sequencing, and
+the remaining stop conditions — was independently verified by the gate and is unchanged in
+substance.
 
 ## 1. Decisions
 
@@ -27,6 +63,14 @@ accepted.
    six `archive/stash-*` tags is pushed under its existing tag name. `git ls-remote` proves
    ref identity; a fresh fetch plus `git cat-file`/`git fsck` proves object reachability.
 
+Boundary 1 is an **audit** boundary, not an enforcement boundary against the owner. Per D031 the
+owner-admin can change any ruleset; what R07 buys is that no such change can happen *silently*.
+The fixture matrix proves the comparator rejects each way the rule shape can be wrong without
+touching GitHub; live mode proves the actual server state still equals the manifest; scheduled
+`fork-health.yml --live` re-proves it daily and fails closed on drift or on insufficient
+authorization. Against everything other than the owner-admin — a contributor, a compromised
+workflow, a fork PR — the ruleset is a genuine server-side enforcement boundary.
+
 The current accepted set does **not** need reopening under the equivalence ladder selected in
 §7. If any listed proof fails when independently re-run, the affected node must be reopened
 with an injected repair node. The ladder must not be weakened to keep a node accepted.
@@ -43,10 +87,13 @@ with an injected repair node. The ladder must not be weakened to keep a node acc
 | `docs/fork/ideal-base/evidence/R07/mapping-ledger.proposed.json` | Full 35-node reviewed-to-published ledger and equivalence methods. |
 | `docs/fork/ideal-base/evidence/R07/archive-manifest.proposed.json` | Exact 39-ref private archive write set. |
 | `docs/fork/ideal-base/evidence/R07/github-governance.proposed.json` | Exact external GitHub configuration write set. Requires confirmation immediately before use. |
-| `docs/fork/ideal-base/evidence/R07/governance-transition.workflow.template.yml` | Candidate-code-free required workflow that authorizes one reviewed PR number, source repository/ref, head SHA, target repository/ref, and base SHA and rejects every other PR during bootstrap or maintenance. |
-| `docs/fork/ideal-base/evidence/R07/governance-transition.proposed.template.json` | Exact materialization, immutable-tag ruleset, pin, read-back, restoration, and rollback contract for a governance transition. |
 | `docs/fork/ideal-base/evidence/R07/workflow-contexts.proposed.patch` | Exact diff for workflow-owned paths outside R07. Coordinator must fold it into an authorized owner or amend the graph. |
 | `docs/fork/ideal-base/STATE.json` and `docs/fork/ideal-base/DECISIONS.md` | Coordinator-owned. R07 must not edit them directly. |
+
+The two `governance-transition.*` artifacts listed in v1 are **deleted**, not superseded. They
+specified materialization, immutable-tag protection, ruleset pinning, and restoration for the
+required-workflow rule. That rule does not exist in v2, so every step they describe operates on
+a field that is never written. See §0.
 
 The workflow proposal is required, not optional. Without it, the four intended contexts are
 not emitted on every pull request and ancestry runs in a depth-1 checkout. The coordinator
@@ -61,6 +108,7 @@ that a human must mentally join to other policy. Exact schema:
 {
   "schema_version": 1,
   "repository": "jerudnik/jcode",
+  "repository_id": 1238606714,
   "target_branch": "main",
   "github_actions_integration_id": 15368,
   "required_checks": [
@@ -100,13 +148,6 @@ that a human must mentally join to other policy. Exact schema:
     }
   ],
   "classic_branch_protection": "absent",
-  "required_workflows": [
-    {
-      "path": ".github/workflows/governance-root.yml",
-      "repository_id": 1238606714,
-      "ref": "refs/heads/main"
-    }
-  ],
   "repository_merge_methods": {
     "allow_merge_commit": true,
     "allow_squash_merge": false,
@@ -126,6 +167,11 @@ unknown bypass actors, missing keys, and extra merge methods fail. Response-only
 `id`, `_links`, timestamps, `node_id`, `source`, and `current_user_can_bypass` are sanitized
 before comparison and never become desired-state inputs.
 
+`repository_id` and `github_actions_integration_id` are desired-state inputs like any other:
+live mode reads `GET /repos/jerudnik/jcode` and compares `id`, and compares the `integration_id`
+on every required status check. Their provenance is §4's preflight, not this document — see the
+provenance note below.
+
 The validator must also inspect every `.github/workflows/*.yml` file with a constrained,
 fail-closed workflow extractor. It requires exactly one literal job `name:` definition for each
 required context, at the declared file/job id, with the exact `needs`, `if`, routing outputs,
@@ -133,22 +179,32 @@ and pull-request trigger contract above. Duplicate names, dynamic names, YAML co
 extractor cannot classify, route drift, or a workflow-level pull-request path filter fail. This
 detects the same-GitHub-Actions-app spoofing gap that `integration_id` alone cannot close.
 
-Detection inside candidate code is not itself a trust root. The server-side `workflows` rule in
-§4 therefore requires `.github/workflows/governance-root.yml` from `refs/heads/main` in
-repository id `1238606714`. The trusted-main workflow executes no candidate script. It fails any
-PR that changes `.github/workflows/**`, the governance manifest/comparator, the railway
-validator, or its tests. A candidate cannot rewrite the summary jobs, their validator, and the
-trusted workflow in one self-approving PR. This external ruleset rule is mandatory while the PR
-approval count remains zero.
+**What this detection is and is not.** Every check above runs from the pull request head, so a
+single PR could in principle change the summary jobs, the comparator, and `governance-root.yml`
+together. v1 answered that with a server-side `workflows` rule pinned to `refs/heads/main`; that
+rule is unavailable here (§0), and per D031 no substitute is claimed. `Governance Root` is
+therefore an **audit gate**: it makes a governance-path change loud (a red required context on
+the PR, and a named diff in the log) rather than impossible. Since the owner-admin is the
+accepted root of trust and is the only actor who can merge, the property R07 actually needs is
+that no governance change lands unnoticed, which this delivers together with live fork-health
+comparison. Against non-owner actors the required contexts plus the ruleset remain a real
+server-side boundary, because a fork PR cannot merge itself.
 
-The integration ID is not guessed. Recon's PR #38 check runs report app id `15368` and slug
-`github-actions` for `Detect changes`, `secret scan`, `fast validation`, and
-`DOX Review Advisory`. The integration pin excludes another app; the unique workflow contract
-above separately excludes a second repository workflow from emitting the same name.
+**Identifier provenance.** `repository_id: 1238606714` and `integration_id: 15368` are *not*
+established by recon. The design gate confirmed the repository id is correct but appears nowhere
+in `recon.md`; likewise no recon line names 15368, only the app slug `github-actions` on PR #38
+check runs. Both values are therefore treated as unverified inputs until proved live:
+`github-governance.proposed.json` sequences 1 and 2 read `GET /repos/jerudnik/jcode` and
+`GET /repos/jerudnik/jcode/commits/{sha}/check-runs` and stop the apply before any write if
+either differs. The integration pin excludes another app; the unique workflow contract above
+separately excludes a second repository workflow from emitting the same name.
 
 ## 4. Exact server-side target and diff from recon §2
 
-The authoritative apply document is `github-governance.proposed.json`. The desired ruleset
+The authoritative apply document is `github-governance.proposed.json`. It opens with five
+read-only preflight asserts (repository identity and id, required-context integration id,
+both ruleset ids bound to their expected names, and the classic-protection baseline) so that
+no identifier in this design is trusted on the strength of citation alone. The desired ruleset
 bodies are:
 
 ```json
@@ -189,19 +245,6 @@ bodies are:
         ],
         "strict_required_status_checks_policy": true
       }
-    },
-    {
-      "type": "workflows",
-      "parameters": {
-        "do_not_enforce_on_create": false,
-        "workflows": [
-          {
-            "path": ".github/workflows/governance-root.yml",
-            "repository_id": 1238606714,
-            "ref": "refs/heads/main"
-          }
-        ]
-      }
     }
   ]
 }
@@ -225,148 +268,93 @@ bodies are:
 }
 ```
 
+This is exactly the rule set the R07 contract in `WORK_GRAPH.json` enumerates: deletion and
+non-fast-forward protection, changes through pull requests, zero required approvals,
+review-thread resolution, merge commits only, strict required checks, and no silent
+administrator bypass. The contract never asked for an external trust root; that was a
+design-layer addition in v1 (D031).
+
 Diff from the live state recorded by recon:
 
 | Surface | Current | Target |
 |---|---|---|
-| `protect-fork-rails.rules` | `deletion` only | Add `non_fast_forward`, complete `pull_request`, strict `required_status_checks`, and the trusted-main `workflows` rule. |
+| `protect-fork-rails.rules` | `deletion` only | Add `non_fast_forward`, complete `pull_request`, and strict `required_status_checks`. |
 | `protect-fork-rails.bypass_actors` | `[]` | Remains exactly `[]`. |
 | `no-stray-branches.bypass_actors` | repository role 5, `always` | `[]`; stale-rail creation has no administrator escape hatch. |
 | Classic protection | `strict:false`, `enforce_admins:false`, weak `Detect changes`, no PR rule | Delete only after the active ruleset is read back and verified. A contradictory second layer must not remain. |
 | Repository merge methods | merge, squash, rebase | merge only. |
 
-The write order is executable in schema-v2 `github-governance.proposed.json`: every write is
-followed by a named `read_assert`, and an explicit checkpoint forbids the classic-protection
-DELETE until the new ruleset, effective main rules, no-stray ruleset, and repository merge
-methods all match. If any read-back differs, stop before the next write. These are external
-writes and require explicit confirmation immediately before execution. If GitHub rejects the
-repository-level `workflows` rule or cannot prove that it selects the workflow from main rather
-than the candidate, R07 is blocked. Required contexts plus zero approvals have no independent
-trust root without it.
+The recon baseline in the middle column is itself re-read and compared by preflight sequences
+3-5 before any write; if live governance has drifted from what recon captured, the apply stops
+rather than overwriting an unreviewed state.
 
-### Immutable transition protocol
+The write order is executable in schema-v3 `github-governance.proposed.json`: preflight reads
+first, then every write followed by a named `read_assert`, and an explicit checkpoint forbids
+the classic-protection DELETE until the new ruleset, effective main rules, no-stray ruleset,
+and repository merge methods all match. If any read-back differs, stop before the next write.
+These are external writes and require explicit confirmation immediately before execution.
 
-`github-governance.proposed.json` is the steady state. Bootstrap and every later governance
-change must first materialize `governance-transition.proposed.template.json` from an externally
-reviewed PR identity: PR number, head repository/ref/SHA, and base repository/ref/SHA. The paired
-workflow contains no checkout and runs no candidate code. It succeeds only when every event field
-equals its reviewed literal, so once it is the required workflow every other PR is server-blocked.
-This is the concurrency freeze; it does not depend on an actor bypass.
+### Ordering instead of a bootstrap pin
 
-The exact transition is:
+v1 serialized the bootstrap merge with an immutable-tag-pinned required workflow, because the
+`workflows` rule made a candidate-free trust root available at bootstrap time. With that rule
+gone (§0), the ordering constraint that remains is narrower and is satisfied by sequencing
+alone:
 
-1. Record the PR number, both repository ids and refs, and `reviewed_head_sha` plus
-   `reviewed_base_sha`. Complete independent review of that exact identity, substitute all seven
-   reviewed fields into `governance-transition.workflow.template.yml`, reject every remaining
-   `__[A-Z0-9_]+__` token, and run `actionlint`.
-2. Create an otherwise empty Git commit whose sole tree entry is the materialized file at
-   `.github/workflows/governance-root.yml`. Name its lightweight tag
-   `governance-root-transition-<reviewed_head_sha[0:12]>-<random-16-hex>`. Record the transition
-   commit SHA, tag, and materialized workflow SHA-256 in the evidence transcript.
+1. The bootstrap pull request lands the four context definitions **before** any of them is
+   required. It merges under the pre-R07 regime, where the only required context is the weak
+   `Detect changes`. Requiring a context whose defining workflow is not yet on `main` would
+   deadlock the repository, so this ordering is mandatory, not stylistic.
+   The bootstrap pull request must originate from a branch in `jerudnik/jcode` itself, not a
+   fork, so that the added workflow files are instantiated with the repository's own
+   permissions and every context is actually emitted. Preflight sequence 2 verifies exactly
+   that by requiring all four check runs on the reviewed head SHA.
+2. `Governance Root` is expected to conclude **failure** on that bootstrap PR, because the
+   bootstrap PR is by construction a governance-path change. Nothing is required yet, so it does
+   not block; record the failure and the three green contexts in evidence. Any other conclusion
+   (for instance `Governance Root` passing on a PR that changes `.github/workflows/**`) means
+   the gate is not wired correctly and is a stop.
+3. Only then is the ruleset applied, with all four contexts required and the repository already
+   able to emit them.
 
-   The materialization/commit CLI is deterministic with respect to reviewed inputs and never
-   changes the working tree:
+There is no concurrency freeze, and none is claimed. If another pull request merges between the
+bootstrap merge and the ruleset apply, the apply's preflight simply re-reads live state; the
+window is under the owner-admin's control and, per D031, the owner-admin is the accepted root of
+trust.
 
-   ```bash
-   template=docs/fork/ideal-base/evidence/R07/governance-transition.workflow.template.yml
-   materialized=$(mktemp)
-   transition_index=$(mktemp)
-   rm -f "$transition_index"
-   trap 'rm -f "$materialized" "$transition_index"' EXIT
+### Later governance maintenance
 
-   python3 - "$template" "$materialized" \
-     "$pull_request_number" \
-     "$reviewed_head_sha" "$reviewed_head_repository_id" "$reviewed_head_ref" \
-     "$reviewed_base_sha" "$reviewed_base_repository_id" "$reviewed_base_ref" <<'PY'
-   import pathlib, re, sys
-   source, target, pr, head, head_repo, head_ref, base, base_repo, base_ref = sys.argv[1:]
-   assert re.fullmatch(r"[1-9][0-9]*", pr)
-   assert re.fullmatch(r"[0-9a-f]{40}", head)
-   assert re.fullmatch(r"[1-9][0-9]*", head_repo)
-   assert re.fullmatch(r"[A-Za-z0-9._/-]+", head_ref)
-   assert re.fullmatch(r"[0-9a-f]{40}", base)
-   assert base_repo == "1238606714"
-   assert base_ref == "main"
-   text = pathlib.Path(source).read_text()
-   replacements = {
-       "__REVIEWED_PR_NUMBER__": pr,
-       "__REVIEWED_HEAD_SHA__": head,
-       "__REVIEWED_HEAD_REPOSITORY_ID__": head_repo,
-       "__REVIEWED_HEAD_REF__": head_ref,
-       "__REVIEWED_BASE_SHA__": base,
-       "__REVIEWED_BASE_REPOSITORY_ID__": base_repo,
-       "__REVIEWED_BASE_REF__": base_ref,
-   }
-   for token, value in replacements.items():
-       text = text.replace(token, value)
-   assert not re.search(r"__[A-Z0-9_]+__", text)
-   pathlib.Path(target).write_text(text)
-   PY
-   actionlint "$materialized"
-   workflow_sha256=$(shasum -a 256 "$materialized" | awk '{print $1}')
-   workflow_blob=$(git hash-object -w "$materialized")
-   GIT_INDEX_FILE="$transition_index" git read-tree --empty
-   GIT_INDEX_FILE="$transition_index" git update-index --add \
-     --cacheinfo "100644,$workflow_blob,.github/workflows/governance-root.yml"
-   transition_tree=$(GIT_INDEX_FILE="$transition_index" git write-tree)
-   transition_commit_sha=$(printf 'Governance transition for PR %s, %s on %s\n' \
-     "$pull_request_number" "$reviewed_head_sha" "$reviewed_base_sha" | env \
-     GIT_AUTHOR_NAME='R07 Governance Transition' \
-     GIT_AUTHOR_EMAIL='noreply@invalid' \
-     GIT_AUTHOR_DATE='2000-01-01T00:00:00Z' \
-     GIT_COMMITTER_NAME='R07 Governance Transition' \
-     GIT_COMMITTER_EMAIL='noreply@invalid' \
-     GIT_COMMITTER_DATE='2000-01-01T00:00:00Z' \
-     git commit-tree "$transition_tree")
-   transition_nonce=$(python3 -c 'import secrets; print(secrets.token_hex(8))')
-   transition_tag="governance-root-transition-${reviewed_head_sha:0:12}-${transition_nonce}"
-   git tag "$transition_tag" "$transition_commit_sha"
-   ```
-3. On bootstrap, first GET and normalize classic protection, both existing rulesets, and merge
-   settings. They must equal the recon baseline summarized above; persist the sanitized
-   snapshot/hash and stop for redesign if recon drifted. Then, with explicit external-write
-   confirmation, POST the exact
-   tag ruleset body. Read it back active with target `tag`, exact ref include, no bypass actors,
-   and `deletion` plus parameterized `update` rules. The ruleset deliberately permits initial
-   creation but forbids changing or deleting the tag afterward.
-4. Only after that read-back, push the tag to the canonical verified `jerudnik/jcode` URL. Verify
-   with `git ls-remote --refs "$verified_repository_url" "refs/tags/$transition_tag"` that it
-   names exactly the transition commit. Fetch it into a fresh repository and compare the
-   workflow bytes and SHA-256 to the reviewed materialization. If the exact remote tag was
-   pre-created or races the push, never reference or mutate it; retain the inert protection rule,
-   generate a new nonce, and restart review/materialization with a new tag.
-5. Materialize the main-ruleset write set by replacing only the required-workflow ref
-   `refs/heads/main` with `refs/tags/$transition_tag` and adding the exact transition workflow
-   `sha`. GitHub's current ruleset schema explicitly permits a workflow `ref` from a branch or
-   tag and a workflow commit `sha`. For bootstrap, apply the full checkpointed write set. For
-   later maintenance, update only `protect-fork-rails`. Read back the complete effective rule and
-   prove repository id `1238606714`, exact workflow path, exact immutable tag ref, exact workflow
-   SHA, and empty bypass actors. At this point only the fully bound reviewed PR can pass
-   `Governance Root`; all other PR merges are frozen.
-6. Re-read the complete PR identity and all four check runs immediately before merge. Any mismatch
-   stops and requires a new review and immutable tag. Merge only with
-   `PUT /repos/jerudnik/jcode/pulls/$pull_request_number/merge` and body
-   `{"sha":"$reviewed_head_sha","merge_method":"merge"}`; GitHub rejects a raced head SHA.
-   Require response `merged:true`, capture `merge_commit_sha`, then read back the PR as merged and
-   the main ref exactly at that SHA. In a fresh fetch prove merge parent 1 equals
-   `reviewed_base_sha`, parent 2 equals `reviewed_head_sha`, and main's governance workflow bytes
-   equal the reviewed head's workflow bytes.
-7. Only after every merge postcondition passes, restore the required-workflow ref to
-   `refs/heads/main`, remove the transition-only `sha` field, and read the entire steady-state
-   workflow object back exactly, including proof that `sha` is absent. Retain the transition tag
-   and its active protection ruleset as evidence; do not create a mutable cleanup window.
+A subsequent legitimate change to `.github/workflows/**`, the manifest, the comparator, the
+railway validator, or `github-governance.proposed.json` will make `Governance Root` red, and a
+red required context blocks the merge. The maintenance procedure is deliberately manual and
+leaves a trail:
 
-Recovery is fail-closed. Before a maintenance merge, restore the old `refs/heads/main` workflow
-ref and read it back. If bootstrap is abandoned after the transition rule is active, do **not**
-restore weak pre-R07 protection. Leave the full ruleset pinned so every PR remains blocked, then
-independently review a replacement bootstrap PR, create/protect a new transition tag, and replace
-only the old required-workflow ref/SHA with the new exact ref/SHA in one ruleset PUT and read-back.
-If the reviewed PR has merged but restoration to main fails, do not relax or remove the transition rule: its
-already-consumed PR identity blocks every new PR while the administrator retries restoration. If
-GitHub rejects an immutable tag ref, the tag `update` rule, the SHA-conditional merge, or any exact
-read-back, stop. There is no interval in which a candidate-selected workflow can authorize an
-unreviewed merge. The materialized evidence record binds PR identity, workflow hash, tag/commit,
-ruleset ids/read-back hashes, merge response/main SHA, and the restored object's absent `sha`.
+1. Open the change as an ordinary pull request. Confirm `Governance Root` fails and names the
+   exact protected paths in its diff output; capture that output as evidence.
+2. Independently review the change against this design and the manifest.
+3. The owner-admin temporarily removes `Governance Root` from `required_status_checks` with a
+   single ruleset PUT, immediately reads the ruleset back, and records both the pre-change and
+   post-change sanitized bodies with hashes.
+4. Merge the reviewed pull request.
+5. Restore the exact steady-state ruleset from `github-governance.proposed.json` in one PUT and
+   read back the complete body. Run `scripts/fork-health.sh --live` and require exit 0.
+
+This is a real bypass window, and it is deliberately visible rather than automated: two ruleset
+writes and their read-backs land in the evidence transcript, and the daily scheduled
+`fork-health.yml --live` run fails closed if the restore in step 5 is forgotten or wrong.
+A scheduled run that fires inside the window between steps 3 and 5 is *expected* to fail and to
+open the drift issue; that is the detector working, not a false alarm. Close it by completing
+step 5, not by widening the manifest.
+
+**Residual risk, accepted per D031.** The owner-admin can change or delete any of these rules at
+any time, with or without this procedure, and nothing in R07 prevents it. R07 does not enforce
+against the root of trust; it makes deviation detectable. Detection comes from three independent
+places: the governance fixtures prove the comparator rejects each wrong rule shape offline; the
+live read-only comparison proves the actual server state equals the manifest at any moment; and
+the scheduled fork-health run re-proves it daily and exits non-zero on drift or on a credential
+that cannot see `bypass_actors`. A silent, undetected weakening of governance would require the
+owner-admin to also alter the manifest, the comparator, and the scheduled workflow, all of which
+are themselves protected paths under `Governance Root` and tracked in Git history.
 
 ## 5. Required context emission and CI depth
 
@@ -374,7 +362,7 @@ Four contexts are required. Each is created on every pull request:
 
 | Context | Summary semantics |
 |---|---|
-| `Governance Root` | Trusted-main required workflow. Fails any change to workflow or R07 governance-root paths; candidate code cannot redefine it. |
+| `Governance Root` | Audit gate for governance-path changes. Fails any pull request that touches `.github/workflows/**`, the manifest, the comparator, the railway validator, its tests, or the apply document, and names the offending paths. It runs from the PR head like every other job, so it detects rather than prevents; see §3 and §4. |
 | `Fork CI Gate` | Requires `Detect changes` and `Governance Contract Gate` success. Quality must succeed iff `rust || scripts`; macOS/Linux must succeed iff `rust`. An applicable skip or inapplicable run fails. |
 | `Security Gate` | Requires dependency detection and secret scan success. Dependency audit must succeed iff `deps`; an unexplained skip fails. |
 | `Nix Gate` | Requires fast validation, matrix selection, and the real x86_64-linux package build/smoke success. |
@@ -385,8 +373,10 @@ contexts are not required because the repository does not control their names or
 
 `workflow-contexts.proposed.patch` makes five exact out-of-scope changes:
 
-1. Adds `governance-root.yml`, whose main-branch version is selected by the server-side required
-   workflow rule and refuses candidate changes to every workflow and R07 governance-root file.
+1. Adds `governance-root.yml`, which fails any pull request that changes a workflow file or an
+   R07 governance file and prints the offending paths. It is a required audit context, not a
+   trust root (§3): the repository-level `workflows` rule that would have pinned it to
+   `refs/heads/main` is unavailable on this account (§0, D031).
 2. Adds a `Governance Contract Gate` job to `fork-ci.yml` with `fetch-depth: 0`, an explicit fetch of
    `main` to `refs/remotes/origin/main`, a non-shallow assertion, railway tests/check, and the
    valid fork-health fixture.
@@ -426,12 +416,15 @@ exit 2 with the failing endpoint named. Governance mismatches are accumulated an
 missing `bypass_actors` key is authorization failure, not an empty list. There is no `WARN` or
 silent skip for a remote invariant.
 
-The comparison must cover:
+Because live comparison is now the primary drift detector for governance (§4, D031), its
+coverage is load-bearing rather than confirmatory. The comparison must cover:
 
 - exact ruleset names and active enforcement;
 - exact include/exclude ref conditions;
 - exact rule types and all relevant parameters;
-- exact required-workflow repository id, path, and trusted main ref;
+- exact repository id, so the comparison cannot silently succeed against a different repository;
+- absence of any rule type not in the manifest, so an added rule is a mismatch rather than an
+  ignored extra;
 - exact bypass actors, including unexpected actors on non-main rulesets;
 - effective `main` rule types;
 - classic protection absence;
@@ -462,9 +455,9 @@ existing planted-failure idiom without adding an unowned `tests/fixtures/**` pat
 | unresolved threads allowed | Set resolution false | 1 |
 | checks not strict | Set strict policy false | 1 |
 | missing required context | Remove each summary context in parameterized subtests | 1 |
-| missing trusted workflow | Remove the `workflows` rule | 1 |
-| candidate-controlled workflow | Change required workflow ref away from `refs/heads/main` | 1 |
-| wrong workflow repository/path | Change repository id or path | 1 |
+| wrong repository | Change the repository id in the live/fixture snapshot | 1 |
+| unexpected extra rule | Add any rule type absent from the manifest | 1 |
+| governance-root context missing | Remove `Governance Root` from required checks | 1 |
 | stale/extra context | Add `Detect changes` or a historical name | 1 |
 | spoofable context | Null or change integration id | 1 |
 | duplicate context definition | Add the same required job name to another workflow | 1 |
@@ -657,11 +650,13 @@ Own `required-checks.json`, `fork-health.sh`, governance comparison code, tests,
 and evidence transcripts. Hand `workflow-contexts.proposed.patch` to the coordinator/workflow
 owner. Do not apply GitHub configuration.
 
-After activation, normal PRs may not modify `.github/workflows/**` or the R07 governance-root
-files. A future legitimate governance change must use the immutable transition protocol in §4.
-The tag-pinned workflow authorizes exactly one externally reviewed PR/source/head/base identity, blocks all
-other PRs during the transition, and fails closed if restoration is interrupted. There is no
-actor bypass, candidate-selected context, or silent in-PR escape hatch.
+After activation, a pull request that modifies `.github/workflows/**` or an R07 governance file
+turns `Governance Root` red, and a red required context blocks the merge. A future legitimate
+governance change uses the recorded maintenance procedure in §4: review, one ruleset PUT that
+temporarily drops `Governance Root` from required checks, merge, one PUT restoring the exact
+steady state, read-back, and a green `--live` run. Both writes and both read-backs are evidence.
+Per D031 this window is under the owner-admin, who is the accepted root of trust; it is designed
+to be auditable, not unavailable.
 
 ### Stream S: state
 
@@ -684,17 +679,17 @@ reflog-only.
    and the coordinator-applied schema-v2 state proposal. The validator and state migration land
    together. Record and independently review the exact PR number, source repository/ref/head,
    and target repository/ref/base identity.
-3. **Immutable bootstrap root:** materialize the transition workflow, protect its not-yet-created
-   tag against update/deletion, create and fresh-fetch-verify the tag, then apply the checkpointed
-   GitHub write set with that immutable tag as the required-workflow ref. Prove all other PRs are
-   frozen and the reviewed PR alone emits all four green contexts.
-4. **Bootstrap merge and restoration:** re-read the complete PR identity and four check runs, use
-   the merge API with the expected head SHA and `merge_method=merge`, prove the response merge SHA
-   is main's new tip with reviewed base/head parents, then switch the required-workflow ref to
-   `refs/heads/main` and remove the transition SHA. Read back the exact workflow object with no
-   `sha`, empty bypass actors, effective rules, and absent classic protection. If restoration
-   fails, leave the immutable transition rule active and all new PRs blocked while retrying;
-   never disable it as a workaround.
+3. **Context-emission proof:** on that exact bootstrap PR, confirm all four contexts are emitted
+   by integration id 15368, that `Fork CI Gate`, `Security Gate`, and `Nix Gate` are green, and
+   that `Governance Root` is red naming the governance paths this PR changes (§4). A green
+   `Governance Root` here would mean the audit gate is misconfigured: stop. Nothing is required
+   yet, so the red context does not block the merge.
+4. **Bootstrap merge:** merge with the API using the expected head SHA and `merge_method=merge`;
+   prove the response merge SHA is main's new tip with the reviewed base/head parents. All four
+   context definitions now exist on `refs/heads/main`, which is the precondition for requiring
+   them. Only now run the `github-governance.proposed.json` sequence, whose own preflight
+   re-verifies repository id, integration id, both ruleset ids, and the classic-protection
+   baseline before the first write.
 5. **Under-enforcement proof PR:** open a harmless PR that changes no governance-root path.
    Confirm `Governance Root`, `Fork CI Gate`, `Security Gate`, and `Nix Gate` appear and pass;
    stale base forces strict reruns; squash/rebase are unavailable; unresolved threads block; and
@@ -706,9 +701,9 @@ reflog-only.
    identity and the merge/main-ancestral published identity, then rerun schema-v2 validation.
    R07 remains pending until this checkpoint is itself published.
 
-Never enable candidate-owned required contexts before their definitions have emitted
-successfully; the separately trusted transition workflow is installed first to serialize the
-bootstrap merge.
+Never require a context before its definition is on `refs/heads/main` and has been observed
+emitting; that ordering is what prevents a lockout, and it is the only ordering constraint the
+removed transition protocol was actually load-bearing for.
 Never land schema v2 without the full state proposal. Never delete classic protection before
 ruleset read-back. Never push archive refs to the public fork.
 
@@ -716,25 +711,34 @@ ruleset read-back. Never push archive refs to the public fork.
 
 | R07 gate | Required evidence |
 |---|---|
-| Intended server enforcement | Materialized transition evidence record; sanitized transition-tag ruleset; immutable tag fetch/hash proof; exact PR/source/head/base identity; SHA-conditional merge response; main-tip and two-parent proof; full main ruleset JSON before/after restoration with transition `sha` absent; effective-main rules; classic-protection 404; and repository merge settings. |
-| Every required context present/green | Bootstrap and post-enforcement PR check-run lists showing all four GitHub Actions contexts and no absent required context. |
-| Fixture and live governance | Valid transcript plus every planted failure in §7; live transcript showing complete rules/bypass/enforcement comparison. |
+| Intended server enforcement | Sanitized preflight snapshots and hashes for repository (with `id`), both rulesets by id and name, and classic protection; exact PR/source/head/base identity; SHA-conditional merge response with main-tip and two-parent proof; full `protect-fork-rails` and `no-stray-branches` JSON after apply, with empty `bypass_actors`; effective-main rules exactly `deletion`, `non_fast_forward`, `pull_request`, `required_status_checks`; classic-protection 404; and repository merge settings. |
+| Every required context present/green | Bootstrap PR check-run list showing all four contexts emitted by integration id 15368, three green and `Governance Root` red on its own governance change; post-enforcement PR check-run list showing all four green and no absent required context. |
+| Fixture and live governance | Valid transcript plus every planted failure in §7; live transcript showing complete rules/bypass/enforcement/repository-id comparison; a scheduled `fork-health.yml --live` run observed exiting 0, and one deliberately mutated live-shim run observed exiting non-zero, so the drift detector is proved non-vacuous in both directions. |
 | Completed records published or reopened | Schema-v2 validator transcript, full ledger, ancestry output for all 35 published commits, and any injected repair nodes. |
 | Reviewed identities and stash tags archived | Pre/post manifest, redacted `ls-remote`, fresh-fetch `cat-file` and `fsck`, and public-fork negative tag proof. |
-| Independent review | Reviewer explicitly checks bypass, context lockout, shallow-history behavior, file-tree rung, archive reachability, and external-write ordering. |
+| Independent review | Reviewer explicitly checks bypass, context lockout, shallow-history behavior, file-tree rung, archive reachability, external-write ordering, and whether the auditability controls detect a governance change made outside the §4 maintenance procedure. |
+
+The accepted residual risk is recorded rather than evidenced: no artifact can demonstrate that
+the owner-admin will not rewrite a ruleset, because per D031 the owner-admin is the root of
+trust. The evidence above shows that any such change is detectable, which is the property R07
+claims in v2.
 
 ## 13. Stop conditions and open questions
 
 A result that would disprove this design is named in advance:
 
 - A proposed summary context is absent on any pull request shape. Stop; do not require it.
-- The required-workflow rule is unavailable, candidate-controlled, or does not fail a planted
-  workflow change. Stop; zero-approval governance is not self-protecting.
-- The transition tag can be updated/deleted, its fetched workflow differs, another PR passes
-  during the pin, or restoration does not read back main exactly. Stop and remain fail-closed.
+- `Governance Root` does not fail a planted governance-path change, or fails to name the changed
+  paths. Stop; the audit gate is the only thing standing between a governance change and silence,
+  so a vacuous one is worse than none.
+- Live fork-health comparison passes against a deliberately mutated live surface. Stop; the drift
+  detector must be observed red before it is trusted (D029's standing rule).
 - The merge API rejects the expected head SHA, the response is not `merged:true`, main does not
-  equal the returned merge SHA, or its two parents differ from reviewed base/head. Stop without
-  restoring the main workflow ref; the immutable transition remains the merge lock.
+  equal the returned merge SHA, or its two parents differ from reviewed base/head. Stop before
+  applying the ruleset; the required contexts are not yet on `main`.
+- Any preflight identifier read-back differs from the value this design embeds (repository id,
+  integration id, either ruleset id/name binding, or the classic-protection baseline). Stop; the
+  apply document is describing a repository state that no longer exists.
 - GitHub rejects either exact ruleset body. Stop; reconcile against the current official API
   rather than deleting classic protection or weakening fields.
 - Live credentials omit `bypass_actors`. Stop; the live comparison is unauthorized, not green.
@@ -745,6 +749,17 @@ A result that would disprove this design is named in advance:
 - The archive cannot be proved private. Stop before push.
 - Any manifest ref fails exact `ls-remote` or fresh-fetch object verification. Stop and repair
   archive durability before R07 proceeds.
+
+**Not a stop condition, by decision.** v1 stopped if the repository-level `workflows` rule was
+unavailable, on the theory that zero-approval governance is then not self-protecting. That rule
+*is* unavailable (§0) and D031 resolves the question in the other direction: the owner-admin is
+the accepted root of trust, and R07 delivers a self-*checking* rather than self-*protecting*
+property. The residual risk is explicit: any ruleset change made by the owner-admin, inside or
+outside the §4 maintenance procedure, is outside enforcement and is caught only by audit — live
+comparison and the scheduled fork-health run. R07 must not be reported as preventing it. If the
+repository ever moves into an organization or enterprise plan, or GitHub makes repository-level
+required-workflow rules generally available, D031's reopen triggers apply and this trade-off is
+revisited as a new decision.
 
 Open questions for the coordinator are intentionally limited to ownership/authorization:
 
