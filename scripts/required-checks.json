@@ -6,10 +6,22 @@
   "target_branch": "main",
   "github_actions_integration_id": 15368,
   "required_checks": [
-    { "context": "Governance Root", "integration_id": 15368 },
-    { "context": "Fork CI Gate", "integration_id": 15368 },
-    { "context": "Security Gate", "integration_id": 15368 },
-    { "context": "Nix Gate", "integration_id": 15368 }
+    {
+      "context": "Governance Root",
+      "integration_id": 15368
+    },
+    {
+      "context": "Fork CI Gate",
+      "integration_id": 15368
+    },
+    {
+      "context": "Security Gate",
+      "integration_id": 15368
+    },
+    {
+      "context": "Nix Gate",
+      "integration_id": 15368
+    }
   ],
   "workflow_contracts": [
     {
@@ -27,7 +39,13 @@
       "file": ".github/workflows/fork-ci.yml",
       "job_id": "fork-ci-gate",
       "if": "always() && github.event_name == 'pull_request'",
-      "needs": ["changes", "governance-contract", "quality", "macos", "linux-tests"],
+      "needs": [
+        "changes",
+        "governance-contract",
+        "quality",
+        "macos",
+        "linux-tests"
+      ],
       "routing": {
         "quality": "rust || scripts",
         "macos": "rust",
@@ -40,8 +58,14 @@
       "file": ".github/workflows/security.yml",
       "job_id": "security-gate",
       "if": "always() && github.event_name == 'pull_request'",
-      "needs": ["detect-dependency-changes", "secret-scan", "dependency-audit"],
-      "routing": { "dependency-audit": "deps" },
+      "needs": [
+        "detect-dependency-changes",
+        "secret-scan",
+        "dependency-audit"
+      ],
+      "routing": {
+        "dependency-audit": "deps"
+      },
       "pull_request_paths_filter": "forbidden"
     },
     {
@@ -49,7 +73,11 @@
       "file": ".github/workflows/nix.yml",
       "job_id": "nix-gate",
       "if": "always() && github.event_name == 'pull_request'",
-      "needs": ["validate", "matrix", "build"],
+      "needs": [
+        "validate",
+        "matrix",
+        "build"
+      ],
       "routing": {},
       "pull_request_paths_filter": "forbidden"
     }
@@ -61,13 +89,20 @@
     "allow_rebase_merge": false
   },
   "branch_set": {
-    "required": ["main"],
-    "allowed_prefixes": ["automation/"],
-    "stale_rails": ["vendor/upstream", "distro/nix"]
+    "required": [
+      "main"
+    ],
+    "allowed_prefixes": [
+      "automation/"
+    ],
+    "stale_rails": [
+      "vendor/upstream",
+      "distro/nix"
+    ]
   },
   "protected_paths": {
-    "_comment": "'required' is design.md section 4's protected set, enforced byte-for-byte against the governance-root.yml job. 'proposed_additions' is the Stream G finding recorded in docs/fork/ideal-base/evidence/R07/stream-g-protected-paths-proposal.md: helper scripts and ratchet baselines that execute inside required contexts but are absent from the design's list. While additions_adjudicated is false the comparator reports them without failing; the integration gate flips it to true in the same change that lands them in governance-root.yml.",
-    "additions_adjudicated": false,
+    "_comment": "'required' is design.md section 4's protected set, enforced byte-for-byte against the governance-root.yml job. 'proposed_additions' is the Stream G finding recorded in docs/fork/ideal-base/evidence/R07/stream-g-protected-paths-proposal.md: helper scripts and ratchet baselines that execute inside required contexts but are absent from the design's list. While additions_adjudicated is false the comparator reports them without failing; the integration gate flips it to true in the same change that lands them in governance-root.yml. | Integration adjudication (2026-07-28): 16 check-script/test/dependency paths enforced; 5 ratchet baselines deliberately left unprotected (legitimate routine edits; raises are visible in review). See docs/fork/ideal-base/evidence/R07/integration-adjudication.md.",
+    "additions_adjudicated": true,
     "required": [
       ".github/scripts",
       ".github/workflows",
@@ -75,9 +110,7 @@
       "scripts/fork-health.sh",
       "scripts/ideal_base_railway.py",
       "tests/test_ideal_base_railway.py",
-      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json"
-    ],
-    "proposed_additions": [
+      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json",
       "scripts/ambient_roots_allowlist.txt",
       "scripts/check_agent_instructions.py",
       "scripts/check_ambient_roots.sh",
@@ -88,18 +121,14 @@
       "scripts/check_test_size_budget.py",
       "scripts/check_tui_render_lock.py",
       "scripts/check_warning_budget.sh",
-      "scripts/code_size_budget.json",
       "scripts/docs_impact_advisory.py",
-      "scripts/panic_budget.json",
       "scripts/rust_production_filter.py",
       "scripts/security_preflight.sh",
-      "scripts/swallowed_error_budget.json",
       "scripts/test_docs_impact_advisory.py",
-      "scripts/test_size_budget.json",
-      "scripts/warning_budget.txt",
       "tests/test_nix_distribution_policy.py",
       "tests/test_rust_production_filter.py"
-    ]
+    ],
+    "proposed_additions": []
   },
   "rulesets": {
     "protect-fork-rails": {
@@ -109,17 +138,25 @@
       "bypass_actors": [],
       "conditions": {
         "ref_name": {
-          "include": ["refs/heads/main"],
+          "include": [
+            "refs/heads/main"
+          ],
           "exclude": []
         }
       },
       "rules": [
-        { "type": "deletion" },
-        { "type": "non_fast_forward" },
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
         {
           "type": "pull_request",
           "parameters": {
-            "allowed_merge_methods": ["merge"],
+            "allowed_merge_methods": [
+              "merge"
+            ],
             "dismiss_stale_reviews_on_push": false,
             "require_code_owner_review": false,
             "require_last_push_approval": false,
@@ -132,10 +169,22 @@
           "parameters": {
             "do_not_enforce_on_create": false,
             "required_status_checks": [
-              { "context": "Governance Root", "integration_id": 15368 },
-              { "context": "Fork CI Gate", "integration_id": 15368 },
-              { "context": "Security Gate", "integration_id": 15368 },
-              { "context": "Nix Gate", "integration_id": 15368 }
+              {
+                "context": "Governance Root",
+                "integration_id": 15368
+              },
+              {
+                "context": "Fork CI Gate",
+                "integration_id": 15368
+              },
+              {
+                "context": "Security Gate",
+                "integration_id": 15368
+              },
+              {
+                "context": "Nix Gate",
+                "integration_id": 15368
+              }
             ],
             "strict_required_status_checks_policy": true
           }
@@ -149,12 +198,19 @@
       "bypass_actors": [],
       "conditions": {
         "ref_name": {
-          "include": ["~ALL"],
-          "exclude": ["refs/heads/main", "refs/heads/automation/**"]
+          "include": [
+            "~ALL"
+          ],
+          "exclude": [
+            "refs/heads/main",
+            "refs/heads/automation/**"
+          ]
         }
       },
       "rules": [
-        { "type": "creation" }
+        {
+          "type": "creation"
+        }
       ]
     }
   }

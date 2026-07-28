@@ -1,19 +1,21 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "program": "ideal-durable-tui-cli-foundation",
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "W4",
     "state": "in_progress",
-    "commit": null,
+    "reviewed_commit": null,
+    "published_commit": null,
     "updated_at": "2026-07-27T06:17:21Z",
     "summary": "W4 in progress: 2 of 9 children accepted (F28 test parallelism restored, F29 ambient filesystem roots routed through jcode-storage). Remaining: R05, F22-F27. Root state corrected from 'pending', which had understated real progress and made the railway offer to re-seed an already-expanded wave."
   },
   "nodes": {
     "W0": {
       "state": "accepted",
-      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "reviewed_commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "published_commit": "fda646de9107a8efa85550b1e01b40a1abc2d7ac",
       "evidence": [
         "docs/fork/ideal-base/evidence/W0.1"
       ],
@@ -22,7 +24,8 @@
     },
     "W1": {
       "state": "accepted",
-      "commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
+      "reviewed_commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
+      "published_commit": "3192e77c2dd43b6a38c505fe4810196ba9b11e71",
       "evidence": [
         "docs/fork/ideal-base/evidence/W1"
       ],
@@ -31,7 +34,8 @@
     },
     "W2": {
       "state": "accepted",
-      "commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
+      "reviewed_commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
+      "published_commit": "931e625cc116a2d57e10cb38ac1ec0a63e37bec8",
       "evidence": [
         "docs/fork/ideal-base/evidence/W2"
       ],
@@ -40,7 +44,8 @@
     },
     "W3": {
       "state": "accepted",
-      "commit": "f8b7b39e72d53ca505b8a82cb5f59928c671dfae",
+      "reviewed_commit": "f8b7b39e72d53ca505b8a82cb5f59928c671dfae",
+      "published_commit": "f8b7b39e72d53ca505b8a82cb5f59928c671dfae",
       "evidence": [
         "docs/fork/ideal-base/evidence/W3"
       ],
@@ -49,21 +54,24 @@
     },
     "W4": {
       "state": "in_progress",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": "W4 in progress: 2 of 9 children accepted (F28 test parallelism restored, F29 ambient filesystem roots routed through jcode-storage). Remaining: R05, F22-F27. Root state corrected from 'pending', which had understated real progress and made the railway offer to re-seed an already-expanded wave.",
       "updated_at": "2026-07-27T06:17:21Z"
     },
     "W5": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "W0.1": {
       "state": "accepted",
-      "commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+      "reviewed_commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+      "published_commit": "84c5a778ddefa2a3bb205d5df83f3bc0919da5a4",
       "evidence": [
         "docs/fork/ideal-base/evidence/W0.1"
       ],
@@ -72,7 +80,8 @@
     },
     "W0.2": {
       "state": "accepted",
-      "commit": "fb00ab840",
+      "reviewed_commit": "fb00ab840df36bf71762f08f4f8339d38a001123",
+      "published_commit": "f1cc1c2a047e8a0526ec3e0862a0b91607f10e4d",
       "evidence": [
         "docs/fork/ideal-base/evidence/W0.2"
       ],
@@ -81,7 +90,8 @@
     },
     "W0.3": {
       "state": "accepted",
-      "commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "reviewed_commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "published_commit": "fda646de9107a8efa85550b1e01b40a1abc2d7ac",
       "evidence": [
         "docs/fork/ideal-base/evidence/W0.3"
       ],
@@ -90,7 +100,8 @@
     },
     "F01": {
       "state": "accepted",
-      "commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
+      "reviewed_commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
+      "published_commit": "dd4b64c39b96e43baa9a0382f3ff7e9e8af485e8",
       "evidence": [
         "docs/fork/ideal-base/evidence/F01",
         "docs/fork/ideal-base/evidence/F01-R",
@@ -101,7 +112,8 @@
     },
     "F02": {
       "state": "accepted",
-      "commit": "2b560788231e10741267d3dbfe74dc48368225a8",
+      "reviewed_commit": "2b560788231e10741267d3dbfe74dc48368225a8",
+      "published_commit": "a78d2d07f3744b3ae9c6a5f08da656fa4bff2bbc",
       "evidence": [
         "docs/fork/ideal-base/evidence/F02",
         "docs/fork/ideal-base/reviews/F02-implementation-review.md"
@@ -111,7 +123,8 @@
     },
     "F03": {
       "state": "accepted",
-      "commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+      "reviewed_commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+      "published_commit": "d01545cd5afcf481349f5f36cbbee09fc0f548de",
       "evidence": [
         "docs/fork/ideal-base/evidence/F03",
         "docs/fork/ideal-base/reviews/F03-verification-review.md"
@@ -121,7 +134,8 @@
     },
     "F04": {
       "state": "accepted",
-      "commit": "9c4c99897b88456257525d359f11fa357669c134",
+      "reviewed_commit": "9c4c99897b88456257525d359f11fa357669c134",
+      "published_commit": "2dd155709273548ce66d9c2ed46e97ffa7d53a33",
       "evidence": [
         "docs/fork/ideal-base/evidence/F04",
         "docs/fork/ideal-base/reviews/F04-implementation-review.md"
@@ -131,7 +145,8 @@
     },
     "F05": {
       "state": "accepted",
-      "commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+      "reviewed_commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+      "published_commit": "89bc657e562ec595ceba977d4983765d2352119b",
       "evidence": [
         "docs/fork/ideal-base/evidence/F05",
         "docs/fork/ideal-base/reviews/F05-verification-review.md"
@@ -141,7 +156,8 @@
     },
     "F06": {
       "state": "accepted",
-      "commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+      "reviewed_commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+      "published_commit": "1a7808af54e7d2c2879bc932193208b044e902fd",
       "evidence": [
         "docs/fork/ideal-base/evidence/F06",
         "docs/fork/ideal-base/reviews/F06-implementation-review.md"
@@ -151,7 +167,8 @@
     },
     "F07": {
       "state": "accepted",
-      "commit": "58a806401",
+      "reviewed_commit": "58a80640134e72b5183da2420cdff3280209cbd5",
+      "published_commit": "95177df94165e3ae2b7425ec6cdfbec0ed7845be",
       "evidence": [
         "docs/fork/ideal-base/evidence/F07"
       ],
@@ -160,7 +177,8 @@
     },
     "F08": {
       "state": "accepted",
-      "commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
+      "reviewed_commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
+      "published_commit": "99acd179ba382d41ed251f127d911190ddf39841",
       "evidence": [
         "docs/fork/ideal-base/evidence/F08"
       ],
@@ -169,7 +187,8 @@
     },
     "F09": {
       "state": "accepted",
-      "commit": "d5d388028",
+      "reviewed_commit": "d5d388028ed56518e8fec4a81c87a0b47a9fad70",
+      "published_commit": "cd591156491aed9452520725daf0296ec4792cd0",
       "evidence": [
         "docs/fork/ideal-base/evidence/F09"
       ],
@@ -178,7 +197,8 @@
     },
     "F10": {
       "state": "accepted",
-      "commit": "4b66de27c",
+      "reviewed_commit": "4b66de27c0a2c3430b7046c95d03a6e03e6dd43c",
+      "published_commit": "c955d7fd9d17b8daf387f6cd9066f2afcb5226fb",
       "evidence": [
         "docs/fork/ideal-base/evidence/F10"
       ],
@@ -187,7 +207,8 @@
     },
     "F11": {
       "state": "accepted",
-      "commit": "77582db05",
+      "reviewed_commit": "77582db053e54096d004277b9bbe97c63bbb757b",
+      "published_commit": "f4b2ddca1c94d36ed869032a8b8df49825eda13f",
       "evidence": [
         "docs/fork/ideal-base/evidence/F11"
       ],
@@ -196,7 +217,8 @@
     },
     "F12": {
       "state": "accepted",
-      "commit": "a1c9075af",
+      "reviewed_commit": "a1c9075afa7fad83a2ef1877e2fcb31ffc7adc7a",
+      "published_commit": "3265193d2c811e0bffa4bef49fc1d40bc3a9adec",
       "evidence": [
         "docs/fork/ideal-base/evidence/F12"
       ],
@@ -205,7 +227,8 @@
     },
     "F13": {
       "state": "accepted",
-      "commit": "080bfc9d7",
+      "reviewed_commit": "080bfc9d735d130086197b8c9195361cc3f905ec",
+      "published_commit": "569e2a1a0dbb86f62a2c59cd0e23297580b0c186",
       "evidence": [
         "docs/fork/ideal-base/evidence/F13"
       ],
@@ -214,7 +237,8 @@
     },
     "F14": {
       "state": "accepted",
-      "commit": "e47efacdb",
+      "reviewed_commit": "e47efacdb6b5c02cfb6b43278c8413d975f3408c",
+      "published_commit": "6144cdb2a7e42470c1c43b96ad6d517e747de5de",
       "evidence": [
         "docs/fork/ideal-base/evidence/F14"
       ],
@@ -223,7 +247,8 @@
     },
     "F15": {
       "state": "accepted",
-      "commit": "bb53da147",
+      "reviewed_commit": "bb53da1476b83c3a35a9e8893f706eb0030d3123",
+      "published_commit": "59c77dd85a910e684edeb080506083b6cf105f8d",
       "evidence": [
         "docs/fork/ideal-base/evidence/F15"
       ],
@@ -232,7 +257,8 @@
     },
     "F16": {
       "state": "accepted",
-      "commit": "8971ed1db",
+      "reviewed_commit": "8971ed1dbe1ee8d44d7cedc370c3a61cd2fac178",
+      "published_commit": "140719594a7d73cb101fee337f3b0e0f00becb59",
       "evidence": [
         "docs/fork/ideal-base/evidence/F16"
       ],
@@ -241,7 +267,8 @@
     },
     "F17": {
       "state": "accepted",
-      "commit": "cdb2ee303fbece2cf4ab6d0558f137055055c204",
+      "reviewed_commit": "cdb2ee303fbece2cf4ab6d0558f137055055c204",
+      "published_commit": "061bc3adef9062cb30e66aa64ea4262b61aec6bf",
       "evidence": [
         "docs/fork/ideal-base/evidence/F17"
       ],
@@ -250,7 +277,8 @@
     },
     "F18": {
       "state": "accepted",
-      "commit": "ca5f38bde",
+      "reviewed_commit": "ca5f38bde426036bb1ad69119775f2289f6e9c2c",
+      "published_commit": "767afae9cf4c3139f7263bbf5cfca483b0ca0792",
       "evidence": [
         "docs/fork/ideal-base/evidence/F18/README.md",
         "docs/fork/ideal-base/evidence/F18/ci-pr-run.md",
@@ -261,7 +289,8 @@
     },
     "F19": {
       "state": "accepted",
-      "commit": "a4dd576d4",
+      "reviewed_commit": "a4dd576d46324824243f71f39d278b9b8cbf4dd5",
+      "published_commit": "91f117a58bc094b83e0bd6cf94ff86d759133d2a",
       "evidence": [
         "docs/fork/ideal-base/evidence/F19/README.md",
         "docs/fork/ideal-base/evidence/F19/http-proof.txt",
@@ -272,7 +301,8 @@
     },
     "F21": {
       "state": "accepted",
-      "commit": "191b27093221171fb25bf549b4c413f3b97483d1",
+      "reviewed_commit": "191b27093221171fb25bf549b4c413f3b97483d1",
+      "published_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
       "evidence": [
         "docs/fork/ideal-base/evidence/F21/README.md",
         "docs/fork/ideal-base/evidence/F21/two-run-manifest.md",
@@ -283,49 +313,56 @@
     },
     "F22": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F23": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F24": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F25": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F26": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F27": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F28": {
       "state": "accepted",
-      "commit": "2df5a891ca7a86524e75d80bf71002cb43172622",
+      "reviewed_commit": "2df5a891ca7a86524e75d80bf71002cb43172622",
+      "published_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
       "evidence": [
         "docs/fork/ideal-base/evidence/F28/SCOPE.md",
         "docs/fork/ideal-base/evidence/F28/RESULT.md"
@@ -335,63 +372,72 @@
     },
     "G01": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "G02": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "G03": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "G04": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "G05": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "S01": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "S02": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "S03": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "R01": {
       "state": "accepted",
-      "commit": "e3736e7fb",
+      "reviewed_commit": "e3736e7fbcc4f6a0914024ac5806fd416545eeac",
+      "published_commit": "18c7088b94961b4ee562f8b9a9cc5e31986e88d5",
       "evidence": [
         "docs/fork/ideal-base/evidence/R01",
         "docs/fork/ideal-base/reviews/R01-implementation-review.md"
@@ -401,7 +447,8 @@
     },
     "R03": {
       "state": "accepted",
-      "commit": "a0676f781",
+      "reviewed_commit": "a0676f781776fbfb168f0d784c38c84b5bcc7108",
+      "published_commit": "12abb57a60ef713ef318bcacd51d8713a99d5ca4",
       "evidence": [
         "docs/fork/ideal-base/evidence/R03",
         "docs/fork/ideal-base/reviews/R03-implementation-review.md"
@@ -411,7 +458,8 @@
     },
     "R04": {
       "state": "accepted",
-      "commit": "c71628498",
+      "reviewed_commit": "c7162849895197662dbcfc69290e12d011fc3a53",
+      "published_commit": "54ae87985ac3a7179af291d7c360bae3ae7c3573",
       "evidence": [
         "docs/fork/ideal-base/evidence/R04"
       ],
@@ -420,14 +468,16 @@
     },
     "R05": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F20a": {
       "state": "accepted",
-      "commit": "dc9ded881",
+      "reviewed_commit": "dc9ded88150f10f82bde54133e49ecfc96866e97",
+      "published_commit": "76af46aef005a7dc78b94a2ab25c4f5454e404b1",
       "evidence": [
         "docs/fork/ideal-base/evidence/F20a/README.md",
         "docs/fork/ideal-base/evidence/F20a/update-decline.txt",
@@ -438,7 +488,8 @@
     },
     "F20b": {
       "state": "accepted",
-      "commit": "c01518181",
+      "reviewed_commit": "c01518181958c550e1ddce5ed595397daaef7a0b",
+      "published_commit": "95e319ac9531b93348713201c6023b493eaaa4a8",
       "evidence": [
         "docs/fork/ideal-base/evidence/F20b/README.md",
         "docs/fork/ideal-base/evidence/F20b/test-output.txt"
@@ -448,7 +499,8 @@
     },
     "F20c": {
       "state": "accepted",
-      "commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
+      "reviewed_commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
+      "published_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
       "evidence": [
         "docs/fork/ideal-base/evidence/F20c/README.md",
         "docs/fork/ideal-base/evidence/F20c/removal-grep-clean.txt",
@@ -462,7 +514,8 @@
     },
     "F29": {
       "state": "accepted",
-      "commit": "caa445ed1",
+      "reviewed_commit": "caa445ed12040565a6463c4c3a96aa652275aa0a",
+      "published_commit": "caa445ed12040565a6463c4c3a96aa652275aa0a",
       "evidence": [
         "docs/fork/ideal-base/evidence/F29/RESULT.md",
         "docs/fork/ideal-base/evidence/F29/gate-after.txt"
@@ -472,35 +525,40 @@
     },
     "W4R": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "R07": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "R06": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "F30": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null
     },
     "D01": {
       "state": "pending",
-      "commit": null,
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [],
       "summary": null,
       "updated_at": null

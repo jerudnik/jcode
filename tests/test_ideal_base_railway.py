@@ -425,22 +425,24 @@ class SchemaV2ValidatorTests(unittest.TestCase):
                 f"{node_id}: published_commit must be an ancestor of baseline main",
             )
 
-    def test_live_state_json_is_schema_v1_and_still_validates(self) -> None:
-        """Pre-migration, live STATE.json must remain valid under its own schema.
+    def test_live_state_json_is_schema_v2_and_validates(self) -> None:
+        """Post-migration, live STATE.json is schema v2 and must validate.
 
-        This is the "handled per design migration semantics" requirement: the
-        validator must not force schema v2 onto the still-v1 live file before
-        the coordinator lands the migration in the same change as this
-        validator (design §8, "Landing either half alone is invalid").
+        The coordinator landed the schema-v2 migration in the same change as
+        this validator (design §8, "Landing either half alone is invalid"), so
+        the live file now carries reviewed_commit/published_commit pairs and
+        must pass the v2 rules against the real published ref.
         """
         live = railway.load_json(railway.STATE_PATH)
-        self.assertEqual(live.get("schema_version"), 1)
-        railway.validate_state(live, self.nodes)
+        self.assertEqual(live.get("schema_version"), 2)
+        railway.validate_state(
+            live, self.nodes, published_ref=self.BASELINE_MAIN
+        )
         for node_id, record in live["nodes"].items():
             if record["state"] in railway.DEPENDENCY_COMPLETE:
-                self.assertIn("commit", record)
-                self.assertNotIn("reviewed_commit", record)
-                self.assertNotIn("published_commit", record)
+                self.assertNotIn("commit", record)
+                self.assertIn("reviewed_commit", record)
+                self.assertIn("published_commit", record)
 
 
 class CheckpointSchemaV2Tests(unittest.TestCase):

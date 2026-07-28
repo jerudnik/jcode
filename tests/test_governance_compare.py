@@ -587,23 +587,33 @@ class SanitizationTests(ComparatorCase):
 
 class ProtectedPathAdjudicationTests(ComparatorCase):
     def test_pending_additions_are_reported_but_not_enforced(self) -> None:
-        result = self.run_snapshot(load_fixture())
-        self.assertEqual(result.returncode, EXIT_OK)
+        # The repo manifest has no pending additions (the R07 integration
+        # adjudication resolved them), so construct the pending state
+        # explicitly: a real path the fixture workflow does not name, behind
+        # additions_adjudicated: false, must report but stay green.
+        manifest = load_manifest()
+        manifest["protected_paths"]["proposed_additions"] = [
+            "scripts/governance_compare.py"
+        ]
+        manifest["protected_paths"]["additions_adjudicated"] = False
+        result = self.run_snapshot(load_fixture(), manifest=manifest)
+        self.assertEqual(result.returncode, EXIT_OK, result.stdout + result.stderr)
         self.assertIn("pending adjudication", result.stdout)
 
     def test_adjudicated_additions_are_enforced(self) -> None:
-        # Flipping the flag is what the integration gate does once the workflow
-        # owner lands the wider list in governance-root.yml. Until that happens
-        # the same fixture must go red, which proves the flag is load-bearing
-        # rather than decorative.
+        # Flipping the flag on a pending addition must turn the same fixture
+        # red, which proves the flag is load-bearing rather than decorative.
         manifest = load_manifest()
+        manifest["protected_paths"]["proposed_additions"] = [
+            "scripts/governance_compare.py"
+        ]
         manifest["protected_paths"]["additions_adjudicated"] = True
         snapshot = load_fixture()
         result = self.run_snapshot(snapshot, manifest=manifest)
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, EXIT_MISMATCH, output)
         self.assertIn("does not name protected path", output)
-        self.assertIn("scripts/check_panic_budget.py", output)
+        self.assertIn("scripts/governance_compare.py", output)
 
     def test_protected_path_that_does_not_exist_is_a_schema_error(self) -> None:
         # A protected path with a typo protects nothing while reading as

@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/.github/workflows/governance-root.yml
-@@ -0,0 +1,45 @@
+@@ -0,0 +1,61 @@
 +name: Governance Root
 +
 +# Audit gate: runs from the pull request head like any other workflow, so it
@@ -40,6 +40,22 @@
 +            scripts/ideal_base_railway.py
 +            tests/test_ideal_base_railway.py
 +            docs/fork/ideal-base/evidence/R07/github-governance.proposed.json
++            scripts/ambient_roots_allowlist.txt
++            scripts/check_agent_instructions.py
++            scripts/check_ambient_roots.sh
++            scripts/check_code_size_budget.py
++            scripts/check_env_lease_drop_order.py
++            scripts/check_panic_budget.py
++            scripts/check_swallowed_error_budget.py
++            scripts/check_test_size_budget.py
++            scripts/check_tui_render_lock.py
++            scripts/check_warning_budget.sh
++            scripts/docs_impact_advisory.py
++            scripts/rust_production_filter.py
++            scripts/security_preflight.sh
++            scripts/test_docs_impact_advisory.py
++            tests/test_nix_distribution_policy.py
++            tests/test_rust_production_filter.py
 +          )
 +          if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
 +            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (design.md section 4)"
