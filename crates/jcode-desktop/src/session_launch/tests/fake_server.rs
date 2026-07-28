@@ -42,7 +42,7 @@ pub(super) fn accept_first_requesting_client(
 
         loop {
             match reader.fill_buf() {
-                Ok(buffer) if buffer.is_empty() => break,
+                Ok([]) => break,
                 Ok(buffer) => {
                     let newline = buffer.iter().position(|byte| *byte == b'\n');
                     let bytes_to_consume = newline.map_or(buffer.len(), |index| index + 1);

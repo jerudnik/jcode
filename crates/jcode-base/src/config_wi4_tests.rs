@@ -196,8 +196,10 @@ fn wi4_keyed_config_fallback_warning_only_fires_once_per_setting_raw_fallback() 
 
 #[test]
 fn wi4_acp_profile_parser_preserves_aliases_and_fallback() {
-    let mut cfg = AcpConfig::default();
-    cfg.profile = " extended ".to_string();
+    let mut cfg = AcpConfig {
+        profile: " extended ".to_string(),
+        ..AcpConfig::default()
+    };
     assert_eq!(cfg.normalized_profile(), "extended");
     cfg.profile = "bogus-wi4-acp".to_string();
     assert_eq!(cfg.normalized_profile(), "standard");

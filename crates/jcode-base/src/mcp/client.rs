@@ -1046,7 +1046,7 @@ mod tests {
         // Only non-flaky facts: cap is positive, a permit acquires under cap,
         // and dropping it does not panic. No assertion on the shared global's
         // absolute value (other tests mutate it in parallel).
-        assert!(MAX_OWNED_MCP_CHILDREN > 0);
+        const { assert!(MAX_OWNED_MCP_CHILDREN > 0) };
         let permit = OwnedChildPermit::try_acquire();
         assert!(permit.is_some(), "should acquire while far under cap");
         drop(permit);
