@@ -800,3 +800,43 @@ not enumerate these mechanics; recorded here rather than silently deviating):
 the budget with its own decision; a documentation node beyond D01 must revisit
 the citation-prefix rule; a defensible legacy commit mapping failure reopens
 the affected node per R07 rather than weakening the ancestry rule.
+
+## D031. R07 proceeds without an external trust root: owner-admin is the accepted root of trust on a personal repository
+
+**Context.** The R07 adversarial design gate (evidence
+`docs/fork/ideal-base/evidence/R07/design-gate.md`, verdict FAIL) proved with
+live API probes, GitHub documentation, and a GitHub staff statement that the
+repository-level `workflows` ruleset rule is organization/enterprise-scoped
+and cannot attach to a repository-level ruleset on `jerudnik/jcode`, a
+personal user-owned repository. The first R07 design had adopted that rule as
+the sole external anchor making zero-required-approval governance
+"self-protecting," and failed its own stop-condition when the rule proved
+unavailable.
+
+**Decisions.**
+
+- The R07 contract in `WORK_GRAPH.json` is unchanged. It never required an
+  external trust root: it requires ruleset hardening (deletion and
+  non-fast-forward protection, pull-request-only changes, zero required
+  approvals, review-thread resolution, merge commits only, strict required
+  checks, no silent administrator bypass), machine-readable required checks,
+  the STATE schema split, ancestor-of-HEAD validator semantics, and private
+  recovery-archive ratification. The external anchor was a design-layer
+  addition, not a contract requirement.
+- On a personal repository the owner-admin is accepted as the root of trust;
+  this was already true de facto, since the owner can rewrite or delete any
+  ruleset. R07's "self-checking governance" property is delivered through
+  auditability instead: governance fixtures that prove rule shape without
+  GitHub access, a live read-only comparison mode, and fork-health full
+  comparison that fails closed on any drift between the machine-readable
+  manifest and the live ruleset.
+- The R07 design is revised (v2) to remove the `workflows` rule and its
+  trust-root narrative, and to fix the unsupported `repository_id` citation
+  chain the gate also flagged. Design v2 must pass a fresh adversarial gate
+  before implementation begins.
+
+**Reopen triggers.** If the repository ever moves into an organization or
+enterprise plan, revisiting the `workflows`-rule external anchor is a new
+decision; if GitHub makes repository-level required-workflow rules generally
+available, the same. A false-durability finding in the R07 independent review
+reopens this trade-off rather than weakening the auditability controls.
