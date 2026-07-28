@@ -174,7 +174,7 @@ run_clippy_gate() {
   local flagged="$work_dir/clippy-flagged"
   local clippy_status=0
   cargo_to_file "$clippy_json" "false" \
-    clippy --all-targets --all-features --message-format=json \
+    clippy --locked --workspace --all-targets --all-features --message-format=json \
     || clippy_status=$?
   if [[ "$clippy_status" -ne 0 ]]; then
     warn "cargo clippy exited $clippy_status (possible hard compile error; run cargo check)"

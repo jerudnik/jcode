@@ -5,10 +5,13 @@ name: Fork CI
 # Upstream's ci.yml is inherited and dispatch-only. Windows CI was removed
 # entirely (issue #19); Windows remains a runtime target but is untested here.
 #
-# Tiering:
-#   blocking on push/PR: quality guardrails, macOS build and test execution,
-#                        and full Linux test execution
-#   scheduled runs    : repeat the same blocking Linux coverage weekly
+# Routing and tiering:
+#   pull requests : Detect changes always runs; quality guardrails run for Rust
+#                   or gate-input changes, while macOS and Linux tests run for
+#                   Rust changes
+#   push/schedule : quality guardrails, macOS build and test execution, and full
+#                   Linux test execution run unconditionally
+#   scheduled runs: repeat the same blocking Linux coverage weekly
 
 
 on:
@@ -38,8 +41,56 @@ env:
   RUSTUP_TOOLCHAIN: 1.96.0
 
 jobs:
+  # Branch protection must require "Detect changes". The conditional checks
+  # "Quality Guardrails", "Build & Test (macOS)", and "Linux Tests" should be
+  # removed from required checks or made optional because they may be skipped.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust || 'true' }}
+      scripts: ${{ steps.filter.outputs.scripts || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: true
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        continue-on-error: true
+        with:
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - '.cargo/**'
+              - 'tests/**'
+              - 'examples/**'
+              - 'assets/**'
+            scripts:
+              - 'scripts/**'
+              - '.apm/**'
+              - '.jcode/**'
+              - '.github/workflows/**'
+              - '.github/scripts/**'
+              - 'docs/agent-workflows.md'
+              - 'docs/BRANCHING.md'
+              - 'docs/NIX.md'
+              - 'docs/SWARM_ARCHITECTURE.md'
+              - 'docs/SWARM_TASK_GRAPH.md'
+              - 'CONTRIBUTING.md'
+              - 'RELEASING.md'
+
   quality:
     name: Quality Guardrails
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.scripts == 'true' || github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -140,7 +191,7 @@ jobs:
       # Doubles as the Linux mergeability canary: everything (tests included)
       # must still type-check on Linux so fork patches stay upstreamable.
       - name: Check all targets and all features
-        run: cargo check --all-targets --all-features
+        run: cargo check --locked --workspace --all-targets --all-features
 
       # Same tolerance policy as the formatting gate (and it reuses
       # /tmp/fork-touched from that step): run clippy over the whole tree
@@ -151,7 +202,7 @@ jobs:
       # fails first) is reported as a warning instead of blocking.
       - name: Clippy (blocking for fork-touched files)
         run: |
-          cargo clippy --all-targets --all-features --message-format=json \
+          cargo clippy --locked --workspace --all-targets --all-features --message-format=json \
             > /tmp/clippy.json
           jq -r '
             select(.reason=="compiler-message")
@@ -230,10 +281,12 @@ jobs:
       - name: Enforce swallowed-error usage ratchet
         run: python3 scripts/check_swallowed_error_budget.py
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2
+
       - name: Enforce no unused dependencies
-        run: |
-          cargo install cargo-machete --locked
-          cargo machete
+        run: cargo machete
 
   latest-stable-canary:
     name: Latest stable canary (advisory)
@@ -257,13 +310,15 @@ jobs:
           cache-all-crates: "true"
 
       - name: Check all targets and all features on latest stable
-        run: cargo check --all-targets --all-features
+        run: cargo check --locked --all-targets --all-features
 
       - name: Report latest-stable Clippy drift
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --locked --all-targets --all-features
 
   macos:
     name: Build & Test (macOS)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
@@ -282,7 +337,7 @@ jobs:
           key: fork-macos
 
       - name: Build release binary
-        run: cargo build --release --target aarch64-apple-darwin
+        run: cargo build --locked --release --target aarch64-apple-darwin
 
       - name: Verify built binary launches
         run: ./target/aarch64-apple-darwin/release/jcode --version
@@ -290,14 +345,14 @@ jobs:
       - name: Compile library and binary tests
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            cargo test --target aarch64-apple-darwin --workspace --lib --bins --no-run
+            cargo test --locked --target aarch64-apple-darwin --workspace --lib --bins --no-run
 
       # Workspace coverage excludes jcode-tui and jcode-app-core because each
       # runs in an explicit blocking step with its own timeout attribution.
       - name: Run workspace library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            cargo test --target aarch64-apple-darwin \
+            cargo test --locked --target aarch64-apple-darwin \
             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
 
       # Parallelism restored by F28. The suite shares process-global TUI view
@@ -312,7 +367,7 @@ jobs:
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target aarch64-apple-darwin -p jcode-tui --lib
+            cargo test --locked --target aarch64-apple-darwin -p jcode-tui --lib
 
       # Parallelism restored by F28. The env-toggling tests hold the
       # `lock_test_env` lease, which serializes exactly the cases that need it
@@ -321,18 +376,18 @@ jobs:
       - name: Run jcode-app-core library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target aarch64-apple-darwin -p jcode-app-core --lib
+            cargo test --locked --target aarch64-apple-darwin -p jcode-app-core --lib
 
       - name: Compile integration test binaries
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            cargo test --target aarch64-apple-darwin \
+            cargo test --locked --target aarch64-apple-darwin \
             --test provider_matrix --test e2e --no-run
 
       - name: Run provider matrix tests
         run: |
           python3 .github/scripts/run_with_timeout.py 600 \
-            cargo test --target aarch64-apple-darwin --test provider_matrix
+            cargo test --locked --target aarch64-apple-darwin --test provider_matrix
 
       - name: Run e2e tests
         env:
@@ -340,10 +395,12 @@ jobs:
           JCODE_E2E_BINARY: ${{ github.workspace }}/target/aarch64-apple-darwin/release/jcode
         run: |
           python3 .github/scripts/run_with_timeout.py 600 \
-            cargo test --target aarch64-apple-darwin --test e2e
+            cargo test --locked --target aarch64-apple-darwin --test e2e
 
   linux-tests:
     name: Linux Tests
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -375,41 +432,41 @@ jobs:
       - name: Compile library and binary tests
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            cargo test --target x86_64-unknown-linux-gnu --workspace --lib --bins --no-run
+            cargo test --locked --target x86_64-unknown-linux-gnu --workspace --lib --bins --no-run
 
       # Workspace coverage excludes jcode-tui and jcode-app-core because each
       # runs in an explicit blocking step with its own timeout attribution.
       - name: Run workspace library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            cargo test --target x86_64-unknown-linux-gnu \
+            cargo test --locked --target x86_64-unknown-linux-gnu \
             --workspace --lib --bins --exclude jcode-tui --exclude jcode-app-core
 
       # Parallelism restored by F28; see the macOS jcode-tui step above.
       - name: Run jcode-tui library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target x86_64-unknown-linux-gnu -p jcode-tui --lib
+            cargo test --locked --target x86_64-unknown-linux-gnu -p jcode-tui --lib
 
       # Parallelism restored by F28; see the macOS jcode-app-core step above.
       - name: Run jcode-app-core library tests
         run: |
           python3 .github/scripts/run_with_timeout.py 1800 \
-            cargo test --target x86_64-unknown-linux-gnu -p jcode-app-core --lib
+            cargo test --locked --target x86_64-unknown-linux-gnu -p jcode-app-core --lib
 
       - name: Compile integration test binaries
         run: |
           python3 .github/scripts/run_with_timeout.py 900 \
-            cargo test --target x86_64-unknown-linux-gnu \
+            cargo test --locked --target x86_64-unknown-linux-gnu \
             --test provider_matrix --test e2e --no-run
 
       - name: Run provider matrix tests
         run: |
           python3 .github/scripts/run_with_timeout.py 600 \
-            cargo test --target x86_64-unknown-linux-gnu --test provider_matrix
+            cargo test --locked --target x86_64-unknown-linux-gnu --test provider_matrix
 
       - name: Build jcode binary for e2e
-        run: cargo build --target x86_64-unknown-linux-gnu --bin jcode
+        run: cargo build --locked --target x86_64-unknown-linux-gnu --bin jcode
 
       - name: Run e2e tests
         env:
@@ -417,4 +474,4 @@ jobs:
           JCODE_E2E_BINARY: ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/debug/jcode
         run: |
           python3 .github/scripts/run_with_timeout.py 600 \
-            cargo test --target x86_64-unknown-linux-gnu --test e2e
+            cargo test --locked --target x86_64-unknown-linux-gnu --test e2e

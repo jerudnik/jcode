@@ -223,7 +223,7 @@ if [ "$ratchets_only" -eq 0 ]; then
       clippy_scoped() {
         local json flagged bad
         json=$(mktemp)
-        cargo clippy --all-targets --all-features --message-format=json \
+        cargo clippy --locked --workspace --all-targets --all-features --message-format=json \
           > "$json" 2>/dev/null || true
         flagged=$(jq -r '
           select(.reason=="compiler-message")
