@@ -15,7 +15,23 @@
       "scripts/fork-health.sh",
       "scripts/ideal_base_railway.py",
       "tests/test_ideal_base_railway.py",
-      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json"
+      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json",
+      "scripts/ambient_roots_allowlist.txt",
+      "scripts/check_agent_instructions.py",
+      "scripts/check_ambient_roots.sh",
+      "scripts/check_code_size_budget.py",
+      "scripts/check_env_lease_drop_order.py",
+      "scripts/check_panic_budget.py",
+      "scripts/check_swallowed_error_budget.py",
+      "scripts/check_test_size_budget.py",
+      "scripts/check_tui_render_lock.py",
+      "scripts/check_warning_budget.sh",
+      "scripts/docs_impact_advisory.py",
+      "scripts/rust_production_filter.py",
+      "scripts/security_preflight.sh",
+      "scripts/test_docs_impact_advisory.py",
+      "tests/test_nix_distribution_policy.py",
+      "tests/test_rust_production_filter.py"
     ]
   },
   "apply_only_after": [
@@ -52,8 +68,19 @@
         "target": "branch",
         "source_type": "Repository",
         "enforcement": "active",
-        "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
-        "rules": [ { "type": "deletion" } ],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          }
+        ],
         "bypass_actors": []
       },
       "expected_sanitized_body_sha256": "8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124",
@@ -72,12 +99,27 @@
         "enforcement": "active",
         "conditions": {
           "ref_name": {
-            "include": ["~ALL"],
-            "exclude": ["refs/heads/main", "refs/heads/automation/**"]
+            "include": [
+              "~ALL"
+            ],
+            "exclude": [
+              "refs/heads/main",
+              "refs/heads/automation/**"
+            ]
           }
         },
-        "rules": [ { "type": "creation" } ],
-        "bypass_actors": [ { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" } ]
+        "rules": [
+          {
+            "type": "creation"
+          }
+        ],
+        "bypass_actors": [
+          {
+            "actor_id": 5,
+            "actor_type": "RepositoryRole",
+            "bypass_mode": "always"
+          }
+        ]
       },
       "expected_sanitized_body_sha256": "1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f",
       "on_mismatch": "stop; live governance for ruleset 18509016 has drifted from the reviewed recon body. Resolve the ruleset id by name and re-review this document"
@@ -91,18 +133,43 @@
       "expected_body": {
         "required_status_checks": {
           "strict": false,
-          "contexts": ["Detect changes"],
-          "checks": [ { "context": "Detect changes", "app_id": null } ]
+          "contexts": [
+            "Detect changes"
+          ],
+          "checks": [
+            {
+              "context": "Detect changes",
+              "app_id": null
+            }
+          ]
         },
-        "required_signatures": { "enabled": false },
-        "enforce_admins": { "enabled": false },
-        "required_linear_history": { "enabled": false },
-        "allow_force_pushes": { "enabled": false },
-        "allow_deletions": { "enabled": false },
-        "block_creations": { "enabled": false },
-        "required_conversation_resolution": { "enabled": false },
-        "lock_branch": { "enabled": false },
-        "allow_fork_syncing": { "enabled": false }
+        "required_signatures": {
+          "enabled": false
+        },
+        "enforce_admins": {
+          "enabled": false
+        },
+        "required_linear_history": {
+          "enabled": false
+        },
+        "allow_force_pushes": {
+          "enabled": false
+        },
+        "allow_deletions": {
+          "enabled": false
+        },
+        "block_creations": {
+          "enabled": false
+        },
+        "required_conversation_resolution": {
+          "enabled": false
+        },
+        "lock_branch": {
+          "enabled": false
+        },
+        "allow_fork_syncing": {
+          "enabled": false
+        }
       },
       "expected_body_sha256": "d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704",
       "on_mismatch": "stop and re-review; do not overwrite live governance state whose baseline has drifted from the reviewed one. Persist the actual live body and its SHA-256 anyway so the deletion in sequence 15, if it later proceeds under a re-reviewed document, remains recoverable evidence."
@@ -122,7 +189,7 @@
           "git cat-file -e ${bootstrap_merge_sha}^{commit}",
           "git cat-file -e ${current_main_sha}^{commit}",
           "git merge-base --is-ancestor ${bootstrap_merge_sha} ${current_main_sha}",
-          "git diff --quiet ${bootstrap_merge_sha} ${current_main_sha} -- .github/scripts/ .github/workflows/ scripts/required-checks.json scripts/fork-health.sh scripts/ideal_base_railway.py tests/test_ideal_base_railway.py docs/fork/ideal-base/evidence/R07/github-governance.proposed.json"
+          "git diff --quiet ${bootstrap_merge_sha} ${current_main_sha} -- .github/scripts/ .github/workflows/ scripts/required-checks.json scripts/fork-health.sh scripts/ideal_base_railway.py tests/test_ideal_base_railway.py docs/fork/ideal-base/evidence/R07/github-governance.proposed.json scripts/ambient_roots_allowlist.txt scripts/check_agent_instructions.py scripts/check_ambient_roots.sh scripts/check_code_size_budget.py scripts/check_env_lease_drop_order.py scripts/check_panic_budget.py scripts/check_swallowed_error_budget.py scripts/check_test_size_budget.py scripts/check_tui_render_lock.py scripts/check_warning_budget.sh scripts/docs_impact_advisory.py scripts/rust_production_filter.py scripts/security_preflight.sh scripts/test_docs_impact_advisory.py tests/test_nix_distribution_policy.py tests/test_rust_production_filter.py"
         ]
       },
       "assert": "This is the immediately-pre-write assertion against CURRENT main, not the historical bootstrap head that sequence 2 read. Set current_main_sha to the endpoint response's full sha. In the apply operator's local clone, run local_git.prepare in order: if the clone is shallow, unshallow it read-only from the explicit jerudnik/jcode URL, then fetch both exact commits. Run every local_git assertion. The final path-limited git diff compares endpoint tree/blob identity for every protected path without an API file-count cap or silent truncation. It also handles renames explicitly: moving a protected path outside the protected prefixes is a deletion of the old protected path and fails; moving a path into a protected prefix is an addition and fails; moving within the protected set also fails. A zero diff, including current_main_sha == bootstrap_merge_sha, passes. Together with sequence 2's context-emission proof, this proves the reviewed protected bytes are exactly what current main contains immediately before sequence 7 requires the contexts.",
@@ -205,8 +272,19 @@
         "target": "branch",
         "enforcement": "active",
         "bypass_actors": [],
-        "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
-        "rules": [ { "type": "deletion" } ]
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          }
+        ]
       },
       "on_mismatch": "If the ruleset read-back differs, or if the repeated sequence 6 detects a rewritten main boundary or any protected-path change, immediately PUT rollback_body to ruleset 18509013, read it back, sanitize it exactly as sequence 3, verify parsed equality and canonical hash equal sequence 3, and stop. rollback_body is the sequence-3 pre-write body with read-only source_type omitted. This rollback is mandatory while the first ruleset is the only surface changed."
     },

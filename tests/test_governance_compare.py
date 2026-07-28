@@ -585,6 +585,86 @@ class SanitizationTests(ComparatorCase):
         )
 
 
+class CrossArtifactCoherenceTests(unittest.TestCase):
+    """The enforced protected-path set must be identical in every artifact.
+
+    The R07 integration gate caught the apply document lagging the manifest and
+    workflow after adjudication; this test makes a future one-sided edit fail
+    loudly instead of silently weakening the bootstrap-to-apply assertion.
+    """
+
+    APPLY_DOC = (
+        REPO_ROOT
+        / "docs"
+        / "fork"
+        / "ideal-base"
+        / "evidence"
+        / "R07"
+        / "github-governance.proposed.json"
+    )
+    RATCHET_BASELINES = {
+        "scripts/code_size_budget.json",
+        "scripts/panic_budget.json",
+        "scripts/swallowed_error_budget.json",
+        "scripts/test_size_budget.json",
+        "scripts/warning_budget.txt",
+    }
+
+    @staticmethod
+    def _norm(paths: list[str]) -> set[str]:
+        return {p.rstrip("/") for p in paths}
+
+    def test_protected_set_is_coherent_across_artifacts(self) -> None:
+        manifest = load_manifest()
+        required = self._norm(manifest["protected_paths"]["required"])
+        self.assertEqual(
+            manifest["protected_paths"]["proposed_additions"],
+            [],
+            "unadjudicated proposed additions must not linger post-integration",
+        )
+        self.assertTrue(manifest["protected_paths"]["additions_adjudicated"])
+
+        apply_doc = json.loads(self.APPLY_DOC.read_text(encoding="utf-8"))
+        template = self._norm(apply_doc["template_variables"]["protected_paths"])
+        self.assertEqual(
+            required,
+            template,
+            f"manifest/template_variables mismatch: "
+            f"{sorted(required ^ template)}",
+        )
+
+        seq6 = next(s for s in apply_doc["steps"] if s.get("sequence") == 6)
+        diff_cmd = next(
+            a
+            for a in seq6["local_git"]["assertions"]
+            if a.startswith("git diff --quiet")
+        )
+        for path in sorted(required):
+            self.assertIn(
+                path,
+                diff_cmd,
+                f"sequence 6 diff assertion does not cover {path}",
+            )
+
+        workflow_text = load_fixture()["workflows"][
+            ".github/workflows/governance-root.yml"
+        ]
+        for path in sorted(required):
+            self.assertIn(
+                path,
+                workflow_text,
+                f"governance-root.yml fixture does not name {path}",
+            )
+
+        # The ratchet baselines are deliberately unprotected everywhere; if a
+        # future edit adds one back it must happen in all artifacts at once,
+        # which this test forces by pinning their absence.
+        for baseline in sorted(self.RATCHET_BASELINES):
+            self.assertNotIn(baseline, required)
+            self.assertNotIn(baseline, diff_cmd)
+            self.assertNotIn(baseline, workflow_text)
+
+
 class ProtectedPathAdjudicationTests(ComparatorCase):
     def test_pending_additions_are_reported_but_not_enforced(self) -> None:
         # The repo manifest has no pending additions (the R07 integration

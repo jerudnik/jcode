@@ -36,8 +36,18 @@ Of the 21 proposed protected-path additions:
   changed the body length. `git apply --check` passes; the patch was re-applied
   to a scratch tree and `governance-root.yml` verified to carry all 23 paths.
 - `docs/fork/ideal-base/evidence/R07/github-governance.proposed.json` —
-  `template_variables.protected_paths` extended with the same 16, so the
+  `template_variables.protected_paths` AND sequence 6's executable
+  `git diff --quiet ... -- <paths>` assertion extended with the same 16, so the
   sequence-6 current-main diff asserts on the full enforced set.
+  **Correction (integration gate, PASS-WITH-FIXES):** the first adjudication
+  commit updated only the manifest, workflow patch, and fixture; the apply
+  document still carried the original 7 in both locations, silently weakening
+  the bootstrap-to-apply protected-byte assertion this record claimed was
+  widened. The integration gate caught it; both locations were fixed in the
+  follow-up commit, and a `CrossArtifactCoherenceTests` regression test now
+  pins set equality across the manifest, `template_variables`, the sequence-6
+  diff command, and the fixture workflow text (and pins the 5 baselines'
+  absence from all of them), so a one-sided edit fails loudly.
 - `docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json` —
   regenerated via `scripts/generate_governance_fixture.py --workflows-dir`
   against the patched scratch tree.
@@ -47,7 +57,9 @@ Of the 21 proposed protected-path additions:
 - `tests/test_governance_compare.py`: the two adjudication-polarity tests now
   construct their own pending/enforced scenario
   (`scripts/governance_compare.py` as the synthetic addition) instead of
-  relying on repo state; both polarities still verified.
+  relying on repo state; both polarities still verified. A new
+  `CrossArtifactCoherenceTests` pins the enforced set across all four
+  artifacts (see the correction note above).
 - `tests/test_ideal_base_railway.py`: `test_live_state_json_is_schema_v1...`
   replaced by `test_live_state_json_is_schema_v2_and_validates`, asserting the
   migrated live file validates under v2 rules against the real published ref.
@@ -66,7 +78,7 @@ protected hash intact".
 
 ## Validation
 
-- `tests.test_governance_compare`: 73/73 pass.
+- `tests.test_governance_compare`: 74/74 pass (73 + new coherence test).
 - `tests.test_ideal_base_railway`: 25/25 pass.
 - `git apply --check` on the workflow patch; real apply to scratch tree;
   actionlint clean on all patched workflows (see below).
