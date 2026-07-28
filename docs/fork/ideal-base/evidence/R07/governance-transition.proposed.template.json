@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "purpose": "Fail-closed bootstrap and maintenance transition for the Governance Root required workflow",
+  "materialization": {
+    "required_inputs": {
+      "pull_request_number": "^[1-9][0-9]*$",
+      "reviewed_head_sha": "^[0-9a-f]{40}$",
+      "reviewed_head_repository_id": "^[1-9][0-9]*$",
+      "reviewed_head_ref": "^[A-Za-z0-9._/-]+$",
+      "reviewed_base_sha": "^[0-9a-f]{40}$",
+      "reviewed_base_repository_id": "^1238606714$",
+      "reviewed_base_ref": "^main$",
+      "transition_commit_sha": "^[0-9a-f]{40}$",
+      "transition_nonce": "^[0-9a-f]{16}$",
+      "transition_tag": "^governance-root-transition-[0-9a-f]{12}-[0-9a-f]{16}$"
+    },
+    "workflow_template": "governance-transition.workflow.template.yml",
+    "workflow_replacements": {
+      "__REVIEWED_PR_NUMBER__": "${pull_request_number}",
+      "__REVIEWED_HEAD_SHA__": "${reviewed_head_sha}",
+      "__REVIEWED_HEAD_REPOSITORY_ID__": "${reviewed_head_repository_id}",
+      "__REVIEWED_HEAD_REF__": "${reviewed_head_ref}",
+      "__REVIEWED_BASE_SHA__": "${reviewed_base_sha}",
+      "__REVIEWED_BASE_REPOSITORY_ID__": "${reviewed_base_repository_id}",
+      "__REVIEWED_BASE_REF__": "${reviewed_base_ref}"
+    },
+    "forbid_unexpanded_token": "__[A-Z0-9_]+__"
+  },
+  "temporary_tag_ruleset": {
+    "method": "POST",
+    "endpoint": "/repos/jerudnik/jcode/rulesets",
+    "body": {
+      "name": "protect-${transition_tag}",
+      "target": "tag",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/tags/${transition_tag}"
+          ],
+          "exclude": []
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "update",
+          "parameters": {
+            "update_allows_fetch_and_merge": false
+          }
+        }
+      ]
+    },
+    "read_assert": {
+      "method": "GET",
+      "endpoint": "/repos/jerudnik/jcode/rulesets/${temporary_tag_ruleset_id}",
+      "exact_fields": [
+        "name",
+        "target",
+        "enforcement",
+        "bypass_actors",
+        "conditions",
+        "rules"
+      ]
+    }
+  },
+  "tag_creation": {
+    "ref": "refs/tags/${transition_tag}",
+    "expected_object": "${transition_commit_sha}",
+    "precondition": "temporary tag ruleset is active and exact before tag creation",
+    "postcondition": "canonical verified archive URL reports exactly transition_commit_sha for the tag"
+  },
+  "main_ruleset_transition": {
+    "source": "github-governance.proposed.json",
+    "transform": [
+      {
+        "operation": "replace",
+        "json_pointer": "/steps/0/body/rules/4/parameters/workflows/0/ref",
+        "steady_value": "refs/heads/main",
+        "transition_value": "refs/tags/${transition_tag}"
+      },
+      {
+        "operation": "add",
+        "json_pointer": "/steps/0/body/rules/4/parameters/workflows/0/sha",
+        "transition_value": "${transition_commit_sha}"
+      }
+    ],
+    "read_assert": {
+      "required_workflow_repository_id": 1238606714,
+      "required_workflow_path": ".github/workflows/governance-root.yml",
+      "required_workflow_ref": "refs/tags/${transition_tag}",
+      "required_workflow_sha": "${transition_commit_sha}",
+      "bypass_actors": []
+    }
+  },
+  "authorization": {
+    "only_passing_pull_request_number": "${pull_request_number}",
+    "only_passing_pull_request_head": "${reviewed_head_sha}",
+    "only_passing_head_repository_id": "${reviewed_head_repository_id}",
+    "only_passing_head_ref": "${reviewed_head_ref}",
+    "only_passing_pull_request_base": "${reviewed_base_sha}",
+    "only_passing_base_repository_id": "${reviewed_base_repository_id}",
+    "only_passing_base_ref": "${reviewed_base_ref}",
+    "all_other_pull_requests": "Governance Root fails",
+    "candidate_code_executed": false
+  },
+  "merge": {
+    "precondition_reads": [
+      "GET /repos/jerudnik/jcode/pulls/${pull_request_number}: number, open state, head SHA/repository id/ref, and base SHA/repository id/ref exactly match all reviewed inputs",
+      "GET /repos/jerudnik/jcode/commits/${reviewed_head_sha}/check-runs: all four required contexts are completed/success from integration id 15368"
+    ],
+    "method": "PUT",
+    "endpoint": "/repos/jerudnik/jcode/pulls/${pull_request_number}/merge",
+    "body": {
+      "sha": "${reviewed_head_sha}",
+      "merge_method": "merge"
+    },
+    "expect": {
+      "status": 200,
+      "merged": true,
+      "sha": "${merge_commit_sha}"
+    },
+    "postcondition_reads": [
+      "GET /repos/jerudnik/jcode/pulls/${pull_request_number}: state=closed, merged=true, merge_commit_sha=${merge_commit_sha}, head.sha=${reviewed_head_sha}",
+      "GET /repos/jerudnik/jcode/git/ref/heads/main: object.sha=${merge_commit_sha}",
+      "fresh fetch: ${merge_commit_sha}^1=${reviewed_base_sha} and ${merge_commit_sha}^2=${reviewed_head_sha}",
+      "fresh fetch: main:.github/workflows/governance-root.yml byte-equals reviewed_head_sha:.github/workflows/governance-root.yml"
+    ]
+  },
+  "restoration": {
+    "apply_only_after": "every merge postcondition passed and main tip equals merge_commit_sha",
+    "required_workflow_ref": "refs/heads/main",
+    "remove_required_workflow_sha": true,
+    "read_assert": {
+      "required_workflow_repository_id": 1238606714,
+      "required_workflow_path": ".github/workflows/governance-root.yml",
+      "required_workflow_ref": "refs/heads/main",
+      "required_workflow_sha": "absent",
+      "exact_workflow_object": {
+        "path": ".github/workflows/governance-root.yml",
+        "repository_id": 1238606714,
+        "ref": "refs/heads/main"
+      },
+      "bypass_actors": []
+    },
+    "retain_transition_tag_and_ruleset": true
+  },
+  "rollback": {
+    "before_merge_existing_steady_state": "restore refs/heads/main and read back; no other PR could merge while the transition ref was active",
+    "before_merge_bootstrap": {
+      "state": "retain the full R07 ruleset pinned to the current immutable transition workflow; every PR remains blocked except the now-abandoned reviewed identity",
+      "sequence": [
+        "prepare and independently review a replacement bootstrap PR with a new complete PR/source/head/base identity",
+        "materialize and protect a new immutable transition tag and verify its workflow bytes, ref, and SHA exactly",
+        "PUT /repos/jerudnik/jcode/rulesets/18509013 once, replacing only the old transition workflow ref/SHA with the new transition workflow ref/SHA while every other rule remains exact",
+        "read back the complete ruleset and prove only the replacement PR identity can pass Governance Root"
+      ],
+      "forbidden": [
+        "restore the weak pre-R07 classic protection or deletion-only ruleset",
+        "disable or remove the workflows rule",
+        "add a bypass actor",
+        "merge the abandoned candidate"
+      ]
+    },
+    "after_merge_before_restoration": "do not relax or remove the transition rule; all new PRs remain blocked; retry restoration to refs/heads/main"
+  },
+  "bootstrap_preflight": {
+    "reads": [
+      "GET /repos/jerudnik/jcode/branches/main/protection",
+      "GET /repos/jerudnik/jcode/rulesets/18509013",
+      "GET /repos/jerudnik/jcode/rulesets/18509016",
+      "GET /repos/jerudnik/jcode"
+    ],
+    "assert": "the sanitized live responses exactly match the recon baseline summarized in design.md before any R07 governance write",
+    "on_mismatch": "stop and redesign/re-review the transition; do not overwrite the captured live state",
+    "evidence": "persist the sanitized normalized snapshot and its SHA-256"
+  },
+  "collision_policy": {
+    "on_remote_tag_preexistence_or_push_race": "do not reference or mutate the collided tag; retain its inert protection ruleset, generate a new transition_nonce, and restart external review/materialization",
+    "referenced_tag_must_match": "transition_commit_sha before the main ruleset may be pinned"
+  },
+  "evidence_record": {
+    "schema_version": 1,
+    "required_fields": [
+      "pull_request_number",
+      "reviewed_head_sha",
+      "reviewed_head_repository_id",
+      "reviewed_head_ref",
+      "reviewed_base_sha",
+      "reviewed_base_repository_id",
+      "reviewed_base_ref",
+      "materialized_workflow_sha256",
+      "transition_commit_sha",
+      "transition_tag",
+      "temporary_tag_ruleset_id",
+      "pre_transition_snapshot_sha256",
+      "temporary_tag_ruleset_readback_sha256",
+      "pinned_main_ruleset_readback_sha256",
+      "merge_commit_sha",
+      "resulting_main_sha",
+      "restored_main_ruleset_readback_sha256",
+      "restored_workflow_sha_field_absent",
+      "operator",
+      "timestamps_utc"
+    ]
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "schema_version": 2,
+  "repository": "jerudnik/jcode",
+  "apply_only_after": [
+    "the bootstrap pull request's complete number/source/head/target/base identity has been independently reviewed",
+    "Fork CI Gate, Security Gate, and Nix Gate emitted green on that exact bootstrap pull request; Governance Root will be supplied by the immutable transition pin before merge",
+    "governance-transition.proposed.template.json has been materialized; its tag ruleset is active; and its tag ref, workflow SHA, bytes, and hash were read back exactly",
+    "an administrator has explicitly approved the external GitHub writes"
+  ],
+  "steps": [
+    {
+      "sequence": 1,
+      "kind": "write",
+      "method": "PUT",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
+      "body": {
+        "name": "protect-fork-rails",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "non_fast_forward"
+          },
+          {
+            "type": "pull_request",
+            "parameters": {
+              "allowed_merge_methods": [
+                "merge"
+              ],
+              "dismiss_stale_reviews_on_push": false,
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 0,
+              "required_review_thread_resolution": true
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "do_not_enforce_on_create": false,
+              "required_status_checks": [
+                {
+                  "context": "Governance Root",
+                  "integration_id": 15368
+                },
+                {
+                  "context": "Fork CI Gate",
+                  "integration_id": 15368
+                },
+                {
+                  "context": "Security Gate",
+                  "integration_id": 15368
+                },
+                {
+                  "context": "Nix Gate",
+                  "integration_id": 15368
+                }
+              ],
+              "strict_required_status_checks_policy": true
+            }
+          },
+          {
+            "type": "workflows",
+            "parameters": {
+              "do_not_enforce_on_create": false,
+              "workflows": [
+                {
+                  "path": ".github/workflows/governance-root.yml",
+                  "repository_id": 1238606714,
+                  "ref": "refs/heads/main"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sequence": 2,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
+      "assert": "sanitized body exactly equals sequence 1, including active enforcement, empty bypass_actors, and every rule parameter"
+    },
+    {
+      "sequence": 3,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rules/branches/main",
+      "assert": "effective rule types include exactly deletion, non_fast_forward, pull_request, required_status_checks, and workflows from the intended main ruleset"
+    },
+    {
+      "sequence": 4,
+      "kind": "write",
+      "method": "PUT",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
+      "body": {
+        "name": "no-stray-branches",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~ALL"
+            ],
+            "exclude": [
+              "refs/heads/main",
+              "refs/heads/automation/**"
+            ]
+          }
+        },
+        "rules": [
+          {
+            "type": "creation"
+          }
+        ]
+      }
+    },
+    {
+      "sequence": 5,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
+      "assert": "sanitized body exactly equals sequence 4, including active enforcement and empty bypass_actors"
+    },
+    {
+      "sequence": 6,
+      "kind": "write",
+      "method": "PATCH",
+      "endpoint": "repos/jerudnik/jcode",
+      "body": {
+        "allow_merge_commit": true,
+        "allow_squash_merge": false,
+        "allow_rebase_merge": false
+      }
+    },
+    {
+      "sequence": 7,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode",
+      "assert": "allow_merge_commit=true, allow_squash_merge=false, allow_rebase_merge=false"
+    },
+    {
+      "sequence": 8,
+      "kind": "checkpoint",
+      "assert": "sequences 2, 3, 5, and 7 all passed; stop here on any mismatch"
+    },
+    {
+      "sequence": 9,
+      "kind": "write",
+      "method": "DELETE",
+      "endpoint": "repos/jerudnik/jcode/branches/main/protection",
+      "purpose": "remove contradictory classic protection only after the active ruleset and repository settings are proved"
+    },
+    {
+      "sequence": 10,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/branches/main/protection",
+      "expect_status": 404
+    },
+    {
+      "sequence": 11,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rules/branches/main",
+      "assert": "effective rule types include exactly deletion, non_fast_forward, pull_request, required_status_checks, and workflows from the intended main ruleset"
+    }
+  ],
+  "abort_policy": "Stop before the next write whenever a read_assert or checkpoint fails. Never continue to sequence 9 unless sequence 8 passed."
+}

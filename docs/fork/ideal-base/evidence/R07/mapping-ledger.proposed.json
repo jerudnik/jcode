@@ -1,0 +1,367 @@
+{
+  "schema_version": 1,
+  "baseline_main": "498249777c453c1d551aeb01fc45420d8ca0a585",
+  "equivalence_ladder": [
+    "identity",
+    "unique_patch_id",
+    "complete_merge_second_parent_payload",
+    "per_file_tree_equality_at_named_published_commit",
+    "reopen_with_injected_repair_node"
+  ],
+  "policy": "The first successful rung wins. Rungs may not be skipped. File-tree equality is historical at the named published commit, never equality with current HEAD.",
+  "entries": [
+    {
+      "node": "W0",
+      "reviewed_commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "published_commit": "fda646de9107a8efa85550b1e01b40a1abc2d7ac",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "W1",
+      "reviewed_commit": "4df63d04ef645ea07abafb46ff90c2cc908e1334",
+      "published_commit": "3192e77c2dd43b6a38c505fe4810196ba9b11e71",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "W2",
+      "reviewed_commit": "61ba2e2656e258b636b1137f114b91031d30aa0a",
+      "published_commit": "931e625cc116a2d57e10cb38ac1ec0a63e37bec8",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "W3",
+      "reviewed_commit": "f8b7b39e72d53ca505b8a82cb5f59928c671dfae",
+      "published_commit": "f8b7b39e72d53ca505b8a82cb5f59928c671dfae",
+      "equivalence_method": "identity",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "W0.1",
+      "reviewed_commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
+      "published_commit": "84c5a778ddefa2a3bb205d5df83f3bc0919da5a4",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "W0.2",
+      "reviewed_commit": "fb00ab840df36bf71762f08f4f8339d38a001123",
+      "published_commit": "f1cc1c2a047e8a0526ec3e0862a0b91607f10e4d",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "W0.3",
+      "reviewed_commit": "b238d7034fdef981a2430224e71b9e6daed2cf23",
+      "published_commit": "fda646de9107a8efa85550b1e01b40a1abc2d7ac",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F01",
+      "reviewed_commit": "a70db370025c53b449cca4138be7cfd5e55c5f17",
+      "published_commit": "dd4b64c39b96e43baa9a0382f3ff7e9e8af485e8",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F02",
+      "reviewed_commit": "2b560788231e10741267d3dbfe74dc48368225a8",
+      "published_commit": "a78d2d07f3744b3ae9c6a5f08da656fa4bff2bbc",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F03",
+      "reviewed_commit": "d8c223d29e35ee8b3b37070686fb1be19cf8b799",
+      "published_commit": "d01545cd5afcf481349f5f36cbbee09fc0f548de",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F04",
+      "reviewed_commit": "9c4c99897b88456257525d359f11fa357669c134",
+      "published_commit": "2dd155709273548ce66d9c2ed46e97ffa7d53a33",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F05",
+      "reviewed_commit": "9f4d34d11e9c54e8023538d6bb4ceff0780f0dfe",
+      "published_commit": "89bc657e562ec595ceba977d4983765d2352119b",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F06",
+      "reviewed_commit": "84dc0aa2b5989a14a3ca7d4d215636fb4ecf0c1b",
+      "published_commit": "1a7808af54e7d2c2879bc932193208b044e902fd",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F07",
+      "reviewed_commit": "58a80640134e72b5183da2420cdff3280209cbd5",
+      "published_commit": "95177df94165e3ae2b7425ec6cdfbec0ed7845be",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F08",
+      "reviewed_commit": "003419d9b71e3e95e48ea79487dfa96f3eb1e9e5",
+      "published_commit": "99acd179ba382d41ed251f127d911190ddf39841",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F09",
+      "reviewed_commit": "d5d388028ed56518e8fec4a81c87a0b47a9fad70",
+      "published_commit": "cd591156491aed9452520725daf0296ec4792cd0",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F10",
+      "reviewed_commit": "4b66de27c0a2c3430b7046c95d03a6e03e6dd43c",
+      "published_commit": "c955d7fd9d17b8daf387f6cd9066f2afcb5226fb",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F11",
+      "reviewed_commit": "77582db053e54096d004277b9bbe97c63bbb757b",
+      "published_commit": "f4b2ddca1c94d36ed869032a8b8df49825eda13f",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F12",
+      "reviewed_commit": "a1c9075afa7fad83a2ef1877e2fcb31ffc7adc7a",
+      "published_commit": "3265193d2c811e0bffa4bef49fc1d40bc3a9adec",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F13",
+      "reviewed_commit": "080bfc9d735d130086197b8c9195361cc3f905ec",
+      "published_commit": "569e2a1a0dbb86f62a2c59cd0e23297580b0c186",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F14",
+      "reviewed_commit": "e47efacdb6b5c02cfb6b43278c8413d975f3408c",
+      "published_commit": "6144cdb2a7e42470c1c43b96ad6d517e747de5de",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F15",
+      "reviewed_commit": "bb53da1476b83c3a35a9e8893f706eb0030d3123",
+      "published_commit": "59c77dd85a910e684edeb080506083b6cf105f8d",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F16",
+      "reviewed_commit": "8971ed1dbe1ee8d44d7cedc370c3a61cd2fac178",
+      "published_commit": "140719594a7d73cb101fee337f3b0e0f00becb59",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F17",
+      "reviewed_commit": "cdb2ee303fbece2cf4ab6d0558f137055055c204",
+      "published_commit": "061bc3adef9062cb30e66aa64ea4262b61aec6bf",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F18",
+      "reviewed_commit": "ca5f38bde426036bb1ad69119775f2289f6e9c2c",
+      "published_commit": "767afae9cf4c3139f7263bbf5cfca483b0ca0792",
+      "equivalence_method": "merge_payload_with_file_tree_split",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "payload_commits": [
+          {
+            "reviewed": "01fcf0bba5028d174d8e3dd15708433af7905093",
+            "published": "163e6e0d7cd9f9a35d8bccfd450e7a22632ea264",
+            "method": "file_tree_at_published_commit",
+            "paths": [
+              ".github/workflows/nix.yml",
+              "docs/fork/ideal-base/evidence/F18/README.md",
+              "docs/fork/ideal-base/evidence/F18/local-darwin-build.log.txt",
+              "docs/fork/ideal-base/evidence/F18/local-darwin-version.txt"
+            ],
+            "path_derivation": "exact output of git diff-tree --root --no-commit-id --name-only -r 01fcf0bba5028d174d8e3dd15708433af7905093"
+          },
+          {
+            "reviewed": "f26cd4dbec622188786bc7481beddcf23640442d",
+            "published": "767afae9cf4c3139f7263bbf5cfca483b0ca0792",
+            "method": "unique_patch_id"
+          }
+        ],
+        "boundary_rule": "published_commit is the earliest main commit containing every mapped payload; 163e6e0d7 is an ancestor of 767afae9c"
+      }
+    },
+    {
+      "node": "F19",
+      "reviewed_commit": "a4dd576d46324824243f71f39d278b9b8cbf4dd5",
+      "published_commit": "91f117a58bc094b83e0bd6cf94ff86d759133d2a",
+      "equivalence_method": "merge_payload",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "payload_commits": [
+          {
+            "reviewed": "66fb306f21fd21231474ccec60081a62d621a641",
+            "published": "e5535fc44017280c51e091cdbb8e0eb38a25178f",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "ea6b0227b1b09969f57364884379062cd43899e5",
+            "published": "6c5fe53e7f5f801eeeaa98d1a2960bd55c7b8608",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "69ae38c625b8099f9e8f39a87980229fb6631d51",
+            "published": "91f117a58bc094b83e0bd6cf94ff86d759133d2a",
+            "method": "unique_patch_id"
+          }
+        ]
+      }
+    },
+    {
+      "node": "F21",
+      "reviewed_commit": "191b27093221171fb25bf549b4c413f3b97483d1",
+      "published_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
+      "equivalence_method": "file_tree_at_published_commit",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "paths": [
+          "docs/fork/ideal-base/evidence/F21/README.md",
+          "docs/fork/ideal-base/evidence/F21/two-run-manifest.md",
+          "docs/fork/ideal-base/evidence/F21/two-run.json"
+        ],
+        "comparison_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
+        "path_derivation": "exact output of git diff-tree --root --no-commit-id --name-only -r 191b27093221171fb25bf549b4c413f3b97483d1"
+      }
+    },
+    {
+      "node": "F28",
+      "reviewed_commit": "2df5a891ca7a86524e75d80bf71002cb43172622",
+      "published_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
+      "equivalence_method": "file_tree_at_published_commit",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "paths": [
+          "crates/jcode-app-core/src/tool/tests.rs"
+        ],
+        "comparison_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
+        "note": "Equality is evaluated at the named publication commit, not HEAD; later commit ac8777d2d legitimately superseded this file.",
+        "path_derivation": "exact output of git diff-tree --root --no-commit-id --name-only -r 2df5a891ca7a86524e75d80bf71002cb43172622"
+      }
+    },
+    {
+      "node": "R01",
+      "reviewed_commit": "e3736e7fbcc4f6a0914024ac5806fd416545eeac",
+      "published_commit": "18c7088b94961b4ee562f8b9a9cc5e31986e88d5",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "R03",
+      "reviewed_commit": "a0676f781776fbfb168f0d784c38c84b5bcc7108",
+      "published_commit": "12abb57a60ef713ef318bcacd51d8713a99d5ca4",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "R04",
+      "reviewed_commit": "c7162849895197662dbcfc69290e12d011fc3a53",
+      "published_commit": "54ae87985ac3a7179af291d7c360bae3ae7c3573",
+      "equivalence_method": "unique_patch_id",
+      "published_is_ancestor_of_baseline_main": true
+    },
+    {
+      "node": "F20a",
+      "reviewed_commit": "dc9ded88150f10f82bde54133e49ecfc96866e97",
+      "published_commit": "76af46aef005a7dc78b94a2ab25c4f5454e404b1",
+      "equivalence_method": "merge_payload",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "payload_commits": [
+          {
+            "reviewed": "80bc55c52a15266f52f0a45be24f979f567acf40",
+            "published": "1996358612d70ee3404d44f22e0ac914305d84c7",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "bf1c7144a3229544a2d44475b6ffe90f9834e44f",
+            "published": "76af46aef005a7dc78b94a2ab25c4f5454e404b1",
+            "method": "unique_patch_id"
+          }
+        ]
+      }
+    },
+    {
+      "node": "F20b",
+      "reviewed_commit": "c01518181958c550e1ddce5ed595397daaef7a0b",
+      "published_commit": "95e319ac9531b93348713201c6023b493eaaa4a8",
+      "equivalence_method": "merge_payload",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "payload_commits": [
+          {
+            "reviewed": "635591d2e495abd70f969a6461455df3c6041d00",
+            "published": "8f6629353ec4096ad36089d5aee55383f261e37d",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "fba17a296e2140cc971cd2fec50af4e33128fb78",
+            "published": "70753c7eb6b0bf07f5f0efcd44ae8bc98ce2b5be",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "ade1460f5596464d88be3e81ed6946aedbfd3733",
+            "published": "005239824f6c2332eca64c20df82b0a1a5972616",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "857508b6626b1de38554468c38f8e7ba53e51bb3",
+            "published": "d08b2d63c88f3e619bc46b0fa48553a102469322",
+            "method": "unique_patch_id"
+          },
+          {
+            "reviewed": "6194ad0934407744e206ed9d5e8983321e6095ad",
+            "published": "95e319ac9531b93348713201c6023b493eaaa4a8",
+            "method": "unique_patch_id"
+          }
+        ]
+      }
+    },
+    {
+      "node": "F20c",
+      "reviewed_commit": "c754004541f676151c1d6d41c54e5e52cc7f6059",
+      "published_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
+      "equivalence_method": "file_tree_at_published_commit",
+      "published_is_ancestor_of_baseline_main": true,
+      "proof": {
+        "paths": [
+          "docs/fork/ideal-base/evidence/F20c/README.md"
+        ],
+        "comparison_commit": "e1d17541eb1207db4d1bc5ccbe05422a2adef68c",
+        "path_derivation": "exact output of git diff-tree --root --no-commit-id --name-only -r c754004541f676151c1d6d41c54e5e52cc7f6059"
+      }
+    },
+    {
+      "node": "F29",
+      "reviewed_commit": "caa445ed12040565a6463c4c3a96aa652275aa0a",
+      "published_commit": "caa445ed12040565a6463c4c3a96aa652275aa0a",
+      "equivalence_method": "identity",
+      "published_is_ancestor_of_baseline_main": true
+    }
+  ]
+}
