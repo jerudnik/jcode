@@ -49,7 +49,12 @@ ARTIFACT_FIELDS = {
     "confidence",
     "what_i_did_not_check",
 }
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# Schema-v2 default publication ref (R07 design §8). CI passes this exact
+# value explicitly; the default only preserves already-documented invocations
+# (e.g. COORDINATOR_BOOTSTRAP.md's bare `check`) that predate the flag.
+DEFAULT_PUBLISHED_REF = "refs/remotes/origin/main"
 # Post-distribution amendment (D030): W4 carries eleven children after the
 # R06 sticky-server and F30 distribution-verification nodes were added, so the
 # per-wave deep-gate review budget moved from 10 to 12.
@@ -115,10 +120,56 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def git_commit_reachable(commit: str) -> bool:
+def git_commit_object_exists(commit: str, *, cwd: Path = REPO_ROOT) -> bool:
+    """True iff ``commit`` names a commit object that exists locally.
+
+    This is object existence, not reachability from any particular ref: an
+    unreferenced local object (e.g. a stash, a reflog-only commit, or a
+    fetched-then-abandoned branch tip) satisfies it. Schema v2 (design §8)
+    requires this check never be reported as proving publication; use
+    ``git_commit_is_ancestor`` for that.
+    """
     result = subprocess.run(
         ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
-        cwd=REPO_ROOT,
+        cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def git_ref_resolves(ref: str, *, cwd: Path = REPO_ROOT) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+        cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def git_repository_is_shallow(*, cwd: Path = REPO_ROOT) -> bool:
+    output = subprocess.check_output(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=cwd,
+        text=True,
+    ).strip()
+    return output == "true"
+
+
+def git_commit_is_ancestor(commit: str, ref: str, *, cwd: Path = REPO_ROOT) -> bool:
+    """True iff ``commit`` is an ancestor of (or equal to) ``ref``.
+
+    This is the only check schema v2 treats as proof of publication. Callers
+    must have already confirmed the repository is non-shallow and that
+    ``ref`` resolves; a shallow clone or an unresolved ref can make ancestry
+    silently false-negative rather than raising.
+    """
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, ref],
+        cwd=cwd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -408,9 +459,23 @@ def evidence_path(value: str) -> Path:
     return path if path.is_absolute() else REPO_ROOT / path
 
 
-def validate_state(state: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> None:
-    if state.get("schema_version") != 1:
-        raise RailwayError("unsupported STATE.json schema_version")
+def validate_state(
+    state: dict[str, Any],
+    nodes: dict[str, dict[str, Any]],
+    *,
+    published_ref: str = DEFAULT_PUBLISHED_REF,
+) -> None:
+    schema_version = state.get("schema_version")
+    if schema_version == 1:
+        _validate_state_v1(state, nodes)
+        return
+    if schema_version == 2:
+        _validate_state_v2(state, nodes, published_ref=published_ref)
+        return
+    raise RailwayError("unsupported STATE.json schema_version")
+
+
+def _validate_state_v1(state: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> None:
     records = state.get("nodes")
     if not isinstance(records, dict):
         raise RailwayError("STATE.json nodes must be an object")
@@ -429,7 +494,7 @@ def validate_state(state: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> N
         if disposition in DEPENDENCY_COMPLETE:
             commit = record.get("commit")
             evidence = record.get("evidence")
-            if not isinstance(commit, str) or not git_commit_reachable(commit):
+            if not isinstance(commit, str) or not git_commit_object_exists(commit):
                 raise RailwayError(
                     f"{node_id}: completed state must cite a reachable commit"
                 )
@@ -438,6 +503,97 @@ def validate_state(state: dict[str, Any], nodes: dict[str, dict[str, Any]]) -> N
             for item in evidence:
                 if not isinstance(item, str) or not evidence_path(item).exists():
                     raise RailwayError(f"{node_id}: missing evidence path {item!r}")
+        if (
+            disposition == "authorization_blocked"
+            and nodes[node_id].get("class") != "gated"
+        ):
+            raise RailwayError(
+                f"{node_id}: only gated nodes may be authorization_blocked"
+            )
+
+
+def _validate_state_v2(
+    state: dict[str, Any],
+    nodes: dict[str, dict[str, Any]],
+    *,
+    published_ref: str,
+) -> None:
+    records = state.get("nodes")
+    if not isinstance(records, dict):
+        raise RailwayError("STATE.json nodes must be an object")
+    if set(records) != set(nodes):
+        missing = sorted(set(nodes) - set(records))
+        extra = sorted(set(records) - set(nodes))
+        raise RailwayError(
+            f"STATE.json node mismatch; missing={missing}, extra={extra}"
+        )
+    # Steps 3-4 of the design §8 sequence are preconditions of the whole
+    # schema-v2 validator, not of any one record: an unresolved published ref
+    # or a shallow clone makes every ancestry check below meaningless, so
+    # fail once, up front, rather than once per accepted node. There is
+    # deliberately no allow_shallow escape hatch (design §8).
+    if not git_ref_resolves(published_ref):
+        raise RailwayError(f"published ref does not resolve: {published_ref!r}")
+    if git_repository_is_shallow():
+        raise RailwayError(
+            "repository is shallow; schema-v2 ancestry checks require full history"
+        )
+    for node_id, record in records.items():
+        if not isinstance(record, dict):
+            raise RailwayError(f"{node_id}: state record must be an object")
+        disposition = record.get("state")
+        if disposition not in ALLOWED_STATES:
+            raise RailwayError(f"{node_id}: invalid state {disposition!r}")
+        reviewed_commit = record.get("reviewed_commit")
+        published_commit = record.get("published_commit")
+        if disposition in DEPENDENCY_COMPLETE:
+            evidence = record.get("evidence")
+            for label, commit in (
+                ("reviewed_commit", reviewed_commit),
+                ("published_commit", published_commit),
+            ):
+                if not isinstance(commit, str) or not FULL_SHA.match(commit):
+                    raise RailwayError(
+                        f"{node_id}: completed state must cite a 40-hex {label}"
+                    )
+            # Step 1: reviewed object existence. This is existence, not
+            # reachability from any ref, and must never be reported as proof
+            # of publication (design §8).
+            if not git_commit_object_exists(reviewed_commit):
+                raise RailwayError(
+                    f"{node_id}: reviewed_commit object does not exist: "
+                    f"{reviewed_commit}"
+                )
+            # Step 2: published object existence.
+            if not git_commit_object_exists(published_commit):
+                raise RailwayError(
+                    f"{node_id}: published_commit object does not exist: "
+                    f"{published_commit}"
+                )
+            # Step 5: published_commit must actually be on the published ref.
+            # This, not step 2's bare existence check, is what proves the
+            # node was published rather than merely reviewed.
+            if not git_commit_is_ancestor(published_commit, published_ref):
+                raise RailwayError(
+                    f"{node_id}: published_commit {published_commit} is not an "
+                    f"ancestor of {published_ref}"
+                )
+            if not isinstance(evidence, list) or not evidence:
+                raise RailwayError(f"{node_id}: completed state must cite evidence")
+            for item in evidence:
+                if not isinstance(item, str) or not evidence_path(item).exists():
+                    raise RailwayError(f"{node_id}: missing evidence path {item!r}")
+        else:
+            # "Every record has both keys. Pending/in-progress records use
+            # null for both." (design §8). A non-terminal node cannot carry a
+            # commit identity: that would let a node be treated as published
+            # by ancestry-scanning tools while the railway itself still
+            # considers it incomplete.
+            if reviewed_commit is not None or published_commit is not None:
+                raise RailwayError(
+                    f"{node_id}: {disposition!r} state must use null for both "
+                    "reviewed_commit and published_commit"
+                )
         if (
             disposition == "authorization_blocked"
             and nodes[node_id].get("class") != "gated"
@@ -496,13 +652,13 @@ def validate_expansion_consistency(
         raise RailwayError("; ".join(violations[key] for key in sorted(violations)))
 
 
-def validate_repository() -> tuple[
-    dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]
-]:
+def validate_repository(
+    *, published_ref: str = DEFAULT_PUBLISHED_REF
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, dict[str, Any]]]:
     graph = load_json(GRAPH_PATH)
     state = load_json(STATE_PATH)
     nodes = validate_graph(graph)
-    validate_state(state, nodes)
+    validate_state(state, nodes, published_ref=published_ref)
     validate_expansion_consistency(graph, state)
     actual_hash = sha256(PROTECTED_PROMPT)
     if actual_hash != PROTECTED_PROMPT_SHA256:
@@ -551,8 +707,8 @@ def ready_nodes(
     return ready
 
 
-def command_check(_: argparse.Namespace) -> int:
-    graph, state, nodes = validate_repository()
+def command_check(args: argparse.Namespace) -> int:
+    graph, state, nodes = validate_repository(published_ref=args.published_ref)
     print(
         "ideal-base railway OK: "
         f"{len(graph['root_nodes'])} roots, {len(graph['all_nodes'])} child nodes, "
@@ -561,8 +717,8 @@ def command_check(_: argparse.Namespace) -> int:
     return 0
 
 
-def command_status(_: argparse.Namespace) -> int:
-    graph, state, nodes = validate_repository()
+def command_status(args: argparse.Namespace) -> int:
+    graph, state, nodes = validate_repository(published_ref=args.published_ref)
     counts = Counter(record["state"] for record in state["nodes"].values())
     print(f"program: {state['program']} ({state['program_state']})")
     print(f"nodes: {len(nodes)}")
@@ -578,7 +734,7 @@ def command_status(_: argparse.Namespace) -> int:
 
 
 def command_next(args: argparse.Namespace) -> int:
-    graph, state, nodes = validate_repository()
+    graph, state, nodes = validate_repository(published_ref=args.published_ref)
     ready = ready_nodes(graph, state, nodes)
     if args.json:
         print(json.dumps(ready, indent=2))
@@ -618,7 +774,8 @@ def command_checkpoint(args: argparse.Namespace) -> int:
     graph = load_json(GRAPH_PATH)
     state = load_json(STATE_PATH)
     nodes = validate_graph(graph)
-    validate_state(state, nodes)
+    validate_state(state, nodes, published_ref=args.published_ref)
+    schema_version = state.get("schema_version")
     if args.node not in nodes:
         raise RailwayError(f"unknown node: {args.node}")
     if args.state not in ALLOWED_STATES:
@@ -634,16 +791,28 @@ def command_checkpoint(args: argparse.Namespace) -> int:
         raise RailwayError("--updated-at must be a valid RFC3339 timestamp") from exc
     if timestamp.tzinfo is None:
         raise RailwayError("--updated-at must include a timezone")
-    if args.state in DEPENDENCY_COMPLETE:
-        if not args.commit or not git_commit_reachable(args.commit):
-            raise RailwayError("completed checkpoint requires a reachable --commit")
-        if not args.evidence:
+
+    if schema_version == 2:
+        # Design §8: "The ambiguous `--commit` option is removed rather than
+        # guessed." A schema-v2 checkpoint names the reviewed identity and the
+        # merge/main-ancestral identity separately; there is no single commit
+        # that could stand in for both without silently picking one.
+        if args.commit is not None:
             raise RailwayError(
-                "completed checkpoint requires at least one --evidence path"
+                "--commit is not valid against a schema-v2 STATE.json; use "
+                "--reviewed-commit and --published-commit"
             )
-        for item in args.evidence:
-            if not evidence_path(item).exists():
-                raise RailwayError(f"evidence path does not exist: {item}")
+        record_update = _build_checkpoint_record_v2(args, nodes)
+    elif schema_version == 1:
+        if args.reviewed_commit is not None or args.published_commit is not None:
+            raise RailwayError(
+                "--reviewed-commit/--published-commit are not valid against a "
+                "schema-v1 STATE.json; use --commit"
+            )
+        record_update = _build_checkpoint_record_v1(args)
+    else:
+        raise RailwayError("unsupported STATE.json schema_version")
+
     lock_value = subprocess.check_output(
         ["git", "rev-parse", "--git-path", "jcode-ideal-base-state.lock"],
         cwd=REPO_ROOT,
@@ -657,22 +826,24 @@ def command_checkpoint(args: argparse.Namespace) -> int:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         latest = load_json(STATE_PATH)
         record = latest["nodes"][args.node]
-        record.update(
-            {
+        record.update(record_update)
+        if schema_version == 2:
+            latest["last_checkpoint"] = {
+                "node": args.node,
                 "state": args.state,
-                "commit": args.commit,
-                "evidence": args.evidence or [],
-                "summary": args.summary,
+                "reviewed_commit": record_update["reviewed_commit"],
+                "published_commit": record_update["published_commit"],
                 "updated_at": args.updated_at,
+                "summary": args.summary,
             }
-        )
-        latest["last_checkpoint"] = {
-            "node": args.node,
-            "state": args.state,
-            "commit": args.commit,
-            "updated_at": args.updated_at,
-            "summary": args.summary,
-        }
+        else:
+            latest["last_checkpoint"] = {
+                "node": args.node,
+                "state": args.state,
+                "commit": record_update["commit"],
+                "updated_at": args.updated_at,
+                "summary": args.summary,
+            }
         # Validate the prospective state before it reaches disk. Writing first
         # and validating after would leave a rejected state persisted, which is
         # worse than the inconsistency being prevented.
@@ -681,7 +852,7 @@ def command_checkpoint(args: argparse.Namespace) -> int:
         # not introduce or worsen a violation, but it must stay able to repair
         # one. Demanding a globally clean result would deadlock repair whenever
         # two roots drifted at once, since neither could be fixed first.
-        validate_state(latest, nodes)
+        validate_state(latest, nodes, published_ref=args.published_ref)
         before = expansion_violations(graph, state)
         after = expansion_violations(graph, latest)
         introduced = {
@@ -705,16 +876,94 @@ def command_checkpoint(args: argparse.Namespace) -> int:
     return 0
 
 
+def _build_checkpoint_record_v1(args: argparse.Namespace) -> dict[str, Any]:
+    if args.state in DEPENDENCY_COMPLETE:
+        if not args.commit or not git_commit_object_exists(args.commit):
+            raise RailwayError("completed checkpoint requires a reachable --commit")
+        if not args.evidence:
+            raise RailwayError(
+                "completed checkpoint requires at least one --evidence path"
+            )
+        for item in args.evidence:
+            if not evidence_path(item).exists():
+                raise RailwayError(f"evidence path does not exist: {item}")
+    return {
+        "state": args.state,
+        "commit": args.commit,
+        "evidence": args.evidence or [],
+        "summary": args.summary,
+        "updated_at": args.updated_at,
+    }
+
+
+def _build_checkpoint_record_v2(
+    args: argparse.Namespace, nodes: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    reviewed_commit = args.reviewed_commit
+    published_commit = args.published_commit
+    if args.state in DEPENDENCY_COMPLETE:
+        for label, commit in (
+            ("--reviewed-commit", reviewed_commit),
+            ("--published-commit", published_commit),
+        ):
+            if not commit or not FULL_SHA.match(commit):
+                raise RailwayError(
+                    f"completed checkpoint requires a 40-hex {label}"
+                )
+        if not git_commit_object_exists(reviewed_commit):
+            raise RailwayError(
+                f"reviewed_commit object does not exist: {reviewed_commit}"
+            )
+        if not git_commit_object_exists(published_commit):
+            raise RailwayError(
+                f"published_commit object does not exist: {published_commit}"
+            )
+        if not git_commit_is_ancestor(published_commit, args.published_ref):
+            raise RailwayError(
+                f"published_commit {published_commit} is not an ancestor of "
+                f"{args.published_ref}"
+            )
+        if not args.evidence:
+            raise RailwayError(
+                "completed checkpoint requires at least one --evidence path"
+            )
+        for item in args.evidence:
+            if not evidence_path(item).exists():
+                raise RailwayError(f"evidence path does not exist: {item}")
+    else:
+        # "Pending/in-progress records use null for both." (design §8).
+        if reviewed_commit is not None or published_commit is not None:
+            raise RailwayError(
+                f"{args.state!r} checkpoint must leave reviewed_commit and "
+                "published_commit null"
+            )
+    return {
+        "state": args.state,
+        "reviewed_commit": reviewed_commit,
+        "published_commit": published_commit,
+        "evidence": args.evidence or [],
+        "summary": args.summary,
+        "updated_at": args.updated_at,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    published_ref_help = (
+        "ref that published_commit values must be an ancestor of "
+        f"(schema v2 only; default {DEFAULT_PUBLISHED_REF!r}, CI passes "
+        "refs/remotes/origin/main explicitly)"
+    )
     check = subparsers.add_parser(
         "check", help="validate graph, state, links, evidence, and protected hash"
     )
+    check.add_argument("--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help)
     check.set_defaults(handler=command_check)
     status = subparsers.add_parser(
         "status", help="summarize durable node state and runnable work"
     )
+    status.add_argument("--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help)
     status.set_defaults(handler=command_status)
     next_parser = subparsers.add_parser(
         "next", help="print currently runnable graph nodes"
@@ -722,13 +971,28 @@ def build_parser() -> argparse.ArgumentParser:
     next_parser.add_argument(
         "--json", action="store_true", help="emit task-graph-ready JSON"
     )
+    next_parser.add_argument(
+        "--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help
+    )
     next_parser.set_defaults(handler=command_next)
     checkpoint = subparsers.add_parser(
         "checkpoint", help="atomically update one durable node record"
     )
     checkpoint.add_argument("node")
     checkpoint.add_argument("--state", required=True, choices=sorted(ALLOWED_STATES))
-    checkpoint.add_argument("--commit")
+    checkpoint.add_argument(
+        "--commit", help="schema v1 only; removed for schema v2 (design §8)"
+    )
+    checkpoint.add_argument(
+        "--reviewed-commit", help="schema v2 only: the reviewed topic-branch identity"
+    )
+    checkpoint.add_argument(
+        "--published-commit",
+        help="schema v2 only: the merge/main-ancestral identity",
+    )
+    checkpoint.add_argument(
+        "--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help
+    )
     checkpoint.add_argument("--evidence", action="append")
     checkpoint.add_argument("--summary", required=True)
     checkpoint.add_argument("--updated-at", required=True, help="RFC3339 timestamp")
