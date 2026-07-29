@@ -117,6 +117,21 @@ See [swarm architecture](SWARM_ARCHITECTURE.md) and [task-graph semantics](SWARM
 
 Local checks are the normal feedback loop. Do not trigger or wait for GitHub Actions merely to discover failures that local, Nix, or remote checks can reproduce.
 
+Batch the work you send to CI. A round trip costs tens of minutes of runner
+time largely independent of diff size, so a one-line change and a ten-file
+change cost about the same. Stack independent fixes onto one branch and take
+one round trip, rather than one per edit. Reach for the cheapest gate that can
+answer the question: `scripts/preflight.sh --ratchets-only` settles the text
+ratchets in about a minute, and full clippy or test runs are rarely the right
+way to answer a question a ratchet already answers.
+
+Verify that remote offload is actually happening rather than assuming it from
+configuration. `JCODE_REMOTE_CARGO_FALLBACK` defaults to `local`, so a broken
+remote silently becomes a local build; `scripts/dev_cargo.sh` now prints a
+banner when it falls back. Worktrees are the usual place this breaks, because
+a worktree `.git` is a file holding an absolute path that is meaningless on
+the builder.
+
 Current workflow authority:
 
 - `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
