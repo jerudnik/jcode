@@ -245,3 +245,26 @@ starts a real telemetry session and exits).
 | RT5 | Five real `jcode` processes started simultaneously produce five distinct, uncorrupted markers, one per PID. This closes the "no real multi-process race test" gap. |
 | RT6 | One subsequent session reaps all five stale markers in a single pass. |
 
+### RT4 root cause: a pre-existing leak that gate 2 happens to mitigate
+
+RT4 was not a fluke, so I traced it. `unregister_active_session` is reachable
+only through `emit_lifecycle_event` (lifecycle.rs:327), which is reached from
+`end_session_with_reason` / `record_crash` (lib.rs:1849, :1853), which are
+called from `Agent::mark_closed` (agent.rs:1029) and the TUI paths.
+
+Headless `jcode run` (`run_single_message_command`, src/cli/commands.rs:2400)
+never calls `mark_closed`, and there is no `impl Drop for Agent`. The only two
+telemetry-end calls anywhere under `src/` are `record_crash` on panic and on
+signal (terminal.rs:201, :220). So the CLI path never emits `session_end` and
+never unregisters its marker.
+
+This is pre-existing: `git grep -l "mark_closed\|end_session" eee5ccc71 -- src/`
+returns nothing at the base commit. It is also outside F26's owned paths, so it
+is **not fixed here** and is handed to the CLI/lifecycle owner.
+
+It does change how gate 2 should be read. Before F26 that leaked marker lingered
+for up to 24 hours and inflated the concurrent-session count for every headless
+run. After F26 the next session reaps it immediately. The liveness check is
+therefore load-bearing rather than a backstop: it mitigates a real leak that it
+did not cause.
+

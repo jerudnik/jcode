@@ -143,3 +143,24 @@ RT6 one subsequent real session reaped all 5 stale markers in a single pass:
   before 5 -> during 1 (e6e72244-....active -> pid=67571).
 VERDICT: the end-to-end behavior gate 2 claims is observable in the shipped binary,
 including after SIGKILL and under 5-way real concurrency.
+
+=== RT4 ROOT CAUSE (chased down rather than left as an open question)
+RT4 observed a gracefully exited `jcode run` leaving its telemetry marker behind.
+Traced: unregister_active_session is only reached via
+  lifecycle.rs:327 (emit_lifecycle_event)
+  <- lib.rs:1849 end_session_with_reason / lib.rs:1853 record_crash
+  <- Agent::mark_closed (crates/jcode-app-core/src/agent.rs:1029) and the TUI paths.
+`jcode run` (src/cli/commands.rs:2400 run_single_message_command) never calls
+mark_closed and there is no `impl Drop for Agent`. Only two telemetry-end calls
+exist anywhere under src/: terminal.rs:201 and :220, both record_crash on
+panic/signal. So the headless CLI path never emits session_end and never
+unregisters.
+$ git grep -l "mark_closed\|end_session" eee5ccc71 -- src/    -> (no matches)
+VERDICT: PRE-EXISTING at the base commit, not introduced by F26, and outside
+F26's owned paths (src/cli/, jcode-app-core/src/agent.rs). NOT FIXED HERE.
+Consequence: before F26 that marker lingered up to 24h and inflated the
+concurrent-session count; after F26 the next session reaps it immediately via
+liveness. So gate 2 mitigates a real leak it did not cause, which makes the
+liveness check load-bearing rather than belt-and-braces.
+$ JCODE_HOME=/tmp/f26v JCODE_TELEMETRY=1 ./target/debug/jcode run "hi" --provider ollama
+   -> exits cleanly, 1 marker left in telemetry_active_sessions/ (reproduced).
