@@ -288,6 +288,38 @@ jobs:
       - name: Enforce no unused dependencies
         run: cargo machete
 
+  governance-contract:
+    name: Governance Contract Gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # CI clones cannot contain the reviewed objects cited by STATE.json:
+      # they are not ancestors of main; they live in local object stores and,
+      # after R07 barrier 1, in the private recovery-archive repo. This opt-in
+      # degrades only the reviewed-object existence check to a NOTE; every
+      # other railway check stays strict, and existence is anchored by barrier
+      # 1's fresh-fetch remote verification plus strict local validation.
+      JCODE_RAILWAY_ALLOW_MISSING_REVIEWED_OBJECTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch published main explicitly
+        run: git fetch --force --no-tags origin main:refs/remotes/origin/main
+
+      - name: Reject shallow ancestry and validate governance/state
+        run: |
+          test "$(git rev-parse --is-shallow-repository)" = false
+          python3 -m unittest tests.test_ideal_base_railway
+          python3 -m unittest tests.test_governance_compare
+          python3 scripts/ideal_base_railway.py check \
+            --published-ref refs/remotes/origin/main
+          scripts/fork-health.sh \
+            --fixture docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json \
+            --fork-remote origin
+
   latest-stable-canary:
     name: Latest stable canary (advisory)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -475,3 +507,50 @@ jobs:
         run: |
           python3 .github/scripts/run_with_timeout.py 600 \
             cargo test --locked --target x86_64-unknown-linux-gnu --test e2e
+
+  fork-ci-gate:
+    name: Fork CI Gate
+    needs: [changes, governance-contract, quality, macos, linux-tests]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      RUST_CHANGED: ${{ needs.changes.outputs.rust }}
+      SCRIPTS_CHANGED: ${{ needs.changes.outputs.scripts }}
+      GOVERNANCE_RESULT: ${{ needs.governance-contract.result }}
+      QUALITY_RESULT: ${{ needs.quality.result }}
+      MACOS_RESULT: ${{ needs.macos.result }}
+      LINUX_RESULT: ${{ needs.linux-tests.result }}
+    steps:
+      - name: Require every applicable Fork CI job
+        shell: bash
+        run: |
+          set -euo pipefail
+          require_success() {
+            if [ "$2" != success ]; then
+              echo "::error::$1 concluded '$2'; expected success"
+              exit 1
+            fi
+          }
+          expect_routed() {
+            local name=$1 applicable=$2 result=$3 expected
+            case "$applicable" in
+              true) expected=success ;;
+              false) expected=skipped ;;
+              *) echo "::error::$name has invalid routing value '$applicable'"; exit 1 ;;
+            esac
+            if [ "$result" != "$expected" ]; then
+              echo "::error::$name concluded '$result'; routing requires '$expected'"
+              exit 1
+            fi
+          }
+          require_success "Detect changes" "$CHANGES_RESULT"
+          require_success "Governance Contract Gate" "$GOVERNANCE_RESULT"
+          quality_applicable=false
+          if [ "$RUST_CHANGED" = true ] || [ "$SCRIPTS_CHANGED" = true ]; then
+            quality_applicable=true
+          fi
+          expect_routed "Quality Guardrails" "$quality_applicable" "$QUALITY_RESULT"
+          expect_routed "Build & Test (macOS)" "$RUST_CHANGED" "$MACOS_RESULT"
+          expect_routed "Linux Tests" "$RUST_CHANGED" "$LINUX_RESULT"

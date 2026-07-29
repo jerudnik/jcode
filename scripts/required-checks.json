@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "_comment": "Canonical machine-readable desired state for jerudnik/jcode governance (R07 design.md section 3). scripts/fork-health.sh compares an aggregate governance snapshot (fixture or live) against this file. Response-only keys (id, node_id, source, source_type, created_at, updated_at, current_user_can_bypass, _links, url, contexts_url) are sanitized before comparison and are never desired-state inputs.",
+  "repository": "jerudnik/jcode",
+  "repository_id": 1238606714,
+  "target_branch": "main",
+  "github_actions_integration_id": 15368,
+  "required_checks": [
+    {
+      "context": "Governance Root",
+      "integration_id": 15368
+    },
+    {
+      "context": "Fork CI Gate",
+      "integration_id": 15368
+    },
+    {
+      "context": "Security Gate",
+      "integration_id": 15368
+    },
+    {
+      "context": "Nix Gate",
+      "integration_id": 15368
+    }
+  ],
+  "workflow_contracts": [
+    {
+      "context": "Governance Root",
+      "file": ".github/workflows/governance-root.yml",
+      "job_id": "governance-root",
+      "if": null,
+      "needs": [],
+      "routing": {},
+      "pull_request_paths_filter": "forbidden",
+      "declares_protected_paths": true
+    },
+    {
+      "context": "Fork CI Gate",
+      "file": ".github/workflows/fork-ci.yml",
+      "job_id": "fork-ci-gate",
+      "if": "always() && github.event_name == 'pull_request'",
+      "needs": [
+        "changes",
+        "governance-contract",
+        "quality",
+        "macos",
+        "linux-tests"
+      ],
+      "routing": {
+        "quality": "rust || scripts",
+        "macos": "rust",
+        "linux-tests": "rust"
+      },
+      "pull_request_paths_filter": "forbidden"
+    },
+    {
+      "context": "Security Gate",
+      "file": ".github/workflows/security.yml",
+      "job_id": "security-gate",
+      "if": "always() && github.event_name == 'pull_request'",
+      "needs": [
+        "detect-dependency-changes",
+        "secret-scan",
+        "dependency-audit"
+      ],
+      "routing": {
+        "dependency-audit": "deps"
+      },
+      "pull_request_paths_filter": "forbidden"
+    },
+    {
+      "context": "Nix Gate",
+      "file": ".github/workflows/nix.yml",
+      "job_id": "nix-gate",
+      "if": "always() && github.event_name == 'pull_request'",
+      "needs": [
+        "validate",
+        "matrix",
+        "build"
+      ],
+      "routing": {},
+      "pull_request_paths_filter": "forbidden"
+    }
+  ],
+  "classic_branch_protection": "absent",
+  "repository_merge_methods": {
+    "allow_merge_commit": true,
+    "allow_squash_merge": false,
+    "allow_rebase_merge": false
+  },
+  "branch_set": {
+    "required": [
+      "main"
+    ],
+    "allowed_prefixes": [
+      "automation/"
+    ],
+    "stale_rails": [
+      "vendor/upstream",
+      "distro/nix"
+    ]
+  },
+  "protected_paths": {
+    "_comment": "'required' is design.md section 4's protected set, enforced byte-for-byte against the governance-root.yml job. 'proposed_additions' is the Stream G finding recorded in docs/fork/ideal-base/evidence/R07/stream-g-protected-paths-proposal.md: helper scripts and ratchet baselines that execute inside required contexts but are absent from the design's list. While additions_adjudicated is false the comparator reports them without failing; the integration gate flips it to true in the same change that lands them in governance-root.yml. | Integration adjudication (2026-07-28): 16 check-script/test/dependency paths enforced; 5 ratchet baselines deliberately left unprotected (legitimate routine edits; raises are visible in review). See docs/fork/ideal-base/evidence/R07/integration-adjudication.md.",
+    "additions_adjudicated": true,
+    "required": [
+      ".github/scripts",
+      ".github/workflows",
+      "scripts/required-checks.json",
+      "scripts/fork-health.sh",
+      "scripts/ideal_base_railway.py",
+      "tests/test_ideal_base_railway.py",
+      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json",
+      "scripts/ambient_roots_allowlist.txt",
+      "scripts/check_agent_instructions.py",
+      "scripts/check_ambient_roots.sh",
+      "scripts/check_code_size_budget.py",
+      "scripts/check_env_lease_drop_order.py",
+      "scripts/check_panic_budget.py",
+      "scripts/check_swallowed_error_budget.py",
+      "scripts/check_test_size_budget.py",
+      "scripts/check_tui_render_lock.py",
+      "scripts/check_warning_budget.sh",
+      "scripts/docs_impact_advisory.py",
+      "scripts/rust_production_filter.py",
+      "scripts/security_preflight.sh",
+      "scripts/test_docs_impact_advisory.py",
+      "tests/test_nix_distribution_policy.py",
+      "tests/test_rust_production_filter.py",
+      "scripts/governance_compare.py",
+      "tests/test_governance_compare.py",
+      "scripts/generate_governance_fixture.py",
+      "docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json"
+    ],
+    "proposed_additions": []
+  },
+  "rulesets": {
+    "protect-fork-rails": {
+      "name": "protect-fork-rails",
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "refs/heads/main"
+          ],
+          "exclude": []
+        }
+      },
+      "rules": [
+        {
+          "type": "deletion"
+        },
+        {
+          "type": "non_fast_forward"
+        },
+        {
+          "type": "pull_request",
+          "parameters": {
+            "allowed_merge_methods": [
+              "merge"
+            ],
+            "dismiss_stale_reviews_on_push": false,
+            "require_code_owner_review": false,
+            "require_last_push_approval": false,
+            "required_approving_review_count": 0,
+            "required_review_thread_resolution": true,
+            "required_reviewers": []
+          }
+        },
+        {
+          "type": "required_status_checks",
+          "parameters": {
+            "do_not_enforce_on_create": false,
+            "required_status_checks": [
+              {
+                "context": "Governance Root",
+                "integration_id": 15368
+              },
+              {
+                "context": "Fork CI Gate",
+                "integration_id": 15368
+              },
+              {
+                "context": "Security Gate",
+                "integration_id": 15368
+              },
+              {
+                "context": "Nix Gate",
+                "integration_id": 15368
+              }
+            ],
+            "strict_required_status_checks_policy": true
+          }
+        }
+      ]
+    },
+    "no-stray-branches": {
+      "name": "no-stray-branches",
+      "target": "branch",
+      "enforcement": "active",
+      "bypass_actors": [],
+      "conditions": {
+        "ref_name": {
+          "include": [
+            "~ALL"
+          ],
+          "exclude": [
+            "refs/heads/main",
+            "refs/heads/automation/**"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "type": "creation"
+        }
+      ]
+    }
+  }
+}

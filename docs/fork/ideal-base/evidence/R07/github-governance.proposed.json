@@ -1,0 +1,385 @@
+{
+  "schema_version": 4,
+  "repository": "jerudnik/jcode",
+  "expected_repository_id": 1238606714,
+  "expected_github_actions_integration_id": 15368,
+  "identifier_provenance": "Every identifier used below is verified live by the preflight read_asserts in sequences 1-6 immediately before the first write. No identifier is trusted because it appears in recon, in design.md, or in this file. A mismatch stops the apply before any write.",
+  "json_hash_canonicalization": "For every JSON SHA-256 in this document, first parse the object and apply the stated sanitization, then encode exactly as UTF-8 bytes from json.dumps(obj, sort_keys=True, separators=(',',':')). Do not add indentation or a trailing newline. Hash those exact bytes.",
+  "template_variables": {
+    "bootstrap_head_sha": "the reviewed head SHA of the bootstrap pull request, captured and independently reviewed under design.md section 11 barrier 2",
+    "bootstrap_merge_sha": "the merge commit SHA returned by the bootstrap pull request's API merge and confirmed to be main's new tip under design.md section 11 barrier 4; this is the commit whose protected-path bytes were reviewed and are asserted unchanged by sequence 6",
+    "protected_paths": [
+      ".github/scripts/",
+      ".github/workflows/",
+      "scripts/required-checks.json",
+      "scripts/fork-health.sh",
+      "scripts/ideal_base_railway.py",
+      "tests/test_ideal_base_railway.py",
+      "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json",
+      "scripts/ambient_roots_allowlist.txt",
+      "scripts/check_agent_instructions.py",
+      "scripts/check_ambient_roots.sh",
+      "scripts/check_code_size_budget.py",
+      "scripts/check_env_lease_drop_order.py",
+      "scripts/check_panic_budget.py",
+      "scripts/check_swallowed_error_budget.py",
+      "scripts/check_test_size_budget.py",
+      "scripts/check_tui_render_lock.py",
+      "scripts/check_warning_budget.sh",
+      "scripts/docs_impact_advisory.py",
+      "scripts/rust_production_filter.py",
+      "scripts/security_preflight.sh",
+      "scripts/test_docs_impact_advisory.py",
+      "tests/test_nix_distribution_policy.py",
+      "tests/test_rust_production_filter.py",
+      "scripts/governance_compare.py",
+      "tests/test_governance_compare.py",
+      "scripts/generate_governance_fixture.py",
+      "docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json"
+    ]
+  },
+  "apply_only_after": [
+    "the bootstrap pull request's complete number/source/head/target/base identity has been independently reviewed",
+    "all four contexts were emitted on that exact bootstrap pull request by integration id 15368; Fork CI Gate, Security Gate, and Nix Gate concluded success. Governance Root is expected to conclude failure there, because the bootstrap pull request is itself a governance-path change; that expected failure is recorded in evidence and does not block, since no context is required yet under the pre-R07 regime",
+    "the bootstrap pull request has merged, so all four required context definitions exist on refs/heads/main before any of them is required; requiring a context whose definition is not yet on main would lock the repository out",
+    "an administrator has explicitly approved the external GitHub writes"
+  ],
+  "steps": [
+    {
+      "sequence": 1,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode",
+      "assert": "id == 1238606714, full_name == 'jerudnik/jcode', owner.login == 'jerudnik'; persist the sanitized response and its SHA-256 as the pre-write baseline. This is the live verification of the repository id; the value is not taken from recon.",
+      "on_mismatch": "stop before any write; the target repository identity is not what this document was written against"
+    },
+    {
+      "sequence": 2,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/commits/${bootstrap_head_sha}/check-runs",
+      "assert": "check runs named 'Governance Root', 'Fork CI Gate', 'Security Gate', and 'Nix Gate' are each present exactly once and each reports app.id == 15368 with app.slug == 'github-actions'; Fork CI Gate, Security Gate, and Nix Gate conclude 'success'; Governance Root concludes 'failure'. This is the live verification of the GitHub Actions integration id and of the audit gate's own wiring; the value is not taken from recon.",
+      "on_mismatch": "stop before any write; if a summary context is missing or non-success, do not pin an integration id that was not observed emitting the required contexts; if Governance Root did not conclude failure on this governance-path change, the audit gate is misconfigured and must be fixed before it is ever relied on, per design.md section 11 barrier 3"
+    },
+    {
+      "sequence": 3,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
+      "assert": "the response, sanitized by removing id, node_id, _links, source, created_at, updated_at, and current_user_can_bypass, is parsed-JSON-equal to the embedded object below and its SHA-256 under json_hash_canonicalization equals 8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124. This binds the numeric ruleset id to its full recon-recorded body, not only its name, before it is overwritten.",
+      "expected_sanitized_body": {
+        "name": "protect-fork-rails",
+        "target": "branch",
+        "source_type": "Repository",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          }
+        ],
+        "bypass_actors": []
+      },
+      "expected_sanitized_body_sha256": "8440214dee8621d8a12a9456083a1c3afc82442291fd8a67ddcea7852d239124",
+      "on_mismatch": "stop; live governance for ruleset 18509013 has drifted from the reviewed recon body. Resolve the ruleset id by name from GET repos/jerudnik/jcode/rulesets and re-review this document rather than writing to an unverified or drifted body"
+    },
+    {
+      "sequence": 4,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
+      "assert": "the response, sanitized the same way as sequence 3, is parsed-JSON-equal to the embedded object below and its SHA-256 under json_hash_canonicalization equals 1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f.",
+      "expected_sanitized_body": {
+        "name": "no-stray-branches",
+        "target": "branch",
+        "source_type": "Repository",
+        "enforcement": "active",
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~ALL"
+            ],
+            "exclude": [
+              "refs/heads/main",
+              "refs/heads/automation/**"
+            ]
+          }
+        },
+        "rules": [
+          {
+            "type": "creation"
+          }
+        ],
+        "bypass_actors": [
+          {
+            "actor_id": 5,
+            "actor_type": "RepositoryRole",
+            "bypass_mode": "always"
+          }
+        ]
+      },
+      "expected_sanitized_body_sha256": "1376e3835feca779dd1dd2387e7cb5e1095f34c6de71ae64483c17e52823f99f",
+      "on_mismatch": "stop; live governance for ruleset 18509016 has drifted from the reviewed recon body. Resolve the ruleset id by name and re-review this document"
+    },
+    {
+      "sequence": 5,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/branches/main/protection",
+      "assert": "recursively remove every object member named url or contexts_url from the response; the sanitized response must be parsed-JSON-equal to the embedded object below and its SHA-256 under json_hash_canonicalization must equal d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704. This is an exact sanitized-object comparison, not a reference to design.md prose.",
+      "expected_body": {
+        "required_status_checks": {
+          "strict": false,
+          "contexts": [
+            "Detect changes"
+          ],
+          "checks": [
+            {
+              "context": "Detect changes",
+              "app_id": null
+            }
+          ]
+        },
+        "required_signatures": {
+          "enabled": false
+        },
+        "enforce_admins": {
+          "enabled": false
+        },
+        "required_linear_history": {
+          "enabled": false
+        },
+        "allow_force_pushes": {
+          "enabled": false
+        },
+        "allow_deletions": {
+          "enabled": false
+        },
+        "block_creations": {
+          "enabled": false
+        },
+        "required_conversation_resolution": {
+          "enabled": false
+        },
+        "lock_branch": {
+          "enabled": false
+        },
+        "allow_fork_syncing": {
+          "enabled": false
+        }
+      },
+      "expected_body_sha256": "d20823253081aca9537b632d1b8605a72d8838f520fe0d14defa7dc2d76b4704",
+      "on_mismatch": "stop and re-review; do not overwrite live governance state whose baseline has drifted from the reviewed one. Persist the actual live body and its SHA-256 anyway so the deletion in sequence 15, if it later proceeds under a re-reviewed document, remains recoverable evidence."
+    },
+    {
+      "sequence": 6,
+      "kind": "read_assert",
+      "method": "GET_AND_LOCAL_GIT",
+      "endpoint": "repos/jerudnik/jcode/commits/main",
+      "local_git": {
+        "prepare": [
+          "if test $(git rev-parse --is-shallow-repository) = true; then git fetch --no-tags --unshallow https://github.com/jerudnik/jcode.git refs/heads/main; fi",
+          "git fetch --no-tags https://github.com/jerudnik/jcode.git ${bootstrap_merge_sha} ${current_main_sha}"
+        ],
+        "assertions": [
+          "test $(git rev-parse --is-shallow-repository) = false",
+          "git cat-file -e ${bootstrap_merge_sha}^{commit}",
+          "git cat-file -e ${current_main_sha}^{commit}",
+          "git merge-base --is-ancestor ${bootstrap_merge_sha} ${current_main_sha}",
+          "git diff --quiet ${bootstrap_merge_sha} ${current_main_sha} -- .github/scripts/ .github/workflows/ scripts/required-checks.json scripts/fork-health.sh scripts/ideal_base_railway.py tests/test_ideal_base_railway.py docs/fork/ideal-base/evidence/R07/github-governance.proposed.json scripts/ambient_roots_allowlist.txt scripts/check_agent_instructions.py scripts/check_ambient_roots.sh scripts/check_code_size_budget.py scripts/check_env_lease_drop_order.py scripts/check_panic_budget.py scripts/check_swallowed_error_budget.py scripts/check_test_size_budget.py scripts/check_tui_render_lock.py scripts/check_warning_budget.sh scripts/docs_impact_advisory.py scripts/rust_production_filter.py scripts/security_preflight.sh scripts/test_docs_impact_advisory.py tests/test_nix_distribution_policy.py tests/test_rust_production_filter.py scripts/governance_compare.py tests/test_governance_compare.py scripts/generate_governance_fixture.py docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json"
+        ]
+      },
+      "assert": "This is the immediately-pre-write assertion against CURRENT main, not the historical bootstrap head that sequence 2 read. Set current_main_sha to the endpoint response's full sha. In the apply operator's local clone, run local_git.prepare in order: if the clone is shallow, unshallow it read-only from the explicit jerudnik/jcode URL, then fetch both exact commits. Run every local_git assertion. The final path-limited git diff compares endpoint tree/blob identity for every protected path without an API file-count cap or silent truncation. It also handles renames explicitly: moving a protected path outside the protected prefixes is a deletion of the old protected path and fails; moving a path into a protected prefix is an addition and fails; moving within the protected set also fails. A zero diff, including current_main_sha == bootstrap_merge_sha, passes. Together with sequence 2's context-emission proof, this proves the reviewed protected bytes are exactly what current main contains immediately before sequence 7 requires the contexts.",
+      "on_mismatch": "stop before any write. If unshallow/fetch fails, either commit is unavailable, the clone remains shallow, or bootstrap_merge_sha is not an ancestor of current_main_sha, treat this as an unverifiable or rewritten main boundary and a governance incident. If git diff is non-zero, a protected path was added, deleted, renamed, or content-modified after the bootstrap merge; re-review current main's actual workflow/manifest state, capture a fresh bootstrap_merge_sha-equivalent baseline if appropriate, and re-run from sequence 1. Do not require a context whose current-main definition was not just proved identical to what was reviewed."
+    },
+    {
+      "sequence": 7,
+      "kind": "write",
+      "method": "PUT",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
+      "body": {
+        "name": "protect-fork-rails",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          },
+          {
+            "type": "non_fast_forward"
+          },
+          {
+            "type": "pull_request",
+            "parameters": {
+              "allowed_merge_methods": [
+                "merge"
+              ],
+              "dismiss_stale_reviews_on_push": false,
+              "require_code_owner_review": false,
+              "require_last_push_approval": false,
+              "required_approving_review_count": 0,
+              "required_review_thread_resolution": true,
+              "required_reviewers": []
+            }
+          },
+          {
+            "type": "required_status_checks",
+            "parameters": {
+              "do_not_enforce_on_create": false,
+              "required_status_checks": [
+                {
+                  "context": "Governance Root",
+                  "integration_id": 15368
+                },
+                {
+                  "context": "Fork CI Gate",
+                  "integration_id": 15368
+                },
+                {
+                  "context": "Security Gate",
+                  "integration_id": 15368
+                },
+                {
+                  "context": "Nix Gate",
+                  "integration_id": 15368
+                }
+              ],
+              "strict_required_status_checks_policy": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "sequence": 8,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509013",
+      "assert": "sanitized body exactly equals sequence 7, including active enforcement, empty bypass_actors, and every rule parameter; then immediately repeat sequence 6 in full with a fresh GET repos/jerudnik/jcode/commits/main response and its new current_main_sha. The repeat must pass before sequence 9 may begin.",
+      "rollback_body": {
+        "name": "protect-fork-rails",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "refs/heads/main"
+            ],
+            "exclude": []
+          }
+        },
+        "rules": [
+          {
+            "type": "deletion"
+          }
+        ]
+      },
+      "on_mismatch": "If the ruleset read-back differs, or if the repeated sequence 6 detects a rewritten main boundary or any protected-path change, immediately PUT rollback_body to ruleset 18509013, read it back, sanitize it exactly as sequence 3, verify parsed equality and canonical hash equal sequence 3, and stop. rollback_body is the sequence-3 pre-write body with read-only source_type omitted. This rollback is mandatory while the first ruleset is the only surface changed."
+    },
+    {
+      "sequence": 9,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rules/branches/main",
+      "assert": "effective rule types are exactly deletion, non_fast_forward, pull_request, and required_status_checks, all sourced from ruleset 18509013"
+    },
+    {
+      "sequence": 10,
+      "kind": "write",
+      "method": "PUT",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
+      "body": {
+        "name": "no-stray-branches",
+        "target": "branch",
+        "enforcement": "active",
+        "bypass_actors": [],
+        "conditions": {
+          "ref_name": {
+            "include": [
+              "~ALL"
+            ],
+            "exclude": [
+              "refs/heads/main",
+              "refs/heads/automation/**"
+            ]
+          }
+        },
+        "rules": [
+          {
+            "type": "creation"
+          }
+        ]
+      }
+    },
+    {
+      "sequence": 11,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rulesets/18509016",
+      "assert": "sanitized body exactly equals sequence 10, including active enforcement and empty bypass_actors"
+    },
+    {
+      "sequence": 12,
+      "kind": "write",
+      "method": "PATCH",
+      "endpoint": "repos/jerudnik/jcode",
+      "body": {
+        "allow_merge_commit": true,
+        "allow_squash_merge": false,
+        "allow_rebase_merge": false
+      }
+    },
+    {
+      "sequence": 13,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode",
+      "assert": "allow_merge_commit=true, allow_squash_merge=false, allow_rebase_merge=false"
+    },
+    {
+      "sequence": 14,
+      "kind": "checkpoint",
+      "assert": "sequences 1, 2, 3, 4, 5, 6, 8 (including its immediate full repeat of sequence 6), 9, 11, and 13 all passed; stop here on any mismatch"
+    },
+    {
+      "sequence": 15,
+      "kind": "write",
+      "method": "DELETE",
+      "endpoint": "repos/jerudnik/jcode/branches/main/protection",
+      "purpose": "remove contradictory classic protection only after the active ruleset and repository settings are proved"
+    },
+    {
+      "sequence": 16,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/branches/main/protection",
+      "expect_status": 404
+    },
+    {
+      "sequence": 17,
+      "kind": "read_assert",
+      "method": "GET",
+      "endpoint": "repos/jerudnik/jcode/rules/branches/main",
+      "assert": "effective rule types are exactly deletion, non_fast_forward, pull_request, and required_status_checks, all sourced from ruleset 18509013"
+    }
+  ],
+  "abort_policy": "Stop before the next write whenever a read_assert or checkpoint fails. No write may run before sequences 1-6 have all passed. Never continue to sequence 15 unless sequence 14 passed.",
+  "residual_risk": "Every rule written here can be rewritten or deleted by the repository owner-admin, who is the accepted root of trust for this personal repository per DECISIONS.md D031. This apply document does not claim to prevent that; it makes the intended state explicit and machine-comparable, proves current main's protected-path bytes match what was reviewed immediately before the first write (sequence 6), and repeats that proof immediately after sequence 8 while rollback remains available. GitHub's ruleset PUT has no expected-main-SHA precondition, so a residual race remains after that repeat and before the apply completes; the repeat narrows but cannot eliminate it. A protected-path merge observed by the repeat triggers rollback, and later drift is detected by scripts/fork-health.sh --live and the governance fixtures."
+}

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+from unittest import mock
 import subprocess
 import tempfile
 import unittest
@@ -185,6 +187,476 @@ class IdealBaseRailwayTests(unittest.TestCase):
             railway.atomic_write_json(path, value)
             self.assertEqual(json.loads(path.read_text()), value)
             self.assertEqual(list(path.parent.glob(f".{path.name}.*")), [])
+
+
+class SchemaV2ValidatorTests(unittest.TestCase):
+    """R07 design §8: reviewed_commit/published_commit split and semantics.
+
+    These tests exercise ``_validate_state_v2`` directly against the live
+    graph's node set (so accepted/pending shapes match reality) rather than
+    against the coordinator-owned ``STATE.json``, which stream S must not
+    edit. The R07 proposal artifact itself (``STATE.proposed.json``) is
+    checked separately in ``test_state_proposed_json_validates_as_schema_v2``.
+    """
+
+    R07_EVIDENCE = railway.CONTROL_ROOT / "evidence/R07"
+    BASELINE_MAIN = "498249777c453c1d551aeb01fc45420d8ca0a585"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        graph = railway.load_json(railway.GRAPH_PATH)
+        cls.nodes = railway.validate_graph(graph)
+        cls.graph = graph
+        # A commit that certainly exists locally but is not on origin/main:
+        # any reviewed-only commit works, e.g. the R07 design tip itself
+        # relative to the pre-R07 baseline.
+        cls.head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=railway.REPO_ROOT, text=True
+        ).strip()
+
+    def minimal_state(self) -> dict:
+        records = {}
+        for node_id in self.nodes:
+            records[node_id] = {
+                "state": "pending",
+                "reviewed_commit": None,
+                "published_commit": None,
+                "evidence": [],
+                "summary": "seed",
+                "updated_at": "2026-01-01T00:00:00Z",
+            }
+        return {
+            "schema_version": 2,
+            "program": "test",
+            "program_state": "railway_ready",
+            "active_graph_id": "test",
+            "last_checkpoint": {
+                "node": "W0",
+                "state": "pending",
+                "reviewed_commit": None,
+                "published_commit": None,
+                "updated_at": "2026-01-01T00:00:00Z",
+                "summary": "seed",
+            },
+            "nodes": records,
+        }
+
+    def test_pending_record_requires_null_commits(self) -> None:
+        state = self.minimal_state()
+        railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+        state["nodes"]["W0"]["reviewed_commit"] = self.head
+        with self.assertRaisesRegex(railway.RailwayError, "must use null"):
+            railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+    def test_accepted_record_requires_both_full_shas(self) -> None:
+        state = self.minimal_state()
+        state["nodes"]["W0"].update(
+            {
+                "state": "accepted",
+                "reviewed_commit": self.head,
+                "published_commit": self.BASELINE_MAIN,
+                "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+            }
+        )
+        railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+        # Abbreviated SHA is rejected even though `git cat-file -e` would
+        # happily resolve it: schema v2 requires the full 40-hex identity.
+        state["nodes"]["W0"]["reviewed_commit"] = self.head[:10]
+        with self.assertRaisesRegex(railway.RailwayError, "40-hex"):
+            railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+    def test_missing_reviewed_object_lenient_mode(self) -> None:
+        """CI clones cannot hold the reviewed objects (they are not ancestors
+        of main). The explicit lenient env var degrades only the reviewed
+        existence check to a NOTE; strict mode (the default) still raises."""
+        missing = "1" * 40  # well-formed full SHA, not present in this repo
+        self.assertFalse(railway.git_commit_object_exists(missing))
+
+        def accepted_state() -> dict:
+            state = self.minimal_state()
+            state["nodes"]["W0"].update(
+                {
+                    "state": "accepted",
+                    "reviewed_commit": missing,
+                    "published_commit": self.BASELINE_MAIN,
+                    "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+                }
+            )
+            return state
+
+        # Default (strict): the missing object is an error.
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(railway.MISSING_REVIEWED_OBJECTS_ENV, None)
+            with self.assertRaisesRegex(
+                railway.RailwayError, "reviewed_commit object does not exist"
+            ):
+                railway.validate_state(
+                    accepted_state(), self.nodes, published_ref=self.BASELINE_MAIN
+                )
+
+        # Lenient opt-in: same state validates, and the published-side checks
+        # (existence + ancestry) still ran strictly, proving only step 1 was
+        # degraded.
+        with mock.patch.dict(
+            os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}
+        ):
+            railway.validate_state(
+                accepted_state(), self.nodes, published_ref=self.BASELINE_MAIN
+            )
+
+        # Lenient mode never rescues a fabricated published_commit: that
+        # existence check is not covered by the opt-in.
+        fabricated = accepted_state()
+        fabricated["nodes"]["W0"]["published_commit"] = missing
+        with mock.patch.dict(
+            os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}
+        ):
+            with self.assertRaisesRegex(
+                railway.RailwayError, "published_commit object does not exist"
+            ):
+                railway.validate_state(
+                    fabricated, self.nodes, published_ref=self.BASELINE_MAIN
+                )
+
+    def test_object_existence_is_never_reachability(self) -> None:
+        """Existence of the reviewed commit is not enough; ancestry is checked separately."""
+        state = self.minimal_state()
+        state["nodes"]["W0"].update(
+            {
+                "state": "accepted",
+                # `self.head` exists but (per this repository's own R07
+                # branch history) is not an ancestor of the pre-R07 baseline.
+                "reviewed_commit": self.head,
+                "published_commit": self.head,
+                "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+            }
+        )
+        # published_commit must be an ancestor of published_ref: using a
+        # commit that exists but is not on the baseline must fail even
+        # though object existence alone would pass.
+        self.assertTrue(railway.git_commit_object_exists(self.head))
+        self.assertFalse(
+            railway.git_commit_is_ancestor(self.head, self.BASELINE_MAIN)
+        )
+        with self.assertRaisesRegex(railway.RailwayError, "not an ancestor"):
+            railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+    def test_published_commit_must_be_ancestor_of_published_ref(self) -> None:
+        state = self.minimal_state()
+        state["nodes"]["W0"].update(
+            {
+                "state": "accepted",
+                "reviewed_commit": self.head,
+                "published_commit": self.BASELINE_MAIN,
+                "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+            }
+        )
+        railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+        # The baseline is not an ancestor of itself-minus-one; use a ref that
+        # the baseline is not reachable from to force a real failure.
+        with self.assertRaisesRegex(railway.RailwayError, "not an ancestor"):
+            railway.validate_state(
+                state, self.nodes, published_ref=f"{self.BASELINE_MAIN}~1"
+            )
+
+    def test_reviewed_commit_need_not_be_ancestor_of_published_ref(self) -> None:
+        """The reviewed identity is a distinct topic commit, never main-ancestral."""
+        state = self.minimal_state()
+        state["nodes"]["W0"].update(
+            {
+                "state": "accepted",
+                "reviewed_commit": self.head,  # not an ancestor of baseline
+                "published_commit": self.BASELINE_MAIN,
+                "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+            }
+        )
+        self.assertFalse(
+            railway.git_commit_is_ancestor(self.head, self.BASELINE_MAIN)
+        )
+        railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+    def test_unresolved_published_ref_fails_closed(self) -> None:
+        state = self.minimal_state()
+        with self.assertRaisesRegex(railway.RailwayError, "does not resolve"):
+            railway.validate_state(
+                state, self.nodes, published_ref="refs/does/not/exist"
+            )
+
+    def test_shallow_repository_fails_closed_no_escape_hatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run(
+                [
+                    "git",
+                    "clone",
+                    "--quiet",
+                    "--no-local",
+                    "--depth",
+                    "1",
+                    f"file://{railway.REPO_ROOT}",
+                    directory,
+                ],
+                check=True,
+            )
+            self.assertTrue(railway.git_repository_is_shallow(cwd=Path(directory)))
+            # `_validate_state_v2` calls the shallow check unconditionally
+            # against `REPO_ROOT`. Point it at the shallow clone for the
+            # duration of this test to exercise the fail-closed path through
+            # the real validator entry point, not just the bare helper.
+            original_is_shallow = railway.git_repository_is_shallow
+            railway.git_repository_is_shallow = (
+                lambda *, cwd=Path(directory): original_is_shallow(cwd=cwd)
+            )
+            try:
+                state = self.minimal_state()
+                with self.assertRaisesRegex(railway.RailwayError, "shallow"):
+                    railway.validate_state(
+                        state, self.nodes, published_ref=self.BASELINE_MAIN
+                    )
+            finally:
+                railway.git_repository_is_shallow = original_is_shallow
+
+    def test_authorization_blocked_still_requires_gated_class(self) -> None:
+        """authorization_blocked is itself dependency-complete (design §8: the
+        DEPENDENCY_COMPLETE set is {accepted, authorization_blocked,
+        superseded}), so it too needs both full commit identities; the class
+        restriction is an orthogonal check on top of that.
+        """
+        gated_id = next(
+            node_id
+            for node_id, node in self.nodes.items()
+            if node.get("class") == "gated"
+        )
+        non_gated_id = next(
+            node_id
+            for node_id, node in self.nodes.items()
+            if node.get("class") != "gated"
+        )
+        state = self.minimal_state()
+        blocked_shape = {
+            "state": "authorization_blocked",
+            "reviewed_commit": self.head,
+            "published_commit": self.BASELINE_MAIN,
+            "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+        }
+        state["nodes"][gated_id].update(blocked_shape)
+        railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+        state["nodes"][non_gated_id].update(blocked_shape)
+        with self.assertRaisesRegex(
+            railway.RailwayError, "only gated nodes may be authorization_blocked"
+        ):
+            railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+    def test_unsupported_schema_version_is_rejected(self) -> None:
+        state = self.minimal_state()
+        state["schema_version"] = 3
+        with self.assertRaisesRegex(
+            railway.RailwayError, "unsupported STATE.json schema_version"
+        ):
+            railway.validate_state(state, self.nodes)
+
+    def test_state_proposed_json_validates_as_schema_v2(self) -> None:
+        """The R07 coordinator hand-off artifact must validate clean end to end."""
+        proposed = railway.load_json(self.R07_EVIDENCE / "STATE.proposed.json")
+        self.assertEqual(proposed.get("schema_version"), 2)
+        self.assertEqual(set(proposed["nodes"]), set(self.nodes))
+        railway.validate_state(
+            proposed, self.nodes, published_ref="refs/remotes/origin/main"
+        )
+        railway.validate_expansion_consistency(self.graph, proposed)
+        accepted = {
+            node_id: record
+            for node_id, record in proposed["nodes"].items()
+            if record["state"] == "accepted"
+        }
+        self.assertEqual(len(accepted), 35)
+        for node_id, record in accepted.items():
+            self.assertTrue(railway.FULL_SHA.match(record["reviewed_commit"]), node_id)
+            self.assertTrue(railway.FULL_SHA.match(record["published_commit"]), node_id)
+            self.assertTrue(
+                railway.git_commit_is_ancestor(
+                    record["published_commit"], self.BASELINE_MAIN
+                ),
+                f"{node_id}: published_commit must be an ancestor of baseline main",
+            )
+
+    def test_live_state_json_is_schema_v2_and_validates(self) -> None:
+        """Post-migration, live STATE.json is schema v2 and must validate.
+
+        The coordinator landed the schema-v2 migration in the same change as
+        this validator (design §8, "Landing either half alone is invalid"), so
+        the live file now carries reviewed_commit/published_commit pairs and
+        must pass the v2 rules against the real published ref.
+        """
+        live = railway.load_json(railway.STATE_PATH)
+        self.assertEqual(live.get("schema_version"), 2)
+        railway.validate_state(
+            live, self.nodes, published_ref=self.BASELINE_MAIN
+        )
+        for node_id, record in live["nodes"].items():
+            if record["state"] in railway.DEPENDENCY_COMPLETE:
+                self.assertNotIn("commit", record)
+                self.assertIn("reviewed_commit", record)
+                self.assertIn("published_commit", record)
+
+
+class CheckpointSchemaV2Tests(unittest.TestCase):
+    """`checkpoint` CLI behavior against a scratch schema-v2 STATE.json."""
+
+    BASELINE_MAIN = "498249777c453c1d551aeb01fc45420d8ca0a585"
+
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.state_path = Path(self.tempdir.name) / "STATE.json"
+        graph = railway.load_json(railway.GRAPH_PATH)
+        nodes = railway.validate_graph(graph)
+        self.nodes = nodes
+        records = {
+            node_id: {
+                "state": "pending",
+                "reviewed_commit": None,
+                "published_commit": None,
+                "evidence": [],
+                "summary": "seed",
+                "updated_at": "2026-01-01T00:00:00Z",
+            }
+            for node_id in nodes
+        }
+        state = {
+            "schema_version": 2,
+            "program": "test",
+            "program_state": "railway_ready",
+            "active_graph_id": "test",
+            "last_checkpoint": {
+                "node": "W0",
+                "state": "pending",
+                "reviewed_commit": None,
+                "published_commit": None,
+                "updated_at": "2026-01-01T00:00:00Z",
+                "summary": "seed",
+            },
+            "nodes": records,
+        }
+        self.state_path.write_text(json.dumps(state, indent=2))
+        self.head = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=railway.REPO_ROOT, text=True
+        ).strip()
+
+    def run_checkpoint(self, argv: list[str]) -> int:
+        original_state_path = railway.STATE_PATH
+        railway.STATE_PATH = self.state_path
+        try:
+            parser = railway.build_parser()
+            args = parser.parse_args(["checkpoint", *argv])
+            return args.handler(args)
+        finally:
+            railway.STATE_PATH = original_state_path
+
+    def test_bare_commit_flag_is_rejected_against_schema_v2(self) -> None:
+        with self.assertRaisesRegex(railway.RailwayError, r"--commit is not valid"):
+            self.run_checkpoint(
+                [
+                    "W0",
+                    "--state",
+                    "in_progress",
+                    "--commit",
+                    self.head,
+                    "--summary",
+                    "x",
+                    "--updated-at",
+                    "2026-01-01T00:00:00Z",
+                ]
+            )
+
+    def test_accepted_checkpoint_requires_reviewed_and_published_commit(self) -> None:
+        with self.assertRaisesRegex(railway.RailwayError, "40-hex"):
+            self.run_checkpoint(
+                [
+                    "W0",
+                    "--state",
+                    "accepted",
+                    "--reviewed-commit",
+                    self.head,
+                    "--evidence",
+                    "docs/fork/ideal-base/evidence/README.md",
+                    "--summary",
+                    "x",
+                    "--updated-at",
+                    "2026-01-01T00:00:00Z",
+                ]
+            )
+
+    def test_accepted_checkpoint_writes_both_commits_and_last_checkpoint(self) -> None:
+        code = self.run_checkpoint(
+            [
+                "W0",
+                "--state",
+                "accepted",
+                "--reviewed-commit",
+                self.head,
+                "--published-commit",
+                self.BASELINE_MAIN,
+                "--evidence",
+                "docs/fork/ideal-base/evidence/README.md",
+                "--published-ref",
+                self.BASELINE_MAIN,
+                "--summary",
+                "checkpoint test",
+                "--updated-at",
+                "2026-01-01T00:00:00Z",
+            ]
+        )
+        self.assertEqual(code, 0)
+        written = json.loads(self.state_path.read_text())
+        record = written["nodes"]["W0"]
+        self.assertEqual(record["state"], "accepted")
+        self.assertEqual(record["reviewed_commit"], self.head)
+        self.assertEqual(record["published_commit"], self.BASELINE_MAIN)
+        self.assertEqual(written["last_checkpoint"]["node"], "W0")
+        self.assertEqual(written["last_checkpoint"]["reviewed_commit"], self.head)
+        self.assertEqual(
+            written["last_checkpoint"]["published_commit"], self.BASELINE_MAIN
+        )
+        self.assertNotIn("commit", record)
+
+    def test_published_commit_not_ancestor_of_published_ref_is_rejected(self) -> None:
+        with self.assertRaisesRegex(railway.RailwayError, "not an ancestor"):
+            self.run_checkpoint(
+                [
+                    "W0",
+                    "--state",
+                    "accepted",
+                    "--reviewed-commit",
+                    self.head,
+                    "--published-commit",
+                    self.head,
+                    "--evidence",
+                    "docs/fork/ideal-base/evidence/README.md",
+                    "--published-ref",
+                    self.BASELINE_MAIN,
+                    "--summary",
+                    "x",
+                    "--updated-at",
+                    "2026-01-01T00:00:00Z",
+                ]
+            )
+
+    def test_non_terminal_checkpoint_rejects_commit_identities(self) -> None:
+        with self.assertRaisesRegex(railway.RailwayError, "must leave"):
+            self.run_checkpoint(
+                [
+                    "W0",
+                    "--state",
+                    "in_progress",
+                    "--reviewed-commit",
+                    self.head,
+                    "--summary",
+                    "x",
+                    "--updated-at",
+                    "2026-01-01T00:00:00Z",
+                ]
+            )
 
 
 if __name__ == "__main__":

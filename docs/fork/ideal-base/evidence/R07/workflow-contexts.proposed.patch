@@ -1,0 +1,287 @@
+--- /dev/null
++++ b/.github/workflows/governance-root.yml
+@@ -0,0 +1,65 @@
++name: Governance Root
++
++# Audit gate: runs from the pull request head like any other workflow, so it
++# detects an unreviewed governance-path change on the PR that makes it rather
++# than preventing one. Legitimate governance-path changes go through the
++# transaction-bound maintenance procedure in design.md section 4.
++on:
++  pull_request:
++    branches: [main]
++
++permissions:
++  contents: read
++
++jobs:
++  governance-root:
++    name: Governance Root
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    steps:
++      - uses: actions/checkout@v5
++        with:
++          fetch-depth: 0
++
++      - name: Fetch the trusted main boundary
++        run: git fetch --force --no-tags origin main:refs/remotes/origin/main
++
++      - name: Detect governance-path changes
++        shell: bash
++        run: |
++          set -euo pipefail
++          base="$(git merge-base HEAD refs/remotes/origin/main)"
++          protected=(
++            .github/scripts
++            .github/workflows
++            scripts/required-checks.json
++            scripts/fork-health.sh
++            scripts/ideal_base_railway.py
++            tests/test_ideal_base_railway.py
++            docs/fork/ideal-base/evidence/R07/github-governance.proposed.json
++            scripts/ambient_roots_allowlist.txt
++            scripts/check_agent_instructions.py
++            scripts/check_ambient_roots.sh
++            scripts/check_code_size_budget.py
++            scripts/check_env_lease_drop_order.py
++            scripts/check_panic_budget.py
++            scripts/check_swallowed_error_budget.py
++            scripts/check_test_size_budget.py
++            scripts/check_tui_render_lock.py
++            scripts/check_warning_budget.sh
++            scripts/docs_impact_advisory.py
++            scripts/rust_production_filter.py
++            scripts/security_preflight.sh
++            scripts/test_docs_impact_advisory.py
++            tests/test_nix_distribution_policy.py
++            tests/test_rust_production_filter.py
++            scripts/governance_compare.py
++            tests/test_governance_compare.py
++            scripts/generate_governance_fixture.py
++            docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json
++          )
++          if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
++            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (design.md section 4)"
++            git diff --name-only "$base" HEAD -- "${protected[@]}"
++            exit 1
++          fi
+--- a/.github/workflows/fork-ci.yml
++++ b/.github/workflows/fork-ci.yml
+@@ -288,6 +288,30 @@
+       - name: Enforce no unused dependencies
+         run: cargo machete
+
++  governance-contract:
++    name: Governance Contract Gate
++    if: github.event_name == 'pull_request'
++    runs-on: ubuntu-latest
++    timeout-minutes: 15
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++
++      - name: Fetch published main explicitly
++        run: git fetch --force --no-tags origin main:refs/remotes/origin/main
++
++      - name: Reject shallow ancestry and validate governance/state
++        run: |
++          test "$(git rev-parse --is-shallow-repository)" = false
++          python3 -m unittest tests.test_ideal_base_railway
++          python3 -m unittest tests.test_governance_compare
++          python3 scripts/ideal_base_railway.py check \
++            --published-ref refs/remotes/origin/main
++          scripts/fork-health.sh \
++            --fixture docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json \
++            --fork-remote origin
++
+   latest-stable-canary:
+     name: Latest stable canary (advisory)
+     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+@@ -475,3 +498,50 @@
+         run: |
+           python3 .github/scripts/run_with_timeout.py 600 \
+             cargo test --locked --target x86_64-unknown-linux-gnu --test e2e
++
++  fork-ci-gate:
++    name: Fork CI Gate
++    needs: [changes, governance-contract, quality, macos, linux-tests]
++    if: always() && github.event_name == 'pull_request'
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    env:
++      CHANGES_RESULT: ${{ needs.changes.result }}
++      RUST_CHANGED: ${{ needs.changes.outputs.rust }}
++      SCRIPTS_CHANGED: ${{ needs.changes.outputs.scripts }}
++      GOVERNANCE_RESULT: ${{ needs.governance-contract.result }}
++      QUALITY_RESULT: ${{ needs.quality.result }}
++      MACOS_RESULT: ${{ needs.macos.result }}
++      LINUX_RESULT: ${{ needs.linux-tests.result }}
++    steps:
++      - name: Require every applicable Fork CI job
++        shell: bash
++        run: |
++          set -euo pipefail
++          require_success() {
++            if [ "$2" != success ]; then
++              echo "::error::$1 concluded '$2'; expected success"
++              exit 1
++            fi
++          }
++          expect_routed() {
++            local name=$1 applicable=$2 result=$3 expected
++            case "$applicable" in
++              true) expected=success ;;
++              false) expected=skipped ;;
++              *) echo "::error::$name has invalid routing value '$applicable'"; exit 1 ;;
++            esac
++            if [ "$result" != "$expected" ]; then
++              echo "::error::$name concluded '$result'; routing requires '$expected'"
++              exit 1
++            fi
++          }
++          require_success "Detect changes" "$CHANGES_RESULT"
++          require_success "Governance Contract Gate" "$GOVERNANCE_RESULT"
++          quality_applicable=false
++          if [ "$RUST_CHANGED" = true ] || [ "$SCRIPTS_CHANGED" = true ]; then
++            quality_applicable=true
++          fi
++          expect_routed "Quality Guardrails" "$quality_applicable" "$QUALITY_RESULT"
++          expect_routed "Build & Test (macOS)" "$RUST_CHANGED" "$MACOS_RESULT"
++          expect_routed "Linux Tests" "$RUST_CHANGED" "$LINUX_RESULT"
+--- a/.github/workflows/security.yml
++++ b/.github/workflows/security.yml
+@@ -164,3 +164,31 @@
+             gh issue create --title "$title" --body-file "$body_file" --label fork-maintenance \
+               || gh issue create --title "$title" --body-file "$body_file"
+           fi
++
++  security-gate:
++    name: Security Gate
++    needs: [detect-dependency-changes, secret-scan, dependency-audit]
++    if: always() && github.event_name == 'pull_request'
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    env:
++      DETECT_RESULT: ${{ needs.detect-dependency-changes.result }}
++      DEPS_CHANGED: ${{ needs.detect-dependency-changes.outputs.deps }}
++      SECRET_RESULT: ${{ needs.secret-scan.result }}
++      AUDIT_RESULT: ${{ needs.dependency-audit.result }}
++    steps:
++      - name: Require every applicable security job
++        shell: bash
++        run: |
++          set -euo pipefail
++          [ "$DETECT_RESULT" = success ] || { echo "::error::dependency detection concluded '$DETECT_RESULT'"; exit 1; }
++          [ "$SECRET_RESULT" = success ] || { echo "::error::secret scan concluded '$SECRET_RESULT'"; exit 1; }
++          case "$DEPS_CHANGED" in
++            true) expected=success ;;
++            false) expected=skipped ;;
++            *) echo "::error::invalid dependency routing value '$DEPS_CHANGED'"; exit 1 ;;
++          esac
++          if [ "$AUDIT_RESULT" != "$expected" ]; then
++            echo "::error::dependency audit concluded '$AUDIT_RESULT'; routing requires '$expected'"
++            exit 1
++          fi
+--- a/.github/workflows/nix.yml
++++ b/.github/workflows/nix.yml
+@@ -45,40 +45,10 @@
+       - "docs/WINDOWS.md"
+       - "docs/WRAPPERS.md"
+       - ".github/workflows/**"
++  # Required context invariant: every pull request must instantiate Nix Gate.
++  # Relevance controls may move inside jobs, but never back to workflow paths.
+   pull_request:
+     branches: [main]
+-    paths:
+-      - "flake.nix"
+-      - "flake.lock"
+-      - "nix/**"
+-      - "Cargo.toml"
+-      - "Cargo.lock"
+-      - "rust-toolchain.toml"
+-      - ".cargo/**"
+-      - "crates/**"
+-      - "src/**"
+-      - "assets/**"
+-      - "web/jcode-mobile/**"
+-      - "scripts/**"
+-      - "tests/**"
+-      - "apm.yml"
+-      - "apm.lock.yaml"
+-      - ".apm/**"
+-      - ".jcode/preferred-tools.md"
+-      - ".jcode/prompt-overlay.md"
+-      - ".jcode/swarm-prompt.md"
+-      - "README.md"
+-      - "CONTRIBUTING.md"
+-      - "RELEASING.md"
+-      - "docs/agent-workflows.md"
+-      - "docs/BRANCHING.md"
+-      - "docs/NIX.md"
+-      - "docs/SWARM_ARCHITECTURE.md"
+-      - "docs/SWARM_TASK_GRAPH.md"
+-      - "docs/ONBOARDING_SANDBOX.md"
+-      - "docs/WINDOWS.md"
+-      - "docs/WRAPPERS.md"
+-      - ".github/workflows/**"
+   workflow_dispatch:
+
+ concurrency:
+@@ -226,3 +196,30 @@
+     permissions:
+       contents: write
+     uses: ./.github/workflows/release.yml
++
++  nix-gate:
++    name: Nix Gate
++    needs: [validate, matrix, build]
++    if: always() && github.event_name == 'pull_request'
++    runs-on: ubuntu-latest
++    timeout-minutes: 5
++    env:
++      VALIDATE_RESULT: ${{ needs.validate.result }}
++      MATRIX_RESULT: ${{ needs.matrix.result }}
++      BUILD_RESULT: ${{ needs.build.result }}
++    steps:
++      - name: Require validation and package build
++        shell: bash
++        run: |
++          set -euo pipefail
++          for pair in \
++            "fast validation:$VALIDATE_RESULT" \
++            "select build matrix:$MATRIX_RESULT" \
++            "build:$BUILD_RESULT"; do
++            name=${pair%%:*}
++            result=${pair#*:}
++            if [ "$result" != success ]; then
++              echo "::error::$name concluded '$result'; expected success"
++              exit 1
++            fi
++          done
+--- a/.github/workflows/fork-health.yml
++++ b/.github/workflows/fork-health.yml
+@@ -2,7 +2,9 @@
+
+ # Enforces the single-rail fork model invariants (see scripts/fork-health.sh):
+ # the fork-point tag still anchors main, and the rail exists. Runs daily and on
+-# demand. Drift opens/updates a single issue instead of failing silently.
++# demand. Drift opens/updates a single issue instead of failing silently. The
++# live governance read requires RULESET_AUDIT_TOKEN because GitHub omits
++# bypass_actors from callers without ruleset write access.
+
+ on:
+   schedule:
+@@ -33,9 +35,9 @@
+       - name: Run fork health check
+         id: health
+         env:
+-          GH_TOKEN: ${{ github.token }}
++          GH_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
+         run: |
+-          scripts/fork-health.sh --repo "$GITHUB_REPOSITORY" \
++          scripts/fork-health.sh --live --repo "$GITHUB_REPOSITORY" \
+             --fork-remote origin | tee health.txt
+           {
+             echo "## Fork health"
