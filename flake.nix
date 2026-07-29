@@ -381,87 +381,95 @@
 
           }
           // lib.optionalAttrs (system == "x86_64-linux") {
-            provenance-sbom =
-              pkgs.runCommand "jcode-provenance-sbom-check"
+            provenance-sbom-fixtures =
+              pkgs.runCommand "jcode-provenance-sbom-fixtures-check"
                 {
                   src = checkSrc;
-                  nativeBuildInputs = [
-                    pkgs.nix
-                    pkgs.python3
-                  ];
-                  inherit
-                    version
-                    sourceFullRevision
-                    sourceDisplayRevision
-                    flakeLockSha256
-                    system
-                    ;
-                  jcodeDrvPath = builtins.unsafeDiscardStringContext jcode.drvPath;
-                  jcodeOutPath = builtins.unsafeDiscardStringContext jcode.outPath;
+                  nativeBuildInputs = [ pkgs.python3 ];
                 }
                 ''
                   cd "$src"
-                  nar_hash=$(nix --extra-experimental-features nix-command hash path --sri ${jcode})
-                  nar_size=$(nix-store --dump ${jcode} | wc -c | tr -d ' ')
-                  sbom_sha256=$(sha256sum ${jcode-sbom}/share/jcode/sbom.cdx.json | cut -d' ' -f1)
-
-                  cat > expected.json <<EOF
-                  {
-                    "source_full_revision": "$sourceFullRevision",
-                    "source_display_revision": "$sourceDisplayRevision",
-                    "flake_lock_sha256": "$flakeLockSha256",
-                    "cargo_version": "$version",
-                    "nix_system": "$system",
-                    "drv_path": "$jcodeDrvPath",
-                    "output_path": "$jcodeOutPath",
-                    "output_nar_hash": "$nar_hash",
-                    "output_nar_size": $nar_size,
-                    "sbom_sha256": "$sbom_sha256"
-                  }
-                  EOF
-
-                  python3 nix/verify-provenance-sbom.py \
-                    --provenance ${jcode-provenance}/share/jcode/provenance.json \
-                    --sbom ${jcode-sbom}/share/jcode/sbom.cdx.json \
-                    --expected expected.json \
-                    --cargo-lock Cargo.lock
-
-                  cp ${jcode-provenance}/share/jcode/provenance.json planted-provenance.json
-                  python3 - <<'PY'
+                  tmp=$(mktemp -d)
+                  python3 - <<'PY' "$tmp"
                   import json
+                  import sys
                   from pathlib import Path
-                  path = Path("planted-provenance.json")
-                  data = json.loads(path.read_text())
-                  data["source"]["full_revision"] = "planted-wrong-revision"
-                  path.write_text(json.dumps(data, sort_keys=True) + "\n")
+
+                  tmp = Path(sys.argv[1])
+                  expected = {
+                      "source_full_revision": "full",
+                      "source_display_revision": "short",
+                      "flake_lock_sha256": "lock",
+                      "cargo_version": "0.46.0",
+                      "nix_system": "x86_64-linux",
+                      "drv_path": "/nix/store/example.drv",
+                      "output_path": "/nix/store/out-jcode",
+                      "output_nar_hash": "sha256-abc",
+                      "output_nar_size": 123,
+                      "sbom_sha256": "sbomhash",
+                  }
+                  provenance = {
+                      "schema": "https://jerudnik.github.io/jcode/schemas/nix-provenance/v1",
+                      "source": {"full_revision": "full", "display_revision": "short", "flake_lock_sha256": "lock"},
+                      "version": {"cargo": "0.46.0"},
+                      "nix": {"system": "x86_64-linux"},
+                      "derivation": {"drv_path": "/nix/store/example.drv"},
+                      "output": {"store_path": "/nix/store/out-jcode", "nar_hash": "sha256-abc", "nar_size": 123},
+                      "sbom": {"sha256": "sbomhash"},
+                      "scope": {"artifact": "packages.x86_64-linux.jcode", "exclusions": ["scripts/build_linux_compat.sh"]},
+                      "release_assets": {"included": False},
+                  }
+                  packages = []
+                  current = {}
+                  in_package = False
+                  for raw in Path("Cargo.lock").read_text().splitlines():
+                      line = raw.strip()
+                      if line == "[[package]]":
+                          if current.get("source", "").startswith("git+"):
+                              packages.append(current)
+                          current = {}
+                          in_package = True
+                          continue
+                      if in_package and " = " in line:
+                          key, value = line.split(" = ", 1)
+                          if key in {"name", "version", "source"}:
+                              current[key] = json.loads(value)
+                  if current.get("source", "").startswith("git+"):
+                      packages.append(current)
+                  components = [
+                      {
+                          "type": "library",
+                          "name": package["name"],
+                          "version": package["version"],
+                          "externalReferences": [{"type": "vcs", "url": package["source"]}],
+                      }
+                      for package in packages
+                  ]
+                  sbom = {
+                      "$schema": "https://cyclonedx.org/schema/bom-1.5.schema.json",
+                      "bomFormat": "CycloneDX",
+                      "specVersion": "1.5",
+                      "metadata": {"component": {"name": "jcode", "version": "0.46.0"}},
+                      "components": components,
+                  }
+                  (tmp / "expected.json").write_text(json.dumps(expected, sort_keys=True) + "\n")
+                  (tmp / "provenance.json").write_text(json.dumps(provenance, sort_keys=True) + "\n")
+                  (tmp / "sbom.json").write_text(json.dumps(sbom, sort_keys=True) + "\n")
+                  bad_provenance = json.loads(json.dumps(provenance))
+                  bad_provenance["source"]["full_revision"] = "wrong"
+                  (tmp / "bad-provenance.json").write_text(json.dumps(bad_provenance, sort_keys=True) + "\n")
+                  bad_sbom = json.loads(json.dumps(sbom))
+                  bad_sbom["components"] = bad_sbom["components"][1:]
+                  (tmp / "bad-sbom.json").write_text(json.dumps(bad_sbom, sort_keys=True) + "\n")
                   PY
-                  if python3 nix/verify-provenance-sbom.py \
-                    --provenance planted-provenance.json \
-                    --sbom ${jcode-sbom}/share/jcode/sbom.cdx.json \
-                    --expected expected.json \
-                    --cargo-lock Cargo.lock; then
-                    echo "planted provenance mismatch passed" >&2
+
+                  python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock
+                  if python3 nix/verify-provenance-sbom.py --provenance "$tmp/bad-provenance.json" --sbom "$tmp/sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
+                    echo "planted provenance mismatch passed unexpectedly" >&2
                     exit 1
                   fi
-
-                  cp ${jcode-sbom}/share/jcode/sbom.cdx.json planted-sbom.cdx.json
-                  python3 - <<'PY'
-                  import json
-                  from pathlib import Path
-                  path = Path("planted-sbom.cdx.json")
-                  data = json.loads(path.read_text())
-                  for component in data["components"]:
-                      if component.get("name") == "agentgrep":
-                          component.pop("externalReferences", None)
-                          break
-                  path.write_text(json.dumps(data, sort_keys=True) + "\n")
-                  PY
-                  if python3 nix/verify-provenance-sbom.py \
-                    --provenance ${jcode-provenance}/share/jcode/provenance.json \
-                    --sbom planted-sbom.cdx.json \
-                    --expected expected.json \
-                    --cargo-lock Cargo.lock; then
-                    echo "planted SBOM mismatch passed" >&2
+                  if python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/bad-sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
+                    echo "planted SBOM omission passed unexpectedly" >&2
                     exit 1
                   fi
                   touch "$out"
