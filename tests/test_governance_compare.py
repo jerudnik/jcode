@@ -683,9 +683,12 @@ class ProtectedPathAdjudicationTests(ComparatorCase):
     def test_adjudicated_additions_are_enforced(self) -> None:
         # Flipping the flag on a pending addition must turn the same fixture
         # red, which proves the flag is load-bearing rather than decorative.
+        # Use a deliberately unprotected ratchet baseline: it exists in the
+        # tree (so the schema check passes) but the fixture workflow does not
+        # name it, so enforcement must fail with a mismatch.
         manifest = load_manifest()
         manifest["protected_paths"]["proposed_additions"] = [
-            "scripts/governance_compare.py"
+            "scripts/panic_budget.json"
         ]
         manifest["protected_paths"]["additions_adjudicated"] = True
         snapshot = load_fixture()
@@ -693,7 +696,7 @@ class ProtectedPathAdjudicationTests(ComparatorCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, EXIT_MISMATCH, output)
         self.assertIn("does not name protected path", output)
-        self.assertIn("scripts/governance_compare.py", output)
+        self.assertIn("scripts/panic_budget.json", output)
 
     def test_protected_path_that_does_not_exist_is_a_schema_error(self) -> None:
         # A protected path with a typo protects nothing while reading as

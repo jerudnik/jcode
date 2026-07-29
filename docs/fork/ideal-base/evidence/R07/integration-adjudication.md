@@ -89,3 +89,33 @@ This closes the enumerated hole, not the class: a sufficiently indirect
 dependency can still route around any fixed list. The durable control remains
 the required-context contract plus the comparator's vacuous-gate detection;
 this list is defence in depth.
+
+## Independent-review remediation (G1-G3, post f428adffe test fix)
+
+The Opus independent review (7ab953c47) found three executed blocking gaps;
+all are closed:
+
+- **G1 (bypass)** — `scripts/governance_compare.py`, `tests/test_governance_compare.py`,
+  `scripts/generate_governance_fixture.py`, and the fixture itself were
+  unprotected. Added to the enforced set (27 paths, coherent across manifest,
+  apply-doc template_variables, sequence-6 diff, patch, and fixture). The
+  `governance-contract` job in fork-ci.yml now also runs
+  `tests.test_governance_compare`, so a tampered comparator fails CI even
+  before Governance Root.
+- **G2 (lockout)** — the patch added `governance-root.yml` without a
+  `docs/BRANCHING.md` CI-table row, which would have failed fork-health
+  invariant 2. Row added.
+- **G3 (false durability)** — live ruleset carries `required_reviewers: []`
+  while all expected bodies omitted it, guaranteeing red live comparisons.
+  `required_reviewers: []` pinned in design.md, manifest, and apply doc
+  sequence 7; fixture regenerated from the updated manifest + patched
+  workflows.
+
+Follow-up validation: patched-tree fork-health run (27 paths enforced,
+governance snapshot matches manifest, all invariants hold), actionlint clean
+on patched `governance-root.yml` + `fork-ci.yml`, `test_governance_compare`
+74/74, `test_ideal_base_railway` 25/25. One test premise was repaired in the
+same pass: `test_adjudicated_additions_are_enforced` now uses a deliberately
+unprotected ratchet baseline (`scripts/panic_budget.json`) as the synthetic
+addition, because the fixture legitimately names `governance_compare.py`
+post-remediation.
