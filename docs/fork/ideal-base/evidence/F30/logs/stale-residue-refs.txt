@@ -1,0 +1,57 @@
+== FINDING R1: scripts/lib/configure_path.sh references retired install.sh ==
+#!/usr/bin/env bash
+# Shared helper that ensures a directory is on PATH for bash, zsh, and fish.
+#
+# Usage:
+#   source "$(dirname "$0")/lib/configure_path.sh"
+#   jcode_configure_path "/path/to/install/dir"
+#
+# This is intentionally POSIX-friendly and side-effect free until you call
+# jcode_configure_path. It is kept in sync with the inline copy in install.sh,
+# which must stay self-contained because it is run via `curl ... | bash`.
+
+# Configure PATH for bash, zsh and fish.
+#   jcode_configure_path <install-dir> [report-fn]
+# report-fn (optional) is called with a human-readable summary string.
+jcode_configure_path() {
+  _jcp_install_dir="$1"
+  _jcp_report="${2:-}"
+  _jcp_path_line="export PATH=\"$_jcp_install_dir:\$PATH\""
+  _jcp_added=""
+
+-- who sources/references configure_path.sh? --
+
+== FINDING R2: paths.rs doc comment references retired uninstall.sh ==
+    pub bytes: u64,
+    /// True when the launcher symlink still resolves into this entry, i.e. the
+    /// machine is still *executing* out of the retired layout.
+    pub launcher_points_here: bool,
+}
+
+/// Enumerate pre-F20c distribution residue under the jcode home.
+///
+/// Returns an empty vec on a clean machine. This reports only; removal is an
+/// explicit user action (`jcode doctor --clean-retired-layout` / `uninstall.sh`)
+/// because these directories can hold the only copy of a binary a user is
+/// currently running.
+/// The retired pre-F20c distribution directory. Nothing writes here; it exists
+/// only so diagnostics and cleanup can name and remove it.
+pub fn retired_layout_dir() -> Result<PathBuf> {
+    Ok(storage::jcode_dir()?.join("builds"))
+}
+
+pub fn retired_layout_residue() -> Result<Vec<RetiredLayoutResidue>> {
+    let builds = retired_layout_dir()?;
+    let launcher_chain = launcher_binary_path()
+
+== is doctor --clean-retired-layout real? ==
+./src/cli/args.rs:246:        #[arg(long = "clean-retired-layout")]
+./src/cli/commands/doctor.rs:204:fn run_clean_retired_layout_command() -> Result<()> {
+./src/cli/commands/doctor.rs:614:pub fn run_doctor_command(emit_json: bool, clean_retired_layout: bool) -> Result<()> {
+./src/cli/commands/doctor.rs:615:    if clean_retired_layout {
+./src/cli/commands/doctor.rs:616:        return run_clean_retired_layout_command();
+./src/cli/commands/doctor.rs:745:            println!("  clean up with: jcode doctor --clean-retired-layout");
+./src/cli/commands.rs:2080:pub fn run_doctor_command(emit_json: bool, clean_retired_layout: bool) -> Result<()> {
+./src/cli/commands.rs:2081:    doctor::run_doctor_command(emit_json, clean_retired_layout)
+./crates/jcode-build-support/src/tests.rs:574:    // retired layout `doctor --clean-retired-layout` deletes. Moving live state
+./crates/jcode-build-support/src/storage_helpers.rs:9:/// --clean-retired-layout` exists to delete it; keeping live state inside it
