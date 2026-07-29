@@ -1,0 +1,124 @@
+commit: eee5ccc710b45be50fe7b6556c958972b7ae51a4
+
+=== ACTIVE-SURFACE retired-token sweep (excludes docs/fork/**, docs/archive/**, changelog/**, binary/svg) ===
+--- [brew install jcode]
+./tests/test_nix_distribution_policy.py:44:    "brew install jcode",
+--- [brew tap]
+./tests/test_nix_distribution_policy.py:45:    "brew tap 1jehuang/jcode",
+--- [jcode-bin]
+./src/cli/tui_launch/tests.rs:109:    let exe = temp.path().join("jcode-bin");
+./src/cli/tui_launch/tests.rs:187:    let exe = temp.path().join("jcode-bin");
+./tests/test_nix_distribution_policy.py:46:    "jcode-bin",
+./crates/jcode-base/src/mcp/protocol_tests.rs:193:        r#"{"servers":{"shared-name":{"command":"jcode-bin"},"jcode-only":{"command":"a"}}}"#,
+./crates/jcode-base/src/config/default_file.rs:410:# When set, jcode runs `<spawn_hook> <jcode-binary> <args...>` instead of
+./docs/SPAWN_HOOK.md:36:<spawn_hook> <jcode-binary> <args...>
+./crates/jcode-config-types/src/lib.rs:704:    /// When set, jcode runs `<spawn_hook> <jcode-binary> <args...>` instead of
+--- [archlinux]
+  (none)
+--- [PKGBUILD]
+  (none)
+--- [yay -S]
+  (none)
+--- [paru -S]
+  (none)
+--- [scripts/install.sh]
+./tests/test_nix_distribution_policy.py:17:    "scripts/install.sh",
+./tests/test_nix_distribution_policy.py:39:    "scripts/install.sh",
+--- [scripts/install.ps1]
+./scripts/fork-health.sh:148:# and scripts/install.ps1 are deliberately still here, so this checks CI
+./tests/test_nix_distribution_policy.py:18:    "scripts/install.ps1",
+./tests/test_nix_distribution_policy.py:40:    "scripts/install.ps1",
+--- [scripts/uninstall.sh]
+./tests/test_nix_distribution_policy.py:19:    "scripts/uninstall.sh",
+./tests/test_nix_distribution_policy.py:41:    "scripts/uninstall.sh",
+--- [scripts/install_release]
+./tests/test_nix_distribution_policy.py:20:    "scripts/install_release.sh",
+--- [scripts/quick-release]
+./tests/test_nix_distribution_policy.py:23:    "scripts/quick-release.sh",
+./tests/test_nix_distribution_policy.py:43:    "scripts/quick-release.sh",
+--- [scripts/update_packages]
+./tests/test_nix_distribution_policy.py:22:    "scripts/update_packages.sh",
+./tests/test_nix_distribution_policy.py:42:    "scripts/update_packages.sh",
+--- [iwr]
+  (none)
+--- [irm https]
+  (none)
+--- [releases/download]
+./README.md:17:<a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.mp4">
+./README.md:18:  <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.webp" alt="jcode memory demonstration" width="800">
+./README.md:260:  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-performance-demo.mp4">
+./README.md:261:    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-performance-demo.webp" alt="jcode performance demonstration" width="900">
+./README.md:283:  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.mp4">
+./README.md:284:    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-memory-demo.webp" alt="jcode memory demonstration" width="900">
+./README.md:318:  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/swarm-demo.mp4">
+./README.md:319:    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-swarm-demonstration.webp" alt="jcode swarm demonstration" width="900">
+./README.md:656:  <a href="https://github.com/1jehuang/jcode/releases/download/readme-assets/workflow.mp4">
+./README.md:657:    <img src="https://github.com/1jehuang/jcode/releases/download/readme-assets/jcode-workflow-demonstration.webp" alt="jcode workflow demonstration" width="900">
+./tests/test_nix_distribution_policy.py:151:            "releases/download",
+./tests/test_nix_distribution_policy.py:165:                "github.com/1jehuang/jcode/releases/download",
+./tests/test_nix_distribution_policy.py:166:                "github.com/jerudnik/jcode/releases/download",
+--- [gh release upload]
+./tests/test_nix_distribution_policy.py:88:            "gh release upload",
+./tests/test_nix_distribution_policy.py:101:            "gh release upload",
+--- [gh release create]
+  (none)
+--- [upload-artifact]
+./tests/test_nix_distribution_policy.py:86:            "actions/upload-artifact",
+--- [download-artifact]
+./tests/test_nix_distribution_policy.py:87:            "actions/download-artifact",
+--- [TestFlight]
+./README.md:614:Jcode ships a browser-based mobile surface through `jcode mobile-server`. It pairs with the WebSocket gateway using the host and six-digit code from `jcode pair`. The native iOS application and App Store/TestFlight delivery are retired.
+./RELEASING.md:65:the native iOS application, signed app-store/TestFlight delivery, or Cargo
+./tests/test_nix_distribution_policy.py:94:            "TestFlight",
+--- [testflight]
+./flake.nix:153:            ++ lib.optional (builtins.pathExists ./.github/workflows/ios-testflight.yml) ".github/workflows/ios-testflight.yml"
+./flake.nix:154:            ++ lib.optional (builtins.pathExists ./scripts/phone-server/testflight-setup.py) "scripts/phone-server/testflight-setup.py"
+./tests/test_nix_distribution_policy.py:16:    ".github/workflows/ios-testflight.yml",
+./tests/test_nix_distribution_policy.py:24:    "scripts/phone-server/testflight-setup.py",
+--- [xcodebuild]
+./tests/test_nix_distribution_policy.py:102:            "xcodebuild archive",
+./tests/test_nix_distribution_policy.py:106:            "xcodebuild",
+--- [JCodeMobile]
+./tests/test_nix_distribution_policy.py:68:        banned_tokens = ("jcode://pair", "apns_token", "JCodeMobile", "APPSTORE_API_KEY")
+./tests/test_nix_distribution_policy.py:105:            "JCodeMobile",
+--- [jcode://pair]
+./tests/test_nix_distribution_policy.py:52:    "jcode://pair",
+./tests/test_nix_distribution_policy.py:68:        banned_tokens = ("jcode://pair", "apns_token", "JCodeMobile", "APPSTORE_API_KEY")
+--- [apns_token]
+./tests/test_nix_distribution_policy.py:68:        banned_tokens = ("jcode://pair", "apns_token", "JCodeMobile", "APPSTORE_API_KEY")
+--- [APPSTORE_API_KEY]
+./tests/test_nix_distribution_policy.py:68:        banned_tokens = ("jcode://pair", "apns_token", "JCodeMobile", "APPSTORE_API_KEY")
+./tests/test_nix_distribution_policy.py:104:            "APPSTORE_API_KEY",
+--- [docs/IOS_APP]
+./flake.nix:151:            ++ lib.optional (builtins.pathExists ./docs/IOS_APP.md) "docs/IOS_APP.md"
+./tests/test_nix_distribution_policy.py:14:    "docs/IOS_APP.md",
+./tests/test_nix_distribution_policy.py:48:    "docs/IOS_APP.md",
+./tests/test_nix_distribution_policy.py:136:        self.assertIn("builtins.pathExists ./docs/IOS_APP.md", flake)
+--- [workflows/ios]
+./flake.nix:152:            ++ lib.optional (builtins.pathExists ./.github/workflows/ios.yml) ".github/workflows/ios.yml"
+./flake.nix:153:            ++ lib.optional (builtins.pathExists ./.github/workflows/ios-testflight.yml) ".github/workflows/ios-testflight.yml"
+./tests/test_nix_distribution_policy.py:15:    ".github/workflows/ios.yml",
+./tests/test_nix_distribution_policy.py:16:    ".github/workflows/ios-testflight.yml",
+./tests/test_nix_distribution_policy.py:49:    ".github/workflows/ios.yml",
+--- [cargo publish]
+./scripts/recovery_validation_driver.py:35:    "cargo publish",
+./tests/test_nix_distribution_policy.py:108:            "cargo publish",
+--- [winget]
+./crates/jcode-setup-hints/src/windows_setup.rs:29:fn is_winget_available() -> bool {
+./crates/jcode-setup-hints/src/windows_setup.rs:31:        .arg("winget")
+./crates/jcode-setup-hints/src/windows_setup.rs:295:    eprintln!("  Installing Alacritty via winget...");
+./crates/jcode-setup-hints/src/windows_setup.rs:298:    let status = std::process::Command::new("winget")
+./crates/jcode-setup-hints/src/windows_setup.rs:311:        anyhow::bail!("winget install failed (exit code: {:?})", status.code())
+./crates/jcode-setup-hints/src/windows_setup.rs:422:            if !is_winget_available() {
+./crates/jcode-setup-hints/src/windows_setup.rs:423:                eprintln!("  \x1b[33m⚠\x1b[0m  winget not found. Install Alacritty manually:");
+./crates/jcode-setup-hints/src/windows_setup.rs:426:                eprintln!("     Or install winget first: https://aka.ms/getwinget");
+./crates/jcode-setup-hints/src/windows_setup.rs:584:            if !is_winget_available() {
+./crates/jcode-setup-hints/src/windows_setup.rs:585:                eprintln!("\n  \x1b[33m⚠\x1b[0m  winget not found. Install Alacritty manually:");
+--- [scoop]
+  (none)
+--- [choco install]
+  (none)
+--- [jcode update installs]
+./tests/test_nix_distribution_policy.py:47:    "jcode update installs",
+--- [ios/]
+./crates/jcode-app-core/src/server/debug_testers.rs:251:    reason = "libc::openpty takes mutable termios/winsize pointers on Apple/BSD targets"

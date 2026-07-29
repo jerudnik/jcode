@@ -1,0 +1,52 @@
+sandbox cwd: /tmp/f30-serve.4dzWrS (no .git, no web/): . .. home 
+binary: /nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/bin/jcode
+
+== start ==
+mobile server running at http://127.0.0.1:8793/ (pid 98265)
+
+== status ==
+mobile server: running
+url: http://127.0.0.1:8793/
+pid: 98265
+web root: /nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/share/jcode/web/jcode-mobile
+log: /tmp/f30-serve.4dzWrS/jcodehome/mobile-server.log
+
+== GET / ==
+status=200 bytes=503 type=text/html; charset=utf-8
+--- first 400 bytes ---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07130f" />
+    <title>jcode mobile web</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <noscript>jcode mobile web needs JavaScript enabled.</noscript>
+    <main id
+sha256 served : 8b6fb426645456652f3af267c51ed19645deb62fca41a385f2b65e7ddd59a75a
+sha256 store  : 8b6fb426645456652f3af267c51ed19645deb62fca41a385f2b65e7ddd59a75a
+
+app.js status=200 bytes=57478
+  app.js: SERVED BYTES == STORE BYTES (e6aab1b5e5efa2ada2caa498aee979f17393d9c1b5a051c365ab6e743a86d746)
+style.css status=200 bytes=17104
+  style.css: SERVED BYTES == STORE BYTES (ba7c9724901068b8a12e49744635208fda18196b73fda71e292f9d85a3b7c38b)
+surface_state.mjs status=200 bytes=11227
+  surface_state.mjs: SERVED BYTES == STORE BYTES (323dd332b52775aa57d5cb56dfcbf484419474d80c76b9623d2b9423e84901bf)
+surface_commands.mjs status=200 bytes=9856
+  surface_commands.mjs: SERVED BYTES == STORE BYTES (8dbbd8ccf4be353dfe5bbb2aa2854726fab609687cbd2bfb0cbdfba6d6789c2d)
+surface_workspace_store.mjs status=200 bytes=18036
+  surface_workspace_store.mjs: SERVED BYTES == STORE BYTES (47ea8bf6773bdde24886efbd4a9bf0473e1b0650e97e8231c66c8e92e5163bf4)
+
+== logs ==
+mobile server ready at http://127.0.0.1:8793/
+serving /nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/share/jcode/web/jcode-mobile
+
+== stop ==
+stopped mobile server pid 98265
+post-stop GET / :
+status=000
+connection refused (expected)
+sandbox removed
