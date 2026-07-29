@@ -1,0 +1,727 @@
+### control/green-baseline
+$ python3 scripts/check_critical_path_budget.py --report /tmp/f23-proof/report-baseline.json
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant1/critical-panic-RED
+$ python3 scripts/check_critical_path_budget.py
+
+Critical-path budget exceeded (acceptance standard A6):
+  - lifecycle/panic grew past its zero-growth ceiling: 11 -> 12
+      contributor: crates/jcode-app-core/src/server/shutdown.rs (8)
+      contributor: crates/jcode-app-core/src/server/comm_session.rs (2)
+      contributor: crates/jcode-app-core/src/server/reload_state.rs (1)
+      contributor: crates/jcode-core/src/util.rs (1)
+Critical paths are zero-growth: existing debt is grandfathered, new debt is not. Remove the new debt, or move the work outside the critical scope. Raising a ceiling requires editing two protected paths inside a maintenance window.
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                12     11       0     12
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=21 ceiling=20 target=0 to-go=21 repo=56 (37.5% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+EXIT=1
+
+### plant1/reverted-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant2/critical-swallow-RED
+$ python3 scripts/check_critical_path_budget.py
+
+Critical-path budget exceeded (acceptance standard A6):
+  - updater/swallowed_error grew past its zero-growth ceiling: 22 -> 23
+      contributor: crates/jcode-app-core/src/tool/selfdev/mod.rs (7)
+      contributor: crates/jcode-app-core/src/tool/selfdev/reload.rs (5)
+      contributor: crates/jcode-app-core/src/tool/selfdev/build_queue.rs (4)
+      contributor: crates/jcode-app-core/src/tool/selfdev/setup.rs (4)
+      contributor: src/cli/selfdev.rs (1)
+      contributor: crates/jcode-app-core/src/tool/selfdev/status.rs (1)
+      contributor: crates/jcode-app-core/src/update.rs (1)
+Critical paths are zero-growth: existing debt is grandfathered, new debt is not. Remove the new debt, or move the work outside the critical scope. Raising a ceiling requires editing two protected paths inside a maintenance window.
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      23     22      11     12
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1164 ceiling=1163 target=581 to-go=583 repo=3034 (38.4% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+EXIT=1
+
+### plant2/reverted-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant3/critical-oversize-RED
+$ python3 scripts/check_critical_path_budget.py
+
+Critical-path budget exceeded (acceptance standard A6):
+  - provider_infrastructure/oversize_files grew past its zero-growth ceiling: 1 -> 2
+      contributor: crates/jcode-provider-core/src/f23_planted_oversize.rs (1301 LOC)
+      contributor: crates/jcode-provider-core/src/lib.rs (1632 LOC)
+Critical paths are zero-growth: existing debt is grandfathered, new debt is not. Remove the new debt, or move the work outside the critical scope. Raising a ceiling requires editing two protected paths inside a maintenance window.
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 292
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  20 expected=  19 (+1)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        2      1       0      2
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=46 ceiling=45 target=25 to-go=21 repo=100 (46.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+EXIT=1
+
+### plant3/reverted-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant4/noncritical-critical-gate-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant4/noncritical-repo-panic-ratchet-RED
+$ python3 scripts/check_panic_budget.py
+Panic-prone usage budget exceeded:
+  - total panic-prone count grew: 56 -> 57
+  - new production panic-prone usage: crates/jcode-fuzzy/src/lib.rs (1)
+Run scripts/check_panic_budget.py --update only after intentional cleanup.
+EXIT=1
+
+### plant4/noncritical-repo-swallow-ratchet-RED
+$ python3 scripts/check_swallowed_error_budget.py
+Swallowed-error budget exceeded:
+  - swallowed-error-like usage grew: crates/jcode-fuzzy/src/lib.rs (2 -> 3)
+Run scripts/check_swallowed_error_budget.py --update only after intentional cleanup.
+EXIT=1
+
+### plant4/noncritical-repo-codesize-ratchet-RED
+$ python3 scripts/check_code_size_budget.py
+Code-size budget exceeded. Existing oversized Rust files must shrink or stay flat, and new oversized production files are not allowed:
+  - new oversized file exceeds 1200 LOC: crates/jcode-fuzzy/src/f23_planted_oversize.rs (1301 LOC)
+Run scripts/check_code_size_budget.py --update only after intentional cleanup.
+EXIT=1
+
+### plant4/reverted-critical-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant4/reverted-repo-panic-GREEN
+$ python3 scripts/check_panic_budget.py
+Panic-prone budget OK: total=56 files=24
+EXIT=0
+
+### plant5/repo-trend-raise-RED
+$ python3 scripts/check_critical_path_budget.py
+
+Critical-path budget exceeded (acceptance standard A6):
+  - repository panic budget rose above its recorded high-water mark: 56 -> 57
+Critical paths are zero-growth: existing debt is grandfathered, new debt is not. Remove the new debt, or move the work outside the critical scope. Raising a ceiling requires editing two protected paths inside a maintenance window.
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=57 (35.1% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     57 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+EXIT=1
+
+### plant5/reverted-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+workflow pin: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+### plant6/pin-matches-baseline
+$ python3 scripts/check_critical_path_budget.py --expect-digest 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant6/ceiling-raise-breaks-pin-RED
+$ python3 scripts/check_critical_path_budget.py --expect-digest 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+Critical-path budget scope digest mismatch.
+  expected (pinned in .github/workflows/fork-ci.yml): 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  actual   (scripts/check_critical_path_budget.py):   6e55aaf4cc51f97feff9444c255b4b9bd538ad159c4be455841a31950cdff7e2
+The critical-path scope, ceilings, targets, or oversize threshold changed. Both this script and the workflow pin are protected governance paths, so an intentional change belongs in a maintenance window; update the workflow pin with `python3 scripts/check_critical_path_budget.py --print-digest`.
+EXIT=1
+
+### plant6/ceiling-raise-hides-plant-without-pin
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 6e55aaf4cc51f97feff9444c255b4b9bd538ad159c4be455841a31950cdff7e2
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8     99       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=111 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK, with headroom from prior cleanup:
+  - tui/panic is 91 below its ceiling
+EXIT=0
+
+### plant6/reverted-pin-GREEN
+$ python3 scripts/check_critical_path_budget.py --expect-digest 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant7/scope-narrowing-breaks-pin-RED
+$ python3 scripts/check_critical_path_budget.py --expect-digest 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+Critical-path budget scope digest mismatch.
+  expected (pinned in .github/workflows/fork-ci.yml): 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  actual   (scripts/check_critical_path_budget.py):   679b5847487f1ce35b9354894e6404cecc3a5357755ac87ee81ca476ea9fec66
+The critical-path scope, ceilings, targets, or oversize threshold changed. Both this script and the workflow pin are protected governance paths, so an intentional change belongs in a maintenance window; update the workflow pin with `python3 scripts/check_critical_path_budget.py --print-digest`.
+EXIT=1
+
+### plant7/reverted-pin-GREEN
+$ python3 scripts/check_critical_path_budget.py --expect-digest 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+
+### plant8/threshold-drift-RED
+$ python3 scripts/check_critical_path_budget.py
+Oversize threshold drift: scripts/code_size_budget.json threshold_loc=5000 but the pinned critical-path threshold is 1200. The baseline is unprotected, so raising it there cannot be allowed to retire the oversize dimension.
+EXIT=1
+
+### plant8/reverted-GREEN
+$ python3 scripts/check_critical_path_budget.py
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
+EXIT=0
+

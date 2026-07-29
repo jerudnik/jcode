@@ -1,0 +1,37 @@
+Critical-path debt trend
+  scope digest: 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846
+  production files in scope: 291
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  63 expected=  63 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      87     87      42     45
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1163 ceiling=1163 target=581 to-go=582 repo=3034 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200961 mark= 200999 (reduced by 38)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3034 mark=   3034 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.

@@ -44,6 +44,8 @@ jobs:
             scripts/check_env_lease_drop_order.py
             scripts/check_panic_budget.py
             scripts/check_swallowed_error_budget.py
+            scripts/check_critical_path_budget.py
+            scripts/test_critical_path_budget.py
             scripts/check_test_size_budget.py
             scripts/check_tui_render_lock.py
             scripts/check_warning_budget.sh
