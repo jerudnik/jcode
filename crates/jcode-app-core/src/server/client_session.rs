@@ -487,9 +487,51 @@ pub(super) async fn handle_subscribe(
     }
 
     if let Some(ref dir) = subscribe_working_dir {
-        let mut agent_guard = agent.lock().await;
-        agent_guard.set_working_dir(dir);
-        drop(agent_guard);
+        // A reconnecting client's Subscribe must not silently rescope a session
+        // that already established a different working_dir: doing so changes
+        // swarm identity and every relative path the session resolves. In the
+        // 2026-07-20 incident a reconnect moved a 13-hour-old session from
+        // /Users/jrudnik/labs/jcode to /Users/jrudnik with no user-visible
+        // trace. The change is still applied (a client may legitimately reopen
+        // the session elsewhere, and refusing would strand it against a stale
+        // directory), but it is now surfaced loudly to every attached client
+        // instead of happening silently.
+        let previous_working_dir = {
+            let mut agent_guard = agent.lock().await;
+            let previous = agent_guard.working_dir().map(str::to_string);
+            agent_guard.set_working_dir(dir);
+            previous
+        };
+        if let Some(previous) = previous_working_dir.as_deref()
+            && previous != dir.as_str()
+        {
+            crate::logging::warn(&format!(
+                "Subscribe changed established working_dir for session {} on connection {}: {} -> {}",
+                client_session_id, client_connection_id, previous, dir
+            ));
+            crate::logging::event_warn(
+                "SESSION_LIFECYCLE",
+                vec![
+                    ("phase", "subscribe_working_dir_changed".to_string()),
+                    ("session_id", client_session_id.to_string()),
+                    ("client_connection_id", client_connection_id.to_string()),
+                    ("previous_working_dir", previous.to_string()),
+                    ("new_working_dir", dir.clone()),
+                ],
+            );
+            let _ = client_event_tx.send(ServerEvent::Notification {
+                from_session: client_session_id.to_string(),
+                from_name: None,
+                notification_type: crate::protocol::NotificationType::Message {
+                    scope: None,
+                    tldr: None,
+                },
+                message: format!(
+                    "⚠ Session working directory changed on reconnect: {} → {}. Relative paths and swarm identity now resolve against the new directory.",
+                    previous, dir
+                ),
+            });
+        }
 
         let new_path = PathBuf::from(dir);
         let new_swarm_id = subscribe_swarm_id_for_working_dir(
@@ -1067,6 +1109,9 @@ pub(super) async fn handle_resume_session(
         )
         .await;
 
+        // Set when a conflicting client remains attached because takeover was
+        // refused; both clients are warned once the new connection is wired up.
+        let mut dual_attach_conflict: Option<ClientConnectionInfo> = None;
         if let Some(conflict) = conflicting_live_client {
             let incoming_instance_id = incoming_client_instance_id.as_deref();
             let existing_instance_id = conflict.client_instance_id.as_deref();
@@ -1125,6 +1170,8 @@ pub(super) async fn handle_resume_session(
                 if let Some(disconnect_tx) = disconnect_tx {
                     let _ = disconnect_tx.send(());
                 }
+            } else {
+                dual_attach_conflict = Some(conflict);
             }
         }
 
@@ -1135,6 +1182,49 @@ pub(super) async fn handle_resume_session(
             client_event_tx.clone(),
         )
         .await;
+
+        // A refused takeover in the live-attach path used to fall through
+        // silently, leaving two clients attached to one session with neither
+        // told. Each client then ran its own stall guard and cancelled the
+        // other's turn (2026-07-20 multi-client incident). Takeover is
+        // deliberately still refused here: the existing owner is a *different*
+        // live client instance and may be mid-turn, so disconnecting it would
+        // kill a legitimately attached user's work. Warn both instead, so the
+        // shared-session state is never silent.
+        if let Some(conflict) = dual_attach_conflict {
+            let warning = format!(
+                "⚠ Two clients are attached to session '{}'. Concurrent turns can cancel each other; use one client, or start a separate session.",
+                session_id
+            );
+            crate::logging::warn(&format!(
+                "Dual attach on session {}: connection {} joined while {} is still attached; warning both clients",
+                session_id, client_connection_id, conflict.client_id
+            ));
+            let delivered = fanout_live_client_event(
+                swarm_members,
+                &session_id,
+                ServerEvent::Notification {
+                    from_session: session_id.clone(),
+                    from_name: None,
+                    notification_type: crate::protocol::NotificationType::Message {
+                        scope: None,
+                        tldr: None,
+                    },
+                    message: warning,
+                },
+            )
+            .await;
+            crate::logging::event_warn(
+                "SESSION_LIFECYCLE",
+                vec![
+                    ("phase", "dual_attach_warned".to_string()),
+                    ("session_id", session_id.clone()),
+                    ("client_connection_id", client_connection_id.to_string()),
+                    ("conflict_client_id", conflict.client_id.clone()),
+                    ("clients_warned", delivered.to_string()),
+                ],
+            );
+        }
 
         let is_canary = live_target_agent
             .try_lock()
