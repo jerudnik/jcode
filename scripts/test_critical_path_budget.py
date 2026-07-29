@@ -180,5 +180,101 @@ class OversizeThresholdTests(unittest.TestCase):
         self.assertEqual(baseline["threshold_loc"], budget.OVERSIZE_THRESHOLD_LOC)
 
 
+class ScopeShrinkTests(unittest.TestCase):
+    """A scope shrink must not be indistinguishable from a cleanup.
+
+    Moving a file out of a critical directory removes its debt from the domain.
+    A count-only gate reads that as progress: an independent review moved
+    server/shutdown.rs out of the critical set, lifecycle/panic fell 11 -> 3,
+    and the gate passed while praising the drop as headroom.
+    """
+
+    def test_matching_counts_are_not_a_regression(self) -> None:
+        self.assertEqual(
+            budget.scope_shrink_regressions(dict(budget.EXPECTED_FILE_COUNTS)), []
+        )
+
+    def test_a_lost_file_is_a_regression(self) -> None:
+        counts = dict(budget.EXPECTED_FILE_COUNTS)
+        counts["lifecycle"] -= 1
+        regressions = budget.scope_shrink_regressions(counts)
+        self.assertEqual(len(regressions), 1)
+        self.assertIn("lifecycle", regressions[0])
+        self.assertIn("lost in-scope production files", regressions[0])
+
+    def test_added_files_are_not_a_regression(self) -> None:
+        # Growth is normal work; the debt it brings is still bounded by the
+        # ceilings, so only a decrease is gated.
+        counts = dict(budget.EXPECTED_FILE_COUNTS)
+        counts["tui"] += 25
+        self.assertEqual(budget.scope_shrink_regressions(counts), [])
+
+    def test_every_domain_is_covered(self) -> None:
+        self.assertEqual(
+            set(budget.EXPECTED_FILE_COUNTS), set(budget.CRITICAL_PATHS)
+        )
+
+    def test_expected_counts_match_the_current_tree(self) -> None:
+        measurement = budget.measure()
+        self.assertEqual(
+            dict(measurement.file_counts), dict(budget.EXPECTED_FILE_COUNTS)
+        )
+
+    def test_expected_counts_sum_to_the_scanned_total(self) -> None:
+        measurement = budget.measure()
+        self.assertEqual(sum(budget.EXPECTED_FILE_COUNTS.values()), measurement.scanned)
+
+    def test_counts_are_pinned_by_the_digest(self) -> None:
+        # Without this the counts could be edited freely, since the workflow
+        # only pins the digest.
+        self.assertIn("expected_file_counts", budget.DIGEST_FIELDS)
+        before = budget.scope_digest()
+        original = budget.EXPECTED_FILE_COUNTS["updater"]
+        budget.EXPECTED_FILE_COUNTS["updater"] = original + 1
+        try:
+            self.assertNotEqual(before, budget.scope_digest())
+        finally:
+            budget.EXPECTED_FILE_COUNTS["updater"] = original
+
+
+class SelfProtectionTests(unittest.TestCase):
+    """This checker must be a protected path, like every checker it sits beside.
+
+    A digest pin cannot substitute for protection: the digest lives in the
+    workflow, but the code that verifies it lives in this script, so an edit
+    that both raises a ceiling and disables the comparison is self-consistent.
+    An independent review did exactly that in two lines and CI stayed green.
+    """
+
+    SCRIPTS = (
+        "scripts/check_critical_path_budget.py",
+        "scripts/test_critical_path_budget.py",
+    )
+
+    def test_manifest_protects_this_checker_and_its_tests(self) -> None:
+        manifest = json.loads(
+            (REPO_ROOT / "scripts" / "required-checks.json").read_text(encoding="utf-8")
+        )
+        required = set(manifest["protected_paths"]["required"])
+        for path in self.SCRIPTS:
+            self.assertIn(path, required, f"{path} is not a protected path")
+
+    def test_governance_root_workflow_names_this_checker(self) -> None:
+        text = (
+            REPO_ROOT / ".github" / "workflows" / "governance-root.yml"
+        ).read_text(encoding="utf-8")
+        for path in self.SCRIPTS:
+            self.assertIn(path, text, f"governance-root.yml does not name {path}")
+
+    def test_protection_matches_a_sibling_checker(self) -> None:
+        # Anchors the assertion to how the repo already protects an equivalent
+        # gate, so this cannot pass by protecting nothing.
+        manifest = json.loads(
+            (REPO_ROOT / "scripts" / "required-checks.json").read_text(encoding="utf-8")
+        )
+        required = set(manifest["protected_paths"]["required"])
+        self.assertIn("scripts/check_panic_budget.py", required)
+
+
 if __name__ == "__main__":
     unittest.main()

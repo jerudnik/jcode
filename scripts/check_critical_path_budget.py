@@ -190,6 +190,28 @@ TARGETS: dict[str, dict[str, Any]] = {
     },
 }
 
+# Expected number of in-scope production files per domain.
+#
+# Without this, the ceilings have a shrinking denominator: moving a file out of a
+# critical directory removes its debt from the domain, and a count-only check
+# reads that as cleanup. An independent review demonstrated it - `git mv`-ing
+# server/shutdown.rs out of the critical set dropped lifecycle/panic 11 -> 3 and
+# the gate praised it as "headroom from prior cleanup". Debt that LEAVES the
+# critical set must not be indistinguishable from debt that was FIXED.
+#
+# An unexplained decrease therefore fails. An increase is fine and expected:
+# adding files to a critical domain is normal work, and their debt is still
+# bounded by the ceilings. Legitimate removals (a genuine deletion, or a
+# refactor that moves code out of scope) are recorded here inside a maintenance
+# window, which is exactly the review such a scope change deserves.
+EXPECTED_FILE_COUNTS: dict[str, int] = {
+    "lifecycle": 62,
+    "persistence": 10,
+    "updater": 8,
+    "provider_infrastructure": 19,
+    "tui": 191,
+}
+
 # Repository-wide high-water marks, read from the five ratchet baselines.
 #
 # The existing ratchets already refuse growth *in the working tree*. What they
@@ -214,6 +236,7 @@ DIGEST_FIELDS = (
     "critical_paths",
     "ceilings",
     "targets",
+    "expected_file_counts",
     "repository_ceilings",
 )
 
@@ -226,6 +249,7 @@ def pinned_data() -> dict[str, Any]:
         "critical_paths": CRITICAL_PATHS,
         "ceilings": CEILINGS,
         "targets": TARGETS,
+        "expected_file_counts": EXPECTED_FILE_COUNTS,
         "repository_ceilings": REPOSITORY_CEILINGS,
     }
 
@@ -283,6 +307,7 @@ class Measurement:
             for domain in CRITICAL_PATHS
             for dim in ("panic", "swallowed_error")
         }
+        self.file_counts: dict[str, int] = {domain: 0 for domain in CRITICAL_PATHS}
         self.scanned = 0
 
     def contributors(self, domain: str, dimension: str) -> list[str]:
@@ -302,6 +327,7 @@ def measure() -> Measurement:
         if domain is None:
             continue
         result.scanned += 1
+        result.file_counts[domain] += 1
         lines = list(production_lines(path))
         panics = sum(1 for line in lines if PANIC_PATTERN.search(line))
         swallowed = sum(
@@ -371,6 +397,11 @@ def build_report(measurement: Measurement) -> dict[str, Any]:
                 "at_or_below_target": current <= target,
             }
         entry["rationale"] = TARGETS[domain]["rationale"]
+        entry["file_count"] = {
+            "current": measurement.file_counts[domain],
+            "expected": EXPECTED_FILE_COUNTS[domain],
+            "delta": measurement.file_counts[domain] - EXPECTED_FILE_COUNTS[domain],
+        }
         entry["oversize_files"] = sorted(measurement.oversize_files[domain])
         domains[domain] = entry
 
@@ -407,6 +438,23 @@ def build_report(measurement: Measurement) -> dict[str, Any]:
     }
 
 
+def scope_shrink_regressions(file_counts: dict[str, int]) -> list[str]:
+    """Fail when a domain lost files, so a scope shrink cannot read as cleanup.
+
+    Only a decrease is a regression. Growth is normal work and its debt is still
+    bounded by the ceilings.
+    """
+
+    return [
+        f"{domain} lost in-scope production files: {EXPECTED_FILE_COUNTS[domain]} -> {count}. "
+        "Debt that leaves the critical set is not debt that was fixed. If this removal is "
+        "intentional, record the new count in EXPECTED_FILE_COUNTS and refresh the workflow "
+        "digest pin, which is a protected-path change and belongs in a maintenance window."
+        for domain, count in sorted(file_counts.items())
+        if count < EXPECTED_FILE_COUNTS[domain]
+    ]
+
+
 def repository_trend_regressions(repo: dict[str, int]) -> list[str]:
     return [
         f"repository {key} budget rose above its recorded high-water mark: "
@@ -420,6 +468,14 @@ def print_report(report: dict[str, Any]) -> None:
     print("Critical-path debt trend")
     print(f"  scope digest: {report['scope_digest']}")
     print(f"  production files in scope: {report['critical_production_files_scanned']}")
+    print("  in-scope file counts (a decrease fails; debt must be fixed, not moved out):")
+    for domain, entry in report["domains"].items():
+        counts = entry["file_count"]
+        delta = counts["delta"]
+        marker = "OK" if delta == 0 else (f"+{delta}" if delta > 0 else str(delta))
+        print(
+            f"    {domain:24s} current={counts['current']:4d} expected={counts['expected']:4d} ({marker})"
+        )
     header = f"  {'domain':24s} {'dimension':16s} {'now':>6s} {'ceil':>6s} {'target':>7s} {'to-go':>6s}"
     print(header)
     for domain, entry in report["domains"].items():
@@ -487,6 +543,7 @@ def main() -> int:
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     regressions: list[str] = repository_trend_regressions(report["repository_totals"])
+    regressions += scope_shrink_regressions(measurement.file_counts)
     for domain in CRITICAL_PATHS:
         for dim in DIMENSIONS:
             current = counts[domain][dim]
