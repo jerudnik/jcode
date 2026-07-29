@@ -1,7 +1,8 @@
 # R06 evidence — sticky-server process-group signaling and unchecked detachment
 
 Node: `R06` (implement, parent `W4`). Branch `automation/w4-r06`, based on
-`eee5ccc71`. Source issue:
+`eee5ccc71`, delivered as `b91982cb1`. All file:line citations below refer to
+that commit. Source issue:
 `docs/fork/ideal-base/human-noticed-issues/STICKY_SERVER.md`.
 
 ## 1. Revalidated line citations
