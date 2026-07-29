@@ -10,6 +10,7 @@ mod client_lifecycle;
 mod client_lifecycle_logging;
 mod client_lightweight_control;
 mod client_session;
+mod client_session_contention;
 mod client_state;
 mod client_writer;
 mod comm_await;
