@@ -4,7 +4,7 @@ use crate::storage;
 use jcode_swarm_core::control_log::{SwarmControlEvent, read_from as read_control_log_from};
 use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 const SWARM_STATE_DIR: &str = "swarm";
 /// Pre-0.36 location under the runtime dir (tmpfs on Linux, wiped on reboot).
 const LEGACY_SWARM_STATE_DIR: &str = "jcode-swarm-state";
+const QUARANTINE_DIR: &str = "quarantine";
 
 /// Serialize each swarm's complete snapshot/read/write operation. Callers must
 /// acquire this before reading the independently locked in-memory maps so an
@@ -198,6 +199,91 @@ pub(super) fn control_log_path(swarm_id: &str) -> PathBuf {
     state_dir().join(format!("{}.control.jsonl", sanitize_swarm_id(swarm_id)))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SwarmStateArtifactKind {
+    Snapshot { swarm_id: String },
+    Backup { swarm_id: String },
+    ControlLog { swarm_id: String },
+    Temp,
+    Quarantine,
+    Other,
+}
+
+fn classify_state_artifact(path: &Path) -> SwarmStateArtifactKind {
+    if path
+        .components()
+        .any(|component| component.as_os_str() == QUARANTINE_DIR)
+    {
+        return SwarmStateArtifactKind::Quarantine;
+    }
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return SwarmStateArtifactKind::Other;
+    };
+    if name.ends_with(".tmp") || name.starts_with('.') {
+        return SwarmStateArtifactKind::Temp;
+    }
+    if let Some(id) = name.strip_suffix(".control.jsonl") {
+        return SwarmStateArtifactKind::ControlLog {
+            swarm_id: id.to_string(),
+        };
+    }
+    if let Some(id) = name.strip_suffix(".json") {
+        return SwarmStateArtifactKind::Snapshot {
+            swarm_id: id.to_string(),
+        };
+    }
+    if let Some(id) = name.strip_suffix(".bak") {
+        return SwarmStateArtifactKind::Backup {
+            swarm_id: id.to_string(),
+        };
+    }
+    SwarmStateArtifactKind::Other
+}
+
+fn quarantine_path(original: &Path, label: &str) -> PathBuf {
+    let dir = state_dir().join(QUARANTINE_DIR);
+    let _ = std::fs::create_dir_all(&dir);
+    let name = original
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("swarm-state");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    for counter in 0..1000u32 {
+        let candidate = dir.join(format!("{name}.{label}.{stamp}.{counter}.corrupt"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!("{name}.{label}.{stamp}.fallback.corrupt"))
+}
+
+fn quarantine_bytes(original: &Path, label: &str, bytes: &[u8]) -> Option<PathBuf> {
+    let path = quarantine_path(original, label);
+    match std::fs::write(&path, bytes) {
+        Ok(()) => {
+            crate::logging::warn(&format!(
+                "swarm_state_corrupt_quarantined path={} quarantine={} bytes={}",
+                original.display(),
+                path.display(),
+                bytes.len()
+            ));
+            Some(path)
+        }
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "swarm_state_quarantine_failed path={} quarantine={} error={}",
+                original.display(),
+                path.display(),
+                error
+            ));
+            None
+        }
+    }
+}
+
 /// Current byte length of the per-swarm control log (0 when absent). Used as
 /// the covered offset for snapshots whose in-memory state already reflects
 /// the full log, so tail replay is a no-op.
@@ -205,6 +291,38 @@ fn current_control_log_len(swarm_id: &str) -> u64 {
     std::fs::metadata(control_log_path(swarm_id))
         .map(|meta| meta.len())
         .unwrap_or(0)
+}
+
+fn prune_terminal_control_logs(dir: &Path, retention: Duration) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let SwarmStateArtifactKind::ControlLog { swarm_id } = classify_state_artifact(&path) else {
+            continue;
+        };
+        if state_path(&swarm_id).exists() {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        if now.duration_since(modified).unwrap_or_default() < retention {
+            continue;
+        }
+        super::control_log_sync::reset_cached_control_log(&swarm_id);
+        if let Err(error) = std::fs::remove_file(&path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            crate::logging::warn(&format!(
+                "Failed to prune terminal swarm control log {}: {}",
+                path.display(),
+                error
+            ));
+        }
+    }
 }
 
 fn read_primary_version(swarm_id: &str) -> SwarmStateFileVersion {
@@ -220,6 +338,7 @@ pub(super) fn capture_swarm_state_version(swarm_id: &str) -> SwarmStateFileVersi
 }
 
 fn remove_snapshot_files(swarm_id: &str) -> bool {
+    super::control_log_sync::reset_cached_control_log(swarm_id);
     let path = state_path(swarm_id);
     // First atomically replace the primary with an empty tombstone. The write
     // may rotate the old primary to `.bak`, but load_runtime_state ignores that
@@ -246,7 +365,7 @@ fn remove_snapshot_files(swarm_id: &str) -> bool {
     }
 
     let mut removed = true;
-    for candidate in [path.with_extension("bak"), path] {
+    for candidate in [path.with_extension("bak"), control_log_path(swarm_id), path] {
         if let Err(err) = std::fs::remove_file(&candidate)
             && err.kind() != std::io::ErrorKind::NotFound
         {
@@ -432,6 +551,7 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
     let mut swarms_by_id = HashMap::new();
     let loaded_at_unix_ms = now_unix_ms();
     let terminal_retention = super::swarm::swarm_terminal_member_retention();
+    prune_terminal_control_logs(&dir, terminal_retention);
     let mut pruned_terminal_members = 0usize;
     let mut pruned_members_by_swarm: HashMap<String, HashSet<String>> = HashMap::new();
     for entry in entries.flatten() {
@@ -439,20 +559,16 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
         if !path.is_file() {
             continue;
         }
-        // `.bak` files are corruption-recovery fallbacks, not co-equal
-        // snapshots. When the primary `.json` still exists, reading the
-        // `.bak` alongside it can resurrect state the primary deliberately
-        // dropped (e.g. a cleared plan: the rotate-on-write keeps the old
-        // plan-bearing snapshot as `.bak`, and a union-load would re-insert
-        // that plan forever). `read_json` already falls back to the `.bak`
-        // internally when the primary is corrupt, so skipping it here loses
-        // nothing.
-        if path.extension().and_then(|ext| ext.to_str()) == Some("bak")
-            && path.with_extension("json").is_file()
-        {
-            continue;
+        match classify_state_artifact(&path) {
+            SwarmStateArtifactKind::Snapshot { .. } => {}
+            SwarmStateArtifactKind::Backup { .. } if !path.with_extension("json").is_file() => {}
+            SwarmStateArtifactKind::Backup { .. }
+            | SwarmStateArtifactKind::ControlLog { .. }
+            | SwarmStateArtifactKind::Temp
+            | SwarmStateArtifactKind::Quarantine
+            | SwarmStateArtifactKind::Other => continue,
         }
-        let Ok(mut state) = storage::read_json::<PersistedSwarmState>(&path) else {
+        let Ok(mut state) = read_swarm_snapshot_with_quarantine(&path) else {
             continue;
         };
         // W1 step 4: the snapshot is the compaction checkpoint, the log is
@@ -541,6 +657,40 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
     }
 }
 
+fn read_swarm_snapshot_with_quarantine(path: &Path) -> anyhow::Result<PersistedSwarmState> {
+    match std::fs::read(path) {
+        Ok(bytes) => match serde_json::from_slice::<PersistedSwarmState>(&bytes) {
+            Ok(state) => Ok(state),
+            Err(primary_error) => {
+                let _ = quarantine_bytes(path, "snapshot", &bytes);
+                let bak_path = path.with_extension("bak");
+                let bak_bytes = std::fs::read(&bak_path)?;
+                match serde_json::from_slice::<PersistedSwarmState>(&bak_bytes) {
+                    Ok(state) => {
+                        crate::logging::warn(&format!(
+                            "swarm_snapshot_recovered_from_backup primary={} backup={} error={}",
+                            path.display(),
+                            bak_path.display(),
+                            primary_error
+                        ));
+                        let _ = std::fs::copy(&bak_path, path);
+                        Ok(state)
+                    }
+                    Err(backup_error) => {
+                        let _ = quarantine_bytes(&bak_path, "snapshot-backup", &bak_bytes);
+                        Err(anyhow::anyhow!(
+                            "corrupt swarm snapshot {} ({primary_error}) and backup {} ({backup_error})",
+                            path.display(),
+                            bak_path.display()
+                        ))
+                    }
+                }
+            }
+        },
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// Replay the per-swarm control log past the snapshot's covered offset,
 /// mutating the persisted records in place. Only swarms with a snapshot are
 /// replayed (a missing snapshot means the swarm was retired; its log is kept
@@ -550,6 +700,13 @@ fn apply_control_log_tail(state: &mut PersistedSwarmState) {
     let Ok(read) = read_control_log_from(&path, state.control_log_covered_offset) else {
         return;
     };
+    for corrupt in &read.corrupt_lines {
+        let label = format!(
+            "control-log-{}-{}",
+            corrupt.start_offset, corrupt.end_offset
+        );
+        let _ = quarantine_bytes(&path, &label, &corrupt.bytes);
+    }
     if read.envelopes.is_empty() {
         return;
     }
