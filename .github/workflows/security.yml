@@ -164,3 +164,31 @@ jobs:
             gh issue create --title "$title" --body-file "$body_file" --label fork-maintenance \
               || gh issue create --title "$title" --body-file "$body_file"
           fi
+
+  security-gate:
+    name: Security Gate
+    needs: [detect-dependency-changes, secret-scan, dependency-audit]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DETECT_RESULT: ${{ needs.detect-dependency-changes.result }}
+      DEPS_CHANGED: ${{ needs.detect-dependency-changes.outputs.deps }}
+      SECRET_RESULT: ${{ needs.secret-scan.result }}
+      AUDIT_RESULT: ${{ needs.dependency-audit.result }}
+    steps:
+      - name: Require every applicable security job
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$DETECT_RESULT" = success ] || { echo "::error::dependency detection concluded '$DETECT_RESULT'"; exit 1; }
+          [ "$SECRET_RESULT" = success ] || { echo "::error::secret scan concluded '$SECRET_RESULT'"; exit 1; }
+          case "$DEPS_CHANGED" in
+            true) expected=success ;;
+            false) expected=skipped ;;
+            *) echo "::error::invalid dependency routing value '$DEPS_CHANGED'"; exit 1 ;;
+          esac
+          if [ "$AUDIT_RESULT" != "$expected" ]; then
+            echo "::error::dependency audit concluded '$AUDIT_RESULT'; routing requires '$expected'"
+            exit 1
+          fi

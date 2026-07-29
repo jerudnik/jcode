@@ -45,40 +45,10 @@ on:
       - "docs/WINDOWS.md"
       - "docs/WRAPPERS.md"
       - ".github/workflows/**"
+  # Required context invariant: every pull request must instantiate Nix Gate.
+  # Relevance controls may move inside jobs, but never back to workflow paths.
   pull_request:
     branches: [main]
-    paths:
-      - "flake.nix"
-      - "flake.lock"
-      - "nix/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".cargo/**"
-      - "crates/**"
-      - "src/**"
-      - "assets/**"
-      - "web/jcode-mobile/**"
-      - "scripts/**"
-      - "tests/**"
-      - "apm.yml"
-      - "apm.lock.yaml"
-      - ".apm/**"
-      - ".jcode/preferred-tools.md"
-      - ".jcode/prompt-overlay.md"
-      - ".jcode/swarm-prompt.md"
-      - "README.md"
-      - "CONTRIBUTING.md"
-      - "RELEASING.md"
-      - "docs/agent-workflows.md"
-      - "docs/BRANCHING.md"
-      - "docs/NIX.md"
-      - "docs/SWARM_ARCHITECTURE.md"
-      - "docs/SWARM_TASK_GRAPH.md"
-      - "docs/ONBOARDING_SANDBOX.md"
-      - "docs/WINDOWS.md"
-      - "docs/WRAPPERS.md"
-      - ".github/workflows/**"
   workflow_dispatch:
 
 concurrency:
@@ -226,3 +196,30 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/release.yml
+
+  nix-gate:
+    name: Nix Gate
+    needs: [validate, matrix, build]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      VALIDATE_RESULT: ${{ needs.validate.result }}
+      MATRIX_RESULT: ${{ needs.matrix.result }}
+      BUILD_RESULT: ${{ needs.build.result }}
+    steps:
+      - name: Require validation and package build
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pair in \
+            "fast validation:$VALIDATE_RESULT" \
+            "select build matrix:$MATRIX_RESULT" \
+            "build:$BUILD_RESULT"; do
+            name=${pair%%:*}
+            result=${pair#*:}
+            if [ "$result" != success ]; then
+              echo "::error::$name concluded '$result'; expected success"
+              exit 1
+            fi
+          done
