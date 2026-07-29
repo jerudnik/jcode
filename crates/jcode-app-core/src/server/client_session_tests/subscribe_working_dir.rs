@@ -158,3 +158,79 @@ async fn subscribe_is_quiet_when_working_dir_is_unchanged() -> Result<()> {
 
     Ok(())
 }
+
+/// The notification is the *only* user-visible trace of the rescope: the warn
+/// above it goes to the log, not the client. Discarding a failed send with
+/// `let _ =` therefore reproduces exactly the silent move this module exists to
+/// prevent, just one layer down. When the client is already gone, the loss of
+/// that trace must itself be recorded.
+///
+/// Regression test for the R05 follow-up: adjudicated 2026-07-29.
+#[tokio::test]
+async fn subscribe_records_when_the_working_dir_notice_cannot_be_delivered() -> Result<()> {
+    let _guard = crate::storage::lock_test_env();
+
+    // Redirect the log so this test reads its own process-global output.
+    let home = tempfile::TempDir::new()?;
+    let previous_home = std::env::var("JCODE_HOME").ok();
+    jcode_core::env::set_var("JCODE_HOME", home.path());
+    crate::logging::init();
+
+    // NOTE: deliberately does NOT contain the asserted phase string; an earlier
+    // draft used one that did, and the assertion matched its own fixture name.
+    let session_id = "session_subscribe_wd_undeliverable";
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider.clone()).await;
+    let agent = Arc::new(Mutex::new(build_test_agent_with_id(
+        provider.clone(),
+        registry,
+        session_id,
+        Vec::new(),
+    )));
+
+    let established = tempfile::TempDir::new()?;
+    let established_dir = established.path().to_string_lossy().to_string();
+    {
+        let mut guard = agent.lock().await;
+        guard.set_working_dir(&established_dir);
+    }
+
+    let reconnect_dir_tmp = tempfile::TempDir::new()?;
+    let reconnect_dir = reconnect_dir_tmp.path().to_string_lossy().to_string();
+    assert_ne!(established_dir, reconnect_dir);
+
+    // Drop the receiver first: this is the "client already disconnected" case,
+    // which is the only way an unbounded send can fail.
+    let (client_event_tx, client_event_rx) = mpsc::unbounded_channel();
+    drop(client_event_rx);
+
+    subscribe_with_working_dir(&agent, session_id, &reconnect_dir, &client_event_tx).await;
+
+    // The rescope is still applied even though nobody could be told.
+    let applied = {
+        let guard = agent.lock().await;
+        guard.working_dir().map(str::to_string)
+    };
+    assert_eq!(applied.as_deref(), Some(reconnect_dir.as_str()));
+
+    let logs = home.path().join("logs");
+    let mut found = String::new();
+    if let Ok(entries) = std::fs::read_dir(&logs) {
+        for entry in entries.flatten() {
+            if let Ok(text) = std::fs::read_to_string(entry.path()) {
+                found.push_str(&text);
+            }
+        }
+    }
+
+    match previous_home {
+        Some(value) => jcode_core::env::set_var("JCODE_HOME", value),
+        None => jcode_core::env::remove_var("JCODE_HOME"),
+    }
+
+    assert!(
+        found.contains("phase=subscribe_working_dir_notify_failed"),
+        "an undeliverable working_dir notice must be recorded, not swallowed; log was: {found}"
+    );
+    Ok(())
+}
