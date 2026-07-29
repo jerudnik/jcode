@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Fork health check: verify the single-rail model and governance invariants.
+# R07 barrier 5 proof: planted comment-only change (expect Governance Root red naming this path).
 #
 # This fork maintains exactly one branch on GitHub: `main`.
 #
