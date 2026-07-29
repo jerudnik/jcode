@@ -1,0 +1,25 @@
+=== scripts/build_linux_compat.sh ===
+123:      curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+
+=== scripts/lib/configure_path.sh ===
+9:# jcode_configure_path. It is kept in sync with the inline copy in install.sh,
+
+=== flake.nix ===
+153:            ++ lib.optional (builtins.pathExists ./.github/workflows/ios-testflight.yml) ".github/workflows/ios-testflight.yml"
+154:            ++ lib.optional (builtins.pathExists ./scripts/phone-server/testflight-setup.py) "scripts/phone-server/testflight-setup.py"
+
+=== crates/jcode-build-support/src/paths.rs ===
+1079:/// explicit user action (`jcode doctor --clean-retired-layout` / `uninstall.sh`)
+
+=== crates/jcode-app-core/src/tool/computer/sys.rs ===
+167:        "no brightness control available. Install with `brew install brightness`, or adjust via the \
+
+=== crates/jcode-tui/src/tui/app/state_ui_input_helpers.rs ===
+1337:                "Install ScrollWM, the scrolling window manager for macOS, by running its official one-line installer: `curl -fsSL https://raw.githubusercontent.com/1jehuang/scrollwm/main/scripts/web-install.sh | bash`. It downloads the latest release, removes the Gatekeeper quarantine, installs to ~/Applications, and launches it (no sudo, no system files touched). Run the command for me and report whether it succeeded.".to_string(),
+
+=== crates/jcode-app-core/src/tool/selfdev/setup.rs ===
+69:                 `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` \
+89:                 `apt install git`, `brew install git`).",
+
+=== telemetry-worker/README.md ===
+

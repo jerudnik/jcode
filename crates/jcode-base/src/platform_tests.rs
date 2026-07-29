@@ -62,6 +62,240 @@ fn spawn_detached_child_probe() {
     std::fs::write(output_path, format!("{pid} {sid}\n")).expect("write child pid and sid");
 }
 
+#[cfg(unix)]
+fn wait_until(mut done: impl FnMut() -> bool, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if done() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
+/// A detached (session-leading) process must take its helper descendants with
+/// it, so the group signal has to stay the preferred path.
+#[cfg(unix)]
+#[test]
+fn signal_detached_process_tree_terminates_descendant_of_group_leader() {
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    let temp = tempfile::tempdir().expect("temp dir");
+    let ready = temp.path().join("ready");
+    let descendant_pid_path = temp.path().join("descendant.pid");
+    let survived = temp.path().join("survived");
+
+    let mut cmd = Command::new("/bin/sh");
+    cmd.arg("-c")
+        .arg(
+            "sh -c 'sleep 3; : > \"$JCODE_TEST_SURVIVED\"' & \
+             echo $! > \"$JCODE_TEST_DESCENDANT_PID\"; \
+             : > \"$JCODE_TEST_READY\"; \
+             sleep 30",
+        )
+        .env("JCODE_TEST_READY", &ready)
+        .env("JCODE_TEST_DESCENDANT_PID", &descendant_pid_path)
+        .env("JCODE_TEST_SURVIVED", &survived)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    let mut leader = super::spawn_detached(&mut cmd).expect("spawn detached leader");
+    let leader_pid = leader.id();
+
+    assert!(
+        wait_until(|| ready.exists(), Duration::from_secs(10)),
+        "detached leader should report ready"
+    );
+    assert_eq!(
+        unsafe { libc::getpgid(leader_pid as i32) },
+        leader_pid as i32,
+        "detached leader should lead its own process group"
+    );
+
+    let descendant_pid: u32 = std::fs::read_to_string(&descendant_pid_path)
+        .expect("read descendant pid")
+        .trim()
+        .parse()
+        .expect("parse descendant pid");
+    assert!(
+        super::is_process_running(descendant_pid),
+        "descendant should be running before the signal"
+    );
+
+    let scope = super::signal_detached_process_tree(leader_pid, libc::SIGTERM)
+        .expect("group signal should reach the detached tree");
+
+    let _ = leader.wait();
+    assert!(
+        wait_until(
+            || !super::is_process_running(descendant_pid),
+            Duration::from_secs(10)
+        ),
+        "descendant should not survive termination of the detached process group"
+    );
+    assert!(
+        !survived.exists(),
+        "descendant should not have reached its survival marker"
+    );
+    assert_eq!(
+        scope,
+        super::SignalScope::ProcessGroup,
+        "a group leader must be signalled as a group, not as a bare process"
+    );
+}
+
+/// A server that never became a group leader is still alive when the group
+/// signal reports ESRCH; the graceful stage must reach it individually.
+#[cfg(unix)]
+#[test]
+fn signal_detached_process_tree_falls_back_to_individual_process_for_sigterm() {
+    assert_individual_fallback_kills_non_group_leader(libc::SIGTERM);
+}
+
+/// The forced stage uses the same fallback policy as the graceful one, so a
+/// stubborn non-leader cannot escape `stop --force`.
+#[cfg(unix)]
+#[test]
+fn signal_detached_process_tree_falls_back_to_individual_process_for_sigkill() {
+    assert_individual_fallback_kills_non_group_leader(libc::SIGKILL);
+}
+
+#[cfg(unix)]
+fn assert_individual_fallback_kills_non_group_leader(signal: i32) {
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+
+    // A plain spawn leaves the child in the caller's process group, so its PID
+    // is not a PGID -- the shape the sticky-server report hit.
+    let mut child = Command::new("/bin/sleep")
+        .arg("30")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn non-group-leader child");
+    let pid = child.id();
+
+    assert_ne!(
+        unsafe { libc::getpgid(pid as i32) },
+        pid as i32,
+        "child should not lead its own process group"
+    );
+    let group_only = super::signal_detached_process_group(pid, signal)
+        .expect_err("group signal must fail for a non-leader");
+    assert_eq!(
+        group_only.raw_os_error(),
+        Some(libc::ESRCH),
+        "group signal should report ESRCH while the process is alive"
+    );
+    assert!(
+        super::is_process_running(pid),
+        "child must still be alive after the failed group signal"
+    );
+
+    let scope = super::signal_detached_process_tree(pid, signal)
+        .expect("fallback should reach the individual process");
+    assert_eq!(
+        scope,
+        super::SignalScope::IndividualProcess,
+        "the narrower reach must be reported, not hidden"
+    );
+
+    let status = child.wait().expect("wait for signalled child");
+    assert_eq!(
+        status.signal(),
+        Some(signal),
+        "child should have been killed by the requested signal"
+    );
+}
+
+/// Only ESRCH means "no such group". Everything else is a real failure and must
+/// not be laundered into a narrower signal.
+#[cfg(unix)]
+#[test]
+fn only_esrch_permits_individual_fallback() {
+    for code in [
+        libc::EPERM,
+        libc::EACCES,
+        libc::EINVAL,
+        libc::EFAULT,
+        libc::EAGAIN,
+    ] {
+        assert!(
+            !super::group_signal_may_fall_back(&std::io::Error::from_raw_os_error(code)),
+            "errno {code} must not be treated as a missing process group"
+        );
+    }
+    assert!(super::group_signal_may_fall_back(
+        &std::io::Error::from_raw_os_error(libc::ESRCH)
+    ));
+}
+
+/// A live process we are not allowed to signal must surface EPERM rather than
+/// silently retrying at a narrower scope.
+#[cfg(unix)]
+#[test]
+fn permission_denied_group_signal_is_surfaced() {
+    if unsafe { libc::getuid() } == 0 {
+        eprintln!("skipping: running as root, no unsignalable process exists");
+        return;
+    }
+    let Some(pid) = foreign_group_leader_pid() else {
+        eprintln!("skipping: no foreign process-group leader found");
+        return;
+    };
+
+    let err = super::signal_detached_process_tree(pid, 0)
+        .expect_err("signalling a foreign group leader must fail");
+    assert_eq!(
+        err.raw_os_error(),
+        Some(libc::EPERM),
+        "EPERM must be surfaced verbatim, got {err}"
+    );
+    // A surfaced error is the raw group error. Anything that attempted the
+    // narrower signal first would report the fallback attempt instead, and a
+    // raw OS error carries no message of its own.
+    assert!(
+        !err.to_string().contains("no process group led by"),
+        "EPERM must not be routed through the individual-process fallback: {err}"
+    );
+}
+
+/// Find a live process-group leader owned by another user (typically root).
+#[cfg(unix)]
+fn foreign_group_leader_pid() -> Option<u32> {
+    let me = unsafe { libc::getuid() };
+    let output = std::process::Command::new("/bin/ps")
+        .args(["-eo", "pid=,pgid=,uid="])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid: u32 = fields.next()?.parse().ok()?;
+            let pgid: u32 = fields.next()?.parse().ok()?;
+            let uid: u32 = fields.next()?.parse().ok()?;
+            (pid == pgid && pid > 1 && uid != me).then_some(pid)
+        })
+        .next()
+}
+
+/// `kill(-1, ...)` broadcasts to every signalable process and `kill(0, ...)`
+/// hits our own group. Neither may ever be reached through a PID argument.
+#[cfg(unix)]
+#[test]
+fn signal_detached_process_tree_refuses_broadcast_pids() {
+    for pid in [0, 1] {
+        let err = super::signal_detached_process_tree(pid, libc::SIGTERM)
+            .expect_err("broadcast pid must be refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "pid {pid}");
+    }
+}
+
 #[cfg(windows)]
 #[test]
 fn is_process_running_reports_exited_children_as_stopped() {

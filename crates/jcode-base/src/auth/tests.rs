@@ -457,6 +457,15 @@ fn command_exists_cached_on_second_call() {
 
 #[test]
 fn auth_status_check_returns_valid_struct() {
+    // This test only asserts internal coherence of whatever the ambient
+    // environment produces, so it needs a *read* lease rather than a write
+    // lease. Without any lease it still called `check_fast()`, which writes
+    // `AUTH_STATUS_FAST_CACHE` keyed on the ambient home key. A write lease
+    // excludes other lease takers, not lease-less threads, so that write could
+    // land inside `auth_status_check_fast_includes_bedrock_probe`'s window
+    // between `invalidate_cache()` and its own `check_fast()`, making that test
+    // read back a cached `bedrock: NotConfigured` instead of probing.
+    let _lock = crate::storage::lock_test_env_read();
     let status = AuthStatus::check_fast();
     // Just verify it runs without panicking and has coherent state
     match status.anthropic.state {
