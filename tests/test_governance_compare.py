@@ -415,11 +415,13 @@ class WorkflowContractTests(ComparatorCase):
 
     def test_summary_dependency_added(self) -> None:
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/security.yml"] = snapshot["workflows"][
-            ".github/workflows/security.yml"
-        ].replace(
-            "needs: [detect-dependency-changes, secret-scan, dependency-audit]",
-            "needs: [detect-dependency-changes, secret-scan, dependency-audit, weekly-report]",
+        workflow = snapshot["workflows"][".github/workflows/security.yml"]
+        original = "needs: [detect-dependency-changes, advisory-policy, secret-scan, dependency-audit]"
+        # A no-op replace would make this test vacuous, so pin the anchor.
+        self.assertIn(original, workflow, "security-gate needs: line moved; update this fixture mutation")
+        snapshot["workflows"][".github/workflows/security.yml"] = workflow.replace(
+            original,
+            original[:-1] + ", weekly-report]",
         )
         self.assert_rejected(snapshot, "summary dependencies")
 

@@ -1,0 +1,147 @@
+# Structured security-advisory ownership record.
+#
+# This file, not `.cargo/audit.toml` and not a Markdown table, is the
+# machine-readable source of truth for every advisory the fork accepts.
+#
+# Why a separate file: cargo-audit validates `.cargo/audit.toml` against a
+# closed schema and rejects any unknown key or table
+# ("unknown field `owner`, expected one of `ignore`, `informational_warnings`,
+# `severity_threshold`"), so ownership metadata cannot live beside the ignore
+# list. Comments there are not machine-readable. This file carries the
+# structure; `.cargo/audit.toml` carries only the IDs cargo-audit acts on, and
+# `scripts/check_advisory_policy.py` proves the two agree.
+#
+# Enforcement (scripts/check_advisory_policy.py, run by
+# .github/workflows/security.yml and scripts/preflight.sh):
+#   - every ID ignored in .cargo/audit.toml MUST have a record here
+#     (an undocumented ignore fails the gate);
+#   - every record here MUST still be ignored in .cargo/audit.toml
+#     (a stale record fails the gate, so retired ignores get cleaned up);
+#   - every record MUST carry a non-empty id, owner, rationale,
+#     affected_surface, expires, and retire_when;
+#   - `expires` is an ISO `YYYY-MM-DD` date; an expired record fails the gate.
+#     The checker takes the current date from --today (deterministic in tests)
+#     or ADVISORY_POLICY_TODAY, defaulting to the system date in CI;
+#   - `expires` may be at most `max_expiry_days` beyond the record's
+#     `accepted` date, so acceptance cannot be parked indefinitely.
+#
+# Expiry is not an excuse to re-stamp: renewing a record means re-reading the
+# advisory, re-checking the retire condition, and moving `accepted` forward
+# with a fresh justification in the same commit.
+
+[policy]
+# Longest single acceptance window. A finding that still needs an ignore after
+# this long is a standing risk decision, not a triage, and should be re-argued
+# rather than silently renewed.
+max_expiry_days = 365
+
+# ── Accepted advisories ──────────────────────────────────────────────────────
+# Fields (all required, all non-empty):
+#   id               RUSTSEC identifier, matching .cargo/audit.toml
+#   crate_name       the vulnerable crate
+#   owner            the GitHub handle accountable for retiring this ignore
+#   accepted         ISO date this acceptance was last argued from scratch
+#   expires          ISO date this acceptance stops being valid (gate fails)
+#   affected_surface the jcode surface that actually reaches the code
+#   rationale        why running with this advisory open is acceptable today
+#   retire_when      the observable condition that removes this record
+
+[[advisory]]
+id = "RUSTSEC-2026-0141"
+crate_name = "lettre"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "jcode-notify-email outbound SMTP; the advisory's hostname-verification defect is in lettre's boring-tls backend"
+rationale = "jcode's lettre dependency enables the rustls/native-tls backends only; boring-tls is not compiled into any jcode target, so the defective code path is absent from the shipped binary."
+retire_when = "lettre ships a patched release, or jcode's lettre feature set ever enables boring-tls (whichever comes first)."
+
+[[advisory]]
+id = "RUSTSEC-2026-0098"
+crate_name = "rustls-webpki"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "TLS certificate validation in every rustls consumer (provider HTTP, IMAP, AWS SDK stacks)"
+rationale = "Name constraints for URI names are incorrectly accepted. Reached only through transitive rustls stacks; the fixed rustls-webpki requires major bumps of the aws-sdk and imap dependency stacks, which is a separate tracked upgrade."
+retire_when = "the aws-smithy and imap/rustls-connector stacks resolve to rustls-webpki >=0.103.10 in Cargo.lock."
+
+[[advisory]]
+id = "RUSTSEC-2026-0099"
+crate_name = "rustls-webpki"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "TLS certificate validation in every rustls consumer (provider HTTP, IMAP, AWS SDK stacks)"
+rationale = "Name constraints are incorrectly accepted for wildcard certificates. Same transitive rustls stacks and same blocked upgrade path as RUSTSEC-2026-0098."
+retire_when = "the aws-smithy and imap/rustls-connector stacks resolve to rustls-webpki >=0.103.10 in Cargo.lock."
+
+[[advisory]]
+id = "RUSTSEC-2026-0104"
+crate_name = "rustls-webpki"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "TLS certificate revocation list parsing in rustls consumers"
+rationale = "Reachable panic in CRL parsing. jcode does not supply CRLs to rustls; the panic needs an attacker-chosen CRL, which no jcode code path loads. Fix is gated on the same rustls-webpki upgrade."
+retire_when = "the aws-smithy and imap/rustls-connector stacks resolve to rustls-webpki >=0.103.10 in Cargo.lock."
+
+[[advisory]]
+id = "RUSTSEC-2026-0049"
+crate_name = "rustls-webpki"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "TLS certificate revocation list handling via the older rustls 0.21 (aws-smithy) and 0.22 (imap/rustls-connector) stacks"
+rationale = "CRLs are not treated as authoritative by Distribution Point because of faulty matching logic. jcode does not configure CRL checking, so the incorrect matching is not exercised. The fix needs rustls-webpki >=0.103.10, which the pinned older rustls stacks cannot reach without major bumps."
+retire_when = "no rustls-webpki <0.103.10 remains in Cargo.lock."
+
+[[advisory]]
+id = "RUSTSEC-2026-0187"
+crate_name = "lopdf"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "jcode-pdf text extraction (/pdf and PDF reads) via pdf-extract 0.8.2 -> lopdf 0.34"
+rationale = "Stack overflow parsing deeply nested PDF objects. Reached only when a user explicitly asks jcode to extract text from a PDF they chose to open; it is not in the auth, provider, or network-listener path, and the failure mode is a crash of the extraction, not memory disclosure. pdf-extract 0.8.2 pins lopdf 0.34, so the fixed lopdf >=0.42 is unreachable without an upstream pdf-extract release."
+retire_when = "pdf-extract publishes a release depending on lopdf >=0.42 and Cargo.lock picks it up."
+
+[[advisory]]
+id = "RUSTSEC-2026-0190"
+crate_name = "anyhow"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "workspace-wide error propagation across CLI, providers, tools, TUI, and support crates"
+rationale = "Unsoundness in Error::downcast_mut(). jcode does not call downcast_mut anywhere; the unsound API is simply present in a crate the workspace depends on broadly. There is no patched anyhow release in the current lockfile."
+retire_when = "a patched anyhow release exists and Cargo.lock resolves to it."
+
+[[advisory]]
+id = "RUSTSEC-2026-0186"
+crate_name = "memmap2"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "font/SVG/Mermaid rendering (fontdb, usvg, resvg) and embedding model loading (tract-onnx)"
+rationale = "Unsoundness in unchecked pointer offset. Transitive through rendering and embedding stacks that jcode does not fork; Linux CI additionally observes an older transitive memmap2 alongside the current 0.9 line, so a single local bump does not clear it."
+retire_when = "every memmap2 version in Cargo.lock is at or above the patched release."
+
+[[advisory]]
+id = "RUSTSEC-2026-0194"
+crate_name = "quick-xml"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "build-time Wayland protocol code generation in the Linux desktop stack (jcode-desktop -> winit 0.29 -> smithay-client-toolkit 0.18 -> wayland-scanner 0.31)"
+rationale = "Allocation/runtime denial of service in XML parsing. wayland-scanner is a build-time proc macro that parses trusted, vendored Wayland protocol XML during compilation; it never sees untrusted input at runtime and is not linked into the TUI agent path. A direct quick-xml >=0.41 lockfile update is blocked by wayland-scanner's quick-xml = ^0.39 constraint."
+retire_when = "the winit/smithay Wayland stack allows quick-xml >=0.41 and Cargo.lock resolves to it."
+
+[[advisory]]
+id = "RUSTSEC-2026-0195"
+crate_name = "quick-xml"
+owner = "jerudnik"
+accepted = "2026-07-29"
+expires = "2027-01-29"
+affected_surface = "build-time Wayland protocol code generation in the Linux desktop stack (same wayland-scanner path as RUSTSEC-2026-0194)"
+rationale = "Second quick-xml denial-of-service advisory with identical exposure to RUSTSEC-2026-0194: build-time only, trusted vendored protocol XML, never runtime input."
+retire_when = "the winit/smithay Wayland stack allows quick-xml >=0.41 and Cargo.lock resolves to it."

@@ -9,7 +9,7 @@ name: Security
 #                    vulnerability fails this workflow -- and only this workflow,
 #                    so unrelated work (Fork CI, Nix) stays green while you
 #                    triage: either fix the dependency or add an ignore + a
-#                    triage row to docs/SECURITY_DEPENDENCIES.md in the same commit.
+#                    record to docs/security/advisories.toml in the same commit.
 #   weekly report  : the full, un-ignored advisory picture (including triaged
 #                    ignores and unmaintained/unsound warnings) posted to a
 #                    single tracking issue, so accepted risk is re-reviewed on
@@ -61,6 +61,28 @@ jobs:
               - '.cargo/**'
               - 'crates/**/Cargo.toml'
 
+  advisory-policy:
+    name: advisory ownership policy
+    # Not gated on dependency changes: an acceptance expires with the calendar,
+    # not with a diff, so this must be able to turn red on a PR that touches no
+    # dependency and on the weekly schedule. Pure Python text checks, no build.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Every ignore is owned, documented, and unexpired
+        # Structured ownership, not a grep for the ID in prose: every ignore in
+        # .cargo/audit.toml must have a machine-readable record in
+        # docs/security/advisories.toml carrying owner, rationale, affected
+        # surface, expiry, and retirement condition. Undocumented, stale,
+        # incomplete, and expired acceptances each fail here. CI evaluates
+        # against the runner's date; preflight and the fixtures inject one.
+        run: python3 scripts/check_advisory_policy.py
+
+      - name: Policy fixtures (checker observed red and green)
+        run: python3 -m unittest discover -s tests -p 'test_advisory_policy.py' -v
+
   secret-scan:
     name: secret scan
     if: github.event_name != 'schedule'
@@ -90,22 +112,6 @@ jobs:
         run: |
           nix build nixpkgs#cargo-audit --out-link "$RUNNER_TEMP/cargo-audit"
           echo "$RUNNER_TEMP/cargo-audit/bin" >> "$GITHUB_PATH"
-
-      - name: Verify audit ignores are documented
-        run: |
-          # Every triaged ignore must have a row in a triage doc, so the
-          # config file and the rationale cannot drift apart. Upstream rows
-          # live in docs/SECURITY_DEPENDENCIES.md (inherited upstream file,
-          # which the fork may extend); fork-only rows live in
-          # docs/fork/SECURITY_TRIAGE.md.
-          missing=0
-          while IFS= read -r id; do
-            if ! grep -q "$id" docs/SECURITY_DEPENDENCIES.md docs/fork/SECURITY_TRIAGE.md 2>/dev/null; then
-              echo "::error::$id is ignored in .cargo/audit.toml but has no triage row in docs/SECURITY_DEPENDENCIES.md or docs/fork/SECURITY_TRIAGE.md"
-              missing=1
-            fi
-          done < <(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' .cargo/audit.toml | sort -u)
-          exit "$missing"
 
       - name: Security preflight (secret scan, permissions, triaged audit)
         run: scripts/security_preflight.sh --strict
@@ -149,7 +155,7 @@ jobs:
           title="Dependency advisories: weekly report"
           body_file="$(mktemp)"
           {
-            echo "Weekly full \`cargo audit\` (ignores disabled). Triaged advisories live in \`.cargo/audit.toml\` with rationale in \`docs/SECURITY_DEPENDENCIES.md\`."
+            echo "Weekly full \`cargo audit\` (ignores disabled). Triaged advisories live in \`.cargo/audit.toml\`, with owner, rationale, affected surface, expiry, and retirement condition in \`docs/security/advisories.toml\`."
             echo
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo
@@ -167,7 +173,7 @@ jobs:
 
   security-gate:
     name: Security Gate
-    needs: [detect-dependency-changes, secret-scan, dependency-audit]
+    needs: [detect-dependency-changes, advisory-policy, secret-scan, dependency-audit]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -176,6 +182,7 @@ jobs:
       DEPS_CHANGED: ${{ needs.detect-dependency-changes.outputs.deps }}
       SECRET_RESULT: ${{ needs.secret-scan.result }}
       AUDIT_RESULT: ${{ needs.dependency-audit.result }}
+      POLICY_RESULT: ${{ needs.advisory-policy.result }}
     steps:
       - name: Require every applicable security job
         shell: bash
@@ -183,6 +190,7 @@ jobs:
           set -euo pipefail
           [ "$DETECT_RESULT" = success ] || { echo "::error::dependency detection concluded '$DETECT_RESULT'"; exit 1; }
           [ "$SECRET_RESULT" = success ] || { echo "::error::secret scan concluded '$SECRET_RESULT'"; exit 1; }
+          [ "$POLICY_RESULT" = success ] || { echo "::error::advisory ownership policy concluded '$POLICY_RESULT'"; exit 1; }
           case "$DEPS_CHANGED" in
             true) expected=success ;;
             false) expected=skipped ;;

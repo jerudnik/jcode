@@ -60,6 +60,7 @@
       "if": "always() && github.event_name == 'pull_request'",
       "needs": [
         "detect-dependency-changes",
+        "advisory-policy",
         "secret-scan",
         "dependency-audit"
       ],
