@@ -1,0 +1,48 @@
+===== A. compliant tree: GREEN =====
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: OK as of 2026-07-29
+[exit=0]
+
+===== B. expired ignore: RED (same tree, later injected date) =====
+$ python3 scripts/check_advisory_policy.py --today 2027-06-01
+advisory policy: 10 problem(s) as of 2027-06-01
+  error: RUSTSEC-2026-0141: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (lettre ships a patched release, or jcode's lettre feature set ever enables boring-tls (whichever comes first).)
+  error: RUSTSEC-2026-0098: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (the aws-smithy and imap/rustls-connector stacks resolve to rustls-webpki >=0.103.10 in Cargo.lock.)
+  error: RUSTSEC-2026-0099: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (the aws-smithy and imap/rustls-connector stacks resolve to rustls-webpki >=0.103.10 in Cargo.lock.)
+  error: RUSTSEC-2026-0104: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (the aws-smithy and imap/rustls-connector stacks resolve to rustls-webpki >=0.103.10 in Cargo.lock.)
+  error: RUSTSEC-2026-0049: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (no rustls-webpki <0.103.10 remains in Cargo.lock.)
+  error: RUSTSEC-2026-0187: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (pdf-extract publishes a release depending on lopdf >=0.42 and Cargo.lock picks it up.)
+  error: RUSTSEC-2026-0190: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (a patched anyhow release exists and Cargo.lock resolves to it.)
+  error: RUSTSEC-2026-0186: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (every memmap2 version in Cargo.lock is at or above the patched release.)
+  error: RUSTSEC-2026-0194: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (the winit/smithay Wayland stack allows quick-xml >=0.41 and Cargo.lock resolves to it.)
+  error: RUSTSEC-2026-0195: acceptance expired on 2027-01-29 (today is 2027-06-01); owner jerudnik must re-argue it or retire it (the winit/smithay Wayland stack allows quick-xml >=0.41 and Cargo.lock resolves to it.)
+[exit=1]
+
+===== C. undocumented ignore: RED (planted RUSTSEC-2099-0001) =====
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: 1 problem(s) as of 2026-07-29
+  error: RUSTSEC-2099-0001: ignored in .cargo/audit.toml but has no record in docs/security/advisories.toml (add owner, rationale, affected surface, expiry, and retirement condition)
+[exit=1]
+
+===== D. incomplete record: RED (owner blanked) =====
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: 2 problem(s) as of 2026-07-29
+  error: RUSTSEC-2026-0141: incomplete record, missing or blank: owner
+  error: RUSTSEC-2026-0141: ignored in .cargo/audit.toml but has no record in docs/security/advisories.toml (add owner, rationale, affected surface, expiry, and retirement condition)
+[exit=1]
+
+===== E. stale record: RED (ignore dropped, record kept) =====
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: 1 problem(s) as of 2026-07-29
+  error: RUSTSEC-2026-0141: has a record in docs/security/advisories.toml but is no longer ignored in .cargo/audit.toml; delete the stale record
+[exit=1]
+
+===== F. tree restored: GREEN again (no residue) =====
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: OK as of 2026-07-29
+[exit=0]
+
+$ git status --short .cargo/audit.toml docs/security/advisories.toml
+ M .cargo/audit.toml
+?? docs/security/advisories.toml
+[exit=0 -- audit.toml modified vs HEAD is expected: F22 rewrote its header]

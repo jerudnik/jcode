@@ -107,6 +107,13 @@ run "wildcard-reexport ratchet" python3 scripts/check_wildcard_reexport_budget.p
 run "dependency boundaries"    python3 scripts/check_dependency_boundaries.py
 run "config env lease"         python3 scripts/check_config_env_lease.py
 run "agent instructions"       python3 scripts/check_agent_instructions.py
+# Advisory ownership: every ignore in .cargo/audit.toml must be owned,
+# documented, and unexpired in docs/security/advisories.toml. The date is
+# injected rather than read from the clock so a local run and a CI run at the
+# same commit reach the same verdict; today's date is passed explicitly here so
+# the gate is reproducible when replayed from a log.
+run "advisory ownership"       python3 scripts/check_advisory_policy.py --today "$(date -u +%Y-%m-%d)"
+run "advisory policy fixtures" python3 -m unittest discover -s tests -p 'test_advisory_policy.py'
 run "docs impact advisory"     python3 scripts/test_docs_impact_advisory.py
 run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
