@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/.github/workflows/governance-root.yml
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,65 @@
 +name: Governance Root
 +
 +# Audit gate: runs from the pull request head like any other workflow, so it
@@ -56,6 +56,10 @@
 +            scripts/test_docs_impact_advisory.py
 +            tests/test_nix_distribution_policy.py
 +            tests/test_rust_production_filter.py
++            scripts/governance_compare.py
++            tests/test_governance_compare.py
++            scripts/generate_governance_fixture.py
++            docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json
 +          )
 +          if ! git diff --quiet "$base" HEAD -- "${protected[@]}"; then
 +            echo "::error::governance paths changed; use the recorded ruleset maintenance procedure (design.md section 4)"
@@ -64,7 +68,7 @@
 +          fi
 --- a/.github/workflows/fork-ci.yml
 +++ b/.github/workflows/fork-ci.yml
-@@ -288,6 +288,29 @@
+@@ -288,6 +288,30 @@
        - name: Enforce no unused dependencies
          run: cargo machete
 
@@ -85,6 +89,7 @@
 +        run: |
 +          test "$(git rev-parse --is-shallow-repository)" = false
 +          python3 -m unittest tests.test_ideal_base_railway
++          python3 -m unittest tests.test_governance_compare
 +          python3 scripts/ideal_base_railway.py check \
 +            --published-ref refs/remotes/origin/main
 +          scripts/fork-health.sh \

@@ -126,6 +126,7 @@ Every workflow lives on `main` with everything else.
 | `nix.yml` | Flake validation + maintained-system builds + Cachix binary publication | push/PR touching build inputs and `v*` tags |
 | `security.yml` | Secret scan + triaged cargo-audit gate; weekly full advisory report | push/PR touching deps, weekly |
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
+| `governance-root.yml` | Governance-path audit gate: fails PRs that change protected governance files outside the recorded maintenance procedure (R07) | PR to `main` |
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
 | `release.yml` | Metadata-only GitHub release notes; rejects attached assets | tag push matching `v*` |
 | `ci.yml`, `freebsd-smoke.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |

@@ -126,7 +126,11 @@
       "scripts/security_preflight.sh",
       "scripts/test_docs_impact_advisory.py",
       "tests/test_nix_distribution_policy.py",
-      "tests/test_rust_production_filter.py"
+      "tests/test_rust_production_filter.py",
+      "scripts/governance_compare.py",
+      "tests/test_governance_compare.py",
+      "scripts/generate_governance_fixture.py",
+      "docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json"
     ],
     "proposed_additions": []
   },
@@ -161,7 +165,8 @@
             "require_code_owner_review": false,
             "require_last_push_approval": false,
             "required_approving_review_count": 0,
-            "required_review_thread_resolution": true
+            "required_review_thread_resolution": true,
+            "required_reviewers": []
           }
         },
         {

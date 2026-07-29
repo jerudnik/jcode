@@ -291,7 +291,8 @@ of volatile-link sanitization sequences 3-4 state for rulesets.
         "require_code_owner_review": false,
         "require_last_push_approval": false,
         "required_approving_review_count": 0,
-        "required_review_thread_resolution": true
+        "required_review_thread_resolution": true,
+        "required_reviewers": []
       }
     },
     {
