@@ -266,6 +266,54 @@ class SelfProtectionTests(unittest.TestCase):
         for path in self.SCRIPTS:
             self.assertIn(path, text, f"governance-root.yml does not name {path}")
 
+    def test_repository_marks_are_not_derived_from_the_baselines(self) -> None:
+        """The pinned marks must stay pinned; deriving them makes the gate vacuous.
+
+        `repository_totals()` reads the live ratchet baselines. If
+        REPOSITORY_CEILINGS were derived from the same source - a change that
+        looks like a cleanup, and that the module comment once implied was
+        already the case - every comparison becomes `value > value`. This test
+        demonstrates that failure mode directly rather than describing it: under
+        derived marks, even doubled debt reports no breach.
+        """
+
+        live = {"panic": 10, "swallowed_error": 100, "oversize_files": 5,
+                "oversize_total_loc": 1000, "test_oversize_files": 3, "warnings": 0}
+        doubled = {key: value * 2 for key, value in live.items()}
+
+        original = budget.REPOSITORY_CEILINGS
+        try:
+            budget.REPOSITORY_CEILINGS = dict(live)
+            self.assertEqual(
+                budget.repository_trend_regressions(doubled) != [],
+                True,
+                "pinned marks must catch a doubling of recorded debt",
+            )
+            # Now the vacuous form: marks derived from the same live numbers.
+            budget.REPOSITORY_CEILINGS = dict(doubled)
+            self.assertEqual(
+                budget.repository_trend_regressions(doubled),
+                [],
+                "derived marks report no breach even at doubled debt, which is "
+                "exactly why the marks are pinned literals",
+            )
+        finally:
+            budget.REPOSITORY_CEILINGS = original
+
+    def test_recorded_marks_are_literal_ints_not_computed(self) -> None:
+        # Guards the property structurally: a future edit that swaps the literal
+        # dict for a call to repository_totals() fails here, not silently.
+        source = (REPO_ROOT / "scripts" / "check_critical_path_budget.py").read_text(
+            encoding="utf-8"
+        )
+        marker = "REPOSITORY_CEILINGS: dict[str, int] = {"
+        self.assertIn(marker, source)
+        block = source.split(marker, 1)[1].split("}", 1)[0]
+        self.assertNotIn("repository_totals", block)
+        self.assertNotIn("load_json", block)
+        for key in budget.REPOSITORY_CEILINGS:
+            self.assertIn(f'"{key}"', block)
+
     def test_protection_matches_a_sibling_checker(self) -> None:
         # Anchors the assertion to how the repo already protects an equivalent
         # gate, so this cannot pass by protecting nothing.

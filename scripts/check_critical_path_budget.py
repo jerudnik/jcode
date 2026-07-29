@@ -134,9 +134,18 @@ CRITICAL_PATHS: dict[str, list[str]] = {
 
 # Zero-growth ceilings. These are the observed counts at the commit that
 # introduced this gate; existing debt is grandfathered, growth is not.
+#
+# persistence/swallowed_error moved 85 -> 87 for F26's active-session marker
+# support (crates/jcode-telemetry-core/src/state_support.rs). Both new `.ok()`
+# uses are Option-returning parses of untrusted on-disk state - a malformed PID
+# in a marker file, and a marker that may be deleted concurrently - whose None
+# case the caller handles explicitly by treating the marker as not-live. They
+# are not discarded errors. The pattern counter cannot tell those apart, which
+# is why a raise lands in a reviewed maintenance window instead of being
+# silently absorbed.
 CEILINGS: dict[str, dict[str, int]] = {
     "lifecycle": {"panic": 11, "swallowed_error": 441, "oversize_files": 10},
-    "persistence": {"panic": 1, "swallowed_error": 85, "oversize_files": 1},
+    "persistence": {"panic": 1, "swallowed_error": 87, "oversize_files": 1},
     "updater": {"panic": 0, "swallowed_error": 22, "oversize_files": 0},
     "provider_infrastructure": {"panic": 0, "swallowed_error": 16, "oversize_files": 1},
     "tui": {"panic": 8, "swallowed_error": 597, "oversize_files": 33},
@@ -205,14 +214,27 @@ TARGETS: dict[str, dict[str, Any]] = {
 # refactor that moves code out of scope) are recorded here inside a maintenance
 # window, which is exactly the review such a scope change deserves.
 EXPECTED_FILE_COUNTS: dict[str, int] = {
-    "lifecycle": 62,
+    "lifecycle": 63,
     "persistence": 10,
     "updater": 8,
     "provider_infrastructure": 19,
     "tui": 191,
 }
 
-# Repository-wide high-water marks, read from the five ratchet baselines.
+# Repository-wide high-water marks: hardcoded here ON PURPOSE, and deliberately
+# NOT read from the five ratchet baselines.
+#
+# `repository_totals()` already reads the live baselines. If these marks were
+# also derived from them, every comparison in
+# `repository_trend_regressions()` would reduce to `value > value` and the gate
+# would be vacuous - it would report zero breaches even if the recorded debt
+# doubled. `test_repository_marks_are_not_derived_from_the_baselines` pins that.
+# The pinned literal is the whole mechanism: it is the independent record that
+# a live baseline is checked *against*.
+#
+# The cost of pinning is that these go stale: they must be refreshed whenever a
+# ceiling is legitimately raised, and a stale mark shows up as a breach rather
+# than as silence. That is the correct failure direction.
 #
 # The existing ratchets already refuse growth *in the working tree*. What they
 # cannot bound is how far their own (deliberately unprotected) baseline may be
@@ -224,7 +246,7 @@ EXPECTED_FILE_COUNTS: dict[str, int] = {
 # true of the recorded budget and not merely of one working tree.
 REPOSITORY_CEILINGS: dict[str, int] = {
     "panic": 56,
-    "swallowed_error": 3032,
+    "swallowed_error": 3034,
     "oversize_files": 100,
     "oversize_total_loc": 200999,
     "test_oversize_files": 37,
