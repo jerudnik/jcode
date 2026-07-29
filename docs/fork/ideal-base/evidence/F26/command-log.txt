@@ -1,0 +1,56 @@
+=== 2026-07-29T06:07:32Z
+$ scripts/dev_cargo.sh test -p jcode-base --lib reconcile_active_sessions -- --test-threads=1
+error:
+exit=1
+=== 2026-07-29T06:08:23Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-base --lib reconcile_active_sessions -- --test-threads=1
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1215 filtered out; finished in 0.86s
+exit=0
+NOTE: baseline at HEAD eee5ccc71 -- gate1 tests already pass (pre-existing sweep, D008/GN-4). Now proving non-vacuity.
+=== 2026-07-29T07:01:15Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-base --lib reconcile_active_sessions -- --test-threads=1
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 1215 filtered out; finished in 1.08s
+error: test failed, to rerun pass `-p jcode-base --lib`
+exit=101
+GATE1: fail-before (mutation: sweep_stale_pid_markers() call removed from reconcile_active_sessions; 1 passed; 1 failed)
+GATE1: pass-after (mutation reverted; 2 passed; 0 failed at HEAD eee5ccc71 -- sweep pre-exists per D008/GN-4)
+MATRIX-ROW: R1 dead PID + no session JSON -> swept | jcode-base session::tests::cases::reconcile_active_sessions_sweeps_dead_marker_without_session_data
+MATRIX-ROW: R2 dead PID + session JSON -> reconciled to Crashed, marker consumed | jcode-base session::tests::cases::reconcile_active_sessions_marks_dead_pid_crashed
+MATRIX-ROW: R3 live PID + marker -> preserved | jcode-storage active_pids::tests::stale_marker_sweep_removes_dead_and_invalid_but_preserves_live
+MATRIX-ROW: R5 malformed marker file -> swept | jcode-storage active_pids::tests::stale_marker_sweep_removes_dead_and_invalid_but_preserves_live
+=== 2026-07-29T07:21:20Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-telemetry-core --lib state_support -- --test-threads=1
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.71s
+exit=0
+=== 2026-07-29T07:23:40Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-telemetry-core --lib state_support -- --test-threads=1
+test result: FAILED. 4 passed; 2 failed; 0 ignored; 0 measured; 24 filtered out; finished in 0.83s
+error: test failed, to rerun pass `-p jcode-telemetry-core --lib`
+exit=101
+GATE2: fail-before (mutation: liveness check replaced by pure 24h mtime approximation; 4 passed; 2 failed)
+MATRIX-ROW: R4 PID reused by an unrelated live process -> counts as live, bounded by max age | jcode-telemetry-core state_support::tests::pid_reuse_is_bounded_by_the_max_age
+=== 2026-07-29T07:24:29Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-telemetry-core --lib -- --test-threads=1
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+exit=0
+GATE2: pass-after (mutation reverted; jcode-telemetry-core --lib 30 passed; 0 failed)
+=== 2026-07-29T07:25:08Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh build --workspace
+=== workspace build with crates/jcode-app-core/src/telemetry_state.rs deleted
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh build --workspace
+    Finished `dev` profile [unoptimized] target(s) in 19m 22s
+GATE3: workspace-build exit=0
+=== gate3 non-vacuity: restore the duplicate and declare it as a module
+$ git checkout HEAD -- crates/jcode-app-core/src/telemetry_state.rs && echo 'pub mod telemetry_state;' >> crates/jcode-app-core/src/lib.rs
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh build --workspace
+error[E0432]: unresolved imports `super::SESSION_STATE`, `super::sanitize_telemetry_label`
+error: could not compile `jcode-app-core` (lib) due to 1 previous error
+GATE3: fail-before (the duplicate cannot compile inside jcode-app-core; proves it was never in the module tree)
+GATE3: pass-after (duplicate deleted; workspace build exit=0, see GATE3: workspace-build exit=0 above)
+=== 2026-07-29T08:33:55Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-telemetry-core --lib -- --test-threads=1
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+exit=0
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-storage --lib active_pids -- --test-threads=1  -> 10 passed; 0 failed (RC=0)
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh clippy -p jcode-telemetry-core --all-targets -- -D warnings -> RC=0
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt --check -p jcode-telemetry-core -> RC=0 after fmt applied
