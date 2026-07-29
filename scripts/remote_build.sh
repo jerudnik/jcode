@@ -325,7 +325,7 @@ if [[ "$SYNC_SOURCE" -eq 1 ]]; then
     "$RSYNC_BIN" -avz --delete \
         -e "$RSYNC_SSH_COMMAND" \
         --exclude 'target/' \
-        --exclude '.git/' \
+        --exclude '.git' \
         --exclude '*.log' \
         --exclude '.claude/' \
         --exclude '.codex-socktest/' \

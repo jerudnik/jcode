@@ -1083,7 +1083,17 @@ if [[ "${JCODE_REMOTE_CARGO:-0}" == "1" ]]; then
     exec "$repo_root/scripts/remote_build.sh" "${cargo_argv[@]}"
   fi
   if [[ "$(remote_cargo_fallback_mode)" == "local" ]]; then
-    log "remote cargo unavailable; falling back to local cargo (set JCODE_REMOTE_CARGO_FALLBACK=error to fail instead)"
+    # Loud on purpose. A silent fallback once hid a broken remote for an entire
+    # work program: `--exclude '.git/'` did not match a worktree's `.git` FILE,
+    # so every worktree build failed its flake fetch and quietly compiled here
+    # instead. The offload looked configured and was not. If the operator asked
+    # for a remote build and did not get one, that is worth a banner.
+    log "############################################################"
+    log "# REMOTE CARGO UNAVAILABLE - BUILDING LOCALLY INSTEAD"
+    log "# host=${JCODE_REMOTE_HOST:-<unset>} cwd=$PWD"
+    log "# This is a fallback, not the requested configuration."
+    log "# Set JCODE_REMOTE_CARGO_FALLBACK=error to fail instead."
+    log "############################################################"
   else
     log "remote cargo unavailable and fallback disabled"
     exit 75
