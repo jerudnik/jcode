@@ -1,6 +1,12 @@
 Critical-path debt trend
-  scope digest: 2eafa153f1aca71934e356b16b1bae607d029b2f3e72313ba39aff7f2e2e56cf
+  scope digest: b3b7fc254cd9750f6fe2a22d26a527f36f08fed011b85813dd85088f3f9dfbf7
   production files in scope: 290
+  in-scope file counts (a decrease fails; debt must be fixed, not moved out):
+    lifecycle                current=  62 expected=  62 (OK)
+    persistence              current=  10 expected=  10 (OK)
+    updater                  current=   8 expected=   8 (OK)
+    provider_infrastructure  current=  19 expected=  19 (OK)
+    tui                      current= 191 expected= 191 (OK)
   domain                   dimension           now   ceil  target  to-go
   lifecycle                panic                11     11       0     11
   lifecycle                swallowed_error     441    441     220    221

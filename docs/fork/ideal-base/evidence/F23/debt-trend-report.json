@@ -53,6 +53,11 @@
           "target": 220
         }
       },
+      "file_count": {
+        "current": 62,
+        "delta": 0,
+        "expected": 62
+      },
       "oversize_files": [
         "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs (1289 LOC)",
         "crates/jcode-app-core/src/server/client_lifecycle.rs (3247 LOC)",
@@ -98,6 +103,11 @@
           "target": 42
         }
       },
+      "file_count": {
+        "current": 10,
+        "delta": 0,
+        "expected": 10
+      },
       "oversize_files": [
         "crates/jcode-telemetry-core/src/lib.rs (1875 LOC)"
       ],
@@ -137,6 +147,11 @@
           "target": 8
         }
       },
+      "file_count": {
+        "current": 19,
+        "delta": 0,
+        "expected": 19
+      },
       "oversize_files": [
         "crates/jcode-provider-core/src/lib.rs (1632 LOC)"
       ],
@@ -174,6 +189,11 @@
           "headroom": 0,
           "target": 300
         }
+      },
+      "file_count": {
+        "current": 191,
+        "delta": 0,
+        "expected": 191
       },
       "oversize_files": [
         "crates/jcode-tui-render/src/swarm_gallery.rs (3023 LOC)",
@@ -244,6 +264,11 @@
           "target": 11
         }
       },
+      "file_count": {
+        "current": 8,
+        "delta": 0,
+        "expected": 8
+      },
       "oversize_files": [],
       "paths": [
         "crates/jcode-app-core/src/update.rs",
@@ -300,6 +325,6 @@
       "reduced_by": 0
     }
   },
-  "scope_digest": "2eafa153f1aca71934e356b16b1bae607d029b2f3e72313ba39aff7f2e2e56cf",
+  "scope_digest": "b3b7fc254cd9750f6fe2a22d26a527f36f08fed011b85813dd85088f3f9dfbf7",
   "version": 1
 }

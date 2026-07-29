@@ -126,23 +126,32 @@ unprotected, so raising it to 5000 there would retire the oversize dimension wit
 touching anything protected. The checker asserts the baseline threshold equals its own
 pinned `OVERSIZE_THRESHOLD_LOC` and fails on drift (plant 8).
 
-### 2.6 Protection was attempted and is not available to this node
+### 2.6 Protection: the original claim was wrong, and is now fixed
 
-I tested adding both new scripts to `protected_paths.required` in
-`scripts/required-checks.json`. `tests/test_governance_compare.py` goes red with 7 failures:
+**The first version of this section was incorrect and is retained here as the record of
+the error.** It said protection needed a four-artifact edit F23 did not own, and concluded:
+"The digest pin in the already-protected workflow delivers the same reviewed-weakening
+property without them."
 
-```
-FAIL: 'Governance Root' at .github/workflows/governance-root.yml does not name protected
-path(s) ['scripts/check_critical_path_budget.py', 'scripts/test_critical_path_budget.py'];
-the audit gate would stay green on a change it is supposed to flag
-```
+That is false. The digest lives in the workflow, but the code that *compares* it lives in
+the checker. If the checker is unprotected, one edit can raise a ceiling and disable the
+comparison at the same time, and the two agree with each other. A checker cannot attest to
+itself. An independent review demonstrated it with two lines, reproduced verbatim in §3.3.
 
-Protection requires coordinated edits to four artifacts (`required-checks.json`, the apply
-document's `template_variables.protected_paths`, sequence 6's `git diff` assertion, and the
-`governance-root.yml` fixture), none of which F23 owns. I reverted and confirmed baseline
-governance is unaffected by my change: **74 passed, 13 subtests passed**. The digest pin in
-the already-protected workflow delivers the same reviewed-weakening property without them.
-Adding the two scripts to the protected set is a reasonable follow-up for the coordinator.
+Both scripts are now in `protected_paths.required`. The coordinated edit spans four
+artifacts, and `tests/test_governance_compare.py` enforces that they move together:
+
+| Artifact | Edit |
+|---|---|
+| `scripts/required-checks.json` | both scripts added to `protected_paths.required` |
+| `.github/workflows/governance-root.yml` | both added to the `protected=(...)` array |
+| `docs/.../github-governance.proposed.json` | `template_variables.protected_paths` **and** the sequence-6 `git diff` assertion |
+| `docs/.../fixtures/governance-valid.json` | regenerated via `scripts/generate_governance_fixture.py` |
+
+The earlier 7 failures came from doing only the first. Doing all four: **74 passed.**
+
+This commit therefore touches protected paths and needs the recorded ruleset maintenance
+procedure. That is the intended cost of making the checker non-self-attesting.
 
 ## 3. Non-vacuity: both directions, every gate
 
@@ -208,15 +217,82 @@ Critical-path budget scope digest mismatch.
 Both plants 6 and 7 also modify a protected path, so in CI they would independently turn
 `Governance Root` red. Two mechanisms, as R07 established for `governance_compare.py`.
 
+### 3.3 The self-attestation defect, reproduced and closed (review finding, CRITICAL)
+
+The attack is two lines in the checker and nothing else:
+
+```
+line 142:  "tui": {"panic": 8, ...}   ->   "tui": {"panic": 999, ...}
+line 512:  if args.expect_digest is not None and ...   ->   if False:
+```
+
+The checker still passes, because it is the thing that was edited:
+
+```
+$ python3 scripts/check_critical_path_budget.py --expect-digest b3b7fc25...
+  tui                      panic                 8    999       0      8
+  - tui/panic is 991 below its ceiling
+EXIT=0
+$ git diff --name-only    # the whole attack surface
+scripts/check_critical_path_budget.py
+```
+
+So the only thing that can catch it is `Governance Root`. Both directions were run against
+the *same* commit, differing only in which `protected=()` array is in force (parsed out of
+the workflow by the simulator, not restated, so it cannot drift):
+
+```
+BEFORE (c49bbaf19 array, does not name the checker: 0 hits)
+  GOVERNANCE ROOT: PASS (exit 0)  -- attack UNDETECTED
+AFTER  (this commit's array)
+  ::error::governance paths changed; use the recorded ruleset maintenance procedure
+  scripts/check_critical_path_budget.py
+  GOVERNANCE ROOT: FAIL (exit 1)
+```
+
+### 3.4 The shrinking denominator, reproduced and closed (review finding, HIGH)
+
+`git mv crates/jcode-app-core/src/server/shutdown.rs` out of the critical set, changing no
+budget file. The old checker treats the vanished debt as progress:
+
+```
+BEFORE (c49bbaf19 checker)
+  production files in scope: 289
+  lifecycle   panic   3   11   0   3
+  Critical-path budget OK, with headroom from prior cleanup:
+    - lifecycle/panic is 8 below its ceiling
+  EXIT=0
+```
+
+`lifecycle/panic` fell 11 -> 3 and the gate called it cleanup. With `EXPECTED_FILE_COUNTS`:
+
+```
+AFTER (this commit)
+  production files in scope: 289
+    lifecycle   current=  61  expected=  62  (-1)
+  - lifecycle lost in-scope production files: 62 -> 61. Debt that leaves the critical
+    set is not debt that was fixed. ...
+  EXIT=1
+```
+
+Only a *decrease* fails. Growth stays green (`test_added_files_are_not_a_regression`):
+adding files to a critical domain is normal work and the debt it brings is still bounded by
+the ceilings. The counts are inside the digest, so they cannot be edited without also
+editing the workflow pin, which is a protected path.
+
 ## 4. Validation performed
 
 | Check | Result |
 |---|---|
 | `python3 scripts/check_critical_path_budget.py --report ...` at baseline | exit 0, both gates green |
-| `pytest scripts/test_critical_path_budget.py` | **20 passed** |
+| `python3 -m unittest ... test_critical_path_budget.py` | **30 passed** (was 20) |
 | `actionlint .github/workflows/fork-ci.yml` | clean (run twice: after the budget step, after the test step) |
 | `pytest tests/test_governance_compare.py` with my changes | **74 passed, 13 subtests passed** |
-| `pytest tests/test_governance_compare.py` with the two scripts added to the protected set | 7 failed (see §2.6), reverted |
+| `tests.test_governance_compare` with all four artifacts updated | **74 passed** (partial edit = 7 failed; see §2.6) |
+| `tests.test_ideal_base_railway` | **18 passed** |
+| `check_panic_budget` / `check_swallowed_error_budget` / `check_code_size_budget` | all exit 0 |
+| Review defect 1 (self-attestation) both directions | old array PASS/undetected, new array FAIL (§3.3) |
+| Review defect 2 (scope shrink) both directions | old checker exit 0 "headroom", new checker exit 1 (§3.4) |
 | Non-vacuity harness, 8 plants both directions | all as tabled; `git status` clean after every plant |
 | `python3 scripts/check_panic_budget.py` after plant 4 revert | exit 0, no residue |
 
@@ -236,8 +312,12 @@ precedent, so a semantic neutering of the checker is caught by executed tests as
 
 Committed (all within F23's owned paths):
 
-- `scripts/check_critical_path_budget.py` — new, unprotected
-- `scripts/test_critical_path_budget.py` — new, unprotected (matches `scripts/*budget*`)
+- `scripts/check_critical_path_budget.py` — new, **protected**
+- `scripts/test_critical_path_budget.py` — new, **protected**
+- `scripts/required-checks.json` — modified, **protected**
+- `.github/workflows/governance-root.yml` — modified, **protected**
+- `docs/fork/ideal-base/evidence/R07/github-governance.proposed.json` — modified, **protected**
+- `docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json` — regenerated, **protected**
 - `.github/workflows/fork-ci.yml` — modified, **protected**
 - `docs/fork/ideal-base/evidence/F23/README.md` — this file
 - `docs/fork/ideal-base/evidence/F23/debt-trend-report.json` — the trend report artifact
@@ -245,9 +325,10 @@ Committed (all within F23's owned paths):
 - `docs/fork/ideal-base/evidence/F23/non-vacuity-log.txt` — full 8-plant transcript
 - `docs/fork/ideal-base/evidence/F23/plant_harness.sh` — the harness, for re-running
 
-Only `.github/workflows/fork-ci.yml` is protected, so **one maintenance window covers this
-node**. The scripts are new files; adding them to the protected set is a coordinator
-follow-up requiring the four-artifact coordinated edit described in §2.6.
+Seven files, six of them protected, so this node needs **one maintenance window** covering
+the whole set. The unowned paths (`required-checks.json`, `governance-root.yml`, and the
+two R07 artifacts) were touched on explicit direction from the coordinator after the
+review, purely to add the two scripts to the protected set.
 
 No ratchet baseline was modified. No unowned path was touched.
 
@@ -258,10 +339,13 @@ No ratchet baseline was modified. No unowned path was touched.
   (already used elsewhere in this repo's workflows), but they have not run on a GitHub runner.
 - **Not checked: cross-platform line counting.** `rust_file_line_count` counts `\n`, matching
   `check_code_size_budget.py` exactly, so any CRLF behaviour is identical to the existing gate.
-- **Open: should the two new scripts be protected?** I argue yes eventually, but it needs
-  the four-artifact coordinated edit F23 does not own. The digest pin covers the weakening
-  case meanwhile. What it does not cover is *deletion* of the workflow step, which is itself
-  a protected-path change and so is caught by `Governance Root`.
+- **Resolved: the two new scripts are now protected.** The earlier answer here ("the digest
+  pin covers the weakening case meanwhile") was wrong; see §2.6 and §3.3.
+- **Not checked: whether `EXPECTED_FILE_COUNTS` drifts noisily.** Any legitimate file
+  removal in a critical domain now needs a protected-path edit. If critical-path files are
+  deleted often, that cost recurs. It did not come up across the plants, but the repo's
+  decomposition work may move files more than usual, and if so the right fix is probably a
+  per-domain allowance rather than dropping the gate.
 - **Open: target review cadence.** Targets are recorded but nothing schedules a review.
   Roughly-halve was chosen as a defensible first pass; a follow-up node could tie them to
   the decomposition program's milestones.
