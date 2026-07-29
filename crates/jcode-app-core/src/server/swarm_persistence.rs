@@ -286,7 +286,15 @@ fn quarantine_bytes_at_stamp(
                     return Some(path);
                 }
                 Err(error) => {
-                    let _ = std::fs::remove_file(&path);
+                    if let Err(remove_error) = std::fs::remove_file(&path)
+                        && remove_error.kind() != std::io::ErrorKind::NotFound
+                    {
+                        crate::logging::warn(&format!(
+                            "swarm_state_quarantine_cleanup_failed quarantine={} error={}",
+                            path.display(),
+                            remove_error
+                        ));
+                    }
                     crate::logging::warn(&format!(
                         "swarm_state_quarantine_failed path={} quarantine={} error={}",
                         original.display(),
@@ -317,12 +325,19 @@ fn quarantine_bytes_at_stamp(
     None
 }
 
-fn quarantine_bytes(original: &Path, label: &str, bytes: &[u8]) -> Option<PathBuf> {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    quarantine_bytes_at_stamp(original, label, bytes, stamp)
+fn quarantine_bytes(original: &Path, label: &str, bytes: &[u8]) {
+    let stamp = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(elapsed) => elapsed.as_nanos(),
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "swarm_state_quarantine_clock_before_epoch path={} error={}",
+                original.display(),
+                error
+            ));
+            0
+        }
+    };
+    drop(quarantine_bytes_at_stamp(original, label, bytes, stamp));
 }
 
 /// Current byte length of the per-swarm control log (0 when absent). Used as
@@ -357,7 +372,10 @@ fn prune_terminal_control_logs(
         let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
             continue;
         };
-        if now.duration_since(modified).unwrap_or_default() < retention {
+        let Ok(age) = now.duration_since(modified) else {
+            continue;
+        };
+        if age < retention {
             continue;
         }
         super::control_log_sync::reset_cached_control_log(&swarm_id);
@@ -718,7 +736,7 @@ fn read_swarm_snapshot_with_quarantine(path: &Path) -> anyhow::Result<PersistedS
         Ok(bytes) => match serde_json::from_slice::<PersistedSwarmState>(&bytes) {
             Ok(state) => Ok(state),
             Err(primary_error) => {
-                let _ = quarantine_bytes(path, "snapshot", &bytes);
+                quarantine_bytes(path, "snapshot", &bytes);
                 let bak_path = path.with_extension("bak");
                 let bak_bytes = std::fs::read(&bak_path)?;
                 match serde_json::from_slice::<PersistedSwarmState>(&bak_bytes) {
@@ -729,11 +747,18 @@ fn read_swarm_snapshot_with_quarantine(path: &Path) -> anyhow::Result<PersistedS
                             bak_path.display(),
                             primary_error
                         ));
-                        let _ = std::fs::copy(&bak_path, path);
+                        if let Err(error) = std::fs::copy(&bak_path, path) {
+                            crate::logging::warn(&format!(
+                                "swarm_snapshot_backup_restore_failed primary={} backup={} error={}",
+                                path.display(),
+                                bak_path.display(),
+                                error
+                            ));
+                        }
                         Ok(state)
                     }
                     Err(backup_error) => {
-                        let _ = quarantine_bytes(&bak_path, "snapshot-backup", &bak_bytes);
+                        quarantine_bytes(&bak_path, "snapshot-backup", &bak_bytes);
                         Err(anyhow::anyhow!(
                             "corrupt swarm snapshot {} ({primary_error}) and backup {} ({backup_error})",
                             path.display(),
@@ -761,7 +786,7 @@ fn apply_control_log_tail(state: &mut PersistedSwarmState) {
             "control-log-{}-{}",
             corrupt.start_offset, corrupt.end_offset
         );
-        let _ = quarantine_bytes(&path, &label, &corrupt.bytes);
+        quarantine_bytes(&path, &label, &corrupt.bytes);
     }
     if read.envelopes.is_empty() {
         return;
@@ -975,3 +1000,7 @@ pub(super) fn remove_swarm_state_if_version(
 #[cfg(test)]
 #[path = "swarm_persistence_tests.rs"]
 mod swarm_persistence_tests;
+
+#[cfg(test)]
+#[path = "swarm_persistence_hygiene_tests.rs"]
+mod swarm_persistence_hygiene_tests;

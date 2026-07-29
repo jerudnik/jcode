@@ -1228,7 +1228,11 @@ async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
     // 2-5. Remove all endpoint artifacts owned by this gracefully exiting
     // daemon. Persistent daemons do not own temporary metadata; temporary
     // daemons do.
-    super::socket::cleanup_endpoint_artifacts(&config.socket_path, config.temporary);
+    super::socket::cleanup_endpoint_artifacts_with_debug(
+        &config.socket_path,
+        &config.debug_socket_path,
+        config.temporary,
+    );
 
     // 6. Shut down MCP children pool-wide, then reap every pooled or
     // per-session child registered to this daemon within one fixed budget.

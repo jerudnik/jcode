@@ -1,11 +1,13 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
+use super::socket::{
+    cleanup_endpoint_artifacts_with_debug, endpoint_artifacts, sibling_socket_path,
+};
 #[cfg(unix)]
 use super::socket::{
     daemon_lock_path, detach_into_new_session, server_start_matches_existing_server,
     try_acquire_daemon_lock,
 };
-use super::socket::{endpoint_artifacts, sibling_socket_path};
 use super::{
     ReloadPhase, ReloadState, ReloadWaitStatus, await_reload_handoff, cleanup_socket_pair,
     clear_reload_marker, inspect_reload_wait_status, publish_reload_socket_ready,
@@ -47,6 +49,31 @@ fn cleanup_socket_pair_removes_main_and_debug_files() {
 
     assert!(!main.exists(), "main socket file should be removed");
     assert!(!debug.exists(), "debug socket file should be removed");
+}
+
+#[test]
+fn endpoint_cleanup_uses_the_explicit_debug_path() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let main = dir.path().join("custom-main.sock");
+    let derived_debug = sibling_socket_path(&main).expect("derived debug path");
+    let explicit_debug = dir.path().join("separately-configured-debug.sock");
+    let hash = std::path::PathBuf::from(format!("{}.hash", main.display()));
+    for path in [&main, &derived_debug, &explicit_debug, &hash] {
+        std::fs::write(path, b"endpoint artifact").expect("write endpoint artifact");
+    }
+
+    cleanup_endpoint_artifacts_with_debug(&main, &explicit_debug, false);
+
+    assert!(!main.exists(), "main socket should be removed");
+    assert!(
+        !explicit_debug.exists(),
+        "the configured debug socket should be removed"
+    );
+    assert!(!hash.exists(), "hash sidecar should be removed");
+    assert!(
+        derived_debug.exists(),
+        "an unrelated derived sibling should remain untouched"
+    );
 }
 
 #[cfg(unix)]

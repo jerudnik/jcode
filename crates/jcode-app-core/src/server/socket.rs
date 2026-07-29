@@ -73,14 +73,40 @@ pub fn cleanup_socket_pair(path: &std::path::Path) {
     let _ = std::fs::remove_file(artifacts.debug_socket);
 }
 
-pub(crate) fn cleanup_endpoint_artifacts(path: &std::path::Path, include_metadata: bool) {
-    let artifacts = endpoint_artifacts(path);
-    let _ = std::fs::remove_file(&artifacts.main_socket);
-    let _ = std::fs::remove_file(&artifacts.debug_socket);
-    let _ = std::fs::remove_file(&artifacts.hash);
+fn cleanup_artifacts(artifacts: EndpointArtifacts, include_metadata: bool) {
+    let mut paths = vec![
+        artifacts.main_socket,
+        artifacts.debug_socket,
+        artifacts.hash,
+    ];
     if include_metadata {
-        super::lifecycle::cleanup_temporary_metadata(&artifacts.main_socket);
+        paths.push(artifacts.temporary_metadata);
     }
+    for artifact in paths {
+        if let Err(error) = std::fs::remove_file(&artifact)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            crate::logging::warn(&format!(
+                "Failed to remove endpoint artifact {}: {}",
+                artifact.display(),
+                error
+            ));
+        }
+    }
+}
+
+pub(crate) fn cleanup_endpoint_artifacts(path: &std::path::Path, include_metadata: bool) {
+    cleanup_artifacts(endpoint_artifacts(path), include_metadata);
+}
+
+pub(crate) fn cleanup_endpoint_artifacts_with_debug(
+    main_socket: &std::path::Path,
+    debug_socket: &std::path::Path,
+    include_metadata: bool,
+) {
+    let mut artifacts = endpoint_artifacts(main_socket);
+    artifacts.debug_socket = debug_socket.to_path_buf();
+    cleanup_artifacts(artifacts, include_metadata);
 }
 
 /// Connect to a socket path.
@@ -158,9 +184,21 @@ pub async fn reap_stale_socket_if_dead(path: &std::path::Path) -> bool {
         path.display()
     ));
     cleanup_endpoint_artifacts(path, true);
-    if let Ok(mut registry) = crate::registry::ServerRegistry::load().await {
-        let _ = registry.cleanup_stale().await;
-        let _ = registry.save().await;
+    match crate::registry::ServerRegistry::load().await {
+        Ok(mut registry) => {
+            if let Err(error) = registry.cleanup_stale().await {
+                crate::logging::warn(&format!(
+                    "Failed to clean stale server registry entries after socket reap: {}",
+                    error
+                ));
+            }
+        }
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "Failed to load server registry after socket reap: {}",
+                error
+            ));
+        }
     }
     // `_lock` (a DaemonLockGuard) removes the lock file when it drops at the end
     // of this scope, so the leftover lock is cleaned up too.
