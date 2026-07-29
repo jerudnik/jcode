@@ -595,4 +595,125 @@ mod tests {
         std::fs::remove_file(&own).expect("graceful unregister");
         assert_eq!(prune_active_session_files(&dir), 1);
     }
+
+    /// The prune got measurably more expensive (see
+    /// `prune_cost_per_call_is_reported`) and it hangs off `record_tool_call`
+    /// and friends, so it is worth pinning down that a default install never
+    /// pays for it: telemetry is opt-in in this fork, `begin_session_with_mode`
+    /// returns before populating `SESSION_STATE`, and every hot-path recorder
+    /// is guarded by that `Some(..)`. If someone later populates the state
+    /// without an enablement check, this test is the tripwire.
+    #[test]
+    fn concurrency_observation_is_unreachable_without_a_session() {
+        let src = include_str!("lib.rs");
+        let begin = src
+            .split("fn begin_session_with_mode(")
+            .nth(1)
+            .expect("begin_session_with_mode must exist");
+        assert!(
+            begin
+                .split("*guard = Some(state);")
+                .next()
+                .expect("assignment must follow the guard")
+                .contains("if !is_enabled() {"),
+            "SESSION_STATE must only be populated after an enablement check, \
+             otherwise the prune runs on every tool call for users who never opted in"
+        );
+        assert_eq!(
+            src.matches("*guard = Some(state);").count(),
+            1,
+            "exactly one site may populate SESSION_STATE; a second one would \
+             bypass the enablement check above"
+        );
+        assert!(
+            src.contains("fn observe_session_concurrency(state: &mut SessionTelemetry)"),
+            "observation must take an existing session by reference, so it \
+             cannot run before one is established"
+        );
+    }
+
+    /// Cost check, not a correctness test. `prune_active_session_files` hangs
+    /// off `record_tool_call`, `record_turn`, and seven other hot recorders, and
+    /// F26 added a file read plus a `kill(0)` syscall per marker. This measures
+    /// the real function so the added cost is a number rather than a guess.
+    ///
+    /// Measured on macOS with 8 markers (a deliberately high session count):
+    /// full prune ~1050 us/call vs ~155 us/call for the pre-F26 mtime-only
+    /// shape. Attribution: `read_to_string` ~894 us, `is_running` ~7 us. The
+    /// liveness syscall is not the cost; reading the file is. Absolute figures
+    /// are inflated in a sandboxed filesystem, so compare the ratios.
+    ///
+    /// This is not on the default-install path: telemetry is opt-in in this
+    /// fork, so `SESSION_STATE` stays `None` and every recorder short-circuits.
+    /// See `concurrency_observation_is_unreachable_without_a_session`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "developer benchmark: measures prune cost per call; run explicitly"]
+    fn prune_cost_per_call_is_reported() {
+        let home = tempfile::TempDir::new().expect("tempdir");
+        let dir = home.path().join("telemetry_active_sessions");
+        std::fs::create_dir_all(&dir).expect("create marker dir");
+        let markers: usize = std::env::var("F26_BENCH_MARKERS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+        for i in 0..markers {
+            std::fs::write(
+                dir.join(format!("s{i}.active")),
+                active_session_marker_contents(std::process::id()),
+            )
+            .expect("write marker");
+        }
+
+        let iterations = 2000;
+        let bench = |label: &str, mut f: Box<dyn FnMut()>| {
+            f();
+            let started = std::time::Instant::now();
+            for _ in 0..iterations {
+                f();
+            }
+            let per_call = started.elapsed().as_secs_f64() / f64::from(iterations) * 1e6;
+            println!("{label}: {per_call:.1} us/call ({markers} markers)");
+        };
+
+        bench(
+            "full prune (post-F26)",
+            Box::new(|| {
+                std::hint::black_box(prune_active_session_files(&dir));
+            }),
+        );
+        let pre = dir.clone();
+        bench(
+            "mtime-only walk (pre-F26 shape)",
+            Box::new(move || {
+                let now = SystemTime::now();
+                for entry in std::fs::read_dir(&pre).unwrap().filter_map(Result::ok) {
+                    std::hint::black_box(
+                        entry
+                            .metadata()
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|m| now.duration_since(m).ok())
+                            .is_some_and(|age| age <= ACTIVE_SESSION_MARKER_MAX_AGE),
+                    );
+                }
+            }),
+        );
+        let read = dir.clone();
+        bench(
+            "  attribution: read_to_string only",
+            Box::new(move || {
+                for entry in std::fs::read_dir(&read).unwrap().filter_map(Result::ok) {
+                    std::hint::black_box(std::fs::read_to_string(entry.path()).ok());
+                }
+            }),
+        );
+        let pid = std::process::id();
+        bench(
+            "  attribution: is_running only",
+            Box::new(move || {
+                std::hint::black_box(jcode_core::process::is_running(pid));
+            }),
+        );
+    }
 }

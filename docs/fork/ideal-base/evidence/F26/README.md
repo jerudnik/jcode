@@ -189,3 +189,42 @@ scoped to the test.
 - `crates/jcode-app-core/src/telemetry_state.rs` - deleted (uncompiled duplicate).
 - `crates/jcode-storage/src/active_pids.rs` - **unchanged**; gate 1 verified only.
 - `crates/jcode-base/src/session.rs` - **unchanged**; gate 1 verified only.
+
+## Cost of the change, and why it is not paid by default
+
+Gate 2 made `prune_active_session_files` measurably more expensive, and that
+function hangs off `record_tool_call`, `record_turn` and seven other hot
+recorders. Measuring rather than assuming (`prune_cost_per_call_is_reported`,
+an `#[ignore]`d developer benchmark, 8 markers, macOS):
+
+| Variant | Cost |
+| --- | --- |
+| full prune (post-F26) | ~1050 us/call |
+| mtime-only walk (pre-F26 shape) | ~155 us/call |
+| attribution: `read_to_string` | ~894 us |
+| attribution: `is_running` | ~7 us |
+
+So the change is ~7x more expensive per prune, and the liveness syscall is not
+the reason: the per-marker file read is. Absolute numbers are inflated by a
+sandboxed filesystem, so treat the ratio as the signal.
+
+This is not paid on a default install. Telemetry is opt-in in this fork, so
+`begin_session_with_mode` returns at `if !is_enabled()` before ever populating
+`SESSION_STATE`, and all nine recorders short-circuit on the `Some(..)` match.
+That invariant is now pinned by
+`concurrency_observation_is_unreachable_without_a_session`, which fails if
+someone later populates `SESSION_STATE` without an enablement check.
+
+If telemetry is enabled and the read cost ever matters, the fix is a bounded
+read of the first ~16 bytes rather than dropping liveness; a marker is at most
+`pid=4294967295`.
+
+## Full workspace test suite
+
+The first report listed "full workspace test suite not run" as a gap. It has
+now been run: `test --workspace --no-fail-fast` gives 172 suites green and one
+suite (`jcode --test auth_login_flow`) with 2 failures. Those two bind a local
+mock HTTP server on a fixed port and failed only because a second `cargo test`
+was running concurrently in this worktree; run alone at HEAD the suite is 7/7.
+No test anywhere depended on the deleted app-core duplicate or on the old
+mtime-only marker semantics.
