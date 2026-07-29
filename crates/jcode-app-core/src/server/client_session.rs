@@ -489,7 +489,7 @@ pub(super) async fn handle_subscribe(
     if let Some(ref dir) = subscribe_working_dir {
         super::client_session_contention::apply_and_announce_working_dir(
             agent,
-            &client_event_tx,
+            client_event_tx,
             client_session_id,
             client_connection_id,
             dir,
