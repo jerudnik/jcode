@@ -2,7 +2,7 @@
 
 Recorded: 2026-07-27
 
-Status: `waiting_for_distribution_handoff`
+Status: `active` (R07 governance barrier closed 2026-07-29; W4 in progress)
 
 This is the execution handoff for the selfdev coordinator after the active
 Nix-only distribution work is complete. It begins after that work merges; it

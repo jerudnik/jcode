@@ -840,3 +840,61 @@ enterprise plan, revisiting the `workflows`-rule external anchor is a new
 decision; if GitHub makes repository-level required-workflow rules generally
 available, the same. A false-durability finding in the R07 independent review
 reopens this trade-off rather than weakening the auditability controls.
+
+## D032. R07 executed: server-side governance is live, audited, and self-checking
+
+**Context.** R07 (W4R) was the post-distribution governance and durability
+barrier gating every remaining W4 node. Its design loop failed twice
+adversarially (v2: bootstrap race and unbound maintenance window; v3: untested
+GitHub API behavior around compare-API truncation, rename evasion, and rev-list
+floors) before design v4 passed with independent live reproduction. The Opus
+independent review of the integrated implementation found three executed
+blocking gaps (an unprotected comparator chain, a missing `docs/BRANCHING.md`
+CI-table row for `governance-root.yml`, and a `required_reviewers` manifest/live
+mismatch), all remediated and re-reviewed before any external write.
+
+**Decisions (record of what was executed 2026-07-29).**
+
+- Barrier 1 (durability): 39/39 refs pushed to the private
+  `jerudnik/jcode-recovery-archive` with exact SHA equality, giving the six
+  reflog-only commits (F17 through F20c) durable remote refs. User authorization
+  for the enumerated external writes preceded every push.
+- Barriers 2-3 (bootstrap): PR #39 proved the four required contexts
+  (`Governance Root`, `Fork CI Gate`, `Security Gate`, `Nix Gate`, all emitted
+  by GitHub Actions app 15368) and that `Governance Root` goes red on
+  governance-path changes by design. A CI-only gap was found and fixed: the
+  railway validator's `reviewed_commit` object-existence check cannot hold in
+  CI clones (reviewed objects are not ancestors of `main`), so the fork-ci
+  governance-contract job sets `JCODE_RAILWAY_ALLOW_MISSING_REVIEWED_OBJECTS=1`
+  to degrade only that check; strict validation still runs locally at
+  coordinator checkpoints.
+- Barrier 4 (apply): governance was applied in the strict design.md sequence:
+  ruleset 18509013 (`protect-fork-rails`) updated with `deletion`,
+  `non_fast_forward`, `pull_request` (merge commits only,
+  `required_reviewers: []` pinned, review-thread resolution), the four required
+  status checks, and empty bypass actors; ruleset 18509016
+  (`no-stray-branches`) bypass actors emptied; the repository restricted to
+  merge commits; classic branch protection deleted last. Live fork-health
+  comparison is green against `scripts/required-checks.json`.
+- Barrier 5 (proof): PR #40 demonstrated the gate is non-vacuous (a planted
+  comment-only change to `scripts/fork-health.sh` turned `Governance Root` red,
+  naming the path) and non-over-broad (a harmless change stayed green).
+- Barriers 6-7 (maintenance + closeout): PR #41 landed through the first
+  transaction-bound maintenance window (67 seconds, ruleset restored
+  canonical-hash identical, exactly one merge inside the window); PR #42 landed
+  with `Governance Root` correctly green on an evidence-only change.
+  `STATE.json` records R07 and W4R accepted (reviewed `69a6a6310`, published
+  `a545ecee4`).
+- Consequence for all future work: the 27 protected governance paths enumerated
+  in `docs/fork/ideal-base/evidence/R07/github-governance.proposed.json` are
+  self-checking. Changing any of them requires the transaction-bound
+  maintenance procedure in design.md section 4. The five ratchet baselines
+  (`code_size_budget.json`, `panic_budget.json`, `swallowed_error_budget.json`,
+  `test_size_budget.json`, `warning_budget.txt`) are deliberately unprotected
+  so quality-gate tightening never requires a maintenance window.
+
+**Reopen triggers.** An organization or enterprise migration (revisits D031's
+external-anchor trade-off); any GitHub ruleset or compare-API behavior change
+(the comparator pins current behavior and fork-health fails closed on drift); a
+false-durability finding in any future audit of the archive or the live
+rulesets.
