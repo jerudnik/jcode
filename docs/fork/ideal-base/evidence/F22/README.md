@@ -68,6 +68,8 @@ governed too (probe K).
 | `docs/SECURITY_DEPENDENCIES.md` | Rewritten and reconciled with reality | yes |
 | `.github/workflows/security.yml` | New `advisory ownership policy` job, wired into `Security Gate` | yes (protected path) |
 | `scripts/required-checks.json` | `advisory-policy` added to the Security Gate contract | no, PROTECTED (reported) |
+| `docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json` | Regenerated: embedded `security.yml` text was stale | no, PROTECTED (reported) |
+| `tests/test_governance_compare.py` | One fixture mutation anchor repinned (was a silent no-op) | no (reported) |
 | `scripts/preflight.sh` | Two new local gates | no (reported to coordinator) |
 | `docs/fork/SECURITY_TRIAGE.md` | De-designated as an enforcement surface | no (reported to coordinator) |
 
@@ -101,6 +103,25 @@ is flagged for the coordinator's maintenance window.
 `test_required_checks_manifest_lists_the_job` now asserts the manifest and the
 workflow agree, so the next person to add a job cannot repeat this. Probe N
 shows that test failing when the manifest fix is reverted.
+
+**And the mirror image, which the fix itself created (probe O).** Making live
+mode green broke *fixture* mode: `tests/test_governance_compare.py`, run by
+`fork-ci.yml:316`, compares against an embedded snapshot of the workflow text
+in `evidence/R07/fixtures/governance-valid.json`. Five of its 74 tests failed
+until the fixture was regenerated with the supported generator. This is the
+same class of defect in the opposite direction, and it is why "the manifest"
+is really three artifacts that must move together: the workflow, the manifest,
+and the fixture.
+
+Regenerating left one failure that turned out to be a **vacuous test**, not a
+real one. `test_summary_dependency_added` mutated the fixture with
+`.replace()` on the old `needs:` string; once that string changed, the replace
+matched nothing, the snapshot went through unmutated, and the test asserted a
+rejection that could no longer occur. It was pinned with an `assertIn` so a
+future no-op fails loudly, and every other `.replace()` anchor in the file was
+swept against the fixture text to confirm no others were silently dead.
+
+Both files are protected paths and are reported.
 
 ### Blocker 2 — the checker was vacuous for the surface CI executes
 
@@ -166,6 +187,8 @@ date, mutates the tree, observes the verdict, and restores. Summary:
 | K | `severity_threshold = "critical"`, no record | 2026-07-29 | **1** | `has no [severity_threshold] record` |
 | L | restored | 2026-07-29 | **0** | `advisory policy: OK as of 2026-07-29` |
 | N | manifest fix reverted | n/a | **1** → **0** | guarding test red, then green |
+| O | manifest fixed, fixture stale | n/a | **5 fail** → **OK** | `test_governance_compare` 74 tests |
+| P | fixture and live modes | n/a | **0** / **0** | both match the manifest |
 
 A, F, and L bracket every red probe, so the greens are not an artifact of a
 broken checker and the reds are not residue. Note B and A are the *same tree*:

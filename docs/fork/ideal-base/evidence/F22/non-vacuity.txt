@@ -127,3 +127,41 @@ FAILED (failures=1)
 Ran 1 test in 0.003s
 
 OK
+
+===== O. the OTHER direction of blocker 1: fixture mode =====
+Fixing the manifest for live mode broke fixture mode, which is the
+mirror image of the same defect. tests/test_governance_compare.py is
+run by fork-ci.yml:316 against an embedded snapshot of the workflow
+text, so a manifest/workflow change must be reflected there too.
+
+-- before regenerating the fixture --
+FAIL: 'Security Gate' summary dependencies are [... no advisory-policy ...];
+      manifest requires ['advisory-policy', ...]
+FAIL: 'Security Gate' declares dependency 'advisory-policy' but never reads
+      needs.advisory-policy.result  -> 5 failures / 74 tests
+
+$ python3 scripts/generate_governance_fixture.py --workflows-dir .github/workflows
+wrote docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json  (1 line changed)
+
+That left one failure, and it was a vacuous test rather than a real one:
+test_summary_dependency_added mutated the fixture with .replace() on the
+OLD needs: string, so after the change the replace matched nothing, the
+snapshot was unmutated, and the test asserted a rejection that could not
+happen. Anchor pinned with an assertIn so a future no-op fails loudly.
+
+$ python3 -m unittest tests.test_governance_compare
+Ran 74 tests in 97.511s
+
+OK
+
+-- swept for the same defect across the file --
+Every .replace() anchor in tests/test_governance_compare.py was checked
+against the fixture workflow text; no other silent no-ops exist.
+
+===== P. both governance modes agree =====
+$ governance_compare --snapshot <fixture>
+=== Governance: snapshot matches the manifest ===
+[exit=0]
+$ governance_compare --live
+=== Governance: snapshot matches the manifest ===
+[exit=0]
