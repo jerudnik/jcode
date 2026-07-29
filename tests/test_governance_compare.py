@@ -821,15 +821,17 @@ class LiveModeTests(unittest.TestCase):
         self.assertEqual(result.returncode, EXIT_OK, f"valid live surface was rejected:\n{output}")
         self.assertIn("matches the manifest", result.stdout)
 
-    def test_live_mode_rejects_the_repositorys_current_unpatched_workflows(self) -> None:
-        # Sanity check on the test above: pointed at this repository's actual
-        # workflow directory, which does not yet carry the four required-context
-        # jobs, live mode must go red. Otherwise the green result above would be
-        # explained by the workflow contract check doing nothing.
+    def test_live_mode_accepts_the_repositorys_patched_workflows(self) -> None:
+        # Post-bootstrap counterpart of the pre-bootstrap sanity check (which
+        # asserted the unpatched workflows went red): now that the authorized
+        # workflow diff is applied, this repository's actual workflow
+        # directory carries the four required-context jobs and live mode must
+        # go green. If a future edit removes a required-context job, this goes
+        # red again, so the workflow contract check stays load-bearing.
         result = self.run_live(self.build_table())
         output = result.stdout + result.stderr
-        self.assertEqual(result.returncode, EXIT_MISMATCH, output)
-        self.assertIn("has no job definition", output)
+        self.assertEqual(result.returncode, EXIT_OK, output)
+        self.assertIn("matches the manifest", result.stdout)
 
     def test_missing_gh_is_exit_two(self) -> None:
         result = self.run_live(self.build_table(), on_path=False)

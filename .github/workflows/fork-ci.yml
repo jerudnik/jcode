@@ -293,6 +293,14 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # CI clones cannot contain the reviewed objects cited by STATE.json:
+      # they are not ancestors of main; they live in local object stores and,
+      # after R07 barrier 1, in the private recovery-archive repo. This opt-in
+      # degrades only the reviewed-object existence check to a NOTE; every
+      # other railway check stays strict, and existence is anchored by barrier
+      # 1's fresh-fetch remote verification plus strict local validation.
+      JCODE_RAILWAY_ALLOW_MISSING_REVIEWED_OBJECTS: "1"
     steps:
       - uses: actions/checkout@v4
         with:

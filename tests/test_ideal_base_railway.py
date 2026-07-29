@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+from unittest import mock
 import subprocess
 import tempfile
 import unittest
@@ -263,6 +265,59 @@ class SchemaV2ValidatorTests(unittest.TestCase):
         state["nodes"]["W0"]["reviewed_commit"] = self.head[:10]
         with self.assertRaisesRegex(railway.RailwayError, "40-hex"):
             railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
+
+    def test_missing_reviewed_object_lenient_mode(self) -> None:
+        """CI clones cannot hold the reviewed objects (they are not ancestors
+        of main). The explicit lenient env var degrades only the reviewed
+        existence check to a NOTE; strict mode (the default) still raises."""
+        missing = "1" * 40  # well-formed full SHA, not present in this repo
+        self.assertFalse(railway.git_commit_object_exists(missing))
+
+        def accepted_state() -> dict:
+            state = self.minimal_state()
+            state["nodes"]["W0"].update(
+                {
+                    "state": "accepted",
+                    "reviewed_commit": missing,
+                    "published_commit": self.BASELINE_MAIN,
+                    "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+                }
+            )
+            return state
+
+        # Default (strict): the missing object is an error.
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(railway.MISSING_REVIEWED_OBJECTS_ENV, None)
+            with self.assertRaisesRegex(
+                railway.RailwayError, "reviewed_commit object does not exist"
+            ):
+                railway.validate_state(
+                    accepted_state(), self.nodes, published_ref=self.BASELINE_MAIN
+                )
+
+        # Lenient opt-in: same state validates, and the published-side checks
+        # (existence + ancestry) still ran strictly, proving only step 1 was
+        # degraded.
+        with mock.patch.dict(
+            os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}
+        ):
+            railway.validate_state(
+                accepted_state(), self.nodes, published_ref=self.BASELINE_MAIN
+            )
+
+        # Lenient mode never rescues a fabricated published_commit: that
+        # existence check is not covered by the opt-in.
+        fabricated = accepted_state()
+        fabricated["nodes"]["W0"]["published_commit"] = missing
+        with mock.patch.dict(
+            os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}
+        ):
+            with self.assertRaisesRegex(
+                railway.RailwayError, "published_commit object does not exist"
+            ):
+                railway.validate_state(
+                    fabricated, self.nodes, published_ref=self.BASELINE_MAIN
+                )
 
     def test_object_existence_is_never_reachability(self) -> None:
         """Existence of the reviewed commit is not enough; ancestry is checked separately."""
