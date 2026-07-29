@@ -1,8 +1,8 @@
 {
-  "total": 3032,
+  "total": 3035,
   "totals_by_pattern": {
-    "dot_ok": 1106,
-    "let_underscore": 1120,
+    "dot_ok": 1108,
+    "let_underscore": 1121,
     "unwrap_or_default": 806
   },
   "tracked_files": {
@@ -182,8 +182,13 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-app-core/src/server/client_session.rs": {
+      "let_underscore": 14,
       "dot_ok": 4,
-      "let_underscore": 15,
+      "unwrap_or_default": 0
+    },
+    "crates/jcode-app-core/src/server/client_session_contention.rs": {
+      "let_underscore": 2,
+      "dot_ok": 0,
       "unwrap_or_default": 0
     },
     "crates/jcode-app-core/src/server/client_state.rs": {
@@ -1677,8 +1682,8 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-telemetry-core/src/state_support.rs": {
-      "dot_ok": 17,
       "let_underscore": 7,
+      "dot_ok": 19,
       "unwrap_or_default": 0
     },
     "crates/jcode-terminal-launch/src/lib.rs": {

@@ -3,7 +3,8 @@
 use super::socket::sibling_socket_path;
 #[cfg(unix)]
 use super::socket::{
-    daemon_lock_path, server_start_matches_existing_server, try_acquire_daemon_lock,
+    daemon_lock_path, detach_into_new_session, server_start_matches_existing_server,
+    try_acquire_daemon_lock,
 };
 use super::{
     ReloadPhase, ReloadState, ReloadWaitStatus, await_reload_handoff, cleanup_socket_pair,
@@ -555,4 +556,53 @@ async fn await_reload_handoff_returns_failed_after_marker_transition() {
     } else {
         crate::env::remove_var("JCODE_RUNTIME_DIR");
     }
+}
+
+/// The daemon must detach into its own session, and a `setsid()` that fails
+/// must abort the spawn instead of quietly leaving the server in the caller's
+/// process group (where later `kill(-pid, ...)` shutdowns report ESRCH).
+#[cfg(unix)]
+#[test]
+fn detach_into_new_session_failure_aborts_spawn() {
+    use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    // Happy path: the child leads its own process group, so a process-group
+    // signal can still reach helper descendants it spawns.
+    let mut ok_cmd = Command::new("/bin/sleep");
+    ok_cmd.arg("30").stdout(Stdio::null()).stderr(Stdio::null());
+    unsafe {
+        ok_cmd.pre_exec(detach_into_new_session);
+    }
+    let mut child = ok_cmd.spawn().expect("detaching spawn should succeed");
+    let child_pid = child.id();
+    assert_eq!(
+        unsafe { libc::getpgid(child_pid as i32) },
+        child_pid as i32,
+        "detached child should lead its own process group"
+    );
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // Failure path: `setsid()` returns EPERM for a process that already leads a
+    // group, so the first call wins and the second must fail the spawn.
+    let mut failing_cmd = Command::new("/bin/sleep");
+    failing_cmd
+        .arg("30")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    unsafe {
+        failing_cmd.pre_exec(|| {
+            detach_into_new_session()?;
+            detach_into_new_session()
+        });
+    }
+    let err = failing_cmd
+        .spawn()
+        .expect_err("a failed setsid() must surface as a spawn error");
+    assert_eq!(
+        err.raw_os_error(),
+        Some(libc::EPERM),
+        "spawn error should carry the setsid() errno, got {err}"
+    );
 }

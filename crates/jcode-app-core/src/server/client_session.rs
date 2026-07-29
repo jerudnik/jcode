@@ -487,9 +487,14 @@ pub(super) async fn handle_subscribe(
     }
 
     if let Some(ref dir) = subscribe_working_dir {
-        let mut agent_guard = agent.lock().await;
-        agent_guard.set_working_dir(dir);
-        drop(agent_guard);
+        super::client_session_contention::apply_and_announce_working_dir(
+            agent,
+            client_event_tx,
+            client_session_id,
+            client_connection_id,
+            dir,
+        )
+        .await;
 
         let new_path = PathBuf::from(dir);
         let new_swarm_id = subscribe_swarm_id_for_working_dir(
@@ -1022,34 +1027,26 @@ pub(super) async fn handle_resume_session(
     if let Some(live_target_agent) = live_target_agent.as_ref() {
         let old_session_id = client_session_id.clone();
 
-        let conflicting_live_client = {
-            let connections = client_connections.read().await;
-            connections
-                .values()
-                .find(|info| {
-                    info.client_id != client_connection_id && info.session_id == session_id
-                })
-                .cloned()
-        };
         let live_target_busy = live_target_agent.try_lock().is_err();
-        crate::logging::info(&format!(
-            "Resume attach to existing live session {} from temporary {} on connection {}: live_target_busy={}, conflict_owner={}, conflict_processing={}, allow_takeover={}, local_history={}, incoming_instance={:?}",
-            session_id,
-            old_session_id,
-            client_connection_id,
-            live_target_busy,
-            conflicting_live_client
-                .as_ref()
-                .map(|info| info.client_id.as_str())
-                .unwrap_or("<none>"),
-            conflicting_live_client
-                .as_ref()
-                .map(|info| info.is_processing)
-                .unwrap_or(false),
-            allow_session_takeover,
-            client_has_local_history,
-            incoming_client_instance_id
-        ));
+        let conflicting_live_client =
+            super::client_session_contention::find_conflicting_live_client(
+                client_connections,
+                client_connection_id,
+                &session_id,
+            )
+            .await;
+        super::client_session_contention::log_resume_attach(
+            super::client_session_contention::ResumeAttachDiagnostics {
+                session_id: &session_id,
+                old_session_id: &old_session_id,
+                client_connection_id,
+                live_target_busy,
+                conflict: conflicting_live_client.as_ref(),
+                allow_session_takeover,
+                client_has_local_history,
+                incoming_client_instance_id: incoming_client_instance_id.as_deref(),
+            },
+        );
 
         cleanup_detached_source_session_if_unused(
             &old_session_id,
@@ -1067,66 +1064,19 @@ pub(super) async fn handle_resume_session(
         )
         .await;
 
-        if let Some(conflict) = conflicting_live_client {
-            let incoming_instance_id = incoming_client_instance_id.as_deref();
-            let existing_instance_id = conflict.client_instance_id.as_deref();
-            let distinct_client_instances = incoming_instance_id
-                .zip(existing_instance_id)
-                .map(|(incoming, existing)| incoming != existing)
-                .unwrap_or(false);
-            let can_take_over_live_session =
-                allow_session_takeover && client_has_local_history && !distinct_client_instances;
-
-            if can_take_over_live_session {
-                let (disconnect_tx, debug_client_id, transferred_processing, transferred_tool_name) = {
-                    let mut connections = client_connections.write().await;
-                    let removed = connections.remove(&conflict.client_id);
-                    if let Some(info) = removed {
-                        (
-                            Some(info.disconnect_tx),
-                            info.debug_client_id,
-                            info.is_processing,
-                            info.current_tool_name,
-                        )
-                    } else {
-                        (
-                            None,
-                            conflict.debug_client_id,
-                            conflict.is_processing,
-                            conflict.current_tool_name,
-                        )
-                    }
-                };
-                if transferred_processing {
-                    crate::logging::warn(&format!(
-                        "Taking over live session {} from {} while old owner reports processing; new connection receives status/tool metadata but not the old processing task handle",
-                        session_id, conflict.client_id
-                    ));
-                } else {
-                    crate::logging::info(&format!(
-                        "Taking over live session {} from idle owner {}",
-                        session_id, conflict.client_id
-                    ));
-                }
-
-                {
-                    let mut connections = client_connections.write().await;
-                    if let Some(info) = connections.get_mut(client_connection_id) {
-                        info.is_processing = transferred_processing;
-                        info.current_tool_name = transferred_tool_name;
-                    }
-                }
-
-                if let Some(debug_client_id) = debug_client_id.as_deref() {
-                    let mut debug_state = client_debug_state.write().await;
-                    debug_state.unregister(debug_client_id);
-                }
-
-                if let Some(disconnect_tx) = disconnect_tx {
-                    let _ = disconnect_tx.send(());
-                }
-            }
-        }
+        let dual_attach_conflict = super::client_session_contention::resolve_live_session_takeover(
+            super::client_session_contention::TakeoverRequest {
+                conflict: conflicting_live_client,
+                session_id: &session_id,
+                client_connections,
+                client_connection_id,
+                client_debug_state,
+                allow_session_takeover,
+                client_has_local_history,
+                incoming_client_instance_id: incoming_client_instance_id.as_deref(),
+            },
+        )
+        .await;
 
         register_session_event_sender(
             swarm_members,
@@ -1135,6 +1085,17 @@ pub(super) async fn handle_resume_session(
             client_event_tx.clone(),
         )
         .await;
+
+        // Refused takeover leaves two clients attached; see warn_dual_attach.
+        if let Some(conflict) = dual_attach_conflict {
+            super::client_session_contention::warn_dual_attach(
+                swarm_members,
+                &session_id,
+                client_connection_id,
+                &conflict,
+            )
+            .await;
+        }
 
         let is_canary = live_target_agent
             .try_lock()

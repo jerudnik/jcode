@@ -1038,3 +1038,46 @@ async fn server_command_client_subscribes_with_working_dir_before_stateful_reque
         .expect("connect subscribed client");
     server.await.expect("server task");
 }
+
+/// `server stop` must not describe an individual-process signal as if it had
+/// reached the whole process group; the sticky-server report was a case where
+/// the reported outcome and the real one diverged.
+#[cfg(unix)]
+#[test]
+fn signal_stage_detail_distinguishes_group_from_individual() {
+    use crate::platform::SignalScope;
+
+    let group = signal_stage_detail("SIGTERM", 4321, &Ok(SignalScope::ProcessGroup));
+    assert!(group.contains("SIGTERM"), "{group}");
+    assert!(group.contains("4321"), "{group}");
+    assert!(group.contains("process group"), "{group}");
+
+    let individual = signal_stage_detail("SIGKILL", 4321, &Ok(SignalScope::IndividualProcess));
+    assert!(individual.contains("SIGKILL"), "{individual}");
+    assert!(individual.contains("4321"), "{individual}");
+    assert!(
+        individual.contains("leads no process group"),
+        "the fallback must say the group was not reached: {individual}"
+    );
+    assert!(
+        individual.contains("descendants were not signalled"),
+        "the fallback must say descendants were missed: {individual}"
+    );
+}
+
+/// The SIGKILL escalation used to discard its result with `let _ =`, so a
+/// failed force-kill was reported as a clean stop. The error must reach the
+/// operator-visible detail string.
+#[cfg(unix)]
+#[test]
+fn signal_stage_detail_surfaces_signal_failure() {
+    let err = std::io::Error::from_raw_os_error(libc::EPERM);
+    let detail = signal_stage_detail("SIGKILL", 4321, &Err(err));
+    assert!(detail.contains("Failed"), "{detail}");
+    assert!(detail.contains("SIGKILL"), "{detail}");
+    assert!(detail.contains("4321"), "{detail}");
+    assert!(
+        !detail.contains("Sent SIGKILL"),
+        "a failed signal must not read as a delivered one: {detail}"
+    );
+}

@@ -2236,6 +2236,25 @@ pub async fn run_server_reload_command(force: bool, emit_json: bool) -> Result<(
     })
 }
 
+/// Report which processes a stop-stage signal reached; the narrower fallback
+/// stays explicit because helper descendants then survive the signal.
+#[cfg(unix)]
+fn signal_stage_detail(
+    signal: &str,
+    pid: u32,
+    outcome: &std::io::Result<crate::platform::SignalScope>,
+) -> String {
+    use crate::platform::SignalScope;
+    match outcome {
+        Ok(SignalScope::ProcessGroup) => format!("Sent {signal} to process group {pid}."),
+        Ok(SignalScope::IndividualProcess) => format!(
+            "Sent {signal} to jcode server process {pid} only; it leads no process group, \
+so any helper descendants were not signalled."
+        ),
+        Err(e) => format!("Failed to send {signal} to jcode server (pid {pid}): {e}"),
+    }
+}
+
 /// Stop the running background server gracefully and clear its socket.
 ///
 /// Intended for use after an upgrade so the next launch starts the freshly
@@ -2285,36 +2304,28 @@ Re-run with `--force` if you really want to stop the server.";
 
     let mut signaled_pid: Option<u32> = None;
     let mut stopped = false;
-    let detail: String;
+    let mut detail: String;
 
     if let Some(info) = server_info.as_ref() {
         let pid = info.pid;
         if crate::platform::is_process_running(pid) {
             #[cfg(unix)]
             {
-                // The daemon spawns detached with setsid(), so it leads its own
-                // process group. Signal the group so any helper children exit too.
-                match crate::platform::signal_detached_process_group(pid, libc::SIGTERM) {
-                    Ok(()) => {
-                        signaled_pid = Some(pid);
-                        detail = format!("Sent SIGTERM to jcode server (pid {pid}).");
-                    }
-                    Err(e) => {
-                        detail = format!("Failed to signal jcode server (pid {pid}): {e}");
-                    }
-                }
+                // Prefer the process group so helper children exit with the
+                // daemon; a server that never became a leader is reached by the
+                // individual-process fallback, which reports its narrower scope.
+                let outcome = crate::platform::signal_detached_process_tree(pid, libc::SIGTERM);
+                signaled_pid = outcome.is_ok().then_some(pid);
+                detail = signal_stage_detail("SIGTERM", pid, &outcome);
             }
             #[cfg(not(unix))]
             {
-                match crate::platform::signal_detached_process_group(pid, 0) {
-                    Ok(()) => {
-                        signaled_pid = Some(pid);
-                        detail = format!("Terminated jcode server (pid {pid}).");
-                    }
-                    Err(e) => {
-                        detail = format!("Failed to terminate jcode server (pid {pid}): {e}");
-                    }
-                }
+                let outcome = crate::platform::signal_detached_process_tree(pid, 0);
+                signaled_pid = outcome.is_ok().then_some(pid);
+                detail = match outcome {
+                    Ok(_) => format!("Terminated jcode server (pid {pid})."),
+                    Err(e) => format!("Failed to terminate jcode server (pid {pid}): {e}"),
+                };
             }
         } else {
             detail = format!("Registered jcode server (pid {pid}) is not running.");
@@ -2353,7 +2364,9 @@ Re-run with `--force` if you really want to stop the server.";
                 && let Some(pid) = signaled_pid
                 && crate::platform::is_process_running(pid)
             {
-                let _ = crate::platform::signal_detached_process_group(pid, libc::SIGKILL);
+                let outcome = crate::platform::signal_detached_process_tree(pid, libc::SIGKILL);
+                detail.push(' ');
+                detail.push_str(&signal_stage_detail("SIGKILL", pid, &outcome));
                 escalated = true;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;

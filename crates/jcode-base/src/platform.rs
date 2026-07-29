@@ -312,6 +312,78 @@ pub fn signal_detached_process_group(pid: u32, signal: i32) -> std::io::Result<(
     }
 }
 
+/// Which granularity a [`signal_detached_process_tree`] call actually reached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalScope {
+    /// The signal reached the whole process group led by the target PID.
+    ProcessGroup,
+    /// No process group is led by the target PID, so only the individual
+    /// process was signalled. Descendants it spawned are not covered.
+    IndividualProcess,
+}
+
+/// Whether a failed process-group signal may fall back to the individual PID.
+///
+/// Only `ESRCH` is a fallback candidate: it is what the kernel reports when no
+/// process group is led by the target PID, which happens when the process never
+/// became a group leader (e.g. a failed `setsid()`). `EPERM` and every other
+/// error describe a real failure to signal and must be surfaced, never silently
+/// downgraded to a narrower signal.
+#[cfg(unix)]
+fn group_signal_may_fall_back(err: &std::io::Error) -> bool {
+    err.raw_os_error() == Some(libc::ESRCH)
+}
+
+/// Signal a detached process tree, preferring the process group.
+///
+/// The group signal is tried first so helper descendants of a correctly
+/// detached (session-leading) process terminate with it. If the kernel reports
+/// `ESRCH` for the group while the PID itself is still alive, the process never
+/// became a group leader; the individual process is signalled instead and the
+/// returned [`SignalScope`] records that narrower reach so callers can report it
+/// truthfully. Any other error, including `EPERM`, is returned unchanged.
+pub fn signal_detached_process_tree(pid: u32, signal: i32) -> std::io::Result<SignalScope> {
+    #[cfg(unix)]
+    {
+        // `kill(-1, ...)` broadcasts to every process this user may signal, and
+        // `kill(0, ...)` targets our own group. Neither is ever a detached tree.
+        if pid <= 1 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("refusing to signal process tree for pid {pid}"),
+            ));
+        }
+
+        match signal_detached_process_group(pid, signal) {
+            Ok(()) => Ok(SignalScope::ProcessGroup),
+            Err(e) if group_signal_may_fall_back(&e) && is_process_running(pid) => {
+                let rc = unsafe { libc::kill(pid as i32, signal) };
+                if rc == 0 {
+                    Ok(SignalScope::IndividualProcess)
+                } else {
+                    // Name both failures: the absent process group and the
+                    // direct signal that was tried instead. A surfaced group
+                    // error stays a bare OS error so callers can still match on
+                    // its errno.
+                    let direct = std::io::Error::last_os_error();
+                    Err(std::io::Error::new(
+                        direct.kind(),
+                        format!(
+                            "no process group led by pid {pid}; signalling the process directly failed: {direct}"
+                        ),
+                    ))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+    #[cfg(windows)]
+    {
+        // Windows termination already walks the process tree by handle.
+        signal_detached_process_group(pid, signal).map(|()| SignalScope::ProcessGroup)
+    }
+}
+
 /// Best-effort non-blocking reap for a child process owned by the current process.
 ///
 /// Returns:

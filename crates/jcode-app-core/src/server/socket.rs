@@ -219,6 +219,21 @@ pub fn set_socket_path(path: &str) {
     crate::env::set_var("JCODE_SOCKET", path);
 }
 
+/// Detach the calling process into a fresh session, failing loudly.
+///
+/// Runs inside `pre_exec`, so returning an error aborts the spawn instead of
+/// letting the daemon start in the caller's inherited process group. That
+/// inherited-group case is not benign: the daemon's PID is then not a process
+/// group ID, so later `kill(-pid, ...)` shutdown attempts report `ESRCH` for a
+/// server that is very much alive.
+#[cfg(unix)]
+pub(super) fn detach_into_new_session() -> std::io::Result<()> {
+    if unsafe { libc::setsid() } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 /// Spawn a server child process and wait until it signals readiness.
 ///
 /// Creates an anonymous pipe, passes the write-end fd to the child via
@@ -259,8 +274,7 @@ pub async fn spawn_server_notify(cmd: &mut std::process::Command) -> Result<std:
             if flags >= 0 {
                 libc::fcntl(write_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC);
             }
-            libc::setsid();
-            Ok(())
+            detach_into_new_session()
         });
     }
     cmd.env("JCODE_READY_FD", write_fd.to_string());
