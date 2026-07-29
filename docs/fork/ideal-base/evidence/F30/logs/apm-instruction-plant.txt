@@ -1,0 +1,10 @@
+old len 187 new len 163
+=== check_agent_instructions ===
+agent-instructions: warning: prompt budget has less than 256 bytes free: 8146/8192 bytes
+agent-instructions: ok (projected=8146/8192)
+=== policy gate ===
+..... [ 55%]
+....              [100%]
+9 passed, 11858 subtests passed in 12.05s
+=== reverted ===
+?? docs/fork/ideal-base/evidence/F30/
