@@ -57,18 +57,36 @@ pub(super) async fn apply_and_announce_working_dir(
             ("new_working_dir", new_dir.to_string()),
         ],
     );
-    let _ = client_event_tx.send(ServerEvent::Notification {
-        from_session: client_session_id.to_string(),
-        from_name: None,
-        notification_type: NotificationType::Message {
-            scope: None,
-            tldr: None,
-        },
-        message: format!(
-            "⚠ Session working directory changed on reconnect: {} → {}. Relative paths and swarm identity now resolve against the new directory.",
-            previous, new_dir
-        ),
-    });
+    if client_event_tx
+        .send(ServerEvent::Notification {
+            from_session: client_session_id.to_string(),
+            from_name: None,
+            notification_type: NotificationType::Message {
+                scope: None,
+                tldr: None,
+            },
+            message: format!(
+                "⚠ Session working directory changed on reconnect: {} → {}. Relative paths and swarm identity now resolve against the new directory.",
+                previous, new_dir
+            ),
+        })
+        .is_err()
+    {
+        // The notification is the only user-visible trace of this move; the
+        // warn above goes to the log, not the client. If delivery fails the
+        // client is already gone, so record that the trace was lost rather
+        // than reproducing the silent move this function exists to prevent.
+        crate::logging::event_warn(
+            "SESSION_LIFECYCLE",
+            vec![
+                ("phase", "subscribe_working_dir_notify_failed".to_string()),
+                ("session_id", client_session_id.to_string()),
+                ("client_connection_id", client_connection_id.to_string()),
+                ("previous_working_dir", previous.to_string()),
+                ("new_working_dir", new_dir.to_string()),
+            ],
+        );
+    }
 }
 
 /// Warn both clients that a refused takeover left two of them on one session.
