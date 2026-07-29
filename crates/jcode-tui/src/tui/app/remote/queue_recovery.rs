@@ -203,9 +203,183 @@ pub(super) async fn recover_stranded_soft_interrupts(
     ));
     app.pending_soft_interrupt_requests.clear();
 
-    let mut recovered_queue = recovered_interrupts;
+    // Recovery must never introduce a *copy* of a message that is already
+    // waiting in the queue. Under multi-client contention the same turn can be
+    // interrupted repeatedly (each client's stall guard cancels the other's
+    // turn), and each interrupt re-runs this recovery over soft interrupts that
+    // were already recovered into `queued_messages` but not yet dispatched.
+    // Blindly prepending them replays one user message N times (18x observed in
+    // the 2026-07-20 multi-client incident).
+    //
+    // This dedups on *recovery provenance only*: a recovered interrupt is
+    // dropped solely because an identical copy is already queued. Messages the
+    // user genuinely typed twice are pushed onto `queued_messages` directly by
+    // the input path and are never filtered here, so intentional repeats still
+    // deliver twice.
+    let already_queued = app.queued_messages.clone();
+    let mut recovered_queue: Vec<String> = Vec::with_capacity(recovered_interrupts.len());
+    let mut dropped = 0usize;
+    for interrupt in recovered_interrupts {
+        let duplicate_of_queued = already_queued.contains(&interrupt);
+        let duplicate_of_recovered = recovered_queue.contains(&interrupt);
+        if duplicate_of_queued || duplicate_of_recovered {
+            dropped += 1;
+            crate::logging::info(&format!(
+                "REMOTE_SOFT_INTERRUPT_RECOVERY_DEDUP content_chars={} already_queued={} already_recovered={}",
+                interrupt.chars().count(),
+                duplicate_of_queued,
+                duplicate_of_recovered
+            ));
+            continue;
+        }
+        recovered_queue.push(interrupt);
+    }
+    if dropped > 0 {
+        crate::logging::warn(&format!(
+            "Dropped {} duplicate stranded soft interrupt(s) during recovery; {} queued",
+            dropped,
+            recovered_queue.len()
+        ));
+    }
     recovered_queue.append(&mut app.queued_messages);
     app.queued_messages = recovered_queue;
     app.set_status_notice("Recovered queued interleave after turn finished");
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::provider::Provider;
+    use std::sync::Arc;
+
+    struct MockProvider;
+
+    #[async_trait::async_trait]
+    impl Provider for MockProvider {
+        async fn complete(
+            &self,
+            _messages: &[crate::message::Message],
+            _tools: &[crate::message::ToolDefinition],
+            _system: &str,
+            _resume_session_id: Option<&str>,
+        ) -> anyhow::Result<crate::provider::EventStream> {
+            Err(anyhow::anyhow!(
+                "mock provider must not stream in queue recovery tests"
+            ))
+        }
+
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        fn fork(&self) -> Arc<dyn Provider> {
+            Arc::new(Self)
+        }
+    }
+
+    fn test_app() -> crate::tui::app::App {
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+        crate::tui::app::test_support::create_test_app_with(provider, |app| {
+            app.queue_mode = false;
+            app.onboarding_flow = None;
+        })
+    }
+
+    /// R05 gate: "N identical queued user messages deliver once, not N times."
+    ///
+    /// Under multi-client contention the same turn is interrupted repeatedly,
+    /// and each interrupt re-runs stranded-soft-interrupt recovery over content
+    /// that a previous recovery already placed on `queued_messages`. Recovery
+    /// must not append another copy (18x replay observed in the 2026-07-20
+    /// incident); the message is delivered once at the turn boundary.
+    #[test]
+    fn recovery_does_not_requeue_a_message_already_queued() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _guard = rt.enter();
+        let mut app = test_app();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+
+        // A prior recovery already moved this content onto the queue.
+        app.queued_messages = vec!["retry the failing test".to_string()];
+        // The same content is still tracked as a stranded soft interrupt, as it
+        // is after a cancel that raced the server-side ack.
+        app.pending_soft_interrupts = vec!["retry the failing test".to_string()];
+        app.is_processing = false;
+
+        let recovered = rt.block_on(super::recover_stranded_soft_interrupts(
+            &mut app,
+            &mut remote,
+        ));
+
+        assert!(
+            recovered,
+            "recovery should run and consume the stranded item"
+        );
+        assert_eq!(
+            app.queued_messages,
+            vec!["retry the failing test".to_string()],
+            "recovery must not add a second copy of an already-queued message"
+        );
+        assert!(
+            app.pending_soft_interrupts.is_empty(),
+            "stranded tracking must be drained"
+        );
+    }
+
+    /// Repeated interrupts must converge, not accumulate: running recovery many
+    /// times over the same content yields exactly one queued copy.
+    #[test]
+    fn repeated_recovery_cycles_do_not_accumulate_duplicates() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _guard = rt.enter();
+        let mut app = test_app();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        app.is_processing = false;
+
+        for _ in 0..18 {
+            app.pending_soft_interrupts = vec!["keep going".to_string()];
+            let _ = rt.block_on(super::recover_stranded_soft_interrupts(
+                &mut app,
+                &mut remote,
+            ));
+        }
+
+        assert_eq!(
+            app.queued_messages,
+            vec!["keep going".to_string()],
+            "18 recovery cycles must leave exactly one copy queued"
+        );
+    }
+
+    /// The collapse keys on recovery provenance only. A message the user
+    /// genuinely typed twice is pushed onto `queued_messages` by the input
+    /// path, never filtered here, so intentional repeats still deliver twice.
+    #[test]
+    fn user_typed_duplicates_are_not_collapsed() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _guard = rt.enter();
+        let mut app = test_app();
+        let mut remote = crate::tui::backend::RemoteConnection::dummy();
+        app.is_processing = false;
+
+        // The user deliberately queued the same prompt twice.
+        app.queued_messages = vec!["ping".to_string(), "ping".to_string()];
+        // An unrelated stranded interrupt triggers a recovery pass.
+        app.pending_soft_interrupts = vec!["and then stop".to_string()];
+
+        let _ = rt.block_on(super::recover_stranded_soft_interrupts(
+            &mut app,
+            &mut remote,
+        ));
+
+        assert_eq!(
+            app.queued_messages,
+            vec![
+                "and then stop".to_string(),
+                "ping".to_string(),
+                "ping".to_string()
+            ],
+            "recovery must not collapse messages the user intentionally repeated"
+        );
+    }
 }
