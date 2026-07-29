@@ -219,10 +219,26 @@ async fn stale_reap_sidecar_matrix_removes_only_after_listener_lock_listener_pro
     let _guard = crate::storage::lock_test_env();
     let temp = tempfile::tempdir().expect("tempdir");
     let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
+    let prev_home = std::env::var_os("JCODE_HOME");
     crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::env::set_var("JCODE_HOME", temp.path().join("home"));
 
     let socket = temp.path().join("jcode.sock");
     let stale_entries = write_endpoint_sidecars(&socket);
+    let mut registry = crate::registry::ServerRegistry::default();
+    registry.register(crate::registry::ServerInfo {
+        id: "server-stale-f25".to_string(),
+        name: "stale-f25".to_string(),
+        icon: "x".to_string(),
+        socket: socket.clone(),
+        debug_socket: endpoint_artifacts(&socket).debug_socket,
+        git_hash: "dead".to_string(),
+        version: "test".to_string(),
+        pid: u32::MAX,
+        started_at: "1970-01-01T00:00:00Z".to_string(),
+        sessions: Vec::new(),
+    });
+    registry.save().await.expect("seed stale registry entry");
     assert!(
         reap_stale_socket_if_dead(&socket).await,
         "dead listener + free lock should reap"
@@ -234,6 +250,13 @@ async fn stale_reap_sidecar_matrix_removes_only_after_listener_lock_listener_pro
             path.display()
         );
     }
+    let registry = crate::registry::ServerRegistry::load()
+        .await
+        .expect("reload registry after stale reap");
+    assert!(
+        registry.find_by_name("stale-f25").is_none(),
+        "stale ownership proof must also remove the dead registry entry"
+    );
 
     let live_entries = write_endpoint_metadata_sidecars(&socket);
     let listener = Listener::bind(&socket).expect("bind live listener");
@@ -276,6 +299,11 @@ async fn stale_reap_sidecar_matrix_removes_only_after_listener_lock_listener_pro
         "reload must preserve server metadata"
     );
 
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
     restore_runtime(prev_runtime);
 }
 

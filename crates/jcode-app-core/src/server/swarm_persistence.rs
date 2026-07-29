@@ -4,6 +4,7 @@ use crate::storage;
 use jcode_swarm_core::control_log::{SwarmControlEvent, read_from as read_control_log_from};
 use jcode_swarm_core::{SwarmLifecycleStatus, SwarmMemberRecord, SwarmRole};
 use std::collections::{HashMap, HashSet};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex as StdMutex, Weak};
 use std::time::{Duration, Instant};
@@ -240,48 +241,88 @@ fn classify_state_artifact(path: &Path) -> SwarmStateArtifactKind {
     SwarmStateArtifactKind::Other
 }
 
-fn quarantine_path(original: &Path, label: &str) -> PathBuf {
-    let dir = state_dir().join(QUARANTINE_DIR);
-    let _ = std::fs::create_dir_all(&dir);
+fn quarantine_path(original: &Path, label: &str, stamp: u128, counter: u32) -> PathBuf {
     let name = original
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("swarm-state");
+    state_dir()
+        .join(QUARANTINE_DIR)
+        .join(format!("{name}.{label}.{stamp}.{counter}.corrupt"))
+}
+
+fn quarantine_bytes_at_stamp(
+    original: &Path,
+    label: &str,
+    bytes: &[u8],
+    stamp: u128,
+) -> Option<PathBuf> {
+    let dir = state_dir().join(QUARANTINE_DIR);
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        crate::logging::warn(&format!(
+            "swarm_state_quarantine_failed path={} quarantine_dir={} error={}",
+            original.display(),
+            dir.display(),
+            error
+        ));
+        return None;
+    }
+
+    for counter in 0..1000u32 {
+        let path = quarantine_path(original, label, stamp, counter);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => match file.write_all(bytes) {
+                Ok(()) => {
+                    crate::logging::warn(&format!(
+                        "swarm_state_corrupt_quarantined path={} quarantine={} bytes={}",
+                        original.display(),
+                        path.display(),
+                        bytes.len()
+                    ));
+                    return Some(path);
+                }
+                Err(error) => {
+                    let _ = std::fs::remove_file(&path);
+                    crate::logging::warn(&format!(
+                        "swarm_state_quarantine_failed path={} quarantine={} error={}",
+                        original.display(),
+                        path.display(),
+                        error
+                    ));
+                    return None;
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                crate::logging::warn(&format!(
+                    "swarm_state_quarantine_failed path={} quarantine={} error={}",
+                    original.display(),
+                    path.display(),
+                    error
+                ));
+                return None;
+            }
+        }
+    }
+
+    crate::logging::warn(&format!(
+        "swarm_state_quarantine_failed path={} quarantine_dir={} error=collision_limit_exhausted",
+        original.display(),
+        dir.display()
+    ));
+    None
+}
+
+fn quarantine_bytes(original: &Path, label: &str, bytes: &[u8]) -> Option<PathBuf> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    for counter in 0..1000u32 {
-        let candidate = dir.join(format!("{name}.{label}.{stamp}.{counter}.corrupt"));
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    dir.join(format!("{name}.{label}.{stamp}.fallback.corrupt"))
-}
-
-fn quarantine_bytes(original: &Path, label: &str, bytes: &[u8]) -> Option<PathBuf> {
-    let path = quarantine_path(original, label);
-    match std::fs::write(&path, bytes) {
-        Ok(()) => {
-            crate::logging::warn(&format!(
-                "swarm_state_corrupt_quarantined path={} quarantine={} bytes={}",
-                original.display(),
-                path.display(),
-                bytes.len()
-            ));
-            Some(path)
-        }
-        Err(error) => {
-            crate::logging::warn(&format!(
-                "swarm_state_quarantine_failed path={} quarantine={} error={}",
-                original.display(),
-                path.display(),
-                error
-            ));
-            None
-        }
-    }
+    quarantine_bytes_at_stamp(original, label, bytes, stamp)
 }
 
 /// Current byte length of the per-swarm control log (0 when absent). Used as
@@ -293,7 +334,11 @@ fn current_control_log_len(swarm_id: &str) -> u64 {
         .unwrap_or(0)
 }
 
-fn prune_terminal_control_logs(dir: &Path, retention: Duration) {
+fn prune_terminal_control_logs(
+    dir: &Path,
+    retention: Duration,
+    retained_control_logs: &HashSet<PathBuf>,
+) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -304,6 +349,9 @@ fn prune_terminal_control_logs(dir: &Path, retention: Duration) {
             continue;
         };
         if state_path(&swarm_id).exists() {
+            continue;
+        }
+        if retained_control_logs.contains(&path) {
             continue;
         }
         let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
@@ -551,7 +599,15 @@ pub(super) fn load_runtime_state() -> LoadedSwarmRuntimeState {
     let mut swarms_by_id = HashMap::new();
     let loaded_at_unix_ms = now_unix_ms();
     let terminal_retention = super::swarm::swarm_terminal_member_retention();
-    prune_terminal_control_logs(&dir, terminal_retention);
+    // Pending awaits persist absolute byte cursors into their swarm's control
+    // log. Keep those logs until the await is finalized or its durable state
+    // becomes stale, including awaits whose deadline elapsed while offline.
+    let retained_control_logs =
+        super::await_members_state::all_pending_await_members_including_expired()
+            .into_iter()
+            .map(|state| control_log_path(&state.swarm_id))
+            .collect();
+    prune_terminal_control_logs(&dir, terminal_retention, &retained_control_logs);
     let mut pruned_terminal_members = 0usize;
     let mut pruned_members_by_swarm: HashMap<String, HashSet<String>> = HashMap::new();
     for entry in entries.flatten() {

@@ -1126,6 +1126,31 @@ fn quarantine_files(dir: &std::path::Path) -> Vec<Vec<u8>> {
 }
 
 #[test]
+fn quarantine_collision_never_overwrites_existing_evidence() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    let original = state_path("swarm-collision");
+    let stamp = 42;
+    let occupied = quarantine_path(&original, "snapshot", stamp, 0);
+    std::fs::create_dir_all(occupied.parent().expect("quarantine parent")).expect("quarantine dir");
+    std::fs::write(&occupied, b"existing quarantine evidence").expect("occupied quarantine");
+
+    let created = quarantine_bytes_at_stamp(&original, "snapshot", b"new corrupt bytes", stamp)
+        .expect("collision should advance to a new path");
+
+    assert_ne!(created, occupied, "a collision must choose another path");
+    assert_eq!(
+        std::fs::read(&occupied).expect("existing evidence"),
+        b"existing quarantine evidence",
+        "quarantine creation must never truncate prior evidence"
+    );
+    assert_eq!(
+        std::fs::read(created).expect("new evidence"),
+        b"new corrupt bytes"
+    );
+}
+
+#[test]
 fn malformed_snapshot_matrix_quarantines_exact_bytes_and_recovers_when_possible() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
@@ -1686,6 +1711,44 @@ fn terminal_control_log_retention_preserves_active_and_young_logs() {
     assert!(unrelated.exists(), "unrelated JSONL must be preserved");
 }
 
+#[cfg(unix)]
+#[test]
+fn terminal_control_log_retention_preserves_pending_await_cursor() {
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    crate::env::set_var("JCODE_SWARM_TERMINAL_MEMBER_RETENTION_SECS", "1");
+
+    let swarm_id = "awaiting-old";
+    let log = control_log_path(swarm_id);
+    std::fs::create_dir_all(state_dir()).expect("state dir");
+    std::fs::write(&log, b"old log covered by a pending await cursor").expect("old log");
+    set_mtime_secs_ago(&log, 5);
+
+    let pending = crate::server::await_members_state::PersistedAwaitMembersState {
+        key: "awaiting-old-key".to_string(),
+        session_id: "requester".to_string(),
+        swarm_id: swarm_id.to_string(),
+        target_status: vec!["completed".to_string()],
+        requested_ids: vec!["worker".to_string()],
+        mode: Some("all".to_string()),
+        created_at_unix_ms: now_unix_ms(),
+        deadline_unix_ms: now_unix_ms() + 60_000,
+        background: true,
+        notify: true,
+        wake: true,
+        scan_offset: 8,
+        final_response: None,
+    };
+    crate::server::await_members_state::save_state(&pending);
+
+    let _ = load_runtime_state();
+    assert_eq!(
+        std::fs::read(&log).expect("pending await log must survive retention"),
+        b"old log covered by a pending await cursor",
+        "retention must not invalidate a persisted absolute-byte await cursor"
+    );
+}
+
 #[test]
 fn deleting_swarm_state_resets_cached_control_log_before_replacement() {
     let dir = tempfile::TempDir::new().expect("tempdir");
@@ -1694,8 +1757,14 @@ fn deleting_swarm_state_resets_cached_control_log_before_replacement() {
     let first = member_for(swarm_id, "first", "agent", "ready");
     crate::server::control_log_sync::sync_swarm_control_log_members(swarm_id, &[first]);
     assert!(control_log_path(swarm_id).exists(), "initial log exists");
+    let mut receiver = crate::server::control_log_sync::subscribe_control_log(swarm_id);
+    let _current_offset = *receiver.borrow_and_update();
 
     remove_swarm_state(swarm_id);
+    assert!(
+        receiver.has_changed().is_ok(),
+        "reset must not close a live append notifier and hot-loop its await watcher"
+    );
     crate::server::control_log_sync::sync_swarm_control_log_members(swarm_id, &[]);
     let (folded, _) = replay(&control_log_path(swarm_id)).unwrap_or_default();
     assert!(
