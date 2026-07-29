@@ -1,0 +1,1 @@
+R07 barrier 5 under-enforcement proof: harmless commit (no protected paths).
