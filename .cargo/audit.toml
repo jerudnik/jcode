@@ -1,11 +1,22 @@
-# cargo-audit configuration -- the fork's single source of truth for triaged
-# dependency advisories. cargo-audit reads this file automatically from the
-# workspace root, so plain `cargo audit`, scripts/security_preflight.sh, and
-# the Security workflow gate all apply the same policy.
+# cargo-audit configuration -- the list of advisory IDs the audit suppresses.
+# cargo-audit reads this file automatically from the workspace root, so plain
+# `cargo audit`, scripts/security_preflight.sh, and the Security workflow gate
+# all apply the same suppression set.
 #
-# Rules (enforced by .github/workflows/security.yml):
-#   - every ignore below MUST have a triage row in docs/SECURITY_DEPENDENCIES.md
-#     (CI fails otherwise), with the affected area and the retirement condition;
+# This file is NOT the ownership record. cargo-audit validates it against a
+# closed schema and rejects any unknown key, so owner/expiry/rationale cannot
+# live here; the comments below are a convenience only. The machine-readable
+# record is docs/security/advisories.toml, and every ID below must have one.
+#
+# Rules (enforced by scripts/check_advisory_policy.py, run from
+# .github/workflows/security.yml and scripts/preflight.sh):
+#   - every ignore below MUST have a record in docs/security/advisories.toml
+#     carrying owner, rationale, affected surface, expiry, and retirement
+#     condition. An undocumented ignore fails the gate;
+#   - an expired acceptance fails the gate, so an ignore cannot outlive the
+#     argument that justified it;
+#   - a record whose ID is no longer listed here also fails, so retired
+#     ignores get cleaned up rather than accumulating;
 #   - the weekly Security report re-runs the audit with ignores DISABLED so
 #     accepted risk is re-reviewed on a cadence;
 #   - unmaintained/unsound *warnings* are advisory by design (cargo-audit only

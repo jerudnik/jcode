@@ -1,50 +1,104 @@
 # Dependency Security Triage
 
-Last reviewed: 2026-07-04
+Last reviewed: 2026-07-29
 
-This file tracks the current `cargo audit` findings for jcode and the intended remediation path.
-It is not an allowlist. It is a triage record so advisories are visible and actionable.
+## Where the record lives
 
-## Current advisories
+| File | Role |
+|---|---|
+| `.cargo/audit.toml` | The advisory IDs `cargo audit` suppresses. Nothing else: cargo-audit validates this file against a closed schema and rejects any extra key, so it cannot hold ownership metadata. |
+| `docs/security/advisories.toml` | **The machine-readable ownership record.** One `[[advisory]]` per accepted advisory with `id`, `crate_name`, `owner`, `accepted`, `expires`, `affected_surface`, `rationale`, and `retire_when`. |
+| `scripts/check_advisory_policy.py` | The checker that proves the two agree and that no acceptance has expired. |
+| `tests/test_advisory_policy.py` | Fixtures that observe the checker failing on each planted violation, so the gate is never trusted unseen. |
+| This file | Human-readable narrative: priority order, review cadence, and what changed. It is not the enforcement surface. |
 
-| Advisory | Crate | Dependency path | Affected area in jcode | Triage | Planned action |
-|---|---|---|---|---|---|
-| `RUSTSEC-2025-0141` | `bincode` | `syntect -> bincode` | Markdown/code highlighting in the TUI | Unmaintained transitive dependency. No direct exposure in the provider/auth flow. | Track `syntect` upgrades or replace `syntect` if upstream does not move off `bincode` soon. |
-| `RUSTSEC-2024-0436` | `paste` | `ratatui -> paste`, `tokenizers -> paste`, `tract-* -> paste` | TUI rendering, tokenizers, embedding/model support | Widely transitive. Not isolated to one module. | Prefer upstream dependency upgrades before any local workaround. Re-evaluate after bumping `ratatui`, `tokenizers`, and `tract-*`. |
-| `RUSTSEC-2026-0002` | `lru` | `ratatui -> lru` | TUI rendering/cache internals | Unsoundness warning in a UI dependency. Not in auth/provider logic, but still ships in-process. | Upgrade `ratatui` / `ratatui-image` together once compatible. |
-| `RUSTSEC-2026-0097` | `rand` | `azure_core`, `tungstenite`, `tract-*`, `ratatui-image`, and others | Azure auth, websocket, embedding, and UI transitive paths | Unsoundness warning involving custom loggers using `rand::rng()`. Jcode does not intentionally use that pattern, but the crate is broad in the graph. | Prefer upstream upgrades to `rand` 0.9-compatible dependency stacks. |
-| `RUSTSEC-2026-0141` | `lettre` | `jcode-notify-email -> lettre` | Notification email sending | Vulnerability applies to the Boring TLS backend hostname verification path. Jcode's `lettre` dependency uses rustls/native-tls features, not `boring-tls`, so this is not believed exploitable in the current build. | Keep ignored in `scripts/security_preflight.sh`; remove ignore after `lettre` ships a patched release or if feature use changes. |
-| `RUSTSEC-2026-0098` | `rustls-webpki` | `rustls` dependency stack | TLS certificate validation in rustls consumers | Name constraints for URI names incorrectly accepted. Transitive via TLS libraries. | Upgrade rustls/webpki stack when compatible releases are available. |
-| `RUSTSEC-2026-0099` | `rustls-webpki` | `rustls` dependency stack | TLS certificate validation in rustls consumers | Name constraints accepted for wildcard certificates. Transitive via TLS libraries. | Upgrade rustls/webpki stack when compatible releases are available. |
-| `RUSTSEC-2026-0104` | `rustls-webpki` | `rustls` dependency stack | TLS certificate revocation list parsing | Reachable panic in CRL parsing. Transitive via TLS libraries. | Upgrade rustls/webpki stack when compatible releases are available. |
-| `RUSTSEC-2026-0049` | `rustls-webpki` | `rustls` dependency stack (`aws-smithy` rustls 0.21, `imap`/`rustls-connector` rustls 0.22) | TLS certificate revocation list handling | CRLs not considered authoritative by Distribution Point due to faulty matching logic. Transitive via the older rustls stacks; fix needs rustls-webpki >=0.103.10, which requires major bumps of the `aws-sdk`/`imap` stacks. | Upgrade rustls/webpki stack when compatible releases are available. |
-| `RUSTSEC-2026-0187` | `lopdf` | `jcode-pdf -> pdf-extract 0.8.2 -> lopdf 0.34` | PDF text extraction (`/pdf`, image/PDF reads) | Stack overflow parsing deeply nested PDF objects. Only reached when extracting text from a (potentially malicious) PDF the user opens; not in the auth/provider/network path. `pdf-extract 0.8.2` pins `lopdf 0.34`, so it cannot be bumped to the fixed `>=0.42` without an upstream `pdf-extract` release. | Upgrade once `pdf-extract` ships a release depending on `lopdf >=0.42`; remove the ignore then. |
-| `RUSTSEC-2026-0190` | `anyhow` | Workspace-wide direct/common dependency | Error handling across CLI, providers, tools, TUI, and support crates | Unsoundness in `Error::downcast_mut()`. Jcode uses `anyhow` broadly for error propagation; there is no patched release in the current lockfile. | Upgrade `anyhow` as soon as a patched release is available; remove the ignore then. |
-| `RUSTSEC-2026-0186` | `memmap2` | `fontdb`/`usvg`/`resvg`/`mermaid-rs-renderer`, `tract-onnx`, and other rendering/embedding transitive paths | TUI rendering, Mermaid/SVG rendering, and embedding/model support | Unsoundness in unchecked pointer offset. Mostly transitive through rendering/embedding stacks; Linux CI also observes an older transitive `memmap2` alongside the current 0.9 line. | Prefer upstream upgrades of rendering/embedding dependency stacks; remove the ignore once all affected `memmap2` versions are gone. |
-| `RUSTSEC-2026-0195` / `RUSTSEC-2026-0194` | `quick-xml` | `jcode-desktop -> winit 0.29 -> smithay-client-toolkit 0.18 -> wayland-scanner 0.31` | Linux Wayland protocol code generation in the desktop build stack | High-severity allocation/runtime denial-of-service issues in XML parsing. This is a build-time Wayland protocol scanner path, not the TUI/runtime agent path. A direct `quick-xml >=0.41` lockfile update is blocked by `wayland-scanner`'s `quick-xml = ^0.39` constraint. | Upgrade the Wayland/winit desktop stack when a compatible release allows `quick-xml >=0.41`; remove both ignores then. |
-| `RUSTSEC-2023-0086` | `lexical-core` | `imap -> imap-proto -> lexical-core` | Gmail/IMAP support path | Old unsound transitive dependency in the mail stack. Higher priority than the UI-only findings because it touches network-parsed data. | Investigate upgrading or replacing `imap` / `imap-proto`. If no maintained path exists, isolate or remove the IMAP dependency. |
+An acceptance that is undocumented, incomplete, stale, or expired fails the
+`advisory ownership policy` job in `.github/workflows/security.yml` and the
+`advisory ownership` gate in `scripts/preflight.sh`. Neither reads a Markdown
+table; adding a row here does not suppress anything, and deleting one does not
+break the build.
+
+This is not an allowlist. It is a triage record so advisories are visible and
+actionable.
+
+## Enforcement rules
+
+- Every ID in `.cargo/audit.toml` must have a record in
+  `docs/security/advisories.toml` — an ignore with no owner fails CI.
+- Every record must carry all eight fields, non-blank.
+- `expires` is an ISO date. On or after that date, the gate fails: an ignore
+  cannot outlive the argument that justified it. Renewing means re-reading the
+  advisory, re-checking `retire_when`, and moving `accepted` forward with a
+  fresh justification in the same commit — not re-stamping the date.
+- `expires` may be at most `[policy].max_expiry_days` (365) past `accepted`.
+- A record whose ID is no longer ignored also fails, so retired acceptances get
+  deleted rather than accumulating.
+- The checker takes the current date from `--today`, then
+  `$ADVISORY_POLICY_TODAY`, then the system date. Tests and preflight inject it,
+  so expiry behavior never depends on when the suite happens to run.
+- Unmaintained/unsound *warnings* are advisory by design. `cargo audit` fails
+  only on vulnerabilities; do not add `--deny warnings` semantics.
+
+## Current accepted advisories
+
+Authoritative fields (owner, expiry, retirement condition) live in
+`docs/security/advisories.toml`. This table is the narrative summary.
+
+| Advisory | Crate | Dependency path | Affected area in jcode | Triage |
+|---|---|---|---|---|
+| `RUSTSEC-2026-0141` | `lettre` | `jcode-notify-email -> lettre` | Notification email sending | The hostname-verification defect is in the Boring TLS backend. Jcode enables rustls/native-tls only, so the defective code is not compiled in. |
+| `RUSTSEC-2026-0098` | `rustls-webpki` | `rustls` dependency stack | TLS certificate validation | Name constraints for URI names incorrectly accepted. Transitive; fix needs major `aws-sdk`/`imap` bumps. |
+| `RUSTSEC-2026-0099` | `rustls-webpki` | `rustls` dependency stack | TLS certificate validation | Name constraints incorrectly accepted for wildcard certificates. Same blocked upgrade path. |
+| `RUSTSEC-2026-0104` | `rustls-webpki` | `rustls` dependency stack | TLS CRL parsing | Reachable panic in CRL parsing; jcode loads no CRLs. |
+| `RUSTSEC-2026-0049` | `rustls-webpki` | `aws-smithy` rustls 0.21, `imap`/`rustls-connector` rustls 0.22 | TLS CRL handling | CRLs not authoritative by Distribution Point. Fix needs rustls-webpki >=0.103.10, blocked by the pinned older rustls stacks. |
+| `RUSTSEC-2026-0187` | `lopdf` | `jcode-pdf -> pdf-extract 0.8.2 -> lopdf 0.34` | PDF text extraction (`/pdf`, PDF reads) | Stack overflow on deeply nested PDF objects; reached only on a user-opened PDF, not in the auth/provider path. `pdf-extract 0.8.2` pins `lopdf 0.34`. |
+| `RUSTSEC-2026-0190` | `anyhow` | Workspace-wide | Error handling across CLI, providers, tools, TUI | Unsoundness in `Error::downcast_mut()`; jcode never calls it. No patched release in the lockfile. |
+| `RUSTSEC-2026-0186` | `memmap2` | `fontdb`/`usvg`/`resvg`, `tract-onnx`, other rendering/embedding paths | TUI rendering, Mermaid/SVG, embedding | Unsoundness in unchecked pointer offset. Linux CI also sees an older transitive `memmap2` alongside 0.9. |
+| `RUSTSEC-2026-0195` / `RUSTSEC-2026-0194` | `quick-xml` | `jcode-desktop -> winit 0.29 -> smithay-client-toolkit 0.18 -> wayland-scanner 0.31` | Linux Wayland protocol codegen in the desktop build stack | Allocation/runtime DoS in XML parsing. `wayland-scanner` is a build-time proc macro over trusted vendored protocol XML. A `quick-xml >=0.41` bump is blocked by its `^0.39` constraint. |
+
+## Advisories fixed rather than accepted
+
+- `RUSTSEC-2026-0217` (`tract-nnef` 0.21.10, integer overflow to out-of-bounds
+  read in the NNEF tensor parser) was **fixed, not ignored**, on 2026-07-29.
+  The fix required moving `jcode-embedding` from `tract-* 0.21` to `0.22`: the
+  patched 0.21 releases (0.21.16, 0.21.17) constrain `time` to `<0.3.42`, while
+  `azure_identity 1.0` requires `time ^0.3.47`, so no in-line 0.21 bump
+  resolves. `tract-linalg 0.22.x` relaxes the constraint to `^0.3.23`.
+- `RUSTSEC-2024-0320` (`yaml-rust`) left the graph on 2026-03-05 by trimming
+  `syntect` features to built-in syntax/theme dumps instead of YAML loading.
+- `RUSTSEC-2023-0086` (`lexical-core` via `imap-proto`) is **not** in the
+  current ignore list and does not appear in the current `cargo audit` output.
+  It was listed here until 2026-07-29 without ever being ignored; the row is
+  removed rather than carried as a phantom.
 
 ## Priority order
 
-1. `rustls-webpki` TLS advisories via rustls stack
-2. `lexical-core` via `imap-proto`
-3. `anyhow` once a patched release is available
+1. `rustls-webpki` TLS advisories via the rustls stack
+2. `anyhow` once a patched release is available
+3. `lopdf` via `pdf-extract`
 4. `memmap2` via rendering/embedding transitive stacks
 5. `quick-xml` via the desktop Wayland/winit build-time stack
-6. `lettre` if Jcode ever enables `boring-tls`
-7. `lru` via `ratatui`
-8. `bincode` via `syntect`
-9. `paste` / `rand` via multiple transitive dependencies
+6. `lettre` if jcode ever enables `boring-tls`
+
+## Review cadence
+
+The weekly Security report (tracking issue, Mondays) re-runs `cargo audit` with
+ignores disabled. When reviewing it:
+
+1. Any accepted advisory whose `retire_when` is now met: drop the ignore from
+   `.cargo/audit.toml`, delete the record from `docs/security/advisories.toml`,
+   and remove the row above. The stale-record check fails if you do only one.
+2. Any new vulnerability: fix it if a compatible version exists, otherwise add
+   an ignore *and* a complete record in the same commit.
+3. Bump "Last reviewed" above.
+
+Expiry does the same job on a hard deadline: the gate turns red on its own if
+nobody reviews.
 
 ## Notes
 
-- None of the advisories above were introduced by the provider-auth refactor.
-- The provider/auth hardening work should continue independently of these dependency upgrades.
-- `RUSTSEC-2024-0320` (`yaml-rust`) was removed from the dependency graph on 2026-03-05 by trimming `syntect` features to built-in syntax/theme dumps instead of YAML loading.
-- `RUSTSEC-2026-0194` / `RUSTSEC-2026-0195` (`quick-xml` 0.39.2): reached only through `wayland-scanner`, a build-time proc-macro in the desktop crate's winit stack. It parses trusted, vendored Wayland protocol XML during compilation and never touches untrusted input at runtime. Remediation is upstream: `wayland-scanner` needs to move to `quick-xml >= 0.41`. Triaged and ignored in `scripts/security_preflight.sh` on 2026-07-04.
-- `scripts/security_preflight.sh` ignores the vulnerability advisories that are explicitly triaged above (`lettre` and `rustls-webpki`) so CI can remain actionable. New vulnerabilities still fail CI by default.
-- `scripts/security_preflight.sh` ignores the vulnerability advisories that are explicitly triaged above (`lettre`, `rustls-webpki`, `lopdf`, `anyhow`, `memmap2`, and `quick-xml`) so CI can remain actionable. New vulnerabilities still fail CI by default.
 - Before changing dependency versions, run:
-  - `cargo check`
-  - `cargo test -j 1`
+  - `scripts/dev_cargo.sh check`
+  - `scripts/dev_cargo.sh test -j 1`
   - `scripts/security_preflight.sh`
+  - `python3 scripts/check_advisory_policy.py`
