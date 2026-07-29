@@ -92,28 +92,47 @@ recreate `vendor/upstream` or `distro/nix`.
 ## Server-side rulesets
 
 Two GitHub repository rulesets enforce the model on the server, independent of
-the local hook:
+the local hook. Neither has any bypass actors: the rules bind the owner-admin
+too, so changes to `main` go through pull requests like everyone else's.
 
-| Ruleset | Rule | Applies to |
+| Ruleset | Rules | Applies to |
 |---|---|---|
-| `protect-fork-rails` | `deletion` | `refs/heads/main` |
-| `no-stray-branches` | `creation` | everything except `main` and `automation/**` (admins bypass) |
+| `protect-fork-rails` | `deletion`, `non_fast_forward`, `pull_request` (zero required approvals, merge commits only, review-thread resolution), `required_status_checks` (`Governance Root`, `Fork CI Gate`, `Security Gate`, `Nix Gate`) | `refs/heads/main` |
+| `no-stray-branches` | `creation` | everything except `main` and `automation/**` |
+
+The repository itself allows merge commits only (squash and rebase merging are
+disabled), matching the merge-commit-only contract above. The legacy classic
+branch-protection rule on `main` was removed when the rulesets took over; the
+rulesets are the only server-side protection.
 
 These are repository configuration, not files, so nothing in a clone reveals
 them. They listed the retired rails until the fork collapsed to one, and the
-stale entries blocked their own deletion. `scripts/fork-health.sh` check 4
-compares them against the rail set so they cannot drift out of sight again.
+stale entries blocked their own deletion. `scripts/fork-health.sh` compares a
+live or fixture governance snapshot against `scripts/required-checks.json`
+(the machine-readable manifest of this state) and fails closed on any drift.
+
+Twenty-seven governance paths (the manifest, the comparator, the fork-health
+script, the governance workflows, and the R07 evidence contract, enumerated in
+`docs/fork/ideal-base/evidence/R07/github-governance.proposed.json`) are
+protected by the `Governance Root` required check: any PR that changes them
+goes red and can only land through the transaction-bound maintenance procedure
+in `docs/fork/ideal-base/evidence/R07/design.md` section 4 (capture the ruleset
+body, drop the check, merge conditioned on the exact head SHA, restore the body
+byte-identically, prove a single merge in the window).
 
 ## Audits
 
 ```sh
-scripts/fork-health.sh
+scripts/fork-health.sh --fixture docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json   # offline
+scripts/fork-health.sh --live                                                                      # compares live GitHub state
 ```
 
 Checks that `fork-point` is still an ancestor of `main` (so the fork-touched
 gates measure the right base), and that the rail exists on GitHub. Topic
 branches are reported, and ones already contained in `main` are flagged as
-residue worth deleting.
+residue worth deleting. A governance source (`--fixture` or `--live`) is
+mandatory: the check fails closed rather than warning when the governance
+state cannot be observed, so an unobserved state can never report green.
 
 ## CI
 
