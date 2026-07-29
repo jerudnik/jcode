@@ -6,11 +6,22 @@ Branch: `automation/w4-f22`, based on `main` `eee5ccc71`
 ## What this node establishes
 
 Every advisory the fork suppresses now carries a machine-readable ownership
-record, and an acceptance that is undocumented, incomplete, stale, or expired
-fails CI and preflight. Before this node the only enforcement was a shell loop
-in `.github/workflows/security.yml` that grepped two Markdown files for the
-advisory ID: any passing mention satisfied it, and it carried no owner, no
-expiry, and no retirement condition.
+record, and an acceptance that is undocumented, incomplete, stale, expired,
+postdated, or blanket fails CI and preflight. Before this node the only
+enforcement was a shell loop in `.github/workflows/security.yml` that grepped
+two Markdown files for the advisory ID: any passing mention satisfied it, and
+it carried no owner, no expiry, and no retirement condition.
+
+The fork suppresses advisories on **two** surfaces, and a suppression is only
+as governed as its weakest one:
+
+| Surface | Read by | Governed since |
+|---|---|---|
+| `.cargo/audit.toml` `[advisories].ignore` | `cargo audit` when run bare | round 1 |
+| `scripts/security_preflight.sh` `audit_ignores=()` | **what CI actually executes** (`ci.yml:249`, `security.yml:95`/`:117`, `governance-root.yml:52`) | round 2 |
+
+Missing the second one made the round-1 checker vacuous where it mattered; see
+*Round 2* below.
 
 ## Design decision: why the record is a separate file
 
@@ -37,9 +48,14 @@ metadata cannot live beside the ignore list, and comments there are not
 machine-readable by any definition worth the word.
 
 The record therefore lives in **`docs/security/advisories.toml`**, and
-`scripts/check_advisory_policy.py` proves the two files agree in both
-directions: an ignore with no record fails, and a record with no ignore also
-fails, so retiring an advisory cannot be done halfway.
+`scripts/check_advisory_policy.py` proves it agrees with every suppression
+surface in both directions: a suppression with no record fails, a record with
+no suppression fails, and a suppression present on one surface but not the
+other fails as drift. So retiring an advisory cannot be done halfway.
+
+Note the third key in that error message, `severity_threshold`. It is a
+blanket suppression of everything below a severity level, and it is now
+governed too (probe K).
 
 ## Files
 
@@ -47,12 +63,88 @@ fails, so retiring an advisory cannot be done halfway.
 |---|---|---|
 | `docs/security/advisories.toml` | The machine-readable record: `id`, `crate_name`, `owner`, `accepted`, `expires`, `affected_surface`, `rationale`, `retire_when` | new file |
 | `scripts/check_advisory_policy.py` | The checker | new file |
-| `tests/test_advisory_policy.py` | 19 fixtures, each planting one violation | new file |
-| `.cargo/audit.toml` | Header rewritten: it is the suppression list, not the record | yes |
+| `tests/test_advisory_policy.py` | 35 fixtures, each planting one violation | new file |
+| `.cargo/audit.toml` | Header rewritten: it is one suppression surface, not the record | yes |
 | `docs/SECURITY_DEPENDENCIES.md` | Rewritten and reconciled with reality | yes |
 | `.github/workflows/security.yml` | New `advisory ownership policy` job, wired into `Security Gate` | yes (protected path) |
+| `scripts/required-checks.json` | `advisory-policy` added to the Security Gate contract | no, PROTECTED (reported) |
 | `scripts/preflight.sh` | Two new local gates | no (reported to coordinator) |
 | `docs/fork/SECURITY_TRIAGE.md` | De-designated as an enforcement surface | no (reported to coordinator) |
+
+## Round 2: two blockers found by independent review
+
+The first cut of this node shipped two real defects. Both were found by an
+independent Opus review, reproduced by the coordinator, and reproduced again
+here before fixing. They are recorded rather than quietly patched, because
+both are instructive about how a gate can look green and be worthless.
+
+### Blocker 1 — the governance manifest was not updated
+
+Adding `advisory-policy` to `security-gate`'s `needs:` without adding it to
+`scripts/required-checks.json` breaks `governance_compare.py --live`:
+
+```
+FAIL: 'Security Gate' summary dependencies are ['advisory-policy',
+      'dependency-audit', 'detect-dependency-changes', 'secret-scan'];
+      manifest requires ['dependency-audit', 'detect-dependency-changes',
+      'secret-scan']
+```
+
+This would have turned the daily Fork Health live run red *after* merge. The
+PR run does not catch it, because fork-ci compares against an embedded
+fixture snapshot that predates this node — a live/fixture split worth
+remembering: a green PR does not prove a green daily.
+
+`scripts/required-checks.json` is a **protected path**. The one-line addition
+is flagged for the coordinator's maintenance window.
+
+`test_required_checks_manifest_lists_the_job` now asserts the manifest and the
+workflow agree, so the next person to add a job cannot repeat this. Probe N
+shows that test failing when the manifest fix is reverted.
+
+### Blocker 2 — the checker was vacuous for the surface CI executes
+
+This is the serious one. `scripts/security_preflight.sh` carries its **own**
+hardcoded `audit_ignores=(--ignore ...)` array at lines 101-114, and that is
+what CI actually runs: `ci.yml:249`, `security.yml:95` and `:117 --strict`,
+`governance-root.yml:52`. The round-1 checker only ever parsed
+`.cargo/audit.toml`, so an ignore added straight to the executed array was
+invisible to it:
+
+```
+$ # --ignore RUSTSEC-2099-9999 planted in scripts/security_preflight.sh
+$ python3 scripts/check_advisory_policy.py
+advisory policy: OK          # exit 0
+```
+
+So the central claim of this node — "no undocumented ignore, and retirement
+cannot be done halfway" — was false exactly where it mattered. I had checked
+that `preflight.sh` invoked my checker and concluded the wiring was done,
+without asking what the *other* preflight script suppressed on its own
+authority.
+
+The checker now treats suppression as a property of a set of surfaces. It
+parses both, requires every record to match every surface, and requires the
+surfaces to agree with each other, so a half-retired advisory is caught as
+drift rather than hidden by a union. Probes H and I demonstrate both.
+
+A single source of truth would still be better than agreement-checking: the
+preflight array duplicates audit.toml by hand. `security_preflight.sh` is a
+vendor-pristine protected file, so collapsing them is not F22's call, but it
+is the right follow-up.
+
+### Two smaller holes, same review
+
+- **Blanket `severity_threshold`.** cargo-audit accepts
+  `severity_threshold = "critical"`, which silently drops every advisory below
+  that level, including ones nobody has ever seen. Ten carefully owned records
+  and one unowned threshold is not ownership. A threshold now requires its own
+  record with owner, rationale, expiry, and retirement condition, must match
+  the configured level, and expires like any other acceptance (probe K).
+- **Postdated acceptance.** Expiry was an interval between two *self-declared*
+  dates, so `accepted = "2098-01-01"` with a perfectly legal 151-day window
+  parked a suppression for 72 years and passed every check (probe J). The
+  checker now rejects an `accepted` date in the future.
 
 ## Gate 1 and 2 — non-vacuity in both directions
 
@@ -63,14 +155,23 @@ date, mutates the tree, observes the verdict, and restores. Summary:
 |---|---|---|---|---|
 | A | as committed | 2026-07-29 | **0** | `advisory policy: OK as of 2026-07-29` |
 | B | as committed | 2027-06-01 | **1** | 10 × `acceptance expired on 2027-01-29` |
-| C | `RUSTSEC-2099-0001` added to `.cargo/audit.toml` | 2026-07-29 | **1** | `ignored in .cargo/audit.toml but has no record` |
+| C | `RUSTSEC-2099-0001` added to `.cargo/audit.toml` | 2026-07-29 | **1** | `suppressed in .cargo/audit.toml but has no record` |
 | D | first record's `owner` blanked | 2026-07-29 | **1** | `incomplete record, missing or blank: owner` |
-| E | `RUSTSEC-2026-0141` ignore deleted, record kept | 2026-07-29 | **1** | `has a record ... but is no longer ignored; delete the stale record` |
+| E | `RUSTSEC-2026-0141` ignore deleted, record kept | 2026-07-29 | **1** | `the suppression surfaces must agree` |
 | F | restored | 2026-07-29 | **0** | `advisory policy: OK as of 2026-07-29` |
+| G | manifest missing `advisory-policy` | n/a | **1** → **0** | `governance_compare --live` FAIL, then match |
+| H | `RUSTSEC-2099-9999` planted in `security_preflight.sh` | 2026-07-29 | **1** | `suppressed in scripts/security_preflight.sh but has no record` |
+| I | `RUSTSEC-2026-0190` dropped from preflight only | 2026-07-29 | **1** | `suppressed in .cargo/audit.toml but not in scripts/security_preflight.sh` |
+| J | `accepted = 2098-01-01`, 151-day window | 2026-07-29 | **1** | `accepted is dated 2098-01-01, in the future` |
+| K | `severity_threshold = "critical"`, no record | 2026-07-29 | **1** | `has no [severity_threshold] record` |
+| L | restored | 2026-07-29 | **0** | `advisory policy: OK as of 2026-07-29` |
+| N | manifest fix reverted | n/a | **1** → **0** | guarding test red, then green |
 
-A and F bracket every red probe, so the greens are not an artifact of a broken
-checker and the reds are not residue. Note B and A are the *same tree*: only
-the injected date differs, which is precisely the expiry gate.
+A, F, and L bracket every red probe, so the greens are not an artifact of a
+broken checker and the reds are not residue. Note B and A are the *same tree*:
+only the injected date differs, which is precisely the expiry gate. H, J, and
+K all exited **0** under the round-1 checker; they are the three vacuity holes
+that review found.
 
 ## Gate 4 — expiry fixtures inject the current date
 
@@ -90,7 +191,7 @@ own when an acceptance ages out, on a PR that changed nothing.
 
 ```
 $ python3 -m unittest discover -s tests -p 'test_advisory_policy.py' -v
-Ran 19 tests in 16.443s
+Ran 35 tests in 13.677s
 OK
 ```
 
@@ -100,9 +201,12 @@ completeness rule is proven field by field, not in aggregate.
 
 ## Gate 3 — records are machine-readable and complete
 
-Ten records, one per ignored advisory, each with all eight fields.
+Ten records, one per suppressed advisory, each with all eight fields.
 `test_every_ignore_has_a_record` asserts set equality between the ignore list
 and the record IDs by parsing both files with `tomllib`, not by grepping prose.
+`test_preflight_array_agrees_with_audit_toml` asserts the same set equality
+against the array CI executes, so the governed list and the executed list are
+provably the same list.
 
 ## RUSTSEC-2026-0217 — fixed, not ignored
 
@@ -243,19 +347,27 @@ actionlint .github/workflows/security.yml           # clean
 
 ## What this node did not check
 
-- The workflow was validated with `actionlint`, not by a live GitHub Actions
-  run. The `advisory ownership policy` job's behavior on a real runner
-  (including that `python3` is present on `ubuntu-latest`, which it is by
-  image definition) is unobserved here.
+- The workflow was validated with `actionlint` and with `governance_compare
+  --live`, not by a live GitHub Actions run. The `advisory ownership policy`
+  job's behavior on a real runner (including that `python3` is present on
+  `ubuntu-latest`, which it is by image definition) is unobserved here.
+- **Whether any further suppression surface exists.** Round 2 found a second
+  one I had missed. I searched for `--ignore` and `RUSTSEC` across `scripts/`
+  and `.github/workflows/` and found only the two now governed, but a surface
+  that suppresses by some other mechanism (a `deny.toml`, a wrapper that drops
+  advisories from output, a vendored database) would not be caught by that
+  search and is not covered.
 - The 0.22 bump is proven by `cargo check` and `cargo test -p jcode-embedding`
   in this worktree, but it is **not** part of this branch: `Cargo.lock` and
   `crates/jcode-embedding/Cargo.toml` are coordinator-owned and were reverted
-  after verification. Until the coordinator lands them, `main` remains red on
-  RUSTSEC-2026-0217, and `cargo audit` will fail independently of the new
-  policy gate. No wider test run (workspace-level, or non-darwin) was made
-  under the bump.
+  after verification. It landed separately as PR #44. No wider test run
+  (workspace-level, or non-darwin) was made under the bump.
 - Linux advisory resolution. `cargo audit` was run on aarch64-darwin; the
   `memmap2` record notes that Linux CI observes an additional older transitive
   version.
 - Whether the advisory database itself is complete or current beyond the
   fetched snapshot.
+- The duplication between `.cargo/audit.toml` and the preflight array is now
+  *checked* but not *removed*. A single source of truth would be better;
+  `security_preflight.sh` is vendor-pristine and protected, so collapsing them
+  was out of scope here.

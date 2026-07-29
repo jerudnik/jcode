@@ -46,3 +46,84 @@ $ git status --short .cargo/audit.toml docs/security/advisories.toml
  M .cargo/audit.toml
 ?? docs/security/advisories.toml
 [exit=0 -- audit.toml modified vs HEAD is expected: F22 rewrote its header]
+
+########################################################################
+# ROUND 2 -- two blockers from independent Opus review, both reproduced
+# and fixed. Re-verified 2026-07-29T09:09:26Z.
+########################################################################
+
+The round-1 checker read only .cargo/audit.toml. CI actually executes the
+hardcoded audit_ignores=() array in scripts/security_preflight.sh
+(ci.yml:249, security.yml:95 and :117 --strict, governance-root.yml:52),
+which the checker never read. The core claim of this node was therefore
+false for the surface that matters. Fixed by governing every surface.
+
+===== G. BLOCKER 1: governance manifest, live mode =====
+-- before the fix (reproduced on the round-1 commit) --
+FAIL: 'Security Gate' summary dependencies are ['advisory-policy', 'dependency-audit', 'detect-dependency-changes', 'secret-scan'];
+      manifest requires ['dependency-audit', 'detect-dependency-changes', 'secret-scan']  [exit=1]
+
+-- after adding advisory-policy to scripts/required-checks.json --
+$ python3 scripts/governance_compare.py --manifest scripts/required-checks.json --live --workflows-dir .github/workflows
+OK:   required context 'Security Gate' is uniquely defined at .github/workflows/security.yml:security-gate
+OK:   required context 'Nix Gate' is uniquely defined at .github/workflows/nix.yml:nix-gate
+NOTE: protected-path additions are adjudicated; enforcing 27 paths
+=== Governance: snapshot matches the manifest ===
+[exit=0]
+
+===== H. BLOCKER 2: the coordinator’s exact plant =====
+Adding an undocumented --ignore straight to the array CI executes.
+
+$ sed -i  # add: --ignore RUSTSEC-2099-9999   to scripts/security_preflight.sh
+115:  --ignore RUSTSEC-2099-9999 # planted, wholly undocumented
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: 2 problem(s) as of 2026-07-29
+  error: RUSTSEC-2099-9999: suppressed in scripts/security_preflight.sh but has no record in docs/security/advisories.toml (add owner, rationale, affected surface, expiry, and retirement condition)
+  error: RUSTSEC-2099-9999: suppressed in scripts/security_preflight.sh but not in .cargo/audit.toml; the suppression surfaces must agree
+[exit=1  <-- round 1 printed OK and exited 0 here]
+
+-- remove the plant --
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: OK as of 2026-07-29
+[exit=0]
+
+===== I. surface drift: retiring on one surface only =====
+$ sed -i  # delete --ignore RUSTSEC-2026-0190 from security_preflight.sh only
+advisory policy: 1 problem(s) as of 2026-07-29
+  error: RUSTSEC-2026-0190: suppressed in .cargo/audit.toml but not in scripts/security_preflight.sh; the suppression surfaces must agree
+[exit=1]
+
+===== J. postdated acceptance: the 72-year park =====
+$ accepted = 2098-01-01, expires = 2098-06-01  (a legal 151-day window)
+advisory policy: 1 problem(s) as of 2026-07-29
+  error: RUSTSEC-2026-0141: accepted is dated 2098-01-01, in the future (today is 2026-07-29); an acceptance cannot begin before it is made
+[exit=1  <-- round 1 exited 0: every window check was satisfied]
+
+===== K. blanket severity_threshold with no record =====
+$ severity_threshold = "critical"  added to .cargo/audit.toml
+advisory policy: 1 problem(s) as of 2026-07-29
+  error: severity_threshold: .cargo/audit.toml sets severity_threshold = 'critical', which silently suppresses every advisory below that severity, but docs/security/advisories.toml has no [severity_threshold] record (add owner, rationale, expiry, and retirement condition)
+[exit=1]
+
+===== L. tree restored: GREEN again, no residue =====
+$ python3 scripts/check_advisory_policy.py --today 2026-07-29
+advisory policy: OK as of 2026-07-29
+[exit=0]
+
+===== M. full suite =====
+$ python3 -m unittest discover -s tests -p test_advisory_policy.py
+----------------------------------------------------------------------
+Ran 35 tests in 15.369s
+
+OK
+
+===== N. the new manifest test is itself non-vacuous =====
+Reverting the manifest fix must turn the guarding test red:
+$ python3 -m unittest ...WiringIsReal.test_required_checks_manifest_lists_the_job
+Ran 1 test in 0.011s
+
+FAILED (failures=1)
+-- manifest restored --
+Ran 1 test in 0.003s
+
+OK
