@@ -548,4 +548,51 @@ mod tests {
         );
         assert!(dir.join("malformed.active").exists());
     }
+
+    /// Upgrade path: a real legacy `"1"` file left on disk by a previous
+    /// version must keep its age-based treatment rather than being read as
+    /// PID 1 (`launchd`/`init`) and becoming immortal, while a crashed owner
+    /// from this build is dropped in the same pass.
+    ///
+    /// `register_active_session` resolves `JCODE_HOME` internally and the
+    /// process-global env lock lives in `crate::tests`, which F26 does not
+    /// own. This drives the same prune/write/remove steps against a scratch
+    /// directory instead of widening the ownership boundary.
+    #[cfg(unix)]
+    #[test]
+    fn upgrade_from_legacy_markers_prunes_only_the_dead_owner() {
+        let home = tempfile::TempDir::new().expect("tempdir");
+        let dir = home.path().join("telemetry_active_sessions");
+        std::fs::create_dir_all(&dir).expect("create marker dir");
+
+        // A legacy marker exactly as older builds wrote it.
+        let legacy = dir.join("legacy-session.active");
+        std::fs::write(&legacy, "1").expect("write legacy marker");
+        // A crashed owner from this build.
+        let crashed = dir.join("crashed.active");
+        std::fs::write(&crashed, active_session_marker_contents(exited_child_pid()))
+            .expect("write crashed marker");
+
+        assert_eq!(
+            prune_active_session_files(&dir),
+            1,
+            "the fresh legacy marker still counts; only the crashed owner is dropped"
+        );
+        assert!(
+            legacy.exists(),
+            "a fresh legacy marker must survive the upgrade"
+        );
+        assert!(!crashed.exists(), "a dead owner's marker must be removed");
+
+        // The new marker this build writes, and the graceful removal path.
+        let own = dir.join("upgrade-session.active");
+        write_private_dir_file(&own, &active_session_marker_contents(std::process::id()));
+        assert_eq!(
+            prune_active_session_files(&dir),
+            2,
+            "our own live marker must count alongside the legacy one"
+        );
+        std::fs::remove_file(&own).expect("graceful unregister");
+        assert_eq!(prune_active_session_files(&dir), 1);
+    }
 }

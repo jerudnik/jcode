@@ -92,6 +92,7 @@ the `~/.jcode/telemetry_active_sessions` markers (gate 2).
 | R2 | Dead PID, session JSON present | Session reconciled `Active` -> `Crashed`, marker consumed | `jcode-base` `session::tests::cases::reconcile_active_sessions_marks_dead_pid_crashed` |
 | R3 | Live PID + marker | Marker preserved; sweep is idempotent | `jcode-storage` `active_pids::tests::stale_marker_sweep_removes_dead_and_invalid_but_preserves_live` |
 | R4 | PID recycled onto an unrelated live process | Counts as live (documented limitation), bounded by the max age rather than permanent | `jcode-telemetry-core` `state_support::tests::pid_reuse_is_bounded_by_the_max_age` |
+| R6 | Real legacy `"1"` marker on disk alongside a crashed owner from this build | Legacy marker survives (age-based); crashed owner removed; own marker written with `pid=` and removed on graceful exit | `jcode-telemetry-core` `state_support::tests::upgrade_from_legacy_markers_prunes_only_the_dead_owner` |
 | R5 | Malformed marker file | Session markers: removed. Telemetry markers: fall back to the age bound, so a fresh one is kept and an aged one is removed | `jcode-storage` `active_pids::tests::stale_marker_sweep_removes_dead_and_invalid_but_preserves_live`; `jcode-telemetry-core` `state_support::tests::malformed_and_unreadable_markers_fall_back_to_age` |
 
 R5's two behaviors are intentionally different. Session PID markers are pure
@@ -172,7 +173,7 @@ fails with a libgit2 path error. All builds and tests are local.
 | same, mutation reverted | 2 passed, 0 failed |
 | `scripts/dev_cargo.sh test -p jcode-telemetry-core --lib state_support` | 6 passed, 0 failed |
 | same, with liveness mutated back to mtime | 4 passed, **2 failed** (gate 2 non-vacuity) |
-| `scripts/dev_cargo.sh test -p jcode-telemetry-core --lib` | 30 passed, 0 failed |
+| `scripts/dev_cargo.sh test -p jcode-telemetry-core --lib` | 31 passed, 0 failed |
 | `scripts/dev_cargo.sh build --workspace` (duplicate deleted) | see `command-log.txt` `GATE3:` line |
 | `scripts/dev_cargo.sh test -p jcode-storage --lib active_pids` | see `command-log.txt` |
 

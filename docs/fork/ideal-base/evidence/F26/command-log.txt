@@ -54,3 +54,28 @@ exit=0
 $ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-storage --lib active_pids -- --test-threads=1  -> 10 passed; 0 failed (RC=0)
 $ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh clippy -p jcode-telemetry-core --all-targets -- -D warnings -> RC=0
 $ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt --check -p jcode-telemetry-core -> RC=0 after fmt applied
+=== 2026-07-29T08:45:49Z
+$ cargo test -p jcode-telemetry-core --lib -- --test-threads=1  => 31 passed 0 failed (adds upgrade_from_legacy_markers_prunes_only_the_dead_owner)
+exit=2
+=== 2026-07-29T08:45:50Z
+$ cargo clippy -p jcode-telemetry-core --all-targets -- -D warnings => 0; cargo fmt --check => 0; cargo build --workspace => 0
+exit=127
+NOTE: the two entries above (exit=2, exit=127) are INVALID. The summary text
+contained "=>", which score.sh's eval interpreted as a shell redirect, so those
+lines recorded the exit status of a mangled command, not of a real run. They are
+left in place because this log is append-only. The real runs follow below.
+=== 2026-07-29T08:46:29Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh test -p jcode-telemetry-core --lib -- --test-threads=1
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+exit=0
+=== 2026-07-29T08:46:50Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh clippy -p jcode-telemetry-core --all-targets -- -D warnings
+exit=0
+=== 2026-07-29T08:47:00Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh fmt --check -p jcode-telemetry-core
+exit=0
+=== 2026-07-29T08:47:06Z
+$ JCODE_REMOTE_CARGO=0 scripts/dev_cargo.sh build --workspace
+exit=0
+MATRIX-ROW: R6 real legacy "1" marker + crashed owner from this build -> legacy survives, crashed swept, own marker written with pid= and removed on graceful exit | jcode-telemetry-core state_support::tests::upgrade_from_legacy_markers_prunes_only_the_dead_owner
+NOTE: score.sh matrix denominator raised 5 -> 6 when row R6 (the on-disk legacy upgrade path) was added.

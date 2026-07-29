@@ -20,4 +20,4 @@ for k in GATE1 GATE2 GATE3; do
 done
 m=$(grep -c "^MATRIX-ROW: " "$LOG" || true)
 b=$(grep -c "^GATE3: workspace-build exit=0" "$LOG" || true)
-echo "SCORE gates=${g}/3 matrix_rows=${m}/5 workspace_build_green=${b}"
+echo "SCORE gates=${g}/3 matrix_rows=${m}/6 workspace_build_green=${b}"
