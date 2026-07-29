@@ -228,3 +228,20 @@ mock HTTP server on a fixed port and failed only because a second `cargo test`
 was running concurrently in this worktree; run alone at HEAD the suite is 7/7.
 No test anywhere depended on the deleted app-core duplicate or on the old
 mtime-only marker semantics.
+
+## Runtime verification against the real binary
+
+The unit fixtures prove the predicate; this proves the shipped behavior. Driven
+against `target/debug/jcode` at HEAD with a scratch `JCODE_HOME` and telemetry
+opted in, using `jcode run --provider ollama` (unreachable, so each invocation
+starts a real telemetry session and exits).
+
+| # | Observation |
+| --- | --- |
+| RT1 | The binary writes `pid=66212`, i.e. the new format, not the legacy `1`. |
+| RT2 | `kill -9` on the owner leaves an orphaned marker on disk. This is exactly the bug class gate 2 targets. |
+| RT3 | The next real session reaps that orphan; only the new marker remains. |
+| RT4 | A gracefully exited process also left a marker behind, and the following session reaped it too, so reaping does not depend on the unregister path firing. |
+| RT5 | Five real `jcode` processes started simultaneously produce five distinct, uncorrupted markers, one per PID. This closes the "no real multi-process race test" gap. |
+| RT6 | One subsequent session reaps all five stale markers in a single pass. |
+

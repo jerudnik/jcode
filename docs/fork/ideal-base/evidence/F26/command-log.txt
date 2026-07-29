@@ -119,3 +119,27 @@ GUARD: concurrency_observation_is_unreachable_without_a_session pins that invari
 GUARD non-vacuity: deleting the `if !is_enabled() { return; }` from
 begin_session_with_mode makes it FAIL ("SESSION_STATE must only be populated after an
 enablement check"); restoring it passes. lib.rs was restored, git diff empty.
+
+=== RUNTIME VERIFICATION against the real binary (target/debug/jcode, HEAD 6117a5e0d)
+The first report listed "no runtime/TUI verification" as a gap. Closed here.
+Driven with JCODE_HOME=/tmp/f26home JCODE_TELEMETRY=1 and `jcode run ... --provider ollama`
+(the provider is unreachable, so each process starts a real telemetry session and exits).
+
+RT1 the shipped binary writes the new format, not the legacy "1":
+  telemetry_active_sessions/eb6c618c-....active -> pid=66212
+RT2 hard kill leaves an orphaned marker (this is the bug class F26 targets):
+  kill -9 66360; owner confirmed dead; marker 752c58ed-....active still on disk.
+RT3 the next real session reaps it:
+  before: 752c58ed-....active (dead owner)
+  during: only 900b46d0-....active -> pid=66501  => dead marker gone.
+RT4 a gracefully exited process also left a marker (900b46d0, owner 66501 confirmed
+  exited); the following session reaped that too, leaving only c5806df7 -> pid=67127.
+  So reaping does not depend on the graceful unregister path firing.
+RT5 CONCURRENCY (the "no real multi-process race test" gap), 5 real jcode processes
+  started simultaneously against one marker dir:
+  -> 5 distinct markers, one per PID (67327/67329/67331/67333/67335), none corrupted,
+     none lost. No interleaving damage from concurrent prune-then-write.
+RT6 one subsequent real session reaped all 5 stale markers in a single pass:
+  before 5 -> during 1 (e6e72244-....active -> pid=67571).
+VERDICT: the end-to-end behavior gate 2 claims is observable in the shipped binary,
+including after SIGKILL and under 5-way real concurrency.
