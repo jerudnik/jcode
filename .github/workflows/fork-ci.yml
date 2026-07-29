@@ -281,6 +281,42 @@ jobs:
       - name: Enforce swallowed-error usage ratchet
         run: python3 scripts/check_swallowed_error_budget.py
 
+      # A6's zero-growth half. The three ratchets above bound the working tree
+      # but not their own baselines, which are deliberately unprotected so that
+      # routine tightening needs no maintenance window
+      # (docs/fork/ideal-base/evidence/R07/integration-adjudication.md). This
+      # step adds the per-domain critical-path ceilings that a baseline raise
+      # must not be able to absorb silently, plus the repository high-water
+      # marks that make the recorded trend one-directional.
+      #
+      # --expect-digest pins the scope, ceilings, targets, and repository marks
+      # from here. Weakening any of them requires editing this workflow and the
+      # checker, both protected governance paths, so it lands in a reviewed
+      # maintenance window. Tightening needs neither edit: ceilings are
+      # high-water marks, so a cleanup just opens headroom. Refresh the pin with
+      # `python3 scripts/check_critical_path_budget.py --print-digest`.
+      - name: Enforce critical-path zero-growth budget and report debt trend
+        run: |
+          python3 scripts/check_critical_path_budget.py \
+            --expect-digest 2eafa153f1aca71934e356b16b1bae607d029b2f3e72313ba39aff7f2e2e56cf \
+            --report /tmp/critical-path-debt-trend.json
+
+      # R07's rereview-remediation established that a gate is only as good as
+      # the tests that catch it being semantically neutered, and that those
+      # tests must actually execute in CI. These assert domain attribution, that
+      # the digest is sensitive to every field it claims to pin, that targets
+      # are strictly downward, and that the pin above is not stale.
+      - name: Test critical-path budget checker
+        run: python3 -m unittest discover -s scripts -p 'test_critical_path_budget.py'
+
+      - name: Upload critical-path debt trend report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: critical-path-debt-trend
+          path: /tmp/critical-path-debt-trend.json
+          if-no-files-found: warn
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete@0.9.2

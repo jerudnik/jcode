@@ -1,0 +1,31 @@
+Critical-path debt trend
+  scope digest: 2eafa153f1aca71934e356b16b1bae607d029b2f3e72313ba39aff7f2e2e56cf
+  production files in scope: 290
+  domain                   dimension           now   ceil  target  to-go
+  lifecycle                panic                11     11       0     11
+  lifecycle                swallowed_error     441    441     220    221
+  lifecycle                oversize_files       10     10       5      5
+  persistence              panic                 1      1       0      1
+  persistence              swallowed_error      85     85      42     43
+  persistence              oversize_files        1      1       0      1
+  updater                  panic                 0      0       0      0
+  updater                  swallowed_error      22     22      11     11
+  updater                  oversize_files        0      0       0      0
+  provider_infrastructure  panic                 0      0       0      0
+  provider_infrastructure  swallowed_error      16     16       8      8
+  provider_infrastructure  oversize_files        1      1       0      1
+  tui                      panic                 8      8       0      8
+  tui                      swallowed_error     597    597     300    297
+  tui                      oversize_files       33     33      20     13
+  TOTAL panic: now=20 ceiling=20 target=0 to-go=20 repo=56 (35.7% of repository)
+  TOTAL swallowed_error: now=1161 ceiling=1161 target=581 to-go=580 repo=3032 (38.3% of repository)
+  TOTAL oversize_files: now=45 ceiling=45 target=25 to-go=20 repo=100 (45.0% of repository)
+  Repository debt trend (recorded budget vs high-water mark):
+    oversize_files       recorded=    100 mark=    100 (unchanged)
+    oversize_total_loc   recorded= 200999 mark= 200999 (unchanged)
+    panic                recorded=     56 mark=     56 (unchanged)
+    swallowed_error      recorded=   3032 mark=   3032 (unchanged)
+    test_oversize_files  recorded=     37 mark=     37 (unchanged)
+    warnings             recorded=      0 mark=      0 (unchanged)
+
+Critical-path budget OK: every domain is exactly at its ceiling.
