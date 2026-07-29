@@ -396,8 +396,8 @@
                     flakeLockSha256
                     system
                     ;
-                  jcodeDrvPath = jcode.drvPath;
-                  jcodeOutPath = jcode.outPath;
+                  jcodeDrvPath = builtins.unsafeDiscardStringContext jcode.drvPath;
+                  jcodeOutPath = builtins.unsafeDiscardStringContext jcode.outPath;
                 }
                 ''
                   cd "$src"
