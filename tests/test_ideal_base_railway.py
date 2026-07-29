@@ -486,13 +486,20 @@ class SchemaV2ValidatorTests(unittest.TestCase):
         The coordinator landed the schema-v2 migration in the same change as
         this validator (design §8, "Landing either half alone is invalid"), so
         the live file now carries reviewed_commit/published_commit pairs and
-        must pass the v2 rules against the real published ref.
+        must pass the v2 rules against the real published ref. The published
+        ref must be the live rail, not a pinned baseline: every accepted
+        node's published_commit is main-ancestral *at publication time*, so
+        any pin goes stale the moment a new node lands (R07 hit this the same
+        day it was written).
         """
         live = railway.load_json(railway.STATE_PATH)
         self.assertEqual(live.get("schema_version"), 2)
-        railway.validate_state(
-            live, self.nodes, published_ref=self.BASELINE_MAIN
-        )
+        published_ref = subprocess.check_output(
+            ["git", "rev-parse", "refs/remotes/origin/main"],
+            cwd=railway.REPO_ROOT,
+            text=True,
+        ).strip()
+        railway.validate_state(live, self.nodes, published_ref=published_ref)
         for node_id, record in live["nodes"].items():
             if record["state"] in railway.DEPENDENCY_COMPLETE:
                 self.assertNotIn("commit", record)
