@@ -162,10 +162,52 @@ pub(super) fn update_session_start_history(
     )
 }
 
+/// Prefix identifying a PID-bearing active-session marker.
+///
+/// Markers written before liveness tracking contained the literal `1`, which
+/// parses as PID 1 (`launchd`/`init`) and would therefore look alive forever.
+/// The prefix makes the two formats distinguishable so legacy files keep the
+/// old age-based treatment and expire instead of becoming immortal.
+const ACTIVE_SESSION_MARKER_PID_PREFIX: &str = "pid=";
+
+/// Upper bound on how long any active-session marker may survive.
+///
+/// For PID-bearing markers this is not the liveness signal; process liveness
+/// is. It remains only as the bounded mitigation for PID reuse: if the owner
+/// died and the operating system later recycled its PID onto an unrelated
+/// process, the marker reads as live until this age is exceeded. See the F26
+/// evidence README for why a start-time cross-check was not adopted here.
+const ACTIVE_SESSION_MARKER_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+
+pub(super) fn active_session_marker_contents(pid: u32) -> String {
+    format!("{ACTIVE_SESSION_MARKER_PID_PREFIX}{pid}")
+}
+
+fn active_session_marker_pid(contents: &str) -> Option<u32> {
+    contents
+        .trim()
+        .strip_prefix(ACTIVE_SESSION_MARKER_PID_PREFIX)
+        .and_then(|pid| pid.trim().parse::<u32>().ok())
+}
+
+/// Decide whether one active-session marker still represents a live session.
+///
+/// A PID-bearing marker counts only while its owning process is running, so a
+/// crashed session stops inflating concurrency immediately rather than up to a
+/// day later. Markers in the legacy format, and markers whose contents cannot
+/// be read, fall back to the original age bound so an upgrade neither
+/// undercounts live sessions nor keeps unreadable files forever.
+fn active_session_marker_is_live(contents: Option<&str>, age: Option<Duration>) -> bool {
+    let within_max_age = age.is_some_and(|age| age <= ACTIVE_SESSION_MARKER_MAX_AGE);
+    match contents.and_then(active_session_marker_pid) {
+        Some(pid) => within_max_age && jcode_core::process::is_running(pid),
+        None => within_max_age,
+    }
+}
+
 pub(super) fn prune_active_session_files(dir: &PathBuf) -> u32 {
     let _ = std::fs::create_dir_all(dir);
     let now = SystemTime::now();
-    let max_age = Duration::from_secs(24 * 60 * 60);
     let mut count = 0u32;
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -173,14 +215,13 @@ pub(super) fn prune_active_session_files(dir: &PathBuf) -> u32 {
     };
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
-        let fresh = entry
+        let age = entry
             .metadata()
             .ok()
             .and_then(|meta| meta.modified().ok())
-            .and_then(|modified| now.duration_since(modified).ok())
-            .map(|age| age <= max_age)
-            .unwrap_or(false);
-        if fresh {
+            .and_then(|modified| now.duration_since(modified).ok());
+        let contents = std::fs::read_to_string(&path).ok();
+        if active_session_marker_is_live(contents.as_deref(), age) {
             count = count.saturating_add(1);
         } else {
             let _ = std::fs::remove_file(path);
@@ -195,7 +236,7 @@ pub(super) fn register_active_session(session_id: &str) -> (u32, u32) {
     };
     let existing = prune_active_session_files(&dir);
     if let Some(path) = active_session_file(session_id) {
-        write_private_dir_file(&path, "1");
+        write_private_dir_file(&path, &active_session_marker_contents(std::process::id()));
     }
     (existing.saturating_add(1), existing)
 }
@@ -391,4 +432,288 @@ pub(super) fn current_session_id() -> Option<String> {
         .map(|state| state.as_ref().map(|s| s.session_id.clone()))
         .ok()
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A PID that has certainly exited, so liveness must report dead.
+    #[cfg(unix)]
+    fn exited_child_pid() -> u32 {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("spawn short-lived child");
+        let pid = child.id();
+        child.wait().expect("wait for short-lived child");
+        assert!(
+            !jcode_core::process::is_running(pid),
+            "test child must have exited"
+        );
+        pid
+    }
+
+    fn fresh() -> Option<Duration> {
+        Some(Duration::from_secs(60))
+    }
+
+    fn ancient() -> Option<Duration> {
+        Some(ACTIVE_SESSION_MARKER_MAX_AGE + Duration::from_secs(60))
+    }
+
+    #[test]
+    fn live_pid_marker_counts() {
+        let contents = active_session_marker_contents(std::process::id());
+        assert!(active_session_marker_is_live(Some(&contents), fresh()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dead_pid_marker_does_not_count_even_when_recently_written() {
+        let contents = active_session_marker_contents(exited_child_pid());
+        assert!(
+            !active_session_marker_is_live(Some(&contents), fresh()),
+            "a crashed session must stop counting immediately, not after 24h"
+        );
+    }
+
+    #[test]
+    fn legacy_marker_keeps_age_based_treatment() {
+        // Legacy contents are the literal "1", which must not be read as PID 1
+        // (launchd/init) or the marker would never expire.
+        assert!(active_session_marker_is_live(Some("1"), fresh()));
+        assert!(!active_session_marker_is_live(Some("1"), ancient()));
+    }
+
+    #[test]
+    fn malformed_and_unreadable_markers_fall_back_to_age() {
+        assert!(active_session_marker_is_live(
+            Some("pid=not-a-number"),
+            fresh()
+        ));
+        assert!(!active_session_marker_is_live(
+            Some("pid=not-a-number"),
+            ancient()
+        ));
+        assert!(active_session_marker_is_live(None, fresh()));
+        assert!(!active_session_marker_is_live(None, ancient()));
+        assert!(
+            !active_session_marker_is_live(Some("pid=1"), None),
+            "an unreadable mtime must not make a marker immortal"
+        );
+    }
+
+    #[test]
+    fn pid_reuse_is_bounded_by_the_max_age() {
+        // A recycled PID belonging to an unrelated live process reads as live,
+        // which is the documented limitation; the age bound stops it being
+        // permanent.
+        let contents = active_session_marker_contents(std::process::id());
+        assert!(active_session_marker_is_live(Some(&contents), fresh()));
+        assert!(
+            !active_session_marker_is_live(Some(&contents), ancient()),
+            "PID reuse must still expire at the max age"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prune_active_session_files_removes_dead_pid_markers_and_counts_live() {
+        let home = tempfile::TempDir::new().expect("tempdir");
+        let dir = home.path().join("telemetry_active_sessions");
+        std::fs::create_dir_all(&dir).expect("create marker dir");
+
+        std::fs::write(
+            dir.join("live.active"),
+            active_session_marker_contents(std::process::id()),
+        )
+        .expect("write live marker");
+        std::fs::write(
+            dir.join("dead.active"),
+            active_session_marker_contents(exited_child_pid()),
+        )
+        .expect("write dead marker");
+        std::fs::write(dir.join("malformed.active"), "pid=").expect("write malformed marker");
+
+        assert_eq!(
+            prune_active_session_files(&dir),
+            2,
+            "only the live PID marker and the fresh malformed marker may count"
+        );
+        assert!(dir.join("live.active").exists());
+        assert!(
+            !dir.join("dead.active").exists(),
+            "a dead owner's marker must be removed by the prune"
+        );
+        assert!(dir.join("malformed.active").exists());
+    }
+
+    /// Upgrade path: a real legacy `"1"` file left on disk by a previous
+    /// version must keep its age-based treatment rather than being read as
+    /// PID 1 (`launchd`/`init`) and becoming immortal, while a crashed owner
+    /// from this build is dropped in the same pass.
+    ///
+    /// `register_active_session` resolves `JCODE_HOME` internally and the
+    /// process-global env lock lives in `crate::tests`, which F26 does not
+    /// own. This drives the same prune/write/remove steps against a scratch
+    /// directory instead of widening the ownership boundary.
+    #[cfg(unix)]
+    #[test]
+    fn upgrade_from_legacy_markers_prunes_only_the_dead_owner() {
+        let home = tempfile::TempDir::new().expect("tempdir");
+        let dir = home.path().join("telemetry_active_sessions");
+        std::fs::create_dir_all(&dir).expect("create marker dir");
+
+        // A legacy marker exactly as older builds wrote it.
+        let legacy = dir.join("legacy-session.active");
+        std::fs::write(&legacy, "1").expect("write legacy marker");
+        // A crashed owner from this build.
+        let crashed = dir.join("crashed.active");
+        std::fs::write(&crashed, active_session_marker_contents(exited_child_pid()))
+            .expect("write crashed marker");
+
+        assert_eq!(
+            prune_active_session_files(&dir),
+            1,
+            "the fresh legacy marker still counts; only the crashed owner is dropped"
+        );
+        assert!(
+            legacy.exists(),
+            "a fresh legacy marker must survive the upgrade"
+        );
+        assert!(!crashed.exists(), "a dead owner's marker must be removed");
+
+        // The new marker this build writes, and the graceful removal path.
+        let own = dir.join("upgrade-session.active");
+        write_private_dir_file(&own, &active_session_marker_contents(std::process::id()));
+        assert_eq!(
+            prune_active_session_files(&dir),
+            2,
+            "our own live marker must count alongside the legacy one"
+        );
+        std::fs::remove_file(&own).expect("graceful unregister");
+        assert_eq!(prune_active_session_files(&dir), 1);
+    }
+
+    /// The prune got measurably more expensive (see
+    /// `prune_cost_per_call_is_reported`) and it hangs off `record_tool_call`
+    /// and friends, so it is worth pinning down that a default install never
+    /// pays for it: telemetry is opt-in in this fork, `begin_session_with_mode`
+    /// returns before populating `SESSION_STATE`, and every hot-path recorder
+    /// is guarded by that `Some(..)`. If someone later populates the state
+    /// without an enablement check, this test is the tripwire.
+    #[test]
+    fn concurrency_observation_is_unreachable_without_a_session() {
+        let src = include_str!("lib.rs");
+        let begin = src
+            .split("fn begin_session_with_mode(")
+            .nth(1)
+            .expect("begin_session_with_mode must exist");
+        assert!(
+            begin
+                .split("*guard = Some(state);")
+                .next()
+                .expect("assignment must follow the guard")
+                .contains("if !is_enabled() {"),
+            "SESSION_STATE must only be populated after an enablement check, \
+             otherwise the prune runs on every tool call for users who never opted in"
+        );
+        assert_eq!(
+            src.matches("*guard = Some(state);").count(),
+            1,
+            "exactly one site may populate SESSION_STATE; a second one would \
+             bypass the enablement check above"
+        );
+        assert!(
+            src.contains("fn observe_session_concurrency(state: &mut SessionTelemetry)"),
+            "observation must take an existing session by reference, so it \
+             cannot run before one is established"
+        );
+    }
+
+    /// Cost check, not a correctness test. `prune_active_session_files` hangs
+    /// off `record_tool_call`, `record_turn`, and seven other hot recorders, and
+    /// F26 added a file read plus a `kill(0)` syscall per marker. This measures
+    /// the real function so the added cost is a number rather than a guess.
+    ///
+    /// Measured on macOS with 8 markers (a deliberately high session count):
+    /// full prune ~1050 us/call vs ~155 us/call for the pre-F26 mtime-only
+    /// shape. Attribution: `read_to_string` ~894 us, `is_running` ~7 us. The
+    /// liveness syscall is not the cost; reading the file is. Absolute figures
+    /// are inflated in a sandboxed filesystem, so compare the ratios.
+    ///
+    /// This is not on the default-install path: telemetry is opt-in in this
+    /// fork, so `SESSION_STATE` stays `None` and every recorder short-circuits.
+    /// See `concurrency_observation_is_unreachable_without_a_session`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "developer benchmark: measures prune cost per call; run explicitly"]
+    fn prune_cost_per_call_is_reported() {
+        let home = tempfile::TempDir::new().expect("tempdir");
+        let dir = home.path().join("telemetry_active_sessions");
+        std::fs::create_dir_all(&dir).expect("create marker dir");
+        let markers: usize = std::env::var("F26_BENCH_MARKERS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+        for i in 0..markers {
+            std::fs::write(
+                dir.join(format!("s{i}.active")),
+                active_session_marker_contents(std::process::id()),
+            )
+            .expect("write marker");
+        }
+
+        let iterations = 2000;
+        let bench = |label: &str, mut f: Box<dyn FnMut()>| {
+            f();
+            let started = std::time::Instant::now();
+            for _ in 0..iterations {
+                f();
+            }
+            let per_call = started.elapsed().as_secs_f64() / f64::from(iterations) * 1e6;
+            println!("{label}: {per_call:.1} us/call ({markers} markers)");
+        };
+
+        bench(
+            "full prune (post-F26)",
+            Box::new(|| {
+                std::hint::black_box(prune_active_session_files(&dir));
+            }),
+        );
+        let pre = dir.clone();
+        bench(
+            "mtime-only walk (pre-F26 shape)",
+            Box::new(move || {
+                let now = SystemTime::now();
+                for entry in std::fs::read_dir(&pre).unwrap().filter_map(Result::ok) {
+                    std::hint::black_box(
+                        entry
+                            .metadata()
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|m| now.duration_since(m).ok())
+                            .is_some_and(|age| age <= ACTIVE_SESSION_MARKER_MAX_AGE),
+                    );
+                }
+            }),
+        );
+        let read = dir.clone();
+        bench(
+            "  attribution: read_to_string only",
+            Box::new(move || {
+                for entry in std::fs::read_dir(&read).unwrap().filter_map(Result::ok) {
+                    std::hint::black_box(std::fs::read_to_string(entry.path()).ok());
+                }
+            }),
+        );
+        let pid = std::process::id();
+        bench(
+            "  attribution: is_running only",
+            Box::new(move || {
+                std::hint::black_box(jcode_core::process::is_running(pid));
+            }),
+        );
+    }
 }

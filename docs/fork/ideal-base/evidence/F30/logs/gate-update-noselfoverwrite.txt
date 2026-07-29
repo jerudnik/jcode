@@ -1,0 +1,42 @@
+store binary mtime/inode BEFORE:
+stat: cannot read file system information for '%N inode=%i mtime=%m size=%z': No such file or directory
+  File: "/nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/bin/jcode"
+    ID: 10000130000001a Namelen: ?       Type: apfs
+Block size: 4096       Fundamental block size: 4096
+Blocks: Total: 120699413  Free: 20922538   Available: 20922538
+Inodes: Total: 841333005  Free: 836901520
+store perms: -r-xr-xr-x 1 root nixbld 124117040 Dec 31  1969 /nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/bin/jcode
+
+== jcode update (nix-managed binary) ==
+                 Jcode is distributed and updated through Nix.
+                      Update it the way you installed it:
+               Home Manager: rebuild your Home Manager generation
+       nix profile:  nix profile upgrade jcode  (or your flake reference)
+               flake input:  nix flake update jcode  then rebuild
+exit=0
+
+store binary AFTER:
+stat: cannot read file system information for '%N inode=%i mtime=%m size=%z': No such file or directory
+  File: "/nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/bin/jcode"
+    ID: 10000130000001a Namelen: ?       Type: apfs
+Block size: 4096       Fundamental block size: 4096
+Blocks: Total: 120699413  Free: 20922478   Available: 20922478
+Inodes: Total: 841330605  Free: 836899120
+
+== any retired build layout written? ==
+total 0
+drwx------ 4 jrudnik wheel 128 Jul 29 02:19 .
+drwx------ 4 jrudnik wheel 128 Jul 29 02:19 ..
+drwx------ 3 jrudnik wheel  96 Jul 29 02:19 logs
+-rw-r--r-- 1 jrudnik wheel   0 Jul 29 02:19 sessions-bak-prune.stamp
+builds dir: absent
+current dir: absent
+
+== network egress check: any file downloaded? ==
+/tmp/f30-upd.ZckTHE/jcodehome/logs/jcode-2026-07-29.log
+/tmp/f30-upd.ZckTHE/jcodehome/sessions-bak-prune.stamp
+
+== jcode version / doctor origin (should be nix) ==
+client.origin = nix
+client.path   = /nix/store/j4m1y602ggih17mp9x19a5ccndvw54k5-jcode-0.46.0/bin/jcode
+sandbox removed

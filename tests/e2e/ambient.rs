@@ -327,6 +327,8 @@ fn test_ambient_system_prompt_builder() {
         AmbientState, MemoryGraphHealth, ResourceBudget, build_ambient_system_prompt,
     };
 
+    let _env = setup_test_env().expect("failed to setup isolated JCODE_HOME");
+
     let state = AmbientState::default();
     let queue_items = vec![];
     let health = MemoryGraphHealth {

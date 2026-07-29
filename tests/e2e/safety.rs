@@ -2,11 +2,14 @@
 // Ambient Mode Integration Tests
 // =============================================================================
 
+use crate::test_support::setup_test_env;
+
 /// Test safety system: action classification
 #[test]
 fn test_safety_classification() {
     use jcode::safety::SafetySystem;
 
+    let _env = setup_test_env().expect("failed to setup isolated JCODE_HOME");
     let safety = SafetySystem::new();
 
     // Tier 1: auto-allowed
@@ -36,6 +39,7 @@ fn test_safety_classification() {
 fn test_safety_permission_flow() {
     use jcode::safety::{PermissionRequest, PermissionResult, SafetySystem, Urgency};
 
+    let _env = setup_test_env().expect("failed to setup isolated JCODE_HOME");
     let safety = SafetySystem::new();
 
     // Count existing pending requests (may have leftover state from other tests)
@@ -82,6 +86,7 @@ fn test_safety_permission_flow() {
 fn test_safety_transcript() {
     use jcode::safety::{AmbientTranscript, SafetySystem, TranscriptStatus};
 
+    let _env = setup_test_env().expect("failed to setup isolated JCODE_HOME");
     let safety = SafetySystem::new();
 
     let transcript = AmbientTranscript {
@@ -109,6 +114,7 @@ fn test_safety_transcript() {
 fn test_safety_summary_generation() {
     use jcode::safety::{ActionLog, ActionTier, SafetySystem};
 
+    let _env = setup_test_env().expect("failed to setup isolated JCODE_HOME");
     let safety = SafetySystem::new();
 
     // Log some actions
