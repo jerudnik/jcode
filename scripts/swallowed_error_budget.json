@@ -1,7 +1,7 @@
 {
-  "total": 3032,
+  "total": 3034,
   "totals_by_pattern": {
-    "dot_ok": 1106,
+    "dot_ok": 1108,
     "let_underscore": 1120,
     "unwrap_or_default": 806
   },
@@ -1677,8 +1677,8 @@
       "unwrap_or_default": 0
     },
     "crates/jcode-telemetry-core/src/state_support.rs": {
-      "dot_ok": 17,
       "let_underscore": 7,
+      "dot_ok": 19,
       "unwrap_or_default": 0
     },
     "crates/jcode-terminal-launch/src/lib.rs": {
