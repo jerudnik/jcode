@@ -189,6 +189,8 @@ date, mutates the tree, observes the verdict, and restores. Summary:
 | N | manifest fix reverted | n/a | **1** → **0** | guarding test red, then green |
 | O | manifest fixed, fixture stale | n/a | **5 fail** → **OK** | `test_governance_compare` 74 tests |
 | P | fixture and live modes | n/a | **0** / **0** | both match the manifest |
+| Q | job steps, fresh `git archive` checkout | n/a | **0** | py3.11/3.12/3.13; cwd-independent |
+| R | same fresh checkout, plant plus restore | n/a | **1** → **0** | first attempt was a no-op; see below |
 
 A, F, and L bracket every red probe, so the greens are not an artifact of a
 broken checker and the reds are not residue. Note B and A are the *same tree*:
@@ -394,3 +396,33 @@ actionlint .github/workflows/security.yml           # clean
   *checked* but not *removed*. A single source of truth would be better;
   `security_preflight.sh` is vendor-pristine and protected, so collapsing them
   was out of scope here.
+
+### Probes Q/R — the job on a runner, and a vacuous probe of my own
+
+Every probe above ran in my worktree, which is not what CI does. Probes Q and
+R re-run the workflow's two `run:` lines verbatim against a fresh
+`git archive HEAD` extraction, which is what `actions/checkout@v5` produces.
+Green on Python 3.11/3.12/3.13 (3.11 is the floor: the checker imports
+`tomllib`), and the checker resolves paths from its own location rather than
+the caller's cwd, so preflight can invoke it from anywhere.
+
+Probe R plants the coordinator's advisory in that fresh tree and observes
+exit 1, then restores and diffs `security_preflight.sh` byte-for-byte against
+`HEAD` to confirm the vendor file is untouched.
+
+**My first attempt at probe R was itself vacuous, which is the more useful
+finding.** The `sed` anchored on an `--ignore` line that does not exist in
+this file. It matched nothing, changed nothing, and the checker reported
+`advisory policy: OK` / exit 0. Read quickly, that looks like the gate failing
+to catch a planted advisory. It was really a probe that planted nothing.
+
+That is the identical failure mode I had fixed in `test_summary_dependency_added`
+minutes earlier — a mutation whose anchor silently stopped matching — and I
+reproduced it in my own verification. The probe now asserts
+`planted occurrences: 1` *before* interpreting the exit code. A mutation test
+that does not confirm its mutation landed cannot distinguish a working gate
+from a no-op, and the failure is invisible in both directions.
+
+This is the third instance in one node of the same root cause: an unenforced
+anchor between two artifacts that must agree. The manifest and the workflow.
+The fixture and the workflow. And now the probe and the file it mutates.

@@ -165,3 +165,61 @@ $ governance_compare --snapshot <fixture>
 $ governance_compare --live
 === Governance: snapshot matches the manifest ===
 [exit=0]
+
+--------------------------------------------------------------------------
+Probe Q — the workflow job's steps, run verbatim from a FRESH CHECKOUT
+--------------------------------------------------------------------------
+Everything above ran in my dirty worktree. That does not prove the job works
+on a runner, which starts from actions/checkout@v5 and nothing else. So:
+
+  git archive HEAD | tar -x -C /tmp/f22-fresh
+
+and then the two `run:` lines from .github/workflows/security.yml verbatim.
+
+  step 1  python3 scripts/check_advisory_policy.py
+          -> advisory policy: OK as of 2026-07-29        exit 0
+  step 2  python3 -m unittest discover -s tests \
+            -p 'test_advisory_policy.py' -v
+          -> Ran 35 tests ... OK                          exit 0
+
+Python floor. The checker imports tomllib, which is 3.11+. Confirmed green on
+3.11.15, 3.12.13, and 3.13.14. ubuntu-latest is well above the floor, but the
+floor is now a measured fact rather than an assumption. 3.10 would fail at
+import; nixpkgs no longer ships it, so that is reasoned, not observed.
+
+cwd independence: run as `python3 /tmp/f22-fresh/scripts/check_advisory_policy.py`
+from /tmp -> exit 0. It resolves paths from the script location, not the
+caller's cwd, which matters because preflight may invoke it from elsewhere.
+
+--------------------------------------------------------------------------
+Probe R — the same fresh checkout turning RED
+--------------------------------------------------------------------------
+A job proven only green is proven only half. Planted the coordinator's
+RUSTSEC-2099-9999 into the fresh tree's security_preflight.sh:
+
+  step 1 -> advisory policy: 2 problem(s) as of 2026-07-29
+            error: RUSTSEC-2099-9999: suppressed in
+              scripts/security_preflight.sh but has no record in
+              docs/security/advisories.toml
+            error: RUSTSEC-2099-9999: suppressed in
+              scripts/security_preflight.sh but not in .cargo/audit.toml;
+              the suppression surfaces must agree
+            exit 1
+
+Restored, diffed byte-for-byte against HEAD:scripts/security_preflight.sh to
+confirm the vendor file is untouched, re-ran -> exit 0, 35/35.
+
+*** The first attempt at this probe was itself vacuous, and it is worth
+    recording rather than quietly retrying. ***
+
+My sed anchored on `--ignore RUSTSEC-2023-0071`, which does not appear in this
+file. The substitution applied to 0 lines, the tree was unchanged, and the
+checker printed `advisory policy: OK` / exit 0. Read carelessly that says "the
+gate does not catch the plant." It actually says "nothing was planted."
+
+This is the exact failure mode I had just fixed in test_summary_dependency_added
+— a `.replace()`/`sed` whose anchor no longer matches, silently testing
+nothing — and I reproduced it in my own verification within the hour. Hence
+the `planted occurrences: N <- must be 1` assertion now in the probe itself.
+A mutation test must verify the mutation landed before it interprets the
+result. Otherwise a green is indistinguishable from a no-op.
