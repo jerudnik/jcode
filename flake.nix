@@ -83,11 +83,13 @@
             root = ./.;
             fileset = lib.fileset.unions [
               ./flake.nix
+              ./flake.lock
               ./rust-toolchain.toml
               ./apm.yml
               ./apm.lock.yaml
               ./nix
               ./Cargo.toml
+              ./Cargo.lock
               ./scripts/clean_target.sh
               ./scripts/check_agent_instructions.py
               ./scripts/dev_cargo.sh
@@ -172,6 +174,28 @@
             # (a clean checkout). Dirty/path trees fall back to the package default.
             gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or "nix";
           };
+
+          sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
+          sourceDisplayRevision =
+            inputs.self.shortRev or inputs.self.dirtyShortRev or (builtins.substring 0 12 sourceFullRevision);
+          flakeLockSha256 = builtins.hashFile "sha256" ./flake.lock;
+
+          jcode-sbom = pkgs.callPackage ./nix/sbom.nix {
+            cargoLock = ./Cargo.lock;
+            inherit version;
+          };
+
+          jcode-provenance = pkgs.callPackage ./nix/provenance.nix {
+            inherit
+              jcode
+              version
+              sourceFullRevision
+              sourceDisplayRevision
+              flakeLockSha256
+              system
+              ;
+            sbom = jcode-sbom;
+          };
         in
         {
           _module.args.pkgs = pkgs;
@@ -188,6 +212,9 @@
             # only the final `./result` leaves this layer unpublished and every
             # runner (and every fresh clone) rebuilds it from source.
             jcode-deps = jcode.cargoArtifacts;
+          }
+          // lib.optionalAttrs (system == "x86_64-linux") {
+            inherit jcode-provenance jcode-sbom;
           };
 
           # CI gates run by `nix flake check`. Keep these cheap, local, and valid
@@ -349,6 +376,94 @@
                     exit 1
                   fi
 
+                  touch "$out"
+                '';
+
+          }
+          // lib.optionalAttrs (system == "x86_64-linux") {
+            provenance-sbom =
+              pkgs.runCommand "jcode-provenance-sbom-check"
+                {
+                  src = checkSrc;
+                  nativeBuildInputs = [
+                    pkgs.nix
+                    pkgs.python3
+                  ];
+                  inherit
+                    version
+                    sourceFullRevision
+                    sourceDisplayRevision
+                    flakeLockSha256
+                    system
+                    ;
+                  jcodeDrvPath = jcode.drvPath;
+                  jcodeOutPath = jcode.outPath;
+                }
+                ''
+                  cd "$src"
+                  nar_hash=$(nix --extra-experimental-features nix-command hash path --sri ${jcode})
+                  nar_size=$(nix-store --dump ${jcode} | wc -c | tr -d ' ')
+                  sbom_sha256=$(sha256sum ${jcode-sbom}/share/jcode/sbom.cdx.json | cut -d' ' -f1)
+
+                  cat > expected.json <<EOF
+                  {
+                    "source_full_revision": "$sourceFullRevision",
+                    "source_display_revision": "$sourceDisplayRevision",
+                    "flake_lock_sha256": "$flakeLockSha256",
+                    "cargo_version": "$version",
+                    "nix_system": "$system",
+                    "drv_path": "$jcodeDrvPath",
+                    "output_path": "$jcodeOutPath",
+                    "output_nar_hash": "$nar_hash",
+                    "output_nar_size": $nar_size,
+                    "sbom_sha256": "$sbom_sha256"
+                  }
+                  EOF
+
+                  python3 nix/verify-provenance-sbom.py \
+                    --provenance ${jcode-provenance}/share/jcode/provenance.json \
+                    --sbom ${jcode-sbom}/share/jcode/sbom.cdx.json \
+                    --expected expected.json \
+                    --cargo-lock Cargo.lock
+
+                  cp ${jcode-provenance}/share/jcode/provenance.json planted-provenance.json
+                  python3 - <<'PY'
+                  import json
+                  from pathlib import Path
+                  path = Path("planted-provenance.json")
+                  data = json.loads(path.read_text())
+                  data["source"]["full_revision"] = "planted-wrong-revision"
+                  path.write_text(json.dumps(data, sort_keys=True) + "\n")
+                  PY
+                  if python3 nix/verify-provenance-sbom.py \
+                    --provenance planted-provenance.json \
+                    --sbom ${jcode-sbom}/share/jcode/sbom.cdx.json \
+                    --expected expected.json \
+                    --cargo-lock Cargo.lock; then
+                    echo "planted provenance mismatch passed" >&2
+                    exit 1
+                  fi
+
+                  cp ${jcode-sbom}/share/jcode/sbom.cdx.json planted-sbom.cdx.json
+                  python3 - <<'PY'
+                  import json
+                  from pathlib import Path
+                  path = Path("planted-sbom.cdx.json")
+                  data = json.loads(path.read_text())
+                  for component in data["components"]:
+                      if component.get("name") == "agentgrep":
+                          component.pop("externalReferences", None)
+                          break
+                  path.write_text(json.dumps(data, sort_keys=True) + "\n")
+                  PY
+                  if python3 nix/verify-provenance-sbom.py \
+                    --provenance ${jcode-provenance}/share/jcode/provenance.json \
+                    --sbom planted-sbom.cdx.json \
+                    --expected expected.json \
+                    --cargo-lock Cargo.lock; then
+                    echo "planted SBOM mismatch passed" >&2
+                    exit 1
+                  fi
                   touch "$out"
                 '';
           };
