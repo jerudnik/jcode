@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W4",
-    "state": "in_progress",
-    "reviewed_commit": null,
-    "published_commit": null,
-    "updated_at": "2026-07-27T06:17:21Z",
-    "summary": "W4 in progress: 2 of 9 children accepted (F28 test parallelism restored, F29 ambient filesystem roots routed through jcode-storage). Remaining: R05, F22-F27. Root state corrected from 'pending', which had understated real progress and made the railway offer to re-seed an already-expanded wave."
+    "node": "R07",
+    "state": "accepted",
+    "reviewed_commit": "69a6a63101d605fb8f2b2a7e069ec49e1a61f73c",
+    "published_commit": "a545ecee42fef172c8c6ff730dc6cb5608ebe652",
+    "updated_at": "2026-07-29T04:09:57Z",
+    "summary": "R07 accepted: governance/durability barrier landed end-to-end. Archive push 39/39 verified (private recovery repo); bootstrap PR #39 merged (a545ecee4); apply sequence 1-17 strict-order pass (rulesets 18509013/18509016 with required_reviewers: [] pin, merge-commit-only repo, classic protection removed last); live fork-health green including governance snapshot vs manifest and 27 protected paths; under-enforcement proof PR #40 (harmless all-green, planted Governance Root red naming the path) closed unmerged. Design v4 PASS, integration gate PASS-WITH-FIXES, independent review GAP-FOUND with G1-G3 remediated, targeted re-review REMEDIATION-PASS."
   },
   "nodes": {
     "W0": {
@@ -524,20 +524,31 @@
       "updated_at": "2026-07-27T03:22:43Z"
     },
     "W4R": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "69a6a63101d605fb8f2b2a7e069ec49e1a61f73c",
+      "published_commit": "a545ecee42fef172c8c6ff730dc6cb5608ebe652",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R07/barrier-0-authorization.md",
+        "docs/fork/ideal-base/evidence/R07/barrier-1-archive-push.md",
+        "docs/fork/ideal-base/evidence/R07/barrier-2-5-execution.md"
+      ],
+      "summary": "W4R closed with its only child R07: recovery/governance barrier complete. Every accepted node's reviewed identity is durably published (39/39 archive refs verified on the private recovery repo; bootstrap merged at a545ecee4); branch protection is self-checking (live fork-health green, Governance Root proven non-vacuous by the barrier-5 proof PR).",
+      "updated_at": "2026-07-29T04:09:47Z"
     },
     "R07": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "69a6a63101d605fb8f2b2a7e069ec49e1a61f73c",
+      "published_commit": "a545ecee42fef172c8c6ff730dc6cb5608ebe652",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R07/design.md",
+        "docs/fork/ideal-base/evidence/R07/barrier-0-authorization.md",
+        "docs/fork/ideal-base/evidence/R07/barrier-1-archive-push.md",
+        "docs/fork/ideal-base/evidence/R07/barrier-2-5-execution.md",
+        "docs/fork/ideal-base/evidence/R07/integration-adjudication.md",
+        "docs/fork/ideal-base/evidence/R07/rereview-remediation.md"
+      ],
+      "summary": "R07 accepted: governance/durability barrier landed end-to-end. Archive push 39/39 verified (private recovery repo); bootstrap PR #39 merged (a545ecee4); apply sequence 1-17 strict-order pass (rulesets 18509013/18509016 with required_reviewers: [] pin, merge-commit-only repo, classic protection removed last); live fork-health green including governance snapshot vs manifest and 27 protected paths; under-enforcement proof PR #40 (harmless all-green, planted Governance Root red naming the path) closed unmerged. Design v4 PASS, integration gate PASS-WITH-FIXES, independent review GAP-FOUND with G1-G3 remediated, targeted re-review REMEDIATION-PASS.",
+      "updated_at": "2026-07-29T04:09:57Z"
     },
     "R06": {
       "state": "pending",
