@@ -384,18 +384,22 @@
             provenance-sbom-fixtures =
               pkgs.runCommand "jcode-provenance-sbom-fixtures-check"
                 {
+                  sbom = jcode-sbom;
                   src = checkSrc;
                   nativeBuildInputs = [ pkgs.python3 ];
                 }
                 ''
                   cd "$src"
                   tmp=$(mktemp -d)
+                  cp "$sbom/share/jcode/sbom.cdx.json" "$tmp/sbom.json"
                   python3 - <<'PY' "$tmp"
+                  import hashlib
                   import json
                   import sys
                   from pathlib import Path
 
                   tmp = Path(sys.argv[1])
+                  sbom_bytes = (tmp / "sbom.json").read_bytes()
                   expected = {
                       "source_full_revision": "full",
                       "source_display_revision": "short",
@@ -406,7 +410,7 @@
                       "output_path": "/nix/store/out-jcode",
                       "output_nar_hash": "sha256-abc",
                       "output_nar_size": 123,
-                      "sbom_sha256": "sbomhash",
+                      "sbom_sha256": hashlib.sha256(sbom_bytes).hexdigest(),
                   }
                   provenance = {
                       "schema": "https://jerudnik.github.io/jcode/schemas/nix-provenance/v1",
@@ -415,52 +419,35 @@
                       "nix": {"system": "x86_64-linux"},
                       "derivation": {"drv_path": "/nix/store/example.drv"},
                       "output": {"store_path": "/nix/store/out-jcode", "nar_hash": "sha256-abc", "nar_size": 123},
-                      "sbom": {"sha256": "sbomhash"},
-                      "scope": {"artifact": "packages.x86_64-linux.jcode", "exclusions": ["scripts/build_linux_compat.sh"]},
+                      "sbom": {"sha256": expected["sbom_sha256"]},
+                      "scope": {
+                          "artifact": "packages.x86_64-linux.jcode",
+                          "nix_system": "x86_64-linux",
+                          "exclusions": [
+                              "scripts/build_linux_compat.sh",
+                              "compatibility bundle and Linux archive assets are excluded unless made reproducible separately",
+                              "release assets",
+                          ],
+                      },
                       "release_assets": {"included": False},
-                  }
-                  packages = []
-                  current = {}
-                  in_package = False
-                  for raw in Path("Cargo.lock").read_text().splitlines():
-                      line = raw.strip()
-                      if line == "[[package]]":
-                          if current.get("source", "").startswith("git+"):
-                              packages.append(current)
-                          current = {}
-                          in_package = True
-                          continue
-                      if in_package and " = " in line:
-                          key, value = line.split(" = ", 1)
-                          if key in {"name", "version", "source"}:
-                              current[key] = json.loads(value)
-                  if current.get("source", "").startswith("git+"):
-                      packages.append(current)
-                  components = [
-                      {
-                          "type": "library",
-                          "name": package["name"],
-                          "version": package["version"],
-                          "externalReferences": [{"type": "vcs", "url": package["source"]}],
-                      }
-                      for package in packages
-                  ]
-                  sbom = {
-                      "$schema": "https://cyclonedx.org/schema/bom-1.5.schema.json",
-                      "bomFormat": "CycloneDX",
-                      "specVersion": "1.5",
-                      "metadata": {"component": {"name": "jcode", "version": "0.46.0"}},
-                      "components": components,
                   }
                   (tmp / "expected.json").write_text(json.dumps(expected, sort_keys=True) + "\n")
                   (tmp / "provenance.json").write_text(json.dumps(provenance, sort_keys=True) + "\n")
-                  (tmp / "sbom.json").write_text(json.dumps(sbom, sort_keys=True) + "\n")
                   bad_provenance = json.loads(json.dumps(provenance))
                   bad_provenance["source"]["full_revision"] = "wrong"
                   (tmp / "bad-provenance.json").write_text(json.dumps(bad_provenance, sort_keys=True) + "\n")
+                  sbom = json.loads(sbom_bytes)
                   bad_sbom = json.loads(json.dumps(sbom))
-                  bad_sbom["components"] = bad_sbom["components"][1:]
+                  git_index = next(
+                      index
+                      for index, component in enumerate(bad_sbom["components"])
+                      if any(ref.get("type") == "vcs" for ref in component.get("externalReferences", []))
+                  )
+                  del bad_sbom["components"][git_index]
                   (tmp / "bad-sbom.json").write_text(json.dumps(bad_sbom, sort_keys=True) + "\n")
+                  duplicate_sbom = json.loads(json.dumps(sbom))
+                  duplicate_sbom["components"].append(json.loads(json.dumps(duplicate_sbom["components"][0])))
+                  (tmp / "duplicate-sbom.json").write_text(json.dumps(duplicate_sbom, sort_keys=True) + "\n")
                   PY
 
                   python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock
@@ -470,6 +457,10 @@
                   fi
                   if python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/bad-sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
                     echo "planted SBOM omission passed unexpectedly" >&2
+                    exit 1
+                  fi
+                  if python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/duplicate-sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
+                    echo "planted duplicate bom-ref passed unexpectedly" >&2
                     exit 1
                   fi
                   touch "$out"

@@ -47,7 +47,7 @@ runCommand "jcode-provenance-${version}"
       '{
         schema: "https://jerudnik.github.io/jcode/schemas/nix-provenance/v1",
         scope: {
-          artifact: "packages.x86_64-linux.jcode",
+          artifact: "packages.\($system).jcode",
           claim: "installed output only",
           nix_system: $system,
           exclusions: [
@@ -68,7 +68,7 @@ runCommand "jcode-provenance-${version}"
         },
         nix: {
           system: $system,
-          rebuild_guidance: "nix build .#packages.x86_64-linux.jcode --rebuild --keep-failed --no-substitute --print-build-logs"
+          rebuild_guidance: "nix build .#packages.\($system).jcode --rebuild --keep-failed --no-substitute --print-build-logs"
         },
         derivation: {
           drv_path: $drvPath

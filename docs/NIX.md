@@ -268,7 +268,9 @@ assets are explicitly excluded unless they are made reproducible in a separate
 contract. GitHub releases remain metadata-only and contain no executable assets.
 
 Two forced rebuilds provide evidence, not a mathematical proof. Use the official
-Nix rebuild guidance on the repository Linux builder:
+Nix rebuild guidance on the repository Linux builder. If the output is not yet
+present in that builder's store, first run the same command without `--rebuild`;
+Nix cannot check a missing output. Then run the forced command twice:
 
 ```sh
 nix build .#packages.x86_64-linux.jcode --rebuild --keep-failed --no-substitute --print-build-logs
@@ -292,5 +294,9 @@ nix build .#packages.x86_64-linux.jcode-sbom
 `jcode-provenance` emits `share/jcode/provenance.json` with source, version,
 platform, derivation, output NAR, SBOM, scope, and exclusion fields.
 `jcode-sbom` emits deterministic CycloneDX 1.5 JSON at
-`share/jcode/sbom.cdx.json` for the Cargo dependency graph. It is not a Nix
-runtime-closure inventory.
+`share/jcode/sbom.cdx.json` for the resolved Cargo component inventory. It does
+not claim Cargo dependency edges or a Nix runtime-closure inventory. Component
+references are source-qualified and unique within the BOM. The optional
+CycloneDX serial number is deliberately omitted because this companion output is
+byte-for-byte reproducible; a random UUID would violate that contract and a nil
+UUID would falsely claim an instance identity.

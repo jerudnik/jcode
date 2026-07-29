@@ -13,6 +13,7 @@ runCommand "jcode-sbom-${version}"
   ''
     mkdir -p "$out/share/jcode"
     python3 - <<'PY' "$cargoLock" "$version" "$out/share/jcode/sbom.cdx.json"
+    import hashlib
     import json
     import re
     import sys
@@ -36,13 +37,16 @@ runCommand "jcode-sbom-${version}"
 
     components = []
     for package in sorted(packages, key=lambda item: (item.get("name", ""), item.get("version", ""), item.get("source", ""))):
+        source = package.get("source", "")
+        if package["name"] == "jcode" and package["version"] == version and not source:
+            continue
+        identity = "\0".join((package["name"], package["version"], source)).encode("utf-8")
         component = {
             "type": "library",
             "name": package["name"],
             "version": package["version"],
-            "bom-ref": "pkg:cargo/%s@%s" % (package["name"], package["version"]),
+            "bom-ref": "urn:jcode:cargo:%s" % hashlib.sha256(identity).hexdigest(),
         }
-        source = package.get("source", "")
         if source.startswith("registry+"):
             component["purl"] = "pkg:cargo/%s@%s" % (package["name"], package["version"])
         elif source.startswith("git+"):
@@ -50,10 +54,12 @@ runCommand "jcode-sbom-${version}"
         components.append(component)
 
     sbom = {
-        "$schema": "https://cyclonedx.org/schema/bom-1.5.schema.json",
+        "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
-        "serialNumber": "urn:uuid:00000000-0000-0000-0000-000000000000",
+        # CycloneDX serial numbers identify individual generations. Omitting the
+        # optional field is more honest than inventing a random or nil UUID for
+        # this byte-for-byte reproducible companion output.
         "version": 1,
         "metadata": {
             "component": {
