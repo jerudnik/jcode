@@ -223,3 +223,78 @@ nothing — and I reproduced it in my own verification within the hour. Hence
 the `planted occurrences: N <- must be 1` assertion now in the probe itself.
 A mutation test must verify the mutation landed before it interprets the
 result. Otherwise a green is indistinguishable from a no-op.
+
+--------------------------------------------------------------------------
+Probe S — checking my own protected-path claim mechanically
+--------------------------------------------------------------------------
+I had been reporting the protected-path list from memory and from the
+`docs/fork/ideal-base/*.md` prose. That was wrong. The list that actually
+gates is the `protected=(...)` array in .github/workflows/governance-root.yml
+(lines 32-59), evaluated as `git diff --quiet $(git merge-base HEAD main) HEAD
+-- "${protected[@]}"`.
+
+Extracted that array and matched it against `git diff --name-only` for this
+branch, rather than asserting it:
+
+  PROTECTED  .github/workflows/security.yml                      (dir match)
+  PROTECTED  scripts/required-checks.json
+  PROTECTED  docs/.../evidence/R07/fixtures/governance-valid.json
+  PROTECTED  tests/test_governance_compare.py                    <- MISSED
+  ok         everything else (11 files)
+
+FOUR, not three. I had told the coordinator in two consecutive reports that
+tests/test_governance_compare.py was "modified but NOT protected." It is on
+the list, at governance-root.yml:57. A maintenance window planned from my
+report would have hit an unexpected red on the file I explicitly cleared.
+
+Also corrected: I had cited governance-root.yml:52 as a place that *invokes*
+scripts/security_preflight.sh. It does not. Line 52 is that script's entry in
+this protected array. The real invocations are ci.yml:249 (--strict),
+security.yml:117 (--strict), and security.yml:95 (no --strict, so the audit
+block is skipped entirely and only the secret scan runs). The audit-bearing
+call sites are two, not three.
+
+The lesson matches probe R exactly: I asserted a fact about the repo from
+recollection instead of extracting it from the file that enforces it. Both
+times the assertion was confidently stated and wrong. The list is now derived
+by script, so it can be re-derived rather than re-remembered.
+
+--------------------------------------------------------------------------
+Probe T — independent adversarial audit of the suppression surface
+--------------------------------------------------------------------------
+I had reported "cannot rule out a suppression mechanism other than --ignore /
+severity_threshold" as unverified, and said it wanted someone who did not
+write the checker. Ran one (gpt-5.5, read-only), briefed specifically on the
+surface I already missed once, and told to hunt output-filtering wrappers
+(`| grep -v`, `jq` on --json, `|| true`, swallowed exit status) since a flag
+grep structurally cannot see those.
+
+Result, matching my own independent sweep: NO additional per-advisory
+suppression mechanism exists. Confirmed absent: cargo-deny, cargo-vet, any
+second audit.toml or deny.toml, RUSTSEC_*/CARGO_AUDIT_* env muting, live
+[patch]/[replace]/[source] redirection, vendored crates, and any alternate
+cargo-audit invocation in scripts/, nix/, packaging/, flake.nix, or justfile.
+Two searches by two models with different blind spots now agree.
+
+It did surface two WORKFLOW-LEVEL coverage gaps. Both are real, both are
+pre-existing routing design rather than per-advisory suppression, and neither
+is in F22's scope -- recorded so they are not lost:
+
+  security.yml:135-149  weekly-report does `rm -f .cargo/audit.toml`, runs the
+                        full audit, and `exit 0`. Deliberately informational;
+                        the tracking issue is the artifact. Nothing about it
+                        suppresses a specific ID, but a red full audit cannot
+                        fail a build.
+  security.yml:100      dependency-audit is skipped on PRs that touch no
+                        dependency path, and Security Gate *expects* skipped.
+                        So a PR touching no dependency never runs cargo audit,
+                        even if a new advisory was published after the branch
+                        was cut.
+
+The second is partly why `advisory-policy` was deliberately given NO `if:`
+condition (verified above: it is the only job in the file that always runs).
+An acceptance expires with the calendar, not with a diff, so expiry still
+turns red on a dependency-free PR and on the weekly schedule. That does not
+catch a newly-published advisory, only an expiring acceptance. Closing the
+former means running the audit unconditionally, which is a routing decision
+above my node.

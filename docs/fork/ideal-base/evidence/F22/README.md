@@ -69,7 +69,13 @@ governed too (probe K).
 | `.github/workflows/security.yml` | New `advisory ownership policy` job, wired into `Security Gate` | yes (protected path) |
 | `scripts/required-checks.json` | `advisory-policy` added to the Security Gate contract | no, PROTECTED (reported) |
 | `docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json` | Regenerated: embedded `security.yml` text was stale | no, PROTECTED (reported) |
-| `tests/test_governance_compare.py` | One fixture mutation anchor repinned (was a silent no-op) | no (reported) |
+| `tests/test_governance_compare.py` | One fixture mutation anchor repinned (was a silent no-op) | no, PROTECTED (reported; see probe S) |
+
+The protected set for this branch is **four** paths, derived mechanically from
+the `protected=(...)` array in `.github/workflows/governance-root.yml` rather
+than from prose. Probe S records that I twice reported it as three, having
+cleared `tests/test_governance_compare.py` from memory when it is listed at
+`governance-root.yml:57`.
 | `scripts/preflight.sh` | Two new local gates | no (reported to coordinator) |
 | `docs/fork/SECURITY_TRIAGE.md` | De-designated as an enforcement surface | no (reported to coordinator) |
 
@@ -191,6 +197,8 @@ date, mutates the tree, observes the verdict, and restores. Summary:
 | P | fixture and live modes | n/a | **0** / **0** | both match the manifest |
 | Q | job steps, fresh `git archive` checkout | n/a | **0** | py3.11/3.12/3.13; cwd-independent |
 | R | same fresh checkout, plant plus restore | n/a | **1** → **0** | first attempt was a no-op; see below |
+| S | protected list extracted from governance-root.yml | n/a | **4 paths** | I had reported 3; see below |
+| T | independent adversarial surface audit (gpt-5.5) | n/a | **no new surface** | two workflow gaps recorded |
 
 A, F, and L bracket every red probe, so the greens are not an artifact of a
 broken checker and the reds are not residue. Note B and A are the *same tree*:
@@ -426,3 +434,54 @@ from a no-op, and the failure is invisible in both directions.
 This is the third instance in one node of the same root cause: an unenforced
 anchor between two artifacts that must agree. The manifest and the workflow.
 The fixture and the workflow. And now the probe and the file it mutates.
+
+### Probe S — my protected-path claim was wrong, and I checked it the same way
+
+Twice I reported the protected set for this branch as three paths, clearing
+`tests/test_governance_compare.py` explicitly. It is protected, listed at
+`.github/workflows/governance-root.yml:57`. The set is four.
+
+I had been reading the protected list out of the `docs/fork/ideal-base/*.md`
+prose and out of memory. The list that actually gates is the `protected=(...)`
+array in `governance-root.yml`, diffed against the merge-base. Probe S
+extracts that array and matches it against this branch's `git diff --name-only`,
+so the answer is derived rather than recalled.
+
+Same correction found that I had mis-cited `governance-root.yml:52` as a place
+that invokes `security_preflight.sh`. It is that script's entry in the
+protected array. The audit-bearing invocations are `ci.yml:249` and
+`security.yml:117` (both `--strict`); `security.yml:95` runs it without
+`--strict`, which skips the advisory block entirely.
+
+This is the same root cause as probe R one more time: a fact asserted from
+recollection instead of extracted from the artifact that enforces it. A
+maintenance window planned from my earlier reports would have hit an
+unexpected red on a file I had explicitly cleared.
+
+### Probe T — the one thing I could not verify myself
+
+I reported "cannot rule out a suppression mechanism other than `--ignore` /
+`severity_threshold`" as an open risk, and said it needed someone who did not
+write the checker. So I ran one: a read-only adversarial audit by a different
+model, briefed on the surface I had already missed once and pointed
+specifically at output-filtering wrappers, which a flag-grep structurally
+cannot see.
+
+It agrees with my independent sweep. No additional per-advisory suppression
+mechanism exists in this repo. Two searches, two models, different blind
+spots, same answer. That is as close to closed as this gets without a runner.
+
+It did find two **workflow-level** gaps, which are real but are routing design
+rather than suppression, and sit above this node:
+
+- `security.yml:135-149` — the weekly report deletes `audit.toml`, runs the
+  full audit, and exits 0 by design. A red full audit cannot fail a build.
+- `security.yml:100` — `dependency-audit` is skipped on PRs touching no
+  dependency path, and the Security Gate *expects* `skipped`. A new advisory
+  published after a branch was cut is not caught by such a PR.
+
+The second is part of why `advisory-policy` was given no `if:` condition at
+all; it is the only job in that file that always runs, so an expiring
+acceptance still turns red on a dependency-free PR. That covers expiry, not
+newly-published advisories. Closing the latter means running the audit
+unconditionally, which is a routing decision for the coordinator.
