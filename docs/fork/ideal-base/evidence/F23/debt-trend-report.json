@@ -1,5 +1,5 @@
 {
-  "critical_production_files_scanned": 290,
+  "critical_production_files_scanned": 291,
   "critical_share_percent": {
     "oversize_files": 45.0,
     "panic": 35.7,
@@ -19,9 +19,9 @@
       "target": 0
     },
     "swallowed_error": {
-      "ceiling": 1161,
-      "current": 1161,
-      "distance_to_target": 580,
+      "ceiling": 1163,
+      "current": 1163,
+      "distance_to_target": 582,
       "target": 581
     }
   },
@@ -54,14 +54,14 @@
         }
       },
       "file_count": {
-        "current": 62,
+        "current": 63,
         "delta": 0,
-        "expected": 62
+        "expected": 63
       },
       "oversize_files": [
         "crates/jcode-app-core/src/server/client_disconnect_cleanup.rs (1289 LOC)",
         "crates/jcode-app-core/src/server/client_lifecycle.rs (3247 LOC)",
-        "crates/jcode-app-core/src/server/client_session.rs (1545 LOC)",
+        "crates/jcode-app-core/src/server/client_session.rs (1506 LOC)",
         "crates/jcode-app-core/src/server/comm_control.rs (2739 LOC)",
         "crates/jcode-app-core/src/server/comm_session.rs (1661 LOC)",
         "crates/jcode-app-core/src/server/jade_relay.rs (1483 LOC)",
@@ -96,9 +96,9 @@
         },
         "swallowed_error": {
           "at_or_below_target": false,
-          "ceiling": 85,
-          "current": 85,
-          "distance_to_target": 43,
+          "ceiling": 87,
+          "current": 87,
+          "distance_to_target": 45,
           "headroom": 0,
           "target": 42
         }
@@ -281,9 +281,9 @@
   "oversize_threshold_loc": 1200,
   "repository_totals": {
     "oversize_files": 100,
-    "oversize_total_loc": 200999,
+    "oversize_total_loc": 200961,
     "panic": 56,
-    "swallowed_error": 3032,
+    "swallowed_error": 3034,
     "test_oversize_files": 37,
     "warnings": 0
   },
@@ -295,10 +295,10 @@
       "reduced_by": 0
     },
     "oversize_total_loc": {
-      "headroom": 0,
+      "headroom": 38,
       "high_water_mark": 200999,
-      "recorded": 200999,
-      "reduced_by": 0
+      "recorded": 200961,
+      "reduced_by": 38
     },
     "panic": {
       "headroom": 0,
@@ -308,8 +308,8 @@
     },
     "swallowed_error": {
       "headroom": 0,
-      "high_water_mark": 3032,
-      "recorded": 3032,
+      "high_water_mark": 3034,
+      "recorded": 3034,
       "reduced_by": 0
     },
     "test_oversize_files": {
@@ -325,6 +325,6 @@
       "reduced_by": 0
     }
   },
-  "scope_digest": "b3b7fc254cd9750f6fe2a22d26a527f36f08fed011b85813dd85088f3f9dfbf7",
+  "scope_digest": "32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846",
   "version": 1
 }

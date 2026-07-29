@@ -2,7 +2,12 @@
 # F23 non-vacuity harness: plant debt, observe the gate, revert, observe green.
 # Not a committed gate; it produces docs/fork/ideal-base/evidence/F23/ output.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+# Every path below is repo-relative, so run from the repo root regardless of
+# where this script is invoked from. Invoking it by path used to `cd` into this
+# evidence directory, where every step crashed with EXIT=2 (file not found)
+# instead of the gate firing with EXIT=1 - a harness that "ran" and proved
+# nothing.
+cd "$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 
 OUT=/tmp/f23-proof
 rm -rf "$OUT" && mkdir -p "$OUT"
@@ -15,6 +20,10 @@ run() { # run <label> <cmd...>
   "$@" >> "$OUT/log.txt" 2>&1
   local rc=$?
   echo "EXIT=$rc" >> "$OUT/log.txt"
+  if [ "$rc" -gt 1 ]; then
+    echo "FATAL: $label exited $rc (crash, not a gate verdict); see $OUT/log.txt" >&2
+    exit 1
+  fi
   echo >> "$OUT/log.txt"
   echo "$label -> EXIT=$rc"
   return $rc
