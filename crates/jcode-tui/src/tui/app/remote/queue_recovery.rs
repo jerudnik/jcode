@@ -306,10 +306,15 @@ mod tests {
         app.pending_soft_interrupts = vec!["retry the failing test".to_string()];
         app.is_processing = false;
 
-        let recovered =
-            rt.block_on(super::recover_stranded_soft_interrupts(&mut app, &mut remote));
+        let recovered = rt.block_on(super::recover_stranded_soft_interrupts(
+            &mut app,
+            &mut remote,
+        ));
 
-        assert!(recovered, "recovery should run and consume the stranded item");
+        assert!(
+            recovered,
+            "recovery should run and consume the stranded item"
+        );
         assert_eq!(
             app.queued_messages,
             vec!["retry the failing test".to_string()],
@@ -333,7 +338,10 @@ mod tests {
 
         for _ in 0..18 {
             app.pending_soft_interrupts = vec!["keep going".to_string()];
-            let _ = rt.block_on(super::recover_stranded_soft_interrupts(&mut app, &mut remote));
+            let _ = rt.block_on(super::recover_stranded_soft_interrupts(
+                &mut app,
+                &mut remote,
+            ));
         }
 
         assert_eq!(
@@ -359,7 +367,10 @@ mod tests {
         // An unrelated stranded interrupt triggers a recovery pass.
         app.pending_soft_interrupts = vec!["and then stop".to_string()];
 
-        let _ = rt.block_on(super::recover_stranded_soft_interrupts(&mut app, &mut remote));
+        let _ = rt.block_on(super::recover_stranded_soft_interrupts(
+            &mut app,
+            &mut remote,
+        ));
 
         assert_eq!(
             app.queued_messages,
