@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "R07",
-    "state": "accepted",
-    "reviewed_commit": "69a6a63101d605fb8f2b2a7e069ec49e1a61f73c",
-    "published_commit": "a545ecee42fef172c8c6ff730dc6cb5608ebe652",
-    "updated_at": "2026-07-29T04:09:57Z",
-    "summary": "R07 accepted: governance/durability barrier landed end-to-end. Archive push 39/39 verified (private recovery repo); bootstrap PR #39 merged (a545ecee4); apply sequence 1-17 strict-order pass (rulesets 18509013/18509016 with required_reviewers: [] pin, merge-commit-only repo, classic protection removed last); live fork-health green including governance snapshot vs manifest and 27 protected paths; under-enforcement proof PR #40 (harmless all-green, planted Governance Root red naming the path) closed unmerged. Design v4 PASS, integration gate PASS-WITH-FIXES, independent review GAP-FOUND with G1-G3 remediated, targeted re-review REMEDIATION-PASS."
+    "node": "W4",
+    "state": "in_progress",
+    "reviewed_commit": null,
+    "published_commit": null,
+    "updated_at": "2026-07-29T20:34:00Z",
+    "summary": "W4 in progress: 8 of 11 children accepted. F28/F29 plus wave-1 R05, R06, F22, F23, F26, and F30 are durable on main; /tmp/w4-remaining.py reports 0/6 wave-1 nodes remaining. Remaining W4 children are F24, F25, and F27."
   },
   "nodes": {
     "W0": {
@@ -57,8 +57,8 @@
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [],
-      "summary": "W4 in progress: 2 of 9 children accepted (F28 test parallelism restored, F29 ambient filesystem roots routed through jcode-storage). Remaining: R05, F22-F27. Root state corrected from 'pending', which had understated real progress and made the railway offer to re-seed an already-expanded wave.",
-      "updated_at": "2026-07-27T06:17:21Z"
+      "summary": "W4 in progress: 8 of 11 children accepted. F28/F29 plus wave-1 R05, R06, F22, F23, F26, and F30 are durable on main; /tmp/w4-remaining.py reports 0/6 wave-1 nodes remaining. Remaining W4 children are F24, F25, and F27.",
+      "updated_at": "2026-07-29T20:34:00Z"
     },
     "W5": {
       "state": "pending",
@@ -312,20 +312,25 @@
       "updated_at": "2026-07-26T09:04:08Z"
     },
     "F22": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "9ced03a146a834ab419483ed2909d256af079fb4",
+      "published_commit": "d8bc566d246b2798978f6547f89cdda61b914d77",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F22"
+      ],
+      "summary": "F22 accepted after a DO-NOT-MERGE review and coordinator reproduction of both blockers: every advisory suppression surface now agrees with a structured owner/expiry/retirement record, Security Gate and governance fixtures move together, and the policy checker is proven non-vacuous against the CI-executed surface.",
+      "updated_at": "2026-07-29T17:33:41Z"
     },
     "F23": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "41b97a1e2eb0f5fbcc3d3ef2a8176079dd6bcf58",
+      "published_commit": "2be9f0b229368d1f19e09c10ada17cf7ba3eb5e6",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F23",
+        "docs/fork/ideal-base/evidence/R07/maintenance-window-pr49-2026-07-29.md"
+      ],
+      "summary": "F23 accepted: machine-readable per-domain zero-growth ceilings and explicit downward targets now cover lifecycle, persistence, updater, provider infrastructure, and TUI debt; repository marks remain independent literal high-water pins; the plant harness rejects crashes and all 10 distinct mutations bite. PR #49 landed through a six-second R07 window with exact head/parents, literal ruleset restoration, and live health green at both boundaries.",
+      "updated_at": "2026-07-29T20:30:18Z"
     },
     "F24": {
       "state": "pending",
@@ -344,12 +349,14 @@
       "updated_at": null
     },
     "F26": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "834073932258236fcd064e77a31ebe1c7aef50d0",
+      "published_commit": "53ff3ff8103b9a0b71c4cfabb8f1fc034629fd67",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F26"
+      ],
+      "summary": "F26 accepted: startup dead-marker sweep verified non-vacuously, telemetry active-session markers now use PID liveness with bounded legacy/PID-reuse fallbacks, and the stale uncompiled telemetry_state duplicate was deleted after equivalence review. Full workspace and real-binary lifecycle gates passed.",
+      "updated_at": "2026-07-29T13:56:00Z"
     },
     "F27": {
       "state": "pending",
@@ -467,12 +474,14 @@
       "updated_at": "2026-07-20T05:05:28Z"
     },
     "R05": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "ad89972b7a58dca92eb6ca265b45b53d94b7b136",
+      "published_commit": "23c5c04e56a09d933591fd7b7c89f2a51d60a141",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R05"
+      ],
+      "summary": "R05 accepted at the final repair boundary: multi-client contention no longer lets stale clients cancel or duplicate a live turn, reconnects cannot silently replace an established working directory, and PR #52 preserves the user-visible failure trace when the working-directory notice is undeliverable. Coordinator plants proved both the contention fixes and the follow-up notify fix.",
+      "updated_at": "2026-07-29T19:24:52Z"
     },
     "F20a": {
       "state": "accepted",
@@ -551,20 +560,24 @@
       "updated_at": "2026-07-29T04:09:57Z"
     },
     "R06": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "feb5bb42e6e39580a1a679fd8e3684da3256cfb1",
+      "published_commit": "f12bf7f29925a926fcab78e2a03eb10034c67c14",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R06"
+      ],
+      "summary": "R06 accepted: server detachment now fails closed, stop --force signals the detached process group before an ESRCH-only PID fallback, non-ESRCH errors remain visible, and escalation reports its real outcome. Real descendant-tree, non-group-leader, EPERM, broadcast-PID, and setsid-failure fixtures proved the gates in both directions.",
+      "updated_at": "2026-07-29T16:11:46Z"
     },
     "F30": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "eee5ccc710b45be50fe7b6556c958972b7ae51a4",
+      "published_commit": "7208702264fa1af84cca122fd4e314d204bd785c",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F30"
+      ],
+      "summary": "F30 accepted: verify-only adversarial proof that the Nix-only distribution and native-iOS retirement are substantially real and non-vacuous. Packaged mobile assets serve outside a checkout and the Nix-managed update path does not self-overwrite; four bounded guard-strength gaps remain recorded as F30-FIX-1..4.",
+      "updated_at": "2026-07-29T08:56:12Z"
     },
     "D01": {
       "state": "pending",

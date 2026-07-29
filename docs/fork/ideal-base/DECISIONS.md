@@ -898,3 +898,55 @@ external-anchor trade-off); any GitHub ruleset or compare-API behavior change
 (the comparator pins current behavior and fork-health fails closed on drift); a
 false-durability finding in any future audit of the archive or the live
 rulesets.
+
+## D033. W4 wave 1 accepted; false-green gates and local-build fallback are not acceptable evidence
+
+**Decision.** Accept W4 wave 1 as six landed nodes: R05, R06, F22, F23, F26,
+and F30. W4 remains `in_progress` at 8 of 11 accepted children because F24,
+F25, and F27 remain. The durable identities and evidence paths are recorded in
+`STATE.json`; `python3 /tmp/w4-remaining.py` independently reports 0 of 6
+wave-1 nodes remaining.
+
+Acceptance is at the final verified boundary, not the first implementation
+commit or an agent's self-report:
+
+- R05 includes the follow-up notify repair in PR #52. The independent
+  adjudicator found that `apply_and_announce_working_dir` discarded the only
+  user-visible trace of an undeliverable working-directory notice. The first
+  regression test was itself vacuous because its session-id fixture contained
+  the asserted substring; the corrected test fails against the planted defect
+  and passes after restoration.
+- F22 and F23 each had an independent DO-NOT-MERGE round whose blockers were
+  reproduced by the coordinator before repair. F23 additionally exposed a
+  plant harness that treated exit 2 crashes as proof and a proposed
+  baseline-derived ceiling that would have made every repository comparison
+  `value > value` and reported no breach. The ceilings remain independent
+  literal high-water marks, with tests preventing that weakening.
+- F23 PR #49 landed through the R07 section-4 maintenance procedure in a
+  six-second window: exact reviewed head, all non-governance required checks
+  green, one exact-parent merge, literal ruleset restoration with canonical
+  hash `43ba61a7a57ffded7a4276917192cdd6028f79d58755cae870cbb2df07494f2b`,
+  and live fork health green at both boundary commits. The protected-path set
+  intentionally grew from 27 to 29 so the critical-path checker and its tests
+  cannot attest to their own weakening.
+- F30 is verify-only and retains four bounded guard-strength follow-ups
+  (`F30-FIX-1..4`); those gaps do not invalidate the landed Nix-only transition,
+  but FIX-1 remains load-bearing and must not be silently dropped.
+
+**Build-loop correction.** PR #53 fixed a separate defect found while measuring
+landing efficiency. `remote_build.sh` excluded `.git/` as a directory, but Git
+worktrees carry `.git` as a file containing an absolute `gitdir:` pointer. That
+file was copied to the remote builder, failed flake evaluation there, and the
+default local fallback silently compiled every worktree on the laptop. The
+exclude now covers the file, local fallback prints a loud host/cwd banner, and
+the maintained workflow requires batched CI submissions plus verification that
+the intended remote host performed the build. The fix was proved in both
+directions and ran `cargo check -p jcode-base` on SCO in 1m32s. The bounded
+before/after transcript and live remote-cache check are retained at
+`evidence/R07/remote-build-worktree-proof-2026-07-29.md`.
+
+**Reopen triggers.** Any wave-1 node's non-vacuity mutation stops failing its
+gate; `fork-health.sh --live` reports RED or governance drift; a required check
+is removed or ceases to instantiate on every PR; the R07 literal-restore hash
+cannot be reproduced; or an F30 follow-up is incorrectly treated as already
+closed.

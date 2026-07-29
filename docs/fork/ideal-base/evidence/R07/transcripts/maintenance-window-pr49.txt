@@ -1,0 +1,77 @@
+=== R07 §4 maintenance window: PR #49 ===
+[1] head_sha=41b97a1e2eb0f5fbcc3d3ef2a8176079dd6bcf58
+[1] expected_base_sha=f3412900f174b8dfb265d868424a04a5edee174e
+[1] Governance Root: failure (as expected for a protected-path PR)
+[1] Fork CI Gate: success
+[1] Nix Gate: success
+[1] Security Gate: success
+[1] PR changes 12 files
+[1] Governance Root summary: (none)
+[1] changed files:
+    .github/workflows/fork-ci.yml
+    .github/workflows/governance-root.yml
+    docs/fork/ideal-base/evidence/F23/README.md
+    docs/fork/ideal-base/evidence/F23/debt-trend-console.txt
+    docs/fork/ideal-base/evidence/F23/debt-trend-report.json
+    docs/fork/ideal-base/evidence/F23/non-vacuity-log.txt
+    docs/fork/ideal-base/evidence/F23/plant_harness.sh
+    docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json
+    docs/fork/ideal-base/evidence/R07/github-governance.proposed.json
+    scripts/check_critical_path_budget.py
+    scripts/required-checks.json
+    scripts/test_critical_path_budget.py
+[1] governance-named paths (7) all belong to this PR: ['.github/workflows/fork-ci.yml', '.github/workflows/governance-root.yml', 'docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json', 'docs/fork/ideal-base/evidence/R07/github-governance.proposed.json', 'scripts/check_critical_path_budget.py', 'scripts/required-checks.json', 'scripts/test_critical_path_budget.py']
+[2] pre-change canonical SHA-256=43ba61a7a57ffded7a4276917192cdd6028f79d58755cae870cbb2df07494f2b
+[2] live required contexts: ['Governance Root', 'Fork CI Gate', 'Security Gate', 'Nix Gate']
+[3] window OPEN 20:30:12Z; `Governance Root` dropped, read-back exact
+[4] merged; merge_sha=2be9f0b229368d1f19e09c10ada17cf7ba3eb5e6
+[5] main==merge_sha; parents exactly [base, head]
+[6] window CLOSED 20:30:18Z; restored body hash == step-2 hash exactly
+[7] exactly one first-parent merge in window, == merge_sha
+
+WINDOW OK  pr=#49 merge_sha=2be9f0b229368d1f19e09c10ada17cf7ba3eb5e6 open=20:30:12Z close=20:30:18Z
+[8] run fork-health.sh --live at expected_base_sha AND merge_sha (separate step)
+
+[8a] command: cd /private/tmp/fh-pr53 && GH_TOKEN=$(rbw get jcode-temp-admin-key) nix shell nixpkgs#gh --command scripts/fork-health.sh --live
+=== Fork health: jerudnik/jcode (governance source: live) ===
+OK:   fork-point (631935dd1d3b) is an ancestor of main
+OK:   docs/BRANCHING.md documents every workflow
+OK:   no Windows CI jobs (issue #19)
+OK:   repository id 1238606714 matches the manifest
+OK:   repository merge methods are merge-commit only
+OK:   effective rules on 'main' are exactly ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']
+OK:   classic branch protection is absent
+OK:   maintained rail 'main' is present
+OK:   required context 'Governance Root' is uniquely defined at .github/workflows/governance-root.yml:governance-root
+OK:   required context 'Fork CI Gate' is uniquely defined at .github/workflows/fork-ci.yml:fork-ci-gate
+OK:   required context 'Security Gate' is uniquely defined at .github/workflows/security.yml:security-gate
+OK:   required context 'Nix Gate' is uniquely defined at .github/workflows/nix.yml:nix-gate
+NOTE: protected-path additions are adjudicated; enforcing 27 paths
+=== Governance: snapshot matches the manifest ===
+OK:   governance snapshot matches scripts/required-checks.json
+INFO: main payload: 631 commit(s) over fork-point
+
+=== Fork health: all invariants hold ===
+
+[8b] command: cd /private/tmp/fh-pr49 && GH_TOKEN=$(rbw get jcode-temp-admin-key) nix shell nixpkgs#gh --command scripts/fork-health.sh --live
+=== Fork health: jerudnik/jcode (governance source: live) ===
+OK:   fork-point (631935dd1d3b) is an ancestor of main
+OK:   docs/BRANCHING.md documents every workflow
+OK:   no Windows CI jobs (issue #19)
+OK:   repository id 1238606714 matches the manifest
+OK:   repository merge methods are merge-commit only
+OK:   effective rules on 'main' are exactly ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']
+OK:   classic branch protection is absent
+OK:   maintained rail 'main' is present
+OK:   required context 'Governance Root' is uniquely defined at .github/workflows/governance-root.yml:governance-root
+OK:   required context 'Fork CI Gate' is uniquely defined at .github/workflows/fork-ci.yml:fork-ci-gate
+OK:   required context 'Security Gate' is uniquely defined at .github/workflows/security.yml:security-gate
+OK:   required context 'Nix Gate' is uniquely defined at .github/workflows/nix.yml:nix-gate
+NOTE: protected-path additions are adjudicated; enforcing 29 paths
+=== Governance: snapshot matches the manifest ===
+OK:   governance snapshot matches scripts/required-checks.json
+INFO: main payload: 631 commit(s) over fork-point
+
+=== Fork health: all invariants hold ===
+
+[8] both commands exited 0
