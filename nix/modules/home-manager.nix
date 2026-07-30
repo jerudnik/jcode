@@ -1,9 +1,10 @@
 # Home Manager module for jcode.
 #
 # Exposed via `inputs.jcode.homeManagerModules.default`. Intentionally thin and
-# unopinionated: it installs the package, optionally manages JCODE_HOME, and
-# lets users declare their `~/.jcode/config.nix.toml` policy as freeform Nix attrs
-# (or an explicit file) without baking any defaults into the module itself.
+# unopinionated: it installs the package (unless `installPackage` is false),
+# optionally manages JCODE_HOME, and lets users declare their
+# `~/.jcode/config.nix.toml` policy as freeform Nix attrs (or an explicit file)
+# without baking any defaults into the module itself.
 {
   config,
   lib,
@@ -39,6 +40,23 @@ in
       description = ''
         The jcode package to install. Defaults to `pkgs.jcode`, which is
         provided when the flake's `overlays.default` is applied.
+
+        Still referenced for overrides and wrappers when `installPackage` is
+        false; it is simply not added to `home.packages` in that case.
+      '';
+    };
+
+    installPackage = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether to add {option}`programs.jcode.package` to `home.packages`.
+
+        Set to false to manage jcode's configuration, `JCODE_HOME`, and related
+        files declaratively while installing the binary some other way -- for
+        example a self-built development binary earlier on `PATH`. Disabling
+        this keeps the rest of the module active, so declarative config does
+        not have to be given up along with the packaged binary.
       '';
     };
 
@@ -116,7 +134,7 @@ in
       to own the whole durable config file.
     '';
 
-    home.packages = [ cfg.package ];
+    home.packages = lib.optional cfg.installPackage cfg.package;
 
     home.sessionVariables = lib.mkIf (cfg.home != null) {
       JCODE_HOME = cfg.home;

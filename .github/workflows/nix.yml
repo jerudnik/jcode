@@ -44,6 +44,13 @@ on:
       - "docs/ONBOARDING_SANDBOX.md"
       - "docs/WINDOWS.md"
       - "docs/WRAPPERS.md"
+      # Railway checkpoint commits touch only docs/fork/**, which the package
+      # fileset excludes -- but flake.nix stamps the git rev into the binary,
+      # so every commit still produces a NEW output hash. Skipping the build
+      # here left main's exact artifact unpublished, forcing consumers that pin
+      # `github:jerudnik/jcode/main` to rebuild from source. Build on these too
+      # so the commit a pin can name is always in Cachix.
+      - "docs/fork/**"
       - ".github/workflows/**"
   # Required context invariant: every pull request must instantiate Nix Gate.
   # Relevance controls may move inside jobs, but never back to workflow paths.
@@ -167,8 +174,14 @@ jobs:
           # Main-branch cache upload is best-effort, but tag publication is a
           # release requirement. Push just the final result path rather than
           # relying on daemon post-job closure draining.
+          # Push the dependency layer as well as the final binary. The deps
+          # derivation is hash-stable across commits (per-commit build metadata
+          # is deliberately excluded from it in nix/package.nix), so publishing
+          # it lets later runs and downstream consumers skip recompiling ~900
+          # crates. Pushing only ./result left it unpublished, which is why a
+          # normal build took ~18 minutes of cold dependency compilation.
           useDaemon: false
-          pathsToPush: ./result
+          pathsToPush: ./result ./result-deps
           cachixArgs: -j2
 
       - name: Cachix (read-only public binary cache)
@@ -177,6 +190,14 @@ jobs:
         with:
           name: jerudnik-jcode
           skipPush: true
+
+      - name: Build dependency layer
+        # Built (and pushed) separately from the package so the expensive,
+        # hash-stable crate layer lands in Cachix on its own. Building it first
+        # also means the package build below is a cache hit on this layer.
+        run: |
+          nix build .#packages.${{ matrix.system }}.jcode-deps \
+            --print-build-logs --out-link result-deps
 
       - name: Build package
         run: nix build .#packages.${{ matrix.system }}.jcode --print-build-logs

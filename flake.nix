@@ -167,6 +167,15 @@
           packages = {
             default = jcode;
             inherit jcode;
+
+            # The ~900-crate dependency layer, exposed so CI can publish it to
+            # Cachix. `nix/package.nix` deliberately keeps per-commit build
+            # metadata out of this derivation, so its hash is stable across
+            # commits: publishing it means a normal commit only recompiles the
+            # workspace crates instead of the whole dependency tree. Pushing
+            # only the final `./result` leaves this layer unpublished and every
+            # runner (and every fresh clone) rebuilds it from source.
+            jcode-deps = jcode.cargoArtifacts;
           };
 
           # CI gates run by `nix flake check`. Keep these cheap, local, and valid

@@ -169,6 +169,13 @@ environment.systemPackages = [ inputs.jcode.packages.${pkgs.system}.default ];
     # This can break jcode runtime saves because Home Manager files are normally
     # read-only Nix store symlinks, so prefer the default policy layer.
     # manageConfigToml = true;
+
+    # Manage configuration without installing the packaged binary. Useful when
+    # jcode is run from a self-built development binary earlier on PATH: the
+    # config, JCODE_HOME, and file management above all stay active, but
+    # `package` is not added to home.packages, so a stale pinned build cannot
+    # shadow (or be confused with) the binary actually in use.
+    # installPackage = false;
   };
 }
 ```
