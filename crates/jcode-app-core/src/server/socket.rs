@@ -233,7 +233,6 @@ pub async fn has_live_listener(path: &std::path::Path) -> bool {
     socket_has_live_listener(path).await
 }
 
-#[cfg(unix)]
 pub(super) fn daemon_lock_path() -> PathBuf {
     crate::storage::runtime_dir().join("jcode-daemon.lock")
 }

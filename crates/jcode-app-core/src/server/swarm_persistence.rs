@@ -304,7 +304,29 @@ fn quarantine_bytes_at_stamp(
                     return None;
                 }
             },
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                match std::fs::read(&path) {
+                    Ok(existing) if existing == bytes => {
+                        crate::logging::warn(&format!(
+                            "swarm_state_corrupt_already_quarantined path={} quarantine={} bytes={}",
+                            original.display(),
+                            path.display(),
+                            bytes.len()
+                        ));
+                        return Some(path);
+                    }
+                    Ok(_) => continue,
+                    Err(read_error) => {
+                        crate::logging::warn(&format!(
+                            "swarm_state_quarantine_failed path={} quarantine={} error={}",
+                            original.display(),
+                            path.display(),
+                            read_error
+                        ));
+                        return None;
+                    }
+                }
+            }
             Err(error) => {
                 crate::logging::warn(&format!(
                     "swarm_state_quarantine_failed path={} quarantine={} error={}",
@@ -326,18 +348,15 @@ fn quarantine_bytes_at_stamp(
 }
 
 fn quarantine_bytes(original: &Path, label: &str, bytes: &[u8]) {
-    let stamp = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(elapsed) => elapsed.as_nanos(),
-        Err(error) => {
-            crate::logging::warn(&format!(
-                "swarm_state_quarantine_clock_before_epoch path={} error={}",
-                original.display(),
-                error
-            ));
-            0
-        }
-    };
-    drop(quarantine_bytes_at_stamp(original, label, bytes, stamp));
+    let stamp = bytes.iter().fold(0xcbf29ce484222325u64, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    });
+    drop(quarantine_bytes_at_stamp(
+        original,
+        label,
+        bytes,
+        u128::from(stamp),
+    ));
 }
 
 /// Current byte length of the per-swarm control log (0 when absent). Used as
@@ -431,7 +450,7 @@ fn remove_snapshot_files(swarm_id: &str) -> bool {
     }
 
     let mut removed = true;
-    for candidate in [path.with_extension("bak"), control_log_path(swarm_id), path] {
+    for candidate in [path.with_extension("bak"), path] {
         if let Err(err) = std::fs::remove_file(&candidate)
             && err.kind() != std::io::ErrorKind::NotFound
         {
