@@ -8,11 +8,11 @@ pub use jcode_config_types::{
     AssistantProfileError, AssistantProfilesConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig,
     CompactionConfig, CompactionMode, CrossProviderFailoverMode, DiagramDisplayMode,
     DiagramPanePosition, DiffDisplayMode, DisplayConfig, FeatureConfig, GatewayConfig, HooksConfig,
-    KeybindingsConfig, LatexRenderingMode,
-    MarkdownSpacingMode, NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig,
-    NamedProviderType, NativeScrollbarConfig, NotificationsConfig, PowerConfig, ProviderConfig,
-    ReasoningDisplayMode, SafetyConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
-    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    KeybindingsConfig, LatexRenderingMode, MarkdownSpacingMode, NamedProviderAuth,
+    NamedProviderConfig, NamedProviderModelConfig, NamedProviderType, NativeScrollbarConfig,
+    NotificationsConfig, PowerConfig, ProviderConfig, ReasoningDisplayMode, SafetyConfig,
+    SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode, SwarmStripLayout, TerminalConfig,
+    UpdateChannel, WebSearchConfig, WebSearchEngine,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
