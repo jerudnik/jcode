@@ -120,6 +120,18 @@
             ];
           };
 
+          # Minimal source for the Cargo git outputHashes coherence check: the
+          # lockfile that declares the git dependencies, the expression that
+          # pins their fixed-output hashes, and the check itself.
+          cargoGitHashSrc = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              ./Cargo.lock
+              ./nix/package.nix
+              ./tests/test_cargo_git_output_hashes.py
+            ];
+          };
+
           distributionPolicySrc = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.unions [
@@ -301,6 +313,18 @@
                   fi
                   cd "$src"
                   python3 tests/test_nix_distribution_policy.py
+                  touch "$out"
+                '';
+
+            cargo-git-output-hashes =
+              pkgs.runCommand "jcode-cargo-git-output-hashes-check"
+                {
+                  src = cargoGitHashSrc;
+                  nativeBuildInputs = [ pkgs.python3 ];
+                }
+                ''
+                  cd "$src"
+                  python3 tests/test_cargo_git_output_hashes.py
                   touch "$out"
                 '';
 
