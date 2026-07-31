@@ -60,12 +60,15 @@ let
     # access while preparing dependencies, which is flaky on hosted macOS CI.
     cargoLock = ../Cargo.lock;
     outputHashes = {
-      "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.2#63e420bb4e035490d28cbca3f58e26baf297048e" =
-        "sha256-Sf3EmWIZJ29KdaNbYRvM1tFXAPhOGhmpHOyqViEwkRI=";
-      "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.3#1fc53630181548db7ad2c73ac8fb66969c04f854" =
-        "sha256-vs8RK85sMa4WVupKU1V2oWxEVs1yHkEy7WNoTCNcMtE=";
-      "git+https://github.com/1jehuang/mermaid-rs-renderer.git?tag=v0.2.1#01e8304ffc670f04dd4a047595cfb8ea9c854ae7" =
-        "sha256-lQCloOhTqqEU8MNrkUmmJFdoOTEE3j5nvZJo21GJlMU=";
+      # Keys must match the `source` strings in Cargo.lock exactly, including
+      # the `?tag=` query and the `#<rev>` fragment. A stale key is silently
+      # ignored: Nix warns "No output hash provided" and falls back to network
+      # access during vendoring, which is exactly the flakiness these pins
+      # exist to prevent. Re-pin these whenever the lockfile bumps either dep.
+      "git+https://github.com/1jehuang/agentgrep.git?tag=v0.1.6#b01b804008ab0662fa14e6b60b10bff61716e6f1" =
+        "sha256-yBLs2YZ6cUlTHYZGLtlAXpK7/9xX2kPi46B1YLbuPUU=";
+      "git+https://github.com/1jehuang/mermaid-rs-renderer.git?tag=v0.3.1#2f993bd79a55235eb59a34d807852276ba25bea7" =
+        "sha256-uekh1vJ19dAPP7+4PiqSlJizApZLpDhBWBoyN+fgS9s=";
     };
 
     nativeBuildInputs = [
