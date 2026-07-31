@@ -562,6 +562,30 @@
       "evidence": [],
       "summary": null,
       "updated_at": null
+    },
+    "R08": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R09": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "W6": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
     }
   }
 }
