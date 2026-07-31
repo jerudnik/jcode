@@ -81,6 +81,15 @@
         "W4R"
       ],
       "priority": 60
+    },
+    {
+      "id": "W6",
+      "content": "Repair human-noticed product defects deferred until after the ideal-base program. These are user-visible TUI/CLI faults found while operating jcode, each root-caused with a durable write-up under human-noticed-issues/ and deliberately not fixed in-program to avoid widening scope during signoff. Expand only after W5 obtains the ideal-base verdict.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 70
     }
   ],
   "expansions": {
@@ -1544,6 +1553,66 @@
         "class": "deterministic",
         "parent": "W5"
       }
+    ],
+    "W6": [
+      {
+        "id": "R08",
+        "content": "Repair todo-subsystem terminal-state handling (human-noticed-issues/TODO_POKE_TERMINAL_STATES.md; revalidate line locations before editing). Six sites encode \"finished\" differently and blocked_by reaches none of them. (a) Report the real cause when a todo update is rejected: say the update was DISCARDED, name the offending group, and distinguish missing-goal from missing-score from below-threshold, which currently share one sentence that describes only the third. (b) Introduce one shared terminal-status predicate in jcode-base and use it at every site, so the \"N todos\" title agrees with every gate. (c) Give todo_confidence_summary a distinct empty-input case: None must mean \"no completed items to assess\", not \"needs more work\". (d) Teach schedule_auto_poke_followup_if_needed a third state by partitioning blocked items out of incomplete, stopping the poke and displaying a true message without falling through to the completion gate. (e) Pass items rather than a count to build_poke_message so the nudge can name what blocks. (f) Document blocked_by in the tool schema. (g) Bound the ordinary poke as a backstop, matching OVERNIGHT_MAX_POKES. Order matters: (a) is safe alone; (b) and (c) must land before (d).",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 88,
+        "owned_paths": [
+          "crates/jcode-base/src/todo.rs",
+          "crates/jcode-app-core/src/tool/todo.rs",
+          "crates/jcode-tui/src/tui/app/commands.rs",
+          "crates/jcode-tui/src/tui/app/input.rs",
+          "crates/jcode-task-types/src/lib.rs"
+        ],
+        "acceptance_gates": [
+          "A rejected todo update names the discarded group and the specific fault, and never reports low ownership when the score exceeds the threshold",
+          "Exactly one predicate decides whether a todo is terminal; the tool-call title and every gate agree on the same list",
+          "An all-cancelled todo list produces neither a visible poke nor a hidden dispatched turn",
+          "A todo carrying a non-empty blocked_by stops the poke and is never announced as complete",
+          "The ordinary auto-poke is bounded, independent of the blocked-state work"
+        ],
+        "evidence": [
+          "executable test over the six predicate sites showing one shared definition",
+          "regression test for an all-cancelled list producing no dispatched turn",
+          "regression test asserting a group-label mismatch is reported as such",
+          "test that a blocked todo yields the blocked branch, not the completion gate"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "R09",
+        "content": "Repair remote-session stall caused by a routes memo whose TTL is shorter than the build it caches (human-noticed-issues/REMOTE_LOADING_SESSION_TTL.md; revalidate line locations before editing). ROUTES_MEMO_TTL is 3s at crates/jcode-base/src/provider/mod.rs:529 while warm rebuilds measure 2393-3801ms and cold rebuilds 8275-17039ms, so the memo can expire before it is ever reused and the rebuild runs inside Subscribe, blocking a 27ms GetHistory until the client's 21s watchdog fires and wrongly advises /restart. (a) Raise the TTL above the observed p99 build time. (b) Serve a stale entry and refresh off the interactive path so an expiry never blocks Subscribe. (c) Prevent one slow build from blocking unrelated cheap requests on the sequential queue. (d) Report \"still starting up\" rather than \"session unavailable, /restart\", which currently encourages discarding a working session.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 86,
+        "owned_paths": [
+          "crates/jcode-base/src/provider/mod.rs"
+        ],
+        "acceptance_gates": [
+          "The routes memo TTL exceeds the measured p99 rebuild time and the relationship is asserted, not assumed",
+          "A routes rebuild never blocks an interactive Subscribe",
+          "A cheap request is not queued behind an in-flight routes rebuild",
+          "A slow-but-healthy startup is reported as slow, never as an unavailable session requiring /restart"
+        ],
+        "evidence": [
+          "measured warm and cold rebuild times recorded alongside the chosen TTL",
+          "test that Subscribe completes promptly while a rebuild is in flight",
+          "test asserting the watchdog message distinguishes slow startup from an unavailable session"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      }
     ]
   },
   "all_nodes": [
@@ -2993,6 +3062,64 @@
       "review_model": "opus",
       "class": "deterministic",
       "parent": "W5"
+    },
+    {
+      "id": "R08",
+      "content": "Repair todo-subsystem terminal-state handling (human-noticed-issues/TODO_POKE_TERMINAL_STATES.md; revalidate line locations before editing). Six sites encode \"finished\" differently and blocked_by reaches none of them. (a) Report the real cause when a todo update is rejected: say the update was DISCARDED, name the offending group, and distinguish missing-goal from missing-score from below-threshold, which currently share one sentence that describes only the third. (b) Introduce one shared terminal-status predicate in jcode-base and use it at every site, so the \"N todos\" title agrees with every gate. (c) Give todo_confidence_summary a distinct empty-input case: None must mean \"no completed items to assess\", not \"needs more work\". (d) Teach schedule_auto_poke_followup_if_needed a third state by partitioning blocked items out of incomplete, stopping the poke and displaying a true message without falling through to the completion gate. (e) Pass items rather than a count to build_poke_message so the nudge can name what blocks. (f) Document blocked_by in the tool schema. (g) Bound the ordinary poke as a backstop, matching OVERNIGHT_MAX_POKES. Order matters: (a) is safe alone; (b) and (c) must land before (d).",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 88,
+      "owned_paths": [
+        "crates/jcode-base/src/todo.rs",
+        "crates/jcode-app-core/src/tool/todo.rs",
+        "crates/jcode-tui/src/tui/app/commands.rs",
+        "crates/jcode-tui/src/tui/app/input.rs",
+        "crates/jcode-task-types/src/lib.rs"
+      ],
+      "acceptance_gates": [
+        "A rejected todo update names the discarded group and the specific fault, and never reports low ownership when the score exceeds the threshold",
+        "Exactly one predicate decides whether a todo is terminal; the tool-call title and every gate agree on the same list",
+        "An all-cancelled todo list produces neither a visible poke nor a hidden dispatched turn",
+        "A todo carrying a non-empty blocked_by stops the poke and is never announced as complete",
+        "The ordinary auto-poke is bounded, independent of the blocked-state work"
+      ],
+      "evidence": [
+        "executable test over the six predicate sites showing one shared definition",
+        "regression test for an all-cancelled list producing no dispatched turn",
+        "regression test asserting a group-label mismatch is reported as such",
+        "test that a blocked todo yields the blocked branch, not the completion gate"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "R09",
+      "content": "Repair remote-session stall caused by a routes memo whose TTL is shorter than the build it caches (human-noticed-issues/REMOTE_LOADING_SESSION_TTL.md; revalidate line locations before editing). ROUTES_MEMO_TTL is 3s at crates/jcode-base/src/provider/mod.rs:529 while warm rebuilds measure 2393-3801ms and cold rebuilds 8275-17039ms, so the memo can expire before it is ever reused and the rebuild runs inside Subscribe, blocking a 27ms GetHistory until the client's 21s watchdog fires and wrongly advises /restart. (a) Raise the TTL above the observed p99 build time. (b) Serve a stale entry and refresh off the interactive path so an expiry never blocks Subscribe. (c) Prevent one slow build from blocking unrelated cheap requests on the sequential queue. (d) Report \"still starting up\" rather than \"session unavailable, /restart\", which currently encourages discarding a working session.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 86,
+      "owned_paths": [
+        "crates/jcode-base/src/provider/mod.rs"
+      ],
+      "acceptance_gates": [
+        "The routes memo TTL exceeds the measured p99 rebuild time and the relationship is asserted, not assumed",
+        "A routes rebuild never blocks an interactive Subscribe",
+        "A cheap request is not queued behind an in-flight routes rebuild",
+        "A slow-but-healthy startup is reported as slow, never as an unavailable session requiring /restart"
+      ],
+      "evidence": [
+        "measured warm and cold rebuild times recorded alongside the chosen TTL",
+        "test that Subscribe completes promptly while a rebuild is in flight",
+        "test asserting the watchdog message distinguishes slow startup from an unavailable session"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
     }
   ],
   "audit_coverage": [
