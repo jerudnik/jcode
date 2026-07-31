@@ -143,9 +143,6 @@ bedrock = ["jcode-provider-bedrock/aws-sdk"]
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-global-hotkey = "0.7"
-
 [dev-dependencies]
 # Dev-only cycle (cargo permits dev-dependencies on dependents): base's
 # MultiProvider routing tests exercise the real OpenRouter/OpenAI-compatible
