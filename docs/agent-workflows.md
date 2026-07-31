@@ -19,6 +19,14 @@ Use `git remote -v`, script help, flake inspection, and workflow inspection to d
 - Prefer structured edit tools over shell rewrites. Never replace a whole file when a narrow edit will preserve concurrent work.
 - Keep shell commands non-interactive and bounded.
 
+Read exit codes from the command you are testing, not from a pipeline. In
+`cmd 2>&1 | tail -1; echo $?`, `$?` is `tail`'s status, and `tail` succeeds
+whatever `cmd` did, so a failing check reads as a clean exit. This misreads
+governance scripts especially badly, because they are designed to print a
+diagnostic and exit non-zero. Capture the status before piping, or set
+`pipefail`. Before reporting a script as defective, reproduce the failure with
+its status captured directly.
+
 The repository-specific routing summary lives in `.jcode/preferred-tools.md`.
 
 ## Rust iteration and tests
