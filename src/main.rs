@@ -103,15 +103,6 @@ fn run_main() -> Result<()> {
     configure_system_allocator();
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    // The macOS global-hotkey listener must run on the real main thread with a
-    // Core Foundation run loop (Carbon `RegisterEventHotKey` delivers events
-    // there). Intercept it before building the tokio runtime, which would
-    // otherwise move execution onto a worker thread with no run loop and leave
-    // the Cmd+; hotkey silently dead.
-    if is_macos_hotkey_listener_invocation() {
-        return jcode::setup_hints::run_macos_hotkey_listener_main_thread();
-    }
-
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -119,20 +110,8 @@ fn run_main() -> Result<()> {
     runtime.block_on(async { jcode::run().await })
 }
 
-/// True when invoked as `jcode setup-hotkey --listen-macos-hotkey`.
-fn is_macos_hotkey_listener_invocation() -> bool {
-    args_are_macos_hotkey_listener(std::env::args().skip(1))
-}
-
-fn args_are_macos_hotkey_listener(args: impl IntoIterator<Item = String>) -> bool {
-    let args: Vec<String> = args.into_iter().collect();
-    args.first().map(String::as_str) == Some("setup-hotkey")
-        && args.iter().any(|a| a == "--listen-macos-hotkey")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::args_are_macos_hotkey_listener;
     use super::parse_alloc_tuning;
 
     #[test]
@@ -152,31 +131,5 @@ mod tests {
         assert_eq!(parse_alloc_tuning(Some("-1"), 4), 4);
         // i32 overflow falls back to default rather than wrapping.
         assert_eq!(parse_alloc_tuning(Some("4294967296"), 4), 4);
-    }
-
-    fn argv(args: &[&str]) -> Vec<String> {
-        args.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn detects_listener_invocation() {
-        assert!(args_are_macos_hotkey_listener(argv(&[
-            "setup-hotkey",
-            "--listen-macos-hotkey"
-        ])));
-    }
-
-    #[test]
-    fn ignores_plain_setup_hotkey() {
-        assert!(!args_are_macos_hotkey_listener(argv(&["setup-hotkey"])));
-    }
-
-    #[test]
-    fn ignores_other_commands() {
-        assert!(!args_are_macos_hotkey_listener(argv(&[
-            "serve",
-            "--listen-macos-hotkey"
-        ])));
-        assert!(!args_are_macos_hotkey_listener(argv(&[])));
     }
 }

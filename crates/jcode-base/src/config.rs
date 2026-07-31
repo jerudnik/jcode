@@ -8,11 +8,11 @@ pub use jcode_config_types::{
     AssistantProfileError, AssistantProfilesConfig, AuthConfig, AutoJudgeConfig, AutoReviewConfig,
     CompactionConfig, CompactionMode, CrossProviderFailoverMode, DiagramDisplayMode,
     DiagramPanePosition, DiffDisplayMode, DisplayConfig, FeatureConfig, GatewayConfig, HooksConfig,
-    KeybindingsConfig, LatexRenderingMode, LaunchHotkeyEntry, LaunchHotkeysConfig,
-    MarkdownSpacingMode, NamedProviderAuth, NamedProviderConfig, NamedProviderModelConfig,
-    NamedProviderType, NativeScrollbarConfig, NotificationsConfig, PowerConfig, ProviderConfig,
-    ReasoningDisplayMode, SafetyConfig, SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode,
-    SwarmStripLayout, TerminalConfig, UpdateChannel, WebSearchConfig, WebSearchEngine,
+    KeybindingsConfig, LatexRenderingMode, MarkdownSpacingMode, NamedProviderAuth,
+    NamedProviderConfig, NamedProviderModelConfig, NamedProviderType, NativeScrollbarConfig,
+    NotificationsConfig, PowerConfig, ProviderConfig, ReasoningDisplayMode, SafetyConfig,
+    SessionPickerResumeAction, SponsorsConfig, SwarmSpawnMode, SwarmStripLayout, TerminalConfig,
+    UpdateChannel, WebSearchConfig, WebSearchEngine,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -598,8 +598,6 @@ pub struct Config {
     /// Sponsored discovery configuration
     pub sponsors: SponsorsConfig,
 
-    /// Global "launch a new jcode" hotkeys (macOS). Baked once by auto-import.
-    pub launch_hotkeys: LaunchHotkeysConfig,
     /// Named assistant profiles for `jcode assistant <profile>`.
     pub assistant: AssistantProfilesConfig,
 

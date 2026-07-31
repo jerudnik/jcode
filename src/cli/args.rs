@@ -358,13 +358,6 @@ pub(crate) enum Command {
         r#type: bool,
     },
 
-    /// Set up the platform global hotkey to launch jcode
-    SetupHotkey {
-        /// Internal: run as the macOS hotkey listener process.
-        #[arg(long, hide = true)]
-        listen_macos_hotkey: bool,
-    },
-
     /// Install a launcher so jcode appears in your app launcher
     SetupLauncher,
 

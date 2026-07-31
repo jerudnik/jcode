@@ -9,7 +9,6 @@
 crates/jcode-base/src/browser.rs:676  # Firefox's native-messaging manifest dir is an OS-defined path in the real home; the browser must find it there, so JCODE_HOME must not move it.
 crates/jcode-base/src/browser.rs:681  # Same as :676, macOS variant: Firefox reads ~/Library/Application Support, a real-home OS location.
 crates/jcode-base/src/browser.rs:692  # Same as :676, Windows variant: dirs::data_dir() is where Firefox looks for the manifest.
-crates/jcode-base/src/config/config_file.rs:834  # Compares session paths against the *real* home to infer the user's project layout; redirecting it would make the heuristic read a temp dir and learn nothing. jcode_dir() is used on the line above for the state we own.
 crates/jcode-base/src/hooks.rs:112  # Expands `~` in a user-authored hook command; the user means their real shell home, not the sandbox.
 crates/jcode-base/src/memory_log.rs:458  # regression test: names the real home in order to assert log_dir() never resolves under it
 crates/jcode-base/src/mobile_server.rs:106  # regression test: names the real home in order to assert jcode_home() never resolves under it
