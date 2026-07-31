@@ -16,7 +16,7 @@
 // silence dead_code only for that specific build shape instead of deleting them.
 #![cfg_attr(all(test, not(target_os = "macos")), allow(dead_code))]
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "macos")]
 use anyhow::Context;
 use anyhow::Result;
 use jcode_storage as storage;
