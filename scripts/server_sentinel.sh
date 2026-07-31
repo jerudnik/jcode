@@ -96,6 +96,35 @@ rescue_binary() {
     if [[ -x "$PUBLISHED_BIN" ]]; then echo "$PUBLISHED_BIN"; else echo "$LAUNCHER_BIN"; fi
 }
 
+load_provider_keys() {
+    # launchd starts this sentinel with no shell profile, so the interactive
+    # shell exports that give a normal jcode its provider credentials never run
+    # here. Without this, a rescued daemon comes up authenticated against
+    # nothing and every provider request fails with a missing key.
+    #
+    # Read the decrypted clan-vars secrets directly. Best-effort by design: an
+    # unreadable or absent file leaves the variable unset, exactly as before,
+    # and never aborts the rescue (this script runs under `set -u`).
+    local env_name path
+    for pair in \
+        "OMLX_API_KEY:omlx" \
+        "ZHIPU_API_KEY:zai" \
+        "MINIMAX_API_KEY:minimax" \
+        "PERPLEXITY_API_KEY:perplexity" \
+        "CURSOR_API_KEY:cursor" \
+        "DEEPSEEK_API_KEY:deepseek"
+    do
+        env_name="${pair%%:*}"
+        path="/run/secrets/vars/jcode-${pair##*:}-api-key/key"
+        # An already-set value wins, so an explicit override is never clobbered.
+        [[ -n "${!env_name:-}" ]] && continue
+        [[ -r "$path" ]] || continue
+        export "$env_name"="$(cat "$path")"
+    done
+    # Region selector for the MiniMax provider catalog (not a secret).
+    export JCODE_MINIMAX_REGION="${JCODE_MINIMAX_REGION:-international}"
+}
+
 rescue() {
     local bin
     bin="$(rescue_binary)"
@@ -103,6 +132,7 @@ rescue() {
         log "RESCUE_SKIPPED no executable rescue binary (checked $PUBLISHED_BIN, $LAUNCHER_BIN)"
         return 1
     fi
+    load_provider_keys
     log "RESCUE spawning daemon via $bin serve"
     # Detach fully; the daemon must not die with the sentinel.
     nohup "$bin" serve >>"$JCODE_HOME/sentinel-rescue.out" 2>&1 &
