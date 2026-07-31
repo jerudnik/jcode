@@ -68,6 +68,14 @@
       "summary": null,
       "updated_at": null
     },
+    "W6": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
     "W0.1": {
       "state": "accepted",
       "reviewed_commit": "d5d0adaaf1120bd412246dce428b0d00dbe8238e",
@@ -580,6 +588,22 @@
       "updated_at": "2026-07-29T08:56:12Z"
     },
     "D01": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R08": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R09": {
       "state": "pending",
       "reviewed_commit": null,
       "published_commit": null,
