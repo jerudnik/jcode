@@ -227,15 +227,64 @@ interacting. A poke never appears as a blank, and a blank never carries poke
 text.
 
 It also explains the `blossom` shape: a bounded-looking agent loop and an
-unbounded reminder pump can drive the same session from opposite ends. Which
-path re-enqueues the reminder 290 times there remains **not identified** — the candidate producers
-are the todo-confidence gate, which pushes to `hidden_queued_system_messages`
-when `needs_more_work` stays true, and any other path that enqueues a reminder
-on turn completion.
+unbounded reminder pump can drive the same session from opposite ends.
 
-Live rather than historical: newest occurrence 2026-08-01T05:14, no bound added
-since. Unowned; recorded here only.
+### Narrowing the pump: every text-carrying producer is excluded
 
+Each candidate was tested the same way — take the producer's *literal output
+string* from the source and count it in the transcript. A producer responsible
+for 600 rounds must appear ~600 times.
+
+| candidate | its output text | occurrences in `blossom` |
+|---|---|---|
+| auto-poke (`input.rs`) | `"You have N incomplete todos..."` | **1** |
+| todo confidence gate | `TODO_COMPLETION_CONTINUATION_MESSAGE` | **0** |
+| overnight poke | `"Overnight auto-poke for run ..."` | **2** |
+| reload recovery (x2 sites) | `ReloadContext` continuation | **0** |
+| `response_recovery.rs` | `"[System reminder: your previous..."` | 19 (bounded) |
+
+None of them can account for 600. The display side agrees: the string
+`"Auto-poking:"`, which `input.rs` pushes *every* time it queues a poke,
+appears **zero** times in the whole file.
+
+### The blanks carry no payload at all
+
+This is the part that overturns my earlier writeup. A blank turn looks like:
+
+```json
+{"role":"user","content":[{"type":"text","text":""}]}
+```
+
+There is no `system_reminder` and no hidden text — nothing rides along. And the
+model's own accounting confirms the provider saw nothing:
+
+```
+input_tokens across the 600 loop replies:  min 22   p50 22   max 1318
+```
+
+**22 input tokens.** A hidden-continuation reminder is hundreds of tokens; the
+median call carried essentially an empty new turn against a warm cache
+(`cache_read_input_tokens` ~137950). So the loop is **not** a reminder being
+re-enqueued. I recorded `hidden_queued_system_messages` as the "matching
+shape"; the token accounting says otherwise, and I was pattern-matching on
+`String::new()` rather than checking what was actually sent.
+
+The re-fire is also far too fast to be deliberative: median **137 ms** between
+the assistant's reply and the next blank, sustained for **124 minutes** across
+1264 messages, answered 547 times with literally `"Idle."`.
+
+### What that leaves
+
+`pending_queued_dispatch` is a *flag*, set independently of whether anything
+was actually queued. Both `local.rs` and `remote.rs` branch on it before
+checking `queued_messages`, so a path that sets the flag and then fails to
+enqueue (or has its queue drained by another handler) yields a dispatch with an
+empty body — exactly this signature. `schedule_queued_dispatch_after_interrupt`
+sets it purely on `has_queued_followups()`, with no message of its own.
+
+That is a hypothesis about a *flag/queue desynchronization*, not a claim, and
+it is deliberately recorded as such. Confirming it needs a live repro with
+tracing on the dispatch path, which is the next step and is owned (see below).
 ## Not inspected
 
 * Whether non-Anthropic providers (OpenAI Responses, Gemini, Copilot) tolerate a
