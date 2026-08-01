@@ -255,3 +255,48 @@ version metadata, which is unavailable in the Nix sandbox. The flake supplies
 deterministic values via environment variables (`JCODE_BUILD_SEMVER`,
 `JCODE_BUILD_GIT_HASH`, `JCODE_BUILD_GIT_DATE`, `JCODE_BUILD_GIT_DIRTY`) so
 builds are pure and cacheable. The version is read from the root `Cargo.toml`.
+
+### Declared reproducible artifact scope
+
+The reproducibility claim is deliberately narrow: only the installed output of
+`packages.x86_64-linux.jcode` is in scope. JRTI x86_64-linux forced rebuilds are
+the authority for this claim. Do not compare x86_64-linux NARs with
+`aarch64-darwin` or other systems; platform outputs are expected to differ.
+
+The Linux compatibility bundle (`scripts/build_linux_compat.sh`) and all release
+assets are explicitly excluded unless they are made reproducible in a separate
+contract. GitHub releases remain metadata-only and contain no executable assets.
+
+Two forced rebuilds provide evidence, not a mathematical proof. Use the official
+Nix rebuild guidance on the repository Linux builder. If the output is not yet
+present in that builder's store, first run the same command without `--rebuild`;
+Nix cannot check a missing output. Then run the forced command twice:
+
+```sh
+nix build .#packages.x86_64-linux.jcode --rebuild --keep-failed --no-substitute --print-build-logs
+```
+
+Record the Nix version/system, source revision, `flake.lock` hash, derivation
+path, output path, NAR hash/size, installed-file manifest, runtime version,
+provenance hash, and SBOM hash for both runs. Stop and investigate with
+`diffoscope` if the forced rebuild output differs or if the top derivation is
+substituted instead of rebuilt.
+
+### Provenance and SBOM companion outputs
+
+The flake exposes deterministic companion outputs for the scoped artifact:
+
+```sh
+nix build .#packages.x86_64-linux.jcode-provenance
+nix build .#packages.x86_64-linux.jcode-sbom
+```
+
+`jcode-provenance` emits `share/jcode/provenance.json` with source, version,
+platform, derivation, output NAR, SBOM, scope, and exclusion fields.
+`jcode-sbom` emits deterministic CycloneDX 1.5 JSON at
+`share/jcode/sbom.cdx.json` for the resolved Cargo component inventory. It does
+not claim Cargo dependency edges or a Nix runtime-closure inventory. Component
+references are source-qualified and unique within the BOM. The optional
+CycloneDX serial number is deliberately omitted because this companion output is
+byte-for-byte reproducible; a random UUID would violate that contract and a nil
+UUID would falsely claim an instance identity.

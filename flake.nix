@@ -83,11 +83,13 @@
             root = ./.;
             fileset = lib.fileset.unions [
               ./flake.nix
+              ./flake.lock
               ./rust-toolchain.toml
               ./apm.yml
               ./apm.lock.yaml
               ./nix
               ./Cargo.toml
+              ./Cargo.lock
               ./scripts/clean_target.sh
               ./scripts/check_agent_instructions.py
               ./scripts/dev_cargo.sh
@@ -172,6 +174,28 @@
             # (a clean checkout). Dirty/path trees fall back to the package default.
             gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or "nix";
           };
+
+          sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";
+          sourceDisplayRevision =
+            inputs.self.shortRev or inputs.self.dirtyShortRev or (builtins.substring 0 12 sourceFullRevision);
+          flakeLockSha256 = builtins.hashFile "sha256" ./flake.lock;
+
+          jcode-sbom = pkgs.callPackage ./nix/sbom.nix {
+            cargoLock = ./Cargo.lock;
+            inherit version;
+          };
+
+          jcode-provenance = pkgs.callPackage ./nix/provenance.nix {
+            inherit
+              jcode
+              version
+              sourceFullRevision
+              sourceDisplayRevision
+              flakeLockSha256
+              system
+              ;
+            sbom = jcode-sbom;
+          };
         in
         {
           _module.args.pkgs = pkgs;
@@ -188,6 +212,9 @@
             # only the final `./result` leaves this layer unpublished and every
             # runner (and every fresh clone) rebuilds it from source.
             jcode-deps = jcode.cargoArtifacts;
+          }
+          // lib.optionalAttrs (system == "x86_64-linux") {
+            inherit jcode-provenance jcode-sbom;
           };
 
           # CI gates run by `nix flake check`. Keep these cheap, local, and valid
@@ -349,6 +376,97 @@
                     exit 1
                   fi
 
+                  touch "$out"
+                '';
+
+          }
+          // lib.optionalAttrs (system == "x86_64-linux") {
+            provenance-sbom-fixtures =
+              pkgs.runCommand "jcode-provenance-sbom-fixtures-check"
+                {
+                  sbom = jcode-sbom;
+                  src = checkSrc;
+                  nativeBuildInputs = [ pkgs.python3 ];
+                  # The workspace version, so fixture facts track Cargo.toml
+                  # instead of hard-coding a version that breaks on every bump.
+                  jcodeVersion = version;
+                }
+                ''
+                  cd "$src"
+                  tmp=$(mktemp -d)
+                  cp "$sbom/share/jcode/sbom.cdx.json" "$tmp/sbom.json"
+                  python3 - <<'PY' "$tmp" "$jcodeVersion"
+                  import hashlib
+                  import json
+                  import sys
+                  from pathlib import Path
+
+                  tmp = Path(sys.argv[1])
+                  cargo_version = sys.argv[2]
+                  sbom_bytes = (tmp / "sbom.json").read_bytes()
+                  expected = {
+                      "source_full_revision": "full",
+                      "source_display_revision": "short",
+                      "flake_lock_sha256": "lock",
+                      "cargo_version": cargo_version,
+                      "nix_system": "x86_64-linux",
+                      "drv_path": "/nix/store/example.drv",
+                      "output_path": "/nix/store/out-jcode",
+                      "output_nar_hash": "sha256-abc",
+                      "output_nar_size": 123,
+                      "sbom_sha256": hashlib.sha256(sbom_bytes).hexdigest(),
+                  }
+                  provenance = {
+                      "schema": "https://jerudnik.github.io/jcode/schemas/nix-provenance/v1",
+                      "source": {"full_revision": "full", "display_revision": "short", "flake_lock_sha256": "lock"},
+                      "version": {"cargo": cargo_version},
+                      "nix": {"system": "x86_64-linux"},
+                      "derivation": {"drv_path": "/nix/store/example.drv"},
+                      "output": {"store_path": "/nix/store/out-jcode", "nar_hash": "sha256-abc", "nar_size": 123},
+                      "sbom": {"sha256": expected["sbom_sha256"]},
+                      "scope": {
+                          "artifact": "packages.x86_64-linux.jcode",
+                          "nix_system": "x86_64-linux",
+                          "exclusions": [
+                              "scripts/build_linux_compat.sh",
+                              "compatibility bundle and Linux archive assets are excluded unless made reproducible separately",
+                              "release assets",
+                          ],
+                      },
+                      "release_assets": {"included": False},
+                  }
+                  (tmp / "expected.json").write_text(json.dumps(expected, sort_keys=True) + "\n")
+                  (tmp / "provenance.json").write_text(json.dumps(provenance, sort_keys=True) + "\n")
+                  bad_provenance = json.loads(json.dumps(provenance))
+                  bad_provenance["source"]["full_revision"] = "wrong"
+                  (tmp / "bad-provenance.json").write_text(json.dumps(bad_provenance, sort_keys=True) + "\n")
+                  sbom = json.loads(sbom_bytes)
+                  bad_sbom = json.loads(json.dumps(sbom))
+                  git_index = next(
+                      index
+                      for index, component in enumerate(bad_sbom["components"])
+                      if any(ref.get("type") == "vcs" for ref in component.get("externalReferences", []))
+                  )
+                  del bad_sbom["components"][git_index]
+                  (tmp / "bad-sbom.json").write_text(json.dumps(bad_sbom, sort_keys=True) + "\n")
+                  duplicate_sbom = json.loads(json.dumps(sbom))
+                  duplicate_sbom["components"].append(json.loads(json.dumps(duplicate_sbom["components"][0])))
+                  (tmp / "duplicate-sbom.json").write_text(json.dumps(duplicate_sbom, sort_keys=True) + "\n")
+                  PY
+
+                  python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock
+                  if python3 nix/verify-provenance-sbom.py --provenance "$tmp/bad-provenance.json" --sbom "$tmp/sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
+                    echo "planted provenance mismatch passed unexpectedly" >&2
+                    exit 1
+                  fi
+                  if python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/bad-sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
+                    echo "planted SBOM omission passed unexpectedly" >&2
+                    exit 1
+                  fi
+                  if python3 nix/verify-provenance-sbom.py --provenance "$tmp/provenance.json" --sbom "$tmp/duplicate-sbom.json" --expected "$tmp/expected.json" --cargo-lock Cargo.lock; then
+                    echo "planted duplicate bom-ref passed unexpectedly" >&2
+                    exit 1
+                  fi
                   touch "$out"
                 '';
           };
