@@ -620,6 +620,14 @@
       "summary": null,
       "updated_at": null
     },
+    "R10": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
     "F30-FIX-1": {
       "state": "pending",
       "reviewed_commit": null,

@@ -930,7 +930,7 @@ remote_cargo_preflight() {
     IFS=$'\t' read -r hostname port uses_proxy <<<"$endpoint"
     if [[ "$uses_proxy" != "true" ]]; then
       if ! remote_tcp_reachable "$hostname" "$port" "$tcp_timeout"; then
-        log "remote host $remote ($hostname:$port) unreachable within ${tcp_timeout}s TCP probe; using local cargo"
+        log "remote host $remote ($hostname:$port) unreachable within ${tcp_timeout}s TCP probe"
         record_remote_down
         return 1
       fi
@@ -1095,7 +1095,8 @@ if [[ "${JCODE_REMOTE_CARGO:-0}" == "1" ]]; then
     log "# Set JCODE_REMOTE_CARGO_FALLBACK=error to fail instead."
     log "############################################################"
   else
-    log "remote cargo unavailable and fallback disabled"
+    log "remote cargo unavailable for host=${JCODE_REMOTE_HOST:-<unset>}; not falling back to a local build (JCODE_REMOTE_CARGO_FALLBACK=error)"
+    log "Set JCODE_REMOTE_CARGO_FALLBACK=local to build here instead."
     exit 75
   fi
 fi

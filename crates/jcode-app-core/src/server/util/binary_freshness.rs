@@ -6,110 +6,72 @@
 //! for the full history (#277 reload loops, #291 downgrade regression).
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
-/// Best-effort start time of this process, cached on first read.
+static IMAGE_BASELINE_MTIME: OnceLock<Option<SystemTime>> = OnceLock::new();
+
+/// The mtime of the binary image this process is *currently executing*, sampled
+/// once and then frozen for the lifetime of the image.
 ///
 /// Same-path in-place binary replacement (the canonical publish flow writes the
 /// new build over `~/.jcode/current/jcode`) makes the running exe and the
 /// reload candidate the *same canonical file*. Comparing "candidate mtime vs
 /// current-exe mtime" is then comparing the file against itself, which can
 /// never be strictly newer, so a genuinely newer published build was invisible
-/// to `server_has_newer_binary` and non-forced reloads. The process start time
-/// is the correct baseline for that case: if the file on disk is newer than
-/// the moment we started executing it, we are running stale code.
-pub(crate) fn process_start_time() -> Option<SystemTime> {
-    use std::sync::OnceLock;
-    static START: OnceLock<Option<SystemTime>> = OnceLock::new();
-    *START.get_or_init(process_start_time_uncached)
+/// to `server_has_newer_binary` and non-forced reloads.
+///
+/// This baseline is the correct discriminator: if the file on disk is newer
+/// than it was when we loaded it, we are provably running stale code.
+///
+/// It deliberately replaces an earlier *process start time* baseline, which was
+/// unsound. Reload re-execs via `Command::exec`, and `exec` preserves the
+/// process start time (verified on macOS via `proc_pidinfo`; Linux `/proc/self`
+/// btime is per-task, not per-image). A daemon whose binary was republished
+/// after it started therefore kept satisfying `mtime > start` *forever*, even
+/// after successfully reloading, so it advertised an update it could never
+/// clear. Clients then re-entered the runtime-identity defer path on every
+/// history bootstrap and never loaded a session.
+///
+/// A `OnceLock` is the right lifetime because `exec` replaces the process image
+/// and reinitializes statics: each reloaded image re-samples, so the baseline
+/// genuinely advances across reloads and the signal terminates.
+///
+/// Callers that care about a precise baseline (the server) should seed this at
+/// boot via [`seed_image_baseline_mtime`] before any republish can race the
+/// first lazy read.
+pub(crate) fn image_baseline_mtime() -> Option<SystemTime> {
+    *IMAGE_BASELINE_MTIME.get_or_init(read_running_image_mtime)
 }
 
-#[cfg(target_os = "macos")]
-fn process_start_time_uncached() -> Option<SystemTime> {
-    // proc_pidinfo(PROC_PIDTBSDINFO) -> proc_bsdinfo.pbi_start_tv{sec,usec}.
-    // Same libproc surface (and FFI style) as jcode-core's stdin_detect probe;
-    // needs no extra privileges for our own pid.
-    const PROC_PIDTBSDINFO: libc::c_int = 3;
-
-    #[repr(C)]
-    struct ProcBsdInfo {
-        pbi_flags: u32,
-        pbi_status: u32,
-        pbi_xstatus: u32,
-        pbi_pid: u32,
-        pbi_ppid: u32,
-        pbi_uid: u32,
-        pbi_gid: u32,
-        pbi_ruid: u32,
-        pbi_rgid: u32,
-        pbi_svuid: u32,
-        pbi_svgid: u32,
-        rfu_1: u32,
-        pbi_comm: [u8; 16],
-        pbi_name: [u8; 32],
-        pbi_nfiles: u32,
-        pbi_pgid: u32,
-        pbi_pjobc: u32,
-        e_tdev: u32,
-        e_tpgid: u32,
-        pbi_nice: i32,
-        pbi_start_tvsec: u64,
-        pbi_start_tvusec: u64,
-    }
-
-    unsafe extern "C" {
-        fn proc_pidinfo(
-            pid: libc::c_int,
-            flavor: libc::c_int,
-            arg: u64,
-            buffer: *mut libc::c_void,
-            buffersize: libc::c_int,
-        ) -> libc::c_int;
-    }
-
-    let mut info: ProcBsdInfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of::<ProcBsdInfo>() as libc::c_int;
-    let rc = unsafe {
-        proc_pidinfo(
-            std::process::id() as libc::c_int,
-            PROC_PIDTBSDINFO,
-            0,
-            &mut info as *mut _ as *mut libc::c_void,
-            size,
-        )
-    };
-    if rc != size || info.pbi_start_tvsec == 0 {
-        return None;
-    }
-    Some(
-        SystemTime::UNIX_EPOCH
-            + std::time::Duration::new(
-                info.pbi_start_tvsec,
-                (info.pbi_start_tvusec as u32).saturating_mul(1000),
-            ),
-    )
+/// Sample and freeze the running image's mtime as early as possible.
+///
+/// Idempotent, and a no-op once the baseline has been established. Called from
+/// server startup so the frozen value describes the image we booted rather than
+/// whatever happens to be on disk at the first freshness query.
+pub(crate) fn seed_image_baseline_mtime() {
+    IMAGE_BASELINE_MTIME.get_or_init(read_running_image_mtime);
 }
 
-#[cfg(target_os = "linux")]
-fn process_start_time_uncached() -> Option<SystemTime> {
-    // /proc/self is owned by this process; its creation time is the process
-    // start. Returns None (and thus the historical behavior) on filesystems
-    // that do not report btime, falling back to mtime first.
-    let Ok(meta) = std::fs::metadata("/proc/self") else {
+fn read_running_image_mtime() -> Option<SystemTime> {
+    // Every failure below degrades to `None`, which the caller treats as "no
+    // provable update". That is the loop-safe direction: an unreadable baseline
+    // must never manufacture a reload signal.
+    let Ok(exe) = std::env::current_exe() else {
         return None;
     };
-    if let Ok(created) = meta.created() {
-        return Some(created);
-    }
-    if let Ok(modified) = meta.modified() {
-        return Some(modified);
-    }
-    None
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn process_start_time_uncached() -> Option<SystemTime> {
-    None
+    let exe = super::strip_deleted_suffix(exe);
+    // Release installs run a wrapper script that execs a `.bin` payload; the
+    // payload is the file that actually changes on publish, and it is what the
+    // candidate side resolves to, so both sides must agree.
+    let payload = crate::build::resolve_binary_payload(&exe);
+    let Ok(meta) = std::fs::metadata(payload) else {
+        return None;
+    };
+    let Ok(modified) = meta.modified() else {
+        return None;
+    };
+    Some(modified)
 }
 
 /// Decide whether any reload candidate is *provably* newer than the running
@@ -127,19 +89,23 @@ fn process_start_time_uncached() -> Option<SystemTime> {
 /// is strictly newer than the running binary. Any uncertainty suppresses the
 /// auto-reload signal so it can never wedge the client into a loop.
 ///
-/// `process_start` handles the same-canonical-path case: the canonical publish
+/// `image_baseline` handles the same-canonical-path case: the canonical publish
 /// flow overwrites `~/.jcode/current/jcode` in place, so the running exe and
 /// the reload candidate are the same file and an mtime-vs-mtime comparison is
-/// the file against itself (never strictly newer). If that shared file was
-/// modified *after this process started executing*, we are provably running
-/// stale code and the candidate is a real update. When `process_start` is
-/// unavailable the same-path case stays "no update", preserving the historical
-/// loop-safe behavior: the file cannot keep being newer than a start time that
-/// advances with every exec, so this cannot reintroduce the #277 reload loop.
+/// the file against itself (never strictly newer). If that shared file is newer
+/// than it was when this image loaded, we are provably running stale code and
+/// the candidate is a real update. When the baseline is unavailable the
+/// same-path case stays "no update", preserving the historical loop-safe
+/// behavior.
+///
+/// The baseline must describe the *image*, not the process: `exec` preserves
+/// the process start time, so a start-time baseline never advanced across a
+/// reload and wedged the daemon into permanently advertising an update it could
+/// not clear. See [`image_baseline_mtime`].
 pub(crate) fn newer_binary_available(
     current_mtime: Option<std::time::SystemTime>,
     current_canonical: Option<&Path>,
-    process_start: Option<std::time::SystemTime>,
+    image_baseline: Option<std::time::SystemTime>,
     candidates: impl IntoIterator<Item = (PathBuf, Option<std::time::SystemTime>)>,
 ) -> bool {
     let Some(current_time) = current_mtime else {
@@ -152,10 +118,10 @@ pub(crate) fn newer_binary_available(
     candidates.into_iter().any(|(candidate, candidate_mtime)| {
         if current_canonical == Some(candidate.as_path()) {
             // Same canonical file: an in-place replacement is an update only if
-            // it happened after this process started. Without a readable start
-            // time, keep the historical "never reload into ourselves".
-            return match (candidate_mtime, process_start) {
-                (Some(candidate_time), Some(started)) => candidate_time > started,
+            // the file changed after this image loaded. Without a readable
+            // baseline, keep the historical "never reload into ourselves".
+            return match (candidate_mtime, image_baseline) {
+                (Some(candidate_time), Some(baseline)) => candidate_time > baseline,
                 _ => false,
             };
         }
@@ -207,7 +173,7 @@ mod newer_binary_tests {
 
     #[test]
     fn never_reloads_into_self_even_if_paths_were_equal() {
-        // Same canonical path without a readable process start time must never
+        // Same canonical path without a readable image baseline must never
         // count as an update, regardless of mtime (historical loop-safe rule).
         let candidates = vec![(PathBuf::from("/x/current/jcode"), Some(t(999)))];
         assert!(!newer_binary_available(
@@ -234,8 +200,8 @@ mod newer_binary_tests {
 
     #[test]
     fn same_path_binary_older_than_start_is_not_an_update() {
-        // Normal steady state: we started after (or at) the last write of our
-        // own binary. No update, no loop.
+        // Normal steady state: our image baseline is at (or after) the last
+        // write of our own binary. No update, no loop.
         let candidates = vec![(PathBuf::from("/x/current/jcode"), Some(t(400)))];
         assert!(!newer_binary_available(
             Some(t(400)),
@@ -252,23 +218,55 @@ mod newer_binary_tests {
     }
 
     #[test]
-    fn process_start_time_is_available_and_in_the_past() {
+    fn image_baseline_mtime_is_available_and_in_the_past() {
         // The same-path update signal silently degrades to "never" without a
-        // readable start time, so prove the platform probe actually works on
-        // the OSes we ship (macOS libproc, Linux /proc).
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        {
-            let started = super::process_start_time().expect("process start time should resolve");
-            let now = std::time::SystemTime::now();
-            assert!(started <= now, "start time must not be in the future");
-            let age = now
-                .duration_since(started)
-                .expect("start time precedes now (asserted above)");
-            assert!(
-                age < std::time::Duration::from_secs(60 * 60 * 24 * 30),
-                "start time implausibly old: {age:?}"
-            );
-        }
+        // readable baseline, so prove the probe actually resolves for a real
+        // running binary.
+        let baseline = super::image_baseline_mtime().expect("image baseline should resolve");
+        let now = std::time::SystemTime::now();
+        assert!(baseline <= now, "baseline must not be in the future");
+    }
+
+    #[test]
+    fn image_baseline_is_stable_within_one_image() {
+        // Freezing is what makes the signal meaningful: a baseline that
+        // re-sampled on every read would always equal the candidate mtime and
+        // could never report an in-place republish.
+        super::seed_image_baseline_mtime();
+        let first = super::image_baseline_mtime();
+        let second = super::image_baseline_mtime();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn same_path_republish_clears_once_the_baseline_advances() {
+        // Regression for the latched-update stall: a daemon whose binary was
+        // republished after it loaded must report an update (so a reload is
+        // offered), and the *reloaded* image -- which re-samples the baseline
+        // to the republished mtime -- must then report no update.
+        //
+        // The old baseline was the process start time, which `exec` preserves
+        // (verified on macOS via proc_pidinfo), so the second assertion failed
+        // in production: the server advertised an update forever, the client
+        // deferred history on every bootstrap, and sessions never loaded.
+        let republished = t(500);
+        let candidates = vec![(PathBuf::from("/x/current/jcode"), Some(republished))];
+
+        // Stale image: loaded at t=400, binary rewritten at t=500.
+        assert!(newer_binary_available(
+            Some(republished),
+            Some(std::path::Path::new("/x/current/jcode")),
+            Some(t(400)),
+            candidates.clone(),
+        ));
+
+        // Reloaded image: re-sampled the baseline from the same file it now runs.
+        assert!(!newer_binary_available(
+            Some(republished),
+            Some(std::path::Path::new("/x/current/jcode")),
+            Some(republished),
+            candidates,
+        ));
     }
 
     #[test]
