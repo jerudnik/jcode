@@ -152,11 +152,16 @@ def usable_repo() -> str | None:
 
 
 def pull_requests() -> dict[str, dict] | None:
-    """Open PRs keyed by head branch, or None when `gh` cannot answer.
+    """PRs keyed by head branch, or None when `gh` cannot answer.
 
     Degrades rather than fails: without `gh` the unpushed shape is still
     detectable from git alone, and a closeout on a machine with no GitHub auth
     should report what it can instead of erroring out.
+
+    Merged PRs are included deliberately. `gh pr merge` does not touch local
+    refs, so a branch can be landed on the remote while every local ref still
+    says otherwise, and asking GitHub is the only read-only way to know. First
+    entry wins if a branch was reused, and `gh` lists most recent first.
     """
     if shutil.which("gh") is None:
         return None
@@ -166,11 +171,11 @@ def pull_requests() -> dict[str, dict] | None:
             "pr",
             "list",
             "--state",
-            "open",
+            "all",
             "--limit",
             "100",
             "--json",
-            "number,headRefName,mergeStateStatus",
+            "number,headRefName,state,mergeStateStatus",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -183,7 +188,10 @@ def pull_requests() -> dict[str, dict] | None:
         entries = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
-    return {entry["headRefName"]: entry for entry in entries}
+    prs: dict[str, dict] = {}
+    for entry in entries:
+        prs.setdefault(entry["headRefName"], entry)
+    return prs
 
 
 def main() -> int:
@@ -232,6 +240,20 @@ def main() -> int:
             findings.append(
                 f"  {branch}: {commits} ahead of {base}, pushed, but no open PR\n"
                 f"      -> gh pr create --head {branch}"
+            )
+            continue
+
+        if pr.get("state") == "MERGED":
+            # Landed on the remote; the local refs just have not caught up.
+            # Not stalled work, so not a finding. Do not fetch to confirm: a
+            # check that mutates the object store to make itself pass is not
+            # a check.
+            continue
+
+        if pr.get("state") == "CLOSED":
+            findings.append(
+                f"  {branch}: {commits} ahead of {base}, PR #{pr['number']} was closed unmerged\n"
+                f"      -> reopen it, open a new PR, or delete the branch"
             )
             continue
 

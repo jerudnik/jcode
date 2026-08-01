@@ -128,7 +128,28 @@ class BranchHandoffFixture:
         bindir = self.root.parent / "stubbin"
         bindir.mkdir(exist_ok=True)
         stub = bindir / "gh"
-        stub.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")
+        # Honour `--state` the way real `gh` does. A stub that returns every
+        # PR regardless of the query makes tests vacuous: an earlier version
+        # of this helper ignored the flag, so a mutation reverting the checker
+        # to `--state open` still saw MERGED entries and the suite stayed
+        # green. The stub must be able to hide what the caller did not ask for.
+        stub.write_text(
+            "#!/bin/sh\n"
+            "state=open\n"
+            'while [ $# -gt 0 ]; do\n'
+            '  case "$1" in --state) state="$2"; shift 2 ;; *) shift ;; esac\n'
+            "done\n"
+            "payload=$(cat <<'JSON'\n"
+            f"{payload}\n"
+            "JSON\n"
+            ")\n"
+            'if [ "$state" = all ]; then printf %s "$payload"; else\n'
+            "  printf %s \"$payload\" | /usr/bin/python3 -c \"import json,sys;"
+            "print(json.dumps([e for e in json.load(sys.stdin)"
+            " if e.get('state','OPEN')=='OPEN']))\"\n"
+            "fi\n",
+            encoding="utf-8",
+        )
         stub.chmod(0o755)
         self.env = {**NO_GH_ENV, "PATH": f"{bindir}:{NO_GH_ENV['PATH']}"}
 
@@ -210,6 +231,52 @@ class BranchHandoffTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("automation/landed-upstream", result.stdout)
+
+    def test_merged_pr_lands_a_branch_even_when_every_local_ref_is_stale(self):
+        """A merged PR is landed, even if the remote-tracking ref is stale too.
+
+        `base_ref()` fixed the case where local `main` lagged the remote, but
+        the remote-tracking ref is only as fresh as the last fetch, and
+        `gh pr merge` does not touch local refs at all. So the original
+        dogfooding scenario survived that fix: merge a PR, do not fetch, and
+        the guard still told you to open a PR for work that was already in
+        `main`. Asking GitHub for the PR state is the only way to know this
+        without fetching.
+        """
+        fix = self.fixture()
+        fix.branch("automation/merged-elsewhere", push=True)
+        before = git_out(fix.root, "rev-parse", "github/main")
+        fix.install_stub_gh(
+            '[{"number": 41, "headRefName": "automation/merged-elsewhere",'
+            ' "state": "MERGED", "mergeStateStatus": "UNKNOWN"}]'
+        )
+        result = fix.run()
+        self.assertEqual(
+            git_out(fix.root, "rev-parse", "github/main"),
+            before,
+            "the check must not fetch to confirm the merge",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("automation/merged-elsewhere", result.stdout)
+
+    def test_pr_closed_without_merging_is_a_stall(self):
+        """A closed-unmerged PR strands work exactly like never opening one.
+
+        Found while testing the merged case: querying `--state all` to see
+        merged PRs also surfaces closed ones, and a branch whose PR was closed
+        without merging is the same stranded work this guard exists to find.
+        Treating any non-open PR as "landed" would have been a false negative.
+        """
+        fix = self.fixture()
+        fix.branch("automation/abandoned", push=True)
+        fix.install_stub_gh(
+            '[{"number": 42, "headRefName": "automation/abandoned",'
+            ' "state": "CLOSED", "mergeStateStatus": "UNKNOWN"}]'
+        )
+        result = fix.run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("automation/abandoned", result.stdout)
+        self.assertIn("closed unmerged", result.stdout)
 
     def test_pushed_branch_without_gh_is_not_a_false_positive(self):
         """Without `gh`, a pushed branch cannot be judged, so it is not flagged.
