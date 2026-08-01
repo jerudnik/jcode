@@ -1,0 +1,34 @@
+=== R07 §4 maintenance window: PR #76 ===
+[0] repository id 1238606714 confirmed; merge-commit only
+[0] classic branch protection absent (expected baseline)
+[1] head_sha=2799e3d3363d32c4341776a1ce37c310d6ad7698
+[1] source=jerudnik:automation/w4-closeout
+[1] expected_base_sha=395e5e9d11b7b77c77c3f527c74cc5545ef84fe9
+[1] live `main` == expected_base (no drift since review)
+[1] head == REVIEWED_HEAD (branch not re-pushed since review)
+[1] Governance Root: failure
+[1] Fork CI Gate: success
+[1] Security Gate: success
+[1] Nix Gate: success
+[1] PR changes 7 files (matches declared changed_files)
+    docs/fork/ideal-base/STATE.json
+    docs/fork/ideal-base/WORK_GRAPH.json
+    docs/fork/ideal-base/evidence/F27/combined-validation-report.md
+    docs/fork/ideal-base/evidence/F27/independent-hardening-review.md
+    scripts/git-hooks/pre-commit
+    tests/test_governance_compare.py
+    tests/test_ideal_base_railway.py
+[1] governance-named paths (2) all belong to this PR: ['tests/test_governance_compare.py', 'tests/test_ideal_base_railway.py']
+[2] pre-change canonical SHA-256=43ba61a7a57ffded7a4276917192cdd6028f79d58755cae870cbb2df07494f2b
+[2] pre-change hash == known-good steady state (PR #49/#55 record)
+[2] live required contexts: ['Governance Root', 'Fork CI Gate', 'Security Gate', 'Nix Gate']
+[2] semantics verified: enforcement/target/bypass/strictness/integration ids
+[2] prospective dropped-body hash=7e6ba479dde06dace3f169dac9980528f42d90c9b9ed1112cec723a2fe8d35a0 (validated pre-write)
+[3] window OPEN 08:59:16Z; `Governance Root` dropped, read-back exact
+[4] merged; merge_sha=8260df14ec702e05688f5c328664d3c72cdb6a50
+[5] main==merge_sha; parents exactly [base, head]
+[6] window CLOSED 08:59:20Z; restored body hash == step-2 hash exactly
+[7] exactly one first-parent merge in window, == 8260df14ec702e05688f5c328664d3c72cdb6a50
+
+WINDOW OK  pr=#76 merge_sha=8260df14ec702e05688f5c328664d3c72cdb6a50 open=08:59:16Z close=08:59:20Z
+[8] run fork-health.sh --live at expected_base_sha AND merge_sha (separate step)
