@@ -12,6 +12,13 @@ are not message bodies. This parses instead.
 Also reports the trailing-role split, because that is what the fix branches on:
 a blank whose predecessor is an assistant message is the prefill-risk case.
 
+SINCE is parsed into a datetime, never compared as a string. Lexicographic
+order is not chronological order across ISO formats: '.' (0x2E) and '+' (0x2B)
+both sort before 'Z' (0x5A), so `"...T20:39:00.123456Z" < "...T20:39:00Z"` is
+True even though that instant is later. That silently drops sub-second
+messages in the first second after a precise cutoff -- and it drops *new*
+blanks, so it over-credits a fix. Caught by badger.
+
 SINCE filters on each *message's own* timestamp, not the file's mtime. That
 distinction is the whole point of the flag: a long-running session touched
 today can contain blanks written weeks ago, so an mtime filter would credit
@@ -24,6 +31,33 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
+
+
+def parse_since(text):
+    """Parse a bare date or full ISO stamp into an aware UTC datetime.
+
+    Rejects unparseable input loudly. Silently comparing nonsense is how the
+    string-comparison bug this replaces stayed invisible.
+    """
+    candidate = text.strip().replace("Z", "+00:00")
+    for form in (candidate, f"{candidate}T00:00:00+00:00"):
+        try:
+            parsed = datetime.fromisoformat(form)
+        except ValueError:
+            continue
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    raise SystemExit(f"unrecognised SINCE value: {text!r}")
+
+
+def parse_stamp(text):
+    """Parse a message timestamp, or None if it is absent/unparseable."""
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def blanks_in(path, since=None):
@@ -55,11 +89,11 @@ def blanks_in(path, since=None):
             and content[0].get("text", "") == ""
         ):
             if since:
-                stamp = msg.get("timestamp")
-                # No timestamp means it cannot be shown to be recent, so it is
-                # excluded rather than assumed new. This under-counts rather
-                # than over-credits a fix.
-                if not stamp or stamp < since:
+                stamp = parse_stamp(msg.get("timestamp"))
+                # No parseable timestamp means it cannot be shown to be recent,
+                # so it is excluded rather than assumed new. This under-counts
+                # rather than over-credits a fix.
+                if stamp is None or stamp < since:
                     continue
             prev_role = messages[i - 1].get("role") if i > 0 else None
             found.append((i, prev_role))
@@ -80,14 +114,15 @@ def main():
         print()
         print("usage: count_blank_user_turns.py [SINCE]")
         print()
-        print("  SINCE   optional ISO date/timestamp prefix, e.g. 2026-07-01 or")
+        print("  SINCE   optional date or ISO timestamp, e.g. 2026-07-01 or")
         print("          2026-08-01T20:00:00Z. Counts only blanks whose own message")
         print("          timestamp is at or after it. Omit to scan all of history.")
+        print("          Parsed, not string-compared; unrecognised input is an error.")
         print()
         print("  The all-time total is immutable: no fix rewrites session files.")
         print("  To see whether a fix worked, pass the time it landed.")
         return 0
-    since = args[0] if args else None
+    since = parse_since(args[0]) if args else None
 
     total_blanks = safe = risky = 0
     scanned = 0
@@ -113,7 +148,7 @@ def main():
 
     print(f"sessions scanned: {scanned}")
     if since:
-        print(f"blank user turns created >= {since}: {total_blanks}")
+        print(f"blank user turns created >= {since.isoformat()}: {total_blanks}")
     else:
         print(f"blank user turns (all time, immutable): {total_blanks}")
     print(f"  prev=user      (safe to drop)   : {safe}")
