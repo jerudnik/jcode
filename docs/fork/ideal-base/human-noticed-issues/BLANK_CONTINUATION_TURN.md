@@ -1238,10 +1238,20 @@ the same shape as the echo error it was meant to rule out. One of the
 "never persisted a todo file" sessions, `macaque`, is a fork, which is why
 that count is two rather than three.
 
-Attributing a shared id needs the fork edge, not a clock. Ranking by file
-mtime picks the *child*, because a long-lived parent keeps being written
-after a fork is abandoned. Ranking by `created_at` happens to be right here
-but is not the rule, and would break on an imported or backfilled parent.
+Attributing a shared id needs the fork edge, not a clock. The two clocks
+available are not equally wrong, and the difference is measurable across
+the 183 parent/child pairs in the corpus:
+
+```
+created_at picks the parent correctly : 183/183 = 100%
+mtime      picks the parent correctly :  82/183 =  45%
+```
+
+`created_at` is a rule with a narrow exception, failing only where a parent
+is imported or backfilled after its child. File mtime is wrong in the
+common case, because a long-lived parent keeps being written after a fork
+is abandoned, which is precisely why it inverted on the pair that mattered.
+Neither is the rule.
 The correct key is lineage: an id belongs to the most ancestral session
 holding it. The decisive check on a suspected fork is whether the child has
 any rejection of its own, and `macaque` has none, so it is not an affected
@@ -1273,8 +1283,26 @@ shared rejection ids, payload identical : 4
 shared rejection ids, payload differs   : 0
 ```
 
-Neither result proves the family empty. Both replace an open caveat with a
-measurement.
+A third member was closed by the same method. Single-hop attribution, which
+looks only at a session's immediate parent, is equivalent to full-ancestry
+attribution only if no fork chain is deeper than one. The corpus contains
+two depth-2 chains:
+
+```
+fork chain depths : {0: 2225, 1: 181, 2: 2}
+sauropod <- lion <- camel        rejections along chain [0, 0, 0]
+scorpion <- hedgehog <- monkey   rejections along chain [0, 0, 0]
+```
+
+Both carry no rejections, so the two attributions agree here by accident of
+which sessions happened to fork, not by construction. A grandchild
+inheriting a grandparent's rejection would break the single-hop version
+invisibly. The published figure walks full ancestry, and both methods were
+computed and agree at 252 events across 139 holding sessions, so it does
+not depend on the accident.
+
+None of this proves the family empty, and it should still be treated as
+open. What changed is that no specific untested member remains named.
 
 **The investigation contaminated its own corpus.** Two sessions spent an
 evening triggering, quoting, and testing this rejection, and they account
