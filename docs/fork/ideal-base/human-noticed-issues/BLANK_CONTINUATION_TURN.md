@@ -4,7 +4,7 @@ Reported by human (2026-08-01): messages appearing in the transcript as if the
 user had sent nothing, each burning a full model call. Observed 10 times in one
 session over ~10 hours.
 
-**Fixed** in `a5fc81b7b` ("fix(agent): stop sending blank user turns on hidden
+**Fixed** in PR #81 ("fix(agent): stop sending blank user turns on hidden
 continuations"). This document records the diagnosis, and in particular records
 a *wrong first fix that was merged*, because the failure mode of that fix is the
 durable lesson.
