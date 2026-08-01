@@ -278,6 +278,55 @@ class BranchHandoffTest(unittest.TestCase):
         self.assertIn("automation/abandoned", result.stdout)
         self.assertIn("closed unmerged", result.stdout)
 
+    def test_unknown_merge_state_is_disclosed_not_treated_as_clean(self):
+        """UNKNOWN means GitHub has not answered yet, not that the PR is fine.
+
+        Caught by dogfooding, seconds after PR #69 merged: the guard reported
+        "all on a path to main" while two open PRs were BEHIND and DIRTY. When
+        `main` moves, GitHub recomputes mergeability for every open PR and
+        reports UNKNOWN meanwhile, and the checker lumped UNKNOWN in with CLEAN.
+
+        The timing is what makes this bad. Mergeability is unsettled precisely
+        because something just merged, which is exactly when a closeout check
+        gets run, so the check was most likely to lie at the moment it was most
+        likely to be trusted.
+        """
+        fix = self.fixture()
+        fix.branch("automation/recomputing", push=True)
+        fix.install_stub_gh(
+            '[{"number": 51, "headRefName": "automation/recomputing",'
+            ' "state": "OPEN", "mergeStateStatus": "UNKNOWN"}]'
+        )
+        result = fix.run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PARTIAL CHECK ONLY", result.stdout)
+        self.assertIn("UNKNOWN", result.stdout)
+        self.assertNotIn(
+            "all on a path to",
+            result.stdout,
+            "an unsettled merge state must not be reported as an all-clear",
+        )
+
+    def test_unknown_merge_state_is_disclosed_alongside_real_findings(self):
+        """The disclosure survives on the failing path too.
+
+        A gap reported only when everything else passes is a gap that vanishes
+        exactly when the output is longest and least closely read.
+        """
+        fix = self.fixture()
+        fix.branch("automation/recomputing", push=True)
+        fix.branch("automation/stalled", push=True)
+        fix.install_stub_gh(
+            '[{"number": 52, "headRefName": "automation/recomputing",'
+            ' "state": "OPEN", "mergeStateStatus": "UNKNOWN"},'
+            ' {"number": 53, "headRefName": "automation/stalled",'
+            ' "state": "OPEN", "mergeStateStatus": "DIRTY"}]'
+        )
+        result = fix.run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("automation/stalled", result.stdout)
+        self.assertIn("UNKNOWN", result.stdout)
+
     def test_pushed_branch_without_gh_is_not_a_false_positive(self):
         """Without `gh`, a pushed branch cannot be judged, so it is not flagged.
 
