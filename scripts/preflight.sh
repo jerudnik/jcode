@@ -117,6 +117,13 @@ run "advisory policy fixtures" python3 -m unittest discover -s tests -p 'test_ad
 run "docs impact advisory"     python3 scripts/test_docs_impact_advisory.py
 run "F20c removal clean"       bash -c 'scripts/f20c_removal_report.sh --stdout >/dev/null'
 run "warning budget"           bash scripts/check_warning_budget.sh
+# Branch handoff: local automation/** work that is not on a path to main. This
+# gate is local-only by nature (a CI checkout has no local branches), and it
+# belongs here because preflight is what runs before pushing -- the exact moment
+# to notice that a previous session's finished work never left this laptop.
+# Added after three branches carrying reviewed, gate-passing work (F24, F25, a
+# wave-scope checkpoint) sat unpushed for two days with no PR.
+run "branch handoff"           python3 scripts/check_branch_handoff.py
 
 # Unused-dependency gate, mirroring the "Enforce no unused dependencies" step in
 # both ci.yml and fork-ci.yml. This was added after F20c: deleting the release
