@@ -49,10 +49,18 @@ BASE_BRANCH = "main"
 # bare railway invocation fail on the canonical checkout (commit 5ee7149b7).
 CANONICAL_REMOTES = ("github", "origin")
 
-# Merge states that mean a PR exists but cannot merge as it stands. Anything
-# else (CLEAN, UNSTABLE, HAS_HOOKS, UNKNOWN) is either mergeable or still being
-# computed by GitHub, and is not worth blocking a closeout over.
+# Merge states that mean a PR exists but cannot merge as it stands.
 STALLED_MERGE_STATES = {"BEHIND", "BLOCKED", "DIRTY"}
+
+# States that are a real answer meaning "this can merge". Everything outside
+# both sets -- notably UNKNOWN -- is GitHub saying it has not finished
+# computing, which is not the same as saying the PR is fine. The original
+# version of this comment lumped UNKNOWN in with CLEAN as "not worth blocking
+# a closeout over", and that produced a false all-clear: GitHub recomputes
+# mergeability for every open PR whenever `main` moves, so a run seconds
+# after a merge saw UNKNOWN for two genuinely stalled PRs and reported
+# "all on a path to main". Unsettled state is reported as a gap, not silence.
+SETTLED_MERGE_STATES = {"CLEAN", "UNSTABLE", "HAS_HOOKS"}
 
 
 def git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -219,6 +227,9 @@ def main() -> int:
     prs = pull_requests()
 
     findings: list[str] = []
+    # PRs whose mergeability GitHub had not finished computing. Reported as a
+    # gap on both the passing and failing paths, never silently dropped.
+    unknown: list[str] = []
     for branch, ahead in sorted(branches):
         commits = f"{ahead} commit{'s' if ahead != 1 else ''}"
 
@@ -263,6 +274,14 @@ def main() -> int:
                 f"  {branch}: PR #{pr['number']} is open but {state}\n"
                 f"      -> gh pr checks {pr['number']}, then update the branch"
             )
+        elif state not in SETTLED_MERGE_STATES:
+            # GitHub computes mergeability asynchronously and reports UNKNOWN
+            # while it recomputes, which it does for every open PR whenever
+            # `main` moves. Treating that as fine is a false all-clear at the
+            # worst possible moment: right after a merge, when this check is
+            # most likely to be run. It is not a finding either, because the
+            # PR may well be fine. It is a gap in what this run could see.
+            unknown.append(f"PR #{pr['number']} ({branch}) reported {state}")
 
     # What could not be checked. A clean run that skipped a whole class of
     # stall is a PARTIAL result, not an all-clear, so these are reported on
@@ -273,6 +292,10 @@ def main() -> int:
         unchecked.append(f"could not read {remote}; unpushed branches were not checked")
     if prs is None:
         unchecked.append("gh unavailable; PR-state stalls were not checked")
+    for note in unknown:
+        unchecked.append(f"{note}; GitHub had not finished computing mergeability")
+    if unknown:
+        unchecked.append("re-run in a minute to get a settled answer")
 
     if not findings:
         if not args.quiet:
