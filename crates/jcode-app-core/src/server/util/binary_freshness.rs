@@ -93,10 +93,18 @@ fn process_start_time_uncached() -> Option<SystemTime> {
 #[cfg(target_os = "linux")]
 fn process_start_time_uncached() -> Option<SystemTime> {
     // /proc/self is owned by this process; its creation time is the process
-    // start. Falls back to None (and thus the historical behavior) on
-    // filesystems that do not report btime.
-    let meta = std::fs::metadata("/proc/self").ok()?;
-    meta.created().ok().or_else(|| meta.modified().ok())
+    // start. Returns None (and thus the historical behavior) on filesystems
+    // that do not report btime, falling back to mtime first.
+    let Ok(meta) = std::fs::metadata("/proc/self") else {
+        return None;
+    };
+    match meta.created() {
+        Ok(created) => Some(created),
+        Err(_) => match meta.modified() {
+            Ok(modified) => Some(modified),
+            Err(_) => None,
+        },
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -253,7 +261,9 @@ mod newer_binary_tests {
             let started = super::process_start_time().expect("process start time should resolve");
             let now = std::time::SystemTime::now();
             assert!(started <= now, "start time must not be in the future");
-            let age = now.duration_since(started).unwrap_or_default();
+            let age = now
+                .duration_since(started)
+                .expect("start time precedes now (asserted above)");
             assert!(
                 age < std::time::Duration::from_secs(60 * 60 * 24 * 30),
                 "start time implausibly old: {age:?}"
