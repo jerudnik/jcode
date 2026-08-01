@@ -1,13 +1,15 @@
 # Empty user turns reach the provider because hidden continuations persist a blank text block
 
 Reported by human (2026-08-01): messages appearing in the transcript as if the
-user had sent nothing, each burning a full model call. Observed 10 times in one
-session over ~10 hours.
+user had sent nothing, each burning a full model call. Observed 10 times in the
+reported session; a later fleet-wide scan found **1348 across 2398 sessions**,
+of which 1241 are runaway loops (see "Scope is larger than the report" below).
 
 **Fixed** in PR #81 ("fix(agent): stop sending blank user turns on hidden
-continuations"). This document records the diagnosis, and in particular records
-a *wrong first fix that was merged*, because the failure mode of that fix is the
-durable lesson.
+continuations") — but only the blank *content*. PR #81 does not stop the loops
+that produce most of them. This document records the diagnosis, and in
+particular records a *wrong first fix that was merged*, because the failure mode
+of that fix is the durable lesson.
 
 ## Symptom
 
@@ -43,6 +45,9 @@ Two producers queue these continuations:
 * reload recovery (`remote/server_events.rs`), after an interrupted turn
 * the auto-poke todo gate (`input.rs`), while idle
 
+Note that the *runaway loops* documented below are a third path and are **not**
+the auto-poke; see "Remaining defect".
+
 ## Evidence
 
 Three independent layers agree, which is why the diagnosis is not inferential:
@@ -56,7 +61,8 @@ Three independent layers agree, which is why the diagnosis is not inferential:
 Counting these needs care. A naive text search for `"text":""` over the session
 file overcounts: it also matches empty strings *nested inside a `tool_use`
 input*, which are not message bodies at all. The defect is a message whose
-content is exactly one empty text block, and by that definition there are 10.
+content is exactly one empty text block, and by that definition there are 10 in
+the reported session.
 
 ## The first fix was wrong, and its wrongness is the point
 
@@ -124,6 +130,161 @@ rather than skipping unconditionally:
 A zero-block message is never stored, because providers reject an empty content
 array.
 
+## Scope is larger than the report
+
+The reported session had 10 blanks. Parsing every session in `~/.jcode/sessions`
+found **1348 blanks across 2398 sessions**, and they are not evenly spread:
+
+| blanks | longest run | date | session |
+|---|---|---|---|
+| 600 | 290 | 2026-07-29 | `blossom_1785304954778` |
+| 361 | 165 | 2026-07-30 | `piglet_1785442483326` |
+| 194 | 144 | 2026-07-29 | `tulip_1785304996653` |
+| 71 | 26 | 2026-08-01 | `retriever_1785438764739` |
+| 15 | 14 | 2026-07-23 | `rabbit_1784775595418` |
+| 10 | 1 | 2026-08-01 | the reported session |
+
+"Longest run" counts blanks spaced exactly two apart, i.e. blank → assistant →
+blank. **1241 of the 1348 sit inside such runs**, concentrated in five sessions.
+The shape is a pump:
+
+```
+505 user      ""
+506 assistant "Idle."
+507 user      ""
+508 assistant "Idle."
+     … 290 consecutive rounds …
+```
+
+The reported session, with its longest run of 1, was among the mildest cases.
+Diagnosing from it alone made the defect look like a content bug affecting ten
+messages rather than a control-flow bug worth hundreds of model calls.
+
+## What PR #81 does and does not fix
+
+Replaying the shipped guard over the worst transcript separates the two:
+
+| | before | after guard |
+|---|---|---|
+| blank user turns | 600 | **0** |
+| provider-visible user turns | 860 | **858** |
+
+The guard is correct and does exactly what it claims: no blank content, no
+trailing-assistant prefill. But the loop's blanks nearly all follow assistant
+text, so they take the *promote* branch rather than the *drop* branch. **598
+model calls still dispatch.** The turns stop being blank; they do not stop being
+turns, and the cost to the user is essentially unchanged.
+
+So the empty text block was a *symptom* of the loop, not its cause. Fixing the
+symptom made the transcript well-formed while leaving the expense intact.
+
+## Remaining defect: an unbounded hidden-continuation pump
+
+The loop is **not** the auto-poke, which is what I first assumed. The evidence
+rules it out: every user message in `blossom`'s 600-blank region is blank. An
+auto-poke would read "You have N incomplete todos. Continue working…" as its
+body, because `build_poke_message` returns unbracketed text that
+`partition_queued_messages` routes to `user_messages`, not to the reminder.
+
+What the loop actually looks like is a `hidden_queued_system_messages` pump.
+That branch (`remote.rs`) sends `String::new()` with the payload as a reminder,
+which is exactly the blank-body shape observed:
+
+```
+} else if !app.hidden_queued_system_messages.is_empty() {
+    let combined = reminders.join("\n\n");
+    begin_remote_send(app, remote, String::new(), vec![], true, Some(combined), true, 0)
+```
+
+The assistant side is 545 replies of literally `"Idle."`, so each round costs a
+model call to say nothing. Something re-enqueued a hidden reminder after every
+completed turn without a termination condition. The mid-turn recovery reminder
+(`response_recovery.rs`) is *not* the culprit: it appears only 19 times and is
+explicitly bounded by `MAX_INCOMPLETE_CONTINUATION_ATTEMPTS`.
+
+### Confirmed live, in the session that wrote this document
+
+The re-enqueue question was settled by an accidental self-repro: the agent
+writing this writeup reproduced **both** defects in its own session.
+
+```
+blank turns in that session   : 2   (indices 3 and 7, both prev=assistant)
+auto-poke turns               : 6   (indices 123, 183, 292, 318, 326, 350)
+gaps between pokes            : 60, 109, 26, 8, 24
+```
+
+Both halves are visible at once, and they are clearly *different* producers:
+
+* The two blanks are the hidden-continuation shape (empty body, payload in the
+  reminder, previous message an assistant reply) — the defect PR #81 fixes.
+* The six pokes each carry a real body, `"You have 1 incomplete todo. Continue
+  working, or update the todo tool."`, and recurred with **no cap** while the
+  todo list stayed incomplete.
+
+This is the direct confirmation that the auto-poke is unbounded *and* that it is
+not the source of the blanks — the two coexist in one transcript without
+interacting. A poke never appears as a blank, and a blank never carries poke
+text.
+
+It also explains the `blossom` shape: a bounded-looking agent loop and an
+unbounded reminder pump can drive the same session from opposite ends.
+
+### Narrowing the pump: every text-carrying producer is excluded
+
+Each candidate was tested the same way — take the producer's *literal output
+string* from the source and count it in the transcript. A producer responsible
+for 600 rounds must appear ~600 times.
+
+| candidate | its output text | occurrences in `blossom` |
+|---|---|---|
+| auto-poke (`input.rs`) | `"You have N incomplete todos..."` | **1** |
+| todo confidence gate | `TODO_COMPLETION_CONTINUATION_MESSAGE` | **0** |
+| overnight poke | `"Overnight auto-poke for run ..."` | **2** |
+| reload recovery (x2 sites) | `ReloadContext` continuation | **0** |
+| `response_recovery.rs` | `"[System reminder: your previous..."` | 19 (bounded) |
+
+None of them can account for 600. The display side agrees: the string
+`"Auto-poking:"`, which `input.rs` pushes *every* time it queues a poke,
+appears **zero** times in the whole file.
+
+### The blanks carry no payload at all
+
+This is the part that overturns my earlier writeup. A blank turn looks like:
+
+```json
+{"role":"user","content":[{"type":"text","text":""}]}
+```
+
+There is no `system_reminder` and no hidden text — nothing rides along. And the
+model's own accounting confirms the provider saw nothing:
+
+```
+input_tokens across the 600 loop replies:  min 22   p50 22   max 1318
+```
+
+**22 input tokens.** A hidden-continuation reminder is hundreds of tokens; the
+median call carried essentially an empty new turn against a warm cache
+(`cache_read_input_tokens` ~137950). So the loop is **not** a reminder being
+re-enqueued. I recorded `hidden_queued_system_messages` as the "matching
+shape"; the token accounting says otherwise, and I was pattern-matching on
+`String::new()` rather than checking what was actually sent.
+
+The re-fire is also far too fast to be deliberative: median **137 ms** between
+the assistant's reply and the next blank, sustained for **124 minutes** across
+1264 messages, answered 547 times with literally `"Idle."`.
+
+### What that leaves
+
+`pending_queued_dispatch` is a *flag*, set independently of whether anything
+was actually queued. Both `local.rs` and `remote.rs` branch on it before
+checking `queued_messages`, so a path that sets the flag and then fails to
+enqueue (or has its queue drained by another handler) yields a dispatch with an
+empty body — exactly this signature. `schedule_queued_dispatch_after_interrupt`
+sets it purely on `has_queued_followups()`, with no message of its own.
+
+That is a hypothesis about a *flag/queue desynchronization*, not a claim, and
+it is deliberately recorded as such. Confirming it needs a live repro with
+tracing on the dispatch path, which is the next step and is owned (see below).
 ## Not inspected
 
 * Whether non-Anthropic providers (OpenAI Responses, Gemini, Copilot) tolerate a
