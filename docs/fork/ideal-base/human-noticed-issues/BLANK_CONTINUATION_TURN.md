@@ -202,11 +202,36 @@ completed turn without a termination condition. The mid-turn recovery reminder
 (`response_recovery.rs`) is *not* the culprit: it appears only 19 times and is
 explicitly bounded by `MAX_INCOMPLETE_CONTINUATION_ATTEMPTS`.
 
-The exact re-enqueue source is **not yet identified** — the candidate producers
-are the todo-confidence gate, which pushes to
-`hidden_queued_system_messages` when `needs_more_work` stays true, and any
-other path that enqueues a reminder on turn completion. Confirming which one
-requires reproducing against a live session, not reading transcripts.
+### Confirmed live, in the session that wrote this document
+
+The re-enqueue question was settled by an accidental self-repro: the agent
+writing this writeup reproduced **both** defects in its own session.
+
+```
+blank turns in that session   : 2   (indices 3 and 7, both prev=assistant)
+auto-poke turns               : 6   (indices 123, 183, 292, 318, 326, 350)
+gaps between pokes            : 60, 109, 26, 8, 24
+```
+
+Both halves are visible at once, and they are clearly *different* producers:
+
+* The two blanks are the hidden-continuation shape (empty body, payload in the
+  reminder, previous message an assistant reply) — the defect PR #81 fixes.
+* The six pokes each carry a real body, `"You have 1 incomplete todo. Continue
+  working, or update the todo tool."`, and recurred with **no cap** while the
+  todo list stayed incomplete.
+
+This is the direct confirmation that the auto-poke is unbounded *and* that it is
+not the source of the blanks — the two coexist in one transcript without
+interacting. A poke never appears as a blank, and a blank never carries poke
+text.
+
+It also explains the `blossom` shape: a bounded-looking agent loop and an
+unbounded reminder pump can drive the same session from opposite ends. Which
+path re-enqueues the reminder 290 times there remains **not identified** — the candidate producers
+are the todo-confidence gate, which pushes to `hidden_queued_system_messages`
+when `needs_more_work` stays true, and any other path that enqueues a reminder
+on turn completion.
 
 Live rather than historical: newest occurrence 2026-08-01T05:14, no bound added
 since. Unowned; recorded here only.
