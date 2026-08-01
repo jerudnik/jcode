@@ -861,3 +861,63 @@ artifact the bug produces; the server log is an independent observation of the
 same events and answered the question directly. When an investigation stalls,
 check whether an independent record of the same events exists before designing
 another experiment against the dependent one.
+
+## All twenty call sites are refuted, which means an exclusion is wrong
+
+`begin_remote_send` is the only client function that reaches the wire with a
+`Request::Message`, and it has twenty non-test call sites: `key_handling.rs`
+10, `remote.rs` 7, `input_dispatch.rs` 2, `tui_lifecycle.rs` 1. Making that a
+number rather than a narrative was the useful move, because each site predicts
+an artifact that either exists or does not.
+
+| call site | prediction if it is the pump | observed | verdict |
+|---|---|---|---|
+| `key_handling.rs` (x10) | keyboard `input_event` | 96/96 frames `tick`; sole key event is the closing Escape | dead |
+| `remote.rs:196` rate-limit resend | ~361 "Retrying continuation" / "Rate limit reset" system messages | **0** in `.json`, `.bak`, and `.evidence.jsonl` | dead |
+| `remote.rs:232` queue join | non-empty `queued_messages` | 0 in 96/96 frames (41 pre-onset, 55 post-onset) | dead |
+| `remote.rs:269` hidden reminder | `system_reminder` on the wire | 0/361 | dead |
+| `remote.rs:1156` fallback resend | `"Resending failed turn"` | 0 lines | dead |
+| `remote.rs:1343` interleave | non-empty guard, plus `interleave` in log | 0 lines, and guarded | dead |
+| `remote.rs:1374/1402` | queue/reminder state | same as above | dead |
+| `input_dispatch.rs:132/310` submit | keystroke | tick-only | dead |
+| `tui_lifecycle.rs:90` wrapper | delegates to `remote.rs` | n/a | dead |
+| deferred pre-history prompt | `"Dispatching prompt that was held"` | **1** line, cannot explain 361 | dead |
+| synthetic startup dispatch | `"Dispatching restored startup/queued followup"` | 0 lines | dead |
+
+Twenty sites refuted against 361 observed sends is a contradiction, not a
+result. One of the exclusions above is false, and the honest position is that
+the pump is not yet named.
+
+Two exclusions were re-tested rather than trusted, since both were mine:
+
+- **The queue claim survived.** `TUI_SLOW_FRAME` only fires on *slow* frames,
+  so "0 in 96/96" could have been a sampling artifact covering only the quiet
+  period. Parsing the frames as JSON and splitting on the onset timestamp
+  gives 41 pre-onset and 55 post-onset frames, all with
+  `"queued_messages":0` and all `"input_event":"tick"`. The claim holds inside
+  the pump window specifically.
+- **One earlier refutation was invalid.** Grepping the server log for
+  `"Rate limit reset"` returned 0 and I read that as exclusion, but that string
+  is a `DisplayMessage`, never a log line, so the grep tested nothing. The
+  correct test is against the session file, where the banner would have been
+  persisted 361 times. It appears 0 times, so the conclusion stands, but it
+  stood on a broken test for one iteration.
+
+`client_api.rs:49` constructs `Request::Message` outside the TUI entirely and
+was never in the candidate set. It is excluded by evidence rather than by
+reading: it opens its own connection with its own id counter starting at 1,
+while piglet's empty sends are contiguous ids 6..367 on the *same* connection
+that carried the real request id=3.
+
+One incidental finding: `TURN_CANCEL_REGISTERED` appears 362 times, once per
+empty send, always `active_turns=1`, always paired with an unregister. That is
+not a leak. It confirms each empty request became a full server-side turn.
+
+### Where this stops
+
+Three rounds of static reading have now failed to name the branch, and the
+third produced a contradiction instead of a candidate. Continuing to read is
+the wrong move. The next step is instrumentation at the single chokepoint,
+recording caller identity and the state that gates it, because the pump's
+distinguishing property is that it logs *nothing at all* -- and every branch
+that logs has been eliminated by that silence.
