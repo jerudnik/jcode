@@ -481,3 +481,50 @@ against a session with nothing left to do. The remaining question is which
 caller of that `false` return keeps dispatching anyway; there are three, in
 `server_events.rs`, plus one in `local.rs`. That trace is next, and no fix
 should land before it.
+
+## The four callers do not dispatch: a negative result
+
+Stated in advance: *if none of the four callers of
+`schedule_auto_poke_followup_if_needed` acts on a `false` return, the driver is
+not in this function and the todo-onset signal is a symptom, not the cause.*
+That is what the code shows.
+
+| caller | behavior on `false` |
+|---|---|
+| `local.rs:502` | `clear_visible_turn_started()`, maybe notify. No send. |
+| `server_events.rs:1055` | `clear_visible_turn_started()`. No send. |
+| `server_events.rs:1169` | `clear_visible_turn_started()`, maybe notify. No send. |
+| `server_events.rs:1385` | returns the value. No send. |
+
+The `|| schedule_overnight_poke_followup_if_needed()` fallback that runs on
+every `false` is likewise inert here: all five of its early exits return
+`false` without queueing, and `overnight_auto_poke.is_none()` in an ordinary
+session anyway.
+
+So the quiet "todos complete" branch is not the pump. It is merely the last
+thing that happens before the pump starts, which is why it correlates so
+sharply. **Correlation confirmed, causation refuted.**
+
+### Where the dispatch actually happens
+
+The event loop, not the scheduler, is what sends:
+
+```rust
+// run_shell.rs:374 (local) and :557 (remote)
+} else if self.pending_queued_dispatch {
+    self.pending_queued_dispatch = false;
+    process_queued_messages(...).await;   // or process_remote_followups(...)
+}
+```
+
+The flag is the sole gate; nothing checks that a message exists. Both
+consumers do guard themselves (`process_remote_followups` returns early on
+`pending_queued_dispatch`, and the startup path clears
+`submit_input_on_startup` and skips on empty input), so no single read of this
+code names the offender. Whatever sets `pending_queued_dispatch` without
+leaving a message behind is the pump, and finding it needs a live trace of the
+flag's transitions, not more reading.
+
+**Status: the driver is still unnamed.** Four suspects have now been refuted
+by evidence (reminder, poke, queue desync, and the todo-completion branch).
+The next step is instrumenting the flag itself in a live repro.
