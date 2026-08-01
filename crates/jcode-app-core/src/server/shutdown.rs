@@ -1225,18 +1225,14 @@ async fn run_cleanup(reason: ExitReason, config: Option<&ShutdownConfig>) {
     })
     .await;
 
-    // 2-3. Remove main + debug sockets.
-    crate::transport::remove_socket(&config.socket_path);
-    crate::transport::remove_socket(&config.debug_socket_path);
-
-    // 4. Remove the `.hash` sidecar.
-    let hash_path = format!("{}.hash", config.socket_path.display());
-    let _ = std::fs::remove_file(&hash_path);
-
-    // 5. Remove temporary metadata when temporary.
-    if config.temporary {
-        super::lifecycle::cleanup_temporary_metadata(&config.socket_path);
-    }
+    // 2-5. Remove all endpoint artifacts owned by this gracefully exiting
+    // daemon. Persistent daemons do not own temporary metadata; temporary
+    // daemons do.
+    super::socket::cleanup_endpoint_artifacts_with_debug(
+        &config.socket_path,
+        &config.debug_socket_path,
+        config.temporary,
+    );
 
     // 6. Shut down MCP children pool-wide, then reap every pooled or
     // per-session child registered to this daemon within one fixed budget.

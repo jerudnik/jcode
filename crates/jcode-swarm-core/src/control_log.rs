@@ -421,6 +421,16 @@ pub struct ControlLogRead {
     pub envelopes: Vec<(u64, SwarmControlEnvelope)>,
     /// Offset to resume from to see only events appended after this read.
     pub next_offset: u64,
+    /// Corrupt COMPLETE lines consumed while reading. Torn final lines are not
+    /// included here because they remain resumable at `next_offset`.
+    pub corrupt_lines: Vec<CorruptControlLogLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorruptControlLogLine {
+    pub start_offset: u64,
+    pub end_offset: u64,
+    pub bytes: Vec<u8>,
 }
 
 /// Read all complete events at/after byte `offset`. A trailing partial line
@@ -434,26 +444,44 @@ pub fn read_from(path: &Path, offset: u64) -> std::io::Result<ControlLogRead> {
     let mut reader = std::io::BufReader::new(file);
     let mut envelopes = Vec::new();
     let mut consumed = offset;
-    let mut buffer = String::new();
+    let mut corrupt_lines = Vec::new();
+    let mut buffer = Vec::new();
     loop {
         buffer.clear();
-        let bytes = reader.read_line(&mut buffer)?;
+        let start_offset = consumed;
+        let bytes = reader.read_until(b'\n', &mut buffer)?;
         if bytes == 0 {
             break;
         }
-        if !buffer.ends_with('\n') {
+        if !buffer.ends_with(b"\n") {
             // Torn final line: leave it for the next read.
             break;
         }
         consumed += bytes as u64;
-        match serde_json::from_str::<SwarmControlEnvelope>(buffer.trim_end()) {
+        let mut line = if buffer.ends_with(b"\n") {
+            &buffer[..buffer.len() - 1]
+        } else {
+            &buffer[..]
+        };
+        // Tolerate CRLF line endings: a `\r` before the newline is transport
+        // framing, not payload, and must not condemn an otherwise-valid line
+        // to quarantine.
+        if line.ends_with(b"\r") {
+            line = &line[..line.len() - 1];
+        }
+        match serde_json::from_slice::<SwarmControlEnvelope>(line) {
             Ok(envelope) => envelopes.push((consumed, envelope)),
-            Err(_) => continue, // skip corrupt complete line, bytes consumed
+            Err(_) => corrupt_lines.push(CorruptControlLogLine {
+                start_offset,
+                end_offset: consumed,
+                bytes: buffer.clone(),
+            }),
         }
     }
     Ok(ControlLogRead {
         envelopes,
         next_offset: consumed,
+        corrupt_lines,
     })
 }
 
@@ -643,6 +671,27 @@ mod tests {
     }
 
     #[test]
+    fn crlf_terminated_line_is_valid_not_corrupt() {
+        // A `\r` before the newline is transport framing, not payload; it must
+        // not send an otherwise-valid event to quarantine.
+        let (_dir, path) = temp_log();
+        let mut writer = ControlLogWriter::open(&path, "s", LOCAL_ORIGIN).expect("open");
+        writer
+            .append(SwarmControlEvent::MemberLeft {
+                session_id: "a".into(),
+            })
+            .expect("append");
+        let bytes = std::fs::read(&path).expect("read raw");
+        let line = &bytes[..bytes.len() - 1]; // strip \n
+        let mut crlf = line.to_vec();
+        crlf.extend_from_slice(b"\r\n");
+        std::fs::write(&path, &crlf).expect("rewrite as CRLF");
+        let read = read_from(&path, 0).expect("read");
+        assert!(read.corrupt_lines.is_empty(), "CRLF line flagged corrupt");
+        assert_eq!(read.envelopes.len(), 1);
+    }
+
+    #[test]
     fn corrupt_complete_line_is_skipped_without_wedging_replay() {
         let (_dir, path) = temp_log();
         let mut writer = ControlLogWriter::open(&path, "s", LOCAL_ORIGIN).expect("open");
@@ -664,7 +713,10 @@ mod tests {
                 session_id: "b".into(),
             })
             .expect("append");
-        let (state, _) = replay(&path).expect("replay");
+        let read = read_from(&path, 0).expect("read");
+        assert_eq!(read.corrupt_lines.len(), 1);
+        assert_eq!(read.corrupt_lines[0].bytes, b"this is not json\n");
+        let state = fold(read.envelopes.iter().map(|(_, envelope)| envelope));
         assert_eq!(
             state.events_applied, 2,
             "good events on both sides of garbage"
