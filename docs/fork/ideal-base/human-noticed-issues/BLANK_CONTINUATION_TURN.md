@@ -288,6 +288,15 @@ appended to history. So the request is well-formed and the history is intact —
 the model is simply being asked to respond to **nothing**, 600 times, and
 correctly reports that it has nothing to do.
 
+**What the 22 tokens actually are** (found by @badger with a wire-boundary
+assertion, correcting my phrasing): a stored `""` does *not* arrive at the
+provider empty. `Message::with_timestamps` prefixes every user text block at
+send time, so `""` becomes `"[2026-08-01T19:25:02.874Z] "`. The 22 tokens are
+that timestamp tag and nothing else. "Empty on the wire" was imprecise; the
+turn carries its own timestamp and no content. This is also why the defect is
+easy to miss at the boundary — an `is_empty()` assertion there can never
+fire.
+
 A control rules out a caching artifact. In the *same* session with the *same*
 warm cache, the 19 replies that follow a real `response_recovery` reminder cost
 **90** input tokens; the 830 that follow a blank cost **22**. A reminder is
