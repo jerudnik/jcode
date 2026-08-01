@@ -1107,3 +1107,91 @@ sites against 361 real sends. That is a contradiction, not a result: the sends
 happened, so one exclusion had to be false. The correct response to "every
 candidate is refuted" is to re-test the exclusions, not to widen the candidate
 list. Both false exclusions above were found by doing that.
+
+---
+
+## What is verified, and how
+
+A fix can be merged, tested, and still never have executed in a running
+binary. Those are three different claims and this investigation conflated
+them at least once, so they are separated here.
+
+| claim | PR #88 (fire-once gate) | PR #87 (widened content guard) |
+|---|---|---|
+| merged to `main` | not yet | yes (`2dbe4f158`) |
+| unit / e2e coverage | yes | yes |
+| regression test proven to fail without the fix | yes (50 vs 1) | replay over 5 sessions |
+| **present in a running binary** | **yes** | **no** |
+
+The last row was checked, not assumed:
+
+```
+git merge-base --is-ancestor 2dbe4f158 c94f327ae   ->  not an ancestor
+strings ~/.jcode/current/jcode | grep -c machine_dispatch              ->  0
+strings ~/.jcode/current/jcode | grep -c 'Todo completion gate already fired'  ->  1
+```
+
+The built branch forked from `main` at `f25a1c026`, before #87 merged, so the
+post-reload reading of "0 blanks created" measured the fire-once gate running
+**alone**. That is cleaner for attributing the gate fix, and it means #87 is
+merged-with-coverage but *un-live-exercised*, which is a weaker claim than
+"verified live".
+
+Two independent reasons that particular 0 proves little:
+
+1. **No power.** The newest blank turn ever written is `2026-08-01T17:07:27Z`,
+   about 3.5 hours before the 20:39Z reload. Nothing was going to write a
+   blank in that window whether or not either fix worked.
+2. **Immutable denominator.** Neither fix rewrites session files, so the
+   all-time total of 1348 is fixed by construction and will never move. Only
+   blanks created *after* a fix landed can move, which is why
+   `count_blank_user_turns.py` takes a `SINCE` argument.
+
+### Counting the ownership gate, and the trap it sets
+
+The same `QUALITY_GATE_THRESHOLD = 96` gates a second path. In
+`newly_completed_groups_have_sufficient_ownership`, a completed group whose
+goal lacks a sufficient `end_to_end_ownership` score causes
+`tool/todo.rs` to return the *previous* todo state and never reach
+`save_todos`. The tool returns `Ok`, so nothing upstream can distinguish it
+from a successful write. The model is told its ownership was insufficient; it
+is **not** told the write was rejected, and the stale state it receives reads
+as though the write landed.
+
+The trigger is broader than a low score: the check is
+`.and_then(|goal| goal.end_to_end_ownership).is_some_and(|s| s >= 96)`, so a
+**missing** score fails too. Completing a group with no goal entry at all,
+including a plain ungrouped list, is rejected. Verified by test rather than
+by reading.
+
+Measuring the impact has a trap: the discarded writes are, by construction,
+absent from the goal files one would naturally count. Counting those files
+suggests ~11-16 affected entries. The escape is that the rejection persists a
+continuation message into the session transcript regardless of whether the
+write landed:
+
+```
+OWNERSHIP rejection : 262 occurrences across 141 sessions
+CONFIDENCE gate     :  20 occurrences across   5 sessions
+
+sessions with a todo file      : 342
+sessions that hit the rejection: 141
+  with a todo file             : 138   (40% of todo-using sessions)
+  with no todo file at all     :   3   (write dropped, nothing persisted)
+```
+
+One more instance of this document's recurring error appeared while measuring
+it. The first scan parsed message `content` and returned **0 occurrences,
+including 0 for the confidence gate already proven to have fired 361 times**.
+That refuted the probe, not the phenomenon: these strings travel as
+`system_reminder`, not as content. It is the same field whose omission from
+`request_payload_summary` produced the original false negative.
+
+**The recurring lesson, stated once more because it caused every wrong call
+here:** the failures were never plain guesses. Each came from a number or a
+code path that looked authoritative while measuring something else. Token
+counts that were not billing what was assumed. A logger's field list mistaken
+for the wire. A scoped lint run mistaken for CI. An uncommitted buffer read as
+`main`. A reload SHA verified without checking that it contained the commit
+under test. String-compared ISO timestamps that dropped exactly the new
+records a fix was being judged by.
