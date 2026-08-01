@@ -921,3 +921,101 @@ the wrong move. The next step is instrumentation at the single chokepoint,
 recording caller identity and the state that gates it, because the pump's
 distinguishing property is that it logs *nothing at all* -- and every branch
 that logs has been eliminated by that silence.
+
+## Named: the todo completion-confidence gate, proven byte-exact
+
+The contradiction resolved the way contradictions usually do: one exclusion was
+invalid, and it was mine.
+
+I had written "no `system_reminder` field on any empty request (0/361)" and
+used it to kill every reminder-bearing branch. **That test never ran.**
+`request_payload_summary` (`client_lifecycle_logging.rs:68`) only extracts
+`content`, `message`, `prompt`, `task`, `command`, `input`, `value`, plus
+`images`/session ids. `system_reminder` is not in the list, so it is never
+logged, and its absence from the log means nothing at all. This is the same
+error class as grepping the server log for the `"Rate limit reset"`
+`DisplayMessage`: **an exclusion resting on a missing string, where the string
+was never emitted on that path.** Twice in one investigation.
+
+What is real is `line_bytes`, because the server logs `line.len()` directly.
+And it was visible the whole time that the empty envelope is *too big*:
+
+| request | content_bytes | line_bytes | overhead |
+|---|---|---|---|
+| id=3 (real user turn) | 6128 | 6291 | **163** |
+| id=6 (empty) | 0 | 251 | **251** |
+
+An empty message carries ~88 bytes *more* envelope than a full one. Since
+`system_reminder` is `#[serde(skip_serializing_if = "Option::is_none")]`
+(`wire.rs:129`), a fatter envelope with no content means the field is present.
+Solving for it gives a reminder of ~191 characters.
+
+`TODO_COMPLETION_CONTINUATION_MESSAGE` (`crates/jcode-base/src/todo.rs:27`) is
+**exactly 191 characters**. Predicting `line_bytes` from the real wire struct,
+with `+1` because `read_line` retains the newline and `images` is skipped when
+empty:
+
+| request ids | predicted | observed | count |
+|---|---|---|---|
+| 6-9 | 251 | 251 | 4 / 4 |
+| 10-99 | 252 | 252 | 90 / 90 |
+| 100-367 | 253 | 253 | 267 / 268 |
+
+Byte-exact across all three id-width buckets. The single-request shortfall in
+the last bucket is id=366, the user's Escape (`request_kind=cancel`). A scan of
+every string literal in the crate tree found 11 within +/-2 characters of 191,
+and exactly one is a `system_reminder`; the rest are format strings, test
+fixtures, and unrelated notices. `hidden_queued_system_messages` has only two
+originating `push` sites (the others are re-queue-on-failure paths that recycle
+an existing reminder), and the other one is reload-recovery with a different
+message and a dedup guard.
+
+**The pump is `schedule_auto_poke_followup_if_needed`, `input.rs:1281-1289`:**
+
+```rust
+if confidence_summary.needs_more_work {
+    self.push_display_message(DisplayMessage::system("🛑 Todo completion gate: ..."));
+    self.hidden_queued_system_messages.push(build_todo_confidence_summary_message(&todos));
+    self.pending_queued_dispatch = true;
+    return true;
+}
+```
+
+Returning `true` means "followup scheduled", so the `Done` handler skips
+`clear_visible_turn_started()`; the queued reminder is then dispatched by the
+`remote.rs:269` hidden-reminder branch as `String::new()` content plus
+`Some(reminder)`. The model answers, the turn completes, and the gate is
+re-evaluated against **the same unchanged todo list** - so it fires again,
+forever, at model round-trip speed. Nothing drains it because nothing about
+answering a reminder changes `completion_confidence`.
+
+This also explains every constraint that made the bug hard to find:
+
+- **Why it logs nothing.** It does log (`"Sending hidden continuation
+  reminder"`), but that is `crate::logging::info`, and the 07-30 run was not at
+  info level for the client. The 5 lines found fleet-wide are from runs that
+  were.
+- **Why the queue was empty.** `hidden_queued_system_messages` is a *separate*
+  field from `queued_messages`, and only the latter appears in `TUI_SLOW_FRAME`.
+  My "0 in 96/96 frames" was correct and irrelevant.
+- **Why 22 input tokens.** Confirmed earlier as `""` plus a timestamp. The
+  reminder rides on the system prompt, not the user message.
+- **Why it starts when work finishes.** The gate is only reachable when
+  `incomplete.is_empty()` - every todo marked completed - which is exactly
+  badger's finding that all 598 onsets follow a *text-only* assistant turn and
+  never one ending in `tool_use`.
+- **Why the todo correlation was p~1e-5.** It was not incidental after all. The
+  gate reads the todo list directly.
+
+Two agents converged from opposite ends: badger's timing split showed the
+dispatch leg was local (162ms) and every onset followed a completed turn, while
+the envelope arithmetic named the payload. Neither alone was sufficient.
+
+### The fix, and why the guard is not it
+
+The `String::new()` skip I had staged in `remote.rs` would have suppressed the
+symptom and left the gate looping invisibly. The defect is that
+`needs_more_work` is re-evaluated against state the reminder cannot change, so
+the gate must fire **at most once per todo-list revision**. That is the change
+to make, and it belongs with a test that asserts a second identical evaluation
+does not re-queue.
