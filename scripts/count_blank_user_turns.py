@@ -56,7 +56,16 @@ def mtime_iso(path):
 
 def main():
     sessions = os.path.expanduser("~/.jcode/sessions")
-    since = sys.argv[1] if len(sys.argv) > 1 else None
+    args = sys.argv[1:]
+    if args and args[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        print()
+        print("usage: count_blank_user_turns.py [SINCE]")
+        print()
+        print("  SINCE   optional ISO date/prefix (e.g. 2026-07-01); only sessions")
+        print("          modified at or after it are scanned. Omit to scan all.")
+        return 0
+    since = args[0] if args else None
 
     total_blanks = safe = risky = 0
     scanned = 0
@@ -91,7 +100,9 @@ def main():
         for name, stamp, n, s, r, idx in offenders:
             short = name.replace("session_", "").replace(".json", "")
             print(f"  {short[:44]:44s} {stamp}  n={n} safe={s} risky={r}")
-            print(f"    indices: {idx}")
+            shown = idx if len(idx) <= 24 else idx[:24]
+            more = "" if len(idx) <= 24 else f" ... (+{len(idx) - 24} more)"
+            print(f"    indices: {shown}{more}")
     return 1 if total_blanks else 0
 
 
