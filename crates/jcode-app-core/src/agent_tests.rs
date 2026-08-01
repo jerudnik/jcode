@@ -20,6 +20,8 @@ use tokio_stream::wrappers::ReceiverStream;
 
 #[path = "agent_tests/active_pid.rs"]
 mod active_pid;
+#[path = "agent_tests/hidden_reminder.rs"]
+mod hidden_reminder;
 
 struct DelayedProvider {
     open_delay: Duration,
@@ -324,8 +326,9 @@ impl Provider for RetryEvidenceProvider {
     }
 }
 
-async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
-    let provider: Arc<dyn Provider> = Arc::new(ScriptedEvidenceProvider { events });
+/// Build a fixture agent over `provider` with tools, memory, and route pinned to
+/// the shared R12 test configuration.
+async fn fixture_agent(provider: Arc<dyn Provider>) -> Agent {
     let registry = Registry::new(provider.clone()).await;
     let mut agent = Agent::new(provider, registry);
     agent.allowed_tools = Some(std::collections::HashSet::new());
@@ -334,29 +337,24 @@ async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
     agent
 }
 
+async fn scripted_agent(events: Vec<ScriptedProviderEvent>) -> Agent {
+    fixture_agent(Arc::new(ScriptedEvidenceProvider { events })).await
+}
+
 async fn retry_agent(attempts: Vec<ScriptedProviderAttempt>) -> Agent {
-    let provider: Arc<dyn Provider> = Arc::new(RetryEvidenceProvider {
+    let mut agent = fixture_agent(Arc::new(RetryEvidenceProvider {
         attempts: Arc::new(Mutex::new(attempts.into())),
-    });
-    let registry = Registry::new(provider.clone()).await;
-    let mut agent = Agent::new(provider, registry);
-    agent.allowed_tools = Some(std::collections::HashSet::new());
-    agent.memory_enabled = false;
-    agent.session.route_api_method = Some("r12-fixture-route".to_string());
+    }))
+    .await;
     seed_context_limit_retry_messages(&mut agent);
     agent
 }
 
 async fn mid_stream_cancel_agent(polled_tx: oneshot::Sender<()>) -> Agent {
-    let provider: Arc<dyn Provider> = Arc::new(MidStreamCancelProvider {
+    fixture_agent(Arc::new(MidStreamCancelProvider {
         polled_tx: Arc::new(Mutex::new(Some(polled_tx))),
-    });
-    let registry = Registry::new(provider.clone()).await;
-    let mut agent = Agent::new(provider, registry);
-    agent.allowed_tools = Some(std::collections::HashSet::new());
-    agent.memory_enabled = false;
-    agent.session.route_api_method = Some("r12-fixture-route".to_string());
-    agent
+    }))
+    .await
 }
 
 fn seed_context_limit_retry_messages(agent: &mut Agent) {
