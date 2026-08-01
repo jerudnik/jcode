@@ -298,7 +298,7 @@ jobs:
       - name: Enforce critical-path zero-growth budget and report debt trend
         run: |
           python3 scripts/check_critical_path_budget.py \
-            --expect-digest 32db9d0da14dc5884b3a93b05e2c3046073ba861ac62230be5739ec9c09c8846 \
+            --expect-digest 6e9367a924cc4199b0725b6181e78e9a2b9a5bad65eb3be4a2d54fc09d67177d \
             --report /tmp/critical-path-debt-trend.json
 
       # R07's rereview-remediation established that a gate is only as good as

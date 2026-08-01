@@ -214,7 +214,7 @@ TARGETS: dict[str, dict[str, Any]] = {
 # refactor that moves code out of scope) are recorded here inside a maintenance
 # window, which is exactly the review such a scope change deserves.
 EXPECTED_FILE_COUNTS: dict[str, int] = {
-    "lifecycle": 63,
+    "lifecycle": 64,
     "persistence": 10,
     "updater": 8,
     "provider_infrastructure": 19,
