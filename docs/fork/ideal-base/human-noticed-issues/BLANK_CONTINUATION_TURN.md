@@ -415,3 +415,69 @@ What *is* established by evidence, and does not depend on the above:
   server-side as a defense in depth, independent of the client-side cause. The
   wire log is where this was first visible, so it is also where it could be
   caught unconditionally.
+
+## Method note: two agents, one worktree
+
+While investigating this I read a co-agent's *uncommitted* edit to
+`turn_execution.rs`, mistook it for the code on `main`, and told them their
+failing test was stale. It was not. Verifying against the committed object
+settles it immediately:
+
+```
+$ git show f25a1c026:crates/jcode-app-core/src/agent/turn_execution.rs \
+    | grep -c CONTINUATION_MARKER
+0
+```
+
+Two lessons, both cheap to apply:
+
+* **`git status` is not the working tree's author.** With more than one agent
+  in a single checkout, uncommitted content on disk may belong to someone
+  else. Read `git show <rev>:<path>`, not the file, when the claim is about
+  what ships.
+* **`git add -A` is unsafe under concurrency.** It swept a peer's in-flight
+  source into four docs commits. Nothing was lost, but the real damage was
+  epistemic: their half-finished edit became my evidence. Stage explicit
+  paths you own.
+
+The same collision struck twice, because the explanatory comment I cited as
+"main documenting its own behavior" was also the peer's uncommitted text.
+
+## The loop begins when the work finishes
+
+The onset correlates with the `todo` tool, and the correlation is not a
+base-rate artifact. Across 2377 sessions `todo` is only 3.8% of all tool
+calls, yet it is the last tool before 4 of the 5 runaway onsets:
+
+```
+P(>=4 of 5 | p=0.038) ~ 1e-5
+```
+
+The mechanism, though, is the **opposite** of the incomplete-todo poke. At the
+exact onset call every todo is already `completed`, and each carries a
+`completion_confidence`:
+
+| session | todos at onset | statuses | missing confidence | `needs_more_work` |
+|---|---|---|---|---|
+| `blossom` | 8 | all `completed` | 0 | false |
+| `piglet` | 7 | all `completed` | 0 | false |
+
+That selects the `✅ Todos complete` branch of
+`schedule_auto_poke_followup_if_needed`, which disables poking, clears
+`pending_queued_dispatch`, returns `false`, and **queues no message**. It is
+the quiet, correct branch.
+
+And the agent does stop working. Counting `tool_use` blocks after the first
+blank:
+
+```
+blossom   15 tool uses in the 1262 messages after onset
+piglet     1 tool use  in the  741 messages after onset
+```
+
+So the pump does not start when the agent has work left. It starts the moment
+the agent declares it has none, and it fires ~600 and ~360 times respectively
+against a session with nothing left to do. The remaining question is which
+caller of that `false` return keeps dispatching anyway; there are three, in
+`server_events.rs`, plus one in `local.rs`. That trace is next, and no fix
+should land before it.
