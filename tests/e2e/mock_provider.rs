@@ -9,6 +9,12 @@ use jcode::provider::{EventStream, Provider};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+/// The (role, text) of one message, flattened across its content blocks.
+type CapturedMessage = (String, String);
+
+/// The messages of a single `complete()` call.
+type CapturedCall = Vec<CapturedMessage>;
+
 /// What each `complete()` call was given, so tests can assert on the payload the
 /// provider actually receives rather than on internal state.
 #[derive(Clone, Default)]
@@ -17,7 +23,7 @@ pub struct MockCaptures {
     pub resume_session_ids: Arc<Mutex<Vec<Option<String>>>>,
     pub models: Arc<Mutex<Vec<String>>>,
     /// Per call, the (role, text) of every message sent, flattened across blocks.
-    pub messages: Arc<Mutex<Vec<Vec<(String, String)>>>>,
+    pub messages: Arc<Mutex<Vec<CapturedCall>>>,
 }
 
 pub struct MockProvider {
