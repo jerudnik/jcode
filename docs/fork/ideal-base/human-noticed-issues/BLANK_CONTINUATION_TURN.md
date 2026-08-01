@@ -722,3 +722,142 @@ Method note: the base-rate check that promoted the todo-onset signal (3.8% vs
 4-of-5) and the confound check that demoted this one are the same test. Any
 population comparison here needs a control matched on session length, since
 length drives blanks, reattaches, tool counts, and nearly everything else.
+
+## The wire says it plainly: `content_bytes=0`, and the queue was always empty
+
+Every section above reasons about the client from the *session file*, which is
+the output of the thing under investigation. The server log is an independent
+record of the same events, and it had been sitting in `~/.jcode/logs/` the
+whole time. Reading it took ten minutes and settled in one command what eight
+suspects could not.
+
+`piglet` (2026-07-30) is the only runaway session inside the log retention
+window that also postdates `SERVER_REQUEST_LIFECYCLE` logging. `blossom` and
+`tulip` are 07-29; that log exists but has **zero** `phase=received` lines, so
+the wire-level check cannot be run against them. Everything below is one
+session, and is labelled as such.
+
+### The pump has a fingerprint
+
+```
+$ grep session_piglet ... | grep phase=received | grep -c 'content_bytes=0'
+361
+$ grep session_piglet ... | grep phase=received | grep -vc 'content_bytes=0 '
+5
+```
+
+361 empty requests, exactly matching the 361 blank user turns in the session
+file. `content_bytes` is the literal `content` field of the decoded wire
+request (`request_payload_summary`, `client_lifecycle_logging.rs:68`), so this
+is not an inference about what the client meant to send. It is what it sent.
+
+Ordered by request id, the session's whole life is visible:
+
+| request_id | kind | content_bytes |
+|---|---|---|
+| 3 | message | 6128 |
+| 4 | soft_interrupt | 155 |
+| 5 | soft_interrupt | 85 |
+| **6 .. 365** | **message** | **0** |
+| 366 | cancel | (27 byte envelope) |
+| 367 | message | 0 |
+
+The pump starts at id=6 and never recovers. It ran for **63 minutes**
+(16:44:18 to 17:47:17) and stopped only because the user pressed Escape:
+request 366 is `REMOTE_INTERRUPT_SEND_START kind=cancel
+trigger=keyboard_escape`. That is the only keyboard-originated event in the
+entire hour.
+
+### Onset, to the millisecond
+
+```
+16:44:18.783  API call complete in 19.51s (input=1293 output=1135)
+16:44:18.809  Turn complete - no tool calls
+16:44:18.834  Client received Done id=3, current_message_id=Some(3)
+16:44:18.845  SERVER_REQUEST_LIFECYCLE phase=received request_kind=message content_bytes=0
+```
+
+**11 milliseconds** from the client observing `Done` to the client sending an
+empty message. This confirms the CV-based inference from the timing section
+above by direct observation: the loop is `Done` -> send -> `Done` -> send, at
+model round-trip speed.
+
+### This kills the entire queue path, including my own leading suspect
+
+Two independent facts from the log, either of which is sufficient:
+
+1. **The queue was never non-empty.** The client emits its full state in
+   `TUI_SLOW_FRAME`. Across all 96 frames spanning the session:
+
+   ```
+   queued_messages: Counter({0: 96})
+   ```
+
+2. **No reminder ever rode along.** None of the 361 empty requests carries a
+   `system_reminder` field, and `line_bytes=251` is pure envelope.
+
+Every remaining candidate in `process_remote_followups` requires one or the
+other. The two queue joins gate on `!queued_messages.is_empty()`; both
+hidden-reminder branches pass `Some(combined)` and would show a reminder and
+cost ~90 tokens rather than 22. The fallback resend logs `"Resending failed
+turn"`, which never appears. `partition_queued_messages` returning an empty
+user set - the defect I found, handed to badger, and quietly hoped was also the
+pump - **cannot** be it, because it requires a non-empty queue to partition.
+
+That was my best remaining lead and the data killed it outright.
+
+### Where the seed is
+
+Two soft interrupts were sent while a turn was running (ids 4 and 5). Both were
+injected and committed server-side (`AGENT_SOFT_INTERRUPT_INJECT_COMMIT` x2).
+But the *client* counter never returned to zero:
+
+```
+16:23:00.056  kind=soft_interrupt_injected content_bytes=155 pending_soft_interrupts=1
+16:25:19.493  kind=soft_interrupt_injected content_bytes=85  pending_soft_interrupts=1
+```
+
+After the second injection the client still believes one interrupt is pending,
+and it stays that way for the rest of the session:
+`recover_stranded_soft_interrupts` logs on every run and appears **zero** times
+in the log, as does its dedup line and its failure line. So a non-empty
+`pending_soft_interrupts` sat in client state, unrecovered, from 16:25 until
+the session closed - 19 minutes before onset, and through all 361 sends.
+
+Three further constraints from the same log:
+
+- Every frame is `input_event: tick`. No keystroke is involved.
+- One client instance, one connection (1096 and 1101 lines respectively). This
+  is not the multi-client contention that
+  `recover_stranded_soft_interrupts` was written to defend against.
+- All 361 sends funnel through `begin_remote_send`, since
+  `send_message_with_images_and_reminder` has exactly one non-test caller
+  (`input_dispatch.rs:19`), and `begin_remote_send` has **no** emptiness guard.
+
+### What is still not proven
+
+The precise tick branch that calls `begin_remote_send` with `content: ""` while
+`pending_soft_interrupts` is stuck is **not yet identified**, and the obvious
+candidate is already dead: `retrieve_pending_message_for_edit` is the one
+function that drains that vector into the input box, and all three of its
+callers are keystroke paths (Up-arrow, Escape) while every observed frame is a
+tick.
+
+Two rounds of reading the code for a branch that fits have now failed. The next
+step is instrumentation, not more reading: log content length and the relevant
+state at the single wire chokepoint and reproduce with a deliberately stranded
+`pending_soft_interrupts`.
+
+Stated so it can be checked rather than believed: the stuck counter is
+correlational. It is the only anomalous client state that persists across the
+onset, and it appears 19 minutes before the first blank, but nothing here
+demonstrates that it *causes* the send.
+
+### Method note
+
+The evidence that settled this was on disk before the investigation started.
+Eight suspects were refuted by reasoning about the session file, which is the
+artifact the bug produces; the server log is an independent observation of the
+same events and answered the question directly. When an investigation stalls,
+check whether an independent record of the same events exists before designing
+another experiment against the dependent one.
