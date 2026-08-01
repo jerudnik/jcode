@@ -1,7 +1,7 @@
 pub(crate) mod binary_freshness;
 
-use binary_freshness::{newer_binary_available, process_start_time};
 use crate::build;
+use binary_freshness::{newer_binary_available, process_start_time};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1119,8 +1119,8 @@ mod newest_reload_candidate_integration_tests {
     //! against its own install when the candidate is a wrapper whose payload is
     //! what it is actually running.
     use super::newest_reload_candidate;
-    use crate::server::util::binary_freshness::newer_binary_available;
     use crate::build;
+    use crate::server::util::binary_freshness::newer_binary_available;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
 
