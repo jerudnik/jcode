@@ -580,3 +580,49 @@ should not send `""` as the user body); not the answer to the loop.
 
 Five suspects down. The driver remains unnamed, and the live flag trace is
 still the next step.
+
+## The loop is turn-driven, not timer-driven
+
+Before instrumenting anything, two deductions worth stating, because together
+they rule out the experiment I was about to run.
+
+**1. The queued-dispatch path cannot produce these blanks.** Chain the
+established facts:
+
+* the loop's blanks carry no reminder (flat 22 input tokens vs 90 with one);
+* every setter of `pending_queued_dispatch` queues a message or a reminder;
+* `combined == ""` arises only from a reminder-*only* queue, which by
+  definition has a reminder.
+
+A blank with no reminder therefore cannot come from that path at all. Tracing
+`pending_queued_dispatch` transitions would have measured the wrong thing.
+
+**2. It is not a retry timer either.** The rate-limit/network resend at
+`remote.rs:196` re-sends `pending.content` verbatim with no emptiness check,
+which makes it a plausible pump. Stated disproof: *a timer fires on a fixed
+schedule, so timer-driven gaps cluster tightly (CV ~ 0.0-0.2), while
+turn-driven gaps track model latency and vary widely.* Measured on the blank
+turns' own timestamps:
+
+| session | n | min | median | p75 | max | CV |
+|---|---|---|---|---|---|---|
+| `blossom` | 596 | 2.4s | 3.6s | 4.5s | 286s | **3.66** |
+| `piglet` | 360 | 2.0s | 3.3s | 3.8s | 269s | **3.96** |
+
+CV near 4 is nowhere near a timer. The ~3.5s median is exactly a short model
+round trip, and the long tail is ordinary provider variance. So each blank is
+sent, answered, and the answer triggers the next one: a **send -> reply ->
+send** cycle running at model speed, not a scheduler firing into the void.
+
+That reframes the search. The pump is not something that keeps *setting a
+flag*; it is something in the turn-completion path that treats a completed
+turn as grounds for starting another, with no user input and nothing queued.
+`finish_turn` and the `Done` handler are where that decision is made, and both
+already appear in this document as the callers that were inert on `false`.
+The remaining candidate is therefore a send site that does not route through
+`pending_queued_dispatch` at all: there are 20 callers of `begin_remote_send`
+outside the queue path (7 in `remote.rs`, 10 in `key_handling.rs`, 2 in
+`input_dispatch.rs`, 1 in `tui_lifecycle.rs`).
+
+Six suspects refuted. The driver is still unnamed, but the search space is now
+a specific list rather than a whole subsystem.
