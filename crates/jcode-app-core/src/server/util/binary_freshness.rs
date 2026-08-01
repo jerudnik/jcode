@@ -98,13 +98,13 @@ fn process_start_time_uncached() -> Option<SystemTime> {
     let Ok(meta) = std::fs::metadata("/proc/self") else {
         return None;
     };
-    match meta.created() {
-        Ok(created) => Some(created),
-        Err(_) => match meta.modified() {
-            Ok(modified) => Some(modified),
-            Err(_) => None,
-        },
+    if let Ok(created) = meta.created() {
+        return Some(created);
     }
+    if let Ok(modified) = meta.modified() {
+        return Some(modified);
+    }
+    None
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
