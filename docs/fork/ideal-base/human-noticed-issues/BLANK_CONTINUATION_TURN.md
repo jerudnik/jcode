@@ -626,3 +626,59 @@ outside the queue path (7 in `remote.rs`, 10 in `key_handling.rs`, 2 in
 
 Six suspects refuted. The driver is still unnamed, but the search space is now
 a specific list rather than a whole subsystem.
+
+## Correction: the empty join is real, my trigger for it was not
+
+@badger checked the mechanism and found the conclusion right but the path
+wrong. Verified here before accepting:
+
+```
+remote.rs:215    if !app.is_processing && !app.queued_messages.is_empty() {
+remote.rs:1351   } else if !app.queued_messages.is_empty() {
+```
+
+Both joins gate on `queued_messages` being non-empty. The confidence gate I
+named (`input.rs:1288`) pushes only to `hidden_queued_system_messages` and
+never touches `queued_messages`, so neither branch can run. It also sets
+`pending_queued_dispatch`, which trips the early return at `remote.rs:211`.
+**The confidence gate cannot produce the empty join. Retracted.**
+
+The reachable path is a queue that is non-empty but *entirely bracketed*:
+`extract_bracketed_system_message` routes every `[SYSTEM: ...]` entry into
+`reminder_parts`, leaving `user_messages` empty. Non-empty in, empty out.
+Badger's test covers it:
+
+```
+partition_queued_messages_yields_no_user_text_when_queue_is_all_system ... ok
+```
+
+So the second defect stands, with a corrected trigger.
+
+### It is still not the pump
+
+Stated disproof: *the producers that queue only bracketed messages
+(`queue_startup_message`, `set_ambient_mode`) are one-shot at session start;
+if the loop were theirs, onset would sit at the beginning of the session.*
+
+| session | first blank | of | position |
+|---|---|---|---|
+| `blossom` | msg 449 | 1711 | 26% in |
+| `piglet` | msg 161 | 902 | 18% in |
+
+Onset is deep mid-session, after hundreds of healthy turns, and then repeats
+hundreds of times. A one-shot startup producer cannot do that. Seven suspects
+refuted.
+
+### What the loop's replies rule out
+
+The assistant reply that precedes each next blank is almost always pure text:
+
+| session | `text` only | with `tool_use` |
+|---|---|---|
+| `blossom` | 591 / 597 | 4 |
+| `piglet` | 357 / 361 | 1 |
+
+No tool_use means no tool-result continuation is driving the cycle, and
+`stop_reason` is `None` on every one of them. So the next send is triggered by
+an ordinary completed text turn, which is what makes this a **send -> reply ->
+send** loop at model speed rather than any resume or continuation mechanism.
