@@ -225,6 +225,62 @@ fn malformed_snapshot_matrix_quarantines_exact_bytes_and_recovers_when_possible(
 }
 
 #[test]
+fn terminal_control_log_retention_preserves_old_log_with_orphan_backup() {
+    // F27 gap F25-1: a crash shape with the primary `.json` gone but a valid
+    // `.bak` snapshot present must NOT lose its control-log tail. Startup
+    // recovery loads the backup when the primary is missing, so the log holds
+    // the events past the backup's covered offset. Pruning it on the strength
+    // of a missing `.json` alone would silently drop replayable state.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    let _retention = RetentionEnvGuard::one_second();
+    std::fs::create_dir_all(state_dir()).expect("state dir");
+
+    let swarm_id = "orphan-bak-with-tail";
+    // Valid orphan backup: no primary `.json`, only the `.bak` snapshot.
+    let backup = serde_json::json!({
+        "swarm_id": swarm_id,
+        "coordinator_session_id": "coord-from-orphan-bak",
+        "updated_at_unix_ms": 1u64
+    });
+    std::fs::write(
+        state_path(swarm_id).with_extension("bak"),
+        serde_json::to_vec(&backup).unwrap(),
+    )
+    .expect("orphan backup");
+
+    // An old control log carrying a replayable event past the snapshot.
+    let mut writer = ControlLogWriter::open(&control_log_path(swarm_id), swarm_id, LOCAL_ORIGIN)
+        .expect("open control log");
+    writer
+        .append(SwarmControlEvent::MemberLeft {
+            session_id: "tail-event".into(),
+        })
+        .expect("append tail event");
+    drop(writer);
+    // Age the log past the retention window so a count-only guard would prune it.
+    std::thread::sleep(Duration::from_millis(1200));
+
+    let loaded = load_runtime_state();
+    // The orphan backup must still load as coordinator state.
+    assert_eq!(
+        loaded.coordinators.get(swarm_id),
+        Some(&"coord-from-orphan-bak".to_string()),
+        "valid orphan backup should load"
+    );
+    // The control-log tail must survive pruning and remain replayable.
+    assert!(
+        control_log_path(swarm_id).exists(),
+        "control-log tail must be preserved when a valid orphan backup exists"
+    );
+    let (folded, _) = replay(&control_log_path(swarm_id)).expect("tail still replayable");
+    assert_eq!(
+        folded.events_applied, 1,
+        "the tail event past the backup offset must survive"
+    );
+}
+
+#[test]
 fn terminal_control_log_retention_removes_only_old_orphan_logs() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
