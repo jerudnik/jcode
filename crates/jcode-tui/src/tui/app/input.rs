@@ -3368,9 +3368,14 @@ impl App {
         // Leaving the preview should happen as soon as the user acts on it.
         self.onboarding_preview_mode = false;
 
-        // Never dispatch a blank turn: whitespace-only input survives the
-        // `is_empty()` entry guards and would burn a model call (issue: empty
-        // user messages sent to the provider).
+        // Never dispatch a blank *typed* turn: whitespace-only input survives
+        // the `is_empty()` entry guards and would burn a model call.
+        //
+        // This does not cover programmatic empty sends. Hidden continuations
+        // call `begin_remote_send` with an empty body and carry their payload
+        // in a `system_reminder`, bypassing this path entirely; that class of
+        // blank turn is fixed in the agent, not here. See
+        // docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
         if input.trim().is_empty() && self.pending_images.is_empty() {
             crate::logging::info("Ignoring blank submit");
             return;
