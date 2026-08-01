@@ -2360,16 +2360,23 @@ fn test_finish_turn_auto_poke_queues_confidence_summary_when_todos_done() {
                 ))
         );
 
-        // Dispatching the follow-up does not disarm the gate. If the model
-        // finishes another turn without improving completion confidence, the
-        // same validation follow-up is queued again.
+        // Finishing another turn without touching the todo list must NOT queue
+        // the reminder again. Nothing about answering it changes the todos, so
+        // re-firing re-evaluates identical state and re-queues the identical
+        // reminder every turn: an unbounded empty-content send loop at model
+        // round-trip speed, observed as 361 blank turns in one session.
+        // See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
         app.hidden_queued_system_messages.clear();
         app.pending_queued_dispatch = false;
         app.is_processing = true;
         super::local::finish_turn(&mut app);
+        assert!(
+            app.hidden_queued_system_messages.is_empty(),
+            "the gate must fire at most once per todo-list revision"
+        );
+        assert!(!app.pending_queued_dispatch);
+        // Auto-poke stays armed so a later genuine todo revision is still gated.
         assert!(app.auto_poke_incomplete_todos);
-        assert!(app.pending_queued_dispatch);
-        assert_eq!(app.hidden_queued_system_messages.len(), 1);
 
         // Once the model records sufficient completion confidence through the
         // todo tool, the next completion check passes and disarms auto-poke.

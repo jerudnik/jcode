@@ -861,6 +861,12 @@ pub struct App {
     pending_turn: bool,
     // When armed by /poke, automatically continue prompting until todos are complete.
     auto_poke_incomplete_todos: bool,
+    // Fingerprint of the todo list for which the completion-confidence gate has
+    // already queued its continuation reminder. The reminder asks the model to
+    // validate further and reassess; until the todo list actually changes,
+    // re-firing would dispatch the identical reminder against identical state,
+    // forever. See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
+    todo_confidence_gate_fired_for: Option<u64>,
     // When armed by /overnight, automatically continue guarded follow-up turns until wake/wrap.
     overnight_auto_poke: Option<OvernightAutoPokeState>,
     // Pending cross-provider resend after a failover warning/countdown.
