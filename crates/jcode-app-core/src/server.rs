@@ -2157,6 +2157,12 @@ impl Server {
     /// top-level runner in `src/cli/dispatch.rs`) performs the sole normal
     /// process-termination call with the returned code (F01 design 3.2.1).
     pub async fn run(&self) -> Result<ServerExit> {
+        // Freeze the running image's mtime before anything can republish over
+        // it. This is the baseline that decides "am I running stale code?"; a
+        // reload exec reinitializes it, which is what lets the update signal
+        // terminate instead of latching forever.
+        util::binary_freshness::seed_image_baseline_mtime();
+
         // Ensure socket directory exists (for named sockets like /run/user/1000/jcode/)
         if let Some(parent) = self.socket_path.parent() {
             std::fs::create_dir_all(parent)?;

@@ -1,7 +1,7 @@
 pub(crate) mod binary_freshness;
 
 use crate::build;
-use binary_freshness::{newer_binary_available, process_start_time};
+use binary_freshness::{image_baseline_mtime, newer_binary_available};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -251,7 +251,7 @@ impl ReloadTargetResolution {
         newer_binary_available(
             self.current_mtime,
             self.current_payload.as_deref(),
-            process_start_time(),
+            image_baseline_mtime(),
             self.candidates
                 .iter()
                 .filter(|candidate| candidate.exec_candidate)
@@ -649,7 +649,7 @@ fn canonicalize_or(path: PathBuf) -> PathBuf {
 /// running binary has been unlinked or replaced in place. The marker is part of
 /// the readlink target, not the real filename, so removing it recovers the path
 /// that may now point at the freshly written replacement binary.
-fn strip_deleted_suffix(path: PathBuf) -> PathBuf {
+pub(crate) fn strip_deleted_suffix(path: PathBuf) -> PathBuf {
     const DELETED_MARKER: &str = " (deleted)";
     if let Some(stripped) = path.to_str().and_then(|s| s.strip_suffix(DELETED_MARKER)) {
         return PathBuf::from(stripped);
@@ -766,7 +766,7 @@ pub(crate) fn server_has_newer_binary() -> bool {
     newer_binary_available(
         current_mtime,
         current_canonical.as_deref(),
-        process_start_time(),
+        image_baseline_mtime(),
         candidates_with_mtimes,
     )
 }
