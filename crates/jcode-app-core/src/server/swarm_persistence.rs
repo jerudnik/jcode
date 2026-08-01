@@ -382,7 +382,15 @@ fn prune_terminal_control_logs(
         let SwarmStateArtifactKind::ControlLog { swarm_id } = classify_state_artifact(&path) else {
             continue;
         };
-        if state_path(&swarm_id).exists() {
+        // A control log is the replay tail beyond its snapshot checkpoint, so it
+        // must be preserved whenever a loadable snapshot still exists. Both the
+        // primary `.json` and an orphan `.bak` count: startup recovery loads the
+        // backup when the primary is missing (see the `[bak, json]` candidate
+        // order in read_swarm_snapshot_with_quarantine), so pruning the log on
+        // the strength of a missing `.json` alone would silently drop events
+        // past the backup's covered offset (F27 gap F25-1).
+        let state_json = state_path(&swarm_id);
+        if state_json.exists() || state_json.with_extension("bak").exists() {
             continue;
         }
         if retained_control_logs.contains(&path) {
