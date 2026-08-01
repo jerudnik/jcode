@@ -43,6 +43,17 @@ impl Client {
 
     /// Send a message and return immediately (events come via read_event)
     pub async fn send_message(&mut self, content: &str) -> Result<u64> {
+        self.send_message_with_reminder(content, None).await
+    }
+
+    /// Send a message carrying an optional hidden system reminder. Hidden
+    /// continuations (the post-reload resume) use an empty `content` and put the
+    /// payload in the reminder.
+    pub async fn send_message_with_reminder(
+        &mut self,
+        content: &str,
+        system_reminder: Option<String>,
+    ) -> Result<u64> {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -50,7 +61,7 @@ impl Client {
             id,
             content: content.to_string(),
             images: vec![],
-            system_reminder: None,
+            system_reminder,
         };
         let json = serde_json::to_string(&request)? + "\n";
         self.writer.write_all(json.as_bytes()).await?;
