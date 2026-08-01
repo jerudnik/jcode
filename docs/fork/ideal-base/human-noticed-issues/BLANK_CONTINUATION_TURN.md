@@ -275,16 +275,52 @@ the assistant's reply and the next blank, sustained for **124 minutes** across
 
 ### What that leaves
 
-`pending_queued_dispatch` is a *flag*, set independently of whether anything
-was actually queued. Both `local.rs` and `remote.rs` branch on it before
-checking `queued_messages`, so a path that sets the flag and then fails to
-enqueue (or has its queue drained by another handler) yields a dispatch with an
-empty body — exactly this signature. `schedule_queued_dispatch_after_interrupt`
-sets it purely on `has_queued_followups()`, with no message of its own.
+The token accounting pins the loop down precisely. Per round, across 600 rounds:
 
-That is a hypothesis about a *flag/queue desynchronization*, not a claim, and
-it is deliberately recorded as such. Confirming it needs a live repro with
-tracing on the dispatch path, which is the next step and is owned (see below).
+```
+input_tokens        22      (constant)
+output_tokens        6      (constant — the string "Idle.")
+cache_read_input  +26 per round, monotonically
+```
+
+The 26-token growth is exactly a blank user turn plus an `"Idle."` reply being
+appended to history. So the request is well-formed and the history is intact —
+the model is simply being asked to respond to **nothing**, 600 times, and
+correctly reports that it has nothing to do.
+
+A control rules out a caching artifact. In the *same* session with the *same*
+warm cache, the 19 replies that follow a real `response_recovery` reminder cost
+**90** input tokens; the 830 that follow a blank cost **22**. A reminder is
+~4x. There was no reminder.
+
+`blossom`'s todo file is the standing condition: **6 todos, 5 pending and 1
+in_progress, none ever completed.** `schedule_auto_poke_followup_if_needed`
+therefore returns `true` on every single turn completion, forever — it is
+called from four post-turn sites (`local.rs:502`,
+`server_events.rs:1055/1169/1385`) and has no repeat bound and no comparison
+against the previous poke.
+
+That is the *driver*. But the poke it queues carries text, and no poke text
+appears in the transcript, so the queued body is being lost between enqueue and
+send. Both dispatchers `mem::take` the queue and then send `messages.join()`;
+if the queue is drained by another handler in between, `combined` is empty and
+an empty turn ships. The display marker `"Auto-poking:"` never appearing while
+the poke *is* firing is consistent with the enqueue being lost, not skipped.
+
+**This is a hypothesis with a named disproof.** If a live repro shows the
+poke text arriving at `partition_queued_messages` intact, the desync theory is
+dead and the fault is downstream in `begin_remote_send`. That test has not been
+run yet, and no fix should be written before it is.
+
+What *is* established by evidence, and does not depend on the above:
+
+* The loop is driven by an unbounded auto-poke gate on a never-completed todo
+  list. Bounding repeats would stop it regardless of where the body is lost.
+* The turns are empty on the wire, not merely blank in the transcript
+  (22 vs 90 input tokens).
+* PR #81 does not address this: it corrects the persisted content, and these
+  turns take the promote branch.
+
 ## Not inspected
 
 * Whether non-Anthropic providers (OpenAI Responses, Gemini, Copilot) tolerate a

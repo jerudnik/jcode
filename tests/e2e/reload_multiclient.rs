@@ -38,6 +38,21 @@ async fn start_inprocess_server(
     Ok((socket_path, debug_socket_path, server_handle))
 }
 
+/// Read events until the `Done` for `msg_id` arrives, so a test can sequence
+/// turns without racing the stream.
+async fn wait_for_done(client: &mut server::Client, msg_id: u64) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), client.read_event()).await {
+            Ok(Ok(ServerEvent::Done { id })) if id == msg_id => return Ok(()),
+            Ok(Ok(_)) => continue,
+            Ok(Err(e)) => anyhow::bail!("client disconnected waiting for Done: {e}"),
+            Err(_) => continue,
+        }
+    }
+    anyhow::bail!("timed out waiting for Done on message {msg_id}")
+}
+
 /// Read events from `client` until a `Reloading` event is seen or the deadline
 /// elapses. Returns whether a `Reloading` event was observed plus the events
 /// seen. A clean disconnect terminates the scan (returning `false`).
@@ -327,6 +342,82 @@ async fn reload_marker_is_active_when_clients_are_notified() -> Result<()> {
         assert!(
             marker_active,
             "the reload marker must be active around the time clients are told to reconnect"
+        );
+
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+
+    server::clear_reload_marker();
+    abort_server_and_cleanup(&server_handle, &socket_path, &debug_socket_path);
+    result
+}
+
+/// A hidden continuation sends an empty body with the payload in the system
+/// reminder. Two things must hold at the provider boundary, and only an
+/// end-to-end run through the real server can show them: no user message may
+/// arrive with empty text, and the transcript must not end on an assistant
+/// message (Anthropic reads that as prefill and continues it instead of
+/// starting a new turn).
+///
+/// This covers the branch the live reload could not reach, because that reload
+/// happened to resume mid-turn with a trailing tool_result.
+#[tokio::test]
+async fn hidden_continuation_after_assistant_reply_sends_no_blank_user_turn() -> Result<()> {
+    let _env = setup_test_env()?;
+
+    let provider = MockProvider::new();
+    for reply in ["first answer", "second answer"] {
+        provider.queue_response(vec![
+            StreamEvent::TextDelta(reply.to_string()),
+            StreamEvent::MessageEnd {
+                stop_reason: Some("end_turn".to_string()),
+            },
+        ]);
+    }
+    let captures = provider.captures.clone();
+    let provider: Arc<dyn Provider> = Arc::new(provider);
+    let (socket_path, debug_socket_path, server_handle) =
+        start_inprocess_server("hidden-continuation", provider).await?;
+
+    let result = async {
+        let (mut client, _session_id) = subscribe_new_session(&socket_path).await?;
+
+        // Turn 1: a normal user message, so the transcript ends on an assistant
+        // reply, which is the state a resume-while-idle continuation sees.
+        let first = client.send_message("hello").await?;
+        wait_for_done(&mut client, first).await?;
+
+        // Turn 2: the hidden continuation shape -- empty body, payload in the
+        // reminder -- exactly what the reload path sends.
+        let second = client
+            .send_message_with_reminder("", Some("Reload complete - continue.".to_string()))
+            .await?;
+        wait_for_done(&mut client, second).await?;
+
+        let calls = captures.messages.lock().unwrap().clone();
+        panic!("[probe] {} call(s): {calls:?}", calls.len());
+        assert!(
+            calls.len() >= 2,
+            "the continuation must reach the provider as its own call, got {} call(s)",
+            calls.len()
+        );
+        let last = calls.last().expect("a provider call");
+
+        let blank_user_turns = last
+            .iter()
+            .filter(|(role, text)| role == "user" && text.is_empty())
+            .count();
+        assert_eq!(
+            blank_user_turns, 0,
+            "no blank user turn may reach the provider, got payload {last:?}"
+        );
+
+        let (last_role, _) = last.last().expect("at least one message");
+        assert_eq!(
+            last_role, "user",
+            "the transcript must not end on an assistant message, or Anthropic \
+             treats the continuation as prefill; got payload {last:?}"
         );
 
         Ok::<_, anyhow::Error>(())
