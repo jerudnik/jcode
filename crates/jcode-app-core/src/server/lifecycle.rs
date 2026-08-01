@@ -140,10 +140,6 @@ pub(crate) fn write_temporary_metadata(
     }
 }
 
-pub(crate) fn cleanup_temporary_metadata(socket_path: &Path) {
-    let _ = std::fs::remove_file(metadata_path(socket_path));
-}
-
 /// Lifecycle monitor for the persistent (non-temporary) shared server. Runs
 /// ALWAYS - debug control (JCODE_DEBUG_CONTROL / self-dev) must NEVER disable
 /// it, which is exactly what let an orphaned self-dev daemon spin forever.

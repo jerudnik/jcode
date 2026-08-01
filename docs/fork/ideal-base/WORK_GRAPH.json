@@ -1026,6 +1026,7 @@
           "crates/jcode-app-core/src/server/shutdown.rs",
           "crates/jcode-app-core/src/server/swarm_persistence.rs",
           "crates/jcode-app-core/src/server/swarm_persistence_tests.rs",
+          "crates/jcode-app-core/src/server/swarm_persistence_hygiene_tests.rs",
           "crates/jcode-app-core/src/server/control_log_sync.rs",
           "crates/jcode-swarm-core/src/control_log.rs",
           "docs/fork/ideal-base/evidence/F25/**"
@@ -2547,6 +2548,7 @@
         "crates/jcode-app-core/src/server/shutdown.rs",
         "crates/jcode-app-core/src/server/swarm_persistence.rs",
         "crates/jcode-app-core/src/server/swarm_persistence_tests.rs",
+        "crates/jcode-app-core/src/server/swarm_persistence_hygiene_tests.rs",
         "crates/jcode-app-core/src/server/control_log_sync.rs",
         "crates/jcode-swarm-core/src/control_log.rs",
         "docs/fork/ideal-base/evidence/F25/**"
