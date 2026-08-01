@@ -528,3 +528,55 @@ flag's transitions, not more reading.
 **Status: the driver is still unnamed.** Four suspects have now been refuted
 by evidence (reminder, poke, queue desync, and the todo-completion branch).
 The next step is instrumenting the flag itself in a live repro.
+
+## Every setter queues something; the empty body is made downstream
+
+All five setters of `pending_queued_dispatch` were checked. None sets the flag
+with nothing behind it:
+
+| setter | what it queues first |
+|---|---|
+| `commands_overnight.rs:411` | `queued_messages.push(prompt)` |
+| `commands.rs:2493` | `queued_messages.push(prompt)` |
+| `input.rs:1288` (confidence gate) | `hidden_queued_system_messages.push(...)` |
+| `input.rs:1307` (incomplete poke) | `queued_messages.push(build_poke_message(...))` |
+| `input.rs:1313` | guarded by `has_queued_followups()` |
+
+So my previous framing -- "something sets the flag without leaving a message"
+-- was wrong. The queue is never empty at dispatch.
+
+The empty *body* is manufactured one layer down, in `partition_queued_messages`
+(`helpers.rs:172`). It splits the queue into user messages and reminders, and
+a reminder-only queue yields `user_messages == []`. The caller then does:
+
+```rust
+let combined = messages.join("\n\n");                       // "" when messages is empty
+let auto_retry = reminder.is_some() && messages.is_empty(); // true in exactly that case
+```
+
+`combined` is the user turn. A dispatch carrying only a hidden reminder sends
+`""` as the user message by construction. That is a real defect and it is the
+shape of the confidence-gate setter, the one setter that queues into
+`hidden_queued_system_messages` alone.
+
+### Why this still is not the pump
+
+Stated as the disproof: *if the loop's blanks carried a reminder, this path
+explains them; if they carry none, it does not.* The token accounting already
+answered. Loop replies cost a flat 22 input tokens, against 90 for a turn that
+carried a real reminder in the same session on a warm cache. There is no
+reminder in the loop's blanks. The confidence gate also fires only when
+`needs_more_work` is true, and at onset it is false in every observed session.
+
+Nor can the resend machinery recycle a bare blank:
+`recover_undelivered_queued_continuation` requires
+`!pending.content.trim().is_empty() || pending.system_reminder.is_some()`, so
+a blank with no reminder is not recoverable by that path.
+
+**Net:** a genuine empty-user-turn generator found and documented, distinct
+from all four refuted suspects, but the evidence says it is not what pumped
+these five sessions. Worth fixing on its own account (a reminder-only dispatch
+should not send `""` as the user body); not the answer to the loop.
+
+Five suspects down. The driver remains unnamed, and the live flag trace is
+still the next step.
