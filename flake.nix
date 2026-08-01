@@ -387,24 +387,28 @@
                   sbom = jcode-sbom;
                   src = checkSrc;
                   nativeBuildInputs = [ pkgs.python3 ];
+                  # The workspace version, so fixture facts track Cargo.toml
+                  # instead of hard-coding a version that breaks on every bump.
+                  jcodeVersion = version;
                 }
                 ''
                   cd "$src"
                   tmp=$(mktemp -d)
                   cp "$sbom/share/jcode/sbom.cdx.json" "$tmp/sbom.json"
-                  python3 - <<'PY' "$tmp"
+                  python3 - <<'PY' "$tmp" "$jcodeVersion"
                   import hashlib
                   import json
                   import sys
                   from pathlib import Path
 
                   tmp = Path(sys.argv[1])
+                  cargo_version = sys.argv[2]
                   sbom_bytes = (tmp / "sbom.json").read_bytes()
                   expected = {
                       "source_full_revision": "full",
                       "source_display_revision": "short",
                       "flake_lock_sha256": "lock",
-                      "cargo_version": "0.46.0",
+                      "cargo_version": cargo_version,
                       "nix_system": "x86_64-linux",
                       "drv_path": "/nix/store/example.drv",
                       "output_path": "/nix/store/out-jcode",
@@ -415,7 +419,7 @@
                   provenance = {
                       "schema": "https://jerudnik.github.io/jcode/schemas/nix-provenance/v1",
                       "source": {"full_revision": "full", "display_revision": "short", "flake_lock_sha256": "lock"},
-                      "version": {"cargo": "0.46.0"},
+                      "version": {"cargo": cargo_version},
                       "nix": {"system": "x86_64-linux"},
                       "derivation": {"drv_path": "/nix/store/example.drv"},
                       "output": {"store_path": "/nix/store/out-jcode", "nar_hash": "sha256-abc", "nar_size": 123},
