@@ -1171,21 +1171,53 @@ continuation message into the session transcript regardless of whether the
 write landed:
 
 ```
-OWNERSHIP rejection : 262 occurrences across 141 sessions
+OWNERSHIP rejection : 240 occurrences across 139 sessions
 CONFIDENCE gate     :  20 occurrences across   5 sessions
 
 sessions with a todo file      : 342
-sessions that hit the rejection: 141
-  with a todo file             : 138   (40% of todo-using sessions)
+sessions that hit the rejection: 139
+  with a todo file             : 136   (40% of todo-using sessions)
   with no todo file at all     :   3   (write dropped, nothing persisted)
 ```
 
-One more instance of this document's recurring error appeared while measuring
-it. The first scan parsed message `content` and returned **0 occurrences,
-including 0 for the confidence gate already proven to have fired 361 times**.
-That refuted the probe, not the phenomenon: these strings travel as
-`system_reminder`, not as content. It is the same field whose omission from
-`request_payload_summary` produced the original false negative.
+A raw grep first reported 262. Two corrections, in opposite directions,
+were needed before that number could be trusted.
+
+**Self-contamination.** Two agents spent an evening quoting this exact
+string to each other while investigating it. Those DMs are stored as
+`role=user` messages and the grep counted 22 of them as rejections.
+Excluding the two investigating sessions gives 240. A measurement whose
+subject is a string will count the investigation of that string.
+
+**Accumulation, tested rather than assumed.** 31 sessions contain
+byte-identical rejection messages, 62 duplicates in total, which would
+inflate the count if the tool replayed prior output. It does not:
+
+```
+duplicate pairs with DISTINCT timestamps (real repeats) : 62
+duplicate pairs with IDENTICAL timestamps (replay)      :  0
+```
+
+for example `17:54:18.829371Z` and `17:54:28.964348Z`, ten seconds
+apart. Those are genuine repeat rejections of an unchanged list. Note
+that checking a single session and finding occurrences equal to messages
+does *not* establish this; that equality holds only in sessions that
+happen to have no repeats. The timestamps are what discriminate.
+
+Two more instances of this document's recurring error appeared while
+measuring it, both caught the same way. The first scan parsed message
+`content` and returned **0 occurrences, including 0 for the confidence gate
+already proven to have fired 361 times**. The second, an attempt to filter
+genuine rejections structurally, assumed the text arrives wrapped in a
+`<system-reminder>` element and returned **0 genuine rejections out of 342
+sessions**. Both refuted the probe, not the phenomenon. The reminder is
+appended as a plain suffix to the todo tool's output, and it is carried in
+the reminder channel rather than as content: the same field whose omission
+from `request_payload_summary` produced the original false negative.
+
+Neither was caught by reasoning. Both were caught because the probe returned
+a value that was impossible on its face, against a control whose true value
+was already known. That is the only mechanism that worked all day.
 
 **The recurring lesson, stated once more because it caused every wrong call
 here:** the failures were never plain guesses. Each came from a number or a
