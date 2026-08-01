@@ -466,3 +466,27 @@ fn backdated_now_never_panics_and_prefers_past_instants() {
     let zero = super::backdated_now(Duration::ZERO);
     assert!(zero <= Instant::now());
 }
+
+/// A queue holding only bracketed system messages leaves no user text behind.
+/// Both dispatch sites in `remote.rs` gate on `!queued_messages.is_empty()` and
+/// then send `messages.join("\n\n")` as the user body, so this case sends "".
+/// The `auto_retry` flag they compute (`reminder.is_some() && messages.is_empty()`)
+/// records that this is a real state, not a hypothetical one.
+#[test]
+fn partition_queued_messages_yields_no_user_text_when_queue_is_all_system() {
+    let (user_messages, reminder, _display) = partition_queued_messages(
+        vec![
+            "[SYSTEM: Continue where you left off.]".to_string(),
+            "[SYSTEM: Todo confidence needs validation.]".to_string(),
+        ],
+        Vec::new(),
+    );
+
+    assert!(user_messages.is_empty());
+    assert!(reminder.is_some());
+    assert_eq!(
+        user_messages.join("\n\n"),
+        "",
+        "the dispatch sites send this join result as the user body"
+    );
+}
