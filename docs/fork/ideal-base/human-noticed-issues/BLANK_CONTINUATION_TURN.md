@@ -1283,6 +1283,20 @@ a method cannot find the error, because the error is nearly always in what
 the method silently assumed the data looks like, which is exactly what a
 reader of the method also assumes.
 
+A re-derivation does not have to be aimed at a number to break it. The fork
+defect above was found while confirming an unrelated claim, that ignoring
+1840 `.bak` files did not undercount the total. That check reproduced, and
+the route written to perform it happened to build one global set of ids
+instead of summing per-session sets, which is what exposed the double
+count. Verifying a neighbouring claim by an independent route is a cheaper
+source of these catches than auditing the number directly, because the
+auditor of a number tends to reuse the reasoning that produced it.
+
+The count is not asserted to be final. It survives three routes sharing no
+traversal, and the share of affected sessions has held at 39-40% across
+every pass, which is the figure any decision here rests on. The absolute
+count has moved five times and could move again.
+
 The most instructive failure came from a probe written to *check* one of
 these numbers. Asked to confirm three named sessions, a one-off script
 matched session ids by substring and read `hit[0]`, which selected a
