@@ -757,6 +757,16 @@ fn read_swarm_snapshot_with_quarantine(path: &Path) -> anyhow::Result<PersistedS
             Err(primary_error) => {
                 quarantine_bytes(path, "snapshot", &bytes);
                 let bak_path = path.with_extension("bak");
+                // When the caller hands us a `.bak` directly (orphaned backup
+                // whose primary `.json` is gone), `with_extension` yields the
+                // SAME path: "recovering" would re-read the corrupt bytes,
+                // quarantine the same file twice, and copy it onto itself.
+                if bak_path == path {
+                    return Err(anyhow::anyhow!(
+                        "corrupt orphaned swarm backup {} ({primary_error})",
+                        path.display(),
+                    ));
+                }
                 let bak_bytes = std::fs::read(&bak_path)?;
                 match serde_json::from_slice::<PersistedSwarmState>(&bak_bytes) {
                     Ok(state) => {

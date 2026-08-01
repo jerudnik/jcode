@@ -458,11 +458,17 @@ pub fn read_from(path: &Path, offset: u64) -> std::io::Result<ControlLogRead> {
             break;
         }
         consumed += bytes as u64;
-        let line = if buffer.ends_with(b"\n") {
+        let mut line = if buffer.ends_with(b"\n") {
             &buffer[..buffer.len() - 1]
         } else {
             &buffer[..]
         };
+        // Tolerate CRLF line endings: a `\r` before the newline is transport
+        // framing, not payload, and must not condemn an otherwise-valid line
+        // to quarantine.
+        if line.ends_with(b"\r") {
+            line = &line[..line.len() - 1];
+        }
         match serde_json::from_slice::<SwarmControlEnvelope>(line) {
             Ok(envelope) => envelopes.push((consumed, envelope)),
             Err(_) => corrupt_lines.push(CorruptControlLogLine {
@@ -662,6 +668,27 @@ mod tests {
             &resumed.envelopes[0].1.event,
             SwarmControlEvent::MemberLeft { session_id } if session_id == "b"
         ));
+    }
+
+    #[test]
+    fn crlf_terminated_line_is_valid_not_corrupt() {
+        // A `\r` before the newline is transport framing, not payload; it must
+        // not send an otherwise-valid event to quarantine.
+        let (_dir, path) = temp_log();
+        let mut writer = ControlLogWriter::open(&path, "s", LOCAL_ORIGIN).expect("open");
+        writer
+            .append(SwarmControlEvent::MemberLeft {
+                session_id: "a".into(),
+            })
+            .expect("append");
+        let bytes = std::fs::read(&path).expect("read raw");
+        let line = &bytes[..bytes.len() - 1]; // strip \n
+        let mut crlf = line.to_vec();
+        crlf.extend_from_slice(b"\r\n");
+        std::fs::write(&path, &crlf).expect("rewrite as CRLF");
+        let read = read_from(&path, 0).expect("read");
+        assert!(read.corrupt_lines.is_empty(), "CRLF line flagged corrupt");
+        assert_eq!(read.envelopes.len(), 1);
     }
 
     #[test]

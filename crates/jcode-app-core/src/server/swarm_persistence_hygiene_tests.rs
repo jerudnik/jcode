@@ -308,6 +308,37 @@ fn malformed_snapshot_quarantines_exact_bytes_and_recovers_from_valid_backup() {
 }
 
 #[test]
+fn corrupt_orphaned_backup_is_quarantined_once_without_self_recovery() {
+    // An orphaned `.bak` (its primary `.json` is gone) is read directly by
+    // load_runtime_state. with_extension("bak") on a `.bak` path yields the
+    // SAME path, so the recovery branch would re-read the corrupt bytes,
+    // quarantine the same file twice, and copy it onto itself. It must fail
+    // cleanly with exactly one quarantine entry instead.
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let _env = test_env(&dir);
+    let swarm_id = "swarm-orphan-bak";
+    let primary = state_path(swarm_id);
+    let backup = primary.with_extension("bak");
+    std::fs::create_dir_all(state_dir()).expect("state dir");
+    std::fs::write(&backup, b"orphan bad").expect("bad orphan backup");
+
+    let loaded = load_runtime_state();
+    assert!(!loaded.coordinators.contains_key(swarm_id));
+    let quarantined = quarantine_files(&state_dir().join("quarantine"));
+    assert_eq!(
+        quarantined
+            .iter()
+            .filter(|bytes| bytes.as_slice() == b"orphan bad")
+            .count(),
+        1,
+        "orphaned backup must be quarantined exactly once"
+    );
+    // The corrupt orphan must not have been "restored" onto itself as a
+    // fresh primary.
+    assert!(!primary.exists(), "no primary must be fabricated");
+}
+
+#[test]
 fn malformed_snapshot_and_backup_quarantine_both_without_losing_adjacent_control_log() {
     let dir = tempfile::TempDir::new().expect("tempdir");
     let _env = test_env(&dir);
