@@ -1182,6 +1182,11 @@ rejections, keyed on distinct tool_use_id (pinned snapshot, 2408 files):
   hit with no todo file   :   3   (write dropped, nothing persisted)
 ```
 
+Report 136/342 as the rate and 139 as the count, never divided into each
+other. The three sessions with no todo file are hit by the bug but absent
+from the denominator, precisely *because* their write was rejected, so
+`139/342` would divide a numerator by a population it is not drawn from.
+
 Reaching that number took four passes, and the first three were wrong in
 ways worth recording, because each is a way a text-derived metric can look
 authoritative while measuring something else.
@@ -1219,7 +1224,8 @@ evening triggering, quoting, and testing this rejection, and they account
 for 22 of the 256. They are excluded from the headline figure and disclosed
 here. A corpus that is being actively written by the measurement is not a
 clean observation of normal usage; a snapshot bounds the drift but cannot
-remove it.
+remove it, and neither agent could stop writing to the corpus while
+measuring it.
 
 A separate check, now superseded but recorded because the reasoning was
 sound: 31 sessions hold byte-identical rejection messages, 62 duplicates in
