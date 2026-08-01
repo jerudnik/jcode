@@ -682,3 +682,43 @@ No tool_use means no tool-result continuation is driving the cycle, and
 `stop_reason` is `None` on every one of them. So the next send is triggered by
 an ordinary completed text turn, which is what makes this a **send -> reply ->
 send** loop at model speed rather than any resume or continuation mechanism.
+
+## A near-miss worth recording: process identity
+
+The `Done` handler's return value was worth re-checking, since the loop being
+turn-driven seemed to contradict my reading that the handler is inert. It does
+not: `run_shell.rs:583` consumes the boolean in a `match` over
+`RemoteEventOutcome` whose only arms are `Continue`/`Reconnect`/`Quit`, and the
+value otherwise feeds `needs_redraw`. It cannot start a turn. The reading
+stands, so the sender is elsewhere.
+
+That prompted asking the sessions who sent the turns rather than asking the
+code. `piglet` was *created* by pid 2203 and its `last_pid` is 52888. A
+different process finished the session than started it, which fits a
+send -> reply -> send loop driven by something that reattached.
+
+The fleet seemed to confirm it emphatically:
+
+| population | n | create-pid != last-pid |
+|---|---|---|
+| runaway (>=50 blanks) | 4 | **100%** |
+| all controls | 2127 | 10% |
+
+**Then the confound check killed it.** Long sessions get reattached far more
+often, and every runaway session is long (>= 850 messages). Comparing against
+*length-matched* controls instead:
+
+| population | n | create-pid != last-pid |
+|---|---|---|
+| runaway | 4 | 100% |
+| controls with >= 850 messages | 28 | **82%** |
+
+100% against 82% at n=4 is nothing at all. The apparent 10x signal was
+entirely session length. Recorded because the unmatched comparison looked
+decisive and would have sent the investigation into reattach handling on the
+strength of an artifact.
+
+Method note: the base-rate check that promoted the todo-onset signal (3.8% vs
+4-of-5) and the confound check that demoted this one are the same test. Any
+population comparison here needs a control matched on session length, since
+length drives blanks, reattaches, tool counts, and nearly everything else.
