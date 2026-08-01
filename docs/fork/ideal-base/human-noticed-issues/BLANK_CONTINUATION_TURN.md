@@ -1171,38 +1171,66 @@ continuation message into the session transcript regardless of whether the
 write landed:
 
 ```
-OWNERSHIP rejection : 240 occurrences across 139 sessions
-CONFIDENCE gate     :  20 occurrences across   5 sessions
+rejections, keyed on distinct tool_use_id (pinned snapshot, 2408 files):
 
-sessions with a todo file      : 342
-sessions that hit the rejection: 139
-  with a todo file             : 136   (40% of todo-using sessions)
-  with no todo file at all     :   3   (write dropped, nothing persisted)
+  from normal usage       : 234  across 139 sessions
+  from this investigation :  22  across   2 sessions
+  total genuine           : 256  across 141 sessions
+
+  todo-using sessions     : 342
+  hit, excluding ours     : 136   = 40%
+  hit with no todo file   :   3   (write dropped, nothing persisted)
 ```
 
-A raw grep first reported 262. Two corrections, in opposite directions,
-were needed before that number could be trusted.
+Reaching that number took four passes, and the first three were wrong in
+ways worth recording, because each is a way a text-derived metric can look
+authoritative while measuring something else.
 
-**Self-contamination.** Two agents spent an evening quoting this exact
-string to each other while investigating it. Those DMs are stored as
-`role=user` messages and the grep counted 22 of them as rejections.
-Excluding the two investigating sessions gives 240. A measurement whose
-subject is a string will count the investigation of that string.
+**Choose a unit the storage format guarantees.** Raw `grep` over session
+files gave 262. Counting messages that contain the string gave 257, because
+four tool results contain it more than once. The stable unit is the tool
+call: one `tool_use_id` whose result carries the rejection is exactly one
+rejected write. Occurrence counts and message counts are both proxies; the
+id is the event.
 
-**Accumulation, tested rather than assumed.** 31 sessions contain
-byte-identical rejection messages, 62 duplicates in total, which would
-inflate the count if the tool replayed prior output. It does not:
+**Classify every occurrence before excluding any.** A full recursive walk
+finds the string in three places, not one:
 
 ```
-duplicate pairs with DISTINCT timestamps (real repeats) : 62
-duplicate pairs with IDENTICAL timestamps (replay)      :  0
+user      tool_result       264
+assistant tool_use           18
+assistant reasoning_trace     2
 ```
 
-for example `17:54:18.829371Z` and `17:54:28.964348Z`, ten seconds
-apart. Those are genuine repeat rejections of an unchanged list. Note
-that checking a single session and finding occurrences equal to messages
-does *not* establish this; that equality holds only in sessions that
-happen to have no repeats. The timestamps are what discriminate.
+Only `tool_result` is a rejection. The `tool_use` blocks are the string
+being *written into* a todo call by agents investigating the bug, and an
+earlier traversal missed them entirely because it walked string values and
+`tool_use.input` is a dict. That produced a correct-looking exclusion of 22
+attributed to the wrong mechanism.
+
+**Immunity by construction still has to be checked.** Keying on
+`tool_use_id` cannot double-count, but it does not prevent the tool from
+echoing its own input back into its output. One result inherited the string
+from a todo item that contained it, so 257 ids yield 256 genuine
+rejections.
+
+**The investigation contaminated its own corpus.** Two sessions spent an
+evening triggering, quoting, and testing this rejection, and they account
+for 22 of the 256. They are excluded from the headline figure and disclosed
+here. A corpus that is being actively written by the measurement is not a
+clean observation of normal usage; a snapshot bounds the drift but cannot
+remove it.
+
+A separate check, now superseded but recorded because the reasoning was
+sound: 31 sessions hold byte-identical rejection messages, 62 duplicates in
+total, which would inflate any occurrence-based count if the tool replayed
+prior output. Timestamps discriminate. All 62 pairs are distinct, none
+identical, typically about ten seconds apart, so they are genuine repeat
+rejections of an unchanged list. Note that checking a single session for
+occurrences equal to messages does *not* establish this, since that equality
+holds only where there are no repeats. Keying on `tool_use_id` makes the
+argument unnecessary, which is the better outcome: prefer a unit that cannot
+double-count over evidence that it did not.
 
 Two more instances of this document's recurring error appeared while
 measuring it, both caught the same way. The first scan parsed message
