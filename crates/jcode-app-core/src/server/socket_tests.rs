@@ -1,6 +1,8 @@
 #![cfg_attr(test, allow(clippy::await_holding_lock))]
 
-use super::socket::sibling_socket_path;
+use super::socket::{
+    cleanup_endpoint_artifacts_with_debug, endpoint_artifacts, sibling_socket_path,
+};
 #[cfg(unix)]
 use super::socket::{
     daemon_lock_path, detach_into_new_session, server_start_matches_existing_server,
@@ -47,6 +49,94 @@ fn cleanup_socket_pair_removes_main_and_debug_files() {
 
     assert!(!main.exists(), "main socket file should be removed");
     assert!(!debug.exists(), "debug socket file should be removed");
+}
+
+#[test]
+fn endpoint_cleanup_uses_the_explicit_debug_path() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let main = dir.path().join("custom-main.sock");
+    let derived_debug = sibling_socket_path(&main).expect("derived debug path");
+    let explicit_debug = dir.path().join("separately-configured-debug.sock");
+    let hash = std::path::PathBuf::from(format!("{}.hash", main.display()));
+    for path in [&main, &derived_debug, &explicit_debug, &hash] {
+        std::fs::write(path, b"endpoint artifact").expect("write endpoint artifact");
+    }
+
+    cleanup_endpoint_artifacts_with_debug(&main, &explicit_debug, false);
+
+    assert!(!main.exists(), "main socket should be removed");
+    assert!(
+        !explicit_debug.exists(),
+        "the configured debug socket should be removed"
+    );
+    assert!(!hash.exists(), "hash sidecar should be removed");
+    assert!(
+        derived_debug.exists(),
+        "an unrelated derived sibling should remain untouched"
+    );
+}
+
+#[cfg(unix)]
+fn write_endpoint_sidecars(socket: &std::path::Path) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let artifacts = endpoint_artifacts(socket);
+    if !artifacts.main_socket.exists() {
+        std::fs::write(&artifacts.main_socket, b"main-sidecar-matrix").expect("write main");
+    }
+    if !artifacts.debug_socket.exists() {
+        std::fs::write(&artifacts.debug_socket, b"debug-sidecar-matrix").expect("write debug");
+    }
+    let entries = vec![
+        (artifacts.hash, b"hash-sidecar-matrix".to_vec()),
+        (
+            artifacts.temporary_metadata,
+            b"metadata-sidecar-matrix".to_vec(),
+        ),
+        (artifacts.daemon_lock, b"lock-sidecar-matrix".to_vec()),
+    ];
+    for (path, bytes) in &entries {
+        std::fs::write(path, bytes).expect("write endpoint sidecar");
+    }
+    entries
+}
+
+#[cfg(unix)]
+fn write_endpoint_metadata_sidecars(
+    socket: &std::path::Path,
+) -> Vec<(std::path::PathBuf, Vec<u8>)> {
+    let artifacts = endpoint_artifacts(socket);
+    let entries = vec![
+        (artifacts.hash, b"hash-sidecar-matrix".to_vec()),
+        (
+            artifacts.temporary_metadata,
+            b"metadata-sidecar-matrix".to_vec(),
+        ),
+        (artifacts.daemon_lock, b"lock-sidecar-matrix".to_vec()),
+    ];
+    for (path, bytes) in &entries {
+        std::fs::write(path, bytes).expect("write endpoint metadata sidecar");
+    }
+    entries
+}
+
+#[cfg(unix)]
+fn assert_endpoint_bytes(entries: &[(std::path::PathBuf, Vec<u8>)]) {
+    for (path, expected) in entries {
+        assert_eq!(
+            std::fs::read(path).unwrap_or_default(),
+            *expected,
+            "{} bytes must be preserved exactly",
+            path.display()
+        );
+    }
+}
+
+#[cfg(unix)]
+fn restore_runtime(prev_runtime: Option<std::ffi::OsString>) {
+    if let Some(prev_runtime) = prev_runtime {
+        crate::env::set_var("JCODE_RUNTIME_DIR", prev_runtime);
+    } else {
+        crate::env::remove_var("JCODE_RUNTIME_DIR");
+    }
 }
 
 #[cfg(unix)]
@@ -148,6 +238,100 @@ async fn reap_stale_socket_removes_dead_socket_pair_and_lock() {
     } else {
         crate::env::remove_var("JCODE_RUNTIME_DIR");
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stale_reap_sidecar_matrix_removes_only_after_listener_lock_listener_proof() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
+    let prev_home = std::env::var_os("JCODE_HOME");
+    crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
+    crate::env::set_var("JCODE_HOME", temp.path().join("home"));
+
+    let socket = temp.path().join("jcode.sock");
+    let stale_entries = write_endpoint_sidecars(&socket);
+    let mut registry = crate::registry::ServerRegistry::default();
+    registry.register(crate::registry::ServerInfo {
+        id: "server-stale-f25".to_string(),
+        name: "stale-f25".to_string(),
+        icon: "x".to_string(),
+        socket: socket.clone(),
+        debug_socket: endpoint_artifacts(&socket).debug_socket,
+        git_hash: "dead".to_string(),
+        version: "test".to_string(),
+        pid: u32::MAX,
+        started_at: "1970-01-01T00:00:00Z".to_string(),
+        sessions: Vec::new(),
+    });
+    registry.save().await.expect("seed stale registry entry");
+    assert!(
+        reap_stale_socket_if_dead(&socket).await,
+        "dead listener + free lock should reap"
+    );
+    for (path, _) in &stale_entries {
+        assert!(
+            !path.exists(),
+            "stale endpoint artifact should be removed: {}",
+            path.display()
+        );
+    }
+    let registry = crate::registry::ServerRegistry::load()
+        .await
+        .expect("reload registry after stale reap");
+    assert!(
+        registry.find_by_name("stale-f25").is_none(),
+        "stale ownership proof must also remove the dead registry entry"
+    );
+
+    let live_entries = write_endpoint_metadata_sidecars(&socket);
+    let listener = Listener::bind(&socket).expect("bind live listener");
+    assert!(
+        !reap_stale_socket_if_dead(&socket).await,
+        "live listener must block reap"
+    );
+    drop(listener);
+    assert_endpoint_bytes(&live_entries);
+    assert!(socket.exists(), "live socket path must be preserved");
+
+    let held_entries = write_endpoint_sidecars(&socket);
+    let held = try_acquire_daemon_lock(&daemon_lock_path())
+        .expect("acquire daemon lock")
+        .expect("daemon lock free");
+    assert!(
+        !reap_stale_socket_if_dead(&socket).await,
+        "held lock must block reap"
+    );
+    assert_endpoint_bytes(&held_entries);
+    assert!(socket.exists(), "held-lock socket path must be preserved");
+    drop(held);
+
+    cleanup_socket_pair(&socket);
+    let reload_artifacts = endpoint_artifacts(&socket);
+    assert!(
+        !reload_artifacts.main_socket.exists(),
+        "reload removes main endpoint"
+    );
+    assert!(
+        !reload_artifacts.debug_socket.exists(),
+        "reload removes debug endpoint"
+    );
+    assert!(
+        reload_artifacts.hash.exists(),
+        "reload must preserve hash metadata"
+    );
+    assert!(
+        reload_artifacts.temporary_metadata.exists(),
+        "reload must preserve server metadata"
+    );
+
+    if let Some(prev_home) = prev_home {
+        crate::env::set_var("JCODE_HOME", prev_home);
+    } else {
+        crate::env::remove_var("JCODE_HOME");
+    }
+    restore_runtime(prev_runtime);
 }
 
 #[cfg(unix)]

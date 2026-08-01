@@ -4,6 +4,15 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct EndpointArtifacts {
+    pub(crate) main_socket: PathBuf,
+    pub(crate) debug_socket: PathBuf,
+    pub(crate) hash: PathBuf,
+    pub(crate) temporary_metadata: PathBuf,
+    pub(crate) daemon_lock: PathBuf,
+}
+
 pub fn socket_path() -> PathBuf {
     if let Ok(custom) = std::env::var("JCODE_SOCKET") {
         return PathBuf::from(custom);
@@ -37,12 +46,67 @@ pub(super) fn sibling_socket_path(path: &std::path::Path) -> Option<PathBuf> {
     None
 }
 
+pub(crate) fn endpoint_artifacts(path: &std::path::Path) -> EndpointArtifacts {
+    let main_socket = if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("-debug.sock"))
+    {
+        sibling_socket_path(path).unwrap_or_else(|| path.to_path_buf())
+    } else {
+        path.to_path_buf()
+    };
+    let debug_socket = sibling_socket_path(&main_socket).unwrap_or_else(|| main_socket.clone());
+    EndpointArtifacts {
+        hash: PathBuf::from(format!("{}.hash", main_socket.display())),
+        temporary_metadata: super::lifecycle::metadata_path(&main_socket),
+        daemon_lock: daemon_lock_path(),
+        main_socket,
+        debug_socket,
+    }
+}
+
 /// Remove a socket file and its sibling (main/debug) if present.
 pub fn cleanup_socket_pair(path: &std::path::Path) {
-    let _ = std::fs::remove_file(path);
-    if let Some(sibling) = sibling_socket_path(path) {
-        let _ = std::fs::remove_file(sibling);
+    let artifacts = endpoint_artifacts(path);
+    let _ = std::fs::remove_file(artifacts.main_socket);
+    let _ = std::fs::remove_file(artifacts.debug_socket);
+}
+
+fn cleanup_artifacts(artifacts: EndpointArtifacts, include_metadata: bool) {
+    let mut paths = vec![
+        artifacts.main_socket,
+        artifacts.debug_socket,
+        artifacts.hash,
+    ];
+    if include_metadata {
+        paths.push(artifacts.temporary_metadata);
     }
+    for artifact in paths {
+        if let Err(error) = std::fs::remove_file(&artifact)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            crate::logging::warn(&format!(
+                "Failed to remove endpoint artifact {}: {}",
+                artifact.display(),
+                error
+            ));
+        }
+    }
+}
+
+pub(crate) fn cleanup_endpoint_artifacts(path: &std::path::Path, include_metadata: bool) {
+    cleanup_artifacts(endpoint_artifacts(path), include_metadata);
+}
+
+pub(crate) fn cleanup_endpoint_artifacts_with_debug(
+    main_socket: &std::path::Path,
+    debug_socket: &std::path::Path,
+    include_metadata: bool,
+) {
+    let mut artifacts = endpoint_artifacts(main_socket);
+    artifacts.debug_socket = debug_socket.to_path_buf();
+    cleanup_artifacts(artifacts, include_metadata);
 }
 
 /// Connect to a socket path.
@@ -119,7 +183,23 @@ pub async fn reap_stale_socket_if_dead(path: &std::path::Path) -> bool {
         "Reaping stale jcode socket with no live listener at {}",
         path.display()
     ));
-    cleanup_socket_pair(path);
+    cleanup_endpoint_artifacts(path, true);
+    match crate::registry::ServerRegistry::load().await {
+        Ok(mut registry) => {
+            if let Err(error) = registry.cleanup_stale().await {
+                crate::logging::warn(&format!(
+                    "Failed to clean stale server registry entries after socket reap: {}",
+                    error
+                ));
+            }
+        }
+        Err(error) => {
+            crate::logging::warn(&format!(
+                "Failed to load server registry after socket reap: {}",
+                error
+            ));
+        }
+    }
     // `_lock` (a DaemonLockGuard) removes the lock file when it drops at the end
     // of this scope, so the leftover lock is cleaned up too.
     true
@@ -137,6 +217,8 @@ pub async fn reap_stale_socket_if_dead(path: &std::path::Path) -> bool {
         "Reaping stale jcode socket with no live listener at {}",
         path.display()
     ));
+    // Without the Unix daemon-lock ownership proof, do not widen cleanup to
+    // metadata sidecars. This preserves the pre-existing endpoint-only behavior.
     cleanup_socket_pair(path);
     true
 }
@@ -151,7 +233,6 @@ pub async fn has_live_listener(path: &std::path::Path) -> bool {
     socket_has_live_listener(path).await
 }
 
-#[cfg(unix)]
 pub(super) fn daemon_lock_path() -> PathBuf {
     crate::storage::runtime_dir().join("jcode-daemon.lock")
 }
