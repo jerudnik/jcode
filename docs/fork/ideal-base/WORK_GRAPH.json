@@ -1620,6 +1620,153 @@
         "review_model": "opus",
         "class": "deterministic",
         "parent": "W6"
+      },
+      {
+        "id": "F30-FIX-1",
+        "content": "Close the distribution-policy allowlist opt-in hole (F30 evidence README; F27 gap F30-1, reproduced). tests/test_nix_distribution_policy.py scans only an 8-file ACTIVE_DISTRIBUTION_DOCS opt-in while 31 other active install/update/distribution docs are unguarded; an isolated `.apm/instructions/**` plant advertising `yay -S jcode-git` passes the gate. Invert to an opt-out model: scan all tracked *.md plus .apm/instructions/** outside docs/fork/**, docs/archive/**, and changelog/**, with a small explicit exception list. Prove non-vacuous with planted retired-channel references that fail RED naming the file, then revert to green.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 70,
+        "owned_paths": [
+          "tests/test_nix_distribution_policy.py",
+          "docs/fork/ideal-base/evidence/F30-FIX-1/**"
+        ],
+        "acceptance_gates": [
+          "A retired-channel claim in any active doc (including .apm/instructions/**) fails the policy gate",
+          "Plant-and-revert proof: planted references fail RED naming the file, clean tree passes"
+        ],
+        "evidence": [
+          "opt-out coverage change",
+          "plant/revert transcript"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "F30-FIX-2",
+        "content": "Widen the distribution-policy forbidden-token list (F30 evidence README; F27 gap F30-1). The current forbidden-token set misses the documented AUR and curl/PowerShell-pipe install patterns, so a retired-channel claim using those phrasings passes. Add the AUR (`yay -S`, `paru -S`, `*-git` AUR package), curl-pipe, and PowerShell installer token classes with fixtures that assert each new token bites. Sequenced after F30-FIX-1 since both edit the same policy test.",
+        "kind": "implement",
+        "depends_on": [
+          "W5",
+          "F30-FIX-1"
+        ],
+        "priority": 70,
+        "owned_paths": [
+          "tests/test_nix_distribution_policy.py",
+          "docs/fork/ideal-base/evidence/F30-FIX-2/**"
+        ],
+        "acceptance_gates": [
+          "Each newly-forbidden token class is proven to fail the gate by a dedicated fixture"
+        ],
+        "evidence": [
+          "forbidden-token additions",
+          "per-token bite fixtures"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "F30-FIX-3",
+        "content": "Close the workflow lint-list completeness gap (F30 evidence README; F27 gap F30-1). ci.yml, freebsd-smoke.yml, and governance-root.yml are absent from the flake checkSrc source filter and from both actionlint lists (nix.yml, flake.nix workflow-syntax check) even though distributionPolicySrc includes all of .github/workflows. Reconcile the lists so every workflow that the distribution-policy source set covers is also lint-covered, and keep fork-health.sh's docs/BRANCHING.md CI-table requirement consistent.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 60,
+        "owned_paths": [
+          "flake.nix",
+          ".github/workflows/nix.yml",
+          "docs/fork/ideal-base/evidence/F30-FIX-3/**"
+        ],
+        "acceptance_gates": [
+          "Every workflow in the distribution-policy source set is also in both actionlint lists and the checkSrc filter"
+        ],
+        "evidence": [
+          "lint-list reconciliation",
+          "coverage diff"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "F30-FIX-4",
+        "content": "Retire orphaned installer residue (F30 evidence README; F27 gap F30-1). scripts/lib/configure_path.sh and the active uninstall.sh reference, plus the crates/jcode-build-support/src/paths.rs:1076-1080 installer path, are leftovers from the retired non-Nix distribution surface. Remove or neutralize them so no retired-installer code path remains, and add a guard/fixture proving the residue does not return.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 60,
+        "owned_paths": [
+          "scripts/lib/configure_path.sh",
+          "crates/jcode-build-support/src/paths.rs",
+          "docs/fork/ideal-base/evidence/F30-FIX-4/**"
+        ],
+        "acceptance_gates": [
+          "No retired-installer code path or script residue remains",
+          "A guard proves the residue cannot silently return"
+        ],
+        "evidence": [
+          "residue removal",
+          "return-guard proof"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "R05-FIX-1",
+        "content": "Propagate stall-guard cancel cause so a cancellation is never mislabeled as a server reload (R05 evidence implementation.md sub-issue (c), escalated; F27 gap R05-1). Request::Cancel in jcode-protocol carries no cause, and turn_streaming_mpsc selects the server-reload tool result from the shared graceful-shutdown signal, so a stall-guard cancel can surface as a reload. Add a cancel-cause to the wire Cancel request, thread it from the TUI backend through the server, and label the turn result truthfully. Prove a stall-guard cancel is labeled as such and never as a reload.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 70,
+        "owned_paths": [
+          "crates/jcode-protocol/src/wire.rs",
+          "crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs",
+          "crates/jcode-tui/src/tui/backend.rs",
+          "docs/fork/ideal-base/evidence/R05-FIX-1/**"
+        ],
+        "acceptance_gates": [
+          "A stall-guard cancel is labeled as a stall-guard cancel, never as a server reload",
+          "Wire protocol version/compat handled for the added cancel cause"
+        ],
+        "evidence": [
+          "cancel-cause plumbing",
+          "truthful-label reproduction"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "F26-FIX-1",
+        "content": "Unregister the active-PID marker on session end (F26 evidence README, handed to the CLI/lifecycle owner; found in the F27 follow-up sweep). A session path never unregisters its active-PID marker, so a leaked marker lingers up to the 24h liveness window and inflates the concurrent-session count for headless sessions. Add a mark_closed/end_session unregister at the CLI/lifecycle boundary (outside F26's owned paths) and prove the marker is dropped promptly on clean exit.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 60,
+        "owned_paths": [
+          "src/cli/**",
+          "crates/jcode-app-core/src/agent.rs",
+          "docs/fork/ideal-base/evidence/F26-FIX-1/**"
+        ],
+        "acceptance_gates": [
+          "A cleanly-exiting session unregisters its active-PID marker without waiting for the liveness sweep"
+        ],
+        "evidence": [
+          "unregister-on-exit change",
+          "prompt-drop reproduction"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
       }
     ]
   },
@@ -3136,6 +3283,153 @@
       "review_model": "opus",
       "class": "deterministic",
       "parent": "W6"
+    },
+    {
+      "id": "F30-FIX-1",
+      "content": "Close the distribution-policy allowlist opt-in hole (F30 evidence README; F27 gap F30-1, reproduced). tests/test_nix_distribution_policy.py scans only an 8-file ACTIVE_DISTRIBUTION_DOCS opt-in while 31 other active install/update/distribution docs are unguarded; an isolated `.apm/instructions/**` plant advertising `yay -S jcode-git` passes the gate. Invert to an opt-out model: scan all tracked *.md plus .apm/instructions/** outside docs/fork/**, docs/archive/**, and changelog/**, with a small explicit exception list. Prove non-vacuous with planted retired-channel references that fail RED naming the file, then revert to green.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 70,
+      "owned_paths": [
+        "tests/test_nix_distribution_policy.py",
+        "docs/fork/ideal-base/evidence/F30-FIX-1/**"
+      ],
+      "acceptance_gates": [
+        "A retired-channel claim in any active doc (including .apm/instructions/**) fails the policy gate",
+        "Plant-and-revert proof: planted references fail RED naming the file, clean tree passes"
+      ],
+      "evidence": [
+        "opt-out coverage change",
+        "plant/revert transcript"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "F30-FIX-2",
+      "content": "Widen the distribution-policy forbidden-token list (F30 evidence README; F27 gap F30-1). The current forbidden-token set misses the documented AUR and curl/PowerShell-pipe install patterns, so a retired-channel claim using those phrasings passes. Add the AUR (`yay -S`, `paru -S`, `*-git` AUR package), curl-pipe, and PowerShell installer token classes with fixtures that assert each new token bites. Sequenced after F30-FIX-1 since both edit the same policy test.",
+      "kind": "implement",
+      "depends_on": [
+        "W5",
+        "F30-FIX-1"
+      ],
+      "priority": 70,
+      "owned_paths": [
+        "tests/test_nix_distribution_policy.py",
+        "docs/fork/ideal-base/evidence/F30-FIX-2/**"
+      ],
+      "acceptance_gates": [
+        "Each newly-forbidden token class is proven to fail the gate by a dedicated fixture"
+      ],
+      "evidence": [
+        "forbidden-token additions",
+        "per-token bite fixtures"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "F30-FIX-3",
+      "content": "Close the workflow lint-list completeness gap (F30 evidence README; F27 gap F30-1). ci.yml, freebsd-smoke.yml, and governance-root.yml are absent from the flake checkSrc source filter and from both actionlint lists (nix.yml, flake.nix workflow-syntax check) even though distributionPolicySrc includes all of .github/workflows. Reconcile the lists so every workflow that the distribution-policy source set covers is also lint-covered, and keep fork-health.sh's docs/BRANCHING.md CI-table requirement consistent.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 60,
+      "owned_paths": [
+        "flake.nix",
+        ".github/workflows/nix.yml",
+        "docs/fork/ideal-base/evidence/F30-FIX-3/**"
+      ],
+      "acceptance_gates": [
+        "Every workflow in the distribution-policy source set is also in both actionlint lists and the checkSrc filter"
+      ],
+      "evidence": [
+        "lint-list reconciliation",
+        "coverage diff"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "F30-FIX-4",
+      "content": "Retire orphaned installer residue (F30 evidence README; F27 gap F30-1). scripts/lib/configure_path.sh and the active uninstall.sh reference, plus the crates/jcode-build-support/src/paths.rs:1076-1080 installer path, are leftovers from the retired non-Nix distribution surface. Remove or neutralize them so no retired-installer code path remains, and add a guard/fixture proving the residue does not return.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 60,
+      "owned_paths": [
+        "scripts/lib/configure_path.sh",
+        "crates/jcode-build-support/src/paths.rs",
+        "docs/fork/ideal-base/evidence/F30-FIX-4/**"
+      ],
+      "acceptance_gates": [
+        "No retired-installer code path or script residue remains",
+        "A guard proves the residue cannot silently return"
+      ],
+      "evidence": [
+        "residue removal",
+        "return-guard proof"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "R05-FIX-1",
+      "content": "Propagate stall-guard cancel cause so a cancellation is never mislabeled as a server reload (R05 evidence implementation.md sub-issue (c), escalated; F27 gap R05-1). Request::Cancel in jcode-protocol carries no cause, and turn_streaming_mpsc selects the server-reload tool result from the shared graceful-shutdown signal, so a stall-guard cancel can surface as a reload. Add a cancel-cause to the wire Cancel request, thread it from the TUI backend through the server, and label the turn result truthfully. Prove a stall-guard cancel is labeled as such and never as a reload.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 70,
+      "owned_paths": [
+        "crates/jcode-protocol/src/wire.rs",
+        "crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs",
+        "crates/jcode-tui/src/tui/backend.rs",
+        "docs/fork/ideal-base/evidence/R05-FIX-1/**"
+      ],
+      "acceptance_gates": [
+        "A stall-guard cancel is labeled as a stall-guard cancel, never as a server reload",
+        "Wire protocol version/compat handled for the added cancel cause"
+      ],
+      "evidence": [
+        "cancel-cause plumbing",
+        "truthful-label reproduction"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "F26-FIX-1",
+      "content": "Unregister the active-PID marker on session end (F26 evidence README, handed to the CLI/lifecycle owner; found in the F27 follow-up sweep). A session path never unregisters its active-PID marker, so a leaked marker lingers up to the 24h liveness window and inflates the concurrent-session count for headless sessions. Add a mark_closed/end_session unregister at the CLI/lifecycle boundary (outside F26's owned paths) and prove the marker is dropped promptly on clean exit.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 60,
+      "owned_paths": [
+        "src/cli/**",
+        "crates/jcode-app-core/src/agent.rs",
+        "docs/fork/ideal-base/evidence/F26-FIX-1/**"
+      ],
+      "acceptance_gates": [
+        "A cleanly-exiting session unregisters its active-PID marker without waiting for the liveness sweep"
+      ],
+      "evidence": [
+        "unregister-on-exit change",
+        "prompt-drop reproduction"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
     }
   ],
   "audit_coverage": [
@@ -3313,7 +3607,8 @@
       "item": "PID and telemetry liveness cleanup",
       "nodes": [
         "F26",
-        "F27"
+        "F27",
+        "F26-FIX-1"
       ],
       "class": "deterministic"
     },
@@ -3369,7 +3664,11 @@
       "id": "A27",
       "item": "Nix-only distribution and native-iOS retirement verification",
       "nodes": [
-        "F30"
+        "F30",
+        "F30-FIX-1",
+        "F30-FIX-2",
+        "F30-FIX-3",
+        "F30-FIX-4"
       ],
       "class": "deterministic"
     }

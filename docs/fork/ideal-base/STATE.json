@@ -5,11 +5,11 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "W4",
-    "state": "in_progress",
-    "reviewed_commit": null,
-    "published_commit": null,
-    "updated_at": "2026-07-29T20:34:00Z",
-    "summary": "W4 in progress: 8 of 11 children accepted. F28/F29 plus wave-1 R05, R06, F22, F23, F26, and F30 are durable on main; /tmp/w4-remaining.py reports 0/6 wave-1 nodes remaining. Remaining W4 children are F24, F25, and F27."
+    "state": "accepted",
+    "reviewed_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
+    "published_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
+    "updated_at": "2026-08-01T07:27:38Z",
+    "summary": "W4 closed: 11/11 children accepted, F27 independent verification complete with all GAP-FOUND items either fixed (F25-1) or injected as tracked W6 fix nodes. Next: W5 signoff."
   },
   "nodes": {
     "W0": {
@@ -53,12 +53,14 @@
       "updated_at": "2026-07-27T06:17:08Z"
     },
     "W4": {
-      "state": "in_progress",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "W4 in progress: 8 of 11 children accepted. F28/F29 plus wave-1 R05, R06, F22, F23, F26, and F30 are durable on main; /tmp/w4-remaining.py reports 0/6 wave-1 nodes remaining. Remaining W4 children are F24, F25, and F27.",
-      "updated_at": "2026-07-29T20:34:00Z"
+      "state": "accepted",
+      "reviewed_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
+      "published_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F27/independent-hardening-review.md"
+      ],
+      "summary": "W4 synthesis: all 11 children accepted (F22-F30, R05, R06). Security/quality/provenance/durable-state hygiene closed and independently verified by F27. The F27 GAP-FOUND findings are dispositioned: one durable-state defect fixed (F25-1, PR #75) and six bounded hardening gaps injected as tracked W6 fix nodes (F30-FIX-1..4, R05-FIX-1, F26-FIX-1) rather than left in evidence prose. No untracked critical policy/provenance/durable-state/marker/cleanup gap remains. W4R closed separately (R07). W5 signoff is the next wave.",
+      "updated_at": "2026-08-01T07:27:38Z"
     },
     "W5": {
       "state": "pending",
@@ -341,20 +343,24 @@
       "updated_at": "2026-07-29T20:30:18Z"
     },
     "F24": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "38c6450234e0b3a0c768a406b5077b9ab9f966cc",
+      "published_commit": "c80c9a48a24aa9d06f3b2f0a3f581b1d732a60d0",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F24/README.md"
+      ],
+      "summary": "F24 accepted: packages.x86_64-linux.jcode reproducible within its declared scope (two clean JRTI builds matched output path, NAR hash/size, manifest hash, installed file-list hash, runtime version), plus jcode-provenance (source rev/version/platform/derivation identity) and a CycloneDX 1.5 SBOM, checked by an independent verifier. Independent Opus review PASS at e9fb3220a. Landed via PR #65; the fixture cargo_version was de-hardcoded to track Cargo.toml. F27 independent re-verification (gpt-5.6-sol) structurally reran the SBOM generator + verifier (947 components, 947 unique bom-refs, exit 0) and found no provenance/SBOM gap in current source.",
+      "updated_at": "2026-08-01T07:27:38Z"
     },
     "F25": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "6d602805e4adbf30fd6c73fc87a81ad072bbd56b",
+      "published_commit": "12422d7b7e664cf9cc86bea168087d697d7224c0",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F25/README.md"
+      ],
+      "summary": "F25 accepted: endpoint sidecars derived from one discovered socket, cleanup modes kept distinct (reload/endpoint-only vs graceful-owned vs proof-gated Unix stale), typed state-dir scan, malformed snapshots/control-log lines quarantined byte-exact with torn final lines left resumable, terminal control logs pruned whole-file after retention without invalidating pending-await cursors. Landed via PR #66; two review findings fixed with regression tests (CRLF line tolerance, orphaned-.bak self-recovery guard). F27 independent review found one further durable-state gap (F25-1: retention could delete a control-log tail when a valid orphan .bak existed but the primary .json did not); fixed in PR #75 with a negative-tested regression, and the residual is fully covered.",
+      "updated_at": "2026-08-01T07:27:38Z"
     },
     "F26": {
       "state": "accepted",
@@ -367,12 +373,15 @@
       "updated_at": "2026-07-29T13:56:00Z"
     },
     "F27": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
+      "published_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/F27/independent-hardening-review.md",
+        "docs/fork/ideal-base/evidence/F27/combined-validation-report.md"
+      ],
+      "summary": "F27 independent hardening verification complete. An adversarial different-provider reviewer (gpt-5.6-sol, high effort; the coordinator is Anthropic and implemented F24/F25, so the review is genuinely independent) verified all ten W4 hardening nodes against current main and returned GAP-FOUND (high confidence), reproducing the F30 policy escape in an isolated tree. Gaps are resolved honestly rather than waved through: F25-1 (durable-state loss) is fixed in PR #75 with a negative-tested regression; the F30 coverage gaps (F30-FIX-1..4), the escalated R05 stall-guard cancel-cause (R05-FIX-1), and the F26 marker-unregister leak (F26-FIX-1, surfaced by the coordinator's follow-up sweep) are injected as separately-owned W6 fix nodes, so every discovered gap is now tracked work rather than prose. F22/F23/F24/F26/F28/F29/R06 verified with stated no-build limitations. Cheap-gate exit codes recorded in the combined validation report.",
+      "updated_at": "2026-08-01T07:27:38Z"
     },
     "F28": {
       "state": "accepted",
@@ -604,6 +613,54 @@
       "updated_at": null
     },
     "R09": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F30-FIX-1": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F30-FIX-2": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F30-FIX-3": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F30-FIX-4": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "R05-FIX-1": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
+    },
+    "F26-FIX-1": {
       "state": "pending",
       "reviewed_commit": null,
       "published_commit": null,
