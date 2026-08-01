@@ -54,6 +54,15 @@ scripts/preflight.sh
 
 Use `scripts/preflight.sh --help` and `scripts/dev_cargo.sh` source/help output for current options. Set `JCODE_REMOTE_CARGO=0` only when a specifically local Cargo run is required.
 
+`preflight.sh` mirrors the cheap CI gates (ratchets, fmt, clippy). To also run the expensive `Build & Test` job (the release build plus the full test suite, ~21 min on hosted macOS) on fleet hardware before opening a PR:
+
+```bash
+scripts/ci_local.sh            # macOS job on the local host triple, via the fleet builder
+scripts/ci_local.sh --list     # print the commands (extracted from fork-ci.yml) without running
+```
+
+It runs the workflow's exact cargo commands, so a red result is known before any hosted CI minute is spent. The first run for a given profile/target primes a cold cache; warm runs are a few minutes.
+
 ## Self-development
 
 This repository defaults to the TUI target. In a self-development session:
