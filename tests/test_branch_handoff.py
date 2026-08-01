@@ -64,6 +64,7 @@ class BranchHandoffFixture:
         scripts.mkdir()
         (scripts / CHECKER.name).write_text(CHECKER.read_text(encoding="utf-8"), encoding="utf-8")
         self.checker = scripts / CHECKER.name
+        self.env = dict(NO_GH_ENV)
         # The checker is committed on `main`, before any branch exists, so it
         # is present on every branch. Leaving it untracked does not work: the
         # `git add -A` in `branch()` sweeps it into that branch's commit, and
@@ -89,8 +90,21 @@ class BranchHandoffFixture:
             capture_output=True,
             text=True,
             check=False,
-            env=NO_GH_ENV,
+            env=self.env,
         )
+
+    def install_stub_gh(self, payload: str = "[]") -> None:
+        """Put a fake `gh` on PATH that answers the PR query with `payload`.
+
+        Only used to reach the fully-checked verdict. Everything else runs
+        degraded on purpose, so the tests stay offline.
+        """
+        bindir = self.root.parent / "stubbin"
+        bindir.mkdir(exist_ok=True)
+        stub = bindir / "gh"
+        stub.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")
+        stub.chmod(0o755)
+        self.env = {**NO_GH_ENV, "PATH": f"{bindir}:{NO_GH_ENV['PATH']}"}
 
 
 class BranchHandoffTest(unittest.TestCase):
@@ -130,13 +144,42 @@ class BranchHandoffTest(unittest.TestCase):
         """Without `gh`, a pushed branch cannot be judged, so it is not flagged.
 
         Flagging it would fail every closeout on an unauthenticated machine,
-        which trains people to ignore the gate.
+        which trains people to ignore the gate. But passing must not be
+        reported as an all-clear either: PR-state stalls were never checked,
+        so the verdict is partial and has to say so.
         """
         fix = self.fixture()
         fix.branch("automation/pushed", push=True)
         result = fix.run()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PARTIAL CHECK ONLY", result.stdout)
+        self.assertIn("gh unavailable", result.stdout)
+        self.assertNotIn("all on a path to main", result.stdout)
+
+    def test_unqualified_all_clear_requires_a_complete_check(self):
+        """The unqualified all-clear is printed only when nothing was skipped.
+
+        Guards the other side of the partial-verdict rule: with `gh` present
+        and answering, the verdict is complete and may say so plainly. Without
+        this, the unqualified all-clear branch would be unreachable and the
+        distinction between "clean" and "did not look" would be cosmetic.
+        """
+        fix = self.fixture()
+        fix.branch("automation/pushed", push=True)
+        fix.install_stub_gh('[{"number":1,"headRefName":"automation/pushed","mergeStateStatus":"CLEAN"}]')
+        result = fix.run()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("all on a path to main", result.stdout)
+        self.assertNotIn("PARTIAL", result.stdout)
+
+    def test_pr_state_stall_is_reported_when_gh_answers(self):
+        """A PR that is open but not mergeable is still a stall."""
+        fix = self.fixture()
+        fix.branch("automation/behind", push=True)
+        fix.install_stub_gh('[{"number":9,"headRefName":"automation/behind","mergeStateStatus":"BEHIND"}]')
+        result = fix.run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("PR #9 is open but BEHIND", result.stdout)
 
     def test_gh_absence_is_disclosed_when_something_is_wrong(self):
         """A partial verdict must say what it could not check."""

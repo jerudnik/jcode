@@ -217,22 +217,35 @@ def main() -> int:
                 f"      -> gh pr checks {pr['number']}, then update the branch"
             )
 
+    # What could not be checked. A clean run that skipped a whole class of
+    # stall is a PARTIAL result, not an all-clear, so these are reported on
+    # both paths. Saying "all on a path to main" while silently not having
+    # looked is the same false assurance that `usable_repo` exists to prevent.
+    unchecked: list[str] = []
+    if published is None and remote:
+        unchecked.append(f"could not read {remote}; unpushed branches were not checked")
+    if prs is None:
+        unchecked.append("gh unavailable; PR-state stalls were not checked")
+
     if not findings:
         if not args.quiet:
             scope = f"{len(branches)} automation branch{'es' if len(branches) != 1 else ''}"
-            print(f"branch handoff: {scope} unmerged, all on a path to {BASE_BRANCH}")
+            if unchecked:
+                print(f"branch handoff: {scope} unmerged, PARTIAL CHECK ONLY")
+                for note in unchecked:
+                    print(f"  (note: {note})")
+            else:
+                print(f"branch handoff: {scope} unmerged, all on a path to {BASE_BRANCH}")
         return 0
 
-    print("branch handoff: work is not on a path to main\n")
+    print(f"branch handoff: work is not on a path to {BASE_BRANCH}\n")
     print("\n".join(findings))
     print(
-        "\nEach branch above holds commits that are not in main and are not"
+        f"\nEach branch above holds commits that are not in {BASE_BRANCH} and are not"
         "\nmoving toward it. Land them, or delete the branch if it is obsolete."
     )
-    if published is None and remote:
-        print(f"\n(note: could not read {remote}; unpushed branches may be under-reported)")
-    if prs is None:
-        print("(note: gh unavailable; PR-state stalls were not checked)")
+    for note in unchecked:
+        print(f"(note: {note})")
     return 1
 
 
