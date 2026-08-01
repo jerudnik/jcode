@@ -51,10 +51,35 @@ ARTIFACT_FIELDS = {
 }
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 MARKDOWN_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
-# Schema-v2 default publication ref (R07 design §8). CI passes this exact
-# value explicitly; the default only preserves already-documented invocations
-# (e.g. COORDINATOR_BOOTSTRAP.md's bare `check`) that predate the flag.
-DEFAULT_PUBLISHED_REF = "refs/remotes/origin/main"
+# Schema-v2 default publication ref (R07 design §8). CI passes
+# refs/remotes/origin/main explicitly (actions/checkout names its remote
+# `origin`); local clones may name the canonical remote differently (the
+# canonical checkout uses `github`), so the default tries each known remote
+# name and keeps the first that resolves. Explicit --published-ref always
+# wins and is never rewritten.
+_PUBLISHED_REF_CANDIDATES = (
+    "refs/remotes/origin/main",
+    "refs/remotes/github/main",
+)
+
+
+def _default_published_ref() -> str:
+    for candidate in _PUBLISHED_REF_CANDIDATES:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", candidate],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            return candidate
+    # Fall through to the historical default so the error message still names
+    # a concrete ref instead of an empty string.
+    return _PUBLISHED_REF_CANDIDATES[0]
+
+
+DEFAULT_PUBLISHED_REF = _default_published_ref()
 # Post-distribution amendment (D030): W4 carries eleven children after the
 # R06 sticky-server and F30 distribution-verification nodes were added, so the
 # per-wave deep-gate review budget moved from 10 to 12.
