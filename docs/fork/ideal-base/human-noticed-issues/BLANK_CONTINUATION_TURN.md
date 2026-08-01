@@ -457,10 +457,15 @@ The mechanism, though, is the **opposite** of the incomplete-todo poke. At the
 exact onset call every todo is already `completed`, and each carries a
 `completion_confidence`:
 
+> **RETRACTED — the `needs_more_work` column below is wrong.** It is `true` in
+> both sessions, not `false`, and this error is what let me discard the gate
+> that turned out to be the cause. See "Correction: the false exclusion" at the
+> end of this document. The rest of this section is preserved as written.
+
 | session | todos at onset | statuses | missing confidence | `needs_more_work` |
 |---|---|---|---|---|
-| `blossom` | 8 | all `completed` | 0 | false |
-| `piglet` | 7 | all `completed` | 0 | false |
+| `blossom` | 8 | all `completed` | 0 | ~~false~~ **true** |
+| `piglet` | 7 | all `completed` | 0 | ~~false~~ **true** |
 
 That selects the `✅ Todos complete` branch of
 `schedule_auto_poke_followup_if_needed`, which disables poking, clears
@@ -560,6 +565,10 @@ shape of the confidence-gate setter, the one setter that queues into
 `hidden_queued_system_messages` alone.
 
 ### Why this still is not the pump
+
+> **RETRACTED.** Both arguments in this subsection are wrong, and together they
+> are the false exclusion that hid the cause. See "Correction: the false
+> exclusion" at the end of this document. Preserved as written.
 
 Stated as the disproof: *if the loop's blanks carried a reminder, this path
 explains them; if they carry none, it does not.* The token accounting already
@@ -1019,3 +1028,82 @@ symptom and left the gate looping invisibly. The defect is that
 the gate must fire **at most once per todo-list revision**. That is the change
 to make, and it belongs with a test that asserts a second identical evaluation
 does not re-queue.
+
+---
+
+## Correction: the false exclusion
+
+Two claims earlier in this document are wrong. Both are retracted inline above.
+Both were mine, and together they are the reason this took as long as it did:
+they excluded the true cause early, so every later search ran in a space that no
+longer contained the answer.
+
+### 1. `needs_more_work` was true at onset, not false
+
+The claim: "the confidence gate fires only when `needs_more_work` is true, and
+at onset it is false in every observed session."
+
+The gate is:
+
+```rust
+needs_more_work = average < QUALITY_GATE_THRESHOLD
+    || missing_confidence > 0
+    || below_threshold_count > 0;
+```
+
+`QUALITY_GATE_THRESHOLD` is 96. `blossom`'s onset payload carries 8 completed
+todos scoring 95, 95, 92, 95, 90, 93, 97, 94 — seven of eight below 96, so
+`below_threshold_count = 7` and `needs_more_work` is **true**. I read the
+"missing confidence" clause, saw zero missing, and never evaluated the other
+two. The published table asserted a value I had not computed.
+
+This is worth stating plainly because the gate's shape is itself the hazard:
+it punishes calibrated confidence. Honest 90–95 self-scores loop forever;
+uniform inflated 99s never trip it at all.
+
+### 2. The 22-vs-90 token argument tested nothing
+
+The claim: loop replies cost a flat 22 input tokens against 90 for a turn
+carrying a real reminder, therefore the loop's blanks carry no reminder.
+
+Reminder text is not billed as ordinary input on the path being compared, so
+the two numbers were never measuring the same thing. The comparison had no
+power to detect the reminder it was used to rule out.
+
+The same error class appeared a third time in this investigation, and it is the
+generalizable lesson: **an exclusion that rests on the absence of a string must
+first prove that string is emitted on that path.** Concretely,
+`request_payload_summary` (`crates/jcode-app-core/src/server/client_lifecycle_logging.rs`)
+extracted only `content`, `message`, `prompt`, `task`, `command`, `input`, and
+`value` — `system_reminder` was **not in the list**. So "0 of 361 sends carry a
+reminder" was a statement about the logger's field list, not about the wire.
+That field has since been added.
+
+### What actually settled it
+
+Envelope arithmetic on `line_bytes`, which is a true byte count
+(`line.len()`, and `read_line` retains the newline). A real 6128-byte turn
+carries 163 bytes of envelope; the blank turns carry **251**. An empty message
+costing ~88 bytes *more* envelope requires a `skip_serializing_if` field to be
+present, and solving for its length gives ~191 characters.
+`TODO_COMPLETION_CONTINUATION_MESSAGE` is exactly 191.
+
+The prediction is byte-exact across the id-width boundaries:
+
+| ids | predicted `line_bytes` | observed |
+|---|---|---|
+| 6–9 | 251 | 251 (4/4) |
+| 10–99 | 252 | 252 (90/90) |
+| 100–367 | 253 | 253 (267/268) |
+
+The single miss is id 366, the user's Escape. Uniqueness was checked: of the 11
+string literals within ±2 characters of 191 in the crate tree, exactly one is a
+`system_reminder`.
+
+### Method note
+
+The refutation table earlier in this document refuted all 20 non-test call
+sites against 361 real sends. That is a contradiction, not a result: the sends
+happened, so one exclusion had to be false. The correct response to "every
+candidate is refuted" is to re-test the exclusions, not to widen the candidate
+list. Both false exclusions above were found by doing that.
