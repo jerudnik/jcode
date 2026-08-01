@@ -1183,9 +1183,14 @@ rejections, keyed on distinct tool_use_id (pinned snapshot, 2408 files):
 ```
 
 Report 136/342 as the rate and 139 as the count, never divided into each
-other. The three sessions with no todo file are hit by the bug but absent
-from the denominator, precisely *because* their write was rejected, so
-`139/342` would divide a numerator by a population it is not drawn from.
+other. The three sessions with no todo file (`cat_1784611126133`,
+`macaque_1784693657835`, `parrot_1785207428544`) are hit by the bug but
+absent from the denominator, and both facts have the same cause: the
+rejection is what kept the file from being written. A `139/342` figure is
+therefore not merely a mismatch of populations, it is a rate whose
+numerator and denominator are both moved, in opposite directions, by the
+defect being measured. Each such session is removed from the denominator
+and added to the numerator by the same event.
 
 Reaching that number took four passes, and the first three were wrong in
 ways worth recording, because each is a way a text-derived metric can look
@@ -1237,6 +1242,50 @@ occurrences equal to messages does *not* establish this, since that equality
 holds only where there are no repeats. Keying on `tool_use_id` makes the
 argument unnecessary, which is the better outcome: prefer a unit that cannot
 double-count over evidence that it did not.
+
+### What actually caught these
+
+Four values were published or nearly published for one quantity: 262, 257,
+240, 234, plus a fifth error inside the probe meant to verify the fourth.
+None was caught by re-reading a method, re-checking arithmetic, or
+reviewing an approach in prose. Every one was caught the same way: the
+quantity was re-derived by a *different decomposition*, and the two results
+disagreed.
+
+Raw text counting versus per-message counting versus keying on
+`tool_use_id` are three decompositions of one question. Each exposed a flaw
+invisible from inside the others. The decisive signal was never an argument
+but an impossible value: zero occurrences for a gate proven to have fired
+361 times, zero genuine rejections out of 342 sessions, two different
+counts for one session in a fixed corpus.
+
+Two agents helped here, but the mechanism is not review. A second agent
+rarely reuses the first one's traversal, so cross-checking *produces*
+independent decompositions as a side effect. That is the useful property,
+and it is available alone: derive the number a second time by a route that
+shares no code and no intermediate representation with the first. Reviewing
+a method cannot find the error, because the error is nearly always in what
+the method silently assumed the data looks like, which is exactly what a
+reader of the method also assumes.
+
+The most instructive failure came from a probe written to *check* one of
+these numbers. Asked to confirm three named sessions, a one-off script
+matched session ids by substring and read `hit[0]`, which selected a
+`.bak` file sitting beside the real transcript:
+
+```
+session_cat_1784611126133_e6303eaa37c1cb0e.bak
+session_cat_1784611126133_e6303eaa37c1cb0e.evidence.jsonl
+session_cat_1784611126133_e6303eaa37c1cb0e.json
+```
+
+It reported 0 rejections for a session that has 1, and 4 for a session
+that has 2. A correction was nearly sent on the strength of it. Every
+scanner used for the real counts filters on `.json`; the probe written to
+audit them did not. **Verification code is code, and it is often written
+faster and checked less than the code it audits.** The contradiction
+between two of this document's own numbers for the same session, 0 and 1,
+is what exposed it, since a fixed corpus cannot return both.
 
 Two more instances of this document's recurring error appeared while
 measuring it, both caught the same way. The first scan parsed message
