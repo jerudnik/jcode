@@ -280,6 +280,23 @@ pub(super) fn current_control_log_offset(swarm_id: &str) -> u64 {
         .unwrap_or(0)
 }
 
+pub(super) fn reset_cached_control_log(swarm_id: &str) {
+    let path = control_log_path(swarm_id);
+    CONTROL_LOGS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&path);
+    let mut senders = CONTROL_LOG_APPENDS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if senders
+        .get(&path)
+        .is_some_and(|sender| sender.receiver_count() == 0)
+    {
+        senders.remove(&path);
+    }
+}
+
 /// Run an await-on-offset scan against a swarm's control log: return the first
 /// event strictly past `offset` for which `predicate` holds, else the resume
 /// offset to re-arm at.
