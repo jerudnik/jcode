@@ -94,14 +94,38 @@ def remote_branches(remote: str) -> set[str] | None:
     return names
 
 
-def unmerged_automation_branches() -> list[tuple[str, int]]:
-    """Local `automation/**` branches with commits not yet in `main`."""
+def base_ref() -> str:
+    """What counts as "landed": the remote's `main`, falling back to local.
+
+    Local `main` is the wrong yardstick and this was caught by dogfooding: the
+    moment PR #67 merged, the guard reported its own just-merged branch as
+    "pushed, but no open PR", because the local `main` in that worktree still
+    pointed at the pre-merge commit. Every merge would have produced a false
+    positive until someone remembered to fast-forward.
+
+    The remote-tracking ref also closes a false *negative*: a branch merged
+    only into a local `main` that was never pushed is not actually landed, and
+    comparing against local `main` would call it done.
+
+    Read-only by design. This never fetches; a check that mutates the object
+    store to make itself pass is not a check.
+    """
+    remote = canonical_remote()
+    if remote:
+        tracking = f"{remote}/{BASE_BRANCH}"
+        if git("rev-parse", "--verify", "--quiet", tracking).returncode == 0:
+            return tracking
+    return BASE_BRANCH
+
+
+def unmerged_automation_branches(base: str) -> list[tuple[str, int]]:
+    """Local `automation/**` branches with commits not yet in `base`."""
     proc = git("for-each-ref", "--format=%(refname:short)", f"refs/heads/{BRANCH_PREFIX}")
     if proc.returncode != 0:
         return []
     branches = []
     for branch in proc.stdout.split():
-        counted = git("rev-list", "--count", f"{BASE_BRANCH}..{branch}")
+        counted = git("rev-list", "--count", f"{base}..{branch}")
         if counted.returncode != 0:
             continue
         ahead = int(counted.stdout.strip() or 0)
@@ -128,11 +152,16 @@ def usable_repo() -> str | None:
 
 
 def pull_requests() -> dict[str, dict] | None:
-    """Open PRs keyed by head branch, or None when `gh` cannot answer.
+    """PRs keyed by head branch, or None when `gh` cannot answer.
 
     Degrades rather than fails: without `gh` the unpushed shape is still
     detectable from git alone, and a closeout on a machine with no GitHub auth
     should report what it can instead of erroring out.
+
+    Merged PRs are included deliberately. `gh pr merge` does not touch local
+    refs, so a branch can be landed on the remote while every local ref still
+    says otherwise, and asking GitHub is the only read-only way to know. First
+    entry wins if a branch was reused, and `gh` lists most recent first.
     """
     if shutil.which("gh") is None:
         return None
@@ -142,11 +171,11 @@ def pull_requests() -> dict[str, dict] | None:
             "pr",
             "list",
             "--state",
-            "open",
+            "all",
             "--limit",
             "100",
             "--json",
-            "number,headRefName,mergeStateStatus",
+            "number,headRefName,state,mergeStateStatus",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -159,7 +188,10 @@ def pull_requests() -> dict[str, dict] | None:
         entries = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
-    return {entry["headRefName"]: entry for entry in entries}
+    prs: dict[str, dict] = {}
+    for entry in entries:
+        prs.setdefault(entry["headRefName"], entry)
+    return prs
 
 
 def main() -> int:
@@ -175,7 +207,8 @@ def main() -> int:
         print(f"branch handoff: cannot inspect this checkout ({reason})", file=sys.stderr)
         return 2
 
-    branches = unmerged_automation_branches()
+    base = base_ref()
+    branches = unmerged_automation_branches(base)
     if not branches:
         if not args.quiet:
             print("branch handoff: no unmerged automation/** branches")
@@ -191,7 +224,7 @@ def main() -> int:
 
         if published is not None and branch not in published:
             findings.append(
-                f"  {branch}: {commits} ahead of {BASE_BRANCH}, not on {remote}\n"
+                f"  {branch}: {commits} ahead of {base}, not on {remote}\n"
                 f"      -> git push -u {remote} {branch} && gh pr create"
             )
             continue
@@ -205,8 +238,22 @@ def main() -> int:
         pr = prs.get(branch)
         if pr is None:
             findings.append(
-                f"  {branch}: {commits} ahead of {BASE_BRANCH}, pushed, but no open PR\n"
+                f"  {branch}: {commits} ahead of {base}, pushed, but no open PR\n"
                 f"      -> gh pr create --head {branch}"
+            )
+            continue
+
+        if pr.get("state") == "MERGED":
+            # Landed on the remote; the local refs just have not caught up.
+            # Not stalled work, so not a finding. Do not fetch to confirm: a
+            # check that mutates the object store to make itself pass is not
+            # a check.
+            continue
+
+        if pr.get("state") == "CLOSED":
+            findings.append(
+                f"  {branch}: {commits} ahead of {base}, PR #{pr['number']} was closed unmerged\n"
+                f"      -> reopen it, open a new PR, or delete the branch"
             )
             continue
 

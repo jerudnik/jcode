@@ -38,6 +38,11 @@ def git(cwd: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
+def git_out(cwd: Path, *args: str) -> str:
+    proc = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+    return proc.stdout.strip()
+
+
 def commit(cwd: Path, name: str) -> None:
     (cwd / name).write_text(name, encoding="utf-8")
     git(cwd, "add", "-A")
@@ -73,6 +78,10 @@ class BranchHandoffFixture:
         # subprocess, which looked like a temp-directory lifetime problem and
         # is not one.
         commit(self.root, "seed")
+        # `main` exists on the remote too, as it does in the real fork. Without
+        # this the remote-tracking `main` is missing and the checker silently
+        # falls back to the local ref, which is the very thing under test.
+        git(self.root, "push", "-q", "-u", "github", "main")
 
     def branch(self, name: str, *, push: bool = False, merge: bool = False) -> None:
         git(self.root, "checkout", "-q", "-b", name, "main")
@@ -82,6 +91,23 @@ class BranchHandoffFixture:
         git(self.root, "checkout", "-q", "main")
         if merge:
             git(self.root, "merge", "-q", "--no-ff", name, "-m", f"merge {name}")
+
+    def merge_on_remote(self, name: str) -> None:
+        """Land `name` on the remote's `main` without touching local `main`.
+
+        Uses a scratch clone so the local checkout's refs are untouched apart
+        from the remote-tracking update, reproducing the real situation: the
+        fork's `main` has moved and this working copy has not caught up.
+        """
+        scratch = self.root.parent / f"scratch-{name.replace('/', '-')}"
+        git(self.root.parent, "clone", "-q", str(self.remote), str(scratch))
+        git(scratch, "config", "user.email", "gate@example.invalid")
+        git(scratch, "config", "user.name", "gate")
+        git(scratch, "checkout", "-q", "main")
+        git(scratch, "merge", "-q", "--no-ff", f"origin/{name}", "-m", f"merge {name}")
+        git(scratch, "push", "-q", "origin", "main")
+        # Update only the remote-tracking ref, as a plain `git fetch` would.
+        git(self.root, "fetch", "-q", "github")
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -102,7 +128,28 @@ class BranchHandoffFixture:
         bindir = self.root.parent / "stubbin"
         bindir.mkdir(exist_ok=True)
         stub = bindir / "gh"
-        stub.write_text(f"#!/bin/sh\ncat <<'JSON'\n{payload}\nJSON\n", encoding="utf-8")
+        # Honour `--state` the way real `gh` does. A stub that returns every
+        # PR regardless of the query makes tests vacuous: an earlier version
+        # of this helper ignored the flag, so a mutation reverting the checker
+        # to `--state open` still saw MERGED entries and the suite stayed
+        # green. The stub must be able to hide what the caller did not ask for.
+        stub.write_text(
+            "#!/bin/sh\n"
+            "state=open\n"
+            'while [ $# -gt 0 ]; do\n'
+            '  case "$1" in --state) state="$2"; shift 2 ;; *) shift ;; esac\n'
+            "done\n"
+            "payload=$(cat <<'JSON'\n"
+            f"{payload}\n"
+            "JSON\n"
+            ")\n"
+            'if [ "$state" = all ]; then printf %s "$payload"; else\n'
+            "  printf %s \"$payload\" | /usr/bin/python3 -c \"import json,sys;"
+            "print(json.dumps([e for e in json.load(sys.stdin)"
+            " if e.get('state','OPEN')=='OPEN']))\"\n"
+            "fi\n",
+            encoding="utf-8",
+        )
         stub.chmod(0o755)
         self.env = {**NO_GH_ENV, "PATH": f"{bindir}:{NO_GH_ENV['PATH']}"}
 
@@ -133,12 +180,103 @@ class BranchHandoffTest(unittest.TestCase):
         self.assertIn("git push -u github automation/stranded", result.stdout)
 
     def test_merged_branch_is_ignored(self):
-        """A branch already in main is done, not stalled."""
+        """A branch landed on the remote's main is done, not stalled."""
         fix = self.fixture()
-        fix.branch("automation/landed", merge=True)
+        fix.branch("automation/landed", push=True)
+        fix.merge_on_remote("automation/landed")
         result = fix.run()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("automation/landed", result.stdout)
+
+    def test_merge_into_an_unpushed_local_main_is_not_landed(self):
+        """Merging locally and never pushing does not count as landed.
+
+        The false negative on the other side of the stale-base fix. Local
+        `main` is not the yardstick: a branch merged only into a local `main`
+        that never left the machine is precisely the stranded work this guard
+        exists to find, and comparing against local `main` would call it done.
+        """
+        fix = self.fixture()
+        fix.branch("automation/local-only", merge=True)
+        result = fix.run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("automation/local-only", result.stdout)
+
+    def test_branch_merged_on_the_remote_is_not_flagged(self):
+        """A branch merged upstream is landed, even if local `main` is stale.
+
+        Regression test for a bug found by dogfooding the guard immediately
+        after its own PR merged: the check compared against local `main`, which
+        in that worktree still pointed at the pre-merge commit, so it reported
+        the just-merged branch as "pushed, but no open PR". Comparing against
+        local `main` makes every merge produce a false positive until someone
+        remembers to fast-forward, which is exactly the kind of noise that
+        trains people to ignore a gate.
+        """
+        fix = self.fixture()
+        fix.branch("automation/landed-upstream", push=True)
+        # The remote merges it; the local checkout has not caught up.
+        fix.merge_on_remote("automation/landed-upstream")
+        stale = git_out(fix.root, "rev-parse", "main")
+        # `gh` must answer here. Run degraded, the pushed branch is skipped
+        # before the base ref is ever consulted, and the test passes whether
+        # or not the bug is present -- which is how an earlier version of this
+        # test was vacuous.
+        fix.install_stub_gh()
+        result = fix.run()
+        self.assertEqual(
+            git_out(fix.root, "rev-parse", "main"),
+            stale,
+            "the check must not fetch or move local refs",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("automation/landed-upstream", result.stdout)
+
+    def test_merged_pr_lands_a_branch_even_when_every_local_ref_is_stale(self):
+        """A merged PR is landed, even if the remote-tracking ref is stale too.
+
+        `base_ref()` fixed the case where local `main` lagged the remote, but
+        the remote-tracking ref is only as fresh as the last fetch, and
+        `gh pr merge` does not touch local refs at all. So the original
+        dogfooding scenario survived that fix: merge a PR, do not fetch, and
+        the guard still told you to open a PR for work that was already in
+        `main`. Asking GitHub for the PR state is the only way to know this
+        without fetching.
+        """
+        fix = self.fixture()
+        fix.branch("automation/merged-elsewhere", push=True)
+        before = git_out(fix.root, "rev-parse", "github/main")
+        fix.install_stub_gh(
+            '[{"number": 41, "headRefName": "automation/merged-elsewhere",'
+            ' "state": "MERGED", "mergeStateStatus": "UNKNOWN"}]'
+        )
+        result = fix.run()
+        self.assertEqual(
+            git_out(fix.root, "rev-parse", "github/main"),
+            before,
+            "the check must not fetch to confirm the merge",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("automation/merged-elsewhere", result.stdout)
+
+    def test_pr_closed_without_merging_is_a_stall(self):
+        """A closed-unmerged PR strands work exactly like never opening one.
+
+        Found while testing the merged case: querying `--state all` to see
+        merged PRs also surfaces closed ones, and a branch whose PR was closed
+        without merging is the same stranded work this guard exists to find.
+        Treating any non-open PR as "landed" would have been a false negative.
+        """
+        fix = self.fixture()
+        fix.branch("automation/abandoned", push=True)
+        fix.install_stub_gh(
+            '[{"number": 42, "headRefName": "automation/abandoned",'
+            ' "state": "CLOSED", "mergeStateStatus": "UNKNOWN"}]'
+        )
+        result = fix.run()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("automation/abandoned", result.stdout)
+        self.assertIn("closed unmerged", result.stdout)
 
     def test_pushed_branch_without_gh_is_not_a_false_positive(self):
         """Without `gh`, a pushed branch cannot be judged, so it is not flagged.
