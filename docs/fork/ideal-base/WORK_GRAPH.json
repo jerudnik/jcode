@@ -1622,6 +1622,34 @@
         "parent": "W6"
       },
       {
+        "id": "R10",
+        "content": "Landed ahead of W6 as an ordinary fix PR off main, because the defect left live sessions unusable and W6 is gated on a W5 verdict with no date (human-noticed-issues/RELOAD_STALENESS_PROCESS_START.md). Repair reload staleness detection, which resolved a same-path in-place republish by comparing the candidate mtime against PROCESS START TIME. Reload re-execs via Command::exec, and exec preserves process start time (verified: proc_pidinfo reports a byte-identical start across exec; Linux /proc/self btime is per-task, not per-image), so a daemon whose binary was republished after boot advertised an update that no reload could clear. The client then re-entered the runtime-identity defer path on every history bootstrap and never loaded a session. Fixed by baselining on the mtime of the executing image, sampled once into a OnceLock and seeded at server boot, so the baseline advances across exec and the signal terminates. This node records the work for graph fidelity; the code is already on main.",
+        "kind": "implement",
+        "depends_on": [
+          "W5"
+        ],
+        "priority": 84,
+        "owned_paths": [
+          "crates/jcode-app-core/src/server/util/binary_freshness.rs",
+          "crates/jcode-app-core/src/server/util.rs",
+          "crates/jcode-app-core/src/server.rs"
+        ],
+        "acceptance_gates": [
+          "A same-path in-place republish is reported as an update, and the reloaded image reports no update, with both halves of the transition asserted",
+          "The staleness baseline advances across exec rather than being preserved by it",
+          "Any mtime uncertainty continues to suppress the update signal, preserving the #277 loop-safe behavior"
+        ],
+        "evidence": [
+          "regression test same_path_republish_clears_once_the_baseline_advances covering stale-then-cleared",
+          "live-daemon transcript: fresh=false, republished=true, post-reload=false at the same pid and start time",
+          "exec probe showing process start time unchanged while the image mtime advances"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6",
+        "status": "landed_early_on_main"
+      },
+      {
         "id": "F30-FIX-1",
         "content": "Close the distribution-policy allowlist opt-in hole (F30 evidence README; F27 gap F30-1, reproduced). tests/test_nix_distribution_policy.py scans only an 8-file ACTIVE_DISTRIBUTION_DOCS opt-in while 31 other active install/update/distribution docs are unguarded; an isolated `.apm/instructions/**` plant advertising `yay -S jcode-git` passes the gate. Invert to an opt-out model: scan all tracked *.md plus .apm/instructions/** outside docs/fork/**, docs/archive/**, and changelog/**, with a small explicit exception list. Prove non-vacuous with planted retired-channel references that fail RED naming the file, then revert to green.",
         "kind": "implement",
@@ -3283,6 +3311,34 @@
       "review_model": "opus",
       "class": "deterministic",
       "parent": "W6"
+    },
+    {
+      "id": "R10",
+      "content": "Landed ahead of W6 as an ordinary fix PR off main, because the defect left live sessions unusable and W6 is gated on a W5 verdict with no date (human-noticed-issues/RELOAD_STALENESS_PROCESS_START.md). Repair reload staleness detection, which resolved a same-path in-place republish by comparing the candidate mtime against PROCESS START TIME. Reload re-execs via Command::exec, and exec preserves process start time (verified: proc_pidinfo reports a byte-identical start across exec; Linux /proc/self btime is per-task, not per-image), so a daemon whose binary was republished after boot advertised an update that no reload could clear. The client then re-entered the runtime-identity defer path on every history bootstrap and never loaded a session. Fixed by baselining on the mtime of the executing image, sampled once into a OnceLock and seeded at server boot, so the baseline advances across exec and the signal terminates. This node records the work for graph fidelity; the code is already on main.",
+      "kind": "implement",
+      "depends_on": [
+        "W5"
+      ],
+      "priority": 84,
+      "owned_paths": [
+        "crates/jcode-app-core/src/server/util/binary_freshness.rs",
+        "crates/jcode-app-core/src/server/util.rs",
+        "crates/jcode-app-core/src/server.rs"
+      ],
+      "acceptance_gates": [
+        "A same-path in-place republish is reported as an update, and the reloaded image reports no update, with both halves of the transition asserted",
+        "The staleness baseline advances across exec rather than being preserved by it",
+        "Any mtime uncertainty continues to suppress the update signal, preserving the #277 loop-safe behavior"
+      ],
+      "evidence": [
+        "regression test same_path_republish_clears_once_the_baseline_advances covering stale-then-cleared",
+        "live-daemon transcript: fresh=false, republished=true, post-reload=false at the same pid and start time",
+        "exec probe showing process start time unchanged while the image mtime advances"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6",
+      "status": "landed_early_on_main"
     },
     {
       "id": "F30-FIX-1",
