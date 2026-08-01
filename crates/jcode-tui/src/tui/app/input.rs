@@ -792,12 +792,8 @@ pub(super) fn handle_text_paste(app: &mut App, text: String) {
     if line_count < 5 {
         insert_input_text(app, &text);
     } else {
+        let placeholder = paste_placeholder(&text);
         app.pasted_contents.push(text);
-        let placeholder = format!(
-            "[pasted {} line{}]",
-            line_count,
-            if line_count == 1 { "" } else { "s" }
-        );
         insert_input_text(app, &placeholder);
     }
 }
@@ -3336,14 +3332,10 @@ impl App {
 
             if let Some(skill) = skill {
                 self.active_skill = Some(skill_name.clone());
-                self.push_display_message(DisplayMessage {
-                    role: "system".to_string(),
-                    content: format!("Activated skill: {} - {}", skill.name, skill.description),
-                    tool_calls: vec![],
-                    duration_secs: None,
-                    title: None,
-                    tool_data: None,
-                });
+                self.push_display_message(DisplayMessage::system(format!(
+                    "Activated skill: {} - {}",
+                    skill.name, skill.description
+                )));
                 if let Some(prompt) = trailing_prompt {
                     input = prompt;
                 } else {
@@ -3366,15 +3358,9 @@ impl App {
                             skill_name, endorsed.source, skill_name
                         ),
                     });
-                self.push_display_message(DisplayMessage {
-                    role: "error".to_string(),
-                    content: endorsed_hint
-                        .unwrap_or_else(|| format!("Unknown skill: /{}", skill_name)),
-                    tool_calls: vec![],
-                    duration_secs: None,
-                    title: None,
-                    tool_data: None,
-                });
+                self.push_display_message(DisplayMessage::error(
+                    endorsed_hint.unwrap_or_else(|| format!("Unknown skill: /{}", skill_name)),
+                ));
                 return;
             }
         }
@@ -3382,6 +3368,13 @@ impl App {
         // Leaving the preview should happen as soon as the user acts on it.
         self.onboarding_preview_mode = false;
 
+        // Never dispatch a blank turn: whitespace-only input survives the
+        // `is_empty()` entry guards and would burn a model call (issue: empty
+        // user messages sent to the provider).
+        if input.trim().is_empty() && self.pending_images.is_empty() {
+            crate::logging::info("Ignoring blank submit");
+            return;
+        }
         // Add user message to display (show placeholder to user, not full paste)
         // Remember the typed prompt so we can restore it to the input box if this
         // turn fails (e.g. "token refresh needed"), instead of dropping it.
