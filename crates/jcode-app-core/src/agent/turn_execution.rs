@@ -79,10 +79,43 @@ impl Agent {
             .into_iter()
             .map(|(media_type, data)| ContentBlock::Image { media_type, data })
             .collect();
-        blocks.push(ContentBlock::Text {
-            text: user_message.to_string(),
-            cache_control: None,
-        });
+        // A hidden continuation (e.g. the post-reload resume) carries its payload in
+        // the system reminder and passes an empty user_message. Appending an empty
+        // text block persists `{"type":"text","text":""}` as a user turn and ships it
+        // to the provider, which reads as the user sending a blank message.
+        //
+        // How to avoid that depends on what the transcript currently ends with,
+        // because Anthropic treats a trailing assistant message as prefill: the model
+        // continues that message instead of starting a fresh turn.
+        //   - ends on a user message (the tool_result mid-turn resume): drop the user
+        //     message entirely. The reminder still reaches the model via the system
+        //     prompt, and the provider merges consecutive same-role messages anyway.
+        //   - ends on an assistant message (the far more common resume-while-idle):
+        //     the user turn is load-bearing, so keep one and carry the reminder text
+        //     as its body. That terminates the assistant turn without inventing a
+        //     blank user message.
+        // A message stored with no blocks at all is not an option: providers reject a
+        // user message whose content array is empty.
+        let transcript_ends_on_user = self
+            .session
+            .messages
+            .last()
+            .is_some_and(|message| matches!(message.role, Role::User));
+        let hidden_reminder = self
+            .current_turn_system_reminder
+            .clone()
+            .filter(|_| user_message.is_empty() && blocks.is_empty());
+        match hidden_reminder {
+            Some(reminder) if !transcript_ends_on_user => blocks.push(ContentBlock::Text {
+                text: reminder,
+                cache_control: None,
+            }),
+            Some(_) => {}
+            None => blocks.push(ContentBlock::Text {
+                text: user_message.to_string(),
+                cache_control: None,
+            }),
+        }
 
         if blocks.len() > 1 {
             crate::logging::info(&format!(
@@ -92,7 +125,9 @@ impl Agent {
         }
 
         let image_count = blocks.len().saturating_sub(1);
-        self.add_message(Role::User, blocks);
+        if !blocks.is_empty() {
+            self.add_message(Role::User, blocks);
+        }
         crate::telemetry::record_turn();
         self.session.save()?;
         let evidence_started_at = Instant::now();
