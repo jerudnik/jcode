@@ -1171,26 +1171,25 @@ continuation message into the session transcript regardless of whether the
 write landed:
 
 ```
-rejections, keyed on distinct tool_use_id (pinned snapshot, 2408 files):
+rejections, keyed on tool_use_id, deduplicated across forked sessions:
 
-  from normal usage       : 234  across 139 sessions
-  from this investigation :  22  across   2 sessions
-  total genuine           : 256  across 141 sessions
+  from normal usage       : 230  across 137 sessions
+  from this investigation :  22
+  total distinct events   : 252
 
   todo-using sessions     : 342
-  hit, excluding ours     : 136   = 40%
-  hit with no todo file   :   3   (write dropped, nothing persisted)
+  hit, in that population : 135   = 39%
+  hit with no todo file   :   2   (write dropped, nothing persisted)
 ```
 
-Report 136/342 as the rate and 139 as the count, never divided into each
-other. The three sessions with no todo file (`cat_1784611126133`,
-`macaque_1784693657835`, `parrot_1785207428544`) are hit by the bug but
-absent from the denominator, and both facts have the same cause: the
-rejection is what kept the file from being written. A `139/342` figure is
-therefore not merely a mismatch of populations, it is a rate whose
-numerator and denominator are both moved, in opposite directions, by the
-defect being measured. Each such session is removed from the denominator
-and added to the numerator by the same event.
+Report 135/342 as the rate and 137 as the count, never divided into each
+other. The two sessions with no todo file are hit by the bug and absent
+from the denominator, and both facts have the same cause: the rejection is
+what kept the file from being written. A `137/342` figure is therefore not
+merely a mismatch of populations, it is a rate whose numerator and
+denominator are both moved, in opposite directions, by the defect being
+measured. Each such session is removed from the denominator and added to
+the numerator by the same event.
 
 Reaching that number took four passes, and the first three were wrong in
 ways worth recording, because each is a way a text-derived metric can look
@@ -1218,11 +1217,26 @@ earlier traversal missed them entirely because it walked string values and
 `tool_use.input` is a dict. That produced a correct-looking exclusion of 22
 attributed to the wrong mechanism.
 
-**Immunity by construction still has to be checked.** Keying on
-`tool_use_id` cannot double-count, but it does not prevent the tool from
-echoing its own input back into its output. One result inherited the string
-from a todo item that contained it, so 257 ids yield 256 genuine
-rejections.
+**Immunity by construction still has to be checked, twice.** Keying on
+`tool_use_id` cannot double-count within a session, but it does not prevent
+the tool from echoing its own input back into its output: one result
+inherited the string from a todo item that contained it. Nor is the id
+unique across the corpus. Sessions can be forked, and a fork copies the
+parent's history verbatim, so a single rejection appears in two session
+files. Summing per-session id sets counts it twice; a single global set
+does not. Four ids are affected, in two fork pairs confirmed by explicit
+metadata rather than inferred:
+
+```
+shark_1785328929645   parent_id = hatchling_1785272355196   1243 shared messages
+macaque_1784693657835 parent_id = fish_1784514956914        5565 shared messages
+```
+
+"One id is one event by construction" was true in the scope it was reasoned
+in, a session, and false in the scope it was applied to, the corpus. That is
+the same shape as the echo error it was meant to rule out. One of the
+"never persisted a todo file" sessions, `macaque`, is a fork, which is why
+that count is two rather than three.
 
 **The investigation contaminated its own corpus.** Two sessions spent an
 evening triggering, quoting, and testing this rejection, and they account
@@ -1245,8 +1259,9 @@ double-count over evidence that it did not.
 
 ### What actually caught these
 
-Four values were published or nearly published for one quantity: 262, 257,
-240, 234, plus a fifth error inside the probe meant to verify the fourth.
+Five values were published or nearly published for one quantity: 262, 257,
+240, 234, 230, plus a further error inside the probe meant to verify the
+fourth.
 None was caught by re-reading a method, re-checking arithmetic, or
 reviewing an approach in prose. Every one was caught the same way: the
 quantity was re-derived by a *different decomposition*, and the two results
