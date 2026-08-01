@@ -8,3 +8,17 @@ repo_root="$(git rev-parse --show-toplevel)"
 
 # Keep prompt-loaded repository instructions lean and internally consistent.
 python3 "$repo_root/scripts/check_agent_instructions.py"
+
+# Ideal-base graph/state consistency, but only when a staged change touches the
+# graph, the durable state, or the railway validator itself. This is the exact
+# offline check CI's governance job runs (`railway check`), pulled forward to
+# commit time so a broken WORK_GRAPH.json / STATE.json edit fails locally in
+# ~8s instead of after a full CI round-trip. The `--published-ref` ancestry
+# checks stay in CI: they need the remote rail and full history, which a fast
+# hook must not fetch. CI remains the authoritative backstop (a `--no-verify`
+# commit or a hook-less clone still gets caught there).
+if git diff --cached --name-only --diff-filter=ACM \
+  | grep -Eq '^(docs/fork/ideal-base/(WORK_GRAPH|STATE)\.json|scripts/ideal_base_railway\.py|tests/test_ideal_base_railway\.py)$'; then
+  echo "pre-commit: ideal-base graph/state changed; running railway check"
+  python3 "$repo_root/scripts/ideal_base_railway.py" check
+fi
