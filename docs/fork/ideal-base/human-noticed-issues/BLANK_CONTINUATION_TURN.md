@@ -1,13 +1,15 @@
 # Empty user turns reach the provider because hidden continuations persist a blank text block
 
 Reported by human (2026-08-01): messages appearing in the transcript as if the
-user had sent nothing, each burning a full model call. Observed 10 times in one
-session over ~10 hours.
+user had sent nothing, each burning a full model call. Observed 10 times in the
+reported session; a later fleet-wide scan found **1348 across 2398 sessions**,
+of which 1241 are runaway loops (see "Scope is larger than the report" below).
 
 **Fixed** in PR #81 ("fix(agent): stop sending blank user turns on hidden
-continuations"). This document records the diagnosis, and in particular records
-a *wrong first fix that was merged*, because the failure mode of that fix is the
-durable lesson.
+continuations") — but only the blank *content*. PR #81 does not stop the loops
+that produce most of them. This document records the diagnosis, and in
+particular records a *wrong first fix that was merged*, because the failure mode
+of that fix is the durable lesson.
 
 ## Symptom
 
@@ -56,7 +58,8 @@ Three independent layers agree, which is why the diagnosis is not inferential:
 Counting these needs care. A naive text search for `"text":""` over the session
 file overcounts: it also matches empty strings *nested inside a `tool_use`
 input*, which are not message bodies at all. The defect is a message whose
-content is exactly one empty text block, and by that definition there are 10.
+content is exactly one empty text block, and by that definition there are 10 in
+the reported session.
 
 ## The first fix was wrong, and its wrongness is the point
 
@@ -123,6 +126,66 @@ rather than skipping unconditionally:
 
 A zero-block message is never stored, because providers reject an empty content
 array.
+
+## Scope is larger than the report
+
+The reported session had 10 blanks. Parsing every session in `~/.jcode/sessions`
+found **1348 blanks across 2398 sessions**, and they are not evenly spread:
+
+| blanks | longest run | date | session |
+|---|---|---|---|
+| 600 | 290 | 2026-07-29 | `blossom_1785304954778` |
+| 361 | 165 | 2026-07-30 | `piglet_1785442483326` |
+| 194 | 144 | 2026-07-29 | `tulip_1785304996653` |
+| 71 | 26 | 2026-08-01 | `retriever_1785438764739` |
+| 15 | 14 | 2026-07-23 | `rabbit_1784775595418` |
+| 10 | 1 | 2026-08-01 | the reported session |
+
+"Longest run" counts blanks spaced exactly two apart, i.e. blank → assistant →
+blank. **1241 of the 1348 sit inside such runs**, concentrated in five sessions.
+The shape is a pump:
+
+```
+505 user      ""
+506 assistant "Idle."
+507 user      ""
+508 assistant "Idle."
+     … 290 consecutive rounds …
+```
+
+The reported session, with its longest run of 1, was among the mildest cases.
+Diagnosing from it alone made the defect look like a content bug affecting ten
+messages rather than a control-flow bug worth hundreds of model calls.
+
+## What PR #81 does and does not fix
+
+Replaying the shipped guard over the worst transcript separates the two:
+
+| | before | after guard |
+|---|---|---|
+| blank user turns | 600 | **0** |
+| provider-visible user turns | 860 | **858** |
+
+The guard is correct and does exactly what it claims: no blank content, no
+trailing-assistant prefill. But the loop's blanks nearly all follow assistant
+text, so they take the *promote* branch rather than the *drop* branch. **598
+model calls still dispatch.** The turns stop being blank; they do not stop being
+turns, and the cost to the user is essentially unchanged.
+
+So the empty text block was a *symptom* of the loop, not its cause. Fixing the
+symptom made the transcript well-formed while leaving the expense intact.
+
+## Remaining defect: the auto-poke has no bound
+
+`schedule_auto_poke_followup_if_needed` (`crates/jcode-tui/src/tui/app/input.rs`)
+gates on `pending_turn`, `pending_queued_dispatch`, and `has_queued_followups`,
+but has **no repeat bound and no comparison against the previous poke's state**.
+If the todo list stays incomplete, it re-pokes indefinitely. `blossom`'s session
+file simply ends mid-loop on three consecutive blanks with no assistant reply,
+which reads like process death rather than loop termination.
+
+This is live, not historical: the most recent occurrence is 2026-08-01T05:14,
+and no bound has been added since. It is unowned and tracked here only.
 
 ## Not inspected
 
