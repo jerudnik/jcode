@@ -356,6 +356,32 @@ something that sets a dispatch flag and sends with no body at all — but I have
 named three suspects and been wrong three times, so this one gets no name
 until a trace shows it.
 
+### One lead, stated as a lead
+
+The loop *onset* correlates with the `todo` tool. Taking the nearest
+`tool_use` before the first blank in every session that has one:
+
+| population | nearest preceding tool |
+|---|---|
+| runaway (>=15 blanks), n=5 | **todo 4**, bash 1 |
+| control (1-14 blanks), n=43 | bash 22, todo 5, swarm 4, write 3, bg 3, ... |
+
+`bash` dominates the control population, as it does overall; `todo` dominates
+the runaway population. In `blossom` and `piglet` the shape is identical — a
+`todo` call, one closing text reply, then the first blank.
+
+`piglet`'s model says so outright on the first blank turn:
+
+```
+"Your message came through empty."
+```
+
+**This is n=5 and it is a correlation.** It is recorded because it is the
+first structural signal about *onset* rather than *content*, and because the
+next trace should start there. It is not a cause, and after three wrong
+suspects it is not being written up as one.
+
+
 What *is* established by evidence, and does not depend on the above:
 
 * The loop is driven by an unbounded auto-poke gate on a never-completed todo
