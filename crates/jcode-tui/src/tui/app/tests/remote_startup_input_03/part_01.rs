@@ -948,3 +948,25 @@ fn test_new_for_remote_restored_interleave_triggers_dispatch_state() {
     assert!(!restored.is_processing);
     assert!(matches!(restored.status, ProcessingStatus::Idle));
 }
+
+#[test]
+fn test_whitespace_only_submit_does_not_dispatch_turn() {
+    let mut app = create_test_app();
+
+    // Whitespace-only input passes the `!input.is_empty()` entry guards, but
+    // must never reach the provider as an empty user turn.
+    for ch in "   ".chars() {
+        app.handle_key(KeyCode::Char(ch), KeyModifiers::empty())
+            .unwrap();
+    }
+
+    app.submit_input();
+
+    assert!(!app.pending_turn, "blank submit must not start a turn");
+    assert!(!app.is_processing, "blank submit must not begin processing");
+    assert!(
+        app.display_messages().is_empty(),
+        "blank submit must not add a user message: {:?}",
+        app.display_messages()
+    );
+}
