@@ -45,6 +45,9 @@ Two producers queue these continuations:
 * reload recovery (`remote/server_events.rs`), after an interrupted turn
 * the auto-poke todo gate (`input.rs`), while idle
 
+Note that the *runaway loops* documented below are a third path and are **not**
+the auto-poke; see "Remaining defect".
+
 ## Evidence
 
 Three independent layers agree, which is why the diagnosis is not inferential:
@@ -175,17 +178,38 @@ turns, and the cost to the user is essentially unchanged.
 So the empty text block was a *symptom* of the loop, not its cause. Fixing the
 symptom made the transcript well-formed while leaving the expense intact.
 
-## Remaining defect: the auto-poke has no bound
+## Remaining defect: an unbounded hidden-continuation pump
 
-`schedule_auto_poke_followup_if_needed` (`crates/jcode-tui/src/tui/app/input.rs`)
-gates on `pending_turn`, `pending_queued_dispatch`, and `has_queued_followups`,
-but has **no repeat bound and no comparison against the previous poke's state**.
-If the todo list stays incomplete, it re-pokes indefinitely. `blossom`'s session
-file simply ends mid-loop on three consecutive blanks with no assistant reply,
-which reads like process death rather than loop termination.
+The loop is **not** the auto-poke, which is what I first assumed. The evidence
+rules it out: every user message in `blossom`'s 600-blank region is blank. An
+auto-poke would read "You have N incomplete todos. Continue working…" as its
+body, because `build_poke_message` returns unbracketed text that
+`partition_queued_messages` routes to `user_messages`, not to the reminder.
 
-This is live, not historical: the most recent occurrence is 2026-08-01T05:14,
-and no bound has been added since. It is unowned and tracked here only.
+What the loop actually looks like is a `hidden_queued_system_messages` pump.
+That branch (`remote.rs`) sends `String::new()` with the payload as a reminder,
+which is exactly the blank-body shape observed:
+
+```
+} else if !app.hidden_queued_system_messages.is_empty() {
+    let combined = reminders.join("\n\n");
+    begin_remote_send(app, remote, String::new(), vec![], true, Some(combined), true, 0)
+```
+
+The assistant side is 545 replies of literally `"Idle."`, so each round costs a
+model call to say nothing. Something re-enqueued a hidden reminder after every
+completed turn without a termination condition. The mid-turn recovery reminder
+(`response_recovery.rs`) is *not* the culprit: it appears only 19 times and is
+explicitly bounded by `MAX_INCOMPLETE_CONTINUATION_ATTEMPTS`.
+
+The exact re-enqueue source is **not yet identified** — the candidate producers
+are the todo-confidence gate, which pushes to
+`hidden_queued_system_messages` when `needs_more_work` stays true, and any
+other path that enqueues a reminder on turn completion. Confirming which one
+requires reproducing against a live session, not reading transcripts.
+
+Live rather than historical: newest occurrence 2026-08-01T05:14, no bound added
+since. Unowned; recorded here only.
 
 ## Not inspected
 
