@@ -1238,6 +1238,44 @@ the same shape as the echo error it was meant to rule out. One of the
 "never persisted a todo file" sessions, `macaque`, is a fork, which is why
 that count is two rather than three.
 
+Attributing a shared id needs the fork edge, not a clock. Ranking by file
+mtime picks the *child*, because a long-lived parent keeps being written
+after a fork is abandoned. Ranking by `created_at` happens to be right here
+but is not the rule, and would break on an imported or backfilled parent.
+The correct key is lineage: an id belongs to the most ancestral session
+holding it. The decisive check on a suspected fork is whether the child has
+any rejection of its own, and `macaque` has none, so it is not an affected
+session at any ordering. Both attributions were computed and agree at
+252 / 230 / 137 / 135, which is a check on the implementation, not on the
+rule.
+
+That scope error is one of a family: three consecutive passes each broke a
+claim of the form "X is unique by construction", each true in the scope it
+was reasoned in and false in the scope it was applied. Two further members
+of that family were tested rather than left as caveats. First, whether the
+id is unique across clients or re-emitted on resume, widened to every tool
+call in the corpus:
+
+```
+distinct tool_use ids       : 53947
+ids appearing in >1 session : 4589
+  explained by a fork chain : 4589
+  not explained by lineage  :    0
+```
+
+Second, whether deduplicating along fork edges discards real events, which
+would make the count an *under*estimate. It does not: every shared
+rejection payload is byte-identical between parent and child, so the copies
+are inherited rather than re-emitted.
+
+```
+shared rejection ids, payload identical : 4
+shared rejection ids, payload differs   : 0
+```
+
+Neither result proves the family empty. Both replace an open caveat with a
+measurement.
+
 **The investigation contaminated its own corpus.** Two sessions spent an
 evening triggering, quoting, and testing this rejection, and they account
 for 22 of the 256. They are excluded from the headline figure and disclosed
