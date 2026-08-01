@@ -50,20 +50,28 @@ pub(crate) fn image_baseline_mtime() -> Option<SystemTime> {
 /// server startup so the frozen value describes the image we booted rather than
 /// whatever happens to be on disk at the first freshness query.
 pub(crate) fn seed_image_baseline_mtime() {
-    let _ = image_baseline_mtime();
+    IMAGE_BASELINE_MTIME.get_or_init(read_running_image_mtime);
 }
 
 fn read_running_image_mtime() -> Option<SystemTime> {
-    let exe = std::env::current_exe()
-        .ok()
-        .map(super::strip_deleted_suffix)?;
+    // Every failure below degrades to `None`, which the caller treats as "no
+    // provable update". That is the loop-safe direction: an unreadable baseline
+    // must never manufacture a reload signal.
+    let Ok(exe) = std::env::current_exe() else {
+        return None;
+    };
+    let exe = super::strip_deleted_suffix(exe);
     // Release installs run a wrapper script that execs a `.bin` payload; the
     // payload is the file that actually changes on publish, and it is what the
     // candidate side resolves to, so both sides must agree.
     let payload = crate::build::resolve_binary_payload(&exe);
-    std::fs::metadata(payload)
-        .ok()
-        .and_then(|meta| meta.modified().ok())
+    let Ok(meta) = std::fs::metadata(payload) else {
+        return None;
+    };
+    let Ok(modified) = meta.modified() else {
+        return None;
+    };
+    Some(modified)
 }
 
 /// Decide whether any reload candidate is *provably* newer than the running

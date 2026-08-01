@@ -471,7 +471,7 @@ use self::state::{
 pub use crate::plan::{SwarmTaskProgress, VersionedPlan};
 
 pub use self::await_members_state::pending_await_members_for_session;
-use self::reload_state::clear_reload_marker_if_stale_for_pid;
+use self::reload_state::establish_boot_reload_state;
 #[cfg(test)]
 pub(crate) use self::reload_state::subscribe_reload_signal_for_tests;
 pub use self::reload_state::{
@@ -2157,12 +2157,6 @@ impl Server {
     /// top-level runner in `src/cli/dispatch.rs`) performs the sole normal
     /// process-termination call with the returned code (F01 design 3.2.1).
     pub async fn run(&self) -> Result<ServerExit> {
-        // Freeze the running image's mtime before anything can republish over
-        // it. This is the baseline that decides "am I running stale code?"; a
-        // reload exec reinitializes it, which is what lets the update signal
-        // terminate instead of latching forever.
-        util::binary_freshness::seed_image_baseline_mtime();
-
         // Ensure socket directory exists (for named sockets like /run/user/1000/jcode/)
         if let Some(parent) = self.socket_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -2193,9 +2187,9 @@ impl Server {
             mark_close_on_exec(&debug_listener);
         }
 
-        // Preserve an in-flight reload marker for exec-based reloads owned by this
-        // process, but clear stale markers from unrelated/stale processes.
-        clear_reload_marker_if_stale_for_pid(std::process::id());
+        // Freeze the stale-code baseline and reconcile any reload marker left
+        // behind by a previous process.
+        establish_boot_reload_state(std::process::id());
 
         match reload_recovery::collect_garbage() {
             Ok(stats) if stats.removed > 0 || stats.errors > 0 => {

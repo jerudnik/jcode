@@ -37,6 +37,19 @@ pub(super) fn clear_reload_marker_if_stale_for_pid(current_pid: u32) {
     }
 }
 
+/// Establish this process's reload state at startup.
+///
+/// Freezes the running image's mtime, which is the baseline deciding "am I
+/// running stale code?". A reload exec reinitializes it, which is what lets the
+/// update signal terminate instead of latching forever.
+///
+/// Also preserves an in-flight reload marker for exec-based reloads owned by
+/// this process, while clearing stale markers left by unrelated processes.
+pub(super) fn establish_boot_reload_state(current_pid: u32) {
+    super::util::binary_freshness::seed_image_baseline_mtime();
+    clear_reload_marker_if_stale_for_pid(current_pid);
+}
+
 pub fn reload_marker_exists() -> bool {
     reload_marker_path().exists()
 }
