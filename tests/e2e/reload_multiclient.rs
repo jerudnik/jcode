@@ -396,7 +396,6 @@ async fn hidden_continuation_after_assistant_reply_sends_no_blank_user_turn() ->
         wait_for_done(&mut client, second).await?;
 
         let calls = captures.messages.lock().unwrap().clone();
-        panic!("[probe] {} call(s): {calls:?}", calls.len());
         assert!(
             calls.len() >= 2,
             "the continuation must reach the provider as its own call, got {} call(s)",
@@ -404,9 +403,21 @@ async fn hidden_continuation_after_assistant_reply_sends_no_blank_user_turn() ->
         );
         let last = calls.last().expect("a provider call");
 
+        // `Message::with_timestamps` prefixes every user text block with a
+        // `[timestamp]` tag before send, so a stored empty string arrives here as
+        // "[2026-...Z] " rather than "". Checking `is_empty()` at this boundary
+        // would silently never fire; strip the tag and inspect the remainder.
         let blank_user_turns = last
             .iter()
-            .filter(|(role, text)| role == "user" && text.is_empty())
+            .filter(|(role, text)| {
+                role == "user" && {
+                    let body = match text.split_once("] ") {
+                        Some((tag, rest)) if tag.starts_with('[') => rest,
+                        _ => text.as_str(),
+                    };
+                    body.trim().is_empty()
+                }
+            })
             .count();
         assert_eq!(
             blank_user_turns, 0,

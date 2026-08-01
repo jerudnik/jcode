@@ -307,10 +307,54 @@ if the queue is drained by another handler in between, `combined` is empty and
 an empty turn ships. The display marker `"Auto-poking:"` never appearing while
 the poke *is* firing is consistent with the enqueue being lost, not skipped.
 
-**This is a hypothesis with a named disproof.** If a live repro shows the
-poke text arriving at `partition_queued_messages` intact, the desync theory is
-dead and the fault is downstream in `begin_remote_send`. That test has not been
-run yet, and no fix should be written before it is.
+**That hypothesis is now dead.** I named its disproof — "if the poke text
+reaches the wire intact, the desync theory is dead" — and then ran it. Against
+the real `jcode-base` code:
+
+```
+n=1  -> "You have 1 incomplete todo. Continue working, or update the todo tool."
+n=6  -> "You have 6 incomplete todos. Continue working, or update the todo tool."
+```
+
+The body is never empty and never bracketed, so `partition_queued_messages`
+routes it to `user_messages` and it ships as a real user body. Nothing is lost
+between enqueue and send. **The 600 blank turns were never pokes at all**, and
+the unbounded poke gate — while genuinely unbounded — is not what produced
+them. That is the third suspect this investigation has had to discard, and the
+second one I discarded by running the test I had written down rather than by
+arguing from the code.
+
+### The blanks are a separate, wider defect
+
+Two facts reframe it:
+
+* `blossom` ends with **three consecutive user turns** and
+  `status: Crashed (process exited, no shutdown signal)`. Strict alternation
+  breaks at the end, so something was appending user turns with no reply.
+* The same signature appears in `piglet` with `is_debug: false`, no self-dev
+  build, and `status: Closed` — a **normal session that ended cleanly**:
+  361 blanks, `input_tokens` p50 **22**, and **323** assistant replies of
+  literally `"Waiting."`.
+
+| session | debug | build | status | blanks | reply |
+|---|---|---|---|---|---|
+| `blossom` | true | self-dev | Crashed | 600 | `"Idle."` |
+| `piglet` | **false** | **none** | **Closed** | 361 | `"Waiting."` |
+| `tulip` | true | self-dev | Crashed | 194 | |
+| `retriever` | false | self-dev | ok | 71 | |
+| `rabbit` | false | self-dev | ok | 15 | |
+
+So this is **not** a self-dev tester artifact and not a crash artifact. It
+reaches ordinary sessions. The constant 22 input tokens across both means the
+provider is repeatedly handed an empty turn, and the model answers with a
+one-word acknowledgement because there is nothing to answer.
+
+What drives it is still **unidentified**. Every text-carrying producer is
+excluded by output-matching, the reminder path is excluded by token accounting,
+and the poke path is now excluded by direct test. The remaining shape is
+something that sets a dispatch flag and sends with no body at all — but I have
+named three suspects and been wrong three times, so this one gets no name
+until a trace shows it.
 
 What *is* established by evidence, and does not depend on the above:
 

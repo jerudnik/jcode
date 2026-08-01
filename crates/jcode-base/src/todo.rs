@@ -389,3 +389,17 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod pump_trace_tests {
+    #[test]
+    fn poke_body_is_never_empty_and_is_not_bracketed() {
+        for n in [1usize, 6, 99] {
+            let m = super::build_auto_poke_message(n);
+            println!("n={} -> {:?}", n, m);
+            assert!(!m.trim().is_empty());
+            assert!(!m.trim_start().starts_with("[SYSTEM:"),
+                "if this were bracketed it would become a reminder, not a user body");
+        }
+    }
+}
