@@ -898,6 +898,27 @@ class LiveModeTests(unittest.TestCase):
 class ForkHealthModeTests(unittest.TestCase):
     """Mode selection is a contract: design.md section 6 forbids warn-and-skip."""
 
+    @classmethod
+    def fork_remote(cls) -> str:
+        """The canonical fork remote available in this checkout.
+
+        CI (actions/checkout) names it `origin`; the canonical local clone names
+        it `github`. Discovering it instead of hardcoding `origin` keeps these
+        tests runnable on any checkout, matching the same fix made to the
+        railway validator and its tests.
+        """
+        configured = subprocess.run(
+            ["git", "remote"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.split()
+        for name in ("origin", "github"):
+            if name in configured:
+                return name
+        return configured[0] if configured else "origin"
+
     def run_fork_health(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [str(FORK_HEALTH), *args],
@@ -908,7 +929,7 @@ class ForkHealthModeTests(unittest.TestCase):
         )
 
     def test_no_source_is_usage_error(self) -> None:
-        result = self.run_fork_health("--fork-remote", "origin")
+        result = self.run_fork_health("--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_ACQUISITION, result.stdout + result.stderr)
         self.assertIn("--fixture", result.stderr)
 
@@ -923,19 +944,19 @@ class ForkHealthModeTests(unittest.TestCase):
         self.assertIn("unknown option", result.stderr)
 
     def test_missing_fixture_is_usage_error(self) -> None:
-        result = self.run_fork_health("--fixture", "/nonexistent/fixture.json", "--fork-remote", "origin")
+        result = self.run_fork_health("--fixture", "/nonexistent/fixture.json", "--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_ACQUISITION)
         self.assertIn("fixture not found", result.stderr)
 
     def test_repo_disagreeing_with_the_manifest_is_usage_error(self) -> None:
         result = self.run_fork_health(
-            "--fixture", str(FIXTURE), "--repo", "someone/else", "--fork-remote", "origin"
+            "--fixture", str(FIXTURE), "--repo", "someone/else", "--fork-remote", self.fork_remote()
         )
         self.assertEqual(result.returncode, EXIT_ACQUISITION)
         self.assertIn("disagrees with the manifest", result.stderr)
 
     def test_valid_fixture_run_is_green_end_to_end(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--fork-remote", "origin")
+        result = self.run_fork_health("--fixture", str(FIXTURE), "--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_OK, result.stdout + result.stderr)
         self.assertIn("all invariants hold", result.stdout)
 
@@ -948,7 +969,7 @@ class ForkHealthModeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "mutated.json"
             path.write_text(json.dumps(snapshot), encoding="utf-8")
-            result = self.run_fork_health("--fixture", str(path), "--fork-remote", "origin")
+            result = self.run_fork_health("--fixture", str(path), "--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_MISMATCH, result.stdout + result.stderr)
         self.assertIn("invariant violation", result.stderr)
         self.assertNotIn("all invariants hold", result.stdout)
