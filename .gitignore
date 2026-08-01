@@ -48,3 +48,7 @@ CLAUDE.md
 .pre-commit-config.yaml
 
 .DS_Store
+
+# Generated view of ideal-base program state; regenerate with
+# scripts/ideal_base_dashboard.py. Not a source of truth.
+docs/fork/ideal-base/dashboard.html
