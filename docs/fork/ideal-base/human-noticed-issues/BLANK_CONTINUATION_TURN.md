@@ -275,16 +275,131 @@ the assistant's reply and the next blank, sustained for **124 minutes** across
 
 ### What that leaves
 
-`pending_queued_dispatch` is a *flag*, set independently of whether anything
-was actually queued. Both `local.rs` and `remote.rs` branch on it before
-checking `queued_messages`, so a path that sets the flag and then fails to
-enqueue (or has its queue drained by another handler) yields a dispatch with an
-empty body — exactly this signature. `schedule_queued_dispatch_after_interrupt`
-sets it purely on `has_queued_followups()`, with no message of its own.
+The token accounting pins the loop down precisely. Per round, across 600 rounds:
 
-That is a hypothesis about a *flag/queue desynchronization*, not a claim, and
-it is deliberately recorded as such. Confirming it needs a live repro with
-tracing on the dispatch path, which is the next step and is owned (see below).
+```
+input_tokens        22      (constant)
+output_tokens        6      (constant — the string "Idle.")
+cache_read_input  +26 per round, monotonically
+```
+
+The 26-token growth is exactly a blank user turn plus an `"Idle."` reply being
+appended to history. So the request is well-formed and the history is intact —
+the model is simply being asked to respond to **nothing**, 600 times, and
+correctly reports that it has nothing to do.
+
+**What the 22 tokens actually are** (found by @badger with a wire-boundary
+assertion, correcting my phrasing): a stored `""` does *not* arrive at the
+provider empty. `Message::with_timestamps` prefixes every user text block at
+send time, so `""` becomes `"[2026-08-01T19:25:02.874Z] "`. The 22 tokens are
+that timestamp tag and nothing else. "Empty on the wire" was imprecise; the
+turn carries its own timestamp and no content. This is also why the defect is
+easy to miss at the boundary — an `is_empty()` assertion there can never
+fire.
+
+A control rules out a caching artifact. In the *same* session with the *same*
+warm cache, the 19 replies that follow a real `response_recovery` reminder cost
+**90** input tokens; the 830 that follow a blank cost **22**. A reminder is
+~4x. There was no reminder.
+
+`blossom`'s todo file is the standing condition: **6 todos, 5 pending and 1
+in_progress, none ever completed.** `schedule_auto_poke_followup_if_needed`
+therefore returns `true` on every single turn completion, forever — it is
+called from four post-turn sites (`local.rs:502`,
+`server_events.rs:1055/1169/1385`) and has no repeat bound and no comparison
+against the previous poke.
+
+That is the *driver*. But the poke it queues carries text, and no poke text
+appears in the transcript, so the queued body is being lost between enqueue and
+send. Both dispatchers `mem::take` the queue and then send `messages.join()`;
+if the queue is drained by another handler in between, `combined` is empty and
+an empty turn ships. The display marker `"Auto-poking:"` never appearing while
+the poke *is* firing is consistent with the enqueue being lost, not skipped.
+
+**That hypothesis is now dead.** I named its disproof — "if the poke text
+reaches the wire intact, the desync theory is dead" — and then ran it. Against
+the real `jcode-base` code:
+
+```
+n=1  -> "You have 1 incomplete todo. Continue working, or update the todo tool."
+n=6  -> "You have 6 incomplete todos. Continue working, or update the todo tool."
+```
+
+The body is never empty and never bracketed, so `partition_queued_messages`
+routes it to `user_messages` and it ships as a real user body. Nothing is lost
+between enqueue and send. **The 600 blank turns were never pokes at all**, and
+the unbounded poke gate — while genuinely unbounded — is not what produced
+them. That is the third suspect this investigation has had to discard, and the
+second one I discarded by running the test I had written down rather than by
+arguing from the code.
+
+### The blanks are a separate, wider defect
+
+Two facts reframe it:
+
+* `blossom` ends with **three consecutive user turns** and
+  `status: Crashed (process exited, no shutdown signal)`. Strict alternation
+  breaks at the end, so something was appending user turns with no reply.
+* The same signature appears in `piglet` with `is_debug: false`, no self-dev
+  build, and `status: Closed` — a **normal session that ended cleanly**:
+  361 blanks, `input_tokens` p50 **22**, and **323** assistant replies of
+  literally `"Waiting."`.
+
+| session | debug | build | status | blanks | reply |
+|---|---|---|---|---|---|
+| `blossom` | true | self-dev | Crashed | 600 | `"Idle."` |
+| `piglet` | **false** | **none** | **Closed** | 361 | `"Waiting."` |
+| `tulip` | true | self-dev | Crashed | 194 | |
+| `retriever` | false | self-dev | ok | 71 | |
+| `rabbit` | false | self-dev | ok | 15 | |
+
+So this is **not** a self-dev tester artifact and not a crash artifact. It
+reaches ordinary sessions. The constant 22 input tokens across both means the
+provider is repeatedly handed an empty turn, and the model answers with a
+one-word acknowledgement because there is nothing to answer.
+
+What drives it is still **unidentified**. Every text-carrying producer is
+excluded by output-matching, the reminder path is excluded by token accounting,
+and the poke path is now excluded by direct test. The remaining shape is
+something that sets a dispatch flag and sends with no body at all — but I have
+named three suspects and been wrong three times, so this one gets no name
+until a trace shows it.
+
+### One lead, stated as a lead
+
+The loop *onset* correlates with the `todo` tool. Taking the nearest
+`tool_use` before the first blank in every session that has one:
+
+| population | nearest preceding tool |
+|---|---|
+| runaway (>=15 blanks), n=5 | **todo 4**, bash 1 |
+| control (1-14 blanks), n=43 | bash 22, todo 5, swarm 4, write 3, bg 3, ... |
+
+`bash` dominates the control population, as it does overall; `todo` dominates
+the runaway population. In `blossom` and `piglet` the shape is identical — a
+`todo` call, one closing text reply, then the first blank.
+
+`piglet`'s model says so outright on the first blank turn:
+
+```
+"Your message came through empty."
+```
+
+**This is n=5 and it is a correlation.** It is recorded because it is the
+first structural signal about *onset* rather than *content*, and because the
+next trace should start there. It is not a cause, and after three wrong
+suspects it is not being written up as one.
+
+
+What *is* established by evidence, and does not depend on the above:
+
+* The loop is driven by an unbounded auto-poke gate on a never-completed todo
+  list. Bounding repeats would stop it regardless of where the body is lost.
+* The turns are empty on the wire, not merely blank in the transcript
+  (22 vs 90 input tokens).
+* PR #81 does not address this: it corrects the persisted content, and these
+  turns take the promote branch.
+
 ## Not inspected
 
 * Whether non-Anthropic providers (OpenAI Responses, Gemini, Copilot) tolerate a
@@ -300,3 +415,310 @@ tracing on the dispatch path, which is the next step and is owned (see below).
   server-side as a defense in depth, independent of the client-side cause. The
   wire log is where this was first visible, so it is also where it could be
   caught unconditionally.
+
+## Method note: two agents, one worktree
+
+While investigating this I read a co-agent's *uncommitted* edit to
+`turn_execution.rs`, mistook it for the code on `main`, and told them their
+failing test was stale. It was not. Verifying against the committed object
+settles it immediately:
+
+```
+$ git show f25a1c026:crates/jcode-app-core/src/agent/turn_execution.rs \
+    | grep -c CONTINUATION_MARKER
+0
+```
+
+Two lessons, both cheap to apply:
+
+* **`git status` is not the working tree's author.** With more than one agent
+  in a single checkout, uncommitted content on disk may belong to someone
+  else. Read `git show <rev>:<path>`, not the file, when the claim is about
+  what ships.
+* **`git add -A` is unsafe under concurrency.** It swept a peer's in-flight
+  source into four docs commits. Nothing was lost, but the real damage was
+  epistemic: their half-finished edit became my evidence. Stage explicit
+  paths you own.
+
+The same collision struck twice, because the explanatory comment I cited as
+"main documenting its own behavior" was also the peer's uncommitted text.
+
+## The loop begins when the work finishes
+
+The onset correlates with the `todo` tool, and the correlation is not a
+base-rate artifact. Across 2377 sessions `todo` is only 3.8% of all tool
+calls, yet it is the last tool before 4 of the 5 runaway onsets:
+
+```
+P(>=4 of 5 | p=0.038) ~ 1e-5
+```
+
+The mechanism, though, is the **opposite** of the incomplete-todo poke. At the
+exact onset call every todo is already `completed`, and each carries a
+`completion_confidence`:
+
+| session | todos at onset | statuses | missing confidence | `needs_more_work` |
+|---|---|---|---|---|
+| `blossom` | 8 | all `completed` | 0 | false |
+| `piglet` | 7 | all `completed` | 0 | false |
+
+That selects the `✅ Todos complete` branch of
+`schedule_auto_poke_followup_if_needed`, which disables poking, clears
+`pending_queued_dispatch`, returns `false`, and **queues no message**. It is
+the quiet, correct branch.
+
+And the agent does stop working. Counting `tool_use` blocks after the first
+blank:
+
+```
+blossom   15 tool uses in the 1262 messages after onset
+piglet     1 tool use  in the  741 messages after onset
+```
+
+So the pump does not start when the agent has work left. It starts the moment
+the agent declares it has none, and it fires ~600 and ~360 times respectively
+against a session with nothing left to do. The remaining question is which
+caller of that `false` return keeps dispatching anyway; there are three, in
+`server_events.rs`, plus one in `local.rs`. That trace is next, and no fix
+should land before it.
+
+## The four callers do not dispatch: a negative result
+
+Stated in advance: *if none of the four callers of
+`schedule_auto_poke_followup_if_needed` acts on a `false` return, the driver is
+not in this function and the todo-onset signal is a symptom, not the cause.*
+That is what the code shows.
+
+| caller | behavior on `false` |
+|---|---|
+| `local.rs:502` | `clear_visible_turn_started()`, maybe notify. No send. |
+| `server_events.rs:1055` | `clear_visible_turn_started()`. No send. |
+| `server_events.rs:1169` | `clear_visible_turn_started()`, maybe notify. No send. |
+| `server_events.rs:1385` | returns the value. No send. |
+
+The `|| schedule_overnight_poke_followup_if_needed()` fallback that runs on
+every `false` is likewise inert here: all five of its early exits return
+`false` without queueing, and `overnight_auto_poke.is_none()` in an ordinary
+session anyway.
+
+So the quiet "todos complete" branch is not the pump. It is merely the last
+thing that happens before the pump starts, which is why it correlates so
+sharply. **Correlation confirmed, causation refuted.**
+
+### Where the dispatch actually happens
+
+The event loop, not the scheduler, is what sends:
+
+```rust
+// run_shell.rs:374 (local) and :557 (remote)
+} else if self.pending_queued_dispatch {
+    self.pending_queued_dispatch = false;
+    process_queued_messages(...).await;   // or process_remote_followups(...)
+}
+```
+
+The flag is the sole gate; nothing checks that a message exists. Both
+consumers do guard themselves (`process_remote_followups` returns early on
+`pending_queued_dispatch`, and the startup path clears
+`submit_input_on_startup` and skips on empty input), so no single read of this
+code names the offender. Whatever sets `pending_queued_dispatch` without
+leaving a message behind is the pump, and finding it needs a live trace of the
+flag's transitions, not more reading.
+
+**Status: the driver is still unnamed.** Four suspects have now been refuted
+by evidence (reminder, poke, queue desync, and the todo-completion branch).
+The next step is instrumenting the flag itself in a live repro.
+
+## Every setter queues something; the empty body is made downstream
+
+All five setters of `pending_queued_dispatch` were checked. None sets the flag
+with nothing behind it:
+
+| setter | what it queues first |
+|---|---|
+| `commands_overnight.rs:411` | `queued_messages.push(prompt)` |
+| `commands.rs:2493` | `queued_messages.push(prompt)` |
+| `input.rs:1288` (confidence gate) | `hidden_queued_system_messages.push(...)` |
+| `input.rs:1307` (incomplete poke) | `queued_messages.push(build_poke_message(...))` |
+| `input.rs:1313` | guarded by `has_queued_followups()` |
+
+So my previous framing -- "something sets the flag without leaving a message"
+-- was wrong. The queue is never empty at dispatch.
+
+The empty *body* is manufactured one layer down, in `partition_queued_messages`
+(`helpers.rs:172`). It splits the queue into user messages and reminders, and
+a reminder-only queue yields `user_messages == []`. The caller then does:
+
+```rust
+let combined = messages.join("\n\n");                       // "" when messages is empty
+let auto_retry = reminder.is_some() && messages.is_empty(); // true in exactly that case
+```
+
+`combined` is the user turn. A dispatch carrying only a hidden reminder sends
+`""` as the user message by construction. That is a real defect and it is the
+shape of the confidence-gate setter, the one setter that queues into
+`hidden_queued_system_messages` alone.
+
+### Why this still is not the pump
+
+Stated as the disproof: *if the loop's blanks carried a reminder, this path
+explains them; if they carry none, it does not.* The token accounting already
+answered. Loop replies cost a flat 22 input tokens, against 90 for a turn that
+carried a real reminder in the same session on a warm cache. There is no
+reminder in the loop's blanks. The confidence gate also fires only when
+`needs_more_work` is true, and at onset it is false in every observed session.
+
+Nor can the resend machinery recycle a bare blank:
+`recover_undelivered_queued_continuation` requires
+`!pending.content.trim().is_empty() || pending.system_reminder.is_some()`, so
+a blank with no reminder is not recoverable by that path.
+
+**Net:** a genuine empty-user-turn generator found and documented, distinct
+from all four refuted suspects, but the evidence says it is not what pumped
+these five sessions. Worth fixing on its own account (a reminder-only dispatch
+should not send `""` as the user body); not the answer to the loop.
+
+Five suspects down. The driver remains unnamed, and the live flag trace is
+still the next step.
+
+## The loop is turn-driven, not timer-driven
+
+Before instrumenting anything, two deductions worth stating, because together
+they rule out the experiment I was about to run.
+
+**1. The queued-dispatch path cannot produce these blanks.** Chain the
+established facts:
+
+* the loop's blanks carry no reminder (flat 22 input tokens vs 90 with one);
+* every setter of `pending_queued_dispatch` queues a message or a reminder;
+* `combined == ""` arises only from a reminder-*only* queue, which by
+  definition has a reminder.
+
+A blank with no reminder therefore cannot come from that path at all. Tracing
+`pending_queued_dispatch` transitions would have measured the wrong thing.
+
+**2. It is not a retry timer either.** The rate-limit/network resend at
+`remote.rs:196` re-sends `pending.content` verbatim with no emptiness check,
+which makes it a plausible pump. Stated disproof: *a timer fires on a fixed
+schedule, so timer-driven gaps cluster tightly (CV ~ 0.0-0.2), while
+turn-driven gaps track model latency and vary widely.* Measured on the blank
+turns' own timestamps:
+
+| session | n | min | median | p75 | max | CV |
+|---|---|---|---|---|---|---|
+| `blossom` | 596 | 2.4s | 3.6s | 4.5s | 286s | **3.66** |
+| `piglet` | 360 | 2.0s | 3.3s | 3.8s | 269s | **3.96** |
+
+CV near 4 is nowhere near a timer. The ~3.5s median is exactly a short model
+round trip, and the long tail is ordinary provider variance. So each blank is
+sent, answered, and the answer triggers the next one: a **send -> reply ->
+send** cycle running at model speed, not a scheduler firing into the void.
+
+That reframes the search. The pump is not something that keeps *setting a
+flag*; it is something in the turn-completion path that treats a completed
+turn as grounds for starting another, with no user input and nothing queued.
+`finish_turn` and the `Done` handler are where that decision is made, and both
+already appear in this document as the callers that were inert on `false`.
+The remaining candidate is therefore a send site that does not route through
+`pending_queued_dispatch` at all: there are 20 callers of `begin_remote_send`
+outside the queue path (7 in `remote.rs`, 10 in `key_handling.rs`, 2 in
+`input_dispatch.rs`, 1 in `tui_lifecycle.rs`).
+
+Six suspects refuted. The driver is still unnamed, but the search space is now
+a specific list rather than a whole subsystem.
+
+## Correction: the empty join is real, my trigger for it was not
+
+@badger checked the mechanism and found the conclusion right but the path
+wrong. Verified here before accepting:
+
+```
+remote.rs:215    if !app.is_processing && !app.queued_messages.is_empty() {
+remote.rs:1351   } else if !app.queued_messages.is_empty() {
+```
+
+Both joins gate on `queued_messages` being non-empty. The confidence gate I
+named (`input.rs:1288`) pushes only to `hidden_queued_system_messages` and
+never touches `queued_messages`, so neither branch can run. It also sets
+`pending_queued_dispatch`, which trips the early return at `remote.rs:211`.
+**The confidence gate cannot produce the empty join. Retracted.**
+
+The reachable path is a queue that is non-empty but *entirely bracketed*:
+`extract_bracketed_system_message` routes every `[SYSTEM: ...]` entry into
+`reminder_parts`, leaving `user_messages` empty. Non-empty in, empty out.
+Badger's test covers it:
+
+```
+partition_queued_messages_yields_no_user_text_when_queue_is_all_system ... ok
+```
+
+So the second defect stands, with a corrected trigger.
+
+### It is still not the pump
+
+Stated disproof: *the producers that queue only bracketed messages
+(`queue_startup_message`, `set_ambient_mode`) are one-shot at session start;
+if the loop were theirs, onset would sit at the beginning of the session.*
+
+| session | first blank | of | position |
+|---|---|---|---|
+| `blossom` | msg 449 | 1711 | 26% in |
+| `piglet` | msg 161 | 902 | 18% in |
+
+Onset is deep mid-session, after hundreds of healthy turns, and then repeats
+hundreds of times. A one-shot startup producer cannot do that. Seven suspects
+refuted.
+
+### What the loop's replies rule out
+
+The assistant reply that precedes each next blank is almost always pure text:
+
+| session | `text` only | with `tool_use` |
+|---|---|---|
+| `blossom` | 591 / 597 | 4 |
+| `piglet` | 357 / 361 | 1 |
+
+No tool_use means no tool-result continuation is driving the cycle, and
+`stop_reason` is `None` on every one of them. So the next send is triggered by
+an ordinary completed text turn, which is what makes this a **send -> reply ->
+send** loop at model speed rather than any resume or continuation mechanism.
+
+## A near-miss worth recording: process identity
+
+The `Done` handler's return value was worth re-checking, since the loop being
+turn-driven seemed to contradict my reading that the handler is inert. It does
+not: `run_shell.rs:583` consumes the boolean in a `match` over
+`RemoteEventOutcome` whose only arms are `Continue`/`Reconnect`/`Quit`, and the
+value otherwise feeds `needs_redraw`. It cannot start a turn. The reading
+stands, so the sender is elsewhere.
+
+That prompted asking the sessions who sent the turns rather than asking the
+code. `piglet` was *created* by pid 2203 and its `last_pid` is 52888. A
+different process finished the session than started it, which fits a
+send -> reply -> send loop driven by something that reattached.
+
+The fleet seemed to confirm it emphatically:
+
+| population | n | create-pid != last-pid |
+|---|---|---|
+| runaway (>=50 blanks) | 4 | **100%** |
+| all controls | 2127 | 10% |
+
+**Then the confound check killed it.** Long sessions get reattached far more
+often, and every runaway session is long (>= 850 messages). Comparing against
+*length-matched* controls instead:
+
+| population | n | create-pid != last-pid |
+|---|---|---|
+| runaway | 4 | 100% |
+| controls with >= 850 messages | 28 | **82%** |
+
+100% against 82% at n=4 is nothing at all. The apparent 10x signal was
+entirely session length. Recorded because the unmatched comparison looked
+decisive and would have sent the investigation into reattach handling on the
+strength of an artifact.
+
+Method note: the base-rate check that promoted the todo-onset signal (3.8% vs
+4-of-5) and the confound check that demoted this one are the same test. Any
+population comparison here needs a control matched on session length, since
+length drives blanks, reattaches, tool counts, and nearly everything else.
