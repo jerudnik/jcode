@@ -6,6 +6,11 @@
 //! - snapshot + journal persistence is searched so recent messages are visible
 //! - results are grouped by session by default to avoid duplicate floods
 
+use super::session_search_filters::{
+    external_session_matches_filters, jcode_session_matches_filters, role_filter_allows_evidence,
+    role_filter_allows_external_message, role_filter_allows_message, role_filter_allows_metadata,
+    source_matches_filter,
+};
 use super::session_search_index::{self, IndexFileSpec};
 use super::{Tool, ToolContext, ToolOutput};
 use crate::message::ContentBlock;
@@ -28,7 +33,6 @@ use jcode_session_types::{
     format_session_search_no_results, format_session_search_results,
     score_session_search_text_match as score_message_match,
     session_search_datetime_matches as session_datetime_matches,
-    session_search_field_filter_matches as field_filter_matches,
     session_search_format_datetime as format_datetime,
     session_search_path_matches_query as path_matches_query,
     session_search_raw_matches_query as raw_matches_query,
@@ -192,7 +196,7 @@ pub fn spawn_recent_index_warmup() {
 }
 
 #[derive(Debug, Clone)]
-struct SearchOptions {
+pub(super) struct SearchOptions {
     current_session_id: String,
     working_dir_filter: Option<String>,
     limit: usize,
@@ -201,13 +205,13 @@ struct SearchOptions {
     include_tools: bool,
     include_system: bool,
     include_external: bool,
-    role_filter: Option<RoleFilter>,
-    provider_filter: Option<String>,
-    model_filter: Option<String>,
-    source_filter: Option<String>,
-    saved_filter: Option<bool>,
-    debug_filter: Option<bool>,
-    canary_filter: Option<bool>,
+    pub(super) role_filter: Option<RoleFilter>,
+    pub(super) provider_filter: Option<String>,
+    pub(super) model_filter: Option<String>,
+    pub(super) source_filter: Option<String>,
+    pub(super) saved_filter: Option<bool>,
+    pub(super) debug_filter: Option<bool>,
+    pub(super) canary_filter: Option<bool>,
     after: Option<DateTime<Utc>>,
     before: Option<DateTime<Utc>>,
     context_before: usize,
@@ -246,7 +250,7 @@ impl SearchOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RoleFilter {
+pub(super) enum RoleFilter {
     User,
     Assistant,
     Metadata,
@@ -1866,110 +1870,6 @@ fn metadata_text(session: &Session) -> String {
     }
 
     fields.join("\n")
-}
-
-fn source_matches_filter(source: &str, options: &SearchOptions) -> bool {
-    options
-        .source_filter
-        .as_deref()
-        .map(|filter| source.eq_ignore_ascii_case(filter))
-        .unwrap_or(true)
-}
-
-fn jcode_session_matches_filters(session: &Session, options: &SearchOptions) -> bool {
-    if !source_matches_filter("jcode", options) {
-        return false;
-    }
-    if !provider_matches(session.provider_key.as_deref(), "jcode", options) {
-        return false;
-    }
-    if !field_filter_matches(session.model.as_deref(), options.model_filter.as_deref()) {
-        return false;
-    }
-    if options
-        .saved_filter
-        .is_some_and(|expected| session.saved != expected)
-    {
-        return false;
-    }
-    if options
-        .debug_filter
-        .is_some_and(|expected| session.is_debug != expected)
-    {
-        return false;
-    }
-    if options
-        .canary_filter
-        .is_some_and(|expected| session.is_canary != expected)
-    {
-        return false;
-    }
-    true
-}
-
-fn external_session_matches_filters(
-    session: &ExternalSessionRecord,
-    options: &SearchOptions,
-) -> bool {
-    if !source_matches_filter(session.source, options) {
-        return false;
-    }
-    if !provider_matches(session.provider_key.as_deref(), session.source, options) {
-        return false;
-    }
-    if !field_filter_matches(session.model.as_deref(), options.model_filter.as_deref()) {
-        return false;
-    }
-    if options.saved_filter == Some(true)
-        || options.debug_filter == Some(true)
-        || options.canary_filter == Some(true)
-    {
-        return false;
-    }
-    true
-}
-
-fn provider_matches(provider_key: Option<&str>, source: &str, options: &SearchOptions) -> bool {
-    let Some(filter) = options.provider_filter.as_deref() else {
-        return true;
-    };
-    field_filter_matches(provider_key, Some(filter)) || source.to_ascii_lowercase().contains(filter)
-}
-
-fn role_filter_allows_metadata(options: &SearchOptions) -> bool {
-    options
-        .role_filter
-        .map(|role| role == RoleFilter::Metadata)
-        .unwrap_or(true)
-}
-
-fn role_filter_allows_evidence(options: &SearchOptions) -> bool {
-    options
-        .role_filter
-        .map(|role| role == RoleFilter::Metadata)
-        .unwrap_or(true)
-}
-
-fn role_filter_allows_message(msg: &StoredMessage, options: &SearchOptions) -> bool {
-    let Some(role_filter) = options.role_filter else {
-        return true;
-    };
-    match role_filter {
-        RoleFilter::User => msg.role == crate::message::Role::User,
-        RoleFilter::Assistant => msg.role == crate::message::Role::Assistant,
-        RoleFilter::Metadata => false,
-    }
-}
-
-fn role_filter_allows_external_message(role: &str, options: &SearchOptions) -> bool {
-    let Some(role_filter) = options.role_filter else {
-        return true;
-    };
-    match role_filter {
-        RoleFilter::User => role.eq_ignore_ascii_case("user"),
-        RoleFilter::Assistant => role.eq_ignore_ascii_case("assistant"),
-        RoleFilter::Metadata => false,
-    }
 }
 
 fn build_jcode_context(

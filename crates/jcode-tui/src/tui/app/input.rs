@@ -1271,45 +1271,7 @@ impl App {
             .cloned()
             .collect();
         if incomplete.is_empty() {
-            if todos.is_empty() {
-                self.auto_poke_incomplete_todos = false;
-                return false;
-            }
-            let confidence_summary = super::commands::todo_confidence_summary(&todos);
-            let confidence_label =
-                super::commands::format_todo_completion_confidence(confidence_summary);
-            if confidence_summary.needs_more_work {
-                // Fire at most once per todo-list revision. The reminder asks the
-                // model to validate further and reassess, but nothing about
-                // answering it changes the todo list, so an unguarded gate
-                // re-evaluates identical state and re-queues the identical
-                // reminder every turn -- an unbounded empty-content send loop at
-                // model round-trip speed.
-                let fingerprint = super::commands::todo_gate_fingerprint(&todos);
-                if self.todo_confidence_gate_fired_for == Some(fingerprint) {
-                    crate::logging::info(
-                        "Todo completion gate already fired for this todo list; not re-queuing",
-                    );
-                    return false;
-                }
-                self.todo_confidence_gate_fired_for = Some(fingerprint);
-                self.push_display_message(DisplayMessage::system(
-                    "🛑 Todo completion gate: completion confidence needs stronger validation.",
-                ));
-                self.hidden_queued_system_messages.push(
-                    super::commands::build_todo_confidence_summary_message(&todos),
-                );
-                self.pending_queued_dispatch = true;
-                return true;
-            }
-            self.auto_poke_incomplete_todos = false;
-            self.todo_confidence_gate_fired_for = None;
-            self.push_display_message(DisplayMessage::system(format!(
-                "✅ Todos complete. Completion confidence: {}.",
-                confidence_label
-            )));
-            self.pending_queued_dispatch = false;
-            return false;
+            return self.settle_completed_todo_list(&todos);
         }
 
         self.push_display_message(DisplayMessage::system(format!(

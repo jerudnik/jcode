@@ -810,3 +810,78 @@ mod tests {
         assert_ne!(before, after);
     }
 }
+
+/// Fingerprint of the todo state the completion-confidence gate evaluates.
+///
+/// Covers exactly the fields `todo_confidence_summary` reads, so any edit that
+/// could change the gate's verdict re-arms it, while an unchanged list does
+/// not. Used to fire the gate at most once per todo-list revision.
+pub(super) fn todo_gate_fingerprint(todos: &[TodoItem]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    todos.len().hash(&mut hasher);
+    for todo in todos {
+        todo.id.hash(&mut hasher);
+        todo.status.hash(&mut hasher);
+        todo.priority.hash(&mut hasher);
+        todo.completion_confidence.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+impl App {
+    /// Arm the completion-confidence gate for this todo list, returning whether
+    /// the caller should fire it.
+    ///
+    /// Fires at most once per todo-list revision. The reminder asks the model to
+    /// validate further and reassess, but nothing about answering it changes the
+    /// todo list, so an unguarded gate re-evaluates identical state and re-queues
+    /// the identical reminder every turn: an unbounded empty-content send loop at
+    /// model round-trip speed.
+    /// Decide what happens when the auto-poke finds no incomplete todos.
+    ///
+    /// Either the completion-confidence gate fires (asking for more validation)
+    /// or the list is genuinely done and the poke stands down. Returns whether a
+    /// followup was queued.
+    pub(super) fn settle_completed_todo_list(&mut self, todos: &[TodoItem]) -> bool {
+        if todos.is_empty() {
+            self.auto_poke_incomplete_todos = false;
+            return false;
+        }
+        let confidence_summary = super::commands::todo_confidence_summary(todos);
+        let confidence_label =
+            super::commands::format_todo_completion_confidence(confidence_summary);
+        if confidence_summary.needs_more_work {
+            if !self.arm_todo_confidence_gate(todos) {
+                return false;
+            }
+            self.push_display_message(crate::tui::DisplayMessage::system(
+                "🛑 Todo completion gate: completion confidence needs stronger validation.",
+            ));
+            self.hidden_queued_system_messages.push(
+                super::commands::build_todo_confidence_summary_message(todos),
+            );
+            self.pending_queued_dispatch = true;
+            return true;
+        }
+        self.auto_poke_incomplete_todos = false;
+        self.todo_confidence_gate_fired_for = None;
+        self.push_display_message(crate::tui::DisplayMessage::system(format!(
+            "✅ Todos complete. Completion confidence: {}.",
+            confidence_label
+        )));
+        self.pending_queued_dispatch = false;
+        false
+    }
+
+    pub(super) fn arm_todo_confidence_gate(&mut self, todos: &[TodoItem]) -> bool {
+        let fingerprint = todo_gate_fingerprint(todos);
+        if self.todo_confidence_gate_fired_for == Some(fingerprint) {
+            crate::logging::info(
+                "Todo completion gate already fired for this todo list; not re-queuing",
+            );
+            return false;
+        }
+        self.todo_confidence_gate_fired_for = Some(fingerprint);
+        true
+    }
+}

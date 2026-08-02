@@ -157,7 +157,7 @@ fn model_not_found_is_fatal_model_endpoint_error() {
 // See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
 #[test]
 fn todo_gate_fingerprint_is_stable_for_unchanged_todos() {
-    use super::todo_gate_fingerprint;
+    use super::super::todos_view::todo_gate_fingerprint;
     let todos = vec![gate_todo("a", "completed", "high", Some(50))];
     assert_eq!(
         todo_gate_fingerprint(&todos),
@@ -168,7 +168,7 @@ fn todo_gate_fingerprint_is_stable_for_unchanged_todos() {
 
 #[test]
 fn todo_gate_fingerprint_changes_when_the_gate_verdict_could_change() {
-    use super::todo_gate_fingerprint;
+    use super::super::todos_view::todo_gate_fingerprint;
     let base = vec![gate_todo("a", "completed", "high", Some(50))];
     let baseline = todo_gate_fingerprint(&base);
 

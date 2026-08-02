@@ -14,6 +14,7 @@ mod streaming;
 mod tools;
 mod turn_execution;
 mod turn_loops;
+mod interrupt_notice;
 mod turn_streaming_mpsc;
 mod utils;
 
