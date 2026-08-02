@@ -341,14 +341,14 @@ impl Tool for TodoTool {
             (|| {
                 let stored_goals = load_goals(&ctx.session_id).unwrap_or_default();
                 let goals = merge_goals(&stored_goals, params.goals);
+                // The ownership gate nudges; it never discards the write. Dropping
+                // the update while returning `Ok` handed the model stale state and
+                // no indication its write was rejected, so the only way to persist
+                // was to inflate the self-assessment until it cleared the bar.
+                let mut nudges = take_reframe_nudges(&goals, &todos);
                 if !newly_completed_groups_have_sufficient_ownership(&previous, &todos, &goals) {
-                    return build_todo_output(
-                        previous,
-                        stored_goals,
-                        [TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string()],
-                    );
+                    nudges.push(TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string());
                 }
-                let nudges = take_reframe_nudges(&goals, &todos);
                 save_todos(&ctx.session_id, &todos)?;
                 save_goals(&ctx.session_id, &goals)?;
 
@@ -706,5 +706,108 @@ mod tests {
         let mut incoming = vec![history_todo("9", Some(80), vec![1, 2, 3])];
         merge_confidence_history(&[], &mut incoming);
         assert_eq!(incoming[0].confidence_history, vec![80]);
+    }
+
+    async fn write_todos(session_id: &str, input: Value) -> ToolOutput {
+        TodoTool::new()
+            .execute(
+                input,
+                ToolContext {
+                    session_id: session_id.to_string(),
+                    message_id: "msg1".to_string(),
+                    tool_call_id: "tool1".to_string(),
+                    working_dir: None,
+                    stdin_request_tx: None,
+                    graceful_shutdown_signal: None,
+                    execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
+                },
+            )
+            .await
+            .expect("todo write should succeed")
+    }
+
+    /// The gate used to early-return the *previous* list, so a completing write
+    /// was dropped while the tool still reported success. The model saw stale
+    /// state and could only persist by inflating its own ownership score.
+    #[tokio::test]
+    async fn low_ownership_still_persists_the_write_and_nudges() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let session = "ses_ownership_gate";
+
+        write_todos(
+            session,
+            json!({"todos": [{"id": "1", "content": "work", "status": "in_progress",
+                              "priority": "high", "confidence": 80, "group": "ship"}]}),
+        )
+        .await;
+
+        // Complete the group with an ownership score below the threshold.
+        let output = write_todos(
+            session,
+            json!({
+                "todos": [{"id": "1", "content": "work", "status": "completed",
+                           "priority": "high", "confidence": 80, "group": "ship"}],
+                "goals": [{"group": "ship", "hill_climbability": 96,
+                           "feedback_loop": "tests", "end_to_end_ownership": 60}],
+            }),
+        )
+        .await;
+
+        assert!(
+            output.output.contains(TODO_OWNERSHIP_CONTINUATION_MESSAGE),
+            "a low ownership score should still nudge",
+        );
+        assert!(
+            output.output.contains("\"status\": \"completed\""),
+            "the returned card must reflect the write, not stale state",
+        );
+        assert_eq!(
+            load_todos(session).expect("todos")[0].status,
+            "completed",
+            "the write must reach disk even though the gate fired",
+        );
+
+        match prev_home {
+            Some(home) => crate::env::set_var("JCODE_HOME", home),
+            None => crate::env::remove_var("JCODE_HOME"),
+        }
+    }
+
+    /// A completing group with no goal entry at all tripped the same gate,
+    /// because `is_some_and` treats a missing score as a failing one.
+    #[tokio::test]
+    async fn missing_ownership_score_still_persists_the_write() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let session = "ses_ownership_missing";
+
+        write_todos(
+            session,
+            json!({"todos": [{"id": "1", "content": "work", "status": "in_progress",
+                              "priority": "high", "confidence": 80}]}),
+        )
+        .await;
+        write_todos(
+            session,
+            json!({"todos": [{"id": "1", "content": "work", "status": "completed",
+                              "priority": "high", "confidence": 80}]}),
+        )
+        .await;
+
+        assert_eq!(
+            load_todos(session).expect("todos")[0].status,
+            "completed",
+            "an ungrouped list with no goal must remain writable",
+        );
+
+        match prev_home {
+            Some(home) => crate::env::set_var("JCODE_HOME", home),
+            None => crate::env::remove_var("JCODE_HOME"),
+        }
     }
 }
