@@ -285,6 +285,11 @@ impl Tool for TodoTool {
                                 "minimum": 0,
                                 "maximum": 100,
                                 "description": "Self-assessed confidence, 0-100, that this todo was completed correctly. Use only for completed items."
+                            },
+                            "blocked_by": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "What this todo is waiting on: ids of other todos, or a short description of an external blocker (e.g. 'awaiting user authorization'). A todo with a non-empty blocked_by is not in progress and not abandoned; it cannot proceed until the blocker clears. Omit or leave empty when nothing blocks the item."
                             }
                         }
                     }
@@ -757,6 +762,66 @@ mod tests {
     /// The gate used to early-return the *previous* list, so a completing write
     /// was dropped while the tool still reported success. The model saw stale
     /// state and could only persist by inflating its own ownership score.
+    /// `blocked_by` must survive a model write, and the schema must advertise it.
+    ///
+    /// The field has existed on `TodoItem` and deserialized correctly for some
+    /// time, but it was absent from the tool schema, so no model could know to
+    /// send it. A capability the model cannot discover is not a capability.
+    ///
+    /// This asserts the round trip *and* the schema entry together, because
+    /// either alone is a false report: documenting a field the parser drops
+    /// would advertise a capability that does not work, and a parser that
+    /// accepts a field nothing advertises stays dead.
+    #[tokio::test]
+    async fn blocked_by_round_trips_and_is_advertised_in_the_schema() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let session = "ses_blocked_by_round_trip";
+
+        write_todos(
+            session,
+            json!({"todos": [
+                {"id": "1", "content": "ship it", "status": "pending",
+                 "priority": "high", "confidence": 80,
+                 "blocked_by": ["2", "an external review"]},
+                {"id": "2", "content": "unblock it", "status": "pending",
+                 "priority": "high", "confidence": 80},
+            ]}),
+        )
+        .await;
+
+        let stored = load_todos(session).expect("todos");
+        assert_eq!(
+            stored[0].blocked_by,
+            vec!["2".to_string(), "an external review".to_string()],
+            "blocked_by must survive the model write and reach disk",
+        );
+        assert!(
+            stored[1].blocked_by.is_empty(),
+            "an omitted blocked_by must default to empty, not to the sibling's value",
+        );
+
+        let schema = TodoTool.parameters_schema();
+        let item_properties = schema
+            .get("properties")
+            .and_then(|v| v.get("todos"))
+            .and_then(|v| v.get("items"))
+            .and_then(|v| v.get("properties"))
+            .expect("todo item properties");
+        assert!(
+            item_properties.get("blocked_by").is_some(),
+            "the schema must advertise blocked_by; the parser accepts it, so \
+             omitting it hides a working capability from every model",
+        );
+
+        match prev_home {
+            Some(value) => crate::env::set_var("JCODE_HOME", value),
+            None => crate::env::remove_var("JCODE_HOME"),
+        }
+    }
+
     #[tokio::test]
     async fn low_ownership_still_persists_the_write_and_nudges() {
         let _guard = crate::storage::lock_test_env();
