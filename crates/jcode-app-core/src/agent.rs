@@ -4,6 +4,7 @@ mod compaction;
 mod environment;
 mod evidence;
 mod inline_tail;
+mod interrupt_notice;
 mod interrupts;
 mod messages;
 mod prompting;
@@ -14,7 +15,6 @@ mod streaming;
 mod tools;
 mod turn_execution;
 mod turn_loops;
-mod interrupt_notice;
 mod turn_streaming_mpsc;
 mod utils;
 
