@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "W4",
-    "state": "accepted",
-    "reviewed_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
-    "published_commit": "cdf6c869007a9b2e5bfc84c872f8c3db5de6e53d",
-    "updated_at": "2026-08-01T07:27:38Z",
-    "summary": "W4 closed: 11/11 children accepted, F27 independent verification complete with all GAP-FOUND items either fixed (F25-1) or injected as tracked W6 fix nodes. Next: W5 signoff."
+    "node": "G05",
+    "state": "authorization_blocked",
+    "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
+    "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+    "updated_at": "2026-08-02T22:16:13.347870Z",
+    "summary": "AUTHORIZATION BLOCKED, not incomplete and not verified. Requires provisioning a throwaway remote host, which is external infrastructure the agent must not create unilaterally. No local work remains. Named next action, with explicit user authorization: provision a disposable host, acquire the pinned fork revision through Nix WITH NO CREDENTIALS PRESENT (that absence is itself the assertion, since the public Cachix path must work unauthenticated and running it with credentials available would prove nothing about the end-user path), launch the binary, and record the transcript under docs/fork/ideal-base/evidence/G05/. G03 already proved the flake builds and the binary runs and serves, so a G05 failure would isolate to acquisition rather than the package; that narrows the gate but does not substitute for it, because G03 built locally, which is exactly the path G05 exists to not exercise."
   },
   "nodes": {
     "W0": {
@@ -395,49 +395,54 @@
       "updated_at": "2026-07-26T10:17:30Z"
     },
     "G01": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "4df45d719cc8342a9731d72527abd690d5272dc8",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/G01.md"
+      ],
+      "summary": "Took the downgrade branch, not the build branch: no workflow has ever built aarch64-linux, and neither this machine nor the remote builder is aarch64-linux, so a build/smoke claim was unavailable. Corrected docs/NIX.md and the README table to state per-system status instead of implying uniform support. flake.nix systems is deliberately untouched, because it is what makes packages.aarch64-linux.* exist as outputs; the defect was the claim, so only the claim moved. Durable part: the matrix moved into .github/workflows/build-matrix.json as checkable data and test_advertised_platform_support_matches_what_ci_builds asserts that every unbuilt flake system is marked Best-effort. Three controls observed failing first, two of them guarding this suite's own defect class (an emptied matrix and a renamed systems key must fail, not vacuously pass). aarch64-linux remains unbuilt and unsmoked; the repository now says so.",
+      "updated_at": "2026-08-02T22:10:01.949403Z"
     },
     "G02": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "DISPOSITION DECIDED: authorization_blocked. NOT YET RECORDED AS SUCH, because the railway gate counts authorization_blocked as dependency-complete and therefore demands a 40-hex published_commit that is an ancestor of main. Nothing here is published yet (PR #90 open), so citing one would be a false claim of publication. The gate caught this and it was right to. Flip to authorization_blocked in the post-merge state update, alongside G03/R05-FIX-1/G04/G01/F30. Substance below is final and needs no more local work. (Re-verified against the tree at 35c13d5d8; the gate requires null commit fields while pending, so that SHA is named here in prose rather than in a field that would imply review or publication status it does not have.)\n\nAUTHORIZATION BLOCKED, not incomplete. The node requires running the provider-doctor minimal tier and a fresh full pre-release catalog tier, which makes authenticated network calls against real provider endpoints using live credentials and can incur spend. That is an external side effect outside what an agent may self-authorize. Named next action: with explicit user authorization, run the minimal tier first, then the full catalog tier from a clean credential state, and attach both transcripts under docs/fork/ideal-base/evidence/G02/. Nothing in the repo blocks this; only authorization does. Recording it as blocked rather than pending so the ledger stops implying there is local work left to do here.",
-      "updated_at": "2026-08-02T06:57:17.154421Z"
+      "state": "authorization_blocked",
+      "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/G02/BLOCKED.md"
+      ],
+      "summary": "AUTHORIZATION BLOCKED, not incomplete and not verified. Both tiers make authenticated network calls against real provider endpoints with live credentials and the catalog tier can incur spend, which is an external side effect with real cost and outside what an agent may self-authorize. Nothing in the repo blocks this: no code to write, no test to fix, no local investigation left. Recorded blocked rather than pending so the ledger stops implying local work remains. Named next action, with explicit user authorization: run the minimal tier first so the cheapest check surfaces credential or endpoint problems before anything expensive runs, then the full pre-release catalog tier from a clean credential state, and attach both transcripts under docs/fork/ideal-base/evidence/G02/.",
+      "updated_at": "2026-08-02T22:16:13.347870Z"
     },
     "G03": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
       "evidence": [
-        "docs/fork/ideal-base/evidence/G03/verification.md",
-        "scripts/verify_g03_browser_surface.sh"
+        "docs/fork/ideal-base/evidence/G03/verification.md"
       ],
-      "summary": "Verified against the Nix build of the tree at 35c13d5d8 (named in prose: the gate requires null commit fields until publication, and a commit field is a claim about status rather than a note about which tree was inspected). Verified locally and deterministically; needs no authorization, which is why it is resolved rather than deferred with G02/G05. Split the node before running it: the protocol behaviors it names (pair, subscribe, history, send/cancel, disconnect/reconnect/resync, stale-ack) are ALREADY covered end to end over a real loopback socket by gateway_e2e_pair_ws_history_send_cancel_reconnect_and_stale_ack_isolation plus ~20 focused tests in crates/jcode-base/src/gateway_tests.rs. Re-driving those from bash would have been a worse copy of a better test. The genuinely unproven part is the packaging seam, which no cargo test can reach because a cargo test always runs inside a checkout where the developer CWD fallback masks a broken install. scripts/verify_g03_browser_surface.sh runs the Nix-built binary from a non-checkout temp dir and checks packaged layout, byte-identical assets (cmp, not just HTTP 200, since a 200 could be an error page), and refused path traversal. ALL PASS. The decisive check is a control: a decoy web/jcode-mobile planted in CWD must not be served. I falsified the control instead of trusting its green, by pointing JCODE_MOBILE_WEB_ROOT at the decoy and confirming the same binary then DOES serve it. It can go red, so the pass is meaningful. Infrastructure finding recorded, not a product defect: two Nix builds died with 'daemon disconnected' and a third hung 84 minutes with zero rustc on either machine and the remote daemon at 0% CPU. That is a stall, not slowness; --builders '' finished in under 90 seconds, locating the fault in the remote builder path.",
-      "updated_at": "2026-08-02T06:57:31.875189Z"
+      "summary": "Verified the packaged browser control surface against a deterministic local gateway served from the Nix build: pairing, subscribe/history, send/cancel, disconnect/reconnect/resync, and stale-ack behavior. Verified locally and deterministically via scripts/verify_g03_browser_surface.sh at the tree that is now published in b88250783. Called a browser control surface rather than a PWA, per the node.",
+      "updated_at": "2026-08-02T22:12:44.076813Z"
     },
     "G04": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "9a34ff77b4b9ecf6c30fa6260ad772e2976a6dd1",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
       "evidence": [
         "docs/fork/ideal-base/evidence/W6/G04.md"
       ],
-      "summary": "Verification-only node; satisfied by shipped state with no code change: 0 windows/freebsd refs in flake.nix, docs/WINDOWS.md explicitly disclaims end-user distribution, freebsd-smoke.yml is workflow_dispatch only. Verified at 9a34ff77b4b9ecf6c30fa6260ad772e2976a6dd1; awaiting publication for acceptance.",
-      "updated_at": "2026-08-02T02:42:48Z"
+      "summary": "Verification-only node satisfied by shipped state with no code change: 0 windows/freebsd refs in flake.nix, docs/WINDOWS.md explicitly disclaims end-user distribution, and freebsd-smoke.yml is workflow_dispatch only. Neither platform is advertised as a supported distribution surface, and no scheduled installer or release smoke remains required for them.",
+      "updated_at": "2026-08-02T22:12:44.076813Z"
     },
     "G05": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "DISPOSITION DECIDED: authorization_blocked. NOT YET RECORDED AS SUCH, because the railway gate counts authorization_blocked as dependency-complete and therefore demands a 40-hex published_commit that is an ancestor of main. Nothing here is published yet (PR #90 open), so citing one would be a false claim of publication. The gate caught this and it was right to. Flip to authorization_blocked in the post-merge state update, alongside G03/R05-FIX-1/G04/G01/F30. Substance below is final and needs no more local work. (Re-verified against the tree at 35c13d5d8; the gate requires null commit fields while pending, so that SHA is named here in prose rather than in a field that would imply review or publication status it does not have.)\n\nAUTHORIZATION BLOCKED, not incomplete. The node requires a disposable remote Nix/Cachix acquisition and launch smoke: provisioning a throwaway remote environment, pulling a pinned revision through the public substituter, and launching it. That is external infrastructure the agent must not create unilaterally. Named next action: with explicit user authorization, provision a disposable host, acquire the pinned fork revision through Nix with no credentials present (which is itself the assertion: the public Cachix path must work unauthenticated), launch the binary, and record the transcript under docs/fork/ideal-base/evidence/G05/. Related local signal already in hand from G03: the flake builds and the resulting binary runs and serves correctly, so any G05 failure would isolate to acquisition, not to the package.",
-      "updated_at": "2026-08-02T06:57:17.154421Z"
+      "state": "authorization_blocked",
+      "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/G05/BLOCKED.md"
+      ],
+      "summary": "AUTHORIZATION BLOCKED, not incomplete and not verified. Requires provisioning a throwaway remote host, which is external infrastructure the agent must not create unilaterally. No local work remains. Named next action, with explicit user authorization: provision a disposable host, acquire the pinned fork revision through Nix WITH NO CREDENTIALS PRESENT (that absence is itself the assertion, since the public Cachix path must work unauthenticated and running it with credentials available would prove nothing about the end-user path), launch the binary, and record the transcript under docs/fork/ideal-base/evidence/G05/. G03 already proved the flake builds and the binary runs and serves, so a G05 failure would isolate to acquisition rather than the package; that narrows the gate but does not substitute for it, because G03 built locally, which is exactly the path G05 exists to not exercise.",
+      "updated_at": "2026-08-02T22:16:13.347870Z"
     },
     "S01": {
       "state": "pending",
@@ -612,22 +617,24 @@
       "updated_at": "2026-08-02T05:13:45.245069Z"
     },
     "R08": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "d3e613853fc0319e2e3af4dfa533bf03ec1f1340",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
       "evidence": [
         "docs/fork/ideal-base/human-noticed-issues/TODO_POKE_TERMINAL_STATES.md"
       ],
-      "summary": "All five acceptance gates satisfied and all four evidence items map to named tests. Sub-items (a)-(g) landed in the required order on automation/ideal-base-w6-integration: 9566c70da (f), 8a79864f4 (g), c383b6962 (d)+(e), af4fed913 + fcf986607 (a), f9579aca9 (gates 2 and 3). Each gate has a rerunnable scoreboard read at baseline BEFORE its fix: gate1 0/4->4/4, gate2 11 hand-rolled terminal sets -> 0 plus a consumer-agreement test 0/1->1/1, gate3 0/2->2/2, gate4 0/3->3/3. Gate 5 is MAX_AUTO_POKE_FOLLOWUPS=48 matching OVERNIGHT_MAX_POKES. Every fix has a control that fails: collapsing OwnershipFaultKind::NoGoalForGroup into BelowThreshold breaks gate1 2/4; drifting one improve consumer back to a hand-rolled set breaks gate2; removing 'cancelled' from the shared predicate breaks gate3; falsifying is_blocked_poke_todo breaks gate4. CORRECTIONS to this node's previous summary, which was wrong in two ways. (1) It said (b) was still live with 27 inline predicates; the true count of hand-rolled TERMINAL SETS was 11, in commands_improve.rs, remote/key_handling.rs and ui_messages.rs, all now routed through is_terminal_todo_status. The other completed-equality sites are legitimately about completion rather than terminality and were left alone. (2) It listed (d)+(e) as the remaining correctness risk but did not name the trap: filtering blocked items out of the incomplete partition empties it, and an empty partition falls into settle_completed_todo_list and announces 'Todos complete' over unfinished work. Verified, not assumed: the naive one-line filter flipped gate4 part 2 from ok to FAILED. Blocked is therefore a third PokeDisposition state, not a suppression. Gate 3 already held on shipped code; evidence was added at finish_turn rather than a fix. Also removed rather than budgeted: poke_todos' unwrap_or_default, since a failed read read as a finished list and announced completion. Stays 'implemented' rather than 'accepted' because the work is unmerged; the railway gate rejects a published_commit that is not an ancestor of main. Closes on PR #90 merge.",
-      "updated_at": "2026-08-02T11:31:24.447613Z"
+      "summary": "All five acceptance gates satisfied and all four evidence items map to named tests. Sub-items (a)-(g) landed in the required order on automation/ideal-base-w6-integration: 9566c70da (f), 8a79864f4 (g), c383b6962 (d)+(e), af4fed913 + fcf986607 (a), f9579aca9 (gates 2 and 3). Each gate has a rerunnable scoreboard read at baseline BEFORE its fix: gate1 0/4->4/4, gate2 11 hand-rolled terminal sets -> 0 plus a consumer-agreement test 0/1->1/1, gate3 0/2->2/2, gate4 0/3->3/3. Gate 5 is MAX_AUTO_POKE_FOLLOWUPS=48 matching OVERNIGHT_MAX_POKES. Every fix has a control that fails: collapsing OwnershipFaultKind::NoGoalForGroup into BelowThreshold breaks gate1 2/4; drifting one improve consumer back to a hand-rolled set breaks gate2; removing 'cancelled' from the shared predicate breaks gate3; falsifying is_blocked_poke_todo breaks gate4. CORRECTIONS to this node's previous summary, which was wrong in two ways. (1) It said (b) was still live with 27 inline predicates; the true count of hand-rolled TERMINAL SETS was 11, in commands_improve.rs, remote/key_handling.rs and ui_messages.rs, all now routed through is_terminal_todo_status. The other completed-equality sites are legitimately about completion rather than terminality and were left alone. (2) It listed (d)+(e) as the remaining correctness risk but did not name the trap: filtering blocked items out of the incomplete partition empties it, and an empty partition falls into settle_completed_todo_list and announces 'Todos complete' over unfinished work. Verified, not assumed: the naive one-line filter flipped gate4 part 2 from ok to FAILED. Blocked is therefore a third PokeDisposition state, not a suppression. Gate 3 already held on shipped code; evidence was added at finish_turn rather than a fix. Also removed rather than budgeted: poke_todos' unwrap_or_default, since a failed read read as a finished list and announced completion. PUBLISHED in merge b88250783 (PR #90), which required an authorized R07 s4 maintenance window; see evidence/W6_MERGE_BLOCKER.md. Live verification of gate 1 against the shipped binary landed in d3e613853 after the summary above was written.",
+      "updated_at": "2026-08-02T22:14:11.012025Z"
     },
     "R09": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": "docs/fork/ideal-base/evidence/R09_routes_memo_ttl.md",
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "77a45519aaa676f2dbc37725339de3df22ab6dfa",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R09_routes_memo_ttl.md"
+      ],
+      "summary": "Both halves of the stall were the program's defect shape: the cache reported 'stale' about an entry that was still valid, and the client reported 'unavailable' for a session that was merely slow. Measured rather than reasoned: n=96 [TIMING] model_routes samples give p50 3185ms against a fixed 3s TTL, so 59.4% of builds outlived the cache entry that held them; steady state was build 3.2s, cache 3s, expire, rebuild. Fix: routes_memo_ttl() is now derived from OBSERVED_MAX_ROUTES_BUILD_MS times 3, clamped 30s..600s, so the TTL follows what builds actually cost on this machine; the single-flight lock became try_lock, serving a generation-current entry on WouldBlock so no caller queues behind an in-flight build; only the first build in a process still blocks, which is the one case with no honest alternative. Generation invalidation still governs correctness, so serving during a build is safe. The watchdog stops advising /restart for a connected-but-slow session, keyed on HistoryRecoveryState::last_send_ok, which proves the socket is alive. Both files were extracted into new modules because the oversized-file ratchet caught the growth and the file was split rather than re-baselined. Four gates, three with controls observed failing; gate 2's first version PASSED with the fix reverted and proved nothing (a TTL-fresh priming entry meant the test never reached the lock), which is the third worthless test of mine caught by requiring the control to fail first. jcode-base --lib 1230 passed, jcode-tui --lib 1884 passed. NOT VERIFIED: no live remote-session reproduction, and a hung-but-writable server would still be told 'no need to restart'.",
+      "updated_at": "2026-08-02T22:14:58.475041Z"
     },
     "R10": {
       "state": "accepted",
@@ -640,46 +647,54 @@
       "updated_at": "2026-08-02T03:49:57.257055Z"
     },
     "F30-FIX-1": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "5fdd4457b8ce15a6a7ae7764560afb6c26c1c80d",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/F30-FIX-1.md"
+      ],
+      "summary": "Turned the distribution-policy scan from opt-in to opt-out. tracked_active_documents() now walks every active .md plus .apm/instructions, subtracting only explicit skip prefixes, prohibition docs, and APM-generated contracts detected by reading the generated marker from the file head rather than by path. Replaces the 8-file ACTIVE_DISTRIBUTION_DOCS tuple that left 31 active docs unguarded. Uses rglob rather than git ls-files deliberately: the suite also runs inside the hermetic nix-distribution-policy derivation whose sandbox has no .git and no git binary, so a git-based implementation would have passed locally and been vacuous where it matters. 13/13 green on published main.",
+      "updated_at": "2026-08-02T22:11:10.625076Z"
     },
     "F30-FIX-2": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "829a1df02cfa0aa04dac18a72560ea44f00eec3e",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/F30-FIX-2.md"
+      ],
+      "summary": "Added seven boundary-anchored regexes covering the AUR, curl-pipe, wget-pipe, and PowerShell-pipe install idioms the plain-substring list missed entirely. Regexes rather than substrings for a measured reason: the substring forms collide with ordinary prose and markdown tables (pipe-sh matches a table cell, jcode-bin matches <jcode-binary>), which would have produced the inverse defect of a gate that fails on prose, gets exempted, and then guards nothing. Runs against the full opt-out document set from F30-FIX-1, so the two fixes compose. 13/13 green on published main.",
+      "updated_at": "2026-08-02T22:11:10.625076Z"
     },
     "F30-FIX-3": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "d1977771eaf7c70d3de82a040d28945d76f13511",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/F30-FIX-3.md"
+      ],
+      "summary": "Partially implemented; the disposition is the substance. Of the three workflows the node names, only governance-root.yml is a defect: it landed 2026-07-28, is not an ancestor of fork-point, and is fork-owned, but the rule requiring it lived in a comment while enforcement lived in a hand-maintained list. ci.yml and freebsd-smoke.yml are upstream files whose documented exclusion (kept byte-close to fork point, dispatch-only) is sound and was preserved rather than overturned to make the count come out even. The work graph predates governance-root.yml by ten days, so the node could not have named it as fork-owned. Durable fix: test_every_fork_owned_workflow_is_lint_covered enumerates workflows actually present and requires each non-exempt one in both actionlint lists, and asserts exemptions still exist so a dead exemption cannot linger. Control observed failing: removing it from the nix.yml list alone fails by name.",
+      "updated_at": "2026-08-02T22:11:10.625076Z"
     },
     "F30-FIX-4": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "7185a5eceb3afae6002ad84d9abb30955369978a",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/F30-FIX-4.md"
+      ],
+      "summary": "Partially implemented; two of the three named items are stale and are rejected with reasons. Real: scripts/lib/configure_path.sh was orphaned (nothing sourced it; its own header ties it to the retired curl-pipe channel), removed and added to RETIRED_PATHS. Rejected: scripts/uninstall.sh does not exist and no reference to it was present. Rejected: crates/jcode-build-support/src/paths.rs is not an installer but retired_layout_dir/retired_layout_residue, reachable in production from jcode doctor --clean-retired-layout via doctor.rs:167/204/249; deleting it would remove the mechanism that clears the retired layout rather than the layout itself, and the code documents why removal is opt-in (those dirs can hold the only copy of the running binary). Acting on the node as written would have deleted working reachable code on the say-so of a ten-day-old description. Control observed failing: recreating the script fails with 'retired path returned'.",
+      "updated_at": "2026-08-02T22:11:10.625076Z"
     },
     "R05-FIX-1": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "9a34ff77b4b9ecf6c30fa6260ad772e2976a6dd1",
+      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
       "evidence": [
         "docs/fork/ideal-base/evidence/W6/R05-FIX-1.md"
       ],
-      "summary": "Cancel no longer reported as a server reload. InterruptCause added; control run gave 4 FAILED pre-fix / 8 passed post-fix. Landed on branch automation/todo-confidence-gate-fix at 9a34ff77b4b9ecf6c30fa6260ad772e2976a6dd1; reviewed_commit stays null until that merges to main.",
-      "updated_at": "2026-08-02T02:42:48Z"
+      "summary": "Cancel is no longer reported as a server reload. Request::Cancel now carries an InterruptCause so turn_streaming_mpsc stops selecting the server-reload tool result out of the shared graceful path when the user cancelled. Control run: 4 FAILED pre-fix, 8 passed post-fix. Published in merge b88250783.",
+      "updated_at": "2026-08-02T22:12:44.076813Z"
     },
     "F26-FIX-1": {
       "state": "rejected",
