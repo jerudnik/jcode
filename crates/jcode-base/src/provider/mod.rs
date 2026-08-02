@@ -29,12 +29,7 @@ mod selection;
 mod startup;
 mod state;
 
-#[cfg(test)]
-use routes_memo::CATALOG_GENERATION;
-use routes_memo::{
-    GLOBAL_ROUTES_BUILD_LOCK, GLOBAL_ROUTES_MEMO, RoutesMemoEntry, catalog_generation,
-    record_routes_build_duration, routes_memo_ttl,
-};
+use routes_memo::RoutesMemoEntry;
 
 use crate::auth;
 use crate::message::{Message, ToolDefinition};

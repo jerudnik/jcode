@@ -20,7 +20,7 @@ use super::ModelRoute;
 /// `AuthStatus::invalidate_cache()` on login/logout/credential edits), and the
 /// catalog generation (bumped by prefetch/refresh completions).
 #[derive(Clone)]
-pub(super) struct RoutesMemoEntry {
+pub(crate) struct RoutesMemoEntry {
     pub(super) built_at: std::time::Instant,
     pub(super) auth_generation: u64,
     pub(super) catalog_generation: u64,

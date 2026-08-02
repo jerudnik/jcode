@@ -26,7 +26,7 @@ fn r09_gate1_ttl_exceeds_every_measured_build_time() {
     // Drive the observed-build tracker with the real measurements, exactly as a
     // process would learn them, then require the resulting TTL to outlast them.
     for ms in MEASURED_BUILD_MS {
-        super::record_routes_build_duration(std::time::Duration::from_millis(*ms));
+        super::routes_memo::record_routes_build_duration(std::time::Duration::from_millis(*ms));
     }
     let ttl = super::routes_memo::routes_memo_ttl();
     let p99 = measured_p99_ms();
@@ -61,7 +61,7 @@ fn r09_gate1_ttl_is_derived_from_measurement_not_a_fixed_guess() {
         "with no observed build the TTL should sit at its floor"
     );
 
-    super::record_routes_build_duration(std::time::Duration::from_secs(20));
+    super::routes_memo::record_routes_build_duration(std::time::Duration::from_secs(20));
     let derived = super::routes_memo::routes_memo_ttl();
     assert!(
         derived > floor,
@@ -76,7 +76,7 @@ fn r09_gate1_ttl_is_derived_from_measurement_not_a_fixed_guess() {
 
     // And it stays bounded, so one pathological build cannot pin a catalog for
     // the life of the process.
-    super::record_routes_build_duration(std::time::Duration::from_secs(86_400));
+    super::routes_memo::record_routes_build_duration(std::time::Duration::from_secs(86_400));
     assert_eq!(
         super::routes_memo::routes_memo_ttl(),
         super::routes_memo::ROUTES_MEMO_MAX_TTL,
@@ -131,7 +131,7 @@ fn r09_gate2_a_request_is_not_queued_behind_an_in_flight_build() {
         // Simulate a long build already in flight: hold the single-flight lock,
         // exactly as a 17s cold rebuild would. This is the condition that used
         // to park an interactive caller for the whole build.
-        let held = super::GLOBAL_ROUTES_BUILD_LOCK
+        let held = super::routes_memo::GLOBAL_ROUTES_BUILD_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
 
@@ -172,7 +172,7 @@ fn r09_gate3_serving_during_a_build_still_respects_generation_invalidation() {
         // while nothing has signalled that the content changed. Bump the
         // catalog generation (what a prefetch/auth change does) and the stale
         // entry must NOT be served, even though a build is in flight.
-        CATALOG_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        super::routes_memo::CATALOG_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let shared_key = provider.routes_memo_key();
         assert!(
