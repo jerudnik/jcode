@@ -76,7 +76,19 @@ pub(super) fn request_payload_summary(kind: &str, line: &str) -> Vec<(String, St
                 }
             };
         for name in [
-            "content", "message", "prompt", "task", "command", "input", "value",
+            "content",
+            "message",
+            "prompt",
+            "task",
+            "command",
+            "input",
+            "value",
+            // A request can carry a side-channel reminder with empty `content`,
+            // so omitting this field made an empty-bodied turn indistinguishable
+            // from a truly empty one and produced a false negative that cost
+            // hours of debugging. See
+            // docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
+            "system_reminder",
         ] {
             bytes_chars(name, &value, &mut fields);
         }

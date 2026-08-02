@@ -2597,6 +2597,24 @@ pub(super) fn build_todo_confidence_summary_message(todos: &[crate::todo::TodoIt
     TODO_COMPLETION_CONTINUATION_MESSAGE.to_string()
 }
 
+/// Fingerprint of the todo state the completion-confidence gate evaluates.
+///
+/// Covers exactly the fields `todo_confidence_summary` reads, so any edit that
+/// could change the gate's verdict re-arms it, while an unchanged list does
+/// not. Used to fire the gate at most once per todo-list revision.
+pub(super) fn todo_gate_fingerprint(todos: &[crate::todo::TodoItem]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    todos.len().hash(&mut hasher);
+    for todo in todos {
+        todo.id.hash(&mut hasher);
+        todo.status.hash(&mut hasher);
+        todo.priority.hash(&mut hasher);
+        todo.completion_confidence.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoConfidenceSummary {
     let completed: Vec<&crate::todo::TodoItem> = todos
         .iter()

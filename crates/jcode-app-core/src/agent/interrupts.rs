@@ -168,11 +168,19 @@ impl Agent {
     }
 
     pub fn request_graceful_shutdown(&self) {
-        self.graceful_shutdown.fire();
+        self.graceful_shutdown
+            .fire_with_cause(jcode_agent_runtime::InterruptCause::ServerReload);
     }
 
     pub(super) fn is_graceful_shutdown(&self) -> bool {
         self.graceful_shutdown.is_set()
+    }
+
+    /// True only when the current interruption is an actual server reload.
+    /// Callers that label the interruption for the model must use this rather
+    /// than [`is_graceful_shutdown`], which is also set by a plain cancel.
+    pub(super) fn is_server_reload(&self) -> bool {
+        self.graceful_shutdown.is_server_reload()
     }
 
     /// Check if there are pending soft interrupts

@@ -26,6 +26,23 @@ pub type BackgroundToolSignal = Arc<std::sync::atomic::AtomicBool>;
 /// Signal to gracefully stop generation.
 pub type GracefulShutdownSignal = Arc<std::sync::atomic::AtomicBool>;
 
+/// Why an [`InterruptSignal`] was fired.
+///
+/// The signal itself is a single shared bit: the server registers one handle
+/// per session and both a user/stall-guard cancel and a server reload fire it.
+/// Without a cause, downstream code can only ask "is it set?" and has to guess
+/// a reason, which is how a plain cancel came to be reported to the model as
+/// `[interrupted by server reload]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptCause {
+    /// A cancel: user Esc, a client stall guard, or any other stop request
+    /// that does not imply the process is going away.
+    Cancel,
+    /// A graceful shutdown for a server reload. The process is restarting, so
+    /// interrupted work may be resumable after the new binary comes up.
+    ServerReload,
+}
+
 /// Async-aware interrupt signal that combines AtomicBool (sync read) with
 /// tokio::Notify (async wake). Eliminates spin-loops during tool execution.
 #[derive(Clone)]
@@ -35,6 +52,10 @@ pub struct InterruptSignal {
     /// that a *newer* fire landed in the meantime and skip the reset instead
     /// of erasing a cancel the target has not observed yet (issue #428).
     epoch: Arc<std::sync::atomic::AtomicU64>,
+    /// Cause of the most recent fire. Stored next to the flag so every reader
+    /// of `is_set()` can also learn *why* without a second channel.
+    /// `false` = [`InterruptCause::Cancel`], `true` = ServerReload.
+    reload: Arc<std::sync::atomic::AtomicBool>,
     notify: Arc<tokio::sync::Notify>,
 }
 
@@ -43,12 +64,23 @@ impl InterruptSignal {
         Self {
             flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
     pub fn fire(&self) {
+        self.fire_with_cause(InterruptCause::Cancel);
+    }
+
+    /// Fire and record why. Readers use [`cause`](Self::cause) to label the
+    /// interruption honestly instead of assuming a reload.
+    pub fn fire_with_cause(&self, cause: InterruptCause) {
         self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.reload.store(
+            matches!(cause, InterruptCause::ServerReload),
+            std::sync::atomic::Ordering::SeqCst,
+        );
         self.flag.store(true, std::sync::atomic::Ordering::SeqCst);
         self.notify.notify_waiters();
     }
@@ -57,8 +89,26 @@ impl InterruptSignal {
         self.flag.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    /// Cause of the most recent fire. Only meaningful while
+    /// [`is_set`](Self::is_set) is true; defaults to
+    /// [`InterruptCause::Cancel`] otherwise.
+    pub fn cause(&self) -> InterruptCause {
+        if self.reload.load(std::sync::atomic::Ordering::SeqCst) {
+            InterruptCause::ServerReload
+        } else {
+            InterruptCause::Cancel
+        }
+    }
+
+    /// True when the current fire is a server reload rather than a cancel.
+    pub fn is_server_reload(&self) -> bool {
+        self.is_set() && matches!(self.cause(), InterruptCause::ServerReload)
+    }
+
     pub fn reset(&self) {
         self.flag.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.reload
+            .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Current fire epoch. Capture this right after a [`fire`](Self::fire) to
@@ -203,6 +253,44 @@ mod tests {
                     .expect("waiter task must not panic");
             }
         });
+    }
+
+    /// The default `fire()` is a cancel, not a reload. The server registers one
+    /// signal per session for both, so a reader that cannot tell them apart
+    /// reports a cancel as a restart (R05-FIX-1).
+    #[test]
+    fn fire_defaults_to_cancel_and_reload_is_explicit() {
+        let signal = InterruptSignal::new();
+        assert_eq!(signal.cause(), InterruptCause::Cancel);
+        assert!(!signal.is_server_reload());
+
+        signal.fire();
+        assert!(signal.is_set());
+        assert_eq!(signal.cause(), InterruptCause::Cancel);
+        assert!(!signal.is_server_reload(), "a plain fire() is not a reload");
+
+        signal.fire_with_cause(InterruptCause::ServerReload);
+        assert!(signal.is_server_reload());
+
+        // A later cancel must not inherit the earlier reload cause.
+        signal.fire();
+        assert!(
+            !signal.is_server_reload(),
+            "cancel after reload must not report as a reload"
+        );
+    }
+
+    /// A cleared signal reports no reload, so a stale cause cannot leak into
+    /// the next turn.
+    #[test]
+    fn reset_clears_the_reload_cause() {
+        let signal = InterruptSignal::new();
+        signal.fire_with_cause(InterruptCause::ServerReload);
+        assert!(signal.is_server_reload());
+        signal.reset();
+        assert!(!signal.is_set());
+        assert!(!signal.is_server_reload());
+        assert_eq!(signal.cause(), InterruptCause::Cancel);
     }
 
     /// A fire() that happened before notified() is observed immediately.

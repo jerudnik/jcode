@@ -148,3 +148,87 @@ fn model_not_found_is_fatal_model_endpoint_error() {
     let err = "chat request failed: 404 model_not_found: The model `gpt-foo` does not exist";
     assert!(is_fatal_model_endpoint_error(err));
 }
+
+// The todo completion-confidence gate queues a continuation reminder asking the
+// model to validate further and reassess. Nothing about answering that reminder
+// changes the todo list, so the gate must not re-fire against unchanged state:
+// an unguarded gate re-queues the identical reminder every turn, producing an
+// unbounded empty-content send loop at model round-trip speed.
+// See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
+#[test]
+fn todo_gate_fingerprint_is_stable_for_unchanged_todos() {
+    use super::todo_gate_fingerprint;
+    let todos = vec![gate_todo("a", "completed", "high", Some(50))];
+    assert_eq!(
+        todo_gate_fingerprint(&todos),
+        todo_gate_fingerprint(&todos.clone()),
+        "an unchanged todo list must fingerprint identically, or the gate re-fires forever"
+    );
+}
+
+#[test]
+fn todo_gate_fingerprint_changes_when_the_gate_verdict_could_change() {
+    use super::todo_gate_fingerprint;
+    let base = vec![gate_todo("a", "completed", "high", Some(50))];
+    let baseline = todo_gate_fingerprint(&base);
+
+    // Every field `todo_confidence_summary` reads must re-arm the gate.
+    let raised = vec![gate_todo("a", "completed", "high", Some(99))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&raised),
+        "raising completion_confidence must re-arm the gate"
+    );
+
+    let missing = vec![gate_todo("a", "completed", "high", None)];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&missing),
+        "clearing completion_confidence must re-arm the gate"
+    );
+
+    let reprioritized = vec![gate_todo("a", "completed", "low", Some(50))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&reprioritized),
+        "priority changes the confidence weighting, so it must re-arm the gate"
+    );
+
+    let reopened = vec![gate_todo("a", "in_progress", "high", Some(50))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&reopened),
+        "reopening a todo must re-arm the gate"
+    );
+
+    let mut appended = base.clone();
+    appended.push(gate_todo("b", "completed", "high", Some(50)));
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&appended),
+        "adding a todo must re-arm the gate"
+    );
+
+    let renamed = vec![gate_todo("z", "completed", "high", Some(50))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&renamed),
+        "replacing a todo must re-arm the gate"
+    );
+}
+
+fn gate_todo(
+    id: &str,
+    status: &str,
+    priority: &str,
+    completion_confidence: Option<u8>,
+) -> crate::todo::TodoItem {
+    crate::todo::TodoItem {
+        content: format!("todo {id}"),
+        status: status.to_string(),
+        priority: priority.to_string(),
+        id: id.to_string(),
+        completion_confidence,
+        ..Default::default()
+    }
+}
