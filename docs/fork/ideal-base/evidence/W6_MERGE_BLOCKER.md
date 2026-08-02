@@ -132,6 +132,10 @@ Option 3 is only a partial mitigation and is stated as such.
 
 ## Resolution: `--admin`, and why it was the lower-risk option
 
+**Superseded. `--admin` was attempted with authorization and it FAILED.** See
+"Correction: `--admin` does not work here" below. The risk comparison in this
+section is still accurate; its conclusion is not actionable.
+
 The user authorized the override explicitly, conditional on an independent
 review agreeing it was warranted. That review (sheep) agreed, and reversed the
 assumption in option 2 above. Recorded so the next reader sees *why* the flag
@@ -163,6 +167,71 @@ paths are sheep's own F30 commits riding in this integration branch, so it was
 not a fully disinterested reviewer of two of those five files. The evidence it
 gave is mechanical and independently reproducible, which is why this is
 recorded as a caveat rather than treated as disqualifying.
+
+## Correction: `--admin` does not work here
+
+Attempted with the user's explicit authorization, at head `35c38febe`, with CI
+fully settled at **15 pass / 1 fail** and the single failure confirmed to be
+`Governance Root` at its `Detect governance-path changes` step. All three other
+required contexts were green.
+
+```text
+$ gh pr merge 90 --merge --admin
+GraphQL: Repository rule violations found
+4 of 4 required status checks are expected. (mergePullRequest)
+
+$ gh api -X PUT repos/jerudnik/jcode/pulls/90/merge -f merge_method=merge
+HTTP 405  Repository rule violations found
+```
+
+The account holds `{"admin": true, "maintain": true, ...}` on this repository,
+so this is not a permissions shortfall. The cause is that `main` is protected by
+**rulesets**, not classic branch protection:
+
+```text
+GET /repos/jerudnik/jcode/branches/main/protection  ->  404 Branch not protected
+GET /repos/jerudnik/jcode/rulesets/18509013         ->  active, bypass_actors: []
+```
+
+Classic branch protection has an `enforce_admins` flag that `--admin` keys off.
+Rulesets have no such concept: the *only* way to be exempt is to appear in
+`bypass_actors`, which is empty. Admin permission grants the ability to **edit
+the ruleset**, not to ignore it. So `--admin` cannot bypass this rule no matter
+who runs it.
+
+**This falsifies option 1 in the list above, and the recommendation built on
+it.** Recorded rather than quietly retried, because "the override is available"
+was an inference from the classic-branch-protection model that nobody had
+tested against this repository's actual configuration. It is exactly the failure
+this program is about: a plausible mechanism asserted without running it.
+
+### What this leaves
+
+The remaining paths are narrower than the earlier list implied:
+
+1. **Add a bypass actor** to `protect-fork-rails` (e.g. repository admin or the
+   owner), then merge normally. This is a durable weakening of the ruleset
+   unless it is added and removed around the merge, at which point it is the
+   R07 §4 window with different fields.
+2. **The R07 §4 transaction-bound procedure**, which is now the *only* recorded
+   path that was designed for this case. Its own text anticipates precisely this
+   situation: "A subsequent legitimate change to `.github/workflows/**` [...]
+   will make `Governance Root` red, and a red required context blocks the merge
+   for that PR alone." It binds the transaction with an 8-step protocol
+   (capture identity, hash the pre-change body, drop exactly one context, merge
+   conditioned on `sha: head_sha`, prove the parents, restore the literal
+   captured body, prove no other merge landed in the window, and confirm with
+   two independent comparator runs).
+3. **Dissolve the loop structurally** by moving `EXPECTED_FILE_COUNTS` out of
+   the protected file, so this class of PR stops being a governance event. This
+   does not unblock the current PR, since making that change is itself a
+   protected-path edit.
+
+The earlier framing of §4 as "the slower, more ceremonial option" was wrong in
+both directions: it is not optional, and it is not merely ceremony. It is the
+only designed mechanism, and its residual risk (another ordinary PR merging
+during the window) is explicitly scoped and detected by step 7 rather than
+ignored.
 
 ## Not verified
 
