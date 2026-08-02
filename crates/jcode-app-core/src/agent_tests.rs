@@ -22,6 +22,8 @@ use tokio_stream::wrappers::ReceiverStream;
 mod active_pid;
 #[path = "agent_tests/hidden_reminder.rs"]
 mod hidden_reminder;
+#[path = "agent_tests/interrupt.rs"]
+mod interrupt;
 
 struct DelayedProvider {
     open_delay: Duration,

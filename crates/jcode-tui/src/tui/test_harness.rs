@@ -929,6 +929,13 @@ mod ambient_root_tests {
     /// per-process random temp dir.
     #[test]
     fn test_bundle_default_path_is_not_under_the_real_home() {
+        // Read under the shared env lease. Both halves of this comparison are
+        // env-derived: `default_path` resolves through the harness redirect,
+        // and `assert_redirected_away_from_real_home` calls `dirs::home_dir()`,
+        // which reads `$HOME`. A concurrent `TestEnvScope` points `$HOME` at
+        // its temp dir, so an unleased read can see "real home" *become* the
+        // harness home and report the correctly-redirected path as an escape.
+        let _lease = crate::storage::lock_test_env_read();
         let path = TestBundle::default_path("demo");
         crate::storage::assert_redirected_away_from_real_home(&path, "test-bundle path");
         assert!(

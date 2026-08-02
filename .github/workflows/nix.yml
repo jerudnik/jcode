@@ -86,6 +86,11 @@ jobs:
         # Only lint the workflows this fork owns. Upstream's ci.yml and
         # freebsd-smoke.yml are kept byte-close to the fork point and are
         # dispatch-only.
+        #
+        # This list is asserted complete by
+        # test_every_fork_owned_workflow_is_lint_covered: every workflow
+        # present that is not an explicit upstream exemption must appear here
+        # and in the flake workflow-syntax check.
         run: |
           nix run nixpkgs#actionlint -- \
             .github/workflows/docs-impact.yml \
@@ -94,7 +99,8 @@ jobs:
             .github/workflows/security.yml \
             .github/workflows/nix.yml \
             .github/workflows/nix-update.yml \
-            .github/workflows/release.yml
+            .github/workflows/release.yml \
+            .github/workflows/governance-root.yml
 
       - name: Dry-run Linux package
         run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
@@ -121,6 +127,13 @@ jobs:
     outputs:
       include: ${{ steps.pick.outputs.include }}
     steps:
+      # Needed only to read build-matrix.json; keep it minimal so matrix
+      # selection stays a fast, cheap job.
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/workflows
+          sparse-checkout-cone-mode: false
+
       # Pull requests build + smoke-launch the real package (acceptance gate:
       # relevant path changes must run `nix build` and prove
       # `result/bin/jcode --version`). We restrict PRs to x86_64-linux: it is the
@@ -129,12 +142,24 @@ jobs:
       # full push/dispatch matrix additionally covers aarch64-darwin (the
       # maintainer machines) where cache misses are expensive on hosted macOS and
       # a per-PR rebuild is not worth the wall-clock cost.
+      # The matrix itself lives in build-matrix.json so it is data, not shell
+      # string-building. tests/test_nix_distribution_policy.py reads that file
+      # to prove the platform support advertised in docs/NIX.md and README.md
+      # matches what CI actually builds; a matrix assembled inside this `run:`
+      # block could only be recovered by regex, and a reworded `if` would
+      # silently empty the expected set and make that guard pass vacuously.
       - id: pick
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            include='[{"system":"x86_64-linux","runner":"ubuntu-latest"}]'
+            key=pull_request
           else
-            include='[{"system":"x86_64-linux","runner":"ubuntu-latest"},{"system":"aarch64-darwin","runner":"macos-latest"}]'
+            key=default
+          fi
+          include="$(jq -c --arg key "$key" '.[$key]' .github/workflows/build-matrix.json)"
+          if [ -z "$include" ] || [ "$include" = "null" ] || [ "$include" = "[]" ]; then
+            echo "build-matrix.json has no systems for '$key'; refusing to run an empty build matrix" >&2
+            exit 1
           fi
           echo "include=$include" >> "$GITHUB_OUTPUT"
 

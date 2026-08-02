@@ -459,7 +459,7 @@ pub(super) fn format_improve_status(app: &App) -> String {
     let cancelled = todos.iter().filter(|t| t.status == "cancelled").count();
     let incomplete: Vec<_> = todos
         .iter()
-        .filter(|t| t.status != "completed" && t.status != "cancelled")
+        .filter(|t| !crate::todo::is_terminal_todo_status(&t.status))
         .collect();
 
     let phase = if app.is_processing {
@@ -528,7 +528,7 @@ pub(super) fn format_refactor_status(app: &App) -> String {
     let cancelled = todos.iter().filter(|t| t.status == "cancelled").count();
     let incomplete: Vec<_> = todos
         .iter()
-        .filter(|t| t.status != "completed" && t.status != "cancelled")
+        .filter(|t| !crate::todo::is_terminal_todo_status(&t.status))
         .collect();
 
     let phase = if app.is_processing {
@@ -604,7 +604,7 @@ pub(super) fn handle_improve_command_local(app: &mut App, command: ImproveComman
             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
             let incomplete: Vec<_> = todos
                 .iter()
-                .filter(|todo| todo.status != "completed" && todo.status != "cancelled")
+                .filter(|todo| !crate::todo::is_terminal_todo_status(&todo.status))
                 .collect();
 
             let mode = current_mode_for(app, ImproveMode::is_improve);
@@ -641,7 +641,7 @@ pub(super) fn handle_improve_command_local(app: &mut App, command: ImproveComman
             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
             let has_incomplete = todos
                 .iter()
-                .any(|todo| todo.status != "completed" && todo.status != "cancelled");
+                .any(|todo| !crate::todo::is_terminal_todo_status(&todo.status));
 
             if current_mode_for(app, ImproveMode::is_improve).is_none()
                 && !app.is_processing
@@ -701,7 +701,7 @@ pub(super) fn handle_refactor_command_local(app: &mut App, command: RefactorComm
             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
             let incomplete: Vec<_> = todos
                 .iter()
-                .filter(|todo| todo.status != "completed" && todo.status != "cancelled")
+                .filter(|todo| !crate::todo::is_terminal_todo_status(&todo.status))
                 .collect();
 
             let mode = current_mode_for(app, ImproveMode::is_refactor);
@@ -738,7 +738,7 @@ pub(super) fn handle_refactor_command_local(app: &mut App, command: RefactorComm
             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
             let has_incomplete = todos
                 .iter()
-                .any(|todo| todo.status != "completed" && todo.status != "cancelled");
+                .any(|todo| !crate::todo::is_terminal_todo_status(&todo.status));
 
             if current_mode_for(app, ImproveMode::is_refactor).is_none()
                 && !app.is_processing

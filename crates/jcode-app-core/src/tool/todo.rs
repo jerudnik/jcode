@@ -1,9 +1,8 @@
 use super::{Tool, ToolContext, ToolOutput};
 use crate::bus::{Bus, BusEvent, TodoEvent};
 use crate::todo::{
-    LOW_HILL_CLIMBABILITY, TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE,
-    TODO_OWNERSHIP_CONTINUATION_MESSAGE, TodoGoal, TodoItem, load_goals, load_todos,
-    newly_completed_groups_have_sufficient_ownership, save_goals, save_todos,
+    LOW_HILL_CLIMBABILITY, TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE, TodoGoal, TodoItem,
+    load_goals, load_todos, ownership_fault, save_goals, save_todos,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -111,8 +110,7 @@ fn take_reframe_nudges(goals: &[TodoGoal], todos: &[TodoItem]) -> Vec<String> {
         }
         let group_open = todos.iter().any(|todo| {
             goal_group_key(todo.group.as_deref()) == goal.group
-                && todo.status != "completed"
-                && todo.status != "cancelled"
+                && !jcode_task_types::is_terminal_todo_status(&todo.status)
         });
         if !group_open {
             continue;
@@ -127,9 +125,11 @@ fn build_todo_output(
     goals: Vec<TodoGoal>,
     continuations: impl IntoIterator<Item = String>,
 ) -> Result<ToolOutput> {
+    // Cancelled work is finished, not outstanding. Counting it here reported a
+    // number the auto-poke disagreed with, on the same list, in the same turn.
     let remaining = todos
         .iter()
-        .filter(|todo| todo.status != "completed")
+        .filter(|todo| !jcode_task_types::is_terminal_todo_status(&todo.status))
         .count();
     let mut text = serde_json::to_string_pretty(&todos)?;
     if !goals.is_empty() {
@@ -284,6 +284,11 @@ impl Tool for TodoTool {
                                 "minimum": 0,
                                 "maximum": 100,
                                 "description": "Self-assessed confidence, 0-100, that this todo was completed correctly. Use only for completed items."
+                            },
+                            "blocked_by": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "What this todo is waiting on: ids of other todos, or a short description of an external blocker (e.g. 'awaiting user authorization'). A todo with a non-empty blocked_by is not in progress and not abandoned; it cannot proceed until the blocker clears. Omit or leave empty when nothing blocks the item."
                             }
                         }
                     }
@@ -341,14 +346,17 @@ impl Tool for TodoTool {
             (|| {
                 let stored_goals = load_goals(&ctx.session_id).unwrap_or_default();
                 let goals = merge_goals(&stored_goals, params.goals);
-                if !newly_completed_groups_have_sufficient_ownership(&previous, &todos, &goals) {
-                    return build_todo_output(
-                        previous,
-                        stored_goals,
-                        [TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string()],
-                    );
+                // The ownership gate nudges; it never discards the write. Dropping
+                // the update while returning `Ok` handed the model stale state and
+                // no indication its write was rejected, so the only way to persist
+                // was to inflate the self-assessment until it cleared the bar.
+                let mut nudges = take_reframe_nudges(&goals, &todos);
+                // Name the group and the specific fault. A label mismatch and a
+                // low score are different problems with different fixes, and
+                // re-scoring cannot resolve the former.
+                if let Some(fault) = ownership_fault(&previous, &todos, &goals) {
+                    nudges.push(fault.message());
                 }
-                let nudges = take_reframe_nudges(&goals, &todos);
                 save_todos(&ctx.session_id, &todos)?;
                 save_goals(&ctx.session_id, &goals)?;
 
@@ -604,6 +612,33 @@ mod tests {
         }
     }
 
+    /// R08(b): the todo card must not count cancelled work as remaining.
+    ///
+    /// `build_todo_output` filtered on `status != "completed"` alone, while the
+    /// auto-poke's `is_incomplete_poke_todo` treats completed *and* cancelled as
+    /// terminal. Two definitions of "finished" in one feature, so a list whose
+    /// every item was cancelled rendered as "1 todos" still to do while the poke
+    /// correctly saw none. The number on the card was simply false.
+    #[test]
+    fn cancelled_todos_are_not_counted_as_remaining() {
+        let mut cancelled = open_todo(Some("ship"));
+        cancelled.status = "cancelled".to_string();
+
+        let output =
+            build_todo_output(vec![cancelled], vec![], []).expect("todo output should build");
+        assert_eq!(
+            output.title.as_deref(),
+            Some("0 todos"),
+            "cancelled work is finished, so nothing remains to report"
+        );
+
+        // Contrast case: genuinely open work must still be counted, or this
+        // passes by never counting anything.
+        let open = build_todo_output(vec![open_todo(Some("ship"))], vec![], [])
+            .expect("todo output should build");
+        assert_eq!(open.title.as_deref(), Some("1 todos"));
+    }
+
     #[test]
     fn ownership_gate_output_preserves_the_saved_todo_card() {
         let todos = vec![open_todo(Some("ship"))];
@@ -611,14 +646,18 @@ mod tests {
         let output = build_todo_output(
             todos.clone(),
             goals.clone(),
-            [TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string()],
+            [jcode_base::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string()],
         )
         .expect("ownership gate should produce a structured todo result");
 
         assert_eq!(output.title.as_deref(), Some("1 todos"));
         assert!(output.output.starts_with('['));
         assert!(output.output.contains("\"status\": \"in_progress\""));
-        assert!(output.output.contains(TODO_OWNERSHIP_CONTINUATION_MESSAGE));
+        assert!(
+            output
+                .output
+                .contains(jcode_base::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE)
+        );
         assert_eq!(
             output.metadata,
             Some(json!({"todos": todos, "goals": goals}))
@@ -706,5 +745,178 @@ mod tests {
         let mut incoming = vec![history_todo("9", Some(80), vec![1, 2, 3])];
         merge_confidence_history(&[], &mut incoming);
         assert_eq!(incoming[0].confidence_history, vec![80]);
+    }
+
+    async fn write_todos(session_id: &str, input: Value) -> ToolOutput {
+        TodoTool::new()
+            .execute(
+                input,
+                ToolContext {
+                    session_id: session_id.to_string(),
+                    message_id: "msg1".to_string(),
+                    tool_call_id: "tool1".to_string(),
+                    working_dir: None,
+                    stdin_request_tx: None,
+                    graceful_shutdown_signal: None,
+                    execution_mode: crate::tool::ToolExecutionMode::AgentTurn,
+                },
+            )
+            .await
+            .expect("todo write should succeed")
+    }
+
+    /// The gate used to early-return the *previous* list, so a completing write
+    /// was dropped while the tool still reported success. The model saw stale
+    /// state and could only persist by inflating its own ownership score.
+    /// `blocked_by` must survive a model write, and the schema must advertise it.
+    ///
+    /// The field has existed on `TodoItem` and deserialized correctly for some
+    /// time, but it was absent from the tool schema, so no model could know to
+    /// send it. A capability the model cannot discover is not a capability.
+    ///
+    /// This asserts the round trip *and* the schema entry together, because
+    /// either alone is a false report: documenting a field the parser drops
+    /// would advertise a capability that does not work, and a parser that
+    /// accepts a field nothing advertises stays dead.
+    #[tokio::test]
+    async fn blocked_by_round_trips_and_is_advertised_in_the_schema() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let session = "ses_blocked_by_round_trip";
+
+        write_todos(
+            session,
+            json!({"todos": [
+                {"id": "1", "content": "ship it", "status": "pending",
+                 "priority": "high", "confidence": 80,
+                 "blocked_by": ["2", "an external review"]},
+                {"id": "2", "content": "unblock it", "status": "pending",
+                 "priority": "high", "confidence": 80},
+            ]}),
+        )
+        .await;
+
+        let stored = load_todos(session).expect("todos");
+        assert_eq!(
+            stored[0].blocked_by,
+            vec!["2".to_string(), "an external review".to_string()],
+            "blocked_by must survive the model write and reach disk",
+        );
+        assert!(
+            stored[1].blocked_by.is_empty(),
+            "an omitted blocked_by must default to empty, not to the sibling's value",
+        );
+
+        let schema = TodoTool.parameters_schema();
+        let item_properties = schema
+            .get("properties")
+            .and_then(|v| v.get("todos"))
+            .and_then(|v| v.get("items"))
+            .and_then(|v| v.get("properties"))
+            .expect("todo item properties");
+        assert!(
+            item_properties.get("blocked_by").is_some(),
+            "the schema must advertise blocked_by; the parser accepts it, so \
+             omitting it hides a working capability from every model",
+        );
+
+        match prev_home {
+            Some(value) => crate::env::set_var("JCODE_HOME", value),
+            None => crate::env::remove_var("JCODE_HOME"),
+        }
+    }
+
+    #[tokio::test]
+    async fn low_ownership_still_persists_the_write_and_nudges() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let session = "ses_ownership_gate";
+
+        write_todos(
+            session,
+            json!({"todos": [{"id": "1", "content": "work", "status": "in_progress",
+                              "priority": "high", "confidence": 80, "group": "ship"}]}),
+        )
+        .await;
+
+        // Complete the group with an ownership score below the threshold.
+        let output = write_todos(
+            session,
+            json!({
+                "todos": [{"id": "1", "content": "work", "status": "completed",
+                           "priority": "high", "confidence": 80, "group": "ship"}],
+                "goals": [{"group": "ship", "hill_climbability": 96,
+                           "feedback_loop": "tests", "end_to_end_ownership": 60}],
+            }),
+        )
+        .await;
+
+        // R08 gate 1, asserted on the production tool path rather than on the
+        // helper: the nudge must name the group it is about. Scoped to the
+        // nudge line, because the serialized todo card also contains "ship" --
+        // a whole-output `contains` passed with the fix unwired, so it proved
+        // nothing.
+        let nudge = output
+            .output
+            .lines()
+            .find(|line| line.contains("end-to-end ownership"))
+            .expect("a low ownership score should still nudge");
+        assert!(
+            nudge.contains("\"ship\""),
+            "the ownership nudge must name the offending group: {nudge}"
+        );
+        assert!(
+            output.output.contains("\"status\": \"completed\""),
+            "the returned card must reflect the write, not stale state",
+        );
+        assert_eq!(
+            load_todos(session).expect("todos")[0].status,
+            "completed",
+            "the write must reach disk even though the gate fired",
+        );
+
+        match prev_home {
+            Some(home) => crate::env::set_var("JCODE_HOME", home),
+            None => crate::env::remove_var("JCODE_HOME"),
+        }
+    }
+
+    /// A completing group with no goal entry at all tripped the same gate,
+    /// because `is_some_and` treats a missing score as a failing one.
+    #[tokio::test]
+    async fn missing_ownership_score_still_persists_the_write() {
+        let _guard = crate::storage::lock_test_env();
+        let temp = tempfile::tempdir().expect("tempdir");
+        let prev_home = std::env::var_os("JCODE_HOME");
+        crate::env::set_var("JCODE_HOME", temp.path());
+        let session = "ses_ownership_missing";
+
+        write_todos(
+            session,
+            json!({"todos": [{"id": "1", "content": "work", "status": "in_progress",
+                              "priority": "high", "confidence": 80}]}),
+        )
+        .await;
+        write_todos(
+            session,
+            json!({"todos": [{"id": "1", "content": "work", "status": "completed",
+                              "priority": "high", "confidence": 80}]}),
+        )
+        .await;
+
+        assert_eq!(
+            load_todos(session).expect("todos")[0].status,
+            "completed",
+            "an ungrouped list with no goal must remain writable",
+        );
+
+        match prev_home {
+            Some(home) => crate::env::set_var("JCODE_HOME", home),
+            None => crate::env::remove_var("JCODE_HOME"),
+        }
     }
 }

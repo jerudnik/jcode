@@ -4,6 +4,7 @@ mod compaction;
 mod environment;
 mod evidence;
 mod inline_tail;
+mod interrupt_notice;
 mod interrupts;
 mod messages;
 mod prompting;

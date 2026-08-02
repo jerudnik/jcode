@@ -2,7 +2,7 @@ use crate::storage;
 use anyhow::Result;
 use std::path::PathBuf;
 
-pub use jcode_task_types::{TodoGoal, TodoItem};
+pub use jcode_task_types::{TodoGoal, TodoItem, is_terminal_todo_status};
 
 /// Minimum passing score for 0-100 quality assessments. Scores below this do
 /// not provide enough evidence to clear their respective quality gate.
@@ -16,7 +16,7 @@ pub const LOW_HILL_CLIMBABILITY: u8 = QUALITY_GATE_THRESHOLD;
 
 /// Model-facing continuation for the private hill-climbability check. Names the
 /// assessment category without disclosing the score or threshold.
-pub const TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE: &str = "Your hill-climbability is not high enough. First, improve the goal's objective and feedback loop so progress can be measured across iterations. Then call the todo tool again with the revised goal before continuing the task. The goal is to create a strong feedback loop you can iterate against.";
+pub const TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE: &str = "Your todo update was saved. Your hill-climbability is not high enough, so this is a nudge, not a rejection: nothing was discarded and you do not need to resend the same content. Improve the goal's objective and feedback loop so progress can be measured across iterations, then call the todo tool again with the revised goal before continuing the task. The goal is to create a strong feedback loop you can iterate against.";
 
 /// Model-facing continuation for the private end-to-end ownership check. Names
 /// the assessment category without disclosing the score or threshold.
@@ -42,14 +42,75 @@ fn group_is_complete(todos: &[TodoItem], group: &Option<String>) -> bool {
     matching.peek().is_some() && matching.all(|todo| todo.status == "completed")
 }
 
-/// Whether every group newly closed by this update has a sufficient assessment
-/// of ownership over its full outcome. Groups completed before this check was
-/// introduced are intentionally grandfathered so existing sessions stay writable.
-pub fn newly_completed_groups_have_sufficient_ownership(
+/// Why a newly completed group failed the ownership gate.
+///
+/// The gate used to answer `bool`, so all three faults had to share one
+/// sentence -- and that sentence described only the third. Telling a model its
+/// ownership is "not high enough" when the real fault is a mistyped group label
+/// sends it to re-score work that was already scored, which cannot ever clear
+/// the gate. Naming the fault is what makes the nudge actionable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnershipFaultKind {
+    /// No goal carries this group's label. Usually a label mismatch, so the
+    /// assessment exists but is filed under a name nothing matches.
+    NoGoalForGroup,
+    /// A goal matches, but it carries no ownership assessment at all.
+    NoOwnershipScore,
+    /// Assessed, and found wanting. The only fault the old sentence described.
+    BelowThreshold,
+}
+
+/// A single group's ownership fault, carrying enough to name it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnershipFault {
+    /// The group that failed, or `None` for the ungrouped list.
+    pub group: Option<String>,
+    pub kind: OwnershipFaultKind,
+}
+
+/// Shared lead-in for ownership nudges.
+///
+/// Keeps two promises the old wording broke: the write survived, and the
+/// specific fault follows. `is_auto_poke_message` matches on this so the
+/// continuation is still recognized as machine-initiated rather than typed.
+pub const TODO_OWNERSHIP_FAULT_PREFIX: &str = "Your todo update was saved. This is a nudge about end-to-end ownership, not a rejection: nothing was discarded.";
+
+impl OwnershipFault {
+    fn label(&self) -> String {
+        match &self.group {
+            Some(group) => format!("\"{group}\""),
+            None => "the ungrouped list".to_string(),
+        }
+    }
+
+    /// The model-facing nudge. Names the group and the specific fault while
+    /// keeping the private calibration (score and threshold) undisclosed.
+    pub fn message(&self) -> String {
+        let label = self.label();
+        let detail = match self.kind {
+            OwnershipFaultKind::NoGoalForGroup => format!(
+                "The group {label} is now complete, but no goal assessment carries that exact label, so its ownership was never assessed. Check that the goal's group matches the todos' group, or add a goal for {label}."
+            ),
+            OwnershipFaultKind::NoOwnershipScore => format!(
+                "The group {label} is now complete and has a goal, but that goal carries no end_to_end_ownership assessment. Assess it before finalizing."
+            ),
+            OwnershipFaultKind::BelowThreshold => {
+                format!("The group {label} is now complete. {TODO_OWNERSHIP_CONTINUATION_MESSAGE}")
+            }
+        };
+        format!("{TODO_OWNERSHIP_FAULT_PREFIX} {detail}")
+    }
+}
+
+/// The first ownership fault among the groups this update newly closed, if any.
+///
+/// Groups completed before this check was introduced are intentionally
+/// grandfathered so existing sessions stay writable.
+pub fn ownership_fault(
     previous: &[TodoItem],
     incoming: &[TodoItem],
     goals: &[TodoGoal],
-) -> bool {
+) -> Option<OwnershipFault> {
     let mut groups: Vec<Option<String>> = Vec::new();
     for todo in incoming {
         let group = normalized_group(todo.group.as_deref());
@@ -58,27 +119,83 @@ pub fn newly_completed_groups_have_sufficient_ownership(
         }
     }
 
-    groups.into_iter().all(|group| {
+    groups.into_iter().find_map(|group| {
         if !group_is_complete(incoming, &group) || group_is_complete(previous, &group) {
-            return true;
+            return None;
         }
-        goals
+        let kind = match goals
             .iter()
             .find(|goal| normalized_group(goal.group.as_deref()) == group)
-            .and_then(|goal| goal.end_to_end_ownership)
-            .is_some_and(|score| score >= QUALITY_GATE_THRESHOLD)
+        {
+            None => OwnershipFaultKind::NoGoalForGroup,
+            Some(goal) => match goal.end_to_end_ownership {
+                None => OwnershipFaultKind::NoOwnershipScore,
+                Some(score) if score < QUALITY_GATE_THRESHOLD => OwnershipFaultKind::BelowThreshold,
+                Some(_) => return None,
+            },
+        };
+        Some(OwnershipFault { group, kind })
     })
+}
+
+/// Whether every group newly closed by this update has a sufficient assessment
+/// of ownership over its full outcome.
+pub fn newly_completed_groups_have_sufficient_ownership(
+    previous: &[TodoItem],
+    incoming: &[TodoItem],
+    goals: &[TodoGoal],
+) -> bool {
+    ownership_fault(previous, incoming, goals).is_none()
 }
 
 /// Build the synthetic auto-poke continuation prompt sent when the model
 /// stops with incomplete todos. Kept here so every producer (TUI auto-poke,
 /// `jcode run` auto-poke) and the transcript renderer agree on the exact text.
 pub fn build_auto_poke_message(incomplete_count: usize) -> String {
-    format!(
-        "You have {} incomplete todo{}. Continue working, or update the todo tool.",
+    build_auto_poke_message_with_blocked(incomplete_count, &[])
+}
+
+/// Build the auto-poke prompt, naming any work that is blocked rather than
+/// actionable.
+///
+/// A blocked item cannot be advanced by "continue working", so folding it into
+/// the incomplete count produces an instruction the model cannot follow, and
+/// omitting it silently makes the remaining count look like the whole picture.
+/// Naming it separately keeps the count honest about what is actionable while
+/// still disclosing that the list is not finished.
+pub fn build_auto_poke_message_with_blocked(
+    incomplete_count: usize,
+    blocked: &[(String, Vec<String>)],
+) -> String {
+    let mut message = format!(
+        "You have {} incomplete todo{}.",
         incomplete_count,
         if incomplete_count == 1 { "" } else { "s" },
-    )
+    );
+    if blocked.is_empty() {
+        // Byte-identical to the long-standing single-line poke, which is
+        // persisted in existing sessions and matched by the renderer.
+        message.push(' ');
+    } else {
+        message.push_str(&format!(
+            "\n\n{} other todo{} blocked and not counted above:",
+            blocked.len(),
+            if blocked.len() == 1 { " is" } else { "s are" },
+        ));
+        for (content, blockers) in blocked {
+            message.push_str(&format!(
+                "\n- {} (blocked by: {})",
+                content,
+                blockers.join(", ")
+            ));
+        }
+        message.push_str("\n\n");
+    }
+    // The trailing sentence is load-bearing: `is_auto_poke_message` anchors on
+    // it to tell a synthetic poke from a real user turn, so the blocked
+    // disclosure goes above it rather than after it.
+    message.push_str("Continue working, or update the todo tool.");
+    message
 }
 
 /// True when `message` is a synthetic auto-poke continuation (the
@@ -97,6 +214,7 @@ pub fn is_auto_poke_message(message: &str) -> bool {
         && trimmed.ends_with("update the todo tool."))
         || trimmed.starts_with(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE)
         || trimmed.starts_with(TODO_OWNERSHIP_CONTINUATION_MESSAGE)
+        || trimmed.starts_with(TODO_OWNERSHIP_FAULT_PREFIX)
         || trimmed.starts_with(TODO_COMPLETION_CONTINUATION_MESSAGE)
         || trimmed.starts_with(LEGACY_TODO_CONFIDENCE_SUMMARY_PREFIX)
 }
@@ -204,6 +322,34 @@ fn goals_path(session_id: &str) -> Result<PathBuf> {
 mod tests {
     use super::*;
 
+    /// The unblocked poke must stay byte-identical after the blocked variant
+    /// was introduced: this exact string is persisted in existing sessions and
+    /// is what `is_auto_poke_message` matches, so drifting it would silently
+    /// reclassify historical pokes as real user turns.
+    #[test]
+    fn the_unblocked_poke_text_is_unchanged() {
+        assert_eq!(
+            build_auto_poke_message(1),
+            "You have 1 incomplete todo. Continue working, or update the todo tool."
+        );
+        assert_eq!(
+            build_auto_poke_message(3),
+            "You have 3 incomplete todos. Continue working, or update the todo tool."
+        );
+    }
+
+    /// A blocked disclosure must not break poke recognition. The recognizer
+    /// anchors on the trailing sentence, so the blocked list is placed above it.
+    #[test]
+    fn a_poke_naming_blocked_work_is_still_recognized_as_a_poke() {
+        let message = build_auto_poke_message_with_blocked(
+            1,
+            &[("Ship it".to_string(), vec!["DBA review".to_string()])],
+        );
+        assert!(is_auto_poke_message(&message), "got: {message}");
+        assert!(message.contains("blocked by: DBA review"), "got: {message}");
+    }
+
     #[test]
     fn built_auto_poke_messages_are_detected() {
         assert!(is_auto_poke_message(&build_auto_poke_message(1)));
@@ -241,9 +387,16 @@ mod tests {
         }
 
         assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("strong feedback loop"));
-        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("First, improve"));
+        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("Improve"));
         assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("call the todo tool again"));
         assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("before continuing the task"));
+        // R08(a): the nudge must say the write survived. `save_todos` runs
+        // unconditionally, but the old wording ("First, improve ... Then call
+        // the todo tool again") read as a rejection, so the only apparent way
+        // to persist was to resend or inflate the score. Observed live: six
+        // identical nudges in one session, every write already saved.
+        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("was saved"));
+        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("not a rejection"));
         assert!(TODO_OWNERSHIP_CONTINUATION_MESSAGE.contains("full user outcome"));
         assert!(TODO_OWNERSHIP_CONTINUATION_MESSAGE.contains("complete workflow"));
         assert!(TODO_OWNERSHIP_CONTINUATION_MESSAGE.contains("necessary follow-through"));
@@ -299,6 +452,131 @@ mod tests {
             &completed,
             &[ownership_goal(Some("ship"), Some(96))],
         ));
+    }
+
+    /// R08 gate 1: "A rejected todo update names the discarded group and the
+    /// specific fault, and never reports low ownership when the score exceeds
+    /// the threshold."
+    ///
+    /// The gate returned a bare `bool`, so one sentence had to cover three
+    /// different faults. The worst is the third: a goal whose label does not
+    /// match its todos' group is *missing*, not low, yet the model was told its
+    /// ownership was insufficient. Re-scoring cannot fix a label mismatch, so
+    /// that message sends the model to work on the wrong thing.
+    #[test]
+    fn r08_gate1_a_label_mismatch_is_reported_as_missing_not_low() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+        // The model scored 100, but filed it under a different label.
+        let goals = [ownership_goal(Some("shipping"), Some(100))];
+
+        let fault = ownership_fault(&previous, &completed, &goals)
+            .expect("a completed group with no matching goal must report a fault");
+        assert_eq!(fault.group.as_deref(), Some("ship"));
+        assert!(
+            matches!(fault.kind, OwnershipFaultKind::NoGoalForGroup),
+            "a label mismatch must not be reported as a low score: {fault:?}"
+        );
+        let message = fault.message();
+        assert!(message.contains("ship"), "must name the group: {message}");
+        assert!(
+            !message.contains("not high enough"),
+            "must not claim the score is low when none was found for this group: {message}"
+        );
+    }
+
+    /// The three faults are distinguishable, and each names its group.
+    #[test]
+    fn r08_gate1_the_three_faults_are_distinct_and_named() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+
+        let missing_goal = ownership_fault(&previous, &completed, &[]).unwrap();
+        assert!(matches!(
+            missing_goal.kind,
+            OwnershipFaultKind::NoGoalForGroup
+        ));
+
+        let missing_score =
+            ownership_fault(&previous, &completed, &[ownership_goal(Some("ship"), None)]).unwrap();
+        assert!(matches!(
+            missing_score.kind,
+            OwnershipFaultKind::NoOwnershipScore
+        ));
+
+        let low = ownership_fault(
+            &previous,
+            &completed,
+            &[ownership_goal(Some("ship"), Some(10))],
+        )
+        .unwrap();
+        assert!(matches!(low.kind, OwnershipFaultKind::BelowThreshold));
+
+        let mut seen = vec![
+            missing_goal.message(),
+            missing_score.message(),
+            low.message(),
+        ];
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 3, "the three faults must read differently");
+        for message in &seen {
+            assert!(message.contains("ship"), "must name the group: {message}");
+        }
+    }
+
+    /// CONTRAST: a sufficient score reports no fault at all. Without this, a
+    /// fault type that always fires would satisfy every other assertion here.
+    #[test]
+    fn r08_gate1_a_sufficient_score_reports_no_fault() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+        assert!(
+            ownership_fault(
+                &previous,
+                &completed,
+                &[ownership_goal(Some("ship"), Some(96))],
+            )
+            .is_none()
+        );
+        // Ungrouped work still resolves through the implicit goal.
+        let previous = vec![todo("work", "in_progress", None)];
+        let completed = vec![todo("work", "completed", None)];
+        assert!(
+            ownership_fault(&previous, &completed, &[ownership_goal(None, Some(96))]).is_none()
+        );
+    }
+
+    /// Every fault message keeps the calibration private: no score, no
+    /// threshold, no digits. Naming the group must not leak the number.
+    #[test]
+    fn r08_gate1_fault_messages_disclose_no_calibration() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+        for goals in [
+            Vec::new(),
+            vec![ownership_goal(Some("ship"), None)],
+            vec![ownership_goal(Some("ship"), Some(10))],
+        ] {
+            let message = ownership_fault(&previous, &completed, &goals)
+                .unwrap()
+                .message();
+            let lower = message.to_ascii_lowercase();
+            assert!(
+                !message.chars().any(|ch| ch.is_ascii_digit()),
+                "leaked a number: {message}"
+            );
+            for disclosure in ["threshold", "score", "percent", "quality gate"] {
+                assert!(
+                    !lower.contains(disclosure),
+                    "leaked {disclosure}: {message}"
+                );
+            }
+            assert!(
+                is_auto_poke_message(&message),
+                "fault messages must stay recognizable as machine continuations: {message}"
+            );
+        }
     }
 
     #[test]

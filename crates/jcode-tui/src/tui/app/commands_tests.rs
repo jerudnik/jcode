@@ -148,3 +148,144 @@ fn model_not_found_is_fatal_model_endpoint_error() {
     let err = "chat request failed: 404 model_not_found: The model `gpt-foo` does not exist";
     assert!(is_fatal_model_endpoint_error(err));
 }
+
+// The todo completion-confidence gate queues a continuation reminder asking the
+// model to validate further and reassess. Nothing about answering that reminder
+// changes the todo list, so the gate must not re-fire against unchanged state:
+// an unguarded gate re-queues the identical reminder every turn, producing an
+// unbounded empty-content send loop at model round-trip speed.
+// See docs/fork/ideal-base/human-noticed-issues/BLANK_CONTINUATION_TURN.md.
+#[test]
+fn todo_gate_fingerprint_is_stable_for_unchanged_todos() {
+    use super::super::todos_view::todo_gate_fingerprint;
+    let todos = vec![gate_todo("a", "completed", "high", Some(50))];
+    assert_eq!(
+        todo_gate_fingerprint(&todos),
+        todo_gate_fingerprint(&todos.clone()),
+        "an unchanged todo list must fingerprint identically, or the gate re-fires forever"
+    );
+}
+
+#[test]
+fn todo_gate_fingerprint_changes_when_the_gate_verdict_could_change() {
+    use super::super::todos_view::todo_gate_fingerprint;
+    let base = vec![gate_todo("a", "completed", "high", Some(50))];
+    let baseline = todo_gate_fingerprint(&base);
+
+    // Every field `todo_confidence_summary` reads must re-arm the gate.
+    let raised = vec![gate_todo("a", "completed", "high", Some(99))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&raised),
+        "raising completion_confidence must re-arm the gate"
+    );
+
+    let missing = vec![gate_todo("a", "completed", "high", None)];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&missing),
+        "clearing completion_confidence must re-arm the gate"
+    );
+
+    let reprioritized = vec![gate_todo("a", "completed", "low", Some(50))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&reprioritized),
+        "priority changes the confidence weighting, so it must re-arm the gate"
+    );
+
+    let reopened = vec![gate_todo("a", "in_progress", "high", Some(50))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&reopened),
+        "reopening a todo must re-arm the gate"
+    );
+
+    let mut appended = base.clone();
+    appended.push(gate_todo("b", "completed", "high", Some(50)));
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&appended),
+        "adding a todo must re-arm the gate"
+    );
+
+    let renamed = vec![gate_todo("z", "completed", "high", Some(50))];
+    assert_ne!(
+        baseline,
+        todo_gate_fingerprint(&renamed),
+        "replacing a todo must re-arm the gate"
+    );
+}
+
+fn gate_todo(
+    id: &str,
+    status: &str,
+    priority: &str,
+    completion_confidence: Option<u8>,
+) -> crate::todo::TodoItem {
+    crate::todo::TodoItem {
+        content: format!("todo {id}"),
+        status: status.to_string(),
+        priority: priority.to_string(),
+        id: id.to_string(),
+        completion_confidence,
+        ..Default::default()
+    }
+}
+
+/// R08(c): `needs_more_work` must distinguish "no completed items to assess"
+/// from "the completed items scored badly".
+///
+/// `unwrap_or(true)` on an empty completed set reported the two identically, so
+/// an all-cancelled list was told its completion confidence was insufficient.
+/// That is a false statement about work that was never assessed, and it is what
+/// sent the auto-poke into the completion gate for a list nobody had scored.
+#[test]
+fn all_cancelled_todos_have_nothing_to_assess_rather_than_needing_work() {
+    use super::super::todos_view::todo_confidence_summary;
+
+    let cancelled = vec![gate_todo("a", "cancelled", "high", None)];
+    let summary = todo_confidence_summary(&cancelled);
+    assert!(
+        !summary.needs_more_work,
+        "a list with no completed items has nothing to assess, so it cannot need more validation"
+    );
+    assert_eq!(
+        summary.completion_average, None,
+        "an unassessed list still has no average to report"
+    );
+
+    // The contrast case must keep failing: completed work that scored low
+    // genuinely does need more validation.
+    let low = vec![gate_todo("a", "completed", "high", Some(10))];
+    assert!(
+        todo_confidence_summary(&low).needs_more_work,
+        "low-scoring completed work must still be flagged"
+    );
+}
+
+/// Guards the equivalence that lets `needs_more_work` drop its `unwrap_or(true)`.
+///
+/// `completion_average` is `None` exactly when no completed item carries a
+/// score. With at least one completed item that means every one of them is
+/// missing a score, so `missing_completion_confidence > 0` already fires and
+/// the `None` arm cannot change the verdict. If someone later makes the average
+/// `None` for a different reason, this test fails and the arm has to come back.
+#[test]
+fn completed_todos_without_scores_still_need_work_without_the_none_arm() {
+    use super::super::todos_view::todo_confidence_summary;
+
+    let unscored = vec![
+        gate_todo("a", "completed", "high", None),
+        gate_todo("b", "completed", "low", None),
+    ];
+    let summary = todo_confidence_summary(&unscored);
+    assert_eq!(
+        summary.completion_average, None,
+        "no scores means no average"
+    );
+    assert!(
+        summary.needs_more_work,
+        "completed work nobody scored must still be flagged, via the missing count"
+    );
+}

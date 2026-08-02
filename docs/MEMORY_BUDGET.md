@@ -23,12 +23,12 @@ Use existing debug surfaces instead of ad hoc instrumentation:
 - Agent/session memory profile via debug socket: `agent:memory`
 
 Primary sources in code:
-- `src/tui/app/debug_cmds.rs`
-- `src/tui/memory_profile.rs`
-- `src/session.rs`
-- `src/tui/markdown.rs`
-- `src/tui/mermaid.rs`
-- `src/runtime_memory_log.rs`
+- `crates/jcode-tui/src/tui/app/debug_cmds.rs`
+- `crates/jcode-tui/src/tui/memory_profile.rs`
+- `crates/jcode-base/src/session.rs`
+- `crates/jcode-tui/src/tui/markdown.rs`
+- `crates/jcode-tui/src/tui/mermaid.rs`
+- `crates/jcode-base/src/runtime_memory_log.rs`
 
 ## Budget model
 
@@ -61,13 +61,14 @@ Required review action if violated:
 
 Sources:
 - `src/tui/mermaid.rs`
-- `src/tui/mermaid_cache_render.rs`
+- `crates/jcode-tui-mermaid/src/mermaid_cache_render.rs`
+- `crates/jcode-tui-mermaid/src/lib.rs`
 
 | Metric | Budget | Why |
 |---|---:|---|
-| `render_cache_entries` | `<= 64` | Explicit render-cache cap (`RENDER_CACHE_MAX`) |
-| `image_state_entries` | `<= 12` | Explicit protocol-state cap (`IMAGE_STATE_MAX`) |
-| `source_cache_entries` | `<= 8` | Explicit decoded-source cap (`SOURCE_CACHE_MAX`) |
+| `render_cache_entries` | `<= 512` | Explicit render-cache cap (`RENDER_CACHE_MAX`, `mermaid_cache_render.rs`) |
+| `image_state_entries` | `<= 24` | Explicit protocol-state cap (`IMAGE_STATE_MAX`, `lib.rs`) |
+| `source_cache_entries` | `<= 16` | Explicit decoded-source cap (`SOURCE_CACHE_MAX`, `lib.rs`) |
 | `active_diagrams` | `<= 128` | Explicit active-diagram cap (`ACTIVE_DIAGRAMS_MAX`) |
 | `cache_disk_png_bytes` | `<= 50 MiB` | Explicit on-disk cache cap (`CACHE_MAX_SIZE_BYTES`) |
 | `cache_disk_max_age_secs` | `<= 259200` | 3-day expiry (`CACHE_MAX_AGE_SECS`) |
@@ -141,9 +142,9 @@ When changing memory-heavy code, capture and include:
 These are the concrete enforced limits today:
 
 - Markdown highlight cache entries: 256
-- Mermaid render cache entries: 64
-- Mermaid protocol image-state entries: 12
-- Mermaid decoded source-cache entries: 8
+- Mermaid render cache entries: 512
+- Mermaid protocol image-state entries: 24
+- Mermaid decoded source-cache entries: 16
 - Mermaid active diagrams: 128
 - Mermaid on-disk PNG cache: 50 MiB, max age 3 days
 

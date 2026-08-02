@@ -32,15 +32,8 @@ use std::time::Instant;
 
 pub(super) const REVIEW_PREFERRED_MODEL: &str = "gpt-5.5";
 const POKE_OFF_UI_HINT: &str = "/poke off to stop.";
-const TODO_CONFIDENCE_THRESHOLD: u8 = crate::todo::QUALITY_GATE_THRESHOLD;
 const TODO_COMPLETION_CONTINUATION_MESSAGE: &str =
     crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct TodoConfidenceSummary {
-    pub completion_average: Option<u8>,
-    pub needs_more_work: bool,
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PokeCommand {
@@ -278,9 +271,46 @@ pub(super) fn poke_triggered_display_message(incomplete_count: usize) -> String 
     )
 }
 
+/// Ceiling on consecutive auto-poke follow-ups, matching `OVERNIGHT_MAX_POKES`.
+///
+/// The ordinary poke's real stopping condition is the todo list reaching a
+/// terminal state, which requires the model to do the thing the poke exists to
+/// nag it about. That is exactly the assumption least safe to rely on here, so
+/// this is a backstop for the case where it never happens: a list that stays
+/// incomplete would otherwise drive model round-trips indefinitely.
+///
+/// Counted per arming, not per session, and reset by `/poke`.
+pub(super) const MAX_AUTO_POKE_FOLLOWUPS: u16 = 48;
+
+pub(super) fn auto_poking_banner(incomplete: usize) -> String {
+    format!(
+        "👉 Auto-poking: {incomplete} incomplete todo{}. /poke off to stop.",
+        if incomplete == 1 { "" } else { "s" }
+    )
+}
+
+/// Charge one follow-up against the budget, returning whether it is spent.
+///
+/// On exhaustion this disarms auto-poke rather than skipping a single turn:
+/// leaving it armed would re-fire on the very next completed turn, which is
+/// not a bound at all.
+pub(super) fn spend_auto_poke_budget(app: &mut App) -> bool {
+    if app.auto_poke_followups_sent >= MAX_AUTO_POKE_FOLLOWUPS {
+        disable_auto_poke(app);
+        app.push_display_message(DisplayMessage::system(format!(
+            "🛑 Auto-poke stopped after reaching its safety budget of {MAX_AUTO_POKE_FOLLOWUPS} follow-up turns. Run /poke again to resume."
+        )));
+        app.set_status_notice("Poke stopped: safety budget");
+        return true;
+    }
+    app.auto_poke_followups_sent = app.auto_poke_followups_sent.saturating_add(1);
+    false
+}
+
 pub(super) fn activate_auto_poke(app: &mut App) -> PokeActivation {
     let incomplete = incomplete_poke_todos(app);
     app.auto_poke_incomplete_todos = true;
+    app.auto_poke_followups_sent = 0;
     app.set_status_notice("Poke: ON");
 
     if incomplete.is_empty() {
@@ -2551,95 +2581,11 @@ pub(super) fn active_session_id(app: &App) -> String {
     }
 }
 
-pub(super) fn poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
-    crate::todo::load_todos(&active_session_id(app)).unwrap_or_default()
-}
-
-pub(super) fn is_incomplete_poke_todo(todo: &crate::todo::TodoItem) -> bool {
-    todo.status != "completed" && todo.status != "cancelled"
-}
-
-pub(super) fn incomplete_poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
-    poke_todos(app)
-        .into_iter()
-        .filter(is_incomplete_poke_todo)
-        .collect()
-}
-
-pub(super) fn build_poke_message(incomplete: &[crate::todo::TodoItem]) -> String {
-    crate::todo::build_auto_poke_message(incomplete.len())
-}
-
-fn todo_confidence_weight(priority: &str) -> u32 {
-    match priority {
-        "high" => 3,
-        "medium" => 2,
-        _ => 1,
-    }
-}
-
-fn weighted_confidence_average(scores: impl IntoIterator<Item = (u8, u32)>) -> Option<u8> {
-    let mut weighted_sum = 0u32;
-    let mut total_weight = 0u32;
-    for (score, weight) in scores {
-        weighted_sum += u32::from(score) * weight;
-        total_weight += weight;
-    }
-    if total_weight == 0 {
-        None
-    } else {
-        Some(((weighted_sum + total_weight / 2) / total_weight) as u8)
-    }
-}
-
-pub(super) fn build_todo_confidence_summary_message(todos: &[crate::todo::TodoItem]) -> String {
-    let _ = todos;
-    TODO_COMPLETION_CONTINUATION_MESSAGE.to_string()
-}
-
-pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoConfidenceSummary {
-    let completed: Vec<&crate::todo::TodoItem> = todos
-        .iter()
-        .filter(|todo| todo.status == "completed")
-        .collect();
-    let completion_scores: Vec<(&crate::todo::TodoItem, u8, u32)> = completed
-        .iter()
-        .filter_map(|todo| {
-            todo.completion_confidence
-                .map(|score| (*todo, score, todo_confidence_weight(&todo.priority)))
-        })
-        .collect();
-    let completion_average = weighted_confidence_average(
-        completion_scores
-            .iter()
-            .map(|(_, score, weight)| (*score, *weight)),
-    );
-    let missing_completion_confidence = completed
-        .iter()
-        .filter(|todo| todo.completion_confidence.is_none())
-        .count();
-    let below_threshold_count = completion_scores
-        .iter()
-        .filter(|(_, score, _)| *score < TODO_CONFIDENCE_THRESHOLD)
-        .count();
-    let needs_more_work = completion_average
-        .map(|avg| avg < TODO_CONFIDENCE_THRESHOLD)
-        .unwrap_or(true)
-        || missing_completion_confidence > 0
-        || below_threshold_count > 0;
-
-    TodoConfidenceSummary {
-        completion_average,
-        needs_more_work,
-    }
-}
-
-pub(super) fn format_todo_completion_confidence(summary: TodoConfidenceSummary) -> String {
-    match summary.completion_average {
-        Some(avg) => format!("{}%", avg),
-        None => "unknown".to_string(),
-    }
-}
+// The todo-partition and poke-message helpers live in `commands_poke`; they are
+// re-exported here so the many `commands::` call sites stay put.
+pub(super) use super::commands_poke::{
+    build_poke_message, incomplete_poke_todos, refresh_poke_message_for_dispatch,
+};
 
 pub(super) fn active_working_dir(app: &App) -> Option<std::path::PathBuf> {
     app.session

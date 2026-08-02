@@ -1119,3 +1119,4 @@ include!("tests/auth_refresh.rs");
 include!("tests/model_resolution.rs");
 include!("tests/fallback_failover.rs");
 include!("tests/catalog_subscription.rs");
+include!("tests/routes_memo_ttl.rs");

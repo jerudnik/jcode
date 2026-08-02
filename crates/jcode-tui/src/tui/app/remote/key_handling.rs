@@ -2129,9 +2129,7 @@ async fn handle_remote_key_internal(
                             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
                             let incomplete: Vec<_> = todos
                                 .iter()
-                                .filter(|todo| {
-                                    todo.status != "completed" && todo.status != "cancelled"
-                                })
+                                .filter(|todo| !crate::todo::is_terminal_todo_status(&todo.status))
                                 .collect();
 
                             let mode = app
@@ -2195,9 +2193,9 @@ async fn handle_remote_key_internal(
                                 .clone()
                                 .unwrap_or_else(|| app.session.id.clone());
                             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
-                            let has_incomplete = todos.iter().any(|todo| {
-                                todo.status != "completed" && todo.status != "cancelled"
-                            });
+                            let has_incomplete = todos
+                                .iter()
+                                .any(|todo| !crate::todo::is_terminal_todo_status(&todo.status));
 
                             let active_improve_mode = app
                                 .improve_mode
@@ -2311,9 +2309,7 @@ async fn handle_remote_key_internal(
                             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
                             let incomplete: Vec<_> = todos
                                 .iter()
-                                .filter(|todo| {
-                                    todo.status != "completed" && todo.status != "cancelled"
-                                })
+                                .filter(|todo| !crate::todo::is_terminal_todo_status(&todo.status))
                                 .collect();
 
                             let mode = app
@@ -2377,9 +2373,9 @@ async fn handle_remote_key_internal(
                                 .clone()
                                 .unwrap_or_else(|| app.session.id.clone());
                             let todos = crate::todo::load_todos(&session_id).unwrap_or_default();
-                            let has_incomplete = todos.iter().any(|todo| {
-                                todo.status != "completed" && todo.status != "cancelled"
-                            });
+                            let has_incomplete = todos
+                                .iter()
+                                .any(|todo| !crate::todo::is_terminal_todo_status(&todo.status));
 
                             let active_refactor_mode = app
                                 .improve_mode

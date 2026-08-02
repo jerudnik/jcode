@@ -828,20 +828,29 @@ fn remote_history_watchdog_rerequests_history_when_stuck() {
         let mut reader = tokio::io::BufReader::new(reader);
 
         // First tick simply starts tracking the wait; no re-request yet.
-        let first = super::recover_stuck_remote_history(&mut app, &mut remote).await;
+        let first = super::super::remote_history_watchdog::recover_stuck_remote_history(
+            &mut app,
+            &mut remote,
+        )
+        .await;
         assert!(!first, "first observation should only arm the watchdog");
-        assert!(app.remote_history_wait_started.is_some());
-        assert_eq!(app.remote_history_recovery_attempts, 0);
+        assert!(app.remote_history_recovery.wait_started.is_some());
+        assert_eq!(app.remote_history_recovery.attempts, 0);
 
         // Simulate the connection having been stuck past the recovery delay.
-        app.remote_history_wait_started = Instant::now().checked_sub(Duration::from_secs(60));
+        app.remote_history_recovery.wait_started =
+            Instant::now().checked_sub(Duration::from_secs(60));
 
-        let redraw = super::recover_stuck_remote_history(&mut app, &mut remote).await;
+        let redraw = super::super::remote_history_watchdog::recover_stuck_remote_history(
+            &mut app,
+            &mut remote,
+        )
+        .await;
         reader
             .read_line(&mut line)
             .await
             .expect("history re-request should be readable by peer");
-        (redraw, app.remote_history_recovery_attempts)
+        (redraw, app.remote_history_recovery.attempts)
     });
 
     assert!(redraw, "re-requesting history should trigger a redraw");
@@ -863,20 +872,21 @@ fn remote_history_watchdog_clears_budget_once_history_loads() {
 
     let mut app = create_test_app();
     app.is_remote = true;
-    app.remote_history_wait_started = Instant::now().checked_sub(Duration::from_secs(60));
-    app.remote_history_recovery_attempts = 2;
+    app.remote_history_recovery.wait_started = Instant::now().checked_sub(Duration::from_secs(60));
+    app.remote_history_recovery.attempts = 2;
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let redraw = rt.block_on(async {
         let mut remote = crate::tui::backend::RemoteConnection::dummy();
         remote.mark_history_loaded();
-        super::recover_stuck_remote_history(&mut app, &mut remote).await
+        super::super::remote_history_watchdog::recover_stuck_remote_history(&mut app, &mut remote)
+            .await
     });
 
     assert!(!redraw);
-    assert!(app.remote_history_wait_started.is_none());
-    assert_eq!(app.remote_history_recovery_attempts, 0);
-    assert!(app.remote_history_recovery_last_attempt.is_none());
+    assert!(app.remote_history_recovery.wait_started.is_none());
+    assert_eq!(app.remote_history_recovery.attempts, 0);
+    assert!(app.remote_history_recovery.last_attempt.is_none());
 }
 
 /// After exhausting re-requests the watchdog surfaces an actionable `/restart`
@@ -887,15 +897,17 @@ fn remote_history_watchdog_advises_restart_after_giving_up() {
 
     let mut app = create_test_app();
     app.is_remote = true;
-    app.remote_history_wait_started = Instant::now().checked_sub(Duration::from_secs(60));
-    app.remote_history_recovery_attempts = super::REMOTE_HISTORY_RECOVERY_MAX_ATTEMPTS;
-    app.remote_history_recovery_last_attempt = Some(Instant::now());
+    app.remote_history_recovery.wait_started = Instant::now().checked_sub(Duration::from_secs(60));
+    app.remote_history_recovery.attempts =
+        super::super::remote_history_watchdog::REMOTE_HISTORY_RECOVERY_MAX_ATTEMPTS;
+    app.remote_history_recovery.last_attempt = Some(Instant::now());
 
     let before = app.display_messages().len();
     let rt = tokio::runtime::Runtime::new().unwrap();
     let redraw = rt.block_on(async {
         let mut remote = crate::tui::backend::RemoteConnection::dummy();
-        super::recover_stuck_remote_history(&mut app, &mut remote).await
+        super::super::remote_history_watchdog::recover_stuck_remote_history(&mut app, &mut remote)
+            .await
     });
 
     assert!(redraw);
@@ -907,13 +919,14 @@ fn remote_history_watchdog_advises_restart_after_giving_up() {
         messages.last().unwrap().content
     );
     // last_attempt cleared so the hint is not repeated every tick.
-    assert!(app.remote_history_recovery_last_attempt.is_none());
+    assert!(app.remote_history_recovery.last_attempt.is_none());
 
     // A subsequent tick must not add another hint.
     let rt2 = tokio::runtime::Runtime::new().unwrap();
     let redraw2 = rt2.block_on(async {
         let mut remote = crate::tui::backend::RemoteConnection::dummy();
-        super::recover_stuck_remote_history(&mut app, &mut remote).await
+        super::super::remote_history_watchdog::recover_stuck_remote_history(&mut app, &mut remote)
+            .await
     });
     assert!(!redraw2);
     assert_eq!(app.display_messages().len(), before + 1);
@@ -987,4 +1000,149 @@ fn forward_pending_reasoning_effort_is_noop_without_staged_effort() {
 
     assert!(app.remote_reasoning_effort.is_none());
     assert!(app.pending_reasoning_effort.is_none());
+}
+
+/// R09 gate 4: a slow startup must be reported as *slow*, never as *unavailable*.
+///
+/// The watchdog gives up after a fixed number of re-requests, but "we gave up
+/// waiting" is not the same fact as "the session is gone". When the last
+/// re-request was accepted by the server the connection is demonstrably alive
+/// and the server is simply still building (measured: a cold model-catalog
+/// build takes up to 17s, well past the ~21s watchdog budget once retries are
+/// counted). Advising `/restart` there tells the user something false and
+/// throws away a session that was about to answer.
+///
+/// Both branches are asserted in one test on purpose: a fix that always says
+/// "still starting up" would be just as much of a lie as the old always-
+/// `/restart` message, and only the contrast catches that.
+#[test]
+fn r09_gate4_slow_startup_is_reported_as_slow_not_as_unavailable() {
+    use std::time::{Duration, Instant};
+
+    fn run_watchdog_with_send_ok(send_ok: bool) -> (String, String) {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.remote_history_recovery.wait_started =
+            Instant::now().checked_sub(Duration::from_secs(60));
+        app.remote_history_recovery.attempts =
+            super::super::remote_history_watchdog::REMOTE_HISTORY_RECOVERY_MAX_ATTEMPTS;
+        app.remote_history_recovery.last_attempt = Some(Instant::now());
+        app.remote_history_recovery.last_send_ok = send_ok;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut remote = crate::tui::backend::RemoteConnection::dummy();
+            super::super::remote_history_watchdog::recover_stuck_remote_history(
+                &mut app,
+                &mut remote,
+            )
+            .await
+        });
+        let message = app.display_messages().last().unwrap().content.clone();
+        let notice = app
+            .status_notice
+            .as_ref()
+            .map(|(text, _)| text.clone())
+            .unwrap_or_default();
+        (message, notice)
+    }
+
+    // Server accepted the re-request: alive, just slow. Must NOT advise restart.
+    let (slow_msg, slow_notice) = run_watchdog_with_send_ok(true);
+    assert!(
+        !slow_msg.contains("/restart"),
+        "a connected-but-slow server must not be reported as needing a restart: {slow_msg}"
+    );
+    assert!(
+        !slow_notice.contains("/restart"),
+        "status notice must not advise restart while connected: {slow_notice}"
+    );
+    assert!(
+        slow_msg.contains("starting up") || slow_msg.contains("preparing"),
+        "message should say the session is still being prepared: {slow_msg}"
+    );
+
+    // Send failed: genuinely out of contact, so /restart is the honest advice.
+    let (dead_msg, dead_notice) = run_watchdog_with_send_ok(false);
+    assert!(
+        dead_msg.contains("/restart"),
+        "a disconnected session should still advise restart: {dead_msg}"
+    );
+    assert!(
+        dead_notice.contains("/restart"),
+        "status notice should advise restart when disconnected: {dead_notice}"
+    );
+
+    // The contrast is the point: the two states must not produce one message.
+    assert_ne!(
+        slow_msg, dead_msg,
+        "slow and unavailable must be distinguishable to the user"
+    );
+}
+
+/// R09 gate 4, socket half: prove `last_send_ok` actually tracks the socket.
+///
+/// The gate-4 unit test drives the flag by hand, so on its own it only shows
+/// the *message* branches are wired. This test never sets the flag directly:
+/// it drops the dummy peer so the socket is genuinely dead, and requires the
+/// watchdog to discover that by failing to send.
+///
+/// The contrast case is the point. With the peer alive the send must succeed
+/// (`true`); with the peer dropped it must fail (`false`). An implementation
+/// that hardcodes either answer fails one half.
+#[test]
+fn r09_gate4_last_send_ok_tracks_the_socket_not_a_hardcoded_value() {
+    // `create_test_app` blocks internally, so build the app outside the async
+    // block and drive only the watchdog on the runtime.
+    fn send_ok_after_watchdog(drop_peer: bool) -> bool {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.remote_session_id = Some("session_socket".to_string());
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut remote = crate::tui::backend::RemoteConnection::dummy();
+            let peer = remote
+                .take_dummy_peer()
+                .expect("dummy remote should retain peer stream");
+            // Keeping `peer` bound holds the far end open; dropping it closes the
+            // socket, which is what a vanished server looks like to a writer.
+            if drop_peer {
+                drop(peer);
+            }
+
+            // Arm the watchdog, then age it past the recovery delay so the next
+            // tick actually attempts the re-request.
+            super::super::remote_history_watchdog::recover_stuck_remote_history(
+                &mut app,
+                &mut remote,
+            )
+            .await;
+            app.remote_history_recovery.wait_started =
+                std::time::Instant::now().checked_sub(std::time::Duration::from_secs(60));
+            super::super::remote_history_watchdog::recover_stuck_remote_history(
+                &mut app,
+                &mut remote,
+            )
+            .await;
+
+            assert!(
+                app.remote_history_recovery.attempts > 0,
+                "watchdog should have attempted a re-request (drop_peer={drop_peer})"
+            );
+            app.remote_history_recovery.last_send_ok
+        })
+    }
+
+    assert!(
+        send_ok_after_watchdog(false),
+        "with the peer alive the re-request must succeed, so the watchdog \
+         reports the connection as slow rather than lost"
+    );
+    assert!(
+        !send_ok_after_watchdog(true),
+        "with the peer dropped the socket is dead and the re-request must \
+         fail; reporting success here is what would tell a user with a dead \
+         connection that there is 'no need to restart'"
+    );
 }

@@ -165,6 +165,20 @@ impl Goal {
     }
 }
 
+/// Whether a todo status means the work is finished, for any reason.
+///
+/// One definition, because this repository has had several. `completed` and
+/// `cancelled` are both terminal: cancelled work is not outstanding work, it is
+/// work that will not happen. Sites that filtered on `completed` alone reported
+/// cancelled items as still to do.
+///
+/// Callers deciding whether to *nag* about a todo want this. Callers reporting
+/// how much was actually *achieved* want `status == "completed"` and should say
+/// so explicitly at the call site.
+pub fn is_terminal_todo_status(status: &str) -> bool {
+    status == "completed" || status == "cancelled"
+}
+
 pub fn sanitize_goal_id(id: &str) -> String {
     let slug = slugify(id);
     if slug.is_empty() {

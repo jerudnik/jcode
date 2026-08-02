@@ -43,55 +43,7 @@ fn find_wrap_marker_incremental(accumulated: &str, appended_len: usize) -> Optio
         .map(|rel_idx| scan_start + rel_idx)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ReloadInterruptedToolResult {
-    message: String,
-    tool_is_error: bool,
-    evidence_status: jcode_session_types::SessionLogStatus,
-    evidence_error_class: Option<&'static str>,
-}
-
-fn reload_interrupted_tool_result(tc: &ToolCall, elapsed_secs: f64) -> ReloadInterruptedToolResult {
-    if tc.name == "selfdev" {
-        return ReloadInterruptedToolResult {
-            message: "Reload initiated. Process restarting...".to_string(),
-            tool_is_error: false,
-            evidence_status: jcode_session_types::SessionLogStatus::Ok,
-            evidence_error_class: None,
-        };
-    }
-
-    let action = tc
-        .input
-        .get("action")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let is_wait_like = (tc.name == "bg" && action == "wait")
-        || (tc.name == "swarm" && matches!(action, "await_members" | "run_plan"));
-
-    if is_wait_like {
-        let input = serde_json::to_string(&tc.input).unwrap_or_else(|_| "{}".to_string());
-        return ReloadInterruptedToolResult {
-            message: format!(
-                "[Tool '{}' wait interrupted by server reload after {:.1}s. The underlying operation may still be running. Resume the wait by rerunning the same tool call with input: {}]",
-                tc.name, elapsed_secs, input
-            ),
-            tool_is_error: true,
-            evidence_status: jcode_session_types::SessionLogStatus::Interrupted,
-            evidence_error_class: Some("resumable_interrupted_wait"),
-        };
-    }
-
-    ReloadInterruptedToolResult {
-        message: format!(
-            "[Tool '{}' interrupted by server reload after {:.1}s]",
-            tc.name, elapsed_secs
-        ),
-        tool_is_error: true,
-        evidence_status: jcode_session_types::SessionLogStatus::Interrupted,
-        evidence_error_class: Some("interrupted_by_reload"),
-    }
-}
+use super::interrupt_notice::{interrupted_tool_result, skipped_tool_notice};
 
 impl Agent {
     pub(super) async fn run_turn_streaming_mpsc(
@@ -597,14 +549,23 @@ impl Agent {
                             }
                         }
                         if self.is_graceful_shutdown() {
-                            logging::info(
-                                "Graceful shutdown during streaming - checkpointing partial response",
-                            );
+                            let marker = if self.is_server_reload() {
+                                "\n\n[generation interrupted - server reloading]"
+                            } else {
+                                "\n\n[generation interrupted - cancelled]"
+                            };
+                            logging::info(&format!(
+                                "{} during streaming - checkpointing partial response",
+                                if self.is_server_reload() {
+                                    "Graceful shutdown"
+                                } else {
+                                    "Cancel"
+                                }
+                            ));
                             let _ = event_tx.send(ServerEvent::TextDelta {
-                                text: "\n\n[generation interrupted - server reloading]".to_string(),
+                                text: marker.to_string(),
                             });
-                            text_content
-                                .push_str("\n\n[generation interrupted - server reloading]");
+                            text_content.push_str(marker);
                             break;
                         }
                     }
@@ -1274,7 +1235,7 @@ impl Agent {
                         Role::User,
                         vec![ContentBlock::ToolResult {
                             tool_use_id: tc.id.clone(),
-                            content: "[Skipped - server reloading]".to_string(),
+                            content: skipped_tool_notice(self.is_server_reload()).to_string(),
                             is_error: Some(true),
                         }],
                     );
@@ -1606,10 +1567,14 @@ impl Agent {
                         }
                     }
                 } else if self.is_graceful_shutdown() {
-                    // Server reload - abort tool and save interrupted result
+                    // Reload or cancel: both abort the tool, but they are told
+                    // apart for the message so a cancel is never reported as a
+                    // restart the model can resume after.
+                    let is_reload = self.is_server_reload();
                     logging::info(&format!(
-                        "Tool '{}' interrupted by server reload after {:.1}s",
+                        "Tool '{}' interrupted by {} after {:.1}s",
                         tc.name,
+                        if is_reload { "server reload" } else { "cancel" },
                         tool_elapsed.as_secs_f64()
                     ));
                     tool_handle.abort();
@@ -1618,7 +1583,7 @@ impl Agent {
                     // selfdev initiated the restart, while wait-like tools should be resumed
                     // after reload rather than treated as failed work.
                     let interrupted =
-                        reload_interrupted_tool_result(tc, tool_elapsed.as_secs_f64());
+                        interrupted_tool_result(tc, tool_elapsed.as_secs_f64(), is_reload);
 
                     self.append_session_evidence_with_correlation(
                         jcode_session_types::SessionLogEventKind::ToolFinished {
@@ -1662,7 +1627,7 @@ impl Agent {
                             Role::User,
                             vec![ContentBlock::ToolResult {
                                 tool_use_id: remaining_tc.id.clone(),
-                                content: "[Skipped - server reloading]".to_string(),
+                                content: skipped_tool_notice(self.is_server_reload()).to_string(),
                                 is_error: Some(true),
                             }],
                         );
@@ -1744,60 +1709,6 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-
-    fn tool_call(name: &str, input: serde_json::Value) -> ToolCall {
-        ToolCall {
-            id: "toolu_test".to_string(),
-            name: name.to_string(),
-            input,
-            intent: None,
-            thought_signature: None,
-        }
-    }
-
-    #[test]
-    fn reload_interrupted_bg_wait_is_interrupted_and_resumable() {
-        let tc = tool_call(
-            "bg",
-            json!({"action": "wait", "task_id": "bg-123", "max_wait_seconds": 300}),
-        );
-
-        let result = reload_interrupted_tool_result(&tc, 1.2);
-
-        assert!(
-            result.tool_is_error,
-            "resumable waits must be visible to downstream renderers as not completed"
-        );
-        assert_eq!(
-            result.evidence_status,
-            jcode_session_types::SessionLogStatus::Interrupted,
-            "resumable waits must not be recorded as completed work"
-        );
-        assert_eq!(
-            result.evidence_error_class,
-            Some("resumable_interrupted_wait")
-        );
-        assert!(result.message.contains("Resume the wait"));
-        assert!(result.message.contains("may still be running"));
-        assert!(result.message.contains("\"task_id\":\"bg-123\""));
-        assert!(result.message.contains("\"max_wait_seconds\":300"));
-    }
-
-    #[test]
-    fn reload_interrupted_non_wait_tool_remains_error() {
-        let tc = tool_call("bash", json!({"command": "sleep 10"}));
-
-        let result = reload_interrupted_tool_result(&tc, 1.2);
-
-        assert!(result.tool_is_error);
-        assert_eq!(
-            result.evidence_status,
-            jcode_session_types::SessionLogStatus::Interrupted
-        );
-        assert_eq!(result.evidence_error_class, Some("interrupted_by_reload"));
-        assert!(result.message.contains("interrupted by server reload"));
-    }
 
     /// Reference O(n) full scan, preserving the original precedence: the
     /// `to=functions.` marker is checked before `+#+#`.

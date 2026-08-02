@@ -23,7 +23,16 @@ The former `distro/nix` packaging rail was retired; its payload is contained in
 
 ## Supported platforms
 
-`x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`.
+| System | Status |
+|---|---|
+| `x86_64-linux` | Built, smoke-launched, and cached by CI on every relevant change |
+| `aarch64-darwin` | Built, smoke-launched, and cached by CI on push to `main` and `v*` |
+| `aarch64-linux` | Best-effort. Exposed by the flake and expected to build, but no CI job builds, smoke-launches, or caches it, so it is unverified and always compiles from source |
+
+"Best-effort" means exactly that no evidence exists, not that the platform is
+known broken. The `aarch64-linux` matrix row was dropped deliberately because
+no consumer exists (see `.github/workflows/nix.yml`); restore it, and promote
+the row above, when one does.
 
 ## Quick start
 

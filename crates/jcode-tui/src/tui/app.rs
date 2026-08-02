@@ -9,8 +9,12 @@ use crate::compaction::CompactionEvent;
 use crate::config::config;
 use crate::id;
 use crate::mcp::McpManager;
+// `cache_relevant_*` is shared with `jcode-app-core::agent::kv_cache_request_event`
+// so both hash messages identically; drift makes remote sessions report false
+// `harness:_prefix_changed` KV-cache misses.
 use crate::message::{
     ContentBlock, Message, Role, StreamEvent, TOOL_OUTPUT_MISSING_TEXT, ToolCall, ToolDefinition,
+    cache_relevant_message_value, cache_relevant_messages,
 };
 use crate::provider::Provider;
 use crate::runtime_memory_log::RuntimeMemoryLogController;
@@ -56,6 +60,7 @@ mod commands;
 mod commands_improve;
 mod commands_overnight;
 mod commands_plan;
+mod commands_poke;
 mod commands_review;
 mod commands_swarm;
 mod construction;
@@ -84,6 +89,7 @@ mod onboarding_repair;
 mod onboarding_sim;
 mod productivity;
 mod remote;
+mod remote_history_watchdog;
 mod remote_notifications;
 mod replay;
 pub(crate) mod run_shell;
@@ -859,8 +865,14 @@ pub struct App {
     last_turn_input_tokens: Option<u64>,
     // Pending turn to process (allows UI to redraw before processing starts)
     pending_turn: bool,
-    // When armed by /poke, automatically continue prompting until todos are complete.
+    // When armed by /poke, automatically continue prompting until todos are
+    // complete, bounded by MAX_AUTO_POKE_FOLLOWUPS follow-ups per arming.
     auto_poke_incomplete_todos: bool,
+    pub(crate) auto_poke_followups_sent: u16,
+    // Todo list the completion-confidence gate has already fired for. Re-firing
+    // against unchanged state would re-queue the identical reminder forever; see
+    // `settle_completed_todo_list` and BLANK_CONTINUATION_TURN.md.
+    todo_confidence_gate_fired_for: Option<u64>,
     // When armed by /overnight, automatically continue guarded follow-up turns until wake/wrap.
     overnight_auto_poke: Option<OvernightAutoPokeState>,
     // Pending cross-provider resend after a failover warning/countdown.
@@ -1078,16 +1090,9 @@ pub struct App {
     runtime_mode: AppRuntimeMode,
     // Remote rewind/undo request waiting for the server's replacement History payload.
     pending_remote_rewind_notice: Option<PendingRemoteRewindNotice>,
-    // History-recovery watchdog for the "stuck on loading session…" bug. When a
-    // remote (re)connect never receives the bootstrap `History` event, every
-    // prompt path is gated behind `has_loaded_history()` and the session is
-    // permanently stuck on "loading session…" until the user runs `/restart`.
-    // These track when the current connection began waiting for history and how
-    // many times we have re-requested it, so the watchdog can re-issue
-    // `GetHistory` a few times before giving up.
-    remote_history_wait_started: Option<Instant>,
-    remote_history_recovery_attempts: u32,
-    remote_history_recovery_last_attempt: Option<Instant>,
+    /// History-recovery watchdog state for the "stuck on loading session…" bug.
+    /// Owned by `remote_history_watchdog`, which documents the fields.
+    remote_history_recovery: remote_history_watchdog::HistoryRecoveryState,
     // Server was just spawned - allow initial connection retries in run_remote
     server_spawning: bool,
     // Whether running in replay mode (readonly playback of a saved session)
@@ -2285,13 +2290,6 @@ fn stable_json_len<T: serde::Serialize + ?Sized>(value: &T) -> usize {
         .map(|encoded| encoded.len())
         .unwrap_or_default()
 }
-
-// The cache-relevant projection lives in `jcode-message-types` (re-exported
-// through `crate::message`) so this local path and the server event path in
-// `jcode-app-core::agent::kv_cache_request_event` hash messages identically.
-// If the two projections drift, remote sessions report false
-// `harness:_prefix_changed` KV-cache misses.
-use crate::message::{cache_relevant_message_value, cache_relevant_messages};
 
 fn message_hashes(messages: &[Message]) -> Vec<u64> {
     messages

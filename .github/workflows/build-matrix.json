@@ -1,0 +1,18 @@
+{
+  "_comment": [
+    "Authoritative build matrix for .github/workflows/nix.yml.",
+    "Extracted from the workflow so it is data rather than shell string-building:",
+    "tests/test_nix_distribution_policy.py reads this file to assert that the",
+    "platform support advertised in docs/NIX.md and README.md matches the systems",
+    "CI actually builds, smoke-launches, and pushes to Cachix. Any flake system",
+    "absent from every list here is unverified and must be documented best-effort.",
+    "Adding a system here without adding a docs row (or vice versa) fails that test."
+  ],
+  "pull_request": [
+    { "system": "x86_64-linux", "runner": "ubuntu-latest" }
+  ],
+  "default": [
+    { "system": "x86_64-linux", "runner": "ubuntu-latest" },
+    { "system": "aarch64-darwin", "runner": "macos-latest" }
+  ]
+}

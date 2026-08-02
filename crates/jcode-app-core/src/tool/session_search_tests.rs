@@ -56,6 +56,54 @@ fn run_search(home: &Path, query: &str, options: &SearchOptions) -> Vec<SearchRe
     run_report(home, query, options).results
 }
 
+/// A fork copies the parent's transcript verbatim, so one real message exists
+/// in two session files under the same message id. Search used to report it
+/// once per file, so a single event appeared as two hits and consumed two
+/// result slots.
+#[test]
+fn forked_history_reports_an_inherited_message_once() {
+    with_temp_home(|home| {
+        let parent = save_test_session(
+            "parent-session",
+            vec![(
+                Role::Assistant,
+                vec![text("The kestrel diagnostic emitted a checksum mismatch.")],
+            )],
+        );
+
+        // Fork: same messages, same ids, new session pointing at the parent.
+        let mut child =
+            Session::create_with_id("child-session".to_string(), Some(parent.id.clone()), None);
+        child.short_name = Some("short-child-session".to_string());
+        child.working_dir = parent.working_dir.clone();
+        for message in &parent.messages {
+            child.append_stored_message(message.clone());
+        }
+        child.save().expect("save forked session");
+
+        let inherited_id = parent.messages[0].id.clone();
+        let results = run_search(
+            home,
+            "kestrel diagnostic checksum",
+            &SearchOptions::for_test("current-session"),
+        );
+
+        let hits = results
+            .iter()
+            .filter(|result| result.message_id.as_deref() == Some(inherited_id.as_str()))
+            .count();
+        assert_eq!(
+            hits,
+            1,
+            "one real message inherited by a fork must not be reported twice: {:#?}",
+            results
+                .iter()
+                .map(|result| (&result.session_id, &result.message_id))
+                .collect::<Vec<_>>()
+        );
+    });
+}
+
 #[test]
 fn token_overlap_matches_when_exact_phrase_is_absent() {
     with_temp_home(|home| {

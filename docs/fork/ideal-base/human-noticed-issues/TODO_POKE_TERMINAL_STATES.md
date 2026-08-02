@@ -224,3 +224,168 @@ blocked branch inherits the drift it is meant to escape.
   which would size the blast radius of consolidating it.
 * The desktop app (`session_launch.rs:156` has an unrelated `Cancelled`
   variant); out of scope for TUI/CLI.
+
+## R08(h): a poke reported a superseded count as present tense (2026-08-02)
+
+Observed live in `session_badger_1785586811874_613d6cdce5daf938`, on the binary
+built 2026-08-01 16:39 (`~/.jcode/current/jcode`, which predates the R08(b)/(c)
+fixes and does not contain `is_terminal_todo_status`).
+
+At `06:58:22.135775Z` the auto-poke said **"You have 4 incomplete todos."**
+The on-disk list had held **2** incomplete since `06:58:03.792681Z`, a lag of
+**18.2 seconds**, and the `todo` tool_result at `06:58:04Z` independently
+confirms the written statuses as `[completed, completed, completed, pending,
+pending]`. So the correct value existed, in the file the poke reads, for 18
+seconds before the poke asserted a different one.
+
+This is the same failure R08 is about, in a new costume: the count is not
+merely wrong, it is a *previous revision's* count presented as current. `4` was
+the true count of the revision written at `05:59:21Z`.
+
+Checked across all three pokes in the session:
+
+| poke (UTC) | said | file held at that moment | verdict |
+| --- | --- | --- | --- |
+| `05:09:14` | 4 | 4 (written `05:08:57`) | correct |
+| `05:59:05` | 4 | 4 (written `05:08:57`) | correct |
+| `06:58:22` | 4 | **2** (written `06:58:03`) | **WRONG** |
+
+### Hypotheses tested and falsified
+
+Recording these because each is individually plausible and a reader would
+otherwise retry them:
+
+1. **Stale terminal-status rule** (the pre-R08(b) `status != "completed"`
+   filter). Falsified: applied to the current file, *both* the old and new
+   rules yield 2, not 4. The running binary is genuinely old, but that does not
+   explain this number.
+2. **Message frozen at queue time.** `build_poke_message` renders a `String`
+   into `queued_messages`, and the dispatcher does `std::mem::take` and
+   forwards it verbatim, so this *is* a real structural gap. But it does not
+   explain this instance: the todo write landed 18s before the poke and the
+   poke is scheduled at `finish_turn`, after the write.
+3. **`TODOS_CACHE` staleness.** There is a time-based todos cache in
+   `helpers.rs` whose only production invalidation is in `observe.rs:112`. But
+   the poke path calls `crate::todo::load_todos` directly and never reads that
+   cache, so it is not implicated.
+4. **`.bak` recovery.** `~/.jcode/todos/<id>.bak` does contain exactly the
+   4-open revision from `05:59:22Z`. Falsified anyway:
+   `read_json_with_recovery_handler` consults `.bak` only when the primary
+   fails to parse, the primary parses fine (5 items), and the two files have
+   distinct inodes and link counts of 1.
+
+### Status: OPEN, root cause not established
+
+Four hypotheses, four falsifications. I am recording this rather than
+continuing, because the honest state is that I cannot yet name the mechanism,
+and the next plausible-sounding guess would be the fifth. What is *established*
+is the observation itself, which is reproducible from the stored transcript and
+the file timestamps, and which no amount of further theorizing changes.
+
+Worth noting for whoever picks this up: hypothesis 2 describes a genuine gap
+(the count is rendered at schedule time and never recomputed at send time) that
+should probably be closed on its own merits even though it does not explain
+this instance. A poke that recomputed at dispatch would be immune to the whole
+class, whatever the specific mechanism here turns out to be.
+
+The first step should be reproducing on a *current* binary. This session's
+binary predates the R08 fixes, so the behavior may already differ.
+
+### Update: the poke self-corrected (2026-08-02T07:11:22Z)
+
+The next poke, one turn later, said **"You have 2 incomplete todos"** — the
+correct count, against an unchanged file. So the defect is **intermittent and
+self-clearing**, not a persistent wrong reading. Any explanation must account
+for a stale value that later resolves on its own with no intervening write.
+
+That single fact retires most of the remaining candidates: whatever produced
+`4` was transient state inside the running process, not a wrong rule, not a
+wrong file, and not a wrong session id.
+
+Three further hypotheses tested after the self-correction, all falsified:
+
+5. **Reload replaying a queued string.** No reload occurred between the
+   `05:59` revision and the bad poke.
+6. **A storage-layer read cache or deferred write.** Neither exists.
+   `read_json` has no cache (zero `LazyLock<Mutex>`/`CACHE` in
+   `crates/jcode-storage/src/lib.rs`) and `write_json_fast` is a temp-file +
+   atomic rename, so the write is visible the instant it returns.
+7. **Writer and poke disagreeing on session id.** Falsified: the write path
+   (`active_client_session_id`, `state_ui.rs:81`) and the poke path
+   (`active_session_id`, `commands.rs:2537`) resolve identically, both
+   preferring `remote_session_id` when remote and `session.id` otherwise.
+
+Seven hypotheses, seven falsifications. I am not proposing an eighth. The
+remaining shape is in-process transient state on the TUI side, which I cannot
+narrow further from a stored transcript, and this session's binary predates
+the R08 fixes anyway.
+
+**Recommended next step, unchanged and now better motivated:** close the
+schedule-time/send-time gap (hypothesis 2) on its own merits. It is a real
+structural defect regardless of whether it caused this instance, and a poke
+that recomputes its count at dispatch is immune to the entire class of
+transient-state explanations that remain — including whichever one this
+actually was.
+
+### Resolution: the schedule-time/send-time gap is closed (2026-08-02)
+
+Implemented the recommendation above. The count is now re-derived when the
+queue is drained, not when the poke is queued.
+
+- `commands::refresh_poke_message_for_dispatch` re-reads the todo list and
+  rebuilds the message. Non-poke messages pass through untouched, and a poke
+  whose todos all resolved in the meantime returns `None` and is dropped rather
+  than sent announcing "0 incomplete todos".
+- `App::take_queued_messages_for_dispatch` drains the queue through that
+  refresh. All three dispatch sites use it: `input.rs` `process_queued_messages`
+  and both `remote.rs` drains.
+- `input.rs:1194` (`retrieve_pending_message_for_edit`) is deliberately **not**
+  refreshed. It pulls queued text into the user's input box for editing rather
+  than sending it to the model, so silently rewriting or dropping a message
+  there would destroy something the user asked to edit.
+
+This does **not** claim to fix the observed instance, whose root cause remains
+unknown. It closes the structural gap that produces the same symptom.
+
+Four tests in `state_model_poke_04.rs`, each falsified before being trusted:
+
+1. `poke_message_is_rebuilt_from_the_todo_list_at_dispatch_time` — queue 4,
+   resolve 2, expect 2.
+2. `poke_refresh_preserves_the_real_count_when_todos_are_unchanged` — the
+   contrast case, so a "fix" that merely dropped the number cannot pass.
+3. `poke_refresh_leaves_user_messages_alone_and_drops_emptied_pokes`.
+4. `draining_the_queue_for_dispatch_refreshes_poke_counts_in_place` — the
+   wiring control.
+
+Test 4 exists because of a near-miss worth recording. Tests 1-3 call the
+refresh helper directly, so they all still passed when the call was deleted
+from `process_queued_messages`: the entire 1874-test suite stayed green against
+a completely unwired fix. `process_queued_messages` needs a live terminal and
+event stream, which is why the drain was extracted into
+`take_queued_messages_for_dispatch` — a seam a test can reach. Test 4 was then
+confirmed to fail with the refresh unwired and pass with it wired.
+
+### Incidental finding: `benchmark_resume_loading_reports_timings` is flaky
+
+Surfaced while validating the above; **unrelated to pokes and pre-existing**.
+
+`session_picker::loading::tests::benchmark_resume_loading_reports_timings`
+writes 120 sessions and asserts `load_sessions()` returns >= 100. Under CPU
+contention it intermittently returns fewer — observed **24** and **87** — about
+1 run in 8, and never on an idle machine.
+
+Attribution was established by control rather than assumption: the branch
+failed 3 times in 16 runs while the baseline passed 16 for 16, which *looks*
+like a regression. Running the **unmodified baseline under identical load**
+reproduced the failure (`count=87`), so the poke change is exonerated and the
+flake predates it. Load, not the diff, was the hidden variable.
+
+Not fixed here, as it is outside this node. Two observations for whoever takes
+it: `reset_tui_test_globals` does not invalidate the session-list cache (unlike
+the neighbouring tests, this one never calls `invalidate_session_list_cache()`
+before loading), and `session_load_thread_count` derives its width from
+`available_parallelism`, which contention can change. Either could plausibly
+produce a short count; neither is confirmed, and I did not test them.
+
+The bare `assert!` was replaced with one that prints the observed count and the
+relevant env vars, since the original failed with no information at all.

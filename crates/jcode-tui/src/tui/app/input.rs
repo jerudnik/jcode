@@ -1256,56 +1256,7 @@ impl App {
     }
 
     pub(super) fn schedule_auto_poke_followup_if_needed(&mut self) -> bool {
-        if !self.auto_poke_incomplete_todos
-            || self.pending_queued_dispatch
-            || self.pending_turn
-            || self.has_queued_followups()
-        {
-            return false;
-        }
-
-        let todos = super::commands::poke_todos(self);
-        let incomplete: Vec<_> = todos
-            .iter()
-            .filter(|todo| super::commands::is_incomplete_poke_todo(todo))
-            .cloned()
-            .collect();
-        if incomplete.is_empty() {
-            if todos.is_empty() {
-                self.auto_poke_incomplete_todos = false;
-                return false;
-            }
-            let confidence_summary = super::commands::todo_confidence_summary(&todos);
-            let confidence_label =
-                super::commands::format_todo_completion_confidence(confidence_summary);
-            if confidence_summary.needs_more_work {
-                self.push_display_message(DisplayMessage::system(
-                    "🛑 Todo completion gate: completion confidence needs stronger validation.",
-                ));
-                self.hidden_queued_system_messages.push(
-                    super::commands::build_todo_confidence_summary_message(&todos),
-                );
-                self.pending_queued_dispatch = true;
-                return true;
-            }
-            self.auto_poke_incomplete_todos = false;
-            self.push_display_message(DisplayMessage::system(format!(
-                "✅ Todos complete. Completion confidence: {}.",
-                confidence_label
-            )));
-            self.pending_queued_dispatch = false;
-            return false;
-        }
-
-        self.push_display_message(DisplayMessage::system(format!(
-            "👉 Auto-poking: {} incomplete todo{}. /poke off to stop.",
-            incomplete.len(),
-            if incomplete.len() == 1 { "" } else { "s" },
-        )));
-        self.queued_messages
-            .push(super::commands::build_poke_message(&incomplete));
-        self.pending_queued_dispatch = true;
-        true
+        super::commands_poke::schedule_auto_poke_followup_if_needed(self)
     }
 
     pub(super) fn schedule_queued_dispatch_after_interrupt(&mut self) {
@@ -3467,6 +3418,23 @@ impl App {
         self.pending_turn = true;
     }
 
+    /// Drain `queued_messages` for dispatch, re-deriving any poke's todo count
+    /// from the list as it stands right now. See
+    /// `commands::refresh_poke_message_for_dispatch` for why, and for the
+    /// dropped-when-resolved case.
+    ///
+    /// Split out of `process_queued_messages` so this is reachable from tests:
+    /// that function needs a live terminal, so a refresh inlined there could be
+    /// deleted without any test noticing.
+    pub(super) fn take_queued_messages_for_dispatch(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.queued_messages)
+            .into_iter()
+            .filter_map(|message| {
+                super::commands::refresh_poke_message_for_dispatch(self, &message)
+            })
+            .collect()
+    }
+
     /// Process all queued messages (combined into a single request)
     /// Loops until queue is empty (in case more messages are queued during processing)
     pub(super) async fn process_queued_messages(
@@ -3477,7 +3445,7 @@ impl App {
         while !self.queued_messages.is_empty() || !self.hidden_queued_system_messages.is_empty() {
             // Combine all currently queued messages into one, treating [SYSTEM: ...]
             // startup continuations as system reminders rather than user turns.
-            let queued_messages = std::mem::take(&mut self.queued_messages);
+            let queued_messages = self.take_queued_messages_for_dispatch();
             let hidden_reminders = std::mem::take(&mut self.hidden_queued_system_messages);
             let (messages, reminder, display_system_messages) =
                 super::helpers::partition_queued_messages(queued_messages, hidden_reminders);
