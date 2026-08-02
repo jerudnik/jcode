@@ -54,11 +54,14 @@ still perfectly valid.
 
 ## The fix
 
-`crates/jcode-base/src/provider/mod.rs`:
+The memo now lives in its own module, `crates/jcode-base/src/provider/routes_memo.rs`
+(extracted so this change does not grow an already-oversized file; the
+repository's oversized-file ratchet caught the growth and the file was split
+rather than re-baselined):
 
 - `OBSERVED_MAX_ROUTES_BUILD_MS` atomic, fed by `record_routes_build_duration()`
   around `multiprovider_model_routes`.
-- `routes_memo_ttl()` = observed max × `ROUTES_MEMO_TTL_BUILD_MULTIPLE` (10),
+- `routes_memo_ttl()` = observed max × `ROUTES_MEMO_TTL_BUILD_MULTIPLE` (3),
   clamped to `ROUTES_MEMO_MIN_TTL` (30s) / `ROUTES_MEMO_MAX_TTL` (600s). The TTL
   is now derived from what builds actually cost on this machine rather than from
   a guess.
@@ -69,10 +72,11 @@ still perfectly valid.
   content-valid regardless of TTL age, so serving during a build still respects
   generation invalidation.
 
-`crates/jcode-tui/src/tui/app/remote.rs` (gate 4): the watchdog no longer
+`crates/jcode-tui/src/tui/app/remote_history_watchdog.rs` (gate 4, also
+extracted from `remote.rs` for the same ratchet reason): the watchdog no longer
 advises `/restart` for a session that is merely slow. Whether the last history
 re-request was *accepted by the server* is recorded in
-`remote_history_recovery_last_send_ok`; a successful send proves the socket is
+`HistoryRecoveryState::last_send_ok`; a successful send proves the socket is
 alive. Connected-but-slow now reports "still starting up… no need to restart";
 a genuinely failed send still advises `/restart`.
 
@@ -120,12 +124,23 @@ message, and only the contrast catches that.
 ## Not verified
 
 - **No live remote-session reproduction.** The stall was diagnosed from shipped
-  code plus 96 timing samples, and the fix is covered by unit gates, but I did
-  not stand up a slow remote server and watch the client recover. Gate 4's
-  connected/disconnected split is exercised through app state, not a real
-  socket.
-- The 10× multiple and the 30s/600s clamps are judgement calls anchored to the
-  measured p99; they are not themselves derived from a failure threshold.
+  code plus 97 timing samples, and the fix is covered by unit gates, but I did
+  not stand up a slow remote server and watch the client recover.
+- **A hung-but-writable server would still be misreported.** `last_send_ok` is
+  now proven to track the socket: the second half of gate 4 drops the dummy
+  peer and requires the watchdog to *discover* the dead socket by failing to
+  send (peer alive → `true`, peer dropped → `false`, so neither answer can be
+  hardcoded). But a write into an open socket whose server has hung succeeds,
+  so such a session would be told "no need to restart". That is the same defect
+  class as the original bug with the sign flipped, and it is not covered.
+  Closing it needs a liveness signal from the server, not a send result.
+- The 3× multiple and the 30s/600s clamps are judgement calls anchored to the
+  measured p99; they are not themselves derived from a failure threshold. The
+  multiple was reduced from an initial 10× after a sensitivity check: every
+  measured sample is under the 30s floor, so the floor, not the multiple, sets
+  the TTL in practice (×2→34s, ×3→51s, ×5→85s, ×10→170s all pass gate 1). 3×
+  keeps headroom over the observed p99 without pinning a stale catalog for
+  minutes on a route-changing path that bumps no generation.
 
 ## Re-deriving the measurement
 

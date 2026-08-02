@@ -28,7 +28,7 @@ fn r09_gate1_ttl_exceeds_every_measured_build_time() {
     for ms in MEASURED_BUILD_MS {
         super::record_routes_build_duration(std::time::Duration::from_millis(*ms));
     }
-    let ttl = super::routes_memo_ttl();
+    let ttl = super::routes_memo::routes_memo_ttl();
     let p99 = measured_p99_ms();
 
     assert!(
@@ -53,16 +53,16 @@ fn r09_gate1_ttl_is_derived_from_measurement_not_a_fixed_guess() {
     // Contrast case: a slower observed build must produce a longer TTL. Without
     // this, a hardcoded value large enough to pass the assertion above would
     // look identical to a derived one.
-    super::OBSERVED_MAX_ROUTES_BUILD_MS.store(0, std::sync::atomic::Ordering::Relaxed);
-    let floor = super::routes_memo_ttl();
+    super::routes_memo::OBSERVED_MAX_ROUTES_BUILD_MS.store(0, std::sync::atomic::Ordering::Relaxed);
+    let floor = super::routes_memo::routes_memo_ttl();
     assert_eq!(
         floor,
-        super::ROUTES_MEMO_MIN_TTL,
+        super::routes_memo::ROUTES_MEMO_MIN_TTL,
         "with no observed build the TTL should sit at its floor"
     );
 
     super::record_routes_build_duration(std::time::Duration::from_secs(20));
-    let derived = super::routes_memo_ttl();
+    let derived = super::routes_memo::routes_memo_ttl();
     assert!(
         derived > floor,
         "a 20s observed build must lengthen the TTL ({}ms) beyond the floor ({}ms)",
@@ -78,11 +78,11 @@ fn r09_gate1_ttl_is_derived_from_measurement_not_a_fixed_guess() {
     // the life of the process.
     super::record_routes_build_duration(std::time::Duration::from_secs(86_400));
     assert_eq!(
-        super::routes_memo_ttl(),
-        super::ROUTES_MEMO_MAX_TTL,
+        super::routes_memo::routes_memo_ttl(),
+        super::routes_memo::ROUTES_MEMO_MAX_TTL,
         "an absurd outlier must clamp to the ceiling rather than pin the memo"
     );
-    super::OBSERVED_MAX_ROUTES_BUILD_MS.store(0, std::sync::atomic::Ordering::Relaxed);
+    super::routes_memo::OBSERVED_MAX_ROUTES_BUILD_MS.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Build a minimal provider whose catalog build is cheap. The point of these
@@ -125,7 +125,7 @@ fn r09_gate2_a_request_is_not_queued_behind_an_in_flight_build() {
         // TTL expired. An earlier version of this test skipped this step, so the
         // fast path returned first and the test passed even with the fix
         // reverted -- it proved nothing until the control exposed it.
-        super::expire_routes_memo_ttl_for_test();
+        super::routes_memo::expire_routes_memo_ttl_for_test();
         provider.expire_instance_routes_memo_ttl_for_test();
 
         // Simulate a long build already in flight: hold the single-flight lock,
@@ -165,7 +165,7 @@ fn r09_gate3_serving_during_a_build_still_respects_generation_invalidation() {
     with_clean_provider_test_env(|| {
         let provider = memo_test_provider();
         let _ = provider.model_routes();
-        super::expire_routes_memo_ttl_for_test();
+        super::routes_memo::expire_routes_memo_ttl_for_test();
         provider.expire_instance_routes_memo_ttl_for_test();
 
         // Contrast case for gate 2: serving a TTL-stale entry is only honest

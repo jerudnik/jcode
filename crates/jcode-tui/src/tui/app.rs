@@ -89,6 +89,7 @@ mod onboarding_repair;
 mod onboarding_sim;
 mod productivity;
 mod remote;
+mod remote_history_watchdog;
 mod remote_notifications;
 mod replay;
 pub(crate) mod run_shell;
@@ -1089,23 +1090,9 @@ pub struct App {
     runtime_mode: AppRuntimeMode,
     // Remote rewind/undo request waiting for the server's replacement History payload.
     pending_remote_rewind_notice: Option<PendingRemoteRewindNotice>,
-    // History-recovery watchdog for the "stuck on loading session…" bug. When a
-    // remote (re)connect never receives the bootstrap `History` event, every
-    // prompt path is gated behind `has_loaded_history()` and the session is
-    // permanently stuck on "loading session…" until the user runs `/restart`.
-    // These track when the current connection began waiting for history and how
-    // many times we have re-requested it, so the watchdog can re-issue
-    // `GetHistory` a few times before giving up.
-    remote_history_wait_started: Option<Instant>,
-    remote_history_recovery_attempts: u32,
-    remote_history_recovery_last_attempt: Option<Instant>,
-    /// Whether the most recent history re-request was accepted by the server.
-    ///
-    /// This is the signal that separates "slow" from "unavailable". A send that
-    /// succeeds proves the connection is alive and the server simply has not
-    /// answered yet (a cold model-catalog build has been measured at 17s), so
-    /// advising `/restart` would discard a working session.
-    remote_history_recovery_last_send_ok: bool,
+    /// History-recovery watchdog state for the "stuck on loading session…" bug.
+    /// Owned by `remote_history_watchdog`, which documents the fields.
+    remote_history_recovery: remote_history_watchdog::HistoryRecoveryState,
     // Server was just spawned - allow initial connection retries in run_remote
     server_spawning: bool,
     // Whether running in replay mode (readonly playback of a saved session)
