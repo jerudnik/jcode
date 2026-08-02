@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import pathlib
+import re
+import subprocess
 import tomllib
 import unittest
 
@@ -35,6 +37,63 @@ ACTIVE_DISTRIBUTION_DOCS = (
     "scripts/phone-server/README.md",
 )
 
+# F30-FIX-1: the scan is opt-out, not opt-in. An allowlist silently exempts
+# every document nobody remembered to add, so the gate reported OK while never
+# opening 31 of 39 active docs. These prefixes are historical records that
+# describe retired channels on purpose; everything else tracked is scanned.
+UNSCANNED_PREFIXES = (
+    "docs/fork/",
+    "docs/archive/",
+    "changelog/",
+    "CHANGELOG",
+)
+
+# Documents whose subject is the prohibition itself, so they must name the
+# retired channels in order to forbid them. Keep this list tiny and explicit;
+# each entry is a hole in the gate.
+PROHIBITION_DOCS = (".apm/instructions/main.instructions.md",)
+
+# The lowest number of documents a healthy scan reaches. This exists so that a
+# future refactor which empties the corpus fails RED instead of reporting OK on
+# zero files, which is the exact failure mode F30-FIX-1 was filed for.
+MIN_SCANNED_ACTIVE_DOCS = 60
+
+# F30-FIX-2: the substring list missed the AUR, curl-pipe, and PowerShell-pipe
+# install idioms entirely. These are regexes rather than substrings because the
+# plain-substring forms collide with ordinary prose and markdown tables ("| sh"
+# matches a table cell; "jcode-bin" matches "<jcode-binary>").
+FORBIDDEN_ACTIVE_DOC_PATTERNS = (
+    ("AUR yay install", r"\byay\s+-S\b"),
+    ("AUR paru install", r"\bparu\s+-S\b"),
+    ("AUR -git package", r"\bjcode(?:-desktop)?-git\b"),
+    # Boundary-anchored: the bare substring also matches "<jcode-binary>".
+    ("AUR jcode-bin package", r"\bjcode-bin\b"),
+    ("curl pipe to shell", r"\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh)\b"),
+    ("wget pipe to shell", r"\bwget\b[^\n|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh)\b"),
+    (
+        "PowerShell pipe to iex",
+        r"\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n|]*\|\s*"
+        r"(?:iex|Invoke-Expression)\b",
+    ),
+)
+
+
+def tracked_active_documents() -> list[str]:
+    """Every tracked doc the distribution policy governs (opt-out)."""
+    listed = subprocess.run(
+        ["git", "ls-files", "*.md", ".apm/instructions/*"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    return [
+        relative
+        for relative in listed
+        if not relative.startswith(UNSCANNED_PREFIXES)
+        and relative not in PROHIBITION_DOCS
+    ]
+
 FORBIDDEN_ACTIVE_DOC_TEXT = (
     "scripts/install.sh",
     "scripts/install.ps1",
@@ -43,7 +102,6 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
     "scripts/quick-release.sh",
     "brew install jcode",
     "brew tap 1jehuang/jcode",
-    "jcode-bin",
     "jcode update installs",
     "docs/IOS_APP.md",
     ".github/workflows/ios.yml",
@@ -196,10 +254,37 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         for relative in ACTIVE_DISTRIBUTION_DOCS:
             path = ROOT / relative
             self.assertTrue(path.exists(), f"active distribution document missing: {relative}")
-            text = path.read_text()
+
+        for relative in tracked_active_documents():
+            text = (ROOT / relative).read_text(errors="ignore")
             for banned in FORBIDDEN_ACTIVE_DOC_TEXT:
                 with self.subTest(path=relative, token=banned):
-                    self.assertNotIn(banned, text)
+                    self.assertNotIn(banned, text, f"{relative} advertises retired channel {banned!r}")
+
+    def test_retired_install_idioms_are_absent_from_active_docs(self) -> None:
+        """F30-FIX-2: AUR, curl-pipe, and PowerShell-pipe install instructions."""
+        for relative in tracked_active_documents():
+            text = (ROOT / relative).read_text(errors="ignore")
+            for label, pattern in FORBIDDEN_ACTIVE_DOC_PATTERNS:
+                with self.subTest(path=relative, token=label):
+                    match = re.search(pattern, text)
+                    self.assertIsNone(
+                        match,
+                        f"{relative} advertises a retired install channel "
+                        f"({label}): {match.group(0) if match else ''!r}",
+                    )
+
+    def test_distribution_doc_scan_is_not_vacuous(self) -> None:
+        """A gate that scans nothing reports OK. Make that state fail RED."""
+        scanned = tracked_active_documents()
+        self.assertGreaterEqual(
+            len(scanned),
+            MIN_SCANNED_ACTIVE_DOCS,
+            f"distribution doc scan collapsed to {len(scanned)} files; "
+            "the gate is near-vacuous and would pass without checking anything",
+        )
+        for relative in ACTIVE_DISTRIBUTION_DOCS:
+            self.assertIn(relative, scanned, f"historically guarded doc dropped out: {relative}")
 
 
 if __name__ == "__main__":
