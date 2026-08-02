@@ -1360,7 +1360,7 @@ fn render_todo_card_item_line(
         Span::styled(format!("{} ", glyph), Style::default().fg(glyph_color)),
         Span::styled(todo.content.clone(), Style::default().fg(text_color)),
     ];
-    if todo.priority == "high" && todo.status != "completed" && todo.status != "cancelled" {
+    if todo.priority == "high" && !crate::todo::is_terminal_todo_status(&todo.status) {
         spans.push(Span::styled(
             " (high)",
             Style::default().fg(rgb(235, 175, 95)),

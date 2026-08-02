@@ -34,12 +34,6 @@ pub(super) fn incomplete_poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
         .collect()
 }
 
-/// True when a todo names an unmet dependency.
-///
-/// A blocked item is outstanding but not actionable, which is a third state the
-/// poke previously could not express: it partitioned todos into terminal and
-/// "keep working", so blocked work was nagged with an instruction that cannot
-/// be followed until something outside the model's control changes.
 /// Banner shown when every outstanding todo is blocked.
 ///
 /// Auto-poke disarms here rather than staying armed and silent: an armed poke
@@ -53,6 +47,12 @@ pub(super) fn auto_poke_blocked_banner(blocked: &[crate::todo::TodoItem]) -> Str
     )
 }
 
+/// True when a todo names an unmet dependency.
+///
+/// A blocked item is outstanding but not actionable, which is a third state the
+/// poke previously could not express: it partitioned todos into terminal and
+/// "keep working", so blocked work was nagged with an instruction that cannot
+/// be followed until something outside the model's control changes.
 pub(super) fn is_blocked_poke_todo(todo: &crate::todo::TodoItem) -> bool {
     todo.blocked_by
         .iter()

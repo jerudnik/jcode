@@ -669,3 +669,163 @@ fn r08_gate4_an_actionable_item_still_pokes_and_names_the_blocker() {
         );
     });
 }
+
+fn cancelled_todo(id: &str, content: &str) -> crate::todo::TodoItem {
+    crate::todo::TodoItem {
+        status: "cancelled".to_string(),
+        ..poke_todo(id, content, &[])
+    }
+}
+
+/// R08 gate 3: "An all-cancelled todo list produces neither a visible poke nor
+/// a hidden dispatched turn."
+///
+/// R08(b) and (c) fixed the two halves separately -- one terminal predicate, and
+/// an empty-completed-set case distinct from "needs more work" -- but both were
+/// only ever asserted on their helpers. Gate 3 is a statement about the pump, so
+/// it has to be measured at `finish_turn`, where a hidden dispatch actually
+/// costs a model round-trip. The failure this guards is specific: cancelled work
+/// counted as outstanding, so the poke nagged about it, while
+/// `todo_confidence_summary` simultaneously reported it as needing more
+/// validation, and the two disagreed about the same list on the same turn.
+#[test]
+fn r08_gate3_an_all_cancelled_list_dispatches_no_turn() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        crate::todo::save_todos(
+            &app.session.id,
+            &[
+                cancelled_todo("t1", "Abandoned approach"),
+                cancelled_todo("t2", "Superseded by t3"),
+            ],
+        )
+        .expect("save todos");
+        app.auto_poke_incomplete_todos = true;
+
+        let mut hidden_total = 0usize;
+        for _ in 0..20 {
+            app.hidden_queued_system_messages.clear();
+            app.pending_queued_dispatch = false;
+            app.is_processing = true;
+            super::local::finish_turn(&mut app);
+            hidden_total += app.hidden_queued_system_messages.len();
+        }
+
+        assert_eq!(
+            hidden_total, 0,
+            "cancelled work is finished, so it must not dispatch a hidden turn"
+        );
+        assert!(
+            app.queued_messages.is_empty(),
+            "no visible poke may be queued for an all-cancelled list"
+        );
+        let nagged = app
+            .display_messages
+            .iter()
+            .any(|message| message.content.contains("incomplete todo"));
+        assert!(!nagged, "cancelled work must not be called incomplete");
+    });
+}
+
+/// CONTRAST for gate 3: an outstanding list must still pump.
+///
+/// Every assertion above is satisfiable by disabling the poke, so this pins the
+/// other side with the same driver and the only difference being status.
+#[test]
+fn r08_gate3_an_outstanding_list_still_pokes_under_the_same_driver() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        crate::todo::save_todos(&app.session.id, &[poke_todo("t1", "Real work", &[])])
+            .expect("save todos");
+        app.auto_poke_incomplete_todos = true;
+
+        app.pending_queued_dispatch = false;
+        app.is_processing = true;
+        super::local::finish_turn(&mut app);
+
+        assert!(
+            !app.queued_messages.is_empty(),
+            "an actionable list must still poke under this driver, \
+             or the all-cancelled assertions prove only that poking is off"
+        );
+    });
+}
+
+/// R08 gate 2 + evidence 1: exactly one predicate decides "terminal", and every
+/// consumer agrees with it on the same list.
+///
+/// Grep alone cannot prove agreement, and a unit test of the predicate alone
+/// proves only that the predicate is self-consistent. So this drives the actual
+/// consumers -- the poke partition, the "N todos" tool-call title, and the
+/// improve/refactor status line -- over one list holding every status, and
+/// requires the counts to match. Before the sweep, eleven call sites re-spelled
+/// the terminal set inline as `!= "completed" && != "cancelled"`, so adding a
+/// third terminal status would have moved some counts and not others.
+#[test]
+fn r08_gate2_every_consumer_agrees_on_one_terminal_predicate() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        let mut todos = vec![
+            poke_todo("t1", "Pending work", &[]),
+            cancelled_todo("t2", "Abandoned"),
+        ];
+        todos.push(crate::todo::TodoItem {
+            status: "completed".to_string(),
+            ..poke_todo("t3", "Done", &[])
+        });
+        todos.push(crate::todo::TodoItem {
+            status: "in_progress".to_string(),
+            ..poke_todo("t4", "Underway", &[])
+        });
+        crate::todo::save_todos(&app.session.id, &todos).expect("save todos");
+
+        // The one predicate: t1 and t4 are outstanding, t2 and t3 are finished.
+        let expected = todos
+            .iter()
+            .filter(|todo| !crate::todo::is_terminal_todo_status(&todo.status))
+            .count();
+        assert_eq!(expected, 2, "fixture sanity: two outstanding items");
+
+        // Consumer 1: the poke partition.
+        assert_eq!(
+            super::commands::incomplete_poke_todos(&app).len(),
+            expected,
+            "the poke must count the same outstanding set as the predicate"
+        );
+
+        // Consumer 2: the improve/refactor status line, which reports the same
+        // list to the user in prose.
+        for status in [
+            super::commands_improve::format_improve_status(&app),
+            super::commands_improve::format_refactor_status(&app),
+        ] {
+            assert!(
+                status.contains(&format!("{expected} incomplete")),
+                "status line disagrees with the terminal predicate: {status}"
+            );
+        }
+
+        // Cancelling the last outstanding item must move every consumer at once.
+        let settled: Vec<_> = todos
+            .iter()
+            .map(|todo| crate::todo::TodoItem {
+                status: if crate::todo::is_terminal_todo_status(&todo.status) {
+                    todo.status.clone()
+                } else {
+                    "cancelled".to_string()
+                },
+                ..todo.clone()
+            })
+            .collect();
+        crate::todo::save_todos(&app.session.id, &settled).expect("save settled todos");
+        assert!(super::commands::incomplete_poke_todos(&app).is_empty());
+        app.auto_poke_incomplete_todos = true;
+        app.pending_queued_dispatch = false;
+        app.is_processing = true;
+        super::local::finish_turn(&mut app);
+        assert!(
+            app.queued_messages.is_empty(),
+            "a fully terminal list must not poke any consumer"
+        );
+    });
+}
