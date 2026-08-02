@@ -622,10 +622,10 @@
       "updated_at": "2026-08-02T11:31:24.447613Z"
     },
     "R09": {
-      "state": "pending",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
+      "evidence": "docs/fork/ideal-base/evidence/R09_routes_memo_ttl.md",
       "summary": null,
       "updated_at": null
     },

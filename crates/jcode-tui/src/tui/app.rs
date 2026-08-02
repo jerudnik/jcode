@@ -1099,6 +1099,13 @@ pub struct App {
     remote_history_wait_started: Option<Instant>,
     remote_history_recovery_attempts: u32,
     remote_history_recovery_last_attempt: Option<Instant>,
+    /// Whether the most recent history re-request was accepted by the server.
+    ///
+    /// This is the signal that separates "slow" from "unavailable". A send that
+    /// succeeds proves the connection is alive and the server simply has not
+    /// answered yet (a cold model-catalog build has been measured at 17s), so
+    /// advising `/restart` would discard a working session.
+    remote_history_recovery_last_send_ok: bool,
     // Server was just spawned - allow initial connection retries in run_remote
     server_spawning: bool,
     // Whether running in replay mode (readonly playback of a saved session)

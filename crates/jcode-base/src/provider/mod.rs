@@ -443,6 +443,87 @@ fn catalog_generation() -> u64 {
     CATALOG_GENERATION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Longest catalog build observed in this process, in milliseconds.
+///
+/// The TTL is derived from this rather than guessed, because a memo whose TTL
+/// is shorter than the build it caches cannot amortize anything: it expires
+/// before it is ever reused, and the rebuild lands on whatever interactive path
+/// asked next. That is not hypothetical. Measured `[TIMING] model_routes` lines
+/// from this machine's own logs, n=96: p50 3185ms, p90 3691ms, p99/max 17039ms,
+/// with 59.4% of builds over the old fixed 3000ms TTL. The *median* build
+/// already outlived its own cache entry.
+static OBSERVED_MAX_ROUTES_BUILD_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Floor for the memo TTL, used before any build has been timed.
+///
+/// Sized above the measured p90 (3691ms) so a warm rebuild is amortized from
+/// the very first build, instead of after the process has learned the hard way.
+const ROUTES_MEMO_MIN_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Ceiling, so a pathological one-off build cannot pin a stale catalog for the
+/// rest of the process. Correctness does not depend on this bound: auth changes
+/// and catalog refreshes bump the generations, which invalidate every entry
+/// immediately regardless of TTL.
+const ROUTES_MEMO_MAX_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Multiple of the worst observed build time to keep an entry for.
+///
+/// A cache is worth having when it is held for meaningfully longer than it
+/// costs to build; 10x means a build is amortized across roughly ten reuse
+/// windows rather than being rebuilt while still warm.
+const ROUTES_MEMO_TTL_BUILD_MULTIPLE: u32 = 10;
+
+/// TTL for a memoized catalog, derived from the slowest build actually
+/// observed. Always exceeds that build time, which is the property the old
+/// fixed 3s constant violated.
+fn routes_memo_ttl() -> std::time::Duration {
+    let observed_ms = OBSERVED_MAX_ROUTES_BUILD_MS.load(std::sync::atomic::Ordering::Relaxed);
+    let derived = std::time::Duration::from_millis(observed_ms)
+        .saturating_mul(ROUTES_MEMO_TTL_BUILD_MULTIPLE);
+    derived.clamp(ROUTES_MEMO_MIN_TTL, ROUTES_MEMO_MAX_TTL)
+}
+
+/// Record a completed build so the TTL tracks reality on this machine instead
+/// of a number someone guessed once.
+fn record_routes_build_duration(elapsed: std::time::Duration) {
+    let ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    OBSERVED_MAX_ROUTES_BUILD_MS.fetch_max(ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Age every memoized entry past the TTL without touching the generations,
+/// reproducing the exact state that matters here: content still valid, but the
+/// TTL expired, so the caller falls through to the build path. Tests that skip
+/// this never reach the single-flight lock at all and silently prove nothing.
+#[cfg(test)]
+fn expire_routes_memo_ttl_for_test() {
+    let aged = std::time::Instant::now()
+        .checked_sub(ROUTES_MEMO_MAX_TTL * 2)
+        .expect("instant far enough in the past");
+    if let Ok(mut shared) = GLOBAL_ROUTES_MEMO.lock() {
+        for entry in shared.values_mut() {
+            entry.built_at = aged;
+        }
+    }
+}
+
+#[cfg(test)]
+impl MultiProvider {
+    /// Age this instance's memo too. Both the instance and shared memos are
+    /// consulted before the build lock, so aging only one leaves a fast path
+    /// that returns early.
+    fn expire_instance_routes_memo_ttl_for_test(&self) {
+        let aged = std::time::Instant::now()
+            .checked_sub(ROUTES_MEMO_MAX_TTL * 2)
+            .expect("instant far enough in the past");
+        if let Ok(mut memo) = self.routes_memo.lock()
+            && let Some(entry) = memo.as_mut()
+        {
+            entry.built_at = aged;
+        }
+    }
+}
+
 impl MultiProvider {
     /// Drop this instance's route-catalog memo. Use for changes that are
     /// captured by [`Self::routes_memo_key`] (model/provider/profile switches):
@@ -525,15 +606,38 @@ impl MultiProvider {
     /// generations. Lookup order: this instance's memo, the process-wide
     /// shared memo (so shared-server forks reuse one build), then a
     /// single-flight build that followers wait on instead of duplicating.
-    fn fresh_routes_memo_entry(&self) -> RoutesMemoEntry {
-        const ROUTES_MEMO_TTL: std::time::Duration = std::time::Duration::from_secs(3);
-
+    /// Newest memo entry whose *content* is still valid, ignoring TTL age.
+    ///
+    /// Generations, not the TTL, are what make an entry correct: auth changes
+    /// and catalog refreshes bump them and invalidate every entry immediately.
+    /// The TTL only bounds drift from inputs nothing signals. So when a build
+    /// is already in flight, a generation-current entry is a truthful answer,
+    /// and returning it beats blocking an interactive request for seconds.
+    fn generation_current_routes_memo_entry(&self, shared_key: &str) -> Option<RoutesMemoEntry> {
         let auth_generation = pricing::auth_pricing_generation();
         let catalog_gen = catalog_generation();
+        let current = |entry: &RoutesMemoEntry| {
+            entry.auth_generation == auth_generation && entry.catalog_generation == catalog_gen
+        };
+        if let Ok(memo) = self.routes_memo.lock()
+            && let Some(entry) = memo.as_ref()
+            && current(entry)
+        {
+            return Some(entry.clone());
+        }
+        let shared = GLOBAL_ROUTES_MEMO.lock().ok()?;
+        let entry = shared.get(shared_key)?;
+        current(entry).then(|| entry.clone())
+    }
+
+    fn fresh_routes_memo_entry(&self) -> RoutesMemoEntry {
+        let auth_generation = pricing::auth_pricing_generation();
+        let catalog_gen = catalog_generation();
+        let ttl = routes_memo_ttl();
         let fresh = |entry: &RoutesMemoEntry| {
             entry.auth_generation == auth_generation
                 && entry.catalog_generation == catalog_gen
-                && entry.built_at.elapsed() < ROUTES_MEMO_TTL
+                && entry.built_at.elapsed() < ttl
         };
 
         // Fast path: this instance already built (or copied) a fresh catalog.
@@ -565,16 +669,39 @@ impl MultiProvider {
 
         // Single-flight: serialize builds so a connect burst produces one
         // build and N-1 memo hits instead of N parallel builds.
-        let _build_guard = GLOBAL_ROUTES_BUILD_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        //
+        // Never *queue* behind a build that is already running. A rebuild
+        // measured at up to 17s inside `Subscribe` blocks the server's
+        // sequential request loop, so a 27ms `GetHistory` waits behind it and
+        // the client's watchdog fires while the server is perfectly healthy.
+        // When a build is already in flight, a generation-current entry is
+        // still the right answer to give: a catalog a few seconds stale is a
+        // far smaller defect than a session that looks dead.
+        let _build_guard = match GLOBAL_ROUTES_BUILD_LOCK.try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if let Some(stale) = self.generation_current_routes_memo_entry(&shared_key) {
+                    return stale;
+                }
+                // Nothing to serve yet (first build in this process), so there
+                // is no honest alternative to waiting for the leader.
+                GLOBAL_ROUTES_BUILD_LOCK
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+            }
+        };
         // Re-check after acquiring the lock: the leader that held it may have
         // just published exactly the entry this instance needs.
         if let Some(entry) = try_shared() {
             return entry;
         }
 
+        let build_started = std::time::Instant::now();
         let routes = catalog_routes::multiprovider_model_routes(self);
+        // Feed the measured cost back into the TTL, so the window this entry is
+        // kept for is derived from how long it actually took to produce.
+        record_routes_build_duration(build_started.elapsed());
         let entry = RoutesMemoEntry {
             built_at: std::time::Instant::now(),
             auth_generation,

@@ -489,6 +489,7 @@ impl App {
         self.remote_history_wait_started = Some(Instant::now());
         self.remote_history_recovery_attempts = 0;
         self.remote_history_recovery_last_attempt = None;
+        self.remote_history_recovery_last_send_ok = false;
     }
 
     /// Clear the history-recovery watchdog once history has loaded (or the
@@ -497,6 +498,7 @@ impl App {
         self.remote_history_wait_started = None;
         self.remote_history_recovery_attempts = 0;
         self.remote_history_recovery_last_attempt = None;
+        self.remote_history_recovery_last_send_ok = false;
     }
 
     pub(super) fn set_memory_feature_enabled(&mut self, enabled: bool) {

@@ -988,3 +988,75 @@ fn forward_pending_reasoning_effort_is_noop_without_staged_effort() {
     assert!(app.remote_reasoning_effort.is_none());
     assert!(app.pending_reasoning_effort.is_none());
 }
+
+/// R09 gate 4: a slow startup must be reported as *slow*, never as *unavailable*.
+///
+/// The watchdog gives up after a fixed number of re-requests, but "we gave up
+/// waiting" is not the same fact as "the session is gone". When the last
+/// re-request was accepted by the server the connection is demonstrably alive
+/// and the server is simply still building (measured: a cold model-catalog
+/// build takes up to 17s, well past the ~21s watchdog budget once retries are
+/// counted). Advising `/restart` there tells the user something false and
+/// throws away a session that was about to answer.
+///
+/// Both branches are asserted in one test on purpose: a fix that always says
+/// "still starting up" would be just as much of a lie as the old always-
+/// `/restart` message, and only the contrast catches that.
+#[test]
+fn r09_gate4_slow_startup_is_reported_as_slow_not_as_unavailable() {
+    use std::time::{Duration, Instant};
+
+    fn run_watchdog_with_send_ok(send_ok: bool) -> (String, String) {
+        let mut app = create_test_app();
+        app.is_remote = true;
+        app.remote_history_wait_started = Instant::now().checked_sub(Duration::from_secs(60));
+        app.remote_history_recovery_attempts = super::REMOTE_HISTORY_RECOVERY_MAX_ATTEMPTS;
+        app.remote_history_recovery_last_attempt = Some(Instant::now());
+        app.remote_history_recovery_last_send_ok = send_ok;
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mut remote = crate::tui::backend::RemoteConnection::dummy();
+            super::recover_stuck_remote_history(&mut app, &mut remote).await
+        });
+        let message = app.display_messages().last().unwrap().content.clone();
+        let notice = app
+            .status_notice
+            .as_ref()
+            .map(|(text, _)| text.clone())
+            .unwrap_or_default();
+        (message, notice)
+    }
+
+    // Server accepted the re-request: alive, just slow. Must NOT advise restart.
+    let (slow_msg, slow_notice) = run_watchdog_with_send_ok(true);
+    assert!(
+        !slow_msg.contains("/restart"),
+        "a connected-but-slow server must not be reported as needing a restart: {slow_msg}"
+    );
+    assert!(
+        !slow_notice.contains("/restart"),
+        "status notice must not advise restart while connected: {slow_notice}"
+    );
+    assert!(
+        slow_msg.contains("starting up") || slow_msg.contains("preparing"),
+        "message should say the session is still being prepared: {slow_msg}"
+    );
+
+    // Send failed: genuinely out of contact, so /restart is the honest advice.
+    let (dead_msg, dead_notice) = run_watchdog_with_send_ok(false);
+    assert!(
+        dead_msg.contains("/restart"),
+        "a disconnected session should still advise restart: {dead_msg}"
+    );
+    assert!(
+        dead_notice.contains("/restart"),
+        "status notice should advise restart when disconnected: {dead_notice}"
+    );
+
+    // The contrast is the point: the two states must not produce one message.
+    assert_ne!(
+        slow_msg, dead_msg,
+        "slow and unavailable must be distinguishable to the user"
+    );
+}

@@ -998,16 +998,35 @@ async fn recover_stuck_remote_history(app: &mut App, remote: &mut RemoteConnecti
         // We've exhausted re-requests. Surface a one-time actionable hint so the
         // user isn't stuck on a silent "loading session…" forever.
         if app.remote_history_recovery_last_attempt.is_some() {
-            crate::logging::warn(
-                "Remote history never loaded after repeated re-requests; session is stuck on \
-                 'loading session…'. Advising /restart.",
-            );
-            app.push_display_message(DisplayMessage::system(
-                "⚠ Still loading session… the server hasn't sent the conversation history. \
-                 This usually clears on its own; if it persists, run /restart to reconnect."
-                    .to_string(),
+            // Distinguish "slow" from "unavailable". Every re-request above was
+            // *accepted* by the server, so the connection is alive and the
+            // session is not lost: it is busy behind a long-running request
+            // (a cold model-catalog build has been measured at 17s). Telling
+            // the user to /restart here is both false and harmful, because it
+            // discards a session that was about to answer.
+            // A re-request that the server accepted proves the socket is alive.
+            let alive = app.remote_history_recovery_last_send_ok;
+            crate::logging::warn(&format!(
+                "Remote history not loaded after {} re-requests (connected={}); reporting a slow \
+                 startup rather than an unavailable session",
+                REMOTE_HISTORY_RECOVERY_MAX_ATTEMPTS, alive,
             ));
-            app.set_status_notice("Session history not loading - try /restart");
+            if alive {
+                app.push_display_message(DisplayMessage::system(
+                    "⏳ Still starting up… the server is connected but hasn't finished \
+                     preparing this session yet. It should arrive on its own; there is no \
+                     need to restart."
+                        .to_string(),
+                ));
+                app.set_status_notice("Still starting up - server connected, preparing session");
+            } else {
+                app.push_display_message(DisplayMessage::system(
+                    "⚠ Lost contact with the server while loading this session. \
+                     Run /restart to reconnect."
+                        .to_string(),
+                ));
+                app.set_status_notice("Disconnected while loading - try /restart");
+            }
             // Clear last_attempt so we don't repeat the message every tick, but
             // keep attempts at max so we don't re-enter the retry path.
             app.remote_history_recovery_last_attempt = None;
@@ -1034,9 +1053,11 @@ async fn recover_stuck_remote_history(app: &mut App, remote: &mut RemoteConnecti
     ));
     match remote.request_history().await {
         Ok(_) => {
+            app.remote_history_recovery_last_send_ok = true;
             app.set_status_notice("Loading session… re-requesting history");
         }
         Err(err) => {
+            app.remote_history_recovery_last_send_ok = false;
             crate::logging::error(&format!(
                 "History recovery re-request failed: {err}; will retry on next watchdog tick"
             ));
