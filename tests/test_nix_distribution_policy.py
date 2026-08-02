@@ -23,6 +23,10 @@ RETIRED_PATHS = (
     "scripts/update_packages.sh",
     "scripts/quick-release.sh",
     "scripts/phone-server/testflight-setup.py",
+    # F30-FIX-4: shared PATH helper for the retired curl|bash installer. Its
+    # own header described keeping it in sync with install.sh, which no longer
+    # exists; nothing sourced it.
+    "scripts/lib/configure_path.sh",
 )
 
 ACTIVE_DISTRIBUTION_DOCS = (
