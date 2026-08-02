@@ -393,7 +393,7 @@ async fn test_resume_session_with_local_history_uses_metadata_only_history() -> 
             .unwrap_or_else(|| "<no logs>".to_string())
     );
 
-    let resume_ids = provider.captured_resume_session_ids.lock().unwrap().clone();
+    let resume_ids = provider.captures.resume_session_ids.lock().unwrap().clone();
     assert_eq!(
         resume_ids.last().cloned(),
         Some(Some("provider-resume-123".to_string()))
@@ -768,7 +768,7 @@ async fn test_model_switch_resets_provider_session() -> Result<()> {
     }
     assert!(saw_done2, "Did not receive Done for second message");
 
-    let resume_ids = provider.captured_resume_session_ids.lock().unwrap().clone();
+    let resume_ids = provider.captures.resume_session_ids.lock().unwrap().clone();
     assert_eq!(resume_ids.len(), 2);
     assert_eq!(resume_ids[0], None);
     assert_eq!(resume_ids[1], None);
@@ -882,7 +882,7 @@ async fn test_model_switch_is_per_session() -> Result<()> {
     }
     assert!(done3, "Did not receive Done for client2 after switch");
 
-    let models = provider.captured_models.lock().unwrap().clone();
+    let models = provider.captures.models.lock().unwrap().clone();
     assert!(models.len() >= 3, "Expected at least 3 model captures");
     assert_eq!(models[2], "model-a");
 
@@ -917,7 +917,7 @@ async fn test_system_prompt_no_claude_code_identity() -> Result<()> {
     let _ = agent.run_once_capture("Who are you?").await?;
 
     // Get the captured system prompt from our Arc<MockProvider>
-    let captured_prompts = provider_for_check.captured_system_prompts.lock().unwrap();
+    let captured_prompts = provider_for_check.captures.system_prompts.lock().unwrap();
 
     assert!(
         !captured_prompts.is_empty(),
