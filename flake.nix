@@ -119,6 +119,7 @@
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
               ./.github/workflows/release.yml
+              ./.github/workflows/governance-root.yml
             ];
           };
 
@@ -323,7 +324,8 @@
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
                     .github/workflows/nix-update.yml \
-                    .github/workflows/release.yml
+                    .github/workflows/release.yml \
+                    .github/workflows/governance-root.yml
                   touch "$out"
                 '';
 

@@ -72,6 +72,13 @@ SKIPPED_DIRECTORIES = frozenset(
 # zero files, which is the exact failure mode F30-FIX-1 was filed for.
 MIN_SCANNED_ACTIVE_DOCS = 60
 
+# F30-FIX-3: workflows inherited from upstream are kept byte-close to the fork
+# point and are dispatch-only, so they are deliberately not linted. Every other
+# workflow is fork-owned and must be. Listing the exemptions rather than the
+# covered set means a newly added workflow is linted by default; the previous
+# hardcoded lint list silently omitted governance-root.yml for three weeks.
+UNLINTED_UPSTREAM_WORKFLOWS = frozenset({"ci.yml", "freebsd-smoke.yml"})
+
 # F30-FIX-2: the substring list missed the AUR, curl-pipe, and PowerShell-pipe
 # install idioms entirely. These are regexes rather than substrings because the
 # plain-substring forms collide with ordinary prose and markdown tables ("| sh"
@@ -296,6 +303,39 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
                         f"{relative} advertises a retired install channel "
                         f"({label}): {match.group(0) if match else ''!r}",
                     )
+
+    def test_every_fork_owned_workflow_is_lint_covered(self) -> None:
+        """F30-FIX-3: lint coverage is a rule, not a hand-maintained list."""
+        workflow_dir = ROOT / ".github/workflows"
+        present = {path.name for path in workflow_dir.glob("*.yml")}
+        present |= {path.name for path in workflow_dir.glob("*.yaml")}
+        expected = present - UNLINTED_UPSTREAM_WORKFLOWS
+
+        nix_workflow = (ROOT / ".github/workflows/nix.yml").read_text()
+        flake = (ROOT / "flake.nix").read_text()
+        for name in sorted(expected):
+            reference = f".github/workflows/{name}"
+            with self.subTest(workflow=name, list="nix.yml actionlint"):
+                self.assertIn(
+                    reference,
+                    nix_workflow,
+                    f"fork-owned workflow {name} is not linted by nix.yml",
+                )
+            with self.subTest(workflow=name, list="flake workflow-syntax check"):
+                self.assertIn(
+                    reference,
+                    flake,
+                    f"fork-owned workflow {name} is not linted by the flake check",
+                )
+
+        for name in sorted(UNLINTED_UPSTREAM_WORKFLOWS):
+            with self.subTest(workflow=name, exemption="still present"):
+                self.assertIn(
+                    name,
+                    present,
+                    f"exempt workflow {name} no longer exists; drop it from "
+                    "UNLINTED_UPSTREAM_WORKFLOWS instead of leaving a dead exemption",
+                )
 
     def test_distribution_doc_scan_is_not_vacuous(self) -> None:
         """A gate that scans nothing reports OK. Make that state fail RED."""
