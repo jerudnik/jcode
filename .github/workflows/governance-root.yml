@@ -49,6 +49,7 @@ jobs:
             scripts/check_test_size_budget.py
             scripts/check_tui_render_lock.py
             scripts/check_warning_budget.sh
+            scripts/test_warning_budget.py
             scripts/docs_impact_advisory.py
             scripts/rust_production_filter.py
             scripts/security_preflight.sh

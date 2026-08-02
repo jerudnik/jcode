@@ -26,7 +26,32 @@ if [[ ! -f "$baseline_file" ]]; then
   exit 1
 fi
 
-current=$(cd "$repo_root" && CARGO_TERM_COLOR=never cargo check -q 2>&1 | rg -c '^warning:' || printf '0\n')
+# Count with grep, not rg. This step ran for the entire life of the gate as
+# `... | rg -c '^warning:' || printf '0\n'` on a runner that has no ripgrep, so
+# `rg: command not found` was absorbed by the `||` and the gate printed
+# "Warning budget OK: current=0 baseline=0" while counting nothing. Observed in
+# CI, not inferred: run 30769227268, Quality Guardrails, lines 755-756.
+#
+# grep is in coreutils-adjacent base on every runner and in the devshell, so the
+# tool cannot go missing the way rg did. `grep -c` still exits 1 on zero
+# matches, which is the legitimate zero-warning case, so `|| true` is needed and
+# is safe only because the cargo status is checked separately below.
+#
+# The cargo exit status is captured explicitly instead of being lost to a pipe:
+# a compile failure emits no `warning:` lines, so the old shape reported a
+# broken build as a clean budget too. Verified separately with a stub that
+# exits 101; it printed current=0 and exited 0.
+cd "$repo_root"
+set +e
+cargo_output=$(CARGO_TERM_COLOR=never cargo check -q 2>&1)
+cargo_status=$?
+set -e
+if (( cargo_status != 0 )); then
+  echo "error: cargo check failed (exit $cargo_status); warning count is not measurable" >&2
+  printf '%s\n' "$cargo_output" >&2
+  exit 1
+fi
+current=$(printf '%s\n' "$cargo_output" | grep -c '^warning:' || true)
 baseline=$(tr -d '[:space:]' < "$baseline_file")
 
 if [[ "${1:-}" == "--update" ]]; then

@@ -234,6 +234,14 @@ jobs:
       - name: Enforce warning budget
         run: scripts/check_warning_budget.sh
 
+      # This gate counted with ripgrep, which is not on this runner image, so
+      # `rg: command not found` was swallowed by a `||` fallback and it printed
+      # "Warning budget OK: current=0 baseline=0" having counted nothing. These
+      # tests drive the script with a stub cargo, because a tree that genuinely
+      # has zero warnings cannot tell a working counter from a broken one.
+      - name: Test warning budget checker
+        run: python3 -m unittest discover -s scripts -p 'test_warning_budget.py'
+
       - name: Enforce oversized-file ratchet
         run: python3 scripts/check_code_size_budget.py
 
