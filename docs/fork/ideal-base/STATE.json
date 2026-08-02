@@ -63,20 +63,20 @@
       "updated_at": "2026-08-01T07:27:38Z"
     },
     "W5": {
-      "state": "pending",
+      "state": "in_progress",
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Signoff wave opened. G04 verified satisfied by shipped state with no work required. G01/G02/G03/G05 remain external gates needing authorization or hardware; S01-S03 blocked on them.",
+      "updated_at": "2026-08-02T02:44:46Z"
     },
     "W6": {
-      "state": "pending",
+      "state": "in_progress",
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "summary": "Fix wave opened. R05-FIX-1 implemented on branch; F26-FIX-1 rejected as a false node after re-verification against shipped code. F30-FIX-1..4 in progress; re-verification found F30-FIX-4 largely false and F30-FIX-3 overstated.",
+      "updated_at": "2026-08-02T02:44:46Z"
     },
     "W0.1": {
       "state": "accepted",
@@ -419,12 +419,14 @@
       "updated_at": null
     },
     "G04": {
-      "state": "pending",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/G04.md"
+      ],
+      "summary": "Verification-only node; satisfied by shipped state with no code change: 0 windows/freebsd refs in flake.nix, docs/WINDOWS.md explicitly disclaims end-user distribution, freebsd-smoke.yml is workflow_dispatch only. Verified at 9a34ff77b4b9ecf6c30fa6260ad772e2976a6dd1; awaiting publication for acceptance.",
+      "updated_at": "2026-08-02T02:42:48Z"
     },
     "G05": {
       "state": "pending",
@@ -661,20 +663,24 @@
       "updated_at": null
     },
     "R05-FIX-1": {
-      "state": "pending",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/R05-FIX-1.md"
+      ],
+      "summary": "Cancel no longer reported as a server reload. InterruptCause added; control run gave 4 FAILED pre-fix / 8 passed post-fix. Landed on branch automation/todo-confidence-gate-fix at 9a34ff77b4b9ecf6c30fa6260ad772e2976a6dd1; reviewed_commit stays null until that merges to main.",
+      "updated_at": "2026-08-02T02:42:48Z"
     },
     "F26-FIX-1": {
-      "state": "pending",
+      "state": "rejected",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6/F26-FIX-1.md"
+      ],
+      "summary": "False node. Production unregister exists as Session::mark_closed_and_persist (7 callers, incl. 5 headless in ambient/runner.rs); sweep reclaims by PID liveness not a 24h window; live machine shows 4 markers, 0 dead.",
+      "updated_at": "2026-08-02T02:42:48Z"
     }
   }
 }
