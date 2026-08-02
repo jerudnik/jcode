@@ -232,3 +232,34 @@ fn gate_todo(
         ..Default::default()
     }
 }
+
+/// R08(c): `needs_more_work` must distinguish "no completed items to assess"
+/// from "the completed items scored badly".
+///
+/// `unwrap_or(true)` on an empty completed set reported the two identically, so
+/// an all-cancelled list was told its completion confidence was insufficient.
+/// That is a false statement about work that was never assessed, and it is what
+/// sent the auto-poke into the completion gate for a list nobody had scored.
+#[test]
+fn all_cancelled_todos_have_nothing_to_assess_rather_than_needing_work() {
+    use super::super::todos_view::todo_confidence_summary;
+
+    let cancelled = vec![gate_todo("a", "cancelled", "high", None)];
+    let summary = todo_confidence_summary(&cancelled);
+    assert!(
+        !summary.needs_more_work,
+        "a list with no completed items has nothing to assess, so it cannot need more validation"
+    );
+    assert_eq!(
+        summary.completion_average, None,
+        "an unassessed list still has no average to report"
+    );
+
+    // The contrast case must keep failing: completed work that scored low
+    // genuinely does need more validation.
+    let low = vec![gate_todo("a", "completed", "high", Some(10))];
+    assert!(
+        todo_confidence_summary(&low).needs_more_work,
+        "low-scoring completed work must still be flagged"
+    );
+}

@@ -2401,7 +2401,7 @@ fn test_finish_turn_auto_poke_queues_confidence_summary_when_todos_done() {
 
 #[test]
 fn test_todo_completion_gate_ignores_precompletion_confidence() {
-    let summary = super::commands::todo_confidence_summary(&[crate::todo::TodoItem {
+    let summary = super::todos_view::todo_confidence_summary(&[crate::todo::TodoItem {
         status: "completed".to_string(),
         priority: "high".to_string(),
         confidence: Some(0),
