@@ -224,3 +224,69 @@ blocked branch inherits the drift it is meant to escape.
   which would size the blast radius of consolidating it.
 * The desktop app (`session_launch.rs:156` has an unrelated `Cancelled`
   variant); out of scope for TUI/CLI.
+
+## R08(h): a poke reported a superseded count as present tense (2026-08-02)
+
+Observed live in `session_badger_1785586811874_613d6cdce5daf938`, on the binary
+built 2026-08-01 16:39 (`~/.jcode/current/jcode`, which predates the R08(b)/(c)
+fixes and does not contain `is_terminal_todo_status`).
+
+At `06:58:22.135775Z` the auto-poke said **"You have 4 incomplete todos."**
+The on-disk list had held **2** incomplete since `06:58:03.792681Z`, a lag of
+**18.2 seconds**, and the `todo` tool_result at `06:58:04Z` independently
+confirms the written statuses as `[completed, completed, completed, pending,
+pending]`. So the correct value existed, in the file the poke reads, for 18
+seconds before the poke asserted a different one.
+
+This is the same failure R08 is about, in a new costume: the count is not
+merely wrong, it is a *previous revision's* count presented as current. `4` was
+the true count of the revision written at `05:59:21Z`.
+
+Checked across all three pokes in the session:
+
+| poke (UTC) | said | file held at that moment | verdict |
+| --- | --- | --- | --- |
+| `05:09:14` | 4 | 4 (written `05:08:57`) | correct |
+| `05:59:05` | 4 | 4 (written `05:08:57`) | correct |
+| `06:58:22` | 4 | **2** (written `06:58:03`) | **WRONG** |
+
+### Hypotheses tested and falsified
+
+Recording these because each is individually plausible and a reader would
+otherwise retry them:
+
+1. **Stale terminal-status rule** (the pre-R08(b) `status != "completed"`
+   filter). Falsified: applied to the current file, *both* the old and new
+   rules yield 2, not 4. The running binary is genuinely old, but that does not
+   explain this number.
+2. **Message frozen at queue time.** `build_poke_message` renders a `String`
+   into `queued_messages`, and the dispatcher does `std::mem::take` and
+   forwards it verbatim, so this *is* a real structural gap. But it does not
+   explain this instance: the todo write landed 18s before the poke and the
+   poke is scheduled at `finish_turn`, after the write.
+3. **`TODOS_CACHE` staleness.** There is a time-based todos cache in
+   `helpers.rs` whose only production invalidation is in `observe.rs:112`. But
+   the poke path calls `crate::todo::load_todos` directly and never reads that
+   cache, so it is not implicated.
+4. **`.bak` recovery.** `~/.jcode/todos/<id>.bak` does contain exactly the
+   4-open revision from `05:59:22Z`. Falsified anyway:
+   `read_json_with_recovery_handler` consults `.bak` only when the primary
+   fails to parse, the primary parses fine (5 items), and the two files have
+   distinct inodes and link counts of 1.
+
+### Status: OPEN, root cause not established
+
+Four hypotheses, four falsifications. I am recording this rather than
+continuing, because the honest state is that I cannot yet name the mechanism,
+and the next plausible-sounding guess would be the fifth. What is *established*
+is the observation itself, which is reproducible from the stored transcript and
+the file timestamps, and which no amount of further theorizing changes.
+
+Worth noting for whoever picks this up: hypothesis 2 describes a genuine gap
+(the count is rendered at schedule time and never recomputed at send time) that
+should probably be closed on its own merits even though it does not explain
+this instance. A poke that recomputed at dispatch would be immune to the whole
+class, whatever the specific mechanism here turns out to be.
+
+The first step should be reproducing on a *current* binary. This session's
+binary predates the R08 fixes, so the behavior may already differ.
