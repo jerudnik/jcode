@@ -1,9 +1,8 @@
 use super::{Tool, ToolContext, ToolOutput};
 use crate::bus::{Bus, BusEvent, TodoEvent};
 use crate::todo::{
-    LOW_HILL_CLIMBABILITY, TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE,
-    TODO_OWNERSHIP_CONTINUATION_MESSAGE, TodoGoal, TodoItem, load_goals, load_todos,
-    newly_completed_groups_have_sufficient_ownership, save_goals, save_todos,
+    LOW_HILL_CLIMBABILITY, TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE, TodoGoal, TodoItem,
+    load_goals, load_todos, ownership_fault, save_goals, save_todos,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -352,8 +351,11 @@ impl Tool for TodoTool {
                 // no indication its write was rejected, so the only way to persist
                 // was to inflate the self-assessment until it cleared the bar.
                 let mut nudges = take_reframe_nudges(&goals, &todos);
-                if !newly_completed_groups_have_sufficient_ownership(&previous, &todos, &goals) {
-                    nudges.push(TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string());
+                // Name the group and the specific fault. A label mismatch and a
+                // low score are different problems with different fixes, and
+                // re-scoring cannot resolve the former.
+                if let Some(fault) = ownership_fault(&previous, &todos, &goals) {
+                    nudges.push(fault.message());
                 }
                 save_todos(&ctx.session_id, &todos)?;
                 save_goals(&ctx.session_id, &goals)?;
@@ -644,14 +646,18 @@ mod tests {
         let output = build_todo_output(
             todos.clone(),
             goals.clone(),
-            [TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string()],
+            [jcode_base::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE.to_string()],
         )
         .expect("ownership gate should produce a structured todo result");
 
         assert_eq!(output.title.as_deref(), Some("1 todos"));
         assert!(output.output.starts_with('['));
         assert!(output.output.contains("\"status\": \"in_progress\""));
-        assert!(output.output.contains(TODO_OWNERSHIP_CONTINUATION_MESSAGE));
+        assert!(
+            output
+                .output
+                .contains(jcode_base::todo::TODO_OWNERSHIP_CONTINUATION_MESSAGE)
+        );
         assert_eq!(
             output.metadata,
             Some(json!({"todos": todos, "goals": goals}))
@@ -849,9 +855,19 @@ mod tests {
         )
         .await;
 
+        // R08 gate 1, asserted on the production tool path rather than on the
+        // helper: the nudge must name the group it is about. Scoped to the
+        // nudge line, because the serialized todo card also contains "ship" --
+        // a whole-output `contains` passed with the fix unwired, so it proved
+        // nothing.
+        let nudge = output
+            .output
+            .lines()
+            .find(|line| line.contains("end-to-end ownership"))
+            .expect("a low ownership score should still nudge");
         assert!(
-            output.output.contains(TODO_OWNERSHIP_CONTINUATION_MESSAGE),
-            "a low ownership score should still nudge",
+            nudge.contains("\"ship\""),
+            "the ownership nudge must name the offending group: {nudge}"
         );
         assert!(
             output.output.contains("\"status\": \"completed\""),

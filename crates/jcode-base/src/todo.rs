@@ -42,14 +42,75 @@ fn group_is_complete(todos: &[TodoItem], group: &Option<String>) -> bool {
     matching.peek().is_some() && matching.all(|todo| todo.status == "completed")
 }
 
-/// Whether every group newly closed by this update has a sufficient assessment
-/// of ownership over its full outcome. Groups completed before this check was
-/// introduced are intentionally grandfathered so existing sessions stay writable.
-pub fn newly_completed_groups_have_sufficient_ownership(
+/// Why a newly completed group failed the ownership gate.
+///
+/// The gate used to answer `bool`, so all three faults had to share one
+/// sentence -- and that sentence described only the third. Telling a model its
+/// ownership is "not high enough" when the real fault is a mistyped group label
+/// sends it to re-score work that was already scored, which cannot ever clear
+/// the gate. Naming the fault is what makes the nudge actionable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnershipFaultKind {
+    /// No goal carries this group's label. Usually a label mismatch, so the
+    /// assessment exists but is filed under a name nothing matches.
+    NoGoalForGroup,
+    /// A goal matches, but it carries no ownership assessment at all.
+    NoOwnershipScore,
+    /// Assessed, and found wanting. The only fault the old sentence described.
+    BelowThreshold,
+}
+
+/// A single group's ownership fault, carrying enough to name it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnershipFault {
+    /// The group that failed, or `None` for the ungrouped list.
+    pub group: Option<String>,
+    pub kind: OwnershipFaultKind,
+}
+
+/// Shared lead-in for ownership nudges.
+///
+/// Keeps two promises the old wording broke: the write survived, and the
+/// specific fault follows. `is_auto_poke_message` matches on this so the
+/// continuation is still recognized as machine-initiated rather than typed.
+pub const TODO_OWNERSHIP_FAULT_PREFIX: &str = "Your todo update was saved. This is a nudge about end-to-end ownership, not a rejection: nothing was discarded.";
+
+impl OwnershipFault {
+    fn label(&self) -> String {
+        match &self.group {
+            Some(group) => format!("\"{group}\""),
+            None => "the ungrouped list".to_string(),
+        }
+    }
+
+    /// The model-facing nudge. Names the group and the specific fault while
+    /// keeping the private calibration (score and threshold) undisclosed.
+    pub fn message(&self) -> String {
+        let label = self.label();
+        let detail = match self.kind {
+            OwnershipFaultKind::NoGoalForGroup => format!(
+                "The group {label} is now complete, but no goal assessment carries that exact label, so its ownership was never assessed. Check that the goal's group matches the todos' group, or add a goal for {label}."
+            ),
+            OwnershipFaultKind::NoOwnershipScore => format!(
+                "The group {label} is now complete and has a goal, but that goal carries no end_to_end_ownership assessment. Assess it before finalizing."
+            ),
+            OwnershipFaultKind::BelowThreshold => {
+                format!("The group {label} is now complete. {TODO_OWNERSHIP_CONTINUATION_MESSAGE}")
+            }
+        };
+        format!("{TODO_OWNERSHIP_FAULT_PREFIX} {detail}")
+    }
+}
+
+/// The first ownership fault among the groups this update newly closed, if any.
+///
+/// Groups completed before this check was introduced are intentionally
+/// grandfathered so existing sessions stay writable.
+pub fn ownership_fault(
     previous: &[TodoItem],
     incoming: &[TodoItem],
     goals: &[TodoGoal],
-) -> bool {
+) -> Option<OwnershipFault> {
     let mut groups: Vec<Option<String>> = Vec::new();
     for todo in incoming {
         let group = normalized_group(todo.group.as_deref());
@@ -58,16 +119,33 @@ pub fn newly_completed_groups_have_sufficient_ownership(
         }
     }
 
-    groups.into_iter().all(|group| {
+    groups.into_iter().find_map(|group| {
         if !group_is_complete(incoming, &group) || group_is_complete(previous, &group) {
-            return true;
+            return None;
         }
-        goals
+        let kind = match goals
             .iter()
             .find(|goal| normalized_group(goal.group.as_deref()) == group)
-            .and_then(|goal| goal.end_to_end_ownership)
-            .is_some_and(|score| score >= QUALITY_GATE_THRESHOLD)
+        {
+            None => OwnershipFaultKind::NoGoalForGroup,
+            Some(goal) => match goal.end_to_end_ownership {
+                None => OwnershipFaultKind::NoOwnershipScore,
+                Some(score) if score < QUALITY_GATE_THRESHOLD => OwnershipFaultKind::BelowThreshold,
+                Some(_) => return None,
+            },
+        };
+        Some(OwnershipFault { group, kind })
     })
+}
+
+/// Whether every group newly closed by this update has a sufficient assessment
+/// of ownership over its full outcome.
+pub fn newly_completed_groups_have_sufficient_ownership(
+    previous: &[TodoItem],
+    incoming: &[TodoItem],
+    goals: &[TodoGoal],
+) -> bool {
+    ownership_fault(previous, incoming, goals).is_none()
 }
 
 /// Build the synthetic auto-poke continuation prompt sent when the model
@@ -136,6 +214,7 @@ pub fn is_auto_poke_message(message: &str) -> bool {
         && trimmed.ends_with("update the todo tool."))
         || trimmed.starts_with(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE)
         || trimmed.starts_with(TODO_OWNERSHIP_CONTINUATION_MESSAGE)
+        || trimmed.starts_with(TODO_OWNERSHIP_FAULT_PREFIX)
         || trimmed.starts_with(TODO_COMPLETION_CONTINUATION_MESSAGE)
         || trimmed.starts_with(LEGACY_TODO_CONFIDENCE_SUMMARY_PREFIX)
 }
@@ -373,6 +452,131 @@ mod tests {
             &completed,
             &[ownership_goal(Some("ship"), Some(96))],
         ));
+    }
+
+    /// R08 gate 1: "A rejected todo update names the discarded group and the
+    /// specific fault, and never reports low ownership when the score exceeds
+    /// the threshold."
+    ///
+    /// The gate returned a bare `bool`, so one sentence had to cover three
+    /// different faults. The worst is the third: a goal whose label does not
+    /// match its todos' group is *missing*, not low, yet the model was told its
+    /// ownership was insufficient. Re-scoring cannot fix a label mismatch, so
+    /// that message sends the model to work on the wrong thing.
+    #[test]
+    fn r08_gate1_a_label_mismatch_is_reported_as_missing_not_low() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+        // The model scored 100, but filed it under a different label.
+        let goals = [ownership_goal(Some("shipping"), Some(100))];
+
+        let fault = ownership_fault(&previous, &completed, &goals)
+            .expect("a completed group with no matching goal must report a fault");
+        assert_eq!(fault.group.as_deref(), Some("ship"));
+        assert!(
+            matches!(fault.kind, OwnershipFaultKind::NoGoalForGroup),
+            "a label mismatch must not be reported as a low score: {fault:?}"
+        );
+        let message = fault.message();
+        assert!(message.contains("ship"), "must name the group: {message}");
+        assert!(
+            !message.contains("not high enough"),
+            "must not claim the score is low when none was found for this group: {message}"
+        );
+    }
+
+    /// The three faults are distinguishable, and each names its group.
+    #[test]
+    fn r08_gate1_the_three_faults_are_distinct_and_named() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+
+        let missing_goal = ownership_fault(&previous, &completed, &[]).unwrap();
+        assert!(matches!(
+            missing_goal.kind,
+            OwnershipFaultKind::NoGoalForGroup
+        ));
+
+        let missing_score =
+            ownership_fault(&previous, &completed, &[ownership_goal(Some("ship"), None)]).unwrap();
+        assert!(matches!(
+            missing_score.kind,
+            OwnershipFaultKind::NoOwnershipScore
+        ));
+
+        let low = ownership_fault(
+            &previous,
+            &completed,
+            &[ownership_goal(Some("ship"), Some(10))],
+        )
+        .unwrap();
+        assert!(matches!(low.kind, OwnershipFaultKind::BelowThreshold));
+
+        let mut seen = vec![
+            missing_goal.message(),
+            missing_score.message(),
+            low.message(),
+        ];
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 3, "the three faults must read differently");
+        for message in &seen {
+            assert!(message.contains("ship"), "must name the group: {message}");
+        }
+    }
+
+    /// CONTRAST: a sufficient score reports no fault at all. Without this, a
+    /// fault type that always fires would satisfy every other assertion here.
+    #[test]
+    fn r08_gate1_a_sufficient_score_reports_no_fault() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+        assert!(
+            ownership_fault(
+                &previous,
+                &completed,
+                &[ownership_goal(Some("ship"), Some(96))],
+            )
+            .is_none()
+        );
+        // Ungrouped work still resolves through the implicit goal.
+        let previous = vec![todo("work", "in_progress", None)];
+        let completed = vec![todo("work", "completed", None)];
+        assert!(
+            ownership_fault(&previous, &completed, &[ownership_goal(None, Some(96))]).is_none()
+        );
+    }
+
+    /// Every fault message keeps the calibration private: no score, no
+    /// threshold, no digits. Naming the group must not leak the number.
+    #[test]
+    fn r08_gate1_fault_messages_disclose_no_calibration() {
+        let previous = vec![todo("work", "in_progress", Some("ship"))];
+        let completed = vec![todo("work", "completed", Some("ship"))];
+        for goals in [
+            Vec::new(),
+            vec![ownership_goal(Some("ship"), None)],
+            vec![ownership_goal(Some("ship"), Some(10))],
+        ] {
+            let message = ownership_fault(&previous, &completed, &goals)
+                .unwrap()
+                .message();
+            let lower = message.to_ascii_lowercase();
+            assert!(
+                !message.chars().any(|ch| ch.is_ascii_digit()),
+                "leaked a number: {message}"
+            );
+            for disclosure in ["threshold", "score", "percent", "quality gate"] {
+                assert!(
+                    !lower.contains(disclosure),
+                    "leaked {disclosure}: {message}"
+                );
+            }
+            assert!(
+                is_auto_poke_message(&message),
+                "fault messages must stay recognizable as machine continuations: {message}"
+            );
+        }
     }
 
     #[test]
