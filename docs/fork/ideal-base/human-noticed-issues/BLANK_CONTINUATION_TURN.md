@@ -1107,3 +1107,301 @@ sites against 361 real sends. That is a contradiction, not a result: the sends
 happened, so one exclusion had to be false. The correct response to "every
 candidate is refuted" is to re-test the exclusions, not to widen the candidate
 list. Both false exclusions above were found by doing that.
+
+---
+
+## What is verified, and how
+
+A fix can be merged, tested, and still never have executed in a running
+binary. Those are three different claims and this investigation conflated
+them at least once, so they are separated here.
+
+| claim | PR #88 (fire-once gate) | PR #87 (widened content guard) |
+|---|---|---|
+| merged to `main` | not yet | yes (`2dbe4f158`) |
+| unit / e2e coverage | yes | yes |
+| regression test proven to fail without the fix | yes (50 vs 1) | replay over 5 sessions |
+| **present in a running binary** | **yes** | **no** |
+
+The last row was checked, not assumed:
+
+```
+git merge-base --is-ancestor 2dbe4f158 c94f327ae   ->  not an ancestor
+strings ~/.jcode/current/jcode | grep -c machine_dispatch              ->  0
+strings ~/.jcode/current/jcode | grep -c 'Todo completion gate already fired'  ->  1
+```
+
+The built branch forked from `main` at `f25a1c026`, before #87 merged, so the
+post-reload reading of "0 blanks created" measured the fire-once gate running
+**alone**. That is cleaner for attributing the gate fix, and it means #87 is
+merged-with-coverage but *un-live-exercised*, which is a weaker claim than
+"verified live".
+
+Two independent reasons that particular 0 proves little:
+
+1. **No power.** The newest blank turn ever written is `2026-08-01T17:07:27Z`,
+   about 3.5 hours before the 20:39Z reload. Nothing was going to write a
+   blank in that window whether or not either fix worked.
+2. **Immutable denominator.** Neither fix rewrites session files, so the
+   all-time total of 1348 is fixed by construction and will never move. Only
+   blanks created *after* a fix landed can move, which is why
+   `count_blank_user_turns.py` takes a `SINCE` argument.
+
+### Counting the ownership gate, and the trap it sets
+
+The same `QUALITY_GATE_THRESHOLD = 96` gates a second path. In
+`newly_completed_groups_have_sufficient_ownership`, a completed group whose
+goal lacks a sufficient `end_to_end_ownership` score causes
+`tool/todo.rs` to return the *previous* todo state and never reach
+`save_todos`. The tool returns `Ok`, so nothing upstream can distinguish it
+from a successful write. The model is told its ownership was insufficient; it
+is **not** told the write was rejected, and the stale state it receives reads
+as though the write landed.
+
+The trigger is broader than a low score: the check is
+`.and_then(|goal| goal.end_to_end_ownership).is_some_and(|s| s >= 96)`, so a
+**missing** score fails too. Completing a group with no goal entry at all,
+including a plain ungrouped list, is rejected. Verified by test rather than
+by reading.
+
+Measuring the impact has a trap: the discarded writes are, by construction,
+absent from the goal files one would naturally count. Counting those files
+suggests ~11-16 affected entries. The escape is that the rejection persists a
+continuation message into the session transcript regardless of whether the
+write landed:
+
+```
+rejections, keyed on tool_use_id, deduplicated across forked sessions:
+
+  from normal usage       : 230  across 137 sessions
+  from this investigation :  22
+  total distinct events   : 252
+
+  todo-using sessions     : 342
+  hit, in that population : 135   = 39%
+  hit with no todo file   :   2   (write dropped, nothing persisted)
+```
+
+Report 135/342 as the rate and 137 as the count, never divided into each
+other. The two sessions with no todo file are hit by the bug and absent
+from the denominator, and both facts have the same cause: the rejection is
+what kept the file from being written. A `137/342` figure is therefore not
+merely a mismatch of populations, it is a rate whose numerator and
+denominator are both moved, in opposite directions, by the defect being
+measured. Each such session is removed from the denominator and added to
+the numerator by the same event.
+
+Reaching that number took four passes, and the first three were wrong in
+ways worth recording, because each is a way a text-derived metric can look
+authoritative while measuring something else.
+
+**Choose a unit the storage format guarantees.** Raw `grep` over session
+files gave 262. Counting messages that contain the string gave 257, because
+four tool results contain it more than once. The stable unit is the tool
+call: one `tool_use_id` whose result carries the rejection is exactly one
+rejected write. Occurrence counts and message counts are both proxies; the
+id is the event.
+
+**Classify every occurrence before excluding any.** A full recursive walk
+finds the string in three places, not one:
+
+```
+user      tool_result       264
+assistant tool_use           18
+assistant reasoning_trace     2
+```
+
+Only `tool_result` is a rejection. The `tool_use` blocks are the string
+being *written into* a todo call by agents investigating the bug, and an
+earlier traversal missed them entirely because it walked string values and
+`tool_use.input` is a dict. That produced a correct-looking exclusion of 22
+attributed to the wrong mechanism.
+
+**Immunity by construction still has to be checked, twice.** Keying on
+`tool_use_id` cannot double-count within a session, but it does not prevent
+the tool from echoing its own input back into its output: one result
+inherited the string from a todo item that contained it. Nor is the id
+unique across the corpus. Sessions can be forked, and a fork copies the
+parent's history verbatim, so a single rejection appears in two session
+files. Summing per-session id sets counts it twice; a single global set
+does not. Four ids are affected, in two fork pairs confirmed by explicit
+metadata rather than inferred:
+
+```
+shark_1785328929645   parent_id = hatchling_1785272355196   1243 shared messages
+macaque_1784693657835 parent_id = fish_1784514956914        5565 shared messages
+```
+
+"One id is one event by construction" was true in the scope it was reasoned
+in, a session, and false in the scope it was applied to, the corpus. That is
+the same shape as the echo error it was meant to rule out. One of the
+"never persisted a todo file" sessions, `macaque`, is a fork, which is why
+that count is two rather than three.
+
+Attributing a shared id needs the fork edge, not a clock. The two clocks
+available are not equally wrong, and the difference is measurable across
+the 183 parent/child pairs in the corpus:
+
+```
+created_at picks the parent correctly : 183/183 = 100%
+mtime      picks the parent correctly :  82/183 =  45%
+```
+
+`created_at` is a rule with a narrow exception, failing only where a parent
+is imported or backfilled after its child. File mtime is wrong in the
+common case, because a long-lived parent keeps being written after a fork
+is abandoned, which is precisely why it inverted on the pair that mattered.
+Neither is the rule.
+The correct key is lineage: an id belongs to the most ancestral session
+holding it. The decisive check on a suspected fork is whether the child has
+any rejection of its own, and `macaque` has none, so it is not an affected
+session at any ordering. Both attributions were computed and agree at
+252 / 230 / 137 / 135, which is a check on the implementation, not on the
+rule.
+
+That scope error is one of a family: three consecutive passes each broke a
+claim of the form "X is unique by construction", each true in the scope it
+was reasoned in and false in the scope it was applied. Two further members
+of that family were tested rather than left as caveats. First, whether the
+id is unique across clients or re-emitted on resume, widened to every tool
+call in the corpus:
+
+```
+distinct tool_use ids       : 53947
+ids appearing in >1 session : 4589
+  explained by a fork chain : 4589
+  not explained by lineage  :    0
+```
+
+Second, whether deduplicating along fork edges discards real events, which
+would make the count an *under*estimate. It does not: every shared
+rejection payload is byte-identical between parent and child, so the copies
+are inherited rather than re-emitted.
+
+```
+shared rejection ids, payload identical : 4
+shared rejection ids, payload differs   : 0
+```
+
+A third member was closed by the same method. Single-hop attribution, which
+looks only at a session's immediate parent, is equivalent to full-ancestry
+attribution only if no fork chain is deeper than one. The corpus contains
+two depth-2 chains:
+
+```
+fork chain depths : {0: 2225, 1: 181, 2: 2}
+sauropod <- lion <- camel        rejections along chain [0, 0, 0]
+scorpion <- hedgehog <- monkey   rejections along chain [0, 0, 0]
+```
+
+Both carry no rejections, so the two attributions agree here by accident of
+which sessions happened to fork, not by construction. A grandchild
+inheriting a grandparent's rejection would break the single-hop version
+invisibly. The published figure walks full ancestry, and both methods were
+computed and agree at 252 events across 139 holding sessions, so it does
+not depend on the accident.
+
+None of this proves the family empty, and it should still be treated as
+open. What changed is that no specific untested member remains named.
+
+**The investigation contaminated its own corpus.** Two sessions spent an
+evening triggering, quoting, and testing this rejection, and they account
+for 22 of the 256. They are excluded from the headline figure and disclosed
+here. A corpus that is being actively written by the measurement is not a
+clean observation of normal usage; a snapshot bounds the drift but cannot
+remove it, and neither agent could stop writing to the corpus while
+measuring it.
+
+A separate check, now superseded but recorded because the reasoning was
+sound: 31 sessions hold byte-identical rejection messages, 62 duplicates in
+total, which would inflate any occurrence-based count if the tool replayed
+prior output. Timestamps discriminate. All 62 pairs are distinct, none
+identical, typically about ten seconds apart, so they are genuine repeat
+rejections of an unchanged list. Note that checking a single session for
+occurrences equal to messages does *not* establish this, since that equality
+holds only where there are no repeats. Keying on `tool_use_id` makes the
+argument unnecessary, which is the better outcome: prefer a unit that cannot
+double-count over evidence that it did not.
+
+### What actually caught these
+
+Five values were published or nearly published for one quantity: 262, 257,
+240, 234, 230, plus a further error inside the probe meant to verify the
+fourth.
+None was caught by re-reading a method, re-checking arithmetic, or
+reviewing an approach in prose. Every one was caught the same way: the
+quantity was re-derived by a *different decomposition*, and the two results
+disagreed.
+
+Raw text counting versus per-message counting versus keying on
+`tool_use_id` are three decompositions of one question. Each exposed a flaw
+invisible from inside the others. The decisive signal was never an argument
+but an impossible value: zero occurrences for a gate proven to have fired
+361 times, zero genuine rejections out of 342 sessions, two different
+counts for one session in a fixed corpus.
+
+Two agents helped here, but the mechanism is not review. A second agent
+rarely reuses the first one's traversal, so cross-checking *produces*
+independent decompositions as a side effect. That is the useful property,
+and it is available alone: derive the number a second time by a route that
+shares no code and no intermediate representation with the first. Reviewing
+a method cannot find the error, because the error is nearly always in what
+the method silently assumed the data looks like, which is exactly what a
+reader of the method also assumes.
+
+A re-derivation does not have to be aimed at a number to break it. The fork
+defect above was found while confirming an unrelated claim, that ignoring
+1840 `.bak` files did not undercount the total. That check reproduced, and
+the route written to perform it happened to build one global set of ids
+instead of summing per-session sets, which is what exposed the double
+count. Verifying a neighbouring claim by an independent route is a cheaper
+source of these catches than auditing the number directly, because the
+auditor of a number tends to reuse the reasoning that produced it.
+
+The count is not asserted to be final. It survives three routes sharing no
+traversal, and the share of affected sessions has held at 39-40% across
+every pass, which is the figure any decision here rests on. The absolute
+count has moved five times and could move again.
+
+The most instructive failure came from a probe written to *check* one of
+these numbers. Asked to confirm three named sessions, a one-off script
+matched session ids by substring and read `hit[0]`, which selected a
+`.bak` file sitting beside the real transcript:
+
+```
+session_cat_1784611126133_e6303eaa37c1cb0e.bak
+session_cat_1784611126133_e6303eaa37c1cb0e.evidence.jsonl
+session_cat_1784611126133_e6303eaa37c1cb0e.json
+```
+
+It reported 0 rejections for a session that has 1, and 4 for a session
+that has 2. A correction was nearly sent on the strength of it. Every
+scanner used for the real counts filters on `.json`; the probe written to
+audit them did not. **Verification code is code, and it is often written
+faster and checked less than the code it audits.** The contradiction
+between two of this document's own numbers for the same session, 0 and 1,
+is what exposed it, since a fixed corpus cannot return both.
+
+Two more instances of this document's recurring error appeared while
+measuring it, both caught the same way. The first scan parsed message
+`content` and returned **0 occurrences, including 0 for the confidence gate
+already proven to have fired 361 times**. The second, an attempt to filter
+genuine rejections structurally, assumed the text arrives wrapped in a
+`<system-reminder>` element and returned **0 genuine rejections out of 342
+sessions**. Both refuted the probe, not the phenomenon. The reminder is
+appended as a plain suffix to the todo tool's output, and it is carried in
+the reminder channel rather than as content: the same field whose omission
+from `request_payload_summary` produced the original false negative.
+
+Neither was caught by reasoning. Both were caught because the probe returned
+a value that was impossible on its face, against a control whose true value
+was already known. That is the only mechanism that worked all day.
+
+**The recurring lesson, stated once more because it caused every wrong call
+here:** the failures were never plain guesses. Each came from a number or a
+code path that looked authoritative while measuring something else. Token
+counts that were not billing what was assumed. A logger's field list mistaken
+for the wire. A scoped lint run mistaken for CI. An uncommitted buffer read as
+`main`. A reload SHA verified without checking that it contained the commit
+under test. String-compared ISO timestamps that dropped exactly the new
+records a fix was being judged by.
