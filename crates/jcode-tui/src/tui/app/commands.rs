@@ -2581,54 +2581,13 @@ pub(super) fn active_session_id(app: &App) -> String {
     }
 }
 
-pub(super) fn poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
-    crate::todo::load_todos(&active_session_id(app)).unwrap_or_default()
-}
-
-pub(super) fn is_incomplete_poke_todo(todo: &crate::todo::TodoItem) -> bool {
-    !crate::todo::is_terminal_todo_status(&todo.status)
-}
-
-pub(super) fn incomplete_poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
-    poke_todos(app)
-        .into_iter()
-        .filter(is_incomplete_poke_todo)
-        .collect()
-}
-
-pub(super) fn build_poke_message(incomplete: &[crate::todo::TodoItem]) -> String {
-    crate::todo::build_auto_poke_message(incomplete.len())
-}
-
-/// Re-derive a queued poke's text from the todo list as it stands *now*.
-///
-/// A poke's count is rendered into a `String` when the poke is scheduled, but
-/// the queue is drained later and forwards that string verbatim. Any todo
-/// update landing in between is invisible to the message the model reads, so
-/// the poke can assert a superseded count in the present tense. Since telling
-/// the model what remains is the poke's whole purpose, that is the mechanism
-/// misreporting the one fact it exists to report.
-///
-/// Returns `Some(text)` with a freshly counted message for pokes, `Some(text)`
-/// unchanged for anything that is not a poke, and `None` when the list has been
-/// fully resolved in the meantime, since a poke reading "0 incomplete todos"
-/// would be a new piece of nonsense rather than a fix for the old one.
-pub(super) fn refresh_poke_message_for_dispatch(app: &App, message: &str) -> Option<String> {
-    if !is_poke_message(message) {
-        return Some(message.to_string());
-    }
-    // Confidence-summary continuations are also "poke messages" but carry no
-    // count, so re-deriving an incomplete-count message for them would replace
-    // their content rather than refresh it.
-    if is_todo_confidence_summary_message(message) {
-        return Some(message.to_string());
-    }
-    let incomplete = incomplete_poke_todos(app);
-    if incomplete.is_empty() {
-        return None;
-    }
-    Some(build_poke_message(&incomplete))
-}
+// The todo-partition and poke-message helpers live in `commands_poke`; they are
+// re-exported here so the many `commands::` call sites stay put.
+pub(super) use super::commands_poke::{
+    auto_poke_blocked_banner, build_poke_message, build_poke_message_with_blocked,
+    incomplete_poke_todos, is_blocked_poke_todo, is_incomplete_poke_todo, poke_todos,
+    refresh_poke_message_for_dispatch,
+};
 
 pub(super) fn active_working_dir(app: &App) -> Option<std::path::PathBuf> {
     app.session

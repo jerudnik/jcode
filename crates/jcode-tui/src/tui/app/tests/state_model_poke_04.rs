@@ -538,3 +538,134 @@ fn the_poke_budget_is_not_consumed_by_turns_that_do_not_poke_and_resets_on_rearm
         );
     });
 }
+
+/// Build a todo in a non-terminal status, optionally blocked.
+fn poke_todo(id: &str, content: &str, blocked_by: &[&str]) -> crate::todo::TodoItem {
+    crate::todo::TodoItem {
+        group: None,
+        id: id.to_string(),
+        content: content.to_string(),
+        status: "pending".to_string(),
+        priority: "high".to_string(),
+        blocked_by: blocked_by.iter().map(|b| b.to_string()).collect(),
+        assigned_to: None,
+        confidence: Some(80),
+        completion_confidence: None,
+        confidence_history: Vec::new(),
+    }
+}
+
+/// R08 gate 4, part 1: a blocked todo must not be nagged to "continue working".
+///
+/// `is_incomplete_poke_todo` decided incompleteness purely from `status`, so an
+/// item whose `blocked_by` names an unmet dependency counted as ordinary
+/// outstanding work. The poke then told the model "You have 1 incomplete todo.
+/// Continue working", which is the system asserting something true-sounding and
+/// false: the work cannot proceed, and no amount of continuing will change that
+/// until the blocker clears. Poking is not merely useless here, it burns a model
+/// round-trip per turn to repeat an instruction that cannot be followed.
+#[test]
+fn r08_gate4_a_blocked_todo_does_not_poke() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        crate::todo::save_todos(
+            &app.session.id,
+            &[poke_todo(
+                "t1",
+                "Ship the migration",
+                &["waiting on DBA review"],
+            )],
+        )
+        .expect("save todos");
+        app.auto_poke_incomplete_todos = true;
+
+        assert!(
+            !app.schedule_auto_poke_followup_if_needed(),
+            "a list whose only outstanding item is blocked must not poke"
+        );
+        assert!(
+            app.queued_messages.is_empty(),
+            "no poke message may be queued for a fully blocked list"
+        );
+    });
+}
+
+/// R08 gate 4, part 2: filtering blocked items out must not fake completion.
+///
+/// This is the trap in the obvious fix. `schedule_auto_poke_followup_if_needed`
+/// treats an empty `incomplete` partition as "the list finished" and hands it to
+/// `settle_completed_todo_list`, which prints "✅ Todos complete." So simply
+/// removing blocked items from the partition converts one misreport into a worse
+/// one: unfinished, blocked work announced as done. The blocked branch has to be
+/// a third state, not a shortcut into the completion gate.
+#[test]
+fn r08_gate4_a_blocked_list_is_never_announced_complete() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        crate::todo::save_todos(
+            &app.session.id,
+            &[poke_todo(
+                "t1",
+                "Ship the migration",
+                &["waiting on DBA review"],
+            )],
+        )
+        .expect("save todos");
+        app.auto_poke_incomplete_todos = true;
+
+        app.schedule_auto_poke_followup_if_needed();
+
+        let said_complete = app
+            .display_messages
+            .iter()
+            .any(|message| message.content.contains("Todos complete"));
+        assert!(
+            !said_complete,
+            "blocked work must never be reported as complete; \
+             filtering blocked items into the completion gate trades one \
+             false report for a worse one"
+        );
+    });
+}
+
+/// R08 gate 4, part 3: the contrast case, and the reason this fix cannot cheat.
+///
+/// Both assertions above are satisfiable by disabling the poke outright, so this
+/// pins the other side: a list holding one blocked item AND one actionable item
+/// must still poke, must count only the actionable one, and must name the
+/// blocked item rather than silently dropping it. Without this, "stop poking"
+/// and "poke correctly" are indistinguishable to the suite.
+#[test]
+fn r08_gate4_an_actionable_item_still_pokes_and_names_the_blocker() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        crate::todo::save_todos(
+            &app.session.id,
+            &[
+                poke_todo("t1", "Ship the migration", &["waiting on DBA review"]),
+                poke_todo("t2", "Write the rollback plan", &[]),
+            ],
+        )
+        .expect("save todos");
+        app.auto_poke_incomplete_todos = true;
+
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "an actionable item must still poke even when a sibling is blocked"
+        );
+        let poke = app
+            .queued_messages
+            .last()
+            .expect("a poke message must be queued")
+            .clone();
+        assert!(
+            poke.contains("1 incomplete todo"),
+            "the count must exclude the blocked item; got: {poke}"
+        );
+        assert!(
+            poke.contains("blocked"),
+            "the poke must disclose that work is blocked rather than \
+             quietly omitting it; got: {poke}"
+        );
+    });
+}

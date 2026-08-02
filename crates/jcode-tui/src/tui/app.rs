@@ -9,9 +9,8 @@ use crate::compaction::CompactionEvent;
 use crate::config::config;
 use crate::id;
 use crate::mcp::McpManager;
-// `cache_relevant_*` lives in `jcode-message-types` so this path and the server
-// event path in `jcode-app-core::agent::kv_cache_request_event` hash messages
-// identically; drift makes remote sessions report false
+// `cache_relevant_*` is shared with `jcode-app-core::agent::kv_cache_request_event`
+// so both hash messages identically; drift makes remote sessions report false
 // `harness:_prefix_changed` KV-cache misses.
 use crate::message::{
     ContentBlock, Message, Role, StreamEvent, TOOL_OUTPUT_MISSING_TEXT, ToolCall, ToolDefinition,
@@ -61,6 +60,7 @@ mod commands;
 mod commands_improve;
 mod commands_overnight;
 mod commands_plan;
+mod commands_poke;
 mod commands_review;
 mod commands_swarm;
 mod construction;

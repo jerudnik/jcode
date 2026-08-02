@@ -1256,38 +1256,7 @@ impl App {
     }
 
     pub(super) fn schedule_auto_poke_followup_if_needed(&mut self) -> bool {
-        if !self.auto_poke_incomplete_todos
-            || self.pending_queued_dispatch
-            || self.pending_turn
-            || self.has_queued_followups()
-        {
-            return false;
-        }
-
-        let todos = super::commands::poke_todos(self);
-        let incomplete: Vec<_> = todos
-            .iter()
-            .filter(|todo| super::commands::is_incomplete_poke_todo(todo))
-            .cloned()
-            .collect();
-        if incomplete.is_empty() {
-            return self.settle_completed_todo_list(&todos);
-        }
-
-        // Backstop for a list that never terminates. After the completion check
-        // so a finished list still settles, and after the partition so declined
-        // pokes are not charged.
-        if super::commands::spend_auto_poke_budget(self) {
-            return false;
-        }
-
-        self.push_display_message(DisplayMessage::system(super::commands::auto_poking_banner(
-            incomplete.len(),
-        )));
-        self.queued_messages
-            .push(super::commands::build_poke_message(&incomplete));
-        self.pending_queued_dispatch = true;
-        true
+        super::commands_poke::schedule_auto_poke_followup_if_needed(self)
     }
 
     pub(super) fn schedule_queued_dispatch_after_interrupt(&mut self) {

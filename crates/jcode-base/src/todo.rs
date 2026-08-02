@@ -74,11 +74,50 @@ pub fn newly_completed_groups_have_sufficient_ownership(
 /// stops with incomplete todos. Kept here so every producer (TUI auto-poke,
 /// `jcode run` auto-poke) and the transcript renderer agree on the exact text.
 pub fn build_auto_poke_message(incomplete_count: usize) -> String {
-    format!(
-        "You have {} incomplete todo{}. Continue working, or update the todo tool.",
+    build_auto_poke_message_with_blocked(incomplete_count, &[])
+}
+
+/// Build the auto-poke prompt, naming any work that is blocked rather than
+/// actionable.
+///
+/// A blocked item cannot be advanced by "continue working", so folding it into
+/// the incomplete count produces an instruction the model cannot follow, and
+/// omitting it silently makes the remaining count look like the whole picture.
+/// Naming it separately keeps the count honest about what is actionable while
+/// still disclosing that the list is not finished.
+pub fn build_auto_poke_message_with_blocked(
+    incomplete_count: usize,
+    blocked: &[(String, Vec<String>)],
+) -> String {
+    let mut message = format!(
+        "You have {} incomplete todo{}.",
         incomplete_count,
         if incomplete_count == 1 { "" } else { "s" },
-    )
+    );
+    if blocked.is_empty() {
+        // Byte-identical to the long-standing single-line poke, which is
+        // persisted in existing sessions and matched by the renderer.
+        message.push(' ');
+    } else {
+        message.push_str(&format!(
+            "\n\n{} other todo{} blocked and not counted above:",
+            blocked.len(),
+            if blocked.len() == 1 { " is" } else { "s are" },
+        ));
+        for (content, blockers) in blocked {
+            message.push_str(&format!(
+                "\n- {} (blocked by: {})",
+                content,
+                blockers.join(", ")
+            ));
+        }
+        message.push_str("\n\n");
+    }
+    // The trailing sentence is load-bearing: `is_auto_poke_message` anchors on
+    // it to tell a synthetic poke from a real user turn, so the blocked
+    // disclosure goes above it rather than after it.
+    message.push_str("Continue working, or update the todo tool.");
+    message
 }
 
 /// True when `message` is a synthetic auto-poke continuation (the
@@ -203,6 +242,34 @@ fn goals_path(session_id: &str) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The unblocked poke must stay byte-identical after the blocked variant
+    /// was introduced: this exact string is persisted in existing sessions and
+    /// is what `is_auto_poke_message` matches, so drifting it would silently
+    /// reclassify historical pokes as real user turns.
+    #[test]
+    fn the_unblocked_poke_text_is_unchanged() {
+        assert_eq!(
+            build_auto_poke_message(1),
+            "You have 1 incomplete todo. Continue working, or update the todo tool."
+        );
+        assert_eq!(
+            build_auto_poke_message(3),
+            "You have 3 incomplete todos. Continue working, or update the todo tool."
+        );
+    }
+
+    /// A blocked disclosure must not break poke recognition. The recognizer
+    /// anchors on the trailing sentence, so the blocked list is placed above it.
+    #[test]
+    fn a_poke_naming_blocked_work_is_still_recognized_as_a_poke() {
+        let message = build_auto_poke_message_with_blocked(
+            1,
+            &[("Ship it".to_string(), vec!["DBA review".to_string()])],
+        );
+        assert!(is_auto_poke_message(&message), "got: {message}");
+        assert!(message.contains("blocked by: DBA review"), "got: {message}");
+    }
 
     #[test]
     fn built_auto_poke_messages_are_detected() {
