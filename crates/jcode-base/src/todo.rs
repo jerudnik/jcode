@@ -16,7 +16,7 @@ pub const LOW_HILL_CLIMBABILITY: u8 = QUALITY_GATE_THRESHOLD;
 
 /// Model-facing continuation for the private hill-climbability check. Names the
 /// assessment category without disclosing the score or threshold.
-pub const TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE: &str = "Your hill-climbability is not high enough. First, improve the goal's objective and feedback loop so progress can be measured across iterations. Then call the todo tool again with the revised goal before continuing the task. The goal is to create a strong feedback loop you can iterate against.";
+pub const TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE: &str = "Your todo update was saved. Your hill-climbability is not high enough, so this is a nudge, not a rejection: nothing was discarded and you do not need to resend the same content. Improve the goal's objective and feedback loop so progress can be measured across iterations, then call the todo tool again with the revised goal before continuing the task. The goal is to create a strong feedback loop you can iterate against.";
 
 /// Model-facing continuation for the private end-to-end ownership check. Names
 /// the assessment category without disclosing the score or threshold.
@@ -308,9 +308,16 @@ mod tests {
         }
 
         assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("strong feedback loop"));
-        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("First, improve"));
+        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("Improve"));
         assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("call the todo tool again"));
         assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("before continuing the task"));
+        // R08(a): the nudge must say the write survived. `save_todos` runs
+        // unconditionally, but the old wording ("First, improve ... Then call
+        // the todo tool again") read as a rejection, so the only apparent way
+        // to persist was to resend or inflate the score. Observed live: six
+        // identical nudges in one session, every write already saved.
+        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("was saved"));
+        assert!(TODO_HILL_CLIMBABILITY_CONTINUATION_MESSAGE.contains("not a rejection"));
         assert!(TODO_OWNERSHIP_CONTINUATION_MESSAGE.contains("full user outcome"));
         assert!(TODO_OWNERSHIP_CONTINUATION_MESSAGE.contains("complete workflow"));
         assert!(TODO_OWNERSHIP_CONTINUATION_MESSAGE.contains("necessary follow-through"));
