@@ -22,9 +22,9 @@ path in its protected list, regardless of whether the change is correct.
 
 It is a closed loop, and each half is individually reasonable:
 
-1. `scripts/check_critical_path_budget.py` pins an expected in-scope file count
-   per domain. Its self-test (run by Quality Guardrails) asserts the pin equals
-   the current tree.
+1. `scripts/check_critical_path_budget.py` records an expected in-scope file
+   count per domain in `EXPECTED_FILE_COUNTS`. Three self-tests (run by Quality
+   Guardrails) assert **strict equality** between that record and the tree.
 2. `crates/jcode-tui/**` is one of those domains. Any commit that adds a file
    there — including extracting an oversized file into a module, which the
    oversized-file ratchet actively demands — changes the tree count.
@@ -40,6 +40,31 @@ pin and Governance Root fails. Measured, not inferred:
 main pins tui = 191
 tree (this branch) = 193
 ```
+
+### Correction: which check actually forces the edit
+
+An earlier revision of this memo said a **stale count fails the budget gate**.
+That is false, and an independent review (sheep) caught it. Re-measured:
+
+```text
+pin 191, tree 193 -> scope_shrink_regressions() = NONE, budget gate PASSES
+```
+
+By design: `scope_shrink_regressions` filters on `count < EXPECTED` only, so a
+stale **low** pin is invisible to it. The edit is forced by strict-equality
+self-tests instead. Reverting the pin to 191 and running the suite gives
+**32 tests, 3 failures**:
+
+```text
+test_expected_counts_match_the_current_tree      (scripts/test_critical_path_budget.py)
+test_expected_counts_sum_to_the_scanned_total    (scripts/test_critical_path_budget.py)
+test_workflow_pin_matches_the_current_digest     (the digest pin in fork-ci.yml)
+```
+
+The deadlock is real and the conclusion is unchanged, but the mechanism is the
+self-test's strict equality, **not** the shrink gate. Recorded because a memo
+that names the wrong cause is the same defect class this program exists to fix:
+a true-sounding report that is not true.
 
 The two extra files are `commands_poke.rs` (R08) and
 `remote_history_watchdog.rs` (R09), both extractions the size ratchet required.
@@ -90,6 +115,40 @@ commits are present. The only mechanical paths forward are:
 
 Option 3 is only a partial mitigation and is stated as such.
 
+## Resolution: `--admin`, and why it was the lower-risk option
+
+The user authorized the override explicitly, conditional on an independent
+review agreeing it was warranted. That review (sheep) agreed, and reversed the
+assumption in option 2 above. Recorded so the next reader sees *why* the flag
+was warranted rather than only that it was used.
+
+The R07 §4 maintenance window is **not** the safer-but-slower path here. It
+works by PUTting a modified `protect-fork-rails` that drops `Governance Root`
+from the required contexts, merging, then restoring it — its own comment says
+"until it lands, `main` is unguarded", with a 5-attempt retry because the
+restore must not fail.
+
+```text
+--admin      one merge, bypasses one FAILING check on ONE PR.
+             The other 3 required checks are enforced and green.
+             main's protection is never modified. No residue possible.
+window.py    two ruleset writes; main is globally unguarded between them.
+             A crash mid-window leaves main permanently weakened.
+```
+
+So the window has the strictly larger blast radius and a failure mode that
+outlives the operation. Choosing it for the feel of procedure would have added
+risk, not removed it. The judgement would invert if any of the other three
+gates were red: `--admin` is defensible here *because* Governance Root is the
+only failure and it is an audit flag correctly announcing a true fact (this PR
+does edit protected paths).
+
+Reviewer independence, stated rather than hidden: three of the five flagged
+paths are sheep's own F30 commits riding in this integration branch, so it was
+not a fully disinterested reviewer of two of those five files. The evidence it
+gave is mechanical and independently reproducible, which is why this is
+recorded as a caveat rather than treated as disqualifying.
+
 ## Not verified
 
 - I did not attempt `--admin`, and did not attempt the §4 maintenance
@@ -101,3 +160,14 @@ Option 3 is only a partial mitigation and is stated as such.
   moving `EXPECTED_FILE_COUNTS` into a generated, unprotected data file with the
   digest still pinned) would dissolve the loop, but that is a governance design
   change and is out of scope for this PR.
+
+## Follow-up this exposed
+
+The loop is a symptom of `EXPECTED_FILE_COUNTS` being a **measured inventory**
+stored inside a **protected policy file**. `fork-ci.yml` already draws the right
+distinction for every other ratchet: the checkers are protected, but their
+baselines (`swallowed_error_budget.json`, `code_size_budget.json`,
+`panic_budget.json`, `test_size_budget.json`) are deliberately unprotected "so
+that routine tightening needs no maintenance window". The critical-path budget
+is the one gate that puts its baseline on the protected side, which is what
+converts routine growth into a governance event. See `W6_CI_FRICTION.md`.
