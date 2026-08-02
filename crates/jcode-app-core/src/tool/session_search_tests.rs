@@ -93,7 +93,8 @@ fn forked_history_reports_an_inherited_message_once() {
             .filter(|result| result.message_id.as_deref() == Some(inherited_id.as_str()))
             .count();
         assert_eq!(
-            hits, 1,
+            hits,
+            1,
             "one real message inherited by a fork must not be reported twice: {:#?}",
             results
                 .iter()

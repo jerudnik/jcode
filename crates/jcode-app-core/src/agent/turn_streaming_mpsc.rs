@@ -1842,7 +1842,10 @@ mod tests {
             cancelled.message
         );
         assert!(cancelled.message.contains("interrupted by cancel"));
-        assert_eq!(cancelled.evidence_error_class, Some("interrupted_by_cancel"));
+        assert_eq!(
+            cancelled.evidence_error_class,
+            Some("interrupted_by_cancel")
+        );
 
         let reloaded = interrupted_tool_result(&tc, 1.2, true);
         assert!(reloaded.message.contains("interrupted by server reload"));
@@ -1863,9 +1866,11 @@ mod tests {
         );
 
         // The reload case keeps its resume affordance.
-        assert!(interrupted_tool_result(&tc, 1.2, true)
-            .message
-            .contains("Resume the wait"));
+        assert!(
+            interrupted_tool_result(&tc, 1.2, true)
+                .message
+                .contains("Resume the wait")
+        );
     }
 
     /// selfdev asks for its own restart, so a reload is expected and not an
