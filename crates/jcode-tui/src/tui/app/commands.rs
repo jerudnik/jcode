@@ -2584,9 +2584,7 @@ pub(super) fn active_session_id(app: &App) -> String {
 // The todo-partition and poke-message helpers live in `commands_poke`; they are
 // re-exported here so the many `commands::` call sites stay put.
 pub(super) use super::commands_poke::{
-    auto_poke_blocked_banner, build_poke_message, build_poke_message_with_blocked,
-    incomplete_poke_todos, is_blocked_poke_todo, is_incomplete_poke_todo, poke_todos,
-    refresh_poke_message_for_dispatch,
+    build_poke_message, incomplete_poke_todos, refresh_poke_message_for_dispatch,
 };
 
 pub(super) fn active_working_dir(app: &App) -> Option<std::path::PathBuf> {

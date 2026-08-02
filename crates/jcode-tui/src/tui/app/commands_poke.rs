@@ -7,17 +7,29 @@
 use super::App;
 use super::commands::{is_poke_message, is_todo_confidence_summary_message};
 
-pub(super) fn poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
-    crate::todo::load_todos(&super::commands::active_session_id(app)).unwrap_or_default()
+/// Load the session's todos, or `None` if they could not be read.
+///
+/// The distinction matters here more than at most call sites: the poke treats
+/// an empty list as "everything finished" and announces completion, so
+/// collapsing a read failure into an empty `Vec` would report work as done on
+/// the strength of a failed read.
+pub(super) fn poke_todos_checked(app: &App) -> anyhow::Result<Vec<crate::todo::TodoItem>> {
+    crate::todo::load_todos(&super::commands::active_session_id(app))
 }
 
 pub(super) fn is_incomplete_poke_todo(todo: &crate::todo::TodoItem) -> bool {
     !crate::todo::is_terminal_todo_status(&todo.status)
 }
 
+/// The outstanding todos, or an empty list if they could not be read.
+///
+/// Callers here only render a count, so an unreadable list degrades to "nothing
+/// outstanding" in the UI. The scheduling path deliberately does not share this
+/// behaviour: see `classify_poke_todos`.
 pub(super) fn incomplete_poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
-    poke_todos(app)
+    poke_todos_checked(app)
         .into_iter()
+        .flatten()
         .filter(is_incomplete_poke_todo)
         .collect()
 }
@@ -109,7 +121,12 @@ pub(super) enum PokeDisposition {
 }
 
 pub(super) fn classify_poke_todos(app: &App) -> PokeDisposition {
-    let todos = poke_todos(app);
+    // A failed read is not a finished list. Report it as blocked-with-nothing
+    // rather than settled, so a transient storage error cannot produce a
+    // "Todos complete" announcement.
+    let Ok(todos) = poke_todos_checked(app) else {
+        return PokeDisposition::AllBlocked(Vec::new());
+    };
     let outstanding: Vec<_> = todos
         .iter()
         .filter(|todo| is_incomplete_poke_todo(todo))
