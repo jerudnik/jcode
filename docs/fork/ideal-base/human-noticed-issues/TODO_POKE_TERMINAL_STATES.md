@@ -326,3 +326,66 @@ structural defect regardless of whether it caused this instance, and a poke
 that recomputes its count at dispatch is immune to the entire class of
 transient-state explanations that remain — including whichever one this
 actually was.
+
+### Resolution: the schedule-time/send-time gap is closed (2026-08-02)
+
+Implemented the recommendation above. The count is now re-derived when the
+queue is drained, not when the poke is queued.
+
+- `commands::refresh_poke_message_for_dispatch` re-reads the todo list and
+  rebuilds the message. Non-poke messages pass through untouched, and a poke
+  whose todos all resolved in the meantime returns `None` and is dropped rather
+  than sent announcing "0 incomplete todos".
+- `App::take_queued_messages_for_dispatch` drains the queue through that
+  refresh. All three dispatch sites use it: `input.rs` `process_queued_messages`
+  and both `remote.rs` drains.
+- `input.rs:1194` (`retrieve_pending_message_for_edit`) is deliberately **not**
+  refreshed. It pulls queued text into the user's input box for editing rather
+  than sending it to the model, so silently rewriting or dropping a message
+  there would destroy something the user asked to edit.
+
+This does **not** claim to fix the observed instance, whose root cause remains
+unknown. It closes the structural gap that produces the same symptom.
+
+Four tests in `state_model_poke_04.rs`, each falsified before being trusted:
+
+1. `poke_message_is_rebuilt_from_the_todo_list_at_dispatch_time` — queue 4,
+   resolve 2, expect 2.
+2. `poke_refresh_preserves_the_real_count_when_todos_are_unchanged` — the
+   contrast case, so a "fix" that merely dropped the number cannot pass.
+3. `poke_refresh_leaves_user_messages_alone_and_drops_emptied_pokes`.
+4. `draining_the_queue_for_dispatch_refreshes_poke_counts_in_place` — the
+   wiring control.
+
+Test 4 exists because of a near-miss worth recording. Tests 1-3 call the
+refresh helper directly, so they all still passed when the call was deleted
+from `process_queued_messages`: the entire 1874-test suite stayed green against
+a completely unwired fix. `process_queued_messages` needs a live terminal and
+event stream, which is why the drain was extracted into
+`take_queued_messages_for_dispatch` — a seam a test can reach. Test 4 was then
+confirmed to fail with the refresh unwired and pass with it wired.
+
+### Incidental finding: `benchmark_resume_loading_reports_timings` is flaky
+
+Surfaced while validating the above; **unrelated to pokes and pre-existing**.
+
+`session_picker::loading::tests::benchmark_resume_loading_reports_timings`
+writes 120 sessions and asserts `load_sessions()` returns >= 100. Under CPU
+contention it intermittently returns fewer — observed **24** and **87** — about
+1 run in 8, and never on an idle machine.
+
+Attribution was established by control rather than assumption: the branch
+failed 3 times in 16 runs while the baseline passed 16 for 16, which *looks*
+like a regression. Running the **unmodified baseline under identical load**
+reproduced the failure (`count=87`), so the poke change is exonerated and the
+flake predates it. Load, not the diff, was the hidden variable.
+
+Not fixed here, as it is outside this node. Two observations for whoever takes
+it: `reset_tui_test_globals` does not invalidate the session-list cache (unlike
+the neighbouring tests, this one never calls `invalidate_session_list_cache()`
+before loading), and `session_load_thread_count` derives its width from
+`available_parallelism`, which contention can change. Either could plausibly
+produce a short count; neither is confirmed, and I did not test them.
+
+The bare `assert!` was replaced with one that prints the observed count and the
+relevant env vars, since the original failed with no information at all.

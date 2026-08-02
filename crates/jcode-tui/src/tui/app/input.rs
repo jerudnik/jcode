@@ -3444,6 +3444,28 @@ impl App {
         self.pending_turn = true;
     }
 
+    /// Drain `queued_messages` for dispatch, re-deriving any poke's todo count
+    /// from the list as it stands right now.
+    ///
+    /// A poke's count is rendered into a `String` when the poke is scheduled,
+    /// but the queue is drained later, so a todo update landing in between
+    /// would otherwise be invisible to the message the model actually reads.
+    /// Pokes whose todos were fully resolved in the meantime are dropped rather
+    /// than sent announcing "0 incomplete todos".
+    ///
+    /// Split out of `process_queued_messages` so this is reachable from tests:
+    /// that function needs a live terminal and an event stream, which means a
+    /// refresh performed inline there could be deleted without any test
+    /// noticing.
+    pub(super) fn take_queued_messages_for_dispatch(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.queued_messages)
+            .into_iter()
+            .filter_map(|message| {
+                super::commands::refresh_poke_message_for_dispatch(self, &message)
+            })
+            .collect()
+    }
+
     /// Process all queued messages (combined into a single request)
     /// Loops until queue is empty (in case more messages are queued during processing)
     pub(super) async fn process_queued_messages(
@@ -3454,7 +3476,7 @@ impl App {
         while !self.queued_messages.is_empty() || !self.hidden_queued_system_messages.is_empty() {
             // Combine all currently queued messages into one, treating [SYSTEM: ...]
             // startup continuations as system reminders rather than user turns.
-            let queued_messages = std::mem::take(&mut self.queued_messages);
+            let queued_messages = self.take_queued_messages_for_dispatch();
             let hidden_reminders = std::mem::take(&mut self.hidden_queued_system_messages);
             let (messages, reminder, display_system_messages) =
                 super::helpers::partition_queued_messages(queued_messages, hidden_reminders);

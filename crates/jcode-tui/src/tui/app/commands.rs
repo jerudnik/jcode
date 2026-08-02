@@ -2563,6 +2563,36 @@ pub(super) fn build_poke_message(incomplete: &[crate::todo::TodoItem]) -> String
     crate::todo::build_auto_poke_message(incomplete.len())
 }
 
+/// Re-derive a queued poke's text from the todo list as it stands *now*.
+///
+/// A poke's count is rendered into a `String` when the poke is scheduled, but
+/// the queue is drained later and forwards that string verbatim. Any todo
+/// update landing in between is invisible to the message the model reads, so
+/// the poke can assert a superseded count in the present tense. Since telling
+/// the model what remains is the poke's whole purpose, that is the mechanism
+/// misreporting the one fact it exists to report.
+///
+/// Returns `Some(text)` with a freshly counted message for pokes, `Some(text)`
+/// unchanged for anything that is not a poke, and `None` when the list has been
+/// fully resolved in the meantime, since a poke reading "0 incomplete todos"
+/// would be a new piece of nonsense rather than a fix for the old one.
+pub(super) fn refresh_poke_message_for_dispatch(app: &App, message: &str) -> Option<String> {
+    if !is_poke_message(message) {
+        return Some(message.to_string());
+    }
+    // Confidence-summary continuations are also "poke messages" but carry no
+    // count, so re-deriving an incomplete-count message for them would replace
+    // their content rather than refresh it.
+    if is_todo_confidence_summary_message(message) {
+        return Some(message.to_string());
+    }
+    let incomplete = incomplete_poke_todos(app);
+    if incomplete.is_empty() {
+        return None;
+    }
+    Some(build_poke_message(&incomplete))
+}
+
 pub(super) fn active_working_dir(app: &App) -> Option<std::path::PathBuf> {
     app.session
         .working_dir
