@@ -650,14 +650,6 @@ pub(super) fn todo_gate_fingerprint(todos: &[TodoItem]) -> u64 {
 }
 
 impl App {
-    /// Arm the completion-confidence gate for this todo list, returning whether
-    /// the caller should fire it.
-    ///
-    /// Fires at most once per todo-list revision. The reminder asks the model to
-    /// validate further and reassess, but nothing about answering it changes the
-    /// todo list, so an unguarded gate re-evaluates identical state and re-queues
-    /// the identical reminder every turn: an unbounded empty-content send loop at
-    /// model round-trip speed.
     /// Decide what happens when the auto-poke finds no incomplete todos.
     ///
     /// Either the completion-confidence gate fires (asking for more validation)
@@ -694,6 +686,14 @@ impl App {
         false
     }
 
+    /// Arm the completion-confidence gate for this todo list, returning whether
+    /// the caller should fire it.
+    ///
+    /// Fires at most once per todo-list revision. The reminder asks the model to
+    /// validate further and reassess, but nothing about answering it changes the
+    /// todo list, so an unguarded gate re-evaluates identical state and re-queues
+    /// the identical reminder every turn: an unbounded empty-content send loop at
+    /// model round-trip speed.
     pub(super) fn arm_todo_confidence_gate(&mut self, todos: &[TodoItem]) -> bool {
         let fingerprint = todo_gate_fingerprint(todos);
         if self.todo_confidence_gate_fired_for == Some(fingerprint) {
