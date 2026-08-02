@@ -258,9 +258,29 @@ impl MultiProvider {
         {
             return Some(entry.clone());
         }
-        let shared = GLOBAL_ROUTES_MEMO.lock().ok()?;
+        self.shared_routes_memo_entry(shared_key, current)
+    }
+
+    /// Look up `shared_key` in the process-wide memo and return the entry only
+    /// if it satisfies `accept`.
+    ///
+    /// Both memo lookups differ solely in that predicate (generation-current
+    /// vs. generation-current-and-within-TTL), so the lock/get/validate half
+    /// lives here once.
+    fn shared_routes_memo_entry(
+        &self,
+        shared_key: &str,
+        accept: impl Fn(&RoutesMemoEntry) -> bool,
+    ) -> Option<RoutesMemoEntry> {
+        // Recover from poisoning rather than returning `None`: a poisoned memo
+        // mutex would otherwise silently degrade every lookup into a rebuild,
+        // which is the swallowed-failure shape this whole change is about. The
+        // rest of this module already recovers the same way.
+        let shared = GLOBAL_ROUTES_MEMO
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let entry = shared.get(shared_key)?;
-        current(entry).then(|| entry.clone())
+        accept(entry).then(|| entry.clone())
     }
 
     pub(super) fn fresh_routes_memo_entry(&self) -> RoutesMemoEntry {
@@ -284,13 +304,9 @@ impl MultiProvider {
         // Shared path: another instance with the same catalog-relevant state
         // (typically a fresh fork on the shared server) built one already.
         let shared_key = self.routes_memo_key();
-        let try_shared = || -> Option<RoutesMemoEntry> {
-            let shared = GLOBAL_ROUTES_MEMO.lock().ok()?;
-            let entry = shared.get(&shared_key)?;
-            if !fresh(entry) {
-                return None;
-            }
-            let entry = entry.clone();
+        // Take a fresh shared entry and adopt it as this instance's memo.
+        let try_shared = || {
+            let entry = self.shared_routes_memo_entry(&shared_key, fresh)?;
             if let Ok(mut memo) = self.routes_memo.lock() {
                 *memo = Some(entry.clone());
             }
