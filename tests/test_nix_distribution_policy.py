@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import tomllib
@@ -380,6 +381,88 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         )
         for relative in ACTIVE_DISTRIBUTION_DOCS:
             self.assertIn(relative, scanned, f"historically guarded doc dropped out: {relative}")
+
+    def test_advertised_platform_support_matches_what_ci_builds(self) -> None:
+        """G01: a flake system CI never builds must be documented best-effort.
+
+        `flake.nix` `systems` is not only advertising -- it is what makes
+        `packages.<system>.*` and `checks.<system>.*` exist, so a consumer can
+        pin an output for a system no CI job has ever built. That is legitimate,
+        but it must not read as the same level of support as a system that is
+        built, smoke-launched, and pushed to Cachix on every change. Before this
+        guard, docs/NIX.md listed all three flake systems in one flat sentence
+        while `aarch64-linux` had never been built by any workflow.
+        """
+        matrix = json.loads((ROOT / ".github/workflows/build-matrix.json").read_text())
+        built = {
+            entry["system"]
+            for key, entries in matrix.items()
+            if not key.startswith("_")
+            for entry in entries
+        }
+        flake = (ROOT / "flake.nix").read_text()
+        systems_block = re.search(r"systems\s*=\s*\[(.*?)\]", flake, re.DOTALL)
+        self.assertIsNotNone(systems_block, "could not locate `systems` in flake.nix")
+        exposed = set(re.findall(r'"([^"]+)"', systems_block.group(1)))
+
+        # Vacuity guards: both sides are parsed out of files that can be
+        # reworded. An empty set on either side would make every assertion
+        # below pass while checking nothing, which is the defect this whole
+        # suite exists to prevent.
+        self.assertGreaterEqual(len(built), 2, f"CI build matrix parsed to {built!r}")
+        self.assertGreaterEqual(len(exposed), 2, f"flake systems parsed to {exposed!r}")
+        self.assertTrue(
+            built <= exposed,
+            f"CI builds systems the flake does not expose: {sorted(built - exposed)}",
+        )
+
+        nix_doc = (ROOT / "docs/NIX.md").read_text()
+        support_section = re.search(
+            r"^## Supported platforms$(.*?)^## ", nix_doc, re.DOTALL | re.MULTILINE
+        )
+        self.assertIsNotNone(support_section, "docs/NIX.md lost its Supported platforms section")
+        support_text = support_section.group(1)
+
+        for system in sorted(exposed):
+            with self.subTest(system=system):
+                self.assertIn(
+                    system,
+                    support_text,
+                    f"flake exposes {system} but docs/NIX.md does not state its support status",
+                )
+
+        # The actual rule: unbuilt systems must be marked, built ones must not.
+        # Match any line naming the system, not a table row: the contract is
+        # honest labeling, not a particular markdown shape. A flat sentence
+        # listing several systems together still fails, and should -- one line
+        # cannot state two different support levels.
+        def status_line(system: str) -> str | None:
+            return next(
+                (line for line in support_text.splitlines() if system in line),
+                None,
+            )
+
+        for system in sorted(exposed - built):
+            row = status_line(system)
+            with self.subTest(system=system, status="unbuilt"):
+                self.assertIsNotNone(row, f"{system} needs a status line in docs/NIX.md")
+                self.assertIn(
+                    "Best-effort",
+                    row,
+                    f"{system} is exposed by the flake but no CI job builds it; "
+                    "docs/NIX.md must mark it Best-effort rather than implying "
+                    "it is verified like the systems CI actually builds",
+                )
+        for system in sorted(built):
+            row = status_line(system)
+            with self.subTest(system=system, status="built"):
+                self.assertIsNotNone(row, f"{system} needs a status line in docs/NIX.md")
+                self.assertNotIn(
+                    "Best-effort",
+                    row,
+                    f"{system} is built by CI but documented Best-effort; "
+                    "promote the row now that evidence exists",
+                )
 
 
 if __name__ == "__main__":

@@ -147,6 +147,10 @@ craneLib.buildPackage (
       homepage = "https://github.com/jerudnik/jcode";
       license = lib.licenses.mit;
       mainProgram = "jcode";
+      # `aarch64-linux` is best-effort: exposed and expected to build, but no
+      # CI job builds, smoke-launches, or caches it. Do not read this list as
+      # uniform support evidence; docs/NIX.md#supported-platforms is the
+      # per-system status of record.
       platforms = [
         "x86_64-linux"
         "aarch64-linux"

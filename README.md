@@ -832,8 +832,9 @@ auth, sessions, logs, and memory.
 
 | Platform | Nix package status |
 |---|---|
-| **Linux** x86_64 / aarch64 | Supported by the flake |
-| **macOS** Apple Silicon | Supported by the flake |
+| **Linux** x86_64 | Supported by the flake; built and cached by CI |
+| **Linux** aarch64 | Best-effort: exposed by the flake but not built, smoke-tested, or cached by CI. See [docs/NIX.md](docs/NIX.md#supported-platforms) |
+| **macOS** Apple Silicon | Supported by the flake; built and cached by CI |
 | **Windows** | No repository-owned end-user package; see [docs/WINDOWS.md](docs/WINDOWS.md) for architecture and developer status |
 
 </div>
