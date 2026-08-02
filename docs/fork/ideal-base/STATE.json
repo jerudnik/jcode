@@ -602,9 +602,11 @@
       "state": "pending",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md"
+      ],
+      "summary": "D01-A re-audit done 2026-08-02 against merged main, which the register itself required before any lane could start. All ten D01-Fxx findings REPRODUCE; none was superseded. Corrected the three that are mechanical source-vs-prose drift, each verified by parsing both sides rather than by reading: F02 (MiniMax preset env var and default model; checked every OpenAiCompatibleProfile preset, MiniMax was the only drift), F03 (mermaid caps 64/12/8 vs shipped 512/24/16, both occurrences), F10 (all pre-crate-split paths in OAUTH.md and MEMORY_BUDGET.md remapped and confirmed to resolve on disk). Seven remain open because they need a decision about what the product should claim, not a lookup: F01 undisclosed default post-login validation, F04 a file that calls graph support both planned and implemented, F05 two shipped subsystems still labelled 'Status: Design', F06 a hard-coded provider list, F07 a doc asserting a retired packaging rail, F08 now 14 (not 10) ~/notes references after the post-merge recount the register asked for, F09 the missing docs/README.md authority map and the deterministic checker. F09 is the durable fix for the F02/F03 class: correcting constants by hand only resets the clock, since the defect is that no gate compares documented values to source values. D01 stays open.",
+      "updated_at": "2026-08-02T05:13:45.245069Z"
     },
     "R08": {
       "state": "pending",

@@ -24,14 +24,14 @@ Credentials are stored locally:
 - Legacy Copilot JSON sources: `~/.config/github-copilot/hosts.json`, `~/.config/github-copilot/apps.json`
 
 Relevant code:
-- Claude provider: `src/provider/claude.rs`
-- OpenAI login + refresh: `src/auth/oauth.rs`
-- OpenAI credentials parsing: `src/auth/codex.rs`
-- OpenAI requests: `src/provider/openai.rs`
-- Azure OpenAI auth/config: `src/auth/azure.rs`
-- Azure OpenAI transport: `src/provider/openrouter.rs`
-- Gemini login + refresh: `src/auth/gemini.rs`
-- Gemini Code Assist provider: `src/provider/gemini.rs`
+- Claude provider: `crates/jcode-base/src/provider/claude.rs`
+- OpenAI login + refresh: `crates/jcode-base/src/auth/oauth.rs`
+- OpenAI credentials parsing: `crates/jcode-base/src/auth/codex.rs`
+- OpenAI requests: `crates/jcode-base/src/provider/openai.rs`
+- Azure OpenAI auth/config: `crates/jcode-base/src/auth/azure.rs`
+- Azure OpenAI transport: `crates/jcode-base/src/provider/openrouter.rs`
+- Gemini login + refresh: `crates/jcode-base/src/auth/gemini.rs`
+- Gemini Code Assist provider: `crates/jcode-base/src/provider/gemini.rs`
 - OpenAI-compatible provider metadata/login descriptors: `crates/jcode-provider-metadata/src/lib.rs`
 
 ## Claude (Claude Max)
@@ -282,9 +282,9 @@ Two notable presets are:
 ### MiniMax
 - Login: `jcode login --provider minimax`
 - Stored env file: `~/.config/jcode/minimax.env`
-- API key env var: `OPENAI_API_KEY`
+- API key env var: `MINIMAX_API_KEY`
 - Base URL: `https://api.minimax.io/v1`
-- Default model hint: `MiniMax-M2.7`
+- Default model hint: `MiniMax-M3`
 - Docs: <https://platform.minimax.io/docs/guides/text-generation>
 
 These are first-class jcode provider presets, not just manual custom endpoint examples.

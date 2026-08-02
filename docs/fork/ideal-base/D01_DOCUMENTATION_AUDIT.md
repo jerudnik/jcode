@@ -2,7 +2,7 @@
 
 Recorded: 2026-07-27
 
-Status: `prepared_input`
+Status: `re_audited` (D01-A re-audit 2026-08-02; see disposition table below)
 
 This document is the source-backed input register for D01. It records defects
 found before the distribution handoff so they survive into the ideal-base
@@ -90,3 +90,37 @@ No item may disappear through prose cleanup alone. The final D01 evidence must
 also include the classified document census, checker fixtures proving each rule
 is non-vacuous, command parser or `--help` evidence, generated-instruction drift
 results, and an independent source-to-prose review.
+
+## D01-A re-audit against merged main (2026-08-02)
+
+Every finding above was re-checked against the shipped tree rather than trusted
+from the snapshot. **All ten reproduce.** None was superseded by the merged
+implementation, so nothing here is stale bookkeeping.
+
+Three were mechanically verifiable against source, so they are corrected now.
+Each was fixed by extracting the value from the code and diffing it against the
+prose, not by reading and retyping:
+
+| ID | Disposition | Evidence |
+| --- | --- | --- |
+| `D01-F02` | `corrected` | `OAUTH.md` MiniMax preset said `OPENAI_API_KEY` / `MiniMax-M2.7`; `catalog.rs` `MINIMAX_PROFILE` says `MINIMAX_API_KEY` / `MiniMax-M3`. Checked **all** `OpenAiCompatibleProfile` presets against their `OAUTH.md` sections by parsing both, not just the reported one; MiniMax was the only drift, 2 fields. |
+| `D01-F03` | `corrected` | `docs/MEMORY_BUDGET.md` said 64/12/8; source says `RENDER_CACHE_MAX=512`, `IMAGE_STATE_MAX=24`, `SOURCE_CACHE_MAX=16`. Corrected in both the budget table and the summary list, and each `<=` value is now confirmed equal to its `const` by parsing both files. `ACTIVE_DIAGRAMS_MAX=128` and the two disk caps were already accurate. |
+| `D01-F10` | `corrected` | Every pre-crate-split path in `OAUTH.md` and `docs/MEMORY_BUDGET.md` was confirmed non-existent, remapped to its current owning crate, and re-checked so that every referenced `.rs` file resolves on disk. |
+
+The remaining seven need editorial judgement about what the product should
+claim, not a lookup, so they stay open under their assigned lanes:
+
+| ID | Disposition | Re-audit note |
+| --- | --- | --- |
+| `D01-F01` | `confirmed` | `src/cli/login.rs:353` still runs post-login validation by default. `OAUTH.md` mentions the opt-out flags only twice and still does not disclose the default network/spend behavior. |
+| `D01-F04` | `confirmed` | `docs/MEMORY_ARCHITECTURE.md:3` still says "Planned (Graph-Based Hybrid)" while its Phase 4 section marks every graph item `[x]`. Self-contradictory in one file. |
+| `D01-F05` | `confirmed` | `docs/AMBIENT_MODE.md:3` and `docs/SAFETY_SYSTEM.md:3` both still say `Status: Design` over shipped code. Needs an implemented/planned matrix and a D01-A lane assignment. |
+| `D01-F06` | `confirmed` | `docs/PROVIDER_DOCTOR.md:12-13` still hard-codes an OpenAI-compatible list while `provider_doctor.rs` selects native drivers. |
+| `D01-F07` | `confirmed` | `docs/CLOUDFLARE_EXPERIMENT_STRATEGY.md:4` still calls `distro/nix` the current packaging rail, contradicting the single-rail model. Needs an archive/reclassify decision. |
+| `D01-F08` | `confirmed` | Recounted post-merge as required: **14** non-archive Markdown references to `~/notes/...`, up from the snapshot's 10. Each needs importing or relabelling as private context. |
+| `D01-F09` | `confirmed` | `docs/README.md` still does not exist. This is the largest item: it wants a classified authority map plus a deterministic link/claim checker with non-vacuous fixtures. |
+
+Note on F03 and F02 as a class: both are a documented constant drifting from its
+source constant, which is the same failure mode this program keeps finding in
+code. `D01-F09`'s checker is the durable fix; correcting the values by hand only
+resets the clock.
