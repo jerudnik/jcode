@@ -610,9 +610,11 @@
       "state": "pending",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/human-noticed-issues/TODO_POKE_TERMINAL_STATES.md"
+      ],
+      "summary": "Re-verified against shipped code 2026-08-02, still LIVE, but partially overtaken. STILL TRUE: is_incomplete_poke_todo (commands.rs:2558) treats completed|cancelled as terminal while the tool-call title counts completed only; 27 inline '!= \"completed\"' predicates remain in production; todo_confidence_summary still does unwrap_or(true) on an empty completed set, so 'nothing to assess' reports as 'needs work' (item c); blocked_by is still absent from the tool schema (item f) and still reaches no gate; the ordinary poke is still unbounded while OVERNIGHT_MAX_POKES=48 bounds the overnight one (item g). ALREADY ADDRESSED, so item (a)'s loop symptom no longer reproduces: the ownership gate no longer discards the write (f378eaa6a) and the completion gate now fires at most once per todo-list revision via arm_todo_confidence_gate in app/todos_view.rs. That closes the unbounded empty-turn loop of Finding 3 WITHOUT closing its stated cause, which is the empty-input conflation in item (c). Remaining scope is (b) through (g).",
+      "updated_at": "2026-08-02T03:52:08.844472Z"
     },
     "R09": {
       "state": "pending",
