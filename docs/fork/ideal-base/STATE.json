@@ -623,12 +623,14 @@
       "updated_at": null
     },
     "R10": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "88f176823859ab30e7e93489d938edd73c7337c2",
+      "published_commit": "2764c810152f2d6cf494f056e7881109046fc057",
+      "evidence": [
+        "docs/fork/ideal-base/human-noticed-issues/RELOAD_STALENESS_PROCESS_START.md"
+      ],
+      "summary": "Shipped and published via PR #78 (merge 2764c810). Re-verified against code rather than node text: the image-mtime baseline lives at crates/jcode-app-core/src/server/util/binary_freshness.rs with a OnceLock IMAGE_BASELINE_MTIME, seeded at boot from server/reload_state.rs:49 and read at server/util.rs:254 and :769. The ledger had this as pending because the state record was never written when the fix landed ahead of W6, not because work remained.",
+      "updated_at": "2026-08-02T03:49:57.257055Z"
     },
     "F30-FIX-1": {
       "state": "pending",
