@@ -38,7 +38,7 @@ use jcode_session_types::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -2091,8 +2091,18 @@ fn group_and_limit_results(
 ) -> Vec<SearchResult> {
     let mut grouped = Vec::new();
     let mut per_session: HashMap<String, usize> = HashMap::new();
+    // A forked session copies its parent's transcript, so one real message can
+    // be found in several session files. Message ids are stable across the
+    // copy, so the highest-ranked hit wins and the inherited duplicates drop
+    // out instead of burning result slots and reporting one event twice.
+    let mut seen_messages: HashSet<String> = HashSet::new();
 
     for result in results {
+        if let Some(message_id) = result.message_id.as_deref()
+            && !seen_messages.insert(message_id.to_string())
+        {
+            continue;
+        }
         let count = per_session.entry(result.session_id.clone()).or_default();
         if *count >= options.max_per_session {
             continue;
