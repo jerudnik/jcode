@@ -119,6 +119,7 @@
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
               ./.github/workflows/release.yml
+              ./.github/workflows/governance-root.yml
             ];
           };
 
@@ -147,11 +148,12 @@
               ./web/jcode-mobile
               ./README.md
               ./RELEASING.md
-              ./docs/BRANCHING.md
-              ./docs/NIX.md
-              ./docs/ONBOARDING_SANDBOX.md
-              ./docs/WINDOWS.md
-              ./docs/WRAPPERS.md
+              # The policy scan is opt-out (F30-FIX-1), so the derivation must
+              # carry every doc it governs. Naming individual files here
+              # reintroduced the same allowlist hole in the hermetic sandbox:
+              # the check saw 13 documents and passed over the rest.
+              ./docs
+              ./.apm/instructions
               ./.github/workflows
             ];
           };
@@ -322,7 +324,8 @@
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
                     .github/workflows/nix-update.yml \
-                    .github/workflows/release.yml
+                    .github/workflows/release.yml \
+                    .github/workflows/governance-root.yml
                   touch "$out"
                 '';
 

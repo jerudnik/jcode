@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import tomllib
 import unittest
 
@@ -22,6 +23,10 @@ RETIRED_PATHS = (
     "scripts/update_packages.sh",
     "scripts/quick-release.sh",
     "scripts/phone-server/testflight-setup.py",
+    # F30-FIX-4: shared PATH helper for the retired curl|bash installer. Its
+    # own header described keeping it in sync with install.sh, which no longer
+    # exists; nothing sourced it.
+    "scripts/lib/configure_path.sh",
 )
 
 ACTIVE_DISTRIBUTION_DOCS = (
@@ -35,6 +40,94 @@ ACTIVE_DISTRIBUTION_DOCS = (
     "scripts/phone-server/README.md",
 )
 
+# F30-FIX-1: the scan is opt-out, not opt-in. An allowlist silently exempts
+# every document nobody remembered to add, so the gate reported OK while never
+# opening 31 of 39 active docs. These prefixes are historical records that
+# describe retired channels on purpose; everything else tracked is scanned.
+UNSCANNED_PREFIXES = (
+    "docs/fork/",
+    "docs/archive/",
+    "changelog/",
+    "CHANGELOG",
+)
+
+# Documents whose subject is the prohibition itself, so they must name the
+# retired channels in order to forbid them. Keep this list tiny and explicit;
+# each entry is a hole in the gate.
+PROHIBITION_DOCS = (".apm/instructions/main.instructions.md",)
+
+# Build outputs and vendored trees are not repository documentation. Skipping
+# them by directory name keeps the walk equivalent to the tracked file set
+# without needing git, which the hermetic Nix sandbox does not provide.
+SKIPPED_DIRECTORIES = frozenset(
+    {
+        ".git",
+        ".jj",
+        "target",
+        "node_modules",
+        "result",
+        ".direnv",
+        "vendor",
+    }
+)
+
+# The lowest number of documents a healthy scan reaches. This exists so that a
+# future refactor which empties the corpus fails RED instead of reporting OK on
+# zero files, which is the exact failure mode F30-FIX-1 was filed for.
+MIN_SCANNED_ACTIVE_DOCS = 60
+
+# F30-FIX-3: workflows inherited from upstream are kept byte-close to the fork
+# point and are dispatch-only, so they are deliberately not linted. Every other
+# workflow is fork-owned and must be. Listing the exemptions rather than the
+# covered set means a newly added workflow is linted by default; the previous
+# hardcoded lint list silently omitted governance-root.yml for three weeks.
+UNLINTED_UPSTREAM_WORKFLOWS = frozenset({"ci.yml", "freebsd-smoke.yml"})
+
+# F30-FIX-2: the substring list missed the AUR, curl-pipe, and PowerShell-pipe
+# install idioms entirely. These are regexes rather than substrings because the
+# plain-substring forms collide with ordinary prose and markdown tables ("| sh"
+# matches a table cell; "jcode-bin" matches "<jcode-binary>").
+FORBIDDEN_ACTIVE_DOC_PATTERNS = (
+    ("AUR yay install", r"\byay\s+-S\b"),
+    ("AUR paru install", r"\bparu\s+-S\b"),
+    ("AUR -git package", r"\bjcode(?:-desktop)?-git\b"),
+    # Boundary-anchored: the bare substring also matches "<jcode-binary>".
+    ("AUR jcode-bin package", r"\bjcode-bin\b"),
+    ("curl pipe to shell", r"\bcurl\b[^\n|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh)\b"),
+    ("wget pipe to shell", r"\bwget\b[^\n|]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh)\b"),
+    (
+        "PowerShell pipe to iex",
+        r"\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n|]*\|\s*"
+        r"(?:iex|Invoke-Expression)\b",
+    ),
+)
+
+
+def tracked_active_documents() -> list[str]:
+    """Every active doc the distribution policy governs (opt-out).
+
+    Walks the filesystem rather than shelling out to git: this suite also runs
+    inside the hermetic `nix-distribution-policy` derivation, whose sandbox has
+    neither a `.git` directory nor a `git` binary.
+    """
+    found: list[str] = []
+    for path in ROOT.rglob("*.md"):
+        relative = path.relative_to(ROOT).as_posix()
+        if any(part in SKIPPED_DIRECTORIES for part in path.relative_to(ROOT).parts[:-1]):
+            continue
+        if relative.startswith(UNSCANNED_PREFIXES) or relative in PROHIBITION_DOCS:
+            continue
+        found.append(relative)
+    instructions = ROOT / ".apm/instructions"
+    if instructions.is_dir():
+        for path in sorted(instructions.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(ROOT).as_posix()
+            if relative not in PROHIBITION_DOCS:
+                found.append(relative)
+    return sorted(found)
+
 FORBIDDEN_ACTIVE_DOC_TEXT = (
     "scripts/install.sh",
     "scripts/install.ps1",
@@ -43,7 +136,6 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
     "scripts/quick-release.sh",
     "brew install jcode",
     "brew tap 1jehuang/jcode",
-    "jcode-bin",
     "jcode update installs",
     "docs/IOS_APP.md",
     ".github/workflows/ios.yml",
@@ -196,10 +288,70 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         for relative in ACTIVE_DISTRIBUTION_DOCS:
             path = ROOT / relative
             self.assertTrue(path.exists(), f"active distribution document missing: {relative}")
-            text = path.read_text()
+
+        for relative in tracked_active_documents():
+            text = (ROOT / relative).read_text(errors="ignore")
             for banned in FORBIDDEN_ACTIVE_DOC_TEXT:
                 with self.subTest(path=relative, token=banned):
-                    self.assertNotIn(banned, text)
+                    self.assertNotIn(banned, text, f"{relative} advertises retired channel {banned!r}")
+
+    def test_retired_install_idioms_are_absent_from_active_docs(self) -> None:
+        """F30-FIX-2: AUR, curl-pipe, and PowerShell-pipe install instructions."""
+        for relative in tracked_active_documents():
+            text = (ROOT / relative).read_text(errors="ignore")
+            for label, pattern in FORBIDDEN_ACTIVE_DOC_PATTERNS:
+                with self.subTest(path=relative, token=label):
+                    match = re.search(pattern, text)
+                    self.assertIsNone(
+                        match,
+                        f"{relative} advertises a retired install channel "
+                        f"({label}): {match.group(0) if match else ''!r}",
+                    )
+
+    def test_every_fork_owned_workflow_is_lint_covered(self) -> None:
+        """F30-FIX-3: lint coverage is a rule, not a hand-maintained list."""
+        workflow_dir = ROOT / ".github/workflows"
+        present = {path.name for path in workflow_dir.glob("*.yml")}
+        present |= {path.name for path in workflow_dir.glob("*.yaml")}
+        expected = present - UNLINTED_UPSTREAM_WORKFLOWS
+
+        nix_workflow = (ROOT / ".github/workflows/nix.yml").read_text()
+        flake = (ROOT / "flake.nix").read_text()
+        for name in sorted(expected):
+            reference = f".github/workflows/{name}"
+            with self.subTest(workflow=name, list="nix.yml actionlint"):
+                self.assertIn(
+                    reference,
+                    nix_workflow,
+                    f"fork-owned workflow {name} is not linted by nix.yml",
+                )
+            with self.subTest(workflow=name, list="flake workflow-syntax check"):
+                self.assertIn(
+                    reference,
+                    flake,
+                    f"fork-owned workflow {name} is not linted by the flake check",
+                )
+
+        for name in sorted(UNLINTED_UPSTREAM_WORKFLOWS):
+            with self.subTest(workflow=name, exemption="still present"):
+                self.assertIn(
+                    name,
+                    present,
+                    f"exempt workflow {name} no longer exists; drop it from "
+                    "UNLINTED_UPSTREAM_WORKFLOWS instead of leaving a dead exemption",
+                )
+
+    def test_distribution_doc_scan_is_not_vacuous(self) -> None:
+        """A gate that scans nothing reports OK. Make that state fail RED."""
+        scanned = tracked_active_documents()
+        self.assertGreaterEqual(
+            len(scanned),
+            MIN_SCANNED_ACTIVE_DOCS,
+            f"distribution doc scan collapsed to {len(scanned)} files; "
+            "the gate is near-vacuous and would pass without checking anything",
+        )
+        for relative in ACTIVE_DISTRIBUTION_DOCS:
+            self.assertIn(relative, scanned, f"historically guarded doc dropped out: {relative}")
 
 
 if __name__ == "__main__":

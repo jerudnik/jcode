@@ -86,6 +86,11 @@ jobs:
         # Only lint the workflows this fork owns. Upstream's ci.yml and
         # freebsd-smoke.yml are kept byte-close to the fork point and are
         # dispatch-only.
+        #
+        # This list is asserted complete by
+        # test_every_fork_owned_workflow_is_lint_covered: every workflow
+        # present that is not an explicit upstream exemption must appear here
+        # and in the flake workflow-syntax check.
         run: |
           nix run nixpkgs#actionlint -- \
             .github/workflows/docs-impact.yml \
@@ -94,7 +99,8 @@ jobs:
             .github/workflows/security.yml \
             .github/workflows/nix.yml \
             .github/workflows/nix-update.yml \
-            .github/workflows/release.yml
+            .github/workflows/release.yml \
+            .github/workflows/governance-root.yml
 
       - name: Dry-run Linux package
         run: nix build .#packages.x86_64-linux.jcode --dry-run --print-build-logs
