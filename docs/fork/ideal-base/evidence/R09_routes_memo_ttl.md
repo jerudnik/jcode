@@ -133,8 +133,8 @@ The TTL is only as good as the distribution behind it, so the numbers above are
 re-derivable rather than quoted from a scrollback:
 
 ```sh
-grep -ho '\[TIMING\] model_routes[^m]*' ~/.jcode/logs/*.log \
-  | grep -oE '[0-9]+ms' | tr -d 'ms' | sort -n > /tmp/r09_samples.txt
+grep -h '\[TIMING\] model_routes:' ~/.jcode/logs/*.log \
+  | grep -oE 'total=[0-9]+ms' | grep -oE '[0-9]+' > /tmp/r09_samples.txt
 python3 - <<'EOF'
 xs = sorted(int(l) for l in open('/tmp/r09_samples.txt'))
 pct = lambda p: xs[min(len(xs) - 1, int(len(xs) * p))]
@@ -144,8 +144,14 @@ print(f"over the old 3000ms TTL: {over}/{len(xs)} = {100 * over / len(xs):.1f}%"
 EOF
 ```
 
-On the machine where this was authored that prints n=96, p50=3185, p99=17039,
-and 59.4% over the old TTL. A machine with faster credential reads will print a
+Verified by running it: `n=97 min=516 p50=3198 p90=3691 p99=17039 max=17039`,
+`over the old 3000ms TTL: 58/97 = 59.8%`. That is one sample more than the n=96
+reading taken earlier in the session, because the binary kept running and logged
+another build; the shape is unchanged and the p99 that sizes the TTL is the same
+17039ms. The first version of this snippet that I wrote into the doc matched
+**zero** lines (it grepped a `[^m]*` span that stopped before `total=`), which is
+exactly why it is recorded here as executed output rather than as a command that
+ought to work. A machine with faster credential reads will print a
 smaller distribution and a correspondingly smaller derived TTL, which is the
 point of deriving it rather than pinning it: the constant that was wrong here
 was wrong *because* it was a single number chosen for every machine.
