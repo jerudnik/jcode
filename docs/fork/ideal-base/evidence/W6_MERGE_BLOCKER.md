@@ -233,10 +233,73 @@ only designed mechanism, and its residual risk (another ordinary PR merging
 during the window) is explicitly scoped and detected by step 7 rather than
 ignored.
 
+## Window attempt 1: the protocol worked, the merge still failed
+
+Authorized by the user. Ran the §4 protocol as a single script with every
+assertion enforced in code, at head `d8e04baa5`, base `8286131d9`, with CI
+settled at 15 pass / 1 fail and the failing step confirmed as
+`Detect governance-path changes`.
+
+Steps 1-2 passed all preconditions, including the check that only
+`Governance Root` was red. Step 3 dropped exactly one context and read it back:
+
+```text
+window_start = 2026-08-02T21:38:16Z
+live contexts now = ['Fork CI Gate', 'Security Gate', 'Nix Gate']
+```
+
+Step 4 then failed, with a **different** message than the `--admin` attempt:
+
+```text
+PUT /repos/jerudnik/jcode/pulls/90/merge  {"sha": head_sha, "merge_method": "merge"}
+HTTP 405  Repository rule violations found
+3 of 3 required status checks are expected.
+```
+
+"3 of 3" rather than "4 of 4" proves the drop took effect. The protocol did its
+job; something else blocks. Step 6 restored the literal captured body and the
+sanitized hash matched step 2 exactly on the first attempt:
+
+```text
+restore sha256 = 43ba61a7a57ffded7a4276917192cdd6028f79d58755cae870cbb2df07494f2b  (== step 2)
+window_end     = 2026-08-02T21:38:20Z
+```
+
+**Total window: 4 seconds**, and `main` ended with all four contexts required.
+The `finally` block is what made that true: the merge raised, and the restore
+ran anyway. Had it been sequential code after the merge call, `main` would have
+been left with a context dropped.
+
+### The real second blocker, and it is the answer to question (a)
+
+```text
+gh pr view 90 --json mergeStateStatus  ->  BEHIND
+compare base...head  ->  ahead_by=55  behind_by=11
+```
+
+The branch was 11 commits behind `main`, because PR #86 merged earlier in the
+session. `strict_required_status_checks_policy: true` therefore refuses the
+merge until the branch absorbs those commits and **reruns the entire ~11 minute
+pipeline**, even though the 11 commits are documentation-only and no gate result
+can change.
+
+This is the exact cost described in `W6_CI_FRICTION.md`, encountered as a
+blocker rather than as a theory. It is worth recording that the two questions
+the user asked turned out to be the same system: the governance loop made this
+PR expensive to land, and `strict` then made every attempt to land it cost a
+full pipeline.
+
+Merged `main` in (clean, one docs file), re-ran the gates locally before
+spending CI (critical-path self-test 32/32, the four ratchets report no
+violations), and pushed `99678e8f3`.
+
 ## Not verified
 
-- I did not attempt `--admin`, and did not attempt the §4 maintenance
-  procedure. Both are external, privileged writes.
+- ~~I did not attempt `--admin`, and did not attempt the §4 maintenance
+  procedure.~~ **Both were subsequently attempted with the user's
+  authorization.** `--admin` is structurally unavailable under rulesets; the §4
+  window executed correctly and was blocked by `strict` instead. See the two
+  correction sections above.
 - I did not verify whether the protected-path list *intends* to cover
   `check_critical_path_budget.py` for count refreshes specifically, or whether
   that inclusion is over-broad. The list treats "the checker's logic" and "the
