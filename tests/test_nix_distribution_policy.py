@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import pathlib
 import re
-import subprocess
 import tomllib
 import unittest
 
@@ -53,6 +52,21 @@ UNSCANNED_PREFIXES = (
 # each entry is a hole in the gate.
 PROHIBITION_DOCS = (".apm/instructions/main.instructions.md",)
 
+# Build outputs and vendored trees are not repository documentation. Skipping
+# them by directory name keeps the walk equivalent to the tracked file set
+# without needing git, which the hermetic Nix sandbox does not provide.
+SKIPPED_DIRECTORIES = frozenset(
+    {
+        ".git",
+        ".jj",
+        "target",
+        "node_modules",
+        "result",
+        ".direnv",
+        "vendor",
+    }
+)
+
 # The lowest number of documents a healthy scan reaches. This exists so that a
 # future refactor which empties the corpus fails RED instead of reporting OK on
 # zero files, which is the exact failure mode F30-FIX-1 was filed for.
@@ -79,20 +93,29 @@ FORBIDDEN_ACTIVE_DOC_PATTERNS = (
 
 
 def tracked_active_documents() -> list[str]:
-    """Every tracked doc the distribution policy governs (opt-out)."""
-    listed = subprocess.run(
-        ["git", "ls-files", "*.md", ".apm/instructions/*"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
-    return [
-        relative
-        for relative in listed
-        if not relative.startswith(UNSCANNED_PREFIXES)
-        and relative not in PROHIBITION_DOCS
-    ]
+    """Every active doc the distribution policy governs (opt-out).
+
+    Walks the filesystem rather than shelling out to git: this suite also runs
+    inside the hermetic `nix-distribution-policy` derivation, whose sandbox has
+    neither a `.git` directory nor a `git` binary.
+    """
+    found: list[str] = []
+    for path in ROOT.rglob("*.md"):
+        relative = path.relative_to(ROOT).as_posix()
+        if any(part in SKIPPED_DIRECTORIES for part in path.relative_to(ROOT).parts[:-1]):
+            continue
+        if relative.startswith(UNSCANNED_PREFIXES) or relative in PROHIBITION_DOCS:
+            continue
+        found.append(relative)
+    instructions = ROOT / ".apm/instructions"
+    if instructions.is_dir():
+        for path in sorted(instructions.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(ROOT).as_posix()
+            if relative not in PROHIBITION_DOCS:
+                found.append(relative)
+    return sorted(found)
 
 FORBIDDEN_ACTIVE_DOC_TEXT = (
     "scripts/install.sh",
