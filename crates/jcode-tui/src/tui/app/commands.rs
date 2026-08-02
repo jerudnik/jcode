@@ -271,9 +271,46 @@ pub(super) fn poke_triggered_display_message(incomplete_count: usize) -> String 
     )
 }
 
+/// Ceiling on consecutive auto-poke follow-ups, matching `OVERNIGHT_MAX_POKES`.
+///
+/// The ordinary poke's real stopping condition is the todo list reaching a
+/// terminal state, which requires the model to do the thing the poke exists to
+/// nag it about. That is exactly the assumption least safe to rely on here, so
+/// this is a backstop for the case where it never happens: a list that stays
+/// incomplete would otherwise drive model round-trips indefinitely.
+///
+/// Counted per arming, not per session, and reset by `/poke`.
+pub(super) const MAX_AUTO_POKE_FOLLOWUPS: u16 = 48;
+
+pub(super) fn auto_poking_banner(incomplete: usize) -> String {
+    format!(
+        "👉 Auto-poking: {incomplete} incomplete todo{}. /poke off to stop.",
+        if incomplete == 1 { "" } else { "s" }
+    )
+}
+
+/// Charge one follow-up against the budget, returning whether it is spent.
+///
+/// On exhaustion this disarms auto-poke rather than skipping a single turn:
+/// leaving it armed would re-fire on the very next completed turn, which is
+/// not a bound at all.
+pub(super) fn spend_auto_poke_budget(app: &mut App) -> bool {
+    if app.auto_poke_followups_sent >= MAX_AUTO_POKE_FOLLOWUPS {
+        disable_auto_poke(app);
+        app.push_display_message(DisplayMessage::system(format!(
+            "🛑 Auto-poke stopped after reaching its safety budget of {MAX_AUTO_POKE_FOLLOWUPS} follow-up turns. Run /poke again to resume."
+        )));
+        app.set_status_notice("Poke stopped: safety budget");
+        return true;
+    }
+    app.auto_poke_followups_sent = app.auto_poke_followups_sent.saturating_add(1);
+    false
+}
+
 pub(super) fn activate_auto_poke(app: &mut App) -> PokeActivation {
     let incomplete = incomplete_poke_todos(app);
     app.auto_poke_incomplete_todos = true;
+    app.auto_poke_followups_sent = 0;
     app.set_status_notice("Poke: ON");
 
     if incomplete.is_empty() {

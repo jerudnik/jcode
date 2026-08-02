@@ -414,3 +414,127 @@ fn draining_the_queue_for_dispatch_refreshes_poke_counts_in_place() {
         );
     });
 }
+
+/// Build `count` pending todos, saved for `app`'s session.
+fn save_pending_todos(app: &App, count: usize) {
+    let todos: Vec<crate::todo::TodoItem> = (0..count)
+        .map(|i| crate::todo::TodoItem {
+            group: None,
+            id: format!("t{i}"),
+            content: format!("task {i}"),
+            status: "pending".to_string(),
+            priority: "high".to_string(),
+            blocked_by: Vec::new(),
+            assigned_to: None,
+            confidence: Some(90),
+            completion_confidence: None,
+            confidence_history: Vec::new(),
+        })
+        .collect();
+    crate::todo::save_todos(&app.session.id, &todos).expect("save todos");
+}
+
+/// Simulate the queued poke being dispatched and the turn finishing, so the
+/// next `schedule_auto_poke_followup_if_needed` is not short-circuited by its
+/// own previous queue entry.
+fn drain_poke_queue(app: &mut App) {
+    app.queued_messages.clear();
+    app.pending_queued_dispatch = false;
+}
+
+/// The ordinary auto-poke must be bounded, like the overnight one.
+///
+/// `OVERNIGHT_MAX_POKES` caps the overnight poke at 48 follow-up turns, but the
+/// ordinary `/poke` loop had no ceiling at all. A todo list that never reaches
+/// a terminal status therefore drives model round-trips indefinitely, at
+/// whatever the provider will serve. The poke's stopping condition was entirely
+/// dependent on the model doing the thing the poke is nagging it to do, which
+/// is precisely the case where that assumption is least safe.
+#[test]
+fn the_ordinary_auto_poke_stops_at_its_safety_budget() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.auto_poke_incomplete_todos = true;
+        save_pending_todos(&app, 3);
+
+        let budget = super::commands::MAX_AUTO_POKE_FOLLOWUPS;
+        for i in 0..budget {
+            assert!(
+                app.schedule_auto_poke_followup_if_needed(),
+                "poke {i} of {budget} is inside the budget and must still fire"
+            );
+            drain_poke_queue(&mut app);
+        }
+
+        // The list is still incomplete, so only the budget can stop this.
+        assert!(
+            !app.schedule_auto_poke_followup_if_needed(),
+            "the poke must stop once it has spent its budget of {budget}"
+        );
+        assert!(
+            !app.auto_poke_incomplete_todos,
+            "exhausting the budget must disarm auto-poke, not merely skip one turn; \
+             leaving it armed would re-fire on the next completed turn"
+        );
+        assert!(
+            app.queued_messages.is_empty(),
+            "the refused poke must not queue a message"
+        );
+        assert!(
+            app.display_messages()
+                .iter()
+                .any(|msg| msg.content.contains("safety budget")),
+            "the user must be told why the poke stopped; a silent stop is \
+             indistinguishable from the feature breaking"
+        );
+    });
+}
+
+/// Contrast case: the budget must not be reachable by ordinary use.
+///
+/// Without this, the test above would pass against a "fix" that refused to
+/// poke at all, or that counted every scheduling call rather than every poke
+/// actually sent. Re-arming with `/poke` must also restore a full budget,
+/// since the ceiling is a runaway backstop and not a session-lifetime quota.
+#[test]
+fn the_poke_budget_is_not_consumed_by_turns_that_do_not_poke_and_resets_on_rearm() {
+    with_temp_jcode_home(|| {
+        let mut app = create_test_app();
+        app.auto_poke_incomplete_todos = true;
+        save_pending_todos(&app, 2);
+
+        // Calls that decline to poke must not spend budget.
+        app.pending_turn = true;
+        for _ in 0..10 {
+            assert!(
+                !app.schedule_auto_poke_followup_if_needed(),
+                "a turn already in flight must not poke"
+            );
+        }
+        app.pending_turn = false;
+        assert_eq!(
+            app.auto_poke_followups_sent, 0,
+            "declined pokes must not be charged against the budget"
+        );
+
+        // Spend the budget.
+        for _ in 0..super::commands::MAX_AUTO_POKE_FOLLOWUPS {
+            assert!(app.schedule_auto_poke_followup_if_needed());
+            drain_poke_queue(&mut app);
+        }
+        assert!(!app.schedule_auto_poke_followup_if_needed());
+
+        // Re-arming with /poke restores a full budget.
+        super::commands::activate_auto_poke(&mut app);
+        assert_eq!(
+            app.auto_poke_followups_sent, 0,
+            "/poke must reset the budget; a spent backstop that never resets \
+             would silently make the feature one-shot per session"
+        );
+        drain_poke_queue(&mut app);
+        assert!(
+            app.schedule_auto_poke_followup_if_needed(),
+            "after re-arming, the poke must work again"
+        );
+    });
+}

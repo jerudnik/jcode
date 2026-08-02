@@ -1274,10 +1274,15 @@ impl App {
             return self.settle_completed_todo_list(&todos);
         }
 
-        self.push_display_message(DisplayMessage::system(format!(
-            "👉 Auto-poking: {} incomplete todo{}. /poke off to stop.",
+        // Backstop for a list that never terminates. After the completion check
+        // so a finished list still settles, and after the partition so declined
+        // pokes are not charged.
+        if super::commands::spend_auto_poke_budget(self) {
+            return false;
+        }
+
+        self.push_display_message(DisplayMessage::system(super::commands::auto_poking_banner(
             incomplete.len(),
-            if incomplete.len() == 1 { "" } else { "s" },
         )));
         self.queued_messages
             .push(super::commands::build_poke_message(&incomplete));
@@ -3445,18 +3450,13 @@ impl App {
     }
 
     /// Drain `queued_messages` for dispatch, re-deriving any poke's todo count
-    /// from the list as it stands right now.
-    ///
-    /// A poke's count is rendered into a `String` when the poke is scheduled,
-    /// but the queue is drained later, so a todo update landing in between
-    /// would otherwise be invisible to the message the model actually reads.
-    /// Pokes whose todos were fully resolved in the meantime are dropped rather
-    /// than sent announcing "0 incomplete todos".
+    /// from the list as it stands right now. See
+    /// `commands::refresh_poke_message_for_dispatch` for why, and for the
+    /// dropped-when-resolved case.
     ///
     /// Split out of `process_queued_messages` so this is reachable from tests:
-    /// that function needs a live terminal and an event stream, which means a
-    /// refresh performed inline there could be deleted without any test
-    /// noticing.
+    /// that function needs a live terminal, so a refresh inlined there could be
+    /// deleted without any test noticing.
     pub(super) fn take_queued_messages_for_dispatch(&mut self) -> Vec<String> {
         std::mem::take(&mut self.queued_messages)
             .into_iter()

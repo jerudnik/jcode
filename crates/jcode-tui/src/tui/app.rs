@@ -9,8 +9,13 @@ use crate::compaction::CompactionEvent;
 use crate::config::config;
 use crate::id;
 use crate::mcp::McpManager;
+// `cache_relevant_*` lives in `jcode-message-types` so this path and the server
+// event path in `jcode-app-core::agent::kv_cache_request_event` hash messages
+// identically; drift makes remote sessions report false
+// `harness:_prefix_changed` KV-cache misses.
 use crate::message::{
     ContentBlock, Message, Role, StreamEvent, TOOL_OUTPUT_MISSING_TEXT, ToolCall, ToolDefinition,
+    cache_relevant_message_value, cache_relevant_messages,
 };
 use crate::provider::Provider;
 use crate::runtime_memory_log::RuntimeMemoryLogController;
@@ -859,8 +864,10 @@ pub struct App {
     last_turn_input_tokens: Option<u64>,
     // Pending turn to process (allows UI to redraw before processing starts)
     pending_turn: bool,
-    // When armed by /poke, automatically continue prompting until todos are complete.
+    // When armed by /poke, automatically continue prompting until todos are
+    // complete, bounded by MAX_AUTO_POKE_FOLLOWUPS follow-ups per arming.
     auto_poke_incomplete_todos: bool,
+    pub(crate) auto_poke_followups_sent: u16,
     // Todo list the completion-confidence gate has already fired for. Re-firing
     // against unchanged state would re-queue the identical reminder forever; see
     // `settle_completed_todo_list` and BLANK_CONTINUATION_TURN.md.
@@ -2289,13 +2296,6 @@ fn stable_json_len<T: serde::Serialize + ?Sized>(value: &T) -> usize {
         .map(|encoded| encoded.len())
         .unwrap_or_default()
 }
-
-// The cache-relevant projection lives in `jcode-message-types` (re-exported
-// through `crate::message`) so this local path and the server event path in
-// `jcode-app-core::agent::kv_cache_request_event` hash messages identically.
-// If the two projections drift, remote sessions report false
-// `harness:_prefix_changed` KV-cache misses.
-use crate::message::{cache_relevant_message_value, cache_relevant_messages};
 
 fn message_hashes(messages: &[Message]) -> Vec<u64> {
     messages
