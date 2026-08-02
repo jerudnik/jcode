@@ -632,6 +632,164 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Fingerprint of the todo state the completion-confidence gate evaluates.
+///
+/// Covers exactly the fields `todo_confidence_summary` reads, so any edit that
+/// could change the gate's verdict re-arms it, while an unchanged list does
+/// not. Used to fire the gate at most once per todo-list revision.
+pub(super) fn todo_gate_fingerprint(todos: &[TodoItem]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    todos.len().hash(&mut hasher);
+    for todo in todos {
+        todo.id.hash(&mut hasher);
+        todo.status.hash(&mut hasher);
+        todo.priority.hash(&mut hasher);
+        todo.completion_confidence.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+impl App {
+    /// Arm the completion-confidence gate for this todo list, returning whether
+    /// the caller should fire it.
+    ///
+    /// Fires at most once per todo-list revision. The reminder asks the model to
+    /// validate further and reassess, but nothing about answering it changes the
+    /// todo list, so an unguarded gate re-evaluates identical state and re-queues
+    /// the identical reminder every turn: an unbounded empty-content send loop at
+    /// model round-trip speed.
+    /// Decide what happens when the auto-poke finds no incomplete todos.
+    ///
+    /// Either the completion-confidence gate fires (asking for more validation)
+    /// or the list is genuinely done and the poke stands down. Returns whether a
+    /// followup was queued.
+    pub(super) fn settle_completed_todo_list(&mut self, todos: &[TodoItem]) -> bool {
+        if todos.is_empty() {
+            self.auto_poke_incomplete_todos = false;
+            return false;
+        }
+        let confidence_summary = super::todos_view::todo_confidence_summary(todos);
+        let confidence_label =
+            super::todos_view::format_todo_completion_confidence(confidence_summary);
+        if confidence_summary.needs_more_work {
+            if !self.arm_todo_confidence_gate(todos) {
+                return false;
+            }
+            self.push_display_message(crate::tui::DisplayMessage::system(
+                "🛑 Todo completion gate: completion confidence needs stronger validation.",
+            ));
+            self.hidden_queued_system_messages.push(
+                super::todos_view::build_todo_confidence_summary_message(todos),
+            );
+            self.pending_queued_dispatch = true;
+            return true;
+        }
+        self.auto_poke_incomplete_todos = false;
+        self.todo_confidence_gate_fired_for = None;
+        self.push_display_message(crate::tui::DisplayMessage::system(format!(
+            "✅ Todos complete. Completion confidence: {}.",
+            confidence_label
+        )));
+        self.pending_queued_dispatch = false;
+        false
+    }
+
+    pub(super) fn arm_todo_confidence_gate(&mut self, todos: &[TodoItem]) -> bool {
+        let fingerprint = todo_gate_fingerprint(todos);
+        if self.todo_confidence_gate_fired_for == Some(fingerprint) {
+            crate::logging::info(
+                "Todo completion gate already fired for this todo list; not re-queuing",
+            );
+            return false;
+        }
+        self.todo_confidence_gate_fired_for = Some(fingerprint);
+        true
+    }
+}
+
+// Completion-confidence scoring for the todo gate.
+//
+// This lives beside the gate that consumes it rather than in commands.rs: the
+// gate's arming decision and the summary it arms on have to agree about what
+// "assessed" means, and splitting them across files is how they drifted apart.
+
+const TODO_CONFIDENCE_THRESHOLD: u8 = crate::todo::QUALITY_GATE_THRESHOLD;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct TodoConfidenceSummary {
+    pub completion_average: Option<u8>,
+    pub needs_more_work: bool,
+}
+
+fn weighted_confidence_average(scores: impl IntoIterator<Item = (u8, u32)>) -> Option<u8> {
+    let mut weighted_sum = 0u32;
+    let mut total_weight = 0u32;
+    for (score, weight) in scores {
+        weighted_sum += u32::from(score) * weight;
+        total_weight += weight;
+    }
+    if total_weight == 0 {
+        None
+    } else {
+        Some(((weighted_sum + total_weight / 2) / total_weight) as u8)
+    }
+}
+
+pub(super) fn build_todo_confidence_summary_message(todos: &[crate::todo::TodoItem]) -> String {
+    let _ = todos;
+    crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE.to_string()
+}
+
+pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoConfidenceSummary {
+    let completed: Vec<&crate::todo::TodoItem> = todos
+        .iter()
+        .filter(|todo| todo.status == "completed")
+        .collect();
+    let completion_scores: Vec<(&crate::todo::TodoItem, u8, u32)> = completed
+        .iter()
+        .filter_map(|todo| {
+            todo.completion_confidence
+                .map(|score| (*todo, score, todo_confidence_weight(&todo.priority)))
+        })
+        .collect();
+    let completion_average = weighted_confidence_average(
+        completion_scores
+            .iter()
+            .map(|(_, score, weight)| (*score, *weight)),
+    );
+    let missing_completion_confidence = completed
+        .iter()
+        .filter(|todo| todo.completion_confidence.is_none())
+        .count();
+    let below_threshold_count = completion_scores
+        .iter()
+        .filter(|(_, score, _)| *score < TODO_CONFIDENCE_THRESHOLD)
+        .count();
+    // An empty completed set means nothing has been assessed, which is not the
+    // same as having been assessed and found wanting. Reporting the two
+    // identically tells the model its completion confidence is insufficient for
+    // work it never claimed to finish, and that false statement is what drives
+    // the auto-poke into the completion gate on an all-cancelled list.
+    let needs_more_work = !completed.is_empty()
+        && (completion_average
+            .map(|avg| avg < TODO_CONFIDENCE_THRESHOLD)
+            .unwrap_or(true)
+            || missing_completion_confidence > 0
+            || below_threshold_count > 0);
+
+    TodoConfidenceSummary {
+        completion_average,
+        needs_more_work,
+    }
+}
+
+pub(super) fn format_todo_completion_confidence(summary: TodoConfidenceSummary) -> String {
+    match summary.completion_average {
+        Some(avg) => format!("{}%", avg),
+        None => "unknown".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -808,163 +966,5 @@ mod tests {
         goals[0].feedback_loop = Some("run test B".to_string());
         let after = hash_todos_payload(Some("session_test"), &todos, &goals);
         assert_ne!(before, after);
-    }
-}
-
-/// Fingerprint of the todo state the completion-confidence gate evaluates.
-///
-/// Covers exactly the fields `todo_confidence_summary` reads, so any edit that
-/// could change the gate's verdict re-arms it, while an unchanged list does
-/// not. Used to fire the gate at most once per todo-list revision.
-pub(super) fn todo_gate_fingerprint(todos: &[TodoItem]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    todos.len().hash(&mut hasher);
-    for todo in todos {
-        todo.id.hash(&mut hasher);
-        todo.status.hash(&mut hasher);
-        todo.priority.hash(&mut hasher);
-        todo.completion_confidence.hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-impl App {
-    /// Arm the completion-confidence gate for this todo list, returning whether
-    /// the caller should fire it.
-    ///
-    /// Fires at most once per todo-list revision. The reminder asks the model to
-    /// validate further and reassess, but nothing about answering it changes the
-    /// todo list, so an unguarded gate re-evaluates identical state and re-queues
-    /// the identical reminder every turn: an unbounded empty-content send loop at
-    /// model round-trip speed.
-    /// Decide what happens when the auto-poke finds no incomplete todos.
-    ///
-    /// Either the completion-confidence gate fires (asking for more validation)
-    /// or the list is genuinely done and the poke stands down. Returns whether a
-    /// followup was queued.
-    pub(super) fn settle_completed_todo_list(&mut self, todos: &[TodoItem]) -> bool {
-        if todos.is_empty() {
-            self.auto_poke_incomplete_todos = false;
-            return false;
-        }
-        let confidence_summary = super::todos_view::todo_confidence_summary(todos);
-        let confidence_label =
-            super::todos_view::format_todo_completion_confidence(confidence_summary);
-        if confidence_summary.needs_more_work {
-            if !self.arm_todo_confidence_gate(todos) {
-                return false;
-            }
-            self.push_display_message(crate::tui::DisplayMessage::system(
-                "🛑 Todo completion gate: completion confidence needs stronger validation.",
-            ));
-            self.hidden_queued_system_messages.push(
-                super::todos_view::build_todo_confidence_summary_message(todos),
-            );
-            self.pending_queued_dispatch = true;
-            return true;
-        }
-        self.auto_poke_incomplete_todos = false;
-        self.todo_confidence_gate_fired_for = None;
-        self.push_display_message(crate::tui::DisplayMessage::system(format!(
-            "✅ Todos complete. Completion confidence: {}.",
-            confidence_label
-        )));
-        self.pending_queued_dispatch = false;
-        false
-    }
-
-    pub(super) fn arm_todo_confidence_gate(&mut self, todos: &[TodoItem]) -> bool {
-        let fingerprint = todo_gate_fingerprint(todos);
-        if self.todo_confidence_gate_fired_for == Some(fingerprint) {
-            crate::logging::info(
-                "Todo completion gate already fired for this todo list; not re-queuing",
-            );
-            return false;
-        }
-        self.todo_confidence_gate_fired_for = Some(fingerprint);
-        true
-    }
-}
-
-// Completion-confidence scoring for the todo gate.
-//
-// This lives beside the gate that consumes it rather than in commands.rs: the
-// gate's arming decision and the summary it arms on have to agree about what
-// "assessed" means, and splitting them across files is how they drifted apart.
-
-const TODO_CONFIDENCE_THRESHOLD: u8 = crate::todo::QUALITY_GATE_THRESHOLD;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct TodoConfidenceSummary {
-    pub completion_average: Option<u8>,
-    pub needs_more_work: bool,
-}
-
-fn weighted_confidence_average(scores: impl IntoIterator<Item = (u8, u32)>) -> Option<u8> {
-    let mut weighted_sum = 0u32;
-    let mut total_weight = 0u32;
-    for (score, weight) in scores {
-        weighted_sum += u32::from(score) * weight;
-        total_weight += weight;
-    }
-    if total_weight == 0 {
-        None
-    } else {
-        Some(((weighted_sum + total_weight / 2) / total_weight) as u8)
-    }
-}
-
-pub(super) fn build_todo_confidence_summary_message(todos: &[crate::todo::TodoItem]) -> String {
-    let _ = todos;
-    crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE.to_string()
-}
-
-pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoConfidenceSummary {
-    let completed: Vec<&crate::todo::TodoItem> = todos
-        .iter()
-        .filter(|todo| todo.status == "completed")
-        .collect();
-    let completion_scores: Vec<(&crate::todo::TodoItem, u8, u32)> = completed
-        .iter()
-        .filter_map(|todo| {
-            todo.completion_confidence
-                .map(|score| (*todo, score, todo_confidence_weight(&todo.priority)))
-        })
-        .collect();
-    let completion_average = weighted_confidence_average(
-        completion_scores
-            .iter()
-            .map(|(_, score, weight)| (*score, *weight)),
-    );
-    let missing_completion_confidence = completed
-        .iter()
-        .filter(|todo| todo.completion_confidence.is_none())
-        .count();
-    let below_threshold_count = completion_scores
-        .iter()
-        .filter(|(_, score, _)| *score < TODO_CONFIDENCE_THRESHOLD)
-        .count();
-    // An empty completed set means nothing has been assessed, which is not the
-    // same as having been assessed and found wanting. Reporting the two
-    // identically tells the model its completion confidence is insufficient for
-    // work it never claimed to finish, and that false statement is what drives
-    // the auto-poke into the completion gate on an all-cancelled list.
-    let needs_more_work = !completed.is_empty()
-        && (completion_average
-            .map(|avg| avg < TODO_CONFIDENCE_THRESHOLD)
-            .unwrap_or(true)
-            || missing_completion_confidence > 0
-            || below_threshold_count > 0);
-
-    TodoConfidenceSummary {
-        completion_average,
-        needs_more_work,
-    }
-}
-
-pub(super) fn format_todo_completion_confidence(summary: TodoConfidenceSummary) -> String {
-    match summary.completion_average {
-        Some(avg) => format!("{}%", avg),
-        None => "unknown".to_string(),
     }
 }

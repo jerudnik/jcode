@@ -1709,7 +1709,6 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     /// Reference O(n) full scan, preserving the original precedence: the
     /// `to=functions.` marker is checked before `+#+#`.
