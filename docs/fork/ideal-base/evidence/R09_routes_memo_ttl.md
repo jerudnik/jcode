@@ -126,3 +126,26 @@ message, and only the contrast catches that.
   socket.
 - The 10× multiple and the 30s/600s clamps are judgement calls anchored to the
   measured p99; they are not themselves derived from a failure threshold.
+
+## Re-deriving the measurement
+
+The TTL is only as good as the distribution behind it, so the numbers above are
+re-derivable rather than quoted from a scrollback:
+
+```sh
+grep -ho '\[TIMING\] model_routes[^m]*' ~/.jcode/logs/*.log \
+  | grep -oE '[0-9]+ms' | tr -d 'ms' | sort -n > /tmp/r09_samples.txt
+python3 - <<'EOF'
+xs = sorted(int(l) for l in open('/tmp/r09_samples.txt'))
+pct = lambda p: xs[min(len(xs) - 1, int(len(xs) * p))]
+over = sum(1 for x in xs if x > 3000)
+print(f"n={len(xs)} min={xs[0]} p50={pct(.50)} p90={pct(.90)} p99={pct(.99)} max={xs[-1]}")
+print(f"over the old 3000ms TTL: {over}/{len(xs)} = {100 * over / len(xs):.1f}%")
+EOF
+```
+
+On the machine where this was authored that prints n=96, p50=3185, p99=17039,
+and 59.4% over the old TTL. A machine with faster credential reads will print a
+smaller distribution and a correspondingly smaller derived TTL, which is the
+point of deriving it rather than pinning it: the constant that was wrong here
+was wrong *because* it was a single number chosen for every machine.
