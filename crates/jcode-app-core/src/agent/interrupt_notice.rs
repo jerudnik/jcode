@@ -54,13 +54,14 @@ pub(super) fn interrupted_tool_result(
         };
     }
 
-    let action = tc
-        .input
-        .get("action")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    let is_wait_like = (tc.name == "bg" && action == "wait")
-        || (tc.name == "swarm" && matches!(action, "await_members" | "run_plan"));
+    // A tool call with no string `action` is simply not one of the wait-like
+    // shapes below, so match on the option rather than flattening a missing
+    // field into "" and comparing that against real action names.
+    let action = tc.input.get("action").and_then(|value| value.as_str());
+    let is_wait_like = matches!(
+        (tc.name.as_str(), action),
+        ("bg", Some("wait")) | ("swarm", Some("await_members" | "run_plan"))
+    );
 
     if is_wait_like {
         let input = serde_json::to_string(&tc.input).unwrap_or_else(|_| "{}".to_string());

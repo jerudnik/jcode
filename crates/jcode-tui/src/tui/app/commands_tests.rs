@@ -263,3 +263,29 @@ fn all_cancelled_todos_have_nothing_to_assess_rather_than_needing_work() {
         "low-scoring completed work must still be flagged"
     );
 }
+
+/// Guards the equivalence that lets `needs_more_work` drop its `unwrap_or(true)`.
+///
+/// `completion_average` is `None` exactly when no completed item carries a
+/// score. With at least one completed item that means every one of them is
+/// missing a score, so `missing_completion_confidence > 0` already fires and
+/// the `None` arm cannot change the verdict. If someone later makes the average
+/// `None` for a different reason, this test fails and the arm has to come back.
+#[test]
+fn completed_todos_without_scores_still_need_work_without_the_none_arm() {
+    use super::super::todos_view::todo_confidence_summary;
+
+    let unscored = vec![
+        gate_todo("a", "completed", "high", None),
+        gate_todo("b", "completed", "low", None),
+    ];
+    let summary = todo_confidence_summary(&unscored);
+    assert_eq!(
+        summary.completion_average, None,
+        "no scores means no average"
+    );
+    assert!(
+        summary.needs_more_work,
+        "completed work nobody scored must still be flagged, via the missing count"
+    );
+}

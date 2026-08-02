@@ -670,9 +670,8 @@ impl App {
             self.push_display_message(crate::tui::DisplayMessage::system(
                 "🛑 Todo completion gate: completion confidence needs stronger validation.",
             ));
-            self.hidden_queued_system_messages.push(
-                super::todos_view::build_todo_confidence_summary_message(todos),
-            );
+            self.hidden_queued_system_messages
+                .push(crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE.to_string());
             self.pending_queued_dispatch = true;
             return true;
         }
@@ -735,11 +734,6 @@ fn weighted_confidence_average(scores: impl IntoIterator<Item = (u8, u32)>) -> O
     }
 }
 
-pub(super) fn build_todo_confidence_summary_message(todos: &[crate::todo::TodoItem]) -> String {
-    let _ = todos;
-    crate::todo::TODO_COMPLETION_CONTINUATION_MESSAGE.to_string()
-}
-
 pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoConfidenceSummary {
     let completed: Vec<&crate::todo::TodoItem> = todos
         .iter()
@@ -770,10 +764,13 @@ pub(super) fn todo_confidence_summary(todos: &[crate::todo::TodoItem]) -> TodoCo
     // identically tells the model its completion confidence is insufficient for
     // work it never claimed to finish, and that false statement is what drives
     // the auto-poke into the completion gate on an all-cancelled list.
+    //
+    // No `unwrap_or(true)` on the average: it is `None` only when nothing
+    // scored, and with a non-empty completed set that already means
+    // `missing_completion_confidence > 0`. See
+    // completed_todos_without_scores_still_need_work_without_the_none_arm.
     let needs_more_work = !completed.is_empty()
-        && (completion_average
-            .map(|avg| avg < TODO_CONFIDENCE_THRESHOLD)
-            .unwrap_or(true)
+        && (completion_average.is_some_and(|avg| avg < TODO_CONFIDENCE_THRESHOLD)
             || missing_completion_confidence > 0
             || below_threshold_count > 0);
 
