@@ -290,3 +290,39 @@ class, whatever the specific mechanism here turns out to be.
 
 The first step should be reproducing on a *current* binary. This session's
 binary predates the R08 fixes, so the behavior may already differ.
+
+### Update: the poke self-corrected (2026-08-02T07:11:22Z)
+
+The next poke, one turn later, said **"You have 2 incomplete todos"** — the
+correct count, against an unchanged file. So the defect is **intermittent and
+self-clearing**, not a persistent wrong reading. Any explanation must account
+for a stale value that later resolves on its own with no intervening write.
+
+That single fact retires most of the remaining candidates: whatever produced
+`4` was transient state inside the running process, not a wrong rule, not a
+wrong file, and not a wrong session id.
+
+Three further hypotheses tested after the self-correction, all falsified:
+
+5. **Reload replaying a queued string.** No reload occurred between the
+   `05:59` revision and the bad poke.
+6. **A storage-layer read cache or deferred write.** Neither exists.
+   `read_json` has no cache (zero `LazyLock<Mutex>`/`CACHE` in
+   `crates/jcode-storage/src/lib.rs`) and `write_json_fast` is a temp-file +
+   atomic rename, so the write is visible the instant it returns.
+7. **Writer and poke disagreeing on session id.** Falsified: the write path
+   (`active_client_session_id`, `state_ui.rs:81`) and the poke path
+   (`active_session_id`, `commands.rs:2537`) resolve identically, both
+   preferring `remote_session_id` when remote and `session.id` otherwise.
+
+Seven hypotheses, seven falsifications. I am not proposing an eighth. The
+remaining shape is in-process transient state on the TUI side, which I cannot
+narrow further from a stored transcript, and this session's binary predates
+the R08 fixes anyway.
+
+**Recommended next step, unchanged and now better motivated:** close the
+schedule-time/send-time gap (hypothesis 2) on its own merits. It is a real
+structural defect regardless of whether it caused this instance, and a poke
+that recomputes its count at dispatch is immune to the entire class of
+transient-state explanations that remain — including whichever one this
+actually was.
