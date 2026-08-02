@@ -111,8 +111,7 @@ fn take_reframe_nudges(goals: &[TodoGoal], todos: &[TodoItem]) -> Vec<String> {
         }
         let group_open = todos.iter().any(|todo| {
             goal_group_key(todo.group.as_deref()) == goal.group
-                && todo.status != "completed"
-                && todo.status != "cancelled"
+                && !jcode_task_types::is_terminal_todo_status(&todo.status)
         });
         if !group_open {
             continue;
@@ -127,9 +126,11 @@ fn build_todo_output(
     goals: Vec<TodoGoal>,
     continuations: impl IntoIterator<Item = String>,
 ) -> Result<ToolOutput> {
+    // Cancelled work is finished, not outstanding. Counting it here reported a
+    // number the auto-poke disagreed with, on the same list, in the same turn.
     let remaining = todos
         .iter()
-        .filter(|todo| todo.status != "completed")
+        .filter(|todo| !jcode_task_types::is_terminal_todo_status(&todo.status))
         .count();
     let mut text = serde_json::to_string_pretty(&todos)?;
     if !goals.is_empty() {
@@ -602,6 +603,33 @@ mod tests {
             group: group.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    /// R08(b): the todo card must not count cancelled work as remaining.
+    ///
+    /// `build_todo_output` filtered on `status != "completed"` alone, while the
+    /// auto-poke's `is_incomplete_poke_todo` treats completed *and* cancelled as
+    /// terminal. Two definitions of "finished" in one feature, so a list whose
+    /// every item was cancelled rendered as "1 todos" still to do while the poke
+    /// correctly saw none. The number on the card was simply false.
+    #[test]
+    fn cancelled_todos_are_not_counted_as_remaining() {
+        let mut cancelled = open_todo(Some("ship"));
+        cancelled.status = "cancelled".to_string();
+
+        let output =
+            build_todo_output(vec![cancelled], vec![], []).expect("todo output should build");
+        assert_eq!(
+            output.title.as_deref(),
+            Some("0 todos"),
+            "cancelled work is finished, so nothing remains to report"
+        );
+
+        // Contrast case: genuinely open work must still be counted, or this
+        // passes by never counting anything.
+        let open = build_todo_output(vec![open_todo(Some("ship"))], vec![], [])
+            .expect("todo output should build");
+        assert_eq!(open.title.as_deref(), Some("1 todos"));
     }
 
     #[test]

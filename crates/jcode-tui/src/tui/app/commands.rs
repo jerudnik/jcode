@@ -2549,7 +2549,7 @@ pub(super) fn poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
 }
 
 pub(super) fn is_incomplete_poke_todo(todo: &crate::todo::TodoItem) -> bool {
-    todo.status != "completed" && todo.status != "cancelled"
+    !crate::todo::is_terminal_todo_status(&todo.status)
 }
 
 pub(super) fn incomplete_poke_todos(app: &App) -> Vec<crate::todo::TodoItem> {
