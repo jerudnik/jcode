@@ -67,8 +67,14 @@ this repo's normal operating mode.
    Post-merge `fork-ci` on `main` remains the safety net. Reversible in one
    call, no code change, no new machinery.
 2. **Transfer the repo to an organization and enable a merge queue.** Keeps
-   `strict`'s guarantee and removes the reruns. Much larger change, affects
-   remotes, permissions, and every recorded workflow reference.
+   `strict`'s guarantee and removes the reruns. Much larger change: it affects
+   remotes, permissions, and every recorded workflow reference, and every
+   workflow producing a required check must additionally be triggered on the
+   `merge_group` event, or the check is never reported and the merge hangs.
+   GitHub's own docs describe the queue as providing "the same benefits as the
+   **Require branches to be up to date before merging** branch protection,
+   [...] without requiring a pull request author to update their pull request
+   branch", which is exactly the tax being paid here.
 3. **Leave it.** Correct while the number of concurrent PRs stays around two.
 
 Recommendation is (1), and (2) only if PR concurrency grows enough that
@@ -102,6 +108,39 @@ protected side. Moving `EXPECTED_FILE_COUNTS` into a generated, unprotected data
 file — with the digest still pinned, so weakening the *policy* still requires a
 window — would dissolve the loop and make this gate consistent with its five
 siblings.
+
+### The asymmetry the design promises is absent for this one field
+
+`check_critical_path_budget.py:240` states the intent plainly:
+
+> That is the intended asymmetry - tightening is frictionless, loosening is
+> reviewed
+
+That holds for the repository high-water marks, which are genuine policy. It
+does **not** hold for `EXPECTED_FILE_COUNTS`, because the strict-equality
+self-tests fire in both directions. Measured by running the suite against a
+pin that differs from the tree:
+
+```text
+real tree tui = 193
+tree GREW vs pin   (pin=192)  -> 3 failures -> protected-path edit required
+tree SHRANK vs pin (pin=194)  -> 3 failures -> protected-path edit required
+tree == pin        (pin=193)  -> 0 failures
+```
+
+Growth and shrink cost exactly the same. So the friction is not "loosening is
+reviewed"; it is "any change to a fact about the tree is reviewed". Adding a
+file to `crates/jcode-tui/**` is the most routine act in this repo, and the
+oversize ratchet actively *demands* it. That is the category error: a
+**measured inventory** is being governed as though it were a **policy
+decision**.
+
+The fix preserves every guarantee. Keep `EXPECTED_FILE_COUNTS` in the digest so
+its *shrink-detection* role is untouched, but store the numbers in a generated,
+unprotected baseline file like the other five ratchets. Loosening the policy
+(ceilings, thresholds, critical paths) still requires a protected edit and a
+window; recording that the tree gained a file does not.
+
 
 **Not verified:** whether the protected-path list intends to cover inventory
 refreshes, or whether that inclusion is over-broad. Answering it requires the

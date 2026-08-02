@@ -66,6 +66,21 @@ self-test's strict equality, **not** the shrink gate. Recorded because a memo
 that names the wrong cause is the same defect class this program exists to fix:
 a true-sounding report that is not true.
 
+### The two protected paths are mechanically coupled
+
+The third failure above is not incidental. The workflow digest is computed over
+`DIGEST_FIELDS`, which includes `expected_file_counts`, so changing only the
+inventory necessarily invalidates the pin in `fork-ci.yml`:
+
+```text
+change ONLY EXPECTED_FILE_COUNTS["tui"] -> digest 053c5c9838ae -> 6e9367a924cc
+```
+
+So a single measurement change *provably requires two protected-path edits*:
+`scripts/check_critical_path_budget.py` and `.github/workflows/fork-ci.yml`.
+The blocker is not "an edit that happens to touch protected files"; it is a
+structural coupling with no in-PR resolution.
+
 The two extra files are `commands_poke.rs` (R08) and
 `remote_history_watchdog.rs` (R09), both extractions the size ratchet required.
 
