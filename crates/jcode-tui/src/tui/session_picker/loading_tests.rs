@@ -39,6 +39,30 @@ fn write_picker_snapshot(path: &Path, has_messages: bool) {
     std::fs::write(path, body).expect("write picker snapshot");
 }
 
+/// Append a one-text-block message to `session`.
+///
+/// These tests only ever vary the id, role, and text; the remaining
+/// `StoredMessage` fields were `None` in all 13 copies of this literal.
+fn append_text_message(
+    session: &mut Session,
+    id: impl Into<String>,
+    role: crate::message::Role,
+    text: impl Into<String>,
+) {
+    session.append_stored_message(crate::session::StoredMessage {
+        id: id.into(),
+        role,
+        content: vec![crate::message::ContentBlock::Text {
+            text: text.into(),
+            cache_control: None,
+        }],
+        display_role: None,
+        timestamp: None,
+        tool_duration_ms: None,
+        token_usage: None,
+    });
+}
+
 #[test]
 fn collect_recent_session_stems_keeps_empty_snapshot_with_journal_history() {
     let temp = tempfile::tempdir().expect("temp dir");
@@ -440,18 +464,12 @@ fn load_sessions_prefers_custom_title_over_generated_title() {
         Some("Generated first prompt".to_string()),
     );
     session.rename_title(Some("Custom release planning".to_string()));
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "please plan the release".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut session,
+        "msg1".to_string(),
+        crate::message::Role::User,
+        "please plan the release".to_string(),
+    );
     session.save().expect("save session");
     invalidate_session_list_cache();
 
@@ -477,18 +495,12 @@ fn load_sessions_prefers_todo_group_over_generated_title() {
         None,
         Some("Generated first prompt".to_string()),
     );
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "please improve the session picker".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut session,
+        "msg1".to_string(),
+        crate::message::Role::User,
+        "please improve the session picker".to_string(),
+    );
     session.save().expect("save session");
     crate::todo::save_todos(
         session_id,
@@ -530,18 +542,12 @@ fn load_sessions_keeps_custom_title_over_todo_group() {
         Some("Generated first prompt".to_string()),
     );
     session.rename_title(Some("Manual session title".to_string()));
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "please improve the session picker".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut session,
+        "msg1".to_string(),
+        crate::message::Role::User,
+        "please improve the session picker".to_string(),
+    );
     session.save().expect("save session");
     crate::todo::save_todos(
         session_id,
@@ -582,18 +588,12 @@ fn load_sessions_includes_saved_sessions_beyond_scan_limit() {
         Some("Saved Beyond Scan".to_string()),
     );
     saved_session.mark_saved(Some("Pinned Session".to_string()));
-    saved_session.append_stored_message(crate::session::StoredMessage {
-        id: "saved-msg".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "keep this bookmarked session visible".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut saved_session,
+        "saved-msg".to_string(),
+        crate::message::Role::User,
+        "keep this bookmarked session visible".to_string(),
+    );
     saved_session.save().expect("save saved session");
 
     for idx in 0..55 {
@@ -602,18 +602,12 @@ fn load_sessions_includes_saved_sessions_beyond_scan_limit() {
             Some(format!("/tmp/newer-unsaved-{idx:03}")),
             Some(format!("Newer Unsaved {idx:03}")),
         );
-        session.append_stored_message(crate::session::StoredMessage {
-            id: format!("msg-{idx}"),
-            role: crate::message::Role::User,
-            content: vec![crate::message::ContentBlock::Text {
-                text: format!("newer unsaved session {idx:03}"),
-                cache_control: None,
-            }],
-            display_role: None,
-            timestamp: None,
-            tool_duration_ms: None,
-            token_usage: None,
-        });
+        append_text_message(
+            &mut session,
+            format!("msg-{idx}"),
+            crate::message::Role::User,
+            format!("newer unsaved session {idx:03}"),
+        );
         session.save().expect("save unsaved session");
     }
     invalidate_session_list_cache();
@@ -639,18 +633,12 @@ fn load_sessions_preserves_snapshot_saved_when_journal_meta_omits_saved() {
         Some("Saved Legacy Journal".to_string()),
     );
     session.mark_saved(Some("Legacy Saved".to_string()));
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "saved-legacy-msg".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "saved session with old journal metadata".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut session,
+        "saved-legacy-msg".to_string(),
+        crate::message::Role::User,
+        "saved session with old journal metadata".to_string(),
+    );
     session.save().expect("save saved session");
 
     let snapshot = crate::session::session_path(&session.id).expect("session path");
@@ -726,18 +714,12 @@ fn session_matches_query_searches_jcode_transcript_contents() {
         Some("/tmp/transcript-search".to_string()),
         Some("Transcript Search".to_string()),
     );
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "please find the zebra needle hidden in transcript text".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut session,
+        "msg1".to_string(),
+        crate::message::Role::User,
+        "please find the zebra needle hidden in transcript text".to_string(),
+    );
     session.save().expect("save session");
 
     let sessions = load_sessions().expect("load sessions");
@@ -995,30 +977,18 @@ fn benchmark_resume_loading_reports_timings() {
             Some(format!("/tmp/resume-bench-{idx:03}")),
             Some(format!("Resume Bench {idx:03}")),
         );
-        session.append_stored_message(crate::session::StoredMessage {
-            id: format!("msg-{idx}-1"),
-            role: crate::message::Role::User,
-            content: vec![crate::message::ContentBlock::Text {
-                text: format!("session {idx:03} says benchmark transcript token zebra-{idx:03}"),
-                cache_control: None,
-            }],
-            display_role: None,
-            timestamp: None,
-            tool_duration_ms: None,
-            token_usage: None,
-        });
-        session.append_stored_message(crate::session::StoredMessage {
-            id: format!("msg-{idx}-2"),
-            role: crate::message::Role::Assistant,
-            content: vec![crate::message::ContentBlock::Text {
-                text: "assistant reply for benchmark coverage".to_string(),
-                cache_control: None,
-            }],
-            display_role: None,
-            timestamp: None,
-            tool_duration_ms: None,
-            token_usage: None,
-        });
+        append_text_message(
+            &mut session,
+            format!("msg-{idx}-1"),
+            crate::message::Role::User,
+            format!("session {idx:03} says benchmark transcript token zebra-{idx:03}"),
+        );
+        append_text_message(
+            &mut session,
+            format!("msg-{idx}-2"),
+            crate::message::Role::Assistant,
+            "assistant reply for benchmark coverage".to_string(),
+        );
         session.save().expect("save benchmark session");
     }
 
@@ -1030,7 +1000,22 @@ fn benchmark_resume_loading_reports_timings() {
     let grouped = load_sessions_grouped().expect("load grouped sessions");
     let group_elapsed = group_start.elapsed();
 
-    assert!(sessions.len() >= 100);
+    // This assertion is flaky under CPU contention: it has been observed
+    // returning 24 and 87 of the 120 sessions written just above, on both this
+    // branch and an unmodified checkout, roughly 1 run in 8 with the machine
+    // loaded. The cause is not yet known and is unrelated to the poke work that
+    // surfaced it. Report the numbers rather than a bare `assert!`, since a
+    // failure that prints nothing forces the next person to rediscover all of
+    // this from scratch.
+    assert!(
+        sessions.len() >= 100,
+        "expected >=100 of the 120 written sessions, loaded {}; \
+         scan_limit={:?} include_saved={:?} home={:?}",
+        sessions.len(),
+        std::env::var("JCODE_SESSION_PICKER_MAX_SESSIONS"),
+        std::env::var("JCODE_SESSION_PICKER_INCLUDE_OLD_SAVED"),
+        std::env::var("JCODE_HOME"),
+    );
     assert!(!grouped.0.is_empty() || !grouped.1.is_empty());
 
     eprintln!(
@@ -1064,18 +1049,12 @@ fn onboarding_scoped_loader_returns_only_codex_sessions() {
         Some("/tmp/jcode-onboard".to_string()),
         Some("Jcode Onboarding".to_string()),
     );
-    jcode_session.append_stored_message(crate::session::StoredMessage {
-        id: "msg-1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "should not show in codex onboarding view".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut jcode_session,
+        "msg-1".to_string(),
+        crate::message::Role::User,
+        "should not show in codex onboarding view".to_string(),
+    );
     jcode_session.save().expect("save jcode session");
 
     let (groups, orphans) = load_external_cli_sessions_grouped(ExternalCli::Codex);
@@ -1106,18 +1085,12 @@ fn parallel_fill_skips_many_recent_empty_sessions_to_reach_scan_limit() {
     std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
 
     let push_message = |session: &mut Session, text: &str| {
-        session.append_stored_message(crate::session::StoredMessage {
-            id: format!("msg-{text}"),
-            role: crate::message::Role::User,
-            content: vec![crate::message::ContentBlock::Text {
-                text: text.to_string(),
-                cache_control: None,
-            }],
-            display_role: None,
-            timestamp: None,
-            tool_duration_ms: None,
-            token_usage: None,
-        });
+        append_text_message(
+            session,
+            format!("msg-{text}"),
+            crate::message::Role::User,
+            text.to_string(),
+        );
     };
 
     // Many recent but empty sessions (no visible messages) that the parallel
@@ -1168,18 +1141,12 @@ fn hidden_debug_sessions_do_not_consume_default_resume_budget() {
     let _scan_limit = EnvVarGuard::set_str("JCODE_SESSION_PICKER_MAX_SESSIONS", "50");
 
     let push_message = |session: &mut Session, text: &str| {
-        session.append_stored_message(crate::session::StoredMessage {
-            id: format!("msg-{text}"),
-            role: crate::message::Role::User,
-            content: vec![crate::message::ContentBlock::Text {
-                text: text.to_string(),
-                cache_control: None,
-            }],
-            display_role: None,
-            timestamp: None,
-            tool_duration_ms: None,
-            token_usage: None,
-        });
+        append_text_message(
+            session,
+            format!("msg-{text}"),
+            crate::message::Role::User,
+            text.to_string(),
+        );
     };
 
     // Write ordinary sessions first so their filesystem mtimes are older than
@@ -1236,18 +1203,12 @@ fn session_matches_picker_query_requires_all_tokens_order_independent() {
         Some("/tmp/token-match".to_string()),
         Some("Token Match".to_string()),
     );
-    session.append_stored_message(crate::session::StoredMessage {
-        id: "msg1".to_string(),
-        role: crate::message::Role::User,
-        content: vec![crate::message::ContentBlock::Text {
-            text: "please deploy the production api gateway now".to_string(),
-            cache_control: None,
-        }],
-        display_role: None,
-        timestamp: None,
-        tool_duration_ms: None,
-        token_usage: None,
-    });
+    append_text_message(
+        &mut session,
+        "msg1".to_string(),
+        crate::message::Role::User,
+        "please deploy the production api gateway now".to_string(),
+    );
     session.save().expect("save session");
 
     let sessions = load_sessions().expect("load sessions");
