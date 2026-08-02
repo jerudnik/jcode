@@ -9,28 +9,34 @@ use jcode::provider::{EventStream, Provider};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+/// The (role, text) of one message, flattened across its content blocks.
+type CapturedMessage = (String, String);
+
+/// The messages of a single `complete()` call.
+type CapturedCall = Vec<CapturedMessage>;
+
+/// What each `complete()` call was given, so tests can assert on the payload the
+/// provider actually receives rather than on internal state.
+#[derive(Clone, Default)]
+pub struct MockCaptures {
+    pub system_prompts: Arc<Mutex<Vec<String>>>,
+    pub resume_session_ids: Arc<Mutex<Vec<Option<String>>>>,
+    pub models: Arc<Mutex<Vec<String>>>,
+    /// Per call, the (role, text) of every message sent, flattened across blocks.
+    pub messages: Arc<Mutex<Vec<CapturedCall>>>,
+}
+
 pub struct MockProvider {
     responses: Arc<Mutex<VecDeque<Vec<StreamEvent>>>>,
     models: Vec<&'static str>,
     current_model: Arc<Mutex<String>>,
-    /// Captured system prompts from complete() calls (for testing)
-    pub captured_system_prompts: Arc<Mutex<Vec<String>>>,
-    /// Captured resume session IDs from complete() calls (for testing)
-    pub captured_resume_session_ids: Arc<Mutex<Vec<Option<String>>>>,
-    /// Captured model names from complete() calls (for testing)
-    pub captured_models: Arc<Mutex<Vec<String>>>,
+    /// Captured inputs from complete() calls (for testing)
+    pub captures: MockCaptures,
 }
 
 impl MockProvider {
     pub fn new() -> Self {
-        Self {
-            responses: Arc::new(Mutex::new(VecDeque::new())),
-            models: Vec::new(),
-            current_model: Arc::new(Mutex::new("mock".to_string())),
-            captured_system_prompts: Arc::new(Mutex::new(Vec::new())),
-            captured_resume_session_ids: Arc::new(Mutex::new(Vec::new())),
-            captured_models: Arc::new(Mutex::new(Vec::new())),
-        }
+        Self::with_models(Vec::new())
     }
 
     pub fn with_models(models: Vec<&'static str>) -> Self {
@@ -42,9 +48,7 @@ impl MockProvider {
             responses: Arc::new(Mutex::new(VecDeque::new())),
             models,
             current_model: Arc::new(Mutex::new(current)),
-            captured_system_prompts: Arc::new(Mutex::new(Vec::new())),
-            captured_resume_session_ids: Arc::new(Mutex::new(Vec::new())),
-            captured_models: Arc::new(Mutex::new(Vec::new())),
+            captures: MockCaptures::default(),
         }
     }
 
@@ -58,21 +62,36 @@ impl MockProvider {
 impl Provider for MockProvider {
     async fn complete(
         &self,
-        _messages: &[Message],
+        messages: &[Message],
         _tools: &[ToolDefinition],
         system: &str,
         resume_session_id: Option<&str>,
     ) -> Result<EventStream> {
-        // Capture the system prompt for testing
-        self.captured_system_prompts
-            .lock()
-            .unwrap()
-            .push(system.to_string());
-        self.captured_resume_session_ids
+        let c = &self.captures;
+        c.system_prompts.lock().unwrap().push(system.to_string());
+        c.resume_session_ids
             .lock()
             .unwrap()
             .push(resume_session_id.map(|s| s.to_string()));
-        self.captured_models.lock().unwrap().push(self.model());
+        c.models.lock().unwrap().push(self.model());
+        c.messages.lock().unwrap().push(
+            messages
+                .iter()
+                .map(|m| {
+                    let role = format!("{:?}", m.role).to_lowercase();
+                    let text = m
+                        .content
+                        .iter()
+                        .filter_map(|b| match b {
+                            jcode::message::ContentBlock::Text { text, .. } => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    (role, text)
+                })
+                .collect(),
+        );
 
         let events = self
             .responses
@@ -116,9 +135,7 @@ impl Provider for MockProvider {
             responses: self.responses.clone(),
             models: self.models.clone(),
             current_model: Arc::new(Mutex::new(current)),
-            captured_system_prompts: self.captured_system_prompts.clone(),
-            captured_resume_session_ids: self.captured_resume_session_ids.clone(),
-            captured_models: self.captured_models.clone(),
+            captures: self.captures.clone(),
         })
     }
 }

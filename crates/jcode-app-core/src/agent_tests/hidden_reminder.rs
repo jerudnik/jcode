@@ -163,3 +163,34 @@ async fn hidden_reminder_after_user_message_adds_no_user_turn() {
         "the transcript already ends on a user message, so none should be added"
     );
 }
+
+/// A blank turn with NO reminder at all: the shipped guard keys on the reminder
+/// being present, so this path must be checked separately or it silently keeps
+/// storing an empty user text block.
+#[tokio::test]
+async fn blank_turn_without_reminder_stores_no_empty_user_text_block() {
+    let _guard = crate::storage::lock_test_env();
+    let _telemetry = ScopedEnvVar::set("JCODE_NO_TELEMETRY", "1");
+    let mut turn = HiddenReminderTurn::new().await;
+    let _home = ScopedEnvVar::set("JCODE_HOME", turn._home.path());
+    turn.agent.add_message(
+        crate::message::Role::Assistant,
+        vec![ContentBlock::Text {
+            text: "All done.".to_string(),
+            cache_control: None,
+        }],
+    );
+
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    turn.agent
+        .run_once_streaming_mpsc("", Vec::new(), None, tx)
+        .await
+        .expect("turn should succeed");
+
+    let empty = turn
+        .user_messages()
+        .flat_map(|m| m.content.iter())
+        .filter(|b| matches!(b, ContentBlock::Text { text, .. } if text.is_empty()))
+        .count();
+    assert_eq!(empty, 0, "a blank turn with no reminder must not be stored");
+}

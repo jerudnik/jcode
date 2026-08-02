@@ -1,5 +1,10 @@
 use super::*;
 
+/// Body for a machine-initiated turn that carries no reminder and cannot be
+/// dropped, because the transcript would otherwise end on an assistant message
+/// and be read as prefill. Keep it short: it is a turn terminator, not content.
+const CONTINUATION_MARKER: &str = "Continue.";
+
 impl Agent {
     /// Run a single turn with the given user message
     pub async fn run_once(&mut self, user_message: &str) -> Result<()> {
@@ -79,42 +84,50 @@ impl Agent {
             .into_iter()
             .map(|(media_type, data)| ContentBlock::Image { media_type, data })
             .collect();
-        // A hidden continuation (e.g. the post-reload resume) carries its payload in
-        // the system reminder and passes an empty user_message. Appending an empty
-        // text block persists `{"type":"text","text":""}` as a user turn and ships it
-        // to the provider, which reads as the user sending a blank message.
+        // A turn with no user text and no images is a machine-initiated dispatch,
+        // not something the user typed. Two sources produce it: the post-reload
+        // hidden continuation, which carries its payload in the system reminder,
+        // and a dispatch with nothing attached at all. Appending a text block
+        // regardless persists `{"type":"text","text":""}` as a user turn and ships
+        // it to the provider. Note it does not arrive there looking empty:
+        // `Message::with_timestamps` prefixes user text at send time, so a stored
+        // "" becomes "[2026-01-01T00:00:00Z] ", a turn whose only content is its
+        // own timestamp. That is why this is easy to miss at the wire boundary.
         //
-        // How to avoid that depends on what the transcript currently ends with,
-        // because Anthropic treats a trailing assistant message as prefill: the model
+        // What to do depends on what the transcript currently ends with, because
+        // Anthropic treats a trailing assistant message as prefill: the model
         // continues that message instead of starting a fresh turn.
-        //   - ends on a user message (the tool_result mid-turn resume): drop the user
-        //     message entirely. The reminder still reaches the model via the system
-        //     prompt, and the provider merges consecutive same-role messages anyway.
-        //   - ends on an assistant message (the far more common resume-while-idle):
-        //     the user turn is load-bearing, so keep one and carry the reminder text
-        //     as its body. That terminates the assistant turn without inventing a
-        //     blank user message.
-        // A message stored with no blocks at all is not an option: providers reject a
-        // user message whose content array is empty.
+        //   - ends on a user message (the tool_result mid-turn resume): drop the
+        //     user message entirely. Any reminder still reaches the model via the
+        //     system prompt, and the provider merges consecutive same-role messages.
+        //   - ends on an assistant message (resume while idle): the user turn is
+        //     load-bearing, so keep one. Carry the reminder as its body when there
+        //     is one; otherwise a minimal continuation marker, since the message
+        //     must exist but must not be blank.
+        // A message stored with no blocks at all is not an option: providers reject
+        // a user message whose content array is empty.
         let transcript_ends_on_user = self
             .session
             .messages
             .last()
             .is_some_and(|message| matches!(message.role, Role::User));
-        let hidden_reminder = self
-            .current_turn_system_reminder
-            .clone()
-            .filter(|_| user_message.is_empty() && blocks.is_empty());
-        match hidden_reminder {
-            Some(reminder) if !transcript_ends_on_user => blocks.push(ContentBlock::Text {
-                text: reminder,
-                cache_control: None,
-            }),
-            Some(_) => {}
-            None => blocks.push(ContentBlock::Text {
+        let machine_dispatch = user_message.is_empty() && blocks.is_empty();
+        if machine_dispatch {
+            if !transcript_ends_on_user {
+                let text = self
+                    .current_turn_system_reminder
+                    .clone()
+                    .unwrap_or_else(|| CONTINUATION_MARKER.to_string());
+                blocks.push(ContentBlock::Text {
+                    text,
+                    cache_control: None,
+                });
+            }
+        } else {
+            blocks.push(ContentBlock::Text {
                 text: user_message.to_string(),
                 cache_control: None,
-            }),
+            });
         }
 
         if blocks.len() > 1 {
