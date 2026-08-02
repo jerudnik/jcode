@@ -51,7 +51,36 @@ struct ReloadInterruptedToolResult {
     evidence_error_class: Option<&'static str>,
 }
 
-fn reload_interrupted_tool_result(tc: &ToolCall, elapsed_secs: f64) -> ReloadInterruptedToolResult {
+/// Notice recorded for tool calls that never ran because the turn was cut
+/// short. Says which of the two causes actually happened.
+fn skipped_tool_notice(is_reload: bool) -> &'static str {
+    if is_reload {
+        "[Skipped - server reloading]"
+    } else {
+        "[Skipped - cancelled]"
+    }
+}
+
+fn interrupted_tool_result(
+    tc: &ToolCall,
+    elapsed_secs: f64,
+    is_reload: bool,
+) -> ReloadInterruptedToolResult {
+    // A cancel is not a restart. Resumability and the "selfdev asked for this"
+    // exemption only hold for an actual reload, so a cancel gets a plain,
+    // truthful message instead of an invitation to resume.
+    if !is_reload {
+        return ReloadInterruptedToolResult {
+            message: format!(
+                "[Tool '{}' interrupted by cancel after {:.1}s]",
+                tc.name, elapsed_secs
+            ),
+            tool_is_error: true,
+            evidence_status: jcode_session_types::SessionLogStatus::Interrupted,
+            evidence_error_class: Some("interrupted_by_cancel"),
+        };
+    }
+
     if tc.name == "selfdev" {
         return ReloadInterruptedToolResult {
             message: "Reload initiated. Process restarting...".to_string(),
@@ -597,14 +626,23 @@ impl Agent {
                             }
                         }
                         if self.is_graceful_shutdown() {
-                            logging::info(
-                                "Graceful shutdown during streaming - checkpointing partial response",
-                            );
+                            let marker = if self.is_server_reload() {
+                                "\n\n[generation interrupted - server reloading]"
+                            } else {
+                                "\n\n[generation interrupted - cancelled]"
+                            };
+                            logging::info(&format!(
+                                "{} during streaming - checkpointing partial response",
+                                if self.is_server_reload() {
+                                    "Graceful shutdown"
+                                } else {
+                                    "Cancel"
+                                }
+                            ));
                             let _ = event_tx.send(ServerEvent::TextDelta {
-                                text: "\n\n[generation interrupted - server reloading]".to_string(),
+                                text: marker.to_string(),
                             });
-                            text_content
-                                .push_str("\n\n[generation interrupted - server reloading]");
+                            text_content.push_str(marker);
                             break;
                         }
                     }
@@ -1274,7 +1312,7 @@ impl Agent {
                         Role::User,
                         vec![ContentBlock::ToolResult {
                             tool_use_id: tc.id.clone(),
-                            content: "[Skipped - server reloading]".to_string(),
+                            content: skipped_tool_notice(self.is_server_reload()).to_string(),
                             is_error: Some(true),
                         }],
                     );
@@ -1606,10 +1644,14 @@ impl Agent {
                         }
                     }
                 } else if self.is_graceful_shutdown() {
-                    // Server reload - abort tool and save interrupted result
+                    // Reload or cancel: both abort the tool, but they are told
+                    // apart for the message so a cancel is never reported as a
+                    // restart the model can resume after.
+                    let is_reload = self.is_server_reload();
                     logging::info(&format!(
-                        "Tool '{}' interrupted by server reload after {:.1}s",
+                        "Tool '{}' interrupted by {} after {:.1}s",
                         tc.name,
+                        if is_reload { "server reload" } else { "cancel" },
                         tool_elapsed.as_secs_f64()
                     ));
                     tool_handle.abort();
@@ -1618,7 +1660,7 @@ impl Agent {
                     // selfdev initiated the restart, while wait-like tools should be resumed
                     // after reload rather than treated as failed work.
                     let interrupted =
-                        reload_interrupted_tool_result(tc, tool_elapsed.as_secs_f64());
+                        interrupted_tool_result(tc, tool_elapsed.as_secs_f64(), is_reload);
 
                     self.append_session_evidence_with_correlation(
                         jcode_session_types::SessionLogEventKind::ToolFinished {
@@ -1662,7 +1704,7 @@ impl Agent {
                             Role::User,
                             vec![ContentBlock::ToolResult {
                                 tool_use_id: remaining_tc.id.clone(),
-                                content: "[Skipped - server reloading]".to_string(),
+                                content: skipped_tool_notice(self.is_server_reload()).to_string(),
                                 is_error: Some(true),
                             }],
                         );
@@ -1763,7 +1805,7 @@ mod tests {
             json!({"action": "wait", "task_id": "bg-123", "max_wait_seconds": 300}),
         );
 
-        let result = reload_interrupted_tool_result(&tc, 1.2);
+        let result = interrupted_tool_result(&tc, 1.2, true);
 
         assert!(
             result.tool_is_error,
@@ -1784,11 +1826,69 @@ mod tests {
         assert!(result.message.contains("\"max_wait_seconds\":300"));
     }
 
+    /// R05-FIX-1 (user-visible half): the tool result handed back to the model
+    /// names the cause that actually happened, and only a real reload
+    /// advertises the interrupted work as resumable. Before the fix both
+    /// causes produced the reload wording, because the only available input
+    /// was a single shared bit.
+    #[test]
+    fn interrupted_tool_result_reports_cancel_and_reload_differently() {
+        let tc = tool_call("bash", json!({"command": "sleep 10"}));
+
+        let cancelled = interrupted_tool_result(&tc, 1.2, false);
+        assert!(
+            !cancelled.message.contains("server reload"),
+            "cancel must not claim a server reload: {}",
+            cancelled.message
+        );
+        assert!(cancelled.message.contains("interrupted by cancel"));
+        assert_eq!(cancelled.evidence_error_class, Some("interrupted_by_cancel"));
+
+        let reloaded = interrupted_tool_result(&tc, 1.2, true);
+        assert!(reloaded.message.contains("interrupted by server reload"));
+        assert_eq!(reloaded.evidence_error_class, Some("interrupted_by_reload"));
+    }
+
+    /// A cancelled wait-like tool must not be told it can resume: the process
+    /// is not restarting, so the underlying operation is simply gone.
+    #[test]
+    fn cancelled_wait_like_tool_is_not_advertised_as_resumable() {
+        let tc = tool_call("bg", json!({"action": "wait", "task_id": "bg-123"}));
+
+        let cancelled = interrupted_tool_result(&tc, 1.2, false);
+        assert!(
+            !cancelled.message.contains("Resume the wait"),
+            "cancelled wait must not advertise reload-style resumability: {}",
+            cancelled.message
+        );
+
+        // The reload case keeps its resume affordance.
+        assert!(interrupted_tool_result(&tc, 1.2, true)
+            .message
+            .contains("Resume the wait"));
+    }
+
+    /// selfdev asks for its own restart, so a reload is expected and not an
+    /// error. A cancel of the same tool is a genuine interruption.
+    #[test]
+    fn cancelled_selfdev_is_an_error_but_reload_is_expected() {
+        let tc = tool_call("selfdev", json!({"action": "reload"}));
+
+        assert!(!interrupted_tool_result(&tc, 0.5, true).tool_is_error);
+        assert!(interrupted_tool_result(&tc, 0.5, false).tool_is_error);
+    }
+
+    #[test]
+    fn skipped_tool_notice_names_the_cause() {
+        assert_eq!(skipped_tool_notice(true), "[Skipped - server reloading]");
+        assert_eq!(skipped_tool_notice(false), "[Skipped - cancelled]");
+    }
+
     #[test]
     fn reload_interrupted_non_wait_tool_remains_error() {
         let tc = tool_call("bash", json!({"command": "sleep 10"}));
 
-        let result = reload_interrupted_tool_result(&tc, 1.2);
+        let result = interrupted_tool_result(&tc, 1.2, true);
 
         assert!(result.tool_is_error);
         assert_eq!(

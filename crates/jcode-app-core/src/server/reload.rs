@@ -449,7 +449,10 @@ async fn graceful_shutdown_sessions_with_timeout(
                 ));
                 continue;
             };
-            signal.fire();
+            // Reload is the one cause that is genuinely a restart. Everything
+            // else firing this signal is a cancel, and mislabeling those as a
+            // reload told the model its work would resume when it would not.
+            signal.fire_with_cause(jcode_agent_runtime::InterruptCause::ServerReload);
             super::reload_trace::record_value(
                 reload_id,
                 "shutdown_signal_sent",
