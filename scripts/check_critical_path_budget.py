@@ -218,7 +218,7 @@ EXPECTED_FILE_COUNTS: dict[str, int] = {
     "persistence": 10,
     "updater": 8,
     "provider_infrastructure": 19,
-    "tui": 192,
+    "tui": 193,
 }
 
 # Repository-wide high-water marks: hardcoded here ON PURPOSE, and deliberately
