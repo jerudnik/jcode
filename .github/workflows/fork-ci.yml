@@ -251,6 +251,16 @@ jobs:
       - name: Enforce agent instruction contract
         run: python3 scripts/check_agent_instructions.py
 
+      # Documentation drifts silently: nothing re-reads a document after it is
+      # written, so a path that was right when the prose was authored survives
+      # long after the file moves. D01-F10 and D01-F11 were both that defect,
+      # each corrected by hand, which only resets the clock.
+      - name: Enforce documentation reference contract
+        run: python3 scripts/check_docs_references.py
+
+      - name: Test documentation reference checker
+        run: python3 -m unittest discover -s scripts -p 'test_docs_references.py'
+
       - name: Test docs impact advisory
         run: python3 scripts/test_docs_impact_advisory.py
 

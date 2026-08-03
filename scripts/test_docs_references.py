@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Tests for check_docs_references.py.
+
+Every rule gets a planted failure. A checker that cannot fail is worse than no
+checker, because it reports OK and nobody looks again. Two of these tests exist
+specifically because the rule they cover is easy to get backwards:
+
+  test_prohibition_is_not_a_finding   the retired-rail rule must not fire on
+                                      the policy sentence that retires the
+                                      rail, or it would flag its own contract
+  test_exclusions_do_not_hide_live_docs
+                                      the path exclusions are load-bearing (25
+                                      findings instead of 143), so they must be
+                                      proven to exclude only frozen material
+"""
+
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+import check_docs_references as mod  # noqa: E402
+
+
+class DocsReferencesTest(unittest.TestCase):
+    def run_on(self, files: dict[str, str]) -> list[mod.Finding]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, text in files.items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            return mod.run(root)
+
+    def rules(self, findings: list[mod.Finding]) -> set[str]:
+        return {f.rule for f in findings}
+
+    # --- broken-link -----------------------------------------------------
+
+    def test_broken_link_is_flagged(self):
+        findings = self.run_on({"docs/a.md": "see [thing](./gone.md)\n"})
+        self.assertIn("broken-link", self.rules(findings))
+
+    def test_existing_link_is_not_flagged(self):
+        findings = self.run_on({"docs/a.md": "see [thing](./b.md)\n", "docs/b.md": "hi\n"})
+        self.assertEqual(self.rules(findings), set())
+
+    def test_external_and_anchor_links_are_ignored(self):
+        findings = self.run_on(
+            {"docs/a.md": "[x](https://example.com) [y](#section) [z](mailto:a@b.c)\n"}
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_link_with_anchor_resolves_to_the_file(self):
+        findings = self.run_on({"docs/a.md": "[x](./b.md#part)\n", "docs/b.md": "hi\n"})
+        self.assertEqual(self.rules(findings), set())
+
+    def test_image_links_are_not_treated_as_links(self):
+        # ![...](...) is an embed, and a missing image is a different defect
+        # class than a broken prose reference.
+        findings = self.run_on({"docs/a.md": "![alt](./missing.png)\n"})
+        self.assertEqual(self.rules(findings), set())
+
+    # --- machine-local ---------------------------------------------------
+
+    def test_machine_local_link_is_flagged(self):
+        findings = self.run_on({"docs/a.md": "[plan](~/notes/projects/p.md)\n"})
+        self.assertIn("machine-local", self.rules(findings))
+
+    def test_machine_local_prose_is_flagged(self):
+        # This is the D01-F08 case that a link-only rule misses. Counting only
+        # links gave 10; counting any mention gives 14, and the extra 4 are
+        # prose or backticked references that are equally unreachable.
+        findings = self.run_on({"docs/a.md": "See ~/notes/projects/jcode/plan.md for detail.\n"})
+        self.assertIn("machine-local", self.rules(findings))
+
+    def test_machine_local_absolute_home_is_flagged(self):
+        findings = self.run_on({"docs/a.md": "run it in /Users/someone/labs/jcode\n"})
+        self.assertIn("machine-local", self.rules(findings))
+
+    def test_machine_local_counts_every_occurrence(self):
+        findings = self.run_on(
+            {"docs/a.md": "~/notes/one.md\n~/notes/two.md\nunrelated\n~/notes/three.md\n"}
+        )
+        self.assertEqual(len([f for f in findings if f.rule == "machine-local"]), 3)
+
+    # --- retired-rail ----------------------------------------------------
+
+    def test_retired_rail_instruction_is_flagged(self):
+        for line in (
+            "Install with `brew install jcode`.",
+            "Run `yay -S jcode` on Arch.",
+            "Bootstrap: curl -fsSL https://example.com/i.sh | sh",
+            "You can cargo install jcode from crates.io.",
+            "Download the build via TestFlight to try it.",
+        ):
+            with self.subTest(line=line):
+                findings = self.run_on({"docs/a.md": line + "\n"})
+                self.assertIn("retired-rail", self.rules(findings), line)
+
+    def test_prohibition_is_not_a_finding(self):
+        # The exact sentences shipped in README.md and RELEASING.md. A rule
+        # that flags these would fire on the contract it exists to enforce.
+        for line in (
+            "Homebrew, AUR, GitHub executable assets, checksum manifests for those assets,",
+            "curl installers, release archives, Homebrew, AUR, Cargo registry packages, or a",
+            "The native iOS application and App Store/TestFlight delivery are retired.",
+            "Do not add brew install instructions.",
+            "We never ship via cargo install jcode.",
+        ):
+            with self.subTest(line=line):
+                findings = self.run_on({"docs/a.md": line + "\n"})
+                self.assertEqual(self.rules(findings), set(), line)
+
+    # --- scope -----------------------------------------------------------
+
+    def test_archives_are_excluded(self):
+        findings = self.run_on({"docs/archive/old.md": "[gone](./nope.md)\n~/notes/x.md\n"})
+        self.assertEqual(self.rules(findings), set())
+
+    def test_frozen_fork_records_are_excluded(self):
+        findings = self.run_on(
+            {
+                "docs/fork/recovery/r.md": "/Users/someone/labs/jcode\n",
+                "docs/fork/normalization/n.md": "/Users/someone/labs/jcode\n",
+            }
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_exclusions_do_not_hide_live_docs(self):
+        # The load-bearing counter-check: a path that merely *resembles* an
+        # excluded one must still be checked, so the exclusion cannot be
+        # widened by accident into "skip everything under docs/fork".
+        findings = self.run_on({"docs/fork/ideal-base/STATE_NOTES.md": "[x](./gone.md)\n"})
+        self.assertIn("broken-link", self.rules(findings))
+
+    def test_audit_register_may_name_machine_local_paths(self):
+        findings = self.run_on(
+            {"docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md": "counts ~/notes/x.md references\n"}
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_audit_register_is_still_link_checked(self):
+        # Exempt from machine-local, NOT exempt from broken links.
+        findings = self.run_on(
+            {"docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md": "[x](./gone.md)\n"}
+        )
+        self.assertIn("broken-link", self.rules(findings))
+
+    # --- exit behavior ---------------------------------------------------
+
+    def test_clean_tree_reports_no_findings(self):
+        findings = self.run_on({"docs/a.md": "clean [link](./b.md)\n", "docs/b.md": "hi\n"})
+        self.assertEqual(findings, [])
+
+
+class RatchetTest(unittest.TestCase):
+    """The machine-local rule is budgeted, because D01-F08 is still open.
+
+    A ratchet is only honest if it can go down and cannot go up. These tests
+    pin both directions; without the second, the baseline would be a way to
+    launder new debt into the tree.
+    """
+
+    def test_new_reference_exceeds_baseline(self):
+        problems = mod.ratchet_violations({"docs/a.md": 3}, {"docs/a.md": 2})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("baseline allows 2", problems[0])
+
+    def test_at_baseline_is_clean(self):
+        self.assertEqual(mod.ratchet_violations({"docs/a.md": 2}, {"docs/a.md": 2}), [])
+
+    def test_below_baseline_is_clean(self):
+        self.assertEqual(mod.ratchet_violations({"docs/a.md": 1}, {"docs/a.md": 2}), [])
+
+    def test_file_absent_from_baseline_is_a_violation(self):
+        # A brand new file carrying a machine-local path must not slip through
+        # just because it has no baseline entry.
+        problems = mod.ratchet_violations({"docs/new.md": 1}, {})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("baseline allows 0", problems[0])
+
+    def test_update_refuses_to_raise_an_existing_baseline(self):
+        # write_baseline targets the real baseline path, so redirect it. Without
+        # this the test only avoids clobbering the repository because the guard
+        # under test happens to fire first, which means a mutation that removes
+        # the guard silently rewrites the shipped baseline.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "budget.json"
+            original = mod.BASELINE_FILE
+            mod.BASELINE_FILE = target
+            try:
+                with self.assertRaises(SystemExit) as caught:
+                    mod.write_baseline({"docs/a.md": 3}, {"docs/a.md": 2})
+                self.assertIn("refuses to raise", str(caught.exception))
+                self.assertFalse(target.exists(), "refusal must not write a baseline")
+            finally:
+                mod.BASELINE_FILE = original
+
+    def test_shipped_baseline_matches_the_tree(self):
+        # If this fails, someone changed the docs without running --update, or
+        # the baseline was hand-edited. Either way the ratchet is no longer
+        # describing reality.
+        root = Path(__file__).resolve().parent.parent
+        counts = mod.machine_local_counts(mod.run(root))
+        self.assertEqual(counts, mod.load_baseline())
+
+
+if __name__ == "__main__":
+    unittest.main()
