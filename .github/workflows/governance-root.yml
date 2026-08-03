@@ -40,6 +40,8 @@ jobs:
             scripts/ambient_roots_allowlist.txt
             scripts/check_agent_instructions.py
             scripts/check_ambient_roots.sh
+            scripts/check_docs_references.py
+            scripts/test_docs_references.py
             scripts/check_code_size_budget.py
             scripts/check_env_lease_drop_order.py
             scripts/check_panic_budget.py
