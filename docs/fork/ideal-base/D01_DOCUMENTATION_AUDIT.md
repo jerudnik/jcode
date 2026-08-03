@@ -43,6 +43,7 @@ authoritative than this snapshot.
 | `D01-F08` | medium | D01-F | Ten non-archive Markdown links in the pre-handoff snapshot target `~/notes/...`, including server, interaction, modular architecture, desktop, and provider-session documents. These targets are unavailable to repository consumers. | Recount after the distribution merge. Import contract-critical material into the repository; otherwise label the reference as private project-management context rather than a durable dependency. |
 | `D01-F09` | medium | D01-A/D01-V | The documentation tree has no `docs/README.md` authority map. Root `README.md:718-730` links only a small unclassified subset. `scripts/check_agent_instructions.py:168-172` validates links only in `docs/agent-workflows.md`, and `scripts/ideal_base_railway.py:257-274` is intentionally scoped to ideal-base control documents. | Add the classified docs map and one deterministic general-doc checker for local links, maintained repository paths, and a narrow retired-claim denylist. Keep archives and frozen evidence outside current-policy rules. |
 | `D01-F10` | low | D01-B/D01-C | `OAUTH.md:26-34` and `docs/MEMORY_BUDGET.md:25-31` retain source paths from before the crate split. | Replace stale implementation references with current owning crates and files. |
+| `D01-F11` | low | D01-B | `TELEMETRY.md:283` cited `src/telemetry.rs`, which does not exist. The implementation is `crates/jcode-telemetry-core/` (5 files, 3811 lines), reached through a `pub mod telemetry` re-export in `jcode-base`. Found while building F09's checker, not in the original census. | Correct the path. Verify the surrounding no-other-telemetry-calls claim rather than assuming only the path is wrong. |
 
 ## Provisional distribution-owned surfaces
 
@@ -106,6 +107,7 @@ prose, not by reading and retyping:
 | `D01-F02` | `corrected` | `OAUTH.md` MiniMax preset said `OPENAI_API_KEY` / `MiniMax-M2.7`; `catalog.rs` `MINIMAX_PROFILE` says `MINIMAX_API_KEY` / `MiniMax-M3`. Checked **all** `OpenAiCompatibleProfile` presets against their `OAUTH.md` sections by parsing both, not just the reported one; MiniMax was the only drift, 2 fields. |
 | `D01-F03` | `corrected` | `docs/MEMORY_BUDGET.md` said 64/12/8; source says `RENDER_CACHE_MAX=512`, `IMAGE_STATE_MAX=24`, `SOURCE_CACHE_MAX=16`. Corrected in both the budget table and the summary list, and each `<=` value is now confirmed equal to its `const` by parsing both files. `ACTIVE_DIAGRAMS_MAX=128` and the two disk caps were already accurate. |
 | `D01-F10` | `corrected` | Every pre-crate-split path in `OAUTH.md` and `docs/MEMORY_BUDGET.md` was confirmed non-existent, remapped to its current owning crate, and re-checked so that every referenced `.rs` file resolves on disk. |
+| `D01-F11` | `corrected` | Path repaired in this pass. The adjacent claim that no other telemetry-related network calls exist was checked rather than assumed: `TELEMETRY_HTTP_CLIENT` is confined to `jcode-telemetry-core/src/lib.rs`, and the other `api.jcode.sh` callers are subscription and config. The claim holds, so it was sharpened, not softened. |
 
 The remaining seven need editorial judgement about what the product should
 claim, not a lookup, so they stay open under their assigned lanes:
@@ -118,7 +120,7 @@ claim, not a lookup, so they stay open under their assigned lanes:
 | `D01-F06` | `confirmed` | `docs/PROVIDER_DOCTOR.md:12-13` still hard-codes an OpenAI-compatible list while `provider_doctor.rs` selects native drivers. |
 | `D01-F07` | `confirmed` | `docs/CLOUDFLARE_EXPERIMENT_STRATEGY.md:4` still calls `distro/nix` the current packaging rail, contradicting the single-rail model. Needs an archive/reclassify decision. |
 | `D01-F08` | `confirmed` | Recounted post-merge as required: **14** non-archive Markdown references to `~/notes/...`, up from the snapshot's 10. Each needs importing or relabelling as private context. |
-| `D01-F09` | `confirmed` | `docs/README.md` still does not exist. This is the largest item: it wants a classified authority map plus a deterministic link/claim checker with non-vacuous fixtures. |
+| `D01-F09` | `partially delivered` | The checker half is done: `scripts/check_docs_references.py` enforces broken-link, machine-local, and retired-rail over 145 active documents, with 23 tests and a mutation control per rule. The map half is **not**: `docs/README.md` still does not exist, so this finding stays open. |
 
 Note on F03 and F02 as a class: both are a documented constant drifting from its
 source constant, which is the same failure mode this program keeps finding in
