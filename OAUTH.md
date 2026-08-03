@@ -225,6 +225,40 @@ The Azure env file may contain:
 - If entitlement or onboarding fails for a Workspace account, set `GOOGLE_CLOUD_PROJECT` and retry.
 - If login succeeds but requests fail later, re-run `jcode login --provider gemini` to refresh the stored session.
 
+### `jcode login` validates automatically, and that costs money
+
+**`jcode login` runs a live post-login validation by default.** This is not
+opt-in. On success it immediately issues two real billable requests to the
+provider you just authenticated (`src/cli/login.rs:364`,
+`src/cli/auth_test/run.rs:140-159`, both smoke flags passed `true`):
+
+1. A provider smoke prompt: `Reply with exactly AUTH_TEST_OK and nothing else.`
+2. A tool-enabled smoke prompt over the same tool-attached path normal chat
+   uses, which asks the model to make one `bash` tool call running
+   `echo JCODE_TOOL_OK`.
+
+The second one matters twice over: it is a second billed request, and it
+exercises tool execution rather than a plain completion. On a metered API key
+both count against spend, and on a rate-limited account both count against your
+quota, immediately after login, without a further prompt.
+
+To log in without any network validation:
+
+```bash
+jcode login --provider <id> --no-validate
+```
+
+`--no-validate` skips both requests and prints
+`Skipping post-login provider validation (--no-validate).` It is the **only**
+opt-out `login` has: post-login validation is all-or-nothing, and there is no
+way to run just the cheap completion and skip the tool-enabled one.
+
+The narrower `--no-smoke` and `--no-tool-smoke` flags belong to `auth-test`,
+not to `login`. Use them when you invoke `auth-test` yourself.
+
+Gmail/Google logins do not run model smoke requests, because they are not model
+providers.
+
 ### Auth verification
 Use the built-in auth verifier to test the full local auth/runtime path after login:
 
