@@ -11,7 +11,7 @@ It is intentionally conservative. The goal is to identify boundaries that are bo
 
 See also:
 
-- [`COMPILE_PERFORMANCE_PLAN.md`](~/notes/projects/jcode/maintenance/compile-performance-plan.md)
+- `COMPILE_PERFORMANCE_PLAN.md` (private planning note, not in this repository)
 - [`REFACTORING.md`](./REFACTORING.md)
 - [`SERVER_ARCHITECTURE.md`](./SERVER_ARCHITECTURE.md)
 - [`MULTI_SESSION_CLIENT_ARCHITECTURE.md`](./MULTI_SESSION_CLIENT_ARCHITECTURE.md)

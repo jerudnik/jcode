@@ -11,7 +11,7 @@ See also:
 
 - [`DESKTOP_APP_ARCHITECTURE.md`](./DESKTOP_APP_ARCHITECTURE.md)
 - [`DESKTOP_SUPERAPP_WORKSPACE.md`](./DESKTOP_SUPERAPP_WORKSPACE.md)
-- [`CLIENT_CORE_PRESENTATION_SPLIT_PLAN.md`](~/notes/projects/jcode/proposals/client-core-presentation-split-plan.md)
+- `CLIENT_CORE_PRESENTATION_SPLIT_PLAN.md` (private planning note, not in this repository)
 - [`MULTI_SESSION_CLIENT_ARCHITECTURE.md`](./MULTI_SESSION_CLIENT_ARCHITECTURE.md)
 - [`SERVER_ARCHITECTURE.md`](./SERVER_ARCHITECTURE.md)
 

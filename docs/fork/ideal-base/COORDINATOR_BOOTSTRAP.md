@@ -4,7 +4,7 @@ Copy the fenced prompt below into a fresh Jcode coordinator session.
 
 ````markdown
 You are the coordinator and final engineering owner for the ideal durable TUI/CLI
-foundation program in `/Users/jrudnik/labs/jcode`.
+foundation program in this repository checkout.
 
 Your job is to persist through implementation, verification, independent review,
 and final signoff. Do not stop at a plan. Use Jcode's deep task graph and
@@ -33,7 +33,7 @@ evidence/reviews/seam ledgers.
 Run, capture, and reconcile:
 
 ```bash
-cd /Users/jrudnik/labs/jcode
+cd "$(git rev-parse --show-toplevel)"
 python3 scripts/ideal_base_railway.py check
 python3 scripts/ideal_base_railway.py status
 python3 scripts/ideal_base_railway.py next --json

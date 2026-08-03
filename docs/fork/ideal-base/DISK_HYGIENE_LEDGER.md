@@ -41,8 +41,8 @@ rebuilds them); worktrees and evidence are not.
 
 | # | Target | Size | Kind | Owner node | Delete WHEN | Reversible? |
 |---|--------|------|------|-----------|-------------|-------------|
-| 1 | `/Users/jrudnik/labs/jcode/target/debug` | ~40+ GiB | primary debug build cache | F21 | Only when NOT mid-build. F21 requires a clean-state build twice anyway, so time this with the first F21 clean run. `cargo clean -p <crate>` or drop `debug/` wholesale. | yes (rebuild, ~10-20 min) |
-| 2 | `/Users/jrudnik/labs/jcode/target/selfdev` | ~12 GiB | selfdev harness build cache | F21 | When no selfdev build/reload is queued. Rebuilt on next `selfdev build`. | yes (rebuild) |
+| 1 | `target/debug` | ~40+ GiB | primary debug build cache | F21 | Only when NOT mid-build. F21 requires a clean-state build twice anyway, so time this with the first F21 clean run. `cargo clean -p <crate>` or drop `debug/` wholesale. | yes (rebuild, ~10-20 min) |
+| 2 | `target/selfdev` | ~12 GiB | selfdev harness build cache | F21 | When no selfdev build/reload is queued. Rebuilt on next `selfdev build`. | yes (rebuild) |
 | 3 | `~/.jcode/builds/versions/*` (stale) | ~4.5 GiB | old selfdev binary versions | F26 | F26 ("sweep dead PID markers / liveness-aware state") is the natural home for a builds-version GC. Keep `current`, `shared-server`, `stable`; prune versions with no live PID and older than the retained set. | yes (rebuilt on demand) |
 | 4 | `~/.jcode/logs/*` (rotated) | ~2.0 GiB | session/server logs | F25 | Bound retention per F25 "bound terminal control-log retention". Safe to trim logs older than the current investigation window now; formalize a cap under F25. | yes (regenerated) |
 | 5 | `/private/tmp/jcode-desktop-*.sock` + malformed swarm state | ~0 B (churns) | leaked test sockets | F25 | Continuously. F25 owns "centralize socket/metadata cleanup"; a startup/periodic sweep should unlink dead sockets. Recurs on every desktop test run until F25 lands. | n/a |

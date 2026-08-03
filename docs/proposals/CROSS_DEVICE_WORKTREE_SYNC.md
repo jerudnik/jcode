@@ -36,8 +36,9 @@ single machine.
 ### Known gap: repo identity across machines
 
 `repo_scope_key` / `worktree_scope_key` hash the *local canonical path* of the
-git common dir / worktree. These will never match across machines
-(`/Users/jeremy/...` vs `/home/jeremy/...`). Cross-device features must key
+git common dir / worktree. These will never match across machines,
+because the same checkout lives under a macOS home directory on one and a
+Linux home directory on the other. Cross-device features must key
 repos by something portable: normalized origin URL, or an explicit repo name
 in config (`[sync] repo_id = "jcode"`), falling back to origin URL hash.
 

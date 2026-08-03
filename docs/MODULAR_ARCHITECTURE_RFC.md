@@ -7,7 +7,7 @@ This RFC describes a modular target architecture for jcode that matches the curr
 It is intentionally aligned with:
 
 - [`REFACTORING.md`](./REFACTORING.md)
-- [`COMPILE_PERFORMANCE_PLAN.md`](~/notes/projects/jcode/maintenance/compile-performance-plan.md)
+- `COMPILE_PERFORMANCE_PLAN.md` (private planning note, not in this repository)
 - [`SERVER_ARCHITECTURE.md`](./SERVER_ARCHITECTURE.md)
 - [`MULTI_SESSION_CLIENT_ARCHITECTURE.md`](./MULTI_SESSION_CLIENT_ARCHITECTURE.md)
 

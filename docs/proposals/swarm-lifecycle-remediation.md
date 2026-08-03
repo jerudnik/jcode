@@ -1,6 +1,6 @@
 # Swarm Lifecycle Remediation
 
-Incident evidence: ~/notes/projects/jcode/maintenance/bug-run-plan-spawn-storm.md
+Incident evidence: `bug-run-plan-spawn-storm.md` (private planning note, not in this repository)
 
 Status: **proposed** (not started). Prerequisite #3 (version drift) is done and
 deployed; this covers the two remaining lifecycle leaks that gate safe swarm use.
