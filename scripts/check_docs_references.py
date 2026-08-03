@@ -147,10 +147,32 @@ def in_scope(rel: str) -> bool:
 
 
 def markdown_files(root: Path) -> list[Path]:
+    """Active documents, as the repository defines them.
+
+    Ask git, not the filesystem. `apm compile` generates AGENTS.md, CLAUDE.md
+    and GEMINI.md into the worktree and .gitignore excludes them, so an rglob
+    scans 9 files here that do not exist in a clean clone: the local run
+    reported 146 documents where CI reported 137. Same tree, two numbers, and
+    only one of them is the repository. A gate that governs the checkout rather
+    than the commit gives different verdicts to different people.
+
+    Falls back to the filesystem when git is unavailable, since a weaker scan
+    beats a gate that cannot run at all.
+    """
+    # `_tracked_files` signals "no git here" with an empty set, which is what
+    # the other two consumers already branch on. Testing `is None` instead
+    # meant a tree without a repo scanned zero documents and the gate passed
+    # everything -- the same "guard silently answers fine" failure this file
+    # exists to prevent, so it is spelled the same way in all three places.
+    tracked = _tracked_files(str(root))
+    if not tracked:
+        candidates = sorted(root.rglob("*.md"))
+    else:
+        candidates = sorted(root / rel for rel in tracked if rel.endswith(".md"))
     out = []
-    for path in sorted(root.rglob("*.md")):
+    for path in candidates:
         rel = path.relative_to(root).as_posix()
-        if in_scope(rel):
+        if in_scope(rel) and path.is_file():
             out.append(path)
     return out
 

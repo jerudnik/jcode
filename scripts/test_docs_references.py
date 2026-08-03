@@ -91,6 +91,25 @@ class DocsReferencesTest(unittest.TestCase):
         )
         self.assertEqual(self.rules(findings), set())
 
+    # --- document discovery scope -----------------------------------------
+
+    def test_untracked_document_is_not_scanned(self):
+        """Local reported 146 documents, CI reported 137, same tree. The 9 were
+        apm-generated AGENTS.md/CLAUDE.md/GEMINI.md, gitignored and absent from
+        a clean clone. A gate that scans the checkout rather than the commit
+        gives different verdicts to different people."""
+        # Needs one tracked file: an empty `git ls-files` is indistinguishable
+        # from "no git here" and correctly falls back to a filesystem scan.
+        findings = self.run_on_git_tree(
+            {"docs/real.md": "fine\n"}, {"docs/generated.md": "[x](./gone.md)\n"}
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_tracked_document_is_still_scanned(self):
+        """The control: narrowing scope to git must not narrow it to nothing."""
+        findings = self.run_on_git_tree({"docs/real.md": "[x](./gone.md)\n"}, {})
+        self.assertIn("broken-link", self.rules(findings))
+
     # --- stale-code-path (D01-F12) ---------------------------------------
 
     def test_citation_of_a_missing_source_file_is_flagged(self):
