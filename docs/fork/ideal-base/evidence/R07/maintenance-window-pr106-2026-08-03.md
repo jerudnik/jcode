@@ -163,3 +163,44 @@ The three newly exempted documents are now invisible to the `stale-code-path`
 rule, including for any future drift. That is acceptable only because they are
 frozen historical records; if any of them is ever un-frozen, the exemption must
 be removed with it.
+
+## Superseded on 2026-08-03: the exemption was removed
+
+The "acceptable only because they are frozen" caveat above did not survive
+contact with its own condition. Asked whether the freeze could be guaranteed,
+the answer was no, which removes the only premise the exemption rested on.
+
+Measuring before arguing showed the exemption was also much wider than its
+stated rationale: it hid **317** citations across **6** files, not the 7 the
+justification described, and **32** of those resolved to code that exists
+today. Those 32 are the real defect. They are correct now and would rot
+silently the next time code moves, because an exempt file is invisible in both
+directions.
+
+`CODE_PATH_EXEMPT` is deleted. The per-file ratchet already expresses the thing
+the exemption was reaching for: a frozen record keeps its inherited count
+forever and is never forced to falsify itself, while anything added beyond that
+count fails. Seeding those counts was done deliberately rather than through
+`--update`, because `--update` correctly refused (it cannot distinguish debt
+that was surfaced from debt that was added), and the adopting script refused to
+seed any file outside the six.
+
+Controls, each planting the bad state:
+
+| control | result |
+|---|---|
+| new stale citation in a formerly-exempt file | exit 1 |
+| same state, `--update` | refuses `2 -> 3` |
+| **same state, exemption restored** | **exit 0, silent, proving removal is what bites** |
+| exemption removed again | exit 1 |
+| genuine repair in a formerly-exempt file | accepted, `2 -> 1` |
+| restored | exit 0 |
+
+Two new tests (34 total, was 33), mutation-verified: restoring the exemption
+fails exactly those two and nothing else.
+
+Recorded error: reverting the first mutation with `git checkout` discarded both
+uncommitted edits to the checker. This is the second time in two sessions that
+`git checkout` restored HEAD rather than the pre-plant working state. The
+remaining controls reverted from `cp` backups, and the mutation was re-run from
+scratch afterwards so no result rests on the clobbered state.

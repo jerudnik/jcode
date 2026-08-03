@@ -99,21 +99,15 @@ CODE_PATH = re.compile(
     r"`((?:crates|src|scripts|tests)/[A-Za-z0-9_./-]+\.(?:rs|py|sh|nix))(?::\d+)?`"
 )
 
-# Dated audits are records of a tree that has since moved. Their stale paths
-# are accurate history, not drift, so flagging them would mean rewriting
-# evidence to make a counter fall.
-CODE_PATH_EXEMPT = (
-    "docs/CODE_QUALITY_AUDIT_2026-04-18.md",
-    "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md",
-    "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md",
-    # Frozen records of the retired upstream-tracking model. Each carries a
-    # header marking it historical and superseded, and patch-ledger.md says in
-    # its own text that some rows "intentionally describe sync machinery that no
-    # longer exists". Repointing those citations would falsify the record.
-    "docs/architecture/FORK_SUSTAINABILITY_MODEL.md",
-    "docs/architecture/FORK_SUSTAINABILITY_REVIEW_SYNTHESIS.md",
-    "docs/fork/patch-ledger.md",
-)
+# There is no whole-file exemption, deliberately. Frozen records (dated audits,
+# the retired upstream-tracking model) do legitimately cite paths that no longer
+# exist, but exempting the FILE to protect those citations also blinds the rule
+# to every citation added to it later, including the ones that resolve today and
+# will rot the next time code moves. The per-file ratchet already says "this
+# debt is inherited and may not grow" without giving up the file: a frozen
+# record sits at its measured count forever, while a new stale citation in it
+# still fails. Measured when the exemption was removed: it was hiding 317
+# citations across 6 files, 32 of which pointed at live code.
 MACHINE_LOCAL = re.compile(r"~/(?:notes|Documents|Desktop)/|/Users/[A-Za-z0-9._-]+/")
 BASELINE_FILE = Path(__file__).resolve().parent / "docs_references_budget.json"
 BASELINE_KEYS = {
@@ -273,7 +267,7 @@ def check_machine_local(root: Path, path: Path, text: str) -> list[Finding]:
 def check_code_paths(root: Path, path: Path, text: str, tracked: frozenset[str]) -> list[Finding]:
     """Citations of source files that are not in the tree (D01-F12)."""
     rel = path.relative_to(root).as_posix()
-    if rel in CODE_PATH_EXEMPT or not tracked:
+    if not tracked:
         return []
     findings = []
     for lineno, line in enumerate(text.splitlines(), 1):
