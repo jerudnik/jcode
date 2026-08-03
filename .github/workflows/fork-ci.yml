@@ -74,6 +74,8 @@ jobs:
               - 'examples/**'
               - 'assets/**'
             scripts:
+              - 'docs/**'
+              - '*.md'
               - 'scripts/**'
               - '.apm/**'
               - '.jcode/**'
@@ -253,6 +255,20 @@ jobs:
 
       - name: Test docs impact advisory
         run: python3 scripts/test_docs_impact_advisory.py
+
+      # D01-F09. The docs reference checker existed and passed for weeks while
+      # nothing ran it, so it prevented exactly nothing. Broken links and
+      # retired-rail claims are fatal; machine-local paths are a ratchet
+      # against a committed baseline and can only fall.
+      - name: Enforce documentation reference contract
+        run: python3 scripts/check_docs_references.py
+
+      # A checker that cannot fail is decoration. This drives it against a
+      # planted violation of each class and requires a non-zero exit, so the
+      # gate above cannot silently degrade into a no-op the way the warning
+      # budget did.
+      - name: Test documentation reference checker
+        run: python3 -m unittest discover -s scripts -p 'test_docs_references.py'
 
       - name: Run Rust production filter tests
         run: python3 -m unittest discover -s tests -p 'test_rust_production_filter.py'

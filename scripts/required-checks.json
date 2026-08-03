@@ -133,7 +133,9 @@
       "scripts/governance_compare.py",
       "tests/test_governance_compare.py",
       "scripts/generate_governance_fixture.py",
-      "docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json"
+      "docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json",
+      "scripts/check_docs_references.py",
+      "scripts/test_docs_references.py"
     ],
     "proposed_additions": []
   },
