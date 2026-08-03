@@ -43,6 +43,7 @@ authoritative than this snapshot.
 | `D01-F08` | medium | D01-F | Ten non-archive Markdown links in the pre-handoff snapshot target `~/notes/...`, including server, interaction, modular architecture, desktop, and provider-session documents. These targets are unavailable to repository consumers. | Recount after the distribution merge. Import contract-critical material into the repository; otherwise label the reference as private project-management context rather than a durable dependency. |
 | `D01-F09` | medium | D01-A/D01-V | The documentation tree has no `docs/README.md` authority map. Root `README.md:718-730` links only a small unclassified subset. `scripts/check_agent_instructions.py:168-172` validates links only in `docs/agent-workflows.md`, and `scripts/ideal_base_railway.py:257-274` is intentionally scoped to ideal-base control documents. | Add the classified docs map and one deterministic general-doc checker for local links, maintained repository paths, and a narrow retired-claim denylist. Keep archives and frozen evidence outside current-policy rules. |
 | `D01-F10` | low | D01-B/D01-C | `OAUTH.md:26-34` and `docs/MEMORY_BUDGET.md:25-31` retain source paths from before the crate split. | Replace stale implementation references with current owning crates and files. |
+| `D01-F11` | low | D01-B | `TELEMETRY.md:283` cited `src/telemetry.rs`, which does not exist. The implementation is `crates/jcode-telemetry-core/` (5 files, 3811 lines), reached through a `pub mod telemetry` re-export in `jcode-base`. Found while building F09's checker, not in the original census. | Correct the path. Verify the surrounding no-other-telemetry-calls claim rather than assuming only the path is wrong. |
 
 ## Provisional distribution-owned surfaces
 
@@ -106,6 +107,7 @@ prose, not by reading and retyping:
 | `D01-F02` | `corrected` | `OAUTH.md` MiniMax preset said `OPENAI_API_KEY` / `MiniMax-M2.7`; `catalog.rs` `MINIMAX_PROFILE` says `MINIMAX_API_KEY` / `MiniMax-M3`. Checked **all** `OpenAiCompatibleProfile` presets against their `OAUTH.md` sections by parsing both, not just the reported one; MiniMax was the only drift, 2 fields. |
 | `D01-F03` | `corrected` | `docs/MEMORY_BUDGET.md` said 64/12/8; source says `RENDER_CACHE_MAX=512`, `IMAGE_STATE_MAX=24`, `SOURCE_CACHE_MAX=16`. Corrected in both the budget table and the summary list, and each `<=` value is now confirmed equal to its `const` by parsing both files. `ACTIVE_DIAGRAMS_MAX=128` and the two disk caps were already accurate. |
 | `D01-F10` | `corrected` | Every pre-crate-split path in `OAUTH.md` and `docs/MEMORY_BUDGET.md` was confirmed non-existent, remapped to its current owning crate, and re-checked so that every referenced `.rs` file resolves on disk. |
+| `D01-F11` | `corrected` | Path repaired in this pass. The adjacent claim that no other telemetry-related network calls exist was checked rather than assumed: `TELEMETRY_HTTP_CLIENT` is confined to `jcode-telemetry-core/src/lib.rs`, and the other `api.jcode.sh` callers are subscription and config. The claim holds, so it was sharpened, not softened. |
 
 The remaining seven need editorial judgement about what the product should
 claim, not a lookup, so they stay open under their assigned lanes:
@@ -118,9 +120,82 @@ claim, not a lookup, so they stay open under their assigned lanes:
 | `D01-F06` | `confirmed` | `docs/PROVIDER_DOCTOR.md:12-13` still hard-codes an OpenAI-compatible list while `provider_doctor.rs` selects native drivers. |
 | `D01-F07` | `confirmed` | `docs/CLOUDFLARE_EXPERIMENT_STRATEGY.md:4` still calls `distro/nix` the current packaging rail, contradicting the single-rail model. Needs an archive/reclassify decision. |
 | `D01-F08` | `confirmed` | Recounted post-merge as required: **14** non-archive Markdown references to `~/notes/...`, up from the snapshot's 10. Each needs importing or relabelling as private context. |
-| `D01-F09` | `confirmed` | `docs/README.md` still does not exist. This is the largest item: it wants a classified authority map plus a deterministic link/claim checker with non-vacuous fixtures. |
+| `D01-F09` | `partially delivered` | The checker half is done: `scripts/check_docs_references.py` enforces broken-link, machine-local, and retired-rail over 145 active documents, with 23 tests and a mutation control per rule. Two things are **not** done. The map half: `docs/README.md` still does not exist. And the checker is **not yet CI-enforced** - wiring it into `.github/workflows/fork-ci.yml` changes a governance-protected path, which fails `Governance Root` and needs the recorded ruleset maintenance procedure (R07 `design.md` section 4) or an authorized override. Until that lands the checker is runnable but advisory, so it prevents nothing on its own. This finding stays open. |
 
 Note on F03 and F02 as a class: both are a documented constant drifting from its
 source constant, which is the same failure mode this program keeps finding in
 code. `D01-F09`'s checker is the durable fix; correcting the values by hand only
 resets the clock.
+
+## D01-A census against `82277c6df` (2026-08-03)
+
+The re-audit above was recorded against the tree of 2026-08-02. `main` has moved
+since, so every finding was re-run against the current tree rather than carried
+forward. **All ten hold**: the three `corrected` items are still correct in the
+shipped tree, and the seven `confirmed` items still reproduce.
+
+Re-verification of the corrected items, checked against source rather than
+re-read as prose:
+
+| ID | Still correct? | Check run now |
+| --- | --- | --- |
+| `D01-F02` | yes | `OAUTH.md:285,287` says `MINIMAX_API_KEY` / `MiniMax-M3`; `catalog.rs:338` `MINIMAX_PROFILE` agrees. |
+| `D01-F03` | yes | `MEMORY_BUDGET.md:69-71` says 512/24/16; `mermaid_cache_render.rs:12` and `lib.rs:487,648` agree. |
+| `D01-F10` | yes | Every `.rs` path cited in the two documents still resolves on disk. |
+
+The seven open items each reproduce verbatim: `login.rs:353` still validates by
+default, `MEMORY_ARCHITECTURE.md:3` still reads `Implemented (Core), Planned
+(Graph-Based Hybrid)` above an all-`[x]` graph phase, `AMBIENT_MODE.md:3` and
+`SAFETY_SYSTEM.md:3` still read `Status: Design`, `PROVIDER_DOCTOR.md:12-13`
+still hard-codes its provider list, `CLOUDFLARE_EXPERIMENT_STRATEGY.md:4` still
+calls `distro/nix` the current packaging rail, and `docs/README.md` still does
+not exist.
+
+### Correction to the F08 recount
+
+The 2026-08-02 note recorded **14** `~/notes/...` references "up from the
+snapshot's 10" and read that as growth. It is not growth; the two numbers count
+different things, so the comparison is invalid. Measured on the current tree,
+every variant reported so the denominator is unambiguous:
+
+| Counting rule | Count |
+| --- | --- |
+| Markdown links `](~/notes/`, non-archive, excluding ideal-base evidence | **10** |
+| Same, including `docs/archive/` | 11 |
+| Any mention of `~/notes/`, non-archive, excluding ideal-base evidence | **14** |
+| Any mention, non-archive, including ideal-base evidence | 18 |
+| Any mention anywhere | 26 |
+
+`10` and `14` are the same tree under two rules: the extra four are prose or
+backticked references rather than links (`INTERACTION_SURFACES.md:136`,
+`proposals/swarm-lifecycle-remediation.md:3`, `REFACTORING.md:7-8`), and
+`10 + 4 = 14` exactly. The link count has not changed since the snapshot.
+
+F08's disposition is therefore **unchanged in scope but corrected in framing**:
+the finding is that these targets are unavailable to repository consumers, which
+is true of all 14 regardless of syntax. All seven distinct targets exist on this
+machine and none is in the repository, so link-vs-prose does not change what a
+consumer can reach. D01-B/D01-F must fix all 14, and the durable rule belongs in
+F09's checker, which must match any `~/notes/` reference and not only link
+syntax.
+
+### Lane sizing for D01-A
+
+| Surface | Files |
+| --- | --- |
+| `docs/*.md` (top level) | 56 |
+| `docs/architecture/**` | 22 |
+| `docs/proposals/**` | 17 |
+| `docs/archive/**` (classification only, not policy) | 11 |
+| All tracked `*.md` in the repository | 446 |
+
+D01's 66 owned paths resolve cleanly: 59 exist on disk and the other 7 are globs
+or artifacts the node is meant to create (`docs/architecture/**`,
+`docs/proposals/**`, `docs/README.md`, `.apm/instructions/**`,
+`scripts/check_docs*.py`, `tests/test_check_docs*.py`,
+`docs/fork/ideal-base/evidence/D01/**`). No owned path has gone missing.
+
+`D01-F09` is the largest item and the only one that prevents recurrence: the
+other nine are individual drifts, and three of them (F02, F03, F10) have already
+been hand-corrected once. Nothing currently re-checks them, so they can drift
+again silently.
