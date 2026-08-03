@@ -17,7 +17,7 @@ agent behavior and are enforced by `scripts/check_agent_instructions.py`.
 | Path | Owns |
 | --- | --- |
 | `AGENTS.md` (root) | the repository work contract |
-| [`AGENTS.md`](./AGENTS.md) | documentation maintenance and integration |
+| `docs/AGENTS.md` | documentation maintenance and integration |
 | [`agent-workflows.md`](./agent-workflows.md) | the operational commands and gates |
 | [`BRANCHING.md`](./BRANCHING.md) | branch rails and fork invariants |
 | [`NIX.md`](./NIX.md) | the packaging and distribution rail |

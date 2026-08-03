@@ -17,6 +17,7 @@ specifically because the rule they cover is easy to get backwards:
 from __future__ import annotations
 
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,6 +46,50 @@ class DocsReferencesTest(unittest.TestCase):
     def test_broken_link_is_flagged(self):
         findings = self.run_on({"docs/a.md": "see [thing](./gone.md)\n"})
         self.assertIn("broken-link", self.rules(findings))
+
+    def run_on_git_tree(self, files: dict[str, str], untracked: dict[str, str]):
+        """Like run_on, but the tree is a real git repo and `untracked` is not added.
+
+        The untracked-target rule can only be exercised against real git state,
+        which is exactly why the bug it now catches survived every other test
+        here: a tempdir with no repo makes the checker fall back to filesystem
+        truth, so a generated-but-ignored file looks fine.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel, text in {**files, **untracked}.items():
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            for rel in files:
+                subprocess.run(["git", "add", "--", rel], cwd=root, check=True)
+            mod._tracked_files.cache_clear()
+            try:
+                return mod.run(root)
+            finally:
+                mod._tracked_files.cache_clear()
+
+    def test_link_to_generated_untracked_file_is_flagged(self):
+        """CI caught this on a clean checkout when no local test could.
+
+        docs/README.md linked to docs/AGENTS.md, which `apm compile` generates
+        and .gitignore excludes. It resolved on the author's machine and 404s
+        for every reader, so `exists()` alone was the wrong question.
+        """
+        findings = self.run_on_git_tree(
+            {"docs/a.md": "see [contract](./AGENTS.md)\n"},
+            {"docs/AGENTS.md": "generated\n"},
+        )
+        self.assertIn("broken-link", self.rules(findings))
+        self.assertIn("not committed", " ".join(f.detail for f in findings))
+
+    def test_link_to_tracked_file_is_not_flagged_in_a_git_tree(self):
+        """The control: the rule must not fire on ordinary committed files."""
+        findings = self.run_on_git_tree(
+            {"docs/a.md": "see [thing](./b.md)\n", "docs/b.md": "hi\n"}, {}
+        )
+        self.assertEqual(self.rules(findings), set())
 
     def test_existing_link_is_not_flagged(self):
         findings = self.run_on({"docs/a.md": "see [thing](./b.md)\n", "docs/b.md": "hi\n"})
