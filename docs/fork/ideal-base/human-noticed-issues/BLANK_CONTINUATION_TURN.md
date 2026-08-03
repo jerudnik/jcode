@@ -1118,7 +1118,7 @@ them at least once, so they are separated here.
 
 | claim | PR #88 (fire-once gate) | PR #87 (widened content guard) |
 |---|---|---|
-| merged to `main` | not yet | yes (`2dbe4f158`) |
+| merged to `main` | yes (`ddcd1a9ef`, via PR #90) | yes (`2dbe4f158`) |
 | unit / e2e coverage | yes | yes |
 | regression test proven to fail without the fix | yes (50 vs 1) | replay over 5 sessions |
 | **present in a running binary** | **yes** | **no** |
