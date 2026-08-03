@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "G05",
-    "state": "authorization_blocked",
-    "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
-    "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
-    "updated_at": "2026-08-02T22:16:13.347870Z",
-    "summary": "AUTHORIZATION BLOCKED, not incomplete and not verified. Requires provisioning a throwaway remote host, which is external infrastructure the agent must not create unilaterally. No local work remains. Named next action, with explicit user authorization: provision a disposable host, acquire the pinned fork revision through Nix WITH NO CREDENTIALS PRESENT (that absence is itself the assertion, since the public Cachix path must work unauthenticated and running it with credentials available would prove nothing about the end-user path), launch the binary, and record the transcript under docs/fork/ideal-base/evidence/G05/. G03 already proved the flake builds and the binary runs and serves, so a G05 failure would isolate to acquisition rather than the package; that narrows the gate but does not substitute for it, because G03 built locally, which is exactly the path G05 exists to not exercise."
+    "node": "D01-FIX-2",
+    "state": "pending",
+    "reviewed_commit": null,
+    "published_commit": null,
+    "updated_at": "2026-08-03T08:10:20Z",
+    "summary": "Injected from D01-F14, same rule as D01-FIX-1: three complete ambient implementations are inert because their wires are unconnected, which is a product defect rather than a prose defect. Two of the three RE-VERIFIED 2026-08-03 by grep rather than inherited: UsageLog::record has no non-test caller, and active_user_sessions has reads at runner.rs:176/585/879 with no writer beyond RwLock::new(0), so ambient can never pause for an active user. The RateLimitInfo wire is carried from the register and must be re-verified when this node starts. docs/AMBIENT_MODE.md already marks each row Inert."
   },
   "nodes": {
     "W0": {
@@ -705,6 +705,22 @@
       ],
       "summary": "False node. Production unregister exists as Session::mark_closed_and_persist (7 callers, incl. 5 headless in ambient/runner.rs); sweep reclaims by PID liveness not a 24h window; live machine shows 4 markers, 0 dead.",
       "updated_at": "2026-08-02T02:42:48Z"
+    },
+    "D01-FIX-1": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Injected from D01-F13: a documentation-audit finding that is not a documentation defect, so softening the prose was forbidden and a separately owned product node is the correct move. Claim RE-VERIFIED 2026-08-03 before the node was created rather than inherited from the register: ActionTier appears in exactly one file, crates/jcode-base/src/safety.rs, and .classify( has zero callers outside it, so the documented tier 1/2/3 gate cannot run at all. docs/SAFETY_SYSTEM.md already says the gate is inert, and that sentence stays true until this node lands.",
+      "updated_at": "2026-08-03T08:10:20Z"
+    },
+    "D01-FIX-2": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Injected from D01-F14, same rule as D01-FIX-1: three complete ambient implementations are inert because their wires are unconnected, which is a product defect rather than a prose defect. Two of the three RE-VERIFIED 2026-08-03 by grep rather than inherited: UsageLog::record has no non-test caller, and active_user_sessions has reads at runner.rs:176/585/879 with no writer beyond RwLock::new(0), so ambient can never pause for an active user. The RateLimitInfo wire is carried from the register and must be re-verified when this node starts. docs/AMBIENT_MODE.md already marks each row Inert.",
+      "updated_at": "2026-08-03T08:10:20Z"
     }
   }
 }
