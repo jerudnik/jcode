@@ -98,3 +98,35 @@ Under the old exemption that identical citation was silent.
 between two `--live` samples would not be caught, so this record does not claim
 continuous coverage of the interval, only that the bounded transaction opened,
 merged exactly the reviewed head, and closed restored.
+
+## Correction (same day, after merge)
+
+The PR merged in this window carried a wrong number in its own rationale
+comment: "hiding 317 citations across 6 files, 32 of which pointed at live
+code". The 317 is right and is what seeded the baseline, but it counts only the
+*stale* citations, so "32 of which pointed at live code" contradicts it. 32 was
+the `PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md` baseline row, transcribed as if
+it were a population.
+
+Remeasured against the merged tree at `56da86505`, using the checker's own
+`CODE_PATH` regex and that commit's `git ls-tree` rather than a hand-rolled one,
+the six seeded files carried **359** citations: **42** live and **317** stale.
+The reconstruction reproduces all six seeded baseline rows exactly, which is
+what makes it trustworthy: 274 / 32 / 5 / 2 / 2 / 2.
+
+Two process notes, both repeats of errors already recorded here:
+
+- My first recount used a regex I wrote myself and returned 924/294, off by an
+  order of magnitude, because it lacked `EXCLUDED_PREFIXES` and allowed
+  extensions the checker does not. Importing `CODE_PATH` from the checker was
+  what produced numbers that reconcile with the baseline. Same class as the
+  `sanitize`/`canonical` error in this file and as #101: reimplementing pinned
+  tooling instead of importing it.
+- The wrong number reached a merged code comment, an audit row, and this file
+  because it was never derived, only carried forward. A number that cannot be
+  re-derived from a command should not be stated.
+
+The comment in `check_docs_references.py` and the `D01-F12` row now state
+359/42/317; the D01 row also records the superseded 32 so the correction is
+visible rather than silent. No governance surface changed, so this correction
+needed no §4 window.

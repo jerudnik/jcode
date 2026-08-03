@@ -4,7 +4,7 @@ See also:
 
 - [`architecture/MCP_SERVE_FORKBOMB_INCIDENT.md`](./architecture/MCP_SERVE_FORKBOMB_INCIDENT.md)
 - [`architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md`](./architecture/MCP_SERVER_REGISTRATION_GUARDRAILS.md)
-- [`fork/SYNC_MODEL.md`](./fork/SYNC_MODEL.md)
+- [`BRANCHING.md`](./BRANCHING.md)
 
 This is the supervision and lifecycle contract for the persistent shared daemon
 and temporary server variants.

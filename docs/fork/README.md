@@ -35,14 +35,8 @@ all live facts with `scripts/ideal_base_railway.py` before mutation.
 The live repository and `main` are authoritative. There is no upstream sync,
 tracking cadence, patch stack, or patch-ledger maintenance obligation.
 
-- [`SYNC_MODEL.md`](SYNC_MODEL.md): independence, lineage, and the retired sync
-  model.
 - [`SECURITY_TRIAGE.md`](SECURITY_TRIAGE.md): fork-only security triage and advisory
   rows not already documented upstream.
-
-The former [`patch-ledger.md`](patch-ledger.md) and
-[`../fork-sync-policy.md`](../fork-sync-policy.md) are frozen historical records.
-Do not add entries or treat them as current maintenance policy.
 
 ## Frozen historical namespaces
 

@@ -14,8 +14,6 @@ Code-adjacent reference for maintaining the independent hard fork: branch topolo
 - `BRANCHING.md` — single-rail hard-fork policy, external-code reuse, and CI ownership.
 - `NIX.md` — flake packaging, Home Manager module, Cachix, and install/use notes.
 - `agent-workflows.md` — detailed agent build, test, selfdev, swarm, CI, and release procedures.
-- `fork/SYNC_MODEL.md` — repository independence, lineage, and the retired sync model.
-- `fork/patch-ledger.md` and `fork-sync-policy.md` are frozen historical records, not active maintenance authorities.
 - Other docs stay close to implementation and should describe current Jcode behavior without assuming another repository is authoritative.
 
 ## Local Contracts
