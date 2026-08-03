@@ -716,6 +716,11 @@ opt-out and posts to the upstream maintainer's server. See
 
 ## Further Reading
 
+Start with the [documentation map](docs/README.md), which classifies every
+document by authority: binding contracts, current subsystem documentation,
+proposals, and frozen historical records. The list below is a convenience
+shortcut into the second tier, not a statement that these are the authorities.
+
 - [Ambient Mode / OpenClaw](docs/AMBIENT_MODE.md)
 - [Browser Provider Protocol](docs/BROWSER_PROVIDER_PROTOCOL.md)
 - [Memory Architecture](docs/MEMORY_ARCHITECTURE.md)
