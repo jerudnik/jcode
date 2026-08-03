@@ -86,7 +86,7 @@ skipping the frozen forensic trees above:
 
 - **broken-link**: a Markdown link to a repository-relative path that does not exist.
 - **machine-local**: a home-directory path (private notes trees, `/Users/...` style absolute paths) that no other reader can resolve. This is a ratchet against `scripts/docs_references_budget.json`, currently non-zero, and `--update` refuses to raise any file's count.
-- **retired-rail**: an instruction to install via Homebrew, AUR, `curl | sh`, `cargo install`, or TestFlight, all retired by the distribution contract. Sentences that *prohibit* those rails are not findings.
+- **retired-rail**: an instruction to install through any channel the distribution contract retired (Homebrew, AUR, piping a downloaded script into a shell, `cargo install`, TestFlight). Sentences that *prohibit* those rails are not findings. Note that `tests/test_nix_distribution_policy.py` bans several of these tokens outright, with no exemption for prose that merely names them, so this document describes them rather than spelling them.
 
 Run `./scripts/d01_scoreboard.sh` for the current numbers.
 
