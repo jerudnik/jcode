@@ -127,14 +127,32 @@ class DocsReferencesTest(unittest.TestCase):
         )
         self.assertEqual(self.rules(findings), set())
 
-    def test_dated_audit_snapshots_are_exempt(self):
+    def test_dated_audit_snapshots_are_ratcheted_not_exempt(self):
         """A document titled with its date is a record of a tree that has since
-        moved. Its stale paths are accurate history, and flagging them would
-        mean editing evidence to make a counter fall."""
+        moved, so its existing stale paths must not force an edit to evidence.
+        It is held by its per-file baseline rather than by an exemption, because
+        an exemption would also hide every citation added to it later."""
+        doc = "docs/CODE_QUALITY_AUDIT_2026-04-18.md"
+        findings = self.run_on_git_tree({doc: "see `src/gone.rs`\n"}, {})
+        # The finding IS raised; the per-file baseline is what forgives it.
+        self.assertEqual(self.rules(findings), {"stale-code-path"})
+        self.assertEqual(mod.ratchet_violations({doc: 1}, {doc: 1}), [])
+
+    def test_new_stale_citation_in_a_frozen_record_still_fails(self):
+        """The reason the exemption had to go. Under an exemption this file was
+        a blind spot forever, so a citation added later was invisible no matter
+        how wrong it was. Under the ratchet, going beyond the frozen count is
+        still a violation."""
+        doc = "docs/CODE_QUALITY_AUDIT_2026-04-18.md"
         findings = self.run_on_git_tree(
-            {"docs/CODE_QUALITY_AUDIT_2026-04-18.md": "see `src/gone.rs`\n"}, {}
+            {doc: "see `src/gone.rs`\nand `src/also_gone.rs`\n"}, {}
         )
-        self.assertEqual(self.rules(findings), set())
+        self.assertEqual(
+            sum(1 for f in findings if f.rule == "stale-code-path"), 2
+        )
+        problems = mod.ratchet_violations({doc: 2}, {doc: 1})
+        self.assertEqual(len(problems), 1)
+        self.assertIn("baseline allows 1", problems[0])
 
     def test_prose_mentioning_a_path_without_backticks_is_not_flagged(self):
         """The rule keys on a backticked citation. Bare prose is too noisy to
