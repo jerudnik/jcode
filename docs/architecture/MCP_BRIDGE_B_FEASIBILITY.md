@@ -46,7 +46,7 @@ $ jcode debug --quiet create_session
 $ jcode debug --quiet -S session_sheep_1783526223097_95c3414bd067289e 'tool:swarm {"action":"list_swarms"}'
 {
   "metadata": null,
-  "output": "Live swarms:\n\n- `/Users/jrudnik`: 2 member(s), coordinator `giraffe` (ready)\n  ...\n- `/Users/jrudnik/labs/jcode/.git`: 12 member(s), coordinator `humpback` (ready)\n  ...\n",
+  "output": "Live swarms:\n\n- `<home>`: 2 member(s), coordinator `giraffe` (ready)\n  ...\n- `<repo>/.git`: 12 member(s), coordinator `humpback` (ready)\n  ...\n",
   "title": null
 }
 ```
@@ -194,10 +194,10 @@ Example `~/.jcode/mcp.json` entry:
   "servers": {
     "jcode-swarm": {
       "command": "python3",
-      "args": ["/Users/jrudnik/.jcode/bin/jcode_swarm_mcp.py"],
+      "args": ["<home>/.jcode/bin/jcode_swarm_mcp.py"],
       "env": {
-        "JCODE_BIN": "/Users/jrudnik/.local/bin/jcode",
-        "JCODE_SWARM_WORKING_DIR": "/Users/jrudnik/labs/jcode"
+        "JCODE_BIN": "<home>/.local/bin/jcode",
+        "JCODE_SWARM_WORKING_DIR": "<repo>"
       },
       "shared": true
     }

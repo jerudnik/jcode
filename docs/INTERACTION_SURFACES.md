@@ -10,8 +10,8 @@ This is the starting point for the jcode surface project. It links the design la
 | --- | --- | --- |
 | [`PERSONAL_INTERACTION_SURFACES.md`](./PERSONAL_INTERACTION_SURFACES.md) | Visual language, device feel, mockups, density, typography | UI decisions and design checklist |
 | [`INTERACTION_SURFACE_REQUIREMENTS.md`](./INTERACTION_SURFACE_REQUIREMENTS.md) | Requirements, phases, command verbs, protocol hooks, tests | Work items with acceptance criteria |
-| [`SURFACE_WORKSPACE_SUBSTRATE_PLAN.md`](~/notes/projects/jcode/proposals/surface-workspace-substrate-plan.md) | Cards/docs/annotations/intents/artifacts object graph | Data model, storage plan, operation log |
-| [`INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md`](~/notes/projects/jcode/proposals/interaction-surface-implementation-prompt.md) | Next-session execution prompt | Research, implementation, tests, troubleshooting, cleanup, commit |
+| `SURFACE_WORKSPACE_SUBSTRATE_PLAN.md` (private planning note, not in this repository) | Cards/docs/annotations/intents/artifacts object graph | Data model, storage plan, operation log |
+| `INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md` (private planning note, not in this repository) | Next-session execution prompt | Research, implementation, tests, troubleshooting, cleanup, commit |
 
 ## Product thesis
 
@@ -133,5 +133,5 @@ Networking should use the existing `~/infrastructure/nix-config` Kanidm and mesh
 ## Future session starting prompt
 
 ```text
-Use ~/notes/projects/jcode/proposals/interaction-surface-implementation-prompt.md for the next implementation session. Preserve the zero-build web path, keep TUI primary, use the surface workspace object model, and satisfy the requirement IDs for the selected phase before expanding scope.
+Use `INTERACTION_SURFACE_IMPLEMENTATION_PROMPT.md` (private planning note, not in this repository) for the next implementation session. Preserve the zero-build web path, keep TUI primary, use the surface workspace object model, and satisfy the requirement IDs for the selected phase before expanding scope.
 ```

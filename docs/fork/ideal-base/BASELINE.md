@@ -11,7 +11,7 @@ program safely. Historical reconstruction remains under
 These facts were true when the railway was created and must be revalidated at the
 start of every coordinator session:
 
-- Canonical checkout: `/Users/jrudnik/labs/jcode`.
+- Canonical checkout: the repository root of this working tree.
 - Canonical branch: `main`.
 - Railway seed source commit: `923c6353e04266f71dc6cc06fc8516e502a9c07f`.
 - The seed source was clean and two commits ahead of `origin/main`.

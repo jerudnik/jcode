@@ -79,7 +79,7 @@ user explicitly asks for a manual manifest repair first.
 
 ## D007. Quarantine the stale persisted swarm plan before railway seeding
 
-**Decision:** the persisted swarm plan for `/Users/jrudnik/labs/jcode/.git`
+**Decision:** the persisted swarm plan keyed to this repository's `.git`
 still contained the completed historical recovery program (P*, G*, w3-*
 nodes). Seeding W0.2 with `task_graph` merged into that plan, and `run_plan`
 resurrected five stale nodes (G4-pilot-execute, P3_gate_recheck, w3-cluster-b,

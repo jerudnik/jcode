@@ -4,8 +4,8 @@ This document defines the safe, incremental path for refactoring jcode while pre
 
 See also:
 
-- `~/notes/projects/jcode/maintenance/code-quality-10-10-plan.md` for the code-quality target, phased uplift program, and initial hotspot refactor list.
-- `~/notes/projects/jcode/maintenance/compile-performance-plan.md` for compile-speed baselines, tactical build workflow, and the workspace/crate split roadmap.
+- `CODE_QUALITY_10_10_PLAN.md` (private planning note, not in this repository) for the code-quality target, phased uplift program, and initial hotspot refactor list.
+- `COMPILE_PERFORMANCE_PLAN.md` (private planning note, not in this repository) for compile-speed baselines, tactical build workflow, and the workspace/crate split roadmap.
 
 ## Goals
 

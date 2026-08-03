@@ -1,22 +1,5 @@
 {
   "_comment": "Per-file count of machine-local documentation references (D01-F08). This ratchet may only decrease. Refresh with scripts/check_docs_references.py --update after removing or importing a reference; --update refuses to raise any file's count.",
-  "machine_local_by_file": {
-    "docs/DESKTOP_APP_ARCHITECTURE.md": 1,
-    "docs/DESKTOP_CODEBASE_ARCHITECTURE.md": 1,
-    "docs/INTERACTION_SURFACES.md": 3,
-    "docs/INTERACTION_SURFACE_REQUIREMENTS.md": 2,
-    "docs/MODULAR_ARCHITECTURE_RFC.md": 1,
-    "docs/PERSONAL_INTERACTION_SURFACES.md": 1,
-    "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md": 1,
-    "docs/REFACTORING.md": 2,
-    "docs/SERVER_ARCHITECTURE.md": 1,
-    "docs/architecture/MCP_BRIDGE_B_FEASIBILITY.md": 4,
-    "docs/fork/ideal-base/BASELINE.md": 1,
-    "docs/fork/ideal-base/COORDINATOR_BOOTSTRAP.md": 2,
-    "docs/fork/ideal-base/DECISIONS.md": 1,
-    "docs/fork/ideal-base/DISK_HYGIENE_LEDGER.md": 2,
-    "docs/proposals/CROSS_DEVICE_WORKTREE_SYNC.md": 1,
-    "docs/proposals/swarm-lifecycle-remediation.md": 1
-  },
-  "total": 25
+  "machine_local_by_file": {},
+  "total": 0
 }
