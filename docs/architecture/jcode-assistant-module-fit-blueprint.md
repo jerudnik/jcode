@@ -101,7 +101,7 @@ Choose where and how work runs for each interaction: direct provider route, MCP/
 
 ### Fit in existing architecture
 
-- Types: add a small `crates/jcode-routing-types` crate only if shared by app-core, protocol, and TUI. If the first slice stays app-core-only, start in `crates/jcode-app-core/src/routing.rs` and extract later.
+- Types: add a small `crates/jcode-routing-types` crate only if shared by app-core, protocol, and TUI. If the first slice stays app-core-only, start in a new crates/jcode-app-core/src/routing.rs and extract later.
 - Runtime owner: `jcode-app-core::agent::Agent` owns an `InteractionRouter` field or creates one per turn from config/runtime state.
 - Provider route seam: use existing `jcode-provider-core::RouteSelection`, `Provider::set_route_selection`, `Agent::set_route_selection`, and model catalog APIs.
 - Tool route seam: wrap or call from `Registry::execute`; do not change `Tool` implementations first.

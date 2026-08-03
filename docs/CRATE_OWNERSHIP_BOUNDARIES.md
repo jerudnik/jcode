@@ -133,8 +133,8 @@ Measured on 2026-04-30 with `scripts/dev_cargo.sh check --profile selfdev -p jco
 | Scenario | Observed time | Interpretation |
 | --- | ---: | --- |
 | No-op check after recent doc-only commit | ~65.8s | Environment/cache state can dominate a first check. Treat as warmup/noise baseline, not pure no-op steady state. |
-| Touch root behavior module `src/usage.rs` | ~6.25s | A root-only behavior edit can be relatively cheap when dependencies are already built. |
-| Touch `crates/jcode-core/src/usage_types.rs` | ~65.35s | Editing `jcode-core` invalidates broad downstream dependents. Avoid adding high-churn domain DTOs to `jcode-core`. |
+| Touch root behavior module `crates/jcode-base/src/usage.rs` | ~6.25s | A root-only behavior edit can be relatively cheap when dependencies are already built. |
+| Touch the usage DTOs, then in `jcode-core` | ~65.35s | Editing `jcode-core` invalidates broad downstream dependents. Avoid adding high-churn domain DTOs to `jcode-core`. Acted on since this measurement: the usage types were moved out to the `jcode-usage-types` leaf crate in `2838bf850`. |
 
 Implication: the compile-speed target is not simply "move things out of root". Moving stable, low-churn contracts out of root is good, but putting many high-churn domain DTOs into `jcode-core` can be counterproductive because `jcode-core` has high fan-out. Prefer focused leaf crates such as `jcode-usage-types`, `jcode-gateway-types`, and `jcode-ambient-types` for domain DTOs that are likely to change.
 
@@ -144,10 +144,10 @@ At this checkpoint, the root crate is the only direct Cargo dependency on `jcode
 
 Observed root re-export/use paths:
 
-- `src/catchup.rs` -> `catchup_types`
-- `src/goal.rs` -> `goal_types`
-- `src/todo.rs` -> `todo_types`
-- `src/env.rs`, `src/id.rs`, `src/stdin_detect.rs`, `src/util.rs`, and panic UI helpers -> general utilities
+- `crates/jcode-app-core/src/catchup.rs` -> `catchup_types`
+- `crates/jcode-base/src/goal.rs` -> `goal_types`
+- `crates/jcode-base/src/todo.rs` -> `todo_types`
+- `crates/jcode-base/src/env.rs`, `crates/jcode-base/src/id.rs`, `crates/jcode-base/src/stdin_detect.rs`, `crates/jcode-base/src/util.rs`, and panic UI helpers -> general utilities
 
 Compile-speed priority from this audit:
 
@@ -202,7 +202,7 @@ Completed/high-value domain type splits:
 
 These are not simple DTO moves. Refactor behavior boundaries first.
 
-### `src/session.rs`
+### `crates/jcode-base/src/session.rs`
 
 Target split:
 
@@ -213,7 +213,7 @@ Target split:
 - rendering lives in existing `session/render.rs`
 - crash recovery lives in existing `session/crash.rs`
 
-### `src/ambient.rs`
+### `crates/jcode-app-core/src/ambient.rs`
 
 Target split:
 
@@ -226,7 +226,7 @@ Target split:
 
 Do not move `AmbientState` as a DTO until load/save/record behavior is separated from the struct.
 
-### `src/usage.rs`
+### `crates/jcode-base/src/usage.rs`
 
 Target split:
 
@@ -237,7 +237,7 @@ Target split:
 - account selection/guidance
 - public report DTOs in `jcode-usage-types`
 
-### `src/gateway.rs`
+### `crates/jcode-base/src/gateway.rs`
 
 Target split:
 

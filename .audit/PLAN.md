@@ -240,7 +240,7 @@ The behavioral risk is changing precedence or accidentally applying catalog alia
      `provider_for_model[_with_hint]` exports.
    - App-core: retain the existing override-precedes-model policy in
      `provider_key_for_spawn_model` and `provider_key_for_launch_model` in
-     `src/server/comm_session.rs` and `src/server/jade_relay.rs`. Only replace
+    `crates/jcode-app-core/src/server/comm_session.rs` and `crates/jcode-app-core/src/server/jade_relay.rs`. Only replace
      each helper's inner `split_once(':')` classification block with
      `resolve_model_spec(model, cfg).provider_key`; do not move spawn/launch
      override policy into `jcode-base` or collapse these helpers into a base

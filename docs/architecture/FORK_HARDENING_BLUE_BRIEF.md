@@ -110,7 +110,7 @@ architectural:
 
 1. **Re-baseline the model's numbers** (one script + a committed table). The prose
    cites 2026-06-27 measurements; make the divergence baseline a regenerable artifact
-   (`scripts/fork-divergence-report.sh` → the GREEN scoreboard) so the doc never
+   (a new scripts/fork-divergence-report.sh → the GREEN scoreboard) so the doc never
    silently decalibrates again. This is the single highest-value fix.
 2. **Fix the one fork-health violation and make check 5 blocking.** Move
    `1f5cc7aac`'s workflow change to `distro/nix`; promote fork-health check 5 from

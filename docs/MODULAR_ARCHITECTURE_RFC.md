@@ -141,13 +141,21 @@ These are already aligned with the compile-performance plan's strategy: isolate 
 
 ### Current chokepoints
 
-The root crate still has several broad, high-fanout modules that make both maintenance and incremental compilation harder. Current sizes observed from the tree:
+The workspace split described by this RFC has largely happened: the modules below now live in
+`jcode-app-core`, `jcode-base`, and `jcode-tui` rather than in the root crate, and the root crate
+retains only `src/main.rs`, `src/lib.rs`, `src/bin/`, and `src/cli/`. What remains is that several
+of those modules are still broad and high-fanout inside their new crates. Sizes observed from the
+tree (`git ls-files '*.rs' | xargs wc -l`, 2026-08-03):
 
-- `src/server.rs`: ~1731 lines
-- `src/provider/mod.rs`: ~2283 lines
-- `src/session.rs`: ~2730 lines
-- `src/protocol.rs`: ~1198 lines
-- `src/main.rs`: ~55 lines
+- `crates/jcode-app-core/src/server.rs`: ~2384 lines
+- `crates/jcode-base/src/provider/mod.rs`: ~2605 lines
+- `crates/jcode-base/src/session.rs`: ~1671 lines
+- `crates/jcode-tui/src/tui/app/input.rs`: ~3565 lines
+- `crates/jcode-app-core/src/server/swarm.rs`: ~3543 lines
+- `src/main.rs`: ~135 lines
+
+`protocol` is no longer a chokepoint: `crates/jcode-base/src/protocol.rs` is a one-line re-export of
+the extracted `jcode-protocol` crate, which is the shape this RFC targets for the modules above.
 
 This supports the current plan direction:
 
@@ -466,7 +474,7 @@ Avoid these tempting but harmful structures:
 
 Based on the current root size and existing footholds, the best next work is probably:
 
-1. **Provider contracts:** keep shrinking `src/provider/mod.rs` until a `jcode-provider` trait/runtime crate can depend only on `jcode-message-types`, `jcode-provider-core`, and small runtime primitives.
+1. **Provider contracts:** keep shrinking `crates/jcode-base/src/provider/mod.rs` until a `jcode-provider` trait/runtime crate can depend only on `jcode-message-types`, `jcode-provider-core`, and small runtime primitives.
 2. **Server core:** extract protocol-independent pieces of `src/server/` such as client lifecycle state machines, swarm/background coordination DTOs, and reload/update policies behind server-local contracts.
 3. **TUI reducer/state core:** extract non-rendering app state transitions from `src/tui/app/*` before moving the whole TUI crate.
 4. **Tool contracts and registry shape:** separate tool definitions, schemas, execution context, and registry metadata from individual tool implementations.
@@ -517,7 +525,7 @@ Should not contain:
 Notes:
 
 - This is the most important future extraction because it enables the rest.
-- `src/protocol.rs`, `src/id.rs`, and carefully selected parts of `config.rs` and `message.rs` are the likely first feeders.
+- `crates/jcode-base/src/protocol.rs`, `crates/jcode-base/src/id.rs`, and carefully selected parts of `config.rs` and `message.rs` are the likely first feeders.
 
 ### `jcode-session`
 
@@ -539,7 +547,7 @@ Should not contain:
 
 Notes:
 
-- This crate is not explicitly named in the current compile-performance plan, but the current size and fanout of `src/session.rs` make session extraction a natural stabilizing move.
+- This crate is not explicitly named in the current compile-performance plan, but the current size and fanout of `crates/jcode-base/src/session.rs` make session extraction a natural stabilizing move.
 - If introducing `jcode-session` feels too early, the same boundary should still be established internally first and extracted later.
 
 ### `jcode-provider`
@@ -607,7 +615,7 @@ Should not contain:
 Notes:
 
 - The current `src/server/` submodule tree is already the right shape for this extraction.
-- `src/server.rs` should continue shrinking into a facade/composition module.
+- `crates/jcode-app-core/src/server.rs` should continue shrinking into a facade/composition module.
 
 ### `jcode-tui`
 
@@ -743,11 +751,11 @@ This is the recommended direction from the current tree, not a one-shot move lis
 
 | Current area | Likely target |
 |---|---|
-| `src/id.rs`, protocol/message/config primitives | `jcode-core` |
-| `src/session.rs`, parts of `storage`, restart snapshot concerns | `jcode-session` |
+| `crates/jcode-base/src/id.rs`, protocol/message/config primitives | `jcode-core` |
+| `crates/jcode-base/src/session.rs`, parts of `storage`, restart snapshot concerns | `jcode-session` |
 | `src/agent/*`, parts of `compaction`, tool orchestration seams | `jcode-agent` |
-| `src/server/` + shrinking `src/server.rs` facade | `jcode-server` |
-| `src/provider/mod.rs` trait/contracts plus provider composition seams | `jcode-provider` |
+| `src/server/` + shrinking `crates/jcode-app-core/src/server.rs` facade | `jcode-server` |
+| `crates/jcode-base/src/provider/mod.rs` trait/contracts plus provider composition seams | `jcode-provider` |
 | existing provider helper crates | remain leaf/provider support crates |
 | `src/tui/*` + `jcode-tui-workspace` | `jcode-tui` + leaf workspace widget crate |
 | `src/cli/*` | stay in root initially or become `jcode-cli` later if justified |
@@ -776,7 +784,7 @@ Aligns with `REFACTORING.md` phases 2 through 6.
 Focus areas:
 
 - continue CLI decomposition until `main()` stays parse + runtime bootstrap only
-- continue shrinking `src/server.rs` into a thin facade over `src/server/*`
+- continue shrinking `crates/jcode-app-core/src/server.rs` into a thin facade over `src/server/*`
 - unify agent turn-loop variants behind one engine
 - continue TUI state/reducer separation
 - continue provider state isolation and pure helper extraction
