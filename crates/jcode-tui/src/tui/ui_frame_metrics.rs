@@ -291,8 +291,28 @@ fn frame_perf_stats() -> &'static Mutex<FramePerfStats> {
     FRAME_PERF_STATS.get_or_init(|| Mutex::new(FramePerfStats::default()))
 }
 
+#[cfg(not(test))]
 fn slow_frame_history() -> &'static Mutex<SlowFrameHistory> {
     SLOW_FRAME_HISTORY.get_or_init(|| Mutex::new(SlowFrameHistory::default()))
+}
+
+// Per-test-thread under `cfg(test)`, matching `flicker_frame_history`. The
+// history is appended to by any frame slower than the threshold, so a shared
+// global lets an unrelated slow draw on another test thread land between this
+// test's `clear_slow_frame_history_for_tests` and its assertion. That made
+// `test_slow_frame_history_retains_recent_samples` fail intermittently under
+// load while passing when run alone. Clearing cannot fix it: the writer is
+// concurrent, so only isolation can.
+#[cfg(test)]
+fn slow_frame_history() -> &'static Mutex<SlowFrameHistory> {
+    thread_local! {
+        static PER_TEST_HISTORY: &'static Mutex<SlowFrameHistory> =
+            Box::leak(Box::new(Mutex::new(SlowFrameHistory::default())));
+    }
+    // Leaked once per test thread, bounded by the thread count and reclaimed at
+    // process exit; borrowing the thread-local directly would not give the
+    // `'static` callers expect.
+    PER_TEST_HISTORY.with(|history| *history)
 }
 
 fn frame_resource_start() -> &'static Mutex<Option<FrameResourceStart>> {
