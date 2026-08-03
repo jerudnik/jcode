@@ -280,7 +280,7 @@ When opted out, zero network requests are made. The telemetry module short-circu
 
 ## Verification
 
-This is open source. The entire telemetry implementation is in [`src/telemetry.rs`](./src/telemetry.rs) - you can read exactly what gets sent. There are no other network calls related to telemetry anywhere in the codebase.
+This is open source. The entire telemetry implementation is in [`crates/jcode-telemetry-core/`](./crates/jcode-telemetry-core/) - you can read exactly what gets sent. That crate owns the only telemetry HTTP client (`TELEMETRY_HTTP_CLIENT` in [`src/lib.rs`](./crates/jcode-telemetry-core/src/lib.rs)); every other crate reaches it through the `jcode_base::telemetry` re-export and can only record events, never send them. There are no other network calls related to telemetry anywhere in the codebase.
 
 ## Data Retention
 
