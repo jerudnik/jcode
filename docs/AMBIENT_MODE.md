@@ -1016,3 +1016,6 @@ has no writer. Because of them the adaptive scheduler always returns the max
 interval, ambient never pauses for an active user session, and the budget bar
 never renders. Each is a small connection, not a feature build.
 
+
+<!-- CONTROL: intentional violation, branch is never merged -->
+See [gone](./definitely-does-not-exist-control.md) and `/Users/jrudnik/labs/jcode/x`.
