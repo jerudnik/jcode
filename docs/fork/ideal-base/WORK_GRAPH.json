@@ -1795,6 +1795,64 @@
         "review_model": "opus",
         "class": "deterministic",
         "parent": "W6"
+      },
+      {
+        "id": "D01-FIX-1",
+        "content": "Wire the safety action classifier into tool dispatch (D01-F13, reproduced 2026-08-03). `SafetySystem::classify` and the AUTO_ALLOWED tier table are complete, but `ActionTier` appears in no file outside crates/jcode-base/src/safety.rs and its tests, and `classify` has no caller outside that file: tool dispatch gates on SessionToolPolicy instead. The documented tier 1/2/3 gate therefore never runs, so an unattended agent is restricted only by session policy and by voluntarily calling request_permission. The review pipeline behind it is real; only the trigger is unwired. Consult `classify` in the ambient/unattended tool path and route tier 2/3 through the existing review queue. Do not soften docs/SAFETY_SYSTEM.md, which already states plainly that the gate is inert; that statement becomes false only once the wire exists.",
+        "kind": "implement",
+        "depends_on": [
+          "D01"
+        ],
+        "priority": 72,
+        "owned_paths": [
+          "crates/jcode-base/src/safety.rs",
+          "crates/jcode-app-core/src/tool/mod.rs",
+          "docs/SAFETY_SYSTEM.md",
+          "docs/fork/ideal-base/evidence/D01-FIX-1/**"
+        ],
+        "acceptance_gates": [
+          "A tier 3 action attempted by an unattended agent is refused or queued for review by the classifier, proven by a test that FAILS when the classify call is removed",
+          "`ActionTier` has at least one production reference outside safety.rs; the grep that found zero is rerun and reported",
+          "Tier 1 auto-allowed actions are not newly blocked, so the wire does not trade an inert gate for a broken one",
+          "docs/SAFETY_SYSTEM.md is updated only after the gate demonstrably runs, and cites the passing test"
+        ],
+        "evidence": [
+          "before/after grep for ActionTier and classify callers",
+          "failing-control transcript with the classify call removed",
+          "tier 1 regression evidence"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
+      },
+      {
+        "id": "D01-FIX-2",
+        "content": "Connect three dangling wires that leave complete ambient implementations inert (D01-F14, reproduced 2026-08-03). (1) `UsageLog::record` (ambient/scheduler.rs) has no non-test caller, so usage.json is never written and every rate query returns 0. (2) `RateLimitInfo` has no production constructor and no x-ratelimit header is parsed anywhere, so both calculate_interval call sites pass None and the adaptive scheduler always returns the max interval. (3) `active_user_sessions` (ambient/runner.rs:53) is read at :176, :585 and :879 but has no writer beyond the RwLock::new(0) initializer, so it is permanently 0 and ambient never pauses for an active user. The budget bar is inert downstream of (1) and (2), since both producers hardcode budget_percent: None. Each fix is a connection, not a feature build. Do not soften docs/AMBIENT_MODE.md, which already marks each row Inert with evidence.",
+        "kind": "implement",
+        "depends_on": [
+          "D01"
+        ],
+        "priority": 68,
+        "owned_paths": [
+          "crates/jcode-app-core/src/ambient/**",
+          "docs/AMBIENT_MODE.md",
+          "docs/fork/ideal-base/evidence/D01-FIX-2/**"
+        ],
+        "acceptance_gates": [
+          "usage.json is written after a real ambient turn, and a rate query returns nonzero; test FAILS when the record call is removed",
+          "calculate_interval receives Some(RateLimitInfo) from a parsed response header, and returns an interval below max under load; the None path stays covered",
+          "active_user_sessions has a production writer; ambient pauses when a user session is active, proven by a test that FAILS with the writer removed",
+          "budget_percent reaches the bar as Some(_) for at least one producer",
+          "Each of the three wires is verified independently, so one fix cannot mask another"
+        ],
+        "evidence": [
+          "writer/caller greps before and after for all three wires",
+          "three failing-control transcripts, one per wire",
+          "usage.json artifact from a real ambient turn"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W6"
       }
     ]
   },
@@ -3482,6 +3540,64 @@
       "evidence": [
         "unregister-on-exit change",
         "prompt-drop reproduction"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "D01-FIX-1",
+      "content": "Wire the safety action classifier into tool dispatch (D01-F13, reproduced 2026-08-03). `SafetySystem::classify` and the AUTO_ALLOWED tier table are complete, but `ActionTier` appears in no file outside crates/jcode-base/src/safety.rs and its tests, and `classify` has no caller outside that file: tool dispatch gates on SessionToolPolicy instead. The documented tier 1/2/3 gate therefore never runs, so an unattended agent is restricted only by session policy and by voluntarily calling request_permission. The review pipeline behind it is real; only the trigger is unwired. Consult `classify` in the ambient/unattended tool path and route tier 2/3 through the existing review queue. Do not soften docs/SAFETY_SYSTEM.md, which already states plainly that the gate is inert; that statement becomes false only once the wire exists.",
+      "kind": "implement",
+      "depends_on": [
+        "D01"
+      ],
+      "priority": 72,
+      "owned_paths": [
+        "crates/jcode-base/src/safety.rs",
+        "crates/jcode-app-core/src/tool/mod.rs",
+        "docs/SAFETY_SYSTEM.md",
+        "docs/fork/ideal-base/evidence/D01-FIX-1/**"
+      ],
+      "acceptance_gates": [
+        "A tier 3 action attempted by an unattended agent is refused or queued for review by the classifier, proven by a test that FAILS when the classify call is removed",
+        "`ActionTier` has at least one production reference outside safety.rs; the grep that found zero is rerun and reported",
+        "Tier 1 auto-allowed actions are not newly blocked, so the wire does not trade an inert gate for a broken one",
+        "docs/SAFETY_SYSTEM.md is updated only after the gate demonstrably runs, and cites the passing test"
+      ],
+      "evidence": [
+        "before/after grep for ActionTier and classify callers",
+        "failing-control transcript with the classify call removed",
+        "tier 1 regression evidence"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W6"
+    },
+    {
+      "id": "D01-FIX-2",
+      "content": "Connect three dangling wires that leave complete ambient implementations inert (D01-F14, reproduced 2026-08-03). (1) `UsageLog::record` (ambient/scheduler.rs) has no non-test caller, so usage.json is never written and every rate query returns 0. (2) `RateLimitInfo` has no production constructor and no x-ratelimit header is parsed anywhere, so both calculate_interval call sites pass None and the adaptive scheduler always returns the max interval. (3) `active_user_sessions` (ambient/runner.rs:53) is read at :176, :585 and :879 but has no writer beyond the RwLock::new(0) initializer, so it is permanently 0 and ambient never pauses for an active user. The budget bar is inert downstream of (1) and (2), since both producers hardcode budget_percent: None. Each fix is a connection, not a feature build. Do not soften docs/AMBIENT_MODE.md, which already marks each row Inert with evidence.",
+      "kind": "implement",
+      "depends_on": [
+        "D01"
+      ],
+      "priority": 68,
+      "owned_paths": [
+        "crates/jcode-app-core/src/ambient/**",
+        "docs/AMBIENT_MODE.md",
+        "docs/fork/ideal-base/evidence/D01-FIX-2/**"
+      ],
+      "acceptance_gates": [
+        "usage.json is written after a real ambient turn, and a rate query returns nonzero; test FAILS when the record call is removed",
+        "calculate_interval receives Some(RateLimitInfo) from a parsed response header, and returns an interval below max under load; the None path stays covered",
+        "active_user_sessions has a production writer; ambient pauses when a user session is active, proven by a test that FAILS with the writer removed",
+        "budget_percent reaches the bar as Some(_) for at least one producer",
+        "Each of the three wires is verified independently, so one fix cannot mask another"
+      ],
+      "evidence": [
+        "writer/caller greps before and after for all three wires",
+        "three failing-control transcripts, one per wire",
+        "usage.json artifact from a real ambient turn"
       ],
       "review_model": "opus",
       "class": "deterministic",
