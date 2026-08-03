@@ -6,7 +6,7 @@ that the independent hard fork currently distributes a Windows package.
 ## Status
 
 - **Transport layer**: Implemented (`src/transport/`)
-- **Platform module**: Implemented (`src/platform.rs`)
+- **Platform module**: Implemented (`crates/jcode-base/src/platform.rs`)
 - **Windows transport**: Implemented but untested (`src/transport/windows.rs`)
 - **Windows platform**: Implemented (`src/platform.rs` has `#[cfg(windows)]` branches)
 - **Windows CI**: Not yet set up
