@@ -1,9 +1,19 @@
 # Memory Architecture Design
 
-> **Status:** Implemented (Core), Planned (Graph-Based Hybrid)
-> **Updated:** 2026-01-27
+> **Status:** Implemented (Core and Graph-Based Hybrid)
+> **Updated:** 2026-08-03
 
-Local embeddings plus a lightweight relevance-verification sidecar are implemented and running in production. This document describes both the current implementation and the planned graph-based hybrid architecture.
+Local embeddings, a lightweight relevance-verification sidecar, and the
+graph-based hybrid layer are all implemented and running in production. The
+graph is shipped: see `crates/jcode-memory-types/src/graph.rs`, whose
+`MemoryGraph` stores nodes and edges in `HashMap`s and whose
+`cascade_retrieve` walks them with a `VecDeque` BFS.
+
+One difference from earlier drafts of this document matters when reading the
+code: the graph is **not** built on petgraph. petgraph appears in no Cargo.toml
+and no Rust source file in this workspace. Plain `HashMap` collections were
+chosen because they serialize to JSON directly, which the persisted graph
+requires.
 
 ## Overview
 
@@ -38,7 +48,7 @@ graph TB
     end
 
     subgraph "Memory Graph"
-        MG[(petgraph<br/>DiGraph)]
+        MG[(MemoryGraph<br/>HashMap adjacency)]
         MS[Memory Nodes]
         TN[Tag Nodes]
         CN[Cluster Nodes]
@@ -102,18 +112,7 @@ graph LR
 ### Rust Implementation
 
 ```rust
-use petgraph::graph::DiGraph;
-
-/// Node in the memory graph
-#[derive(Debug, Clone)]
-pub enum MemoryNode {
-    Memory(MemoryEntry),
-    Tag(TagEntry),
-    Cluster(ClusterEntry),
-}
-
-/// Edge relationships
-#[derive(Debug, Clone)]
+/// Edge relationships (crates/jcode-memory-types/src/graph.rs)
 pub enum EdgeKind {
     HasTag,
     InCluster,
@@ -123,15 +122,20 @@ pub enum EdgeKind {
     DerivedFrom,
 }
 
-/// The memory graph
+/// The memory graph: adjacency lists, not a graph library.
 pub struct MemoryGraph {
-    graph: DiGraph<MemoryNode, EdgeKind>,
-    // Indexes for fast lookup
-    memory_index: HashMap<String, NodeIndex>,
-    tag_index: HashMap<String, NodeIndex>,
-    cluster_index: HashMap<String, NodeIndex>,
+    pub graph_version: u32,
+    pub memories: HashMap<String, MemoryEntry>,
+    pub tags: HashMap<String, TagEntry>,       // ids formatted "tag:{name}"
+    pub clusters: HashMap<String, ClusterEntry>, // ids formatted "cluster:{id}"
+    pub edges: HashMap<String, Vec<Edge>>,       // source_id -> outgoing edges
+    pub reverse_edges: HashMap<String, Vec<String>>, // target_id -> source_ids
+    pub metadata: GraphMetadata,
 }
 ```
+
+`reverse_edges` exists so cascade retrieval can traverse backwards without
+scanning every edge list.
 
 ---
 
@@ -671,10 +675,11 @@ sequenceDiagram
 
 ```
 ~/.jcode/memory/
-├── graph.json                    # Serialized petgraph
 ├── projects/
-│   └── <project_hash>.json       # Per-directory memories
-├── global.json                   # User-wide memories
+│   └── <project_hash>.json       # Per-directory memories, serialized as a
+│                                 # whole MemoryGraph: keys graph_version,
+│                                 # memories, tags, clusters, edges, metadata
+├── global.json                   # User-wide memories, same graph shape
 ├── embeddings/
 │   └── <memory_id>.vec           # Embedding vectors
 ├── clusters/

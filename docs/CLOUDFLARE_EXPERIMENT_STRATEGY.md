@@ -1,7 +1,21 @@
 # Cloudflare Experiment Strategy After Upstream Sync
 
+Status: frozen record, 2026-06-16. Retained as the reasoning behind a decision,
+not as current guidance.
+
+This document was written under the fork's earlier upstream-tracking branch
+model. That model no longer exists: `docs/fork/SYNC_MODEL.md` is the authority,
+and it defines a single-rail hard fork with `main` as the only durable rail and
+no upstream-tracking contract. The `distro/nix` packaging branch this document
+describes as current does not exist in the repository.
+
+Its Cloudflare findings (service latency as a ceiling for interactive recall,
+Cloudflare as a durability and batch substrate rather than a hot path) are the
+reason it is kept. Its branch-model statements are historical and must not be
+followed.
+
 Date: 2026-06-16
-Historical base: former `nix-flake` branch after syncing upstream through v0.28.0. Current branch model uses `distro/nix` for packaging and `main` for custom work.
+Historical base: former `nix-flake` branch after syncing upstream through v0.28.0. The branch model in force at the time used `distro/nix` for packaging and `main` for custom work; both that model and that branch are retired.
 Historical source branch reviewed: former `origin/nix-flake-dev`.
 
 ## Summary

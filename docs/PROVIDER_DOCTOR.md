@@ -9,8 +9,20 @@ tracks (`jcode provider-test-coverage`), but as an interactive command you can r
 yourself, with clear pass/fail output and a "what to try next" hint on the first
 failure.
 
-It works with **OpenAI-compatible providers** (cerebras, fpt, nvidia-nim,
-comtegra, deepseek, groq, openrouter, and other `openai-compatible` profiles).
+It covers both provider families, and picks the right one for you:
+
+- **Native-runtime providers** (Claude, OpenAI, Gemini, Cursor, Copilot,
+  Bedrock, Antigravity, Azure OpenAI, and Jcode's own provider) are routed to
+  native drivers that exercise the production runtime. Claude and Antigravity
+  keep bespoke drivers; the rest share a generic native driver.
+- **OpenAI-compatible providers** (cerebras, fpt, nvidia-nim, comtegra,
+  deepseek, groq, openrouter, and other `openai-compatible` profiles) run
+  through the OpenAI-compatible path.
+
+Routing is automatic and decided by `native_doctor_supports_provider`
+(`crates/jcode-base/src/auth/doctor.rs`), which is the authority for that
+first list. Run `jcode provider-test-coverage` for the current provider ids
+rather than trusting either list here to stay complete.
 
 ## Quick start
 
