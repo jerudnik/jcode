@@ -1,7 +1,7 @@
 # Ambient Mode
 
-> **Status:** Design
-> **Updated:** 2026-02-08
+> **Status:** Partially implemented. See the implementation matrix below.
+> **Updated:** 2026-08-03
 
 A proactive, always-on agent mode that works autonomously without user prompting. Like a brain consolidating memories during sleep, ambient mode tends to the memory graph, identifies useful work, and acts on the user's behalf — all while staying within resource limits.
 
@@ -919,48 +919,100 @@ This is a distributed systems problem that will be addressed once ambient is sta
 
 ---
 
-## Implementation Phases
+## Implementation Status
+
+This section replaces the aspirational checklist this document used to carry.
+Every row was verified against the code at the cited symbol; rows without a
+citation are absent. Three states are used, and the distinction matters:
+
+- **Shipped**: code exists and runs in the ambient cycle.
+- **Inert**: the implementation exists and is complete, but nothing feeds it at
+  runtime, so the behavior does not occur. This is worse than absent, because
+  the code reads as working.
+- **Prompt-only**: no code performs this. The prompt asks the model to do it.
+  That is a legitimate design choice, but it is not an implementation, and the
+  behavior is neither deterministic nor testable.
+- **Absent**: not implemented.
 
 ### Phase 1: Foundation
-- [ ] Ambient agent loop (spawn, run, sleep)
-- [ ] Single-instance guard
-- [ ] Basic scheduling (fixed interval with max ceiling)
-- [ ] Provider selection chain (OpenAI OAuth → Anthropic OAuth → pay-per-token opt-in → disabled)
-- [ ] Configuration (`[ambient]` section in config)
-- [ ] Storage layout
 
-### Phase 2: Memory Consolidation — Garden
-- [ ] Full graph-wide dedup scan
-- [ ] Fact verification against codebase
-- [ ] Retroactive session extraction (crashed/missed sessions)
-- [ ] Pruning dead memories (low confidence + low strength)
-- [ ] Relationship discovery across sessions
-- [ ] Embedding backfill
-- [ ] Contradiction resolution
+| Item | State | Evidence |
+|---|---|---|
+| Ambient agent loop (spawn, run, sleep) | Shipped | `ambient/runner.rs:533` `run_loop` |
+| Single-instance guard | Shipped | `ambient/persistence.rs:177` `AmbientLock::try_acquire`, PID-liveness checked |
+| Basic scheduling (fixed interval with ceiling) | Shipped | `ambient/scheduler.rs:271` `apply_backoff`, clamped to config min/max |
+| Provider selection chain | Absent | No OAuth chain exists. `server.rs:1383` hands the runner the user's active provider. `allow_api_keys` and `api_daily_budget` have no reader outside config display |
+| Configuration (`[ambient]`) | Shipped | `jcode-config-types/src/lib.rs:1324` `AmbientConfig`, 11 keys; 3 are inert (see above and Phase 4) |
+| Storage layout | Shipped | `ambient/paths.rs:10`; `~/.jcode/ambient/` holds `state.json`, `queue.json`, `ambient.lock`, `transcripts/` |
+
+### Phase 2: Memory Consolidation
+
+Layer 1 (the retrieval-time sidecar) implements much of this; the ambient
+garden pass mostly does not. The distinction is the point of the phase, so the
+rows say which layer runs.
+
+| Item | State | Evidence |
+|---|---|---|
+| Full graph-wide dedup scan | Prompt-only | Write-time dedup exists (`memory.rs:550`), but `prompt.rs:100` hardcodes `duplicate_candidates = 0`; no scan |
+| Fact verification against codebase | Prompt-only | No verification routine; only prompt text |
+| Retroactive session extraction | Prompt-only | `prompt.rs:245` detects and labels missed sessions, but nothing re-runs extraction |
+| Pruning dead memories | Layer 1 only | `memory_agent.rs:1479` `prune_low_confidence`, called only from post-retrieval maintenance, never from the ambient cycle |
+| Relationship discovery across sessions | Layer 1 only | `memory_agent.rs:1682` `discover_links`, scoped to the current turn's verified ids |
+| Embedding backfill | Shipped | `ambient/runner.rs:788` calls `MemoryManager::backfill_embeddings` after each cycle |
+| Contradiction resolution | Layer 1 only | Ambient counts `Contradicts` edges (`prompt.rs:79`); resolution runs only during extraction (`sidecar.rs:1002`) |
 
 ### Phase 3: Scheduling
-- [ ] `schedule_ambient` tool for agent self-scheduling
-- [ ] Scheduled queue (persistent, with context)
-- [ ] Adaptive resource calculator
-- [ ] Usage history tracking
-- [ ] Rate limit awareness (from provider response headers)
-- [ ] Event triggers (session close, crash, git push)
-- [ ] Active session detection → pause/throttle
+
+| Item | State | Evidence |
+|---|---|---|
+| `schedule_ambient` tool | Shipped | `tool/ambient.rs:302`, registered at `tool/mod.rs:1048` |
+| Scheduled queue (persistent, with context) | Shipped | `ambient/persistence.rs:57` `ScheduledQueue`, saved on every mutation |
+| Adaptive resource calculator | **Inert** | `ambient/scheduler.rs:188` `calculate_interval` implements the documented algorithm, but both production callers (`runner.rs:686`, `runner.rs:819`) pass `None`, so it always returns the max interval. Only tests exercise the adaptive path |
+| Usage history tracking | **Inert** | `ambient/scheduler.rs:26` `UsageLog` is complete, but `UsageLog::record` has no non-test caller, so `usage.json` is never written and every rate query returns 0 |
+| Rate limit awareness | Absent | No `x-ratelimit`/`anthropic-ratelimit` parsing anywhere. `RateLimitInfo` has no production constructor |
+| Event triggers | Partial | Session close is wired (`server/runtime.rs:424` nudge on disconnect). Crash and git-push triggers do not exist |
+| Active session detection, pause/throttle | **Inert** | The pause path is complete (`runner.rs:589` `should_pause`), but `active_user_sessions` (`runner.rs:53`) has only reads and no writer in the workspace, so it is permanently 0 and ambient never pauses |
 
 ### Phase 4: Proactive Work
-- [ ] Scout: analyze recent sessions + git history
-- [ ] Infer user priorities from memories
-- [ ] Identify actionable work
-- [ ] Execute on separate branch
-- [ ] Report results
+
+| Item | State | Evidence |
+|---|---|---|
+| Scout: analyze sessions and git history | Partial | Session analysis is real (`prompt.rs:173`). Git history is prompt text only; the cycle runs no git command |
+| Infer user priorities | Prompt-only | `prompt.rs:112` gathers feedback memories as context; no inference code |
+| Identify actionable work | Prompt-only | No such symbol exists; `prompt.rs:481-507` asks the model |
+| Execute on separate branch | Absent | No worktree or branch creation in ambient. `work_branch_prefix` has no reader outside config display |
+| Report results | Shipped | `notifications.rs:82` `dispatch_cycle_summary`, called at `runner.rs:782` |
 
 ### Phase 5: Info Widget
-- [ ] Ambient status display in TUI
-- [ ] Queue preview
-- [ ] Last cycle summary
-- [ ] Next wake estimate
-- [ ] Budget bar (user vs ambient vs remaining)
 
----
+| Item | State | Evidence |
+|---|---|---|
+| Status display | Shipped | `tui/info_widget.rs:1862`, all five `AmbientStatus` variants |
+| Queue preview | Shipped | `tui/info_widget.rs:1907` |
+| Last cycle summary | Shipped | `tui/info_widget.rs:1946` |
+| Next wake estimate | Shipped | `tui/info_widget.rs:1886` countdown |
+| Budget bar | **Inert** | The bar renders (`info_widget.rs:1988`), but both producers hardcode `budget_percent: None`, so it never appears. Downstream of the two inert rows in Phase 3 |
 
-*Last updated: 2026-02-08*
+### Shipped but never listed
+
+The original checklist omitted roughly a third of what ambient actually does.
+Verified present: direct-delivery scheduled tasks including session, spawn, and
+headless-resume targets (`runner.rs:477`), which run even when
+`ambient.enabled = false`; the general `schedule` tool with list and cancel
+(`tool/ambient.rs:757`); two-way messaging over Telegram, Discord, and IMAP
+email with soft-interrupt injection into a live cycle (`runner.rs:102`); a
+persisted user-directive store that both triggers and steers a cycle
+(`ambient/directives.rs`); the permission and approval system with HTML email
+buttons and stale-request GC (`tool/ambient.rs:552`); a visible cycle mode that
+spawns a TUI (`runner.rs:997`); the debug socket surface
+(`server/debug_ambient.rs`); and activity-lease coordination so shutdown cannot
+drop a dequeued item (`runner.rs:635`).
+
+### The one thing to fix first
+
+Three dangling wires make three complete implementations inert: `UsageLog::record`
+has no producer, `RateLimitInfo` has no constructor, and `active_user_sessions`
+has no writer. Because of them the adaptive scheduler always returns the max
+interval, ambient never pauses for an active user session, and the budget bar
+never renders. Each is a small connection, not a feature build.
+

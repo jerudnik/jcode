@@ -1,7 +1,7 @@
 # Safety System
 
-> **Status:** Design
-> **Updated:** 2026-02-08
+> **Status:** Partially implemented. See the implementation matrix below.
+> **Updated:** 2026-08-03
 
 A human-in-the-loop safety layer for unmonitored agent operations. Designed as an independent subsystem that any jcode feature can integrate with. Currently the only consumer is ambient mode, but the system is intentionally decoupled so it can be reused for future features.
 
@@ -508,36 +508,85 @@ pub enum Urgency {
 
 ## Implementation Phases
 
+### How to read this
+
+Every row below was verified against the code at the cited symbol. Four states,
+and the difference between two of them matters more than the rest:
+
+- **Shipped**: exists and runs.
+- **Inert**: fully implemented, but nothing calls it at runtime, so the
+  behavior does not happen. Inert is more dangerous than absent in a safety
+  document, because the code reads as protection that is not in force.
+- **Partial**: some of it runs; the row names what does not.
+- **Absent**: not implemented.
+
 ### Phase 1: Foundation
-- [ ] Action classifier (tier 1/2/3 lookup)
-- [ ] Review queue (persistent storage)
-- [ ] `request_permission` tool for agents
-- [ ] Transcript logger
-- [ ] Basic session summary generation
+
+| Item | State | Evidence |
+|---|---|---|
+| Action classifier (tier 1/2/3) | **Inert** | `safety.rs:177` `classify` and the `AUTO_ALLOWED` table (`safety.rs:132`) are complete, but `ActionTier` appears in no file outside `safety.rs` and its tests. Tool dispatch (`tool/mod.rs:568`) gates on `SessionToolPolicy` instead, so the tier table protects nothing today |
+| Review queue (persistent) | Shipped | `safety.rs:363` `persist_queue`, written on every request and decision, reloaded at startup, read cross-process |
+| `request_permission` tool | Shipped | `tool/ambient.rs:551`, registered for ambient sessions at `tool/mod.rs:1054` |
+| Transcript logger | Partial | Cycle transcripts persist (`safety.rs:335` `save_transcript`, called at `ambient/runner.rs:779`). Per-action logging does not: `log_action` (`safety.rs:278`) has only test callers and the runner hardcodes `actions: Vec::new()`, so every stored transcript has an empty action list |
+| Basic session summary | Partial | The shipped summary is agent-authored, passed to `end_ambient_cycle` (`tool/ambient.rs:124`). The documented generator `generate_summary` (`safety.rs:285`) is inert, and would emit nothing regardless because `log_action` is never called |
 
 ### Phase 2: Notification Channels
-- [ ] Desktop notifications (notify-send / Wayland)
-- [ ] Email notifications (SMTP)
-- [ ] Webhook support
-- [ ] Notification batching and quiet hours
-- [ ] SMS (Twilio or similar)
+
+| Item | State | Evidence |
+|---|---|---|
+| Desktop notifications | Shipped | `notifications.rs:363` `send_desktop`, notify-send on Linux/Wayland, osascript on macOS |
+| Email (SMTP) | Shipped | `jcode-notify-email/src/lib.rs:28` `send_email`, lettre async SMTP |
+| Webhook support | Absent | No webhook sink, config field, or HTTP POST notifier exists |
+| Batching and quiet hours | Absent | `notifications.rs:158` dispatches immediately; no schedule, digest, or rate limit |
+| SMS (Twilio or similar) | Absent | No telephony code or config |
 
 ### Phase 3: Review Interfaces
-- [ ] TUI review panel
-- [ ] CLI commands (`jcode safety review/list/approve/deny/log`)
-- [ ] Email approve/deny links (relay service)
+
+| Item | State | Evidence |
+|---|---|---|
+| TUI review panel | Shipped | `jcode-tui-permissions/src/lib.rs:833` `run_permissions`, full approve/deny/approve-all with typed deny reasons. It is a standalone screen reached by `jcode permissions`, not a panel inside the session TUI |
+| CLI `jcode safety ...` | **Does not exist** | There is no `safety` variant in the clap command tree, so `jcode safety review/list/approve/deny/log` does not parse. The shipped equivalents are `jcode permissions` (`src/cli/args.rs:338`) and `jcode ambient log`. Non-interactive list/approve/deny exists only over the debug socket |
+| Email approve/deny links | Partial | `jcode-notify-email/src/lib.rs:180` builds working approve/deny buttons, but they are `mailto:` links answered by IMAP polling (`notifications.rs:394`), not HTTP one-click. No relay service exists |
 
 ### Phase 4: Configuration
-- [ ] `[safety]` config section
-- [ ] Custom classification rules (promote/demote actions)
-- [ ] Per-project overrides
-- [ ] Notification channel configuration
+
+| Item | State | Evidence |
+|---|---|---|
+| `[safety]` config section | Shipped | `jcode-config-types/src/lib.rs:1409` `SafetyConfig`, env-overridable, read at runtime |
+| Custom classification rules | Absent | The tier table is a hardcoded const slice with no config input, and no promote/demote field exists |
+| Per-project overrides | Absent | Config resolves only `$JCODE_HOME/config.toml` plus the machine-wide policy file; no project-local layer |
+| Notification channel configuration | Shipped | `channel.rs:26` `ChannelRegistry::from_config` |
 
 ### Phase 5: Intelligence
-- [ ] Decision history tracking
-- [ ] Pattern detection (auto-suggest promotions)
-- [ ] Urgency inference from context
 
----
+| Item | State | Evidence |
+|---|---|---|
+| Decision history tracking | Partial, write-only | Decisions persist to `safety/history.json` from every path and reload at startup (`safety.rs:164`), but `SafetySystem` exposes no accessor and nothing reads the store. It accumulates and is never consulted |
+| Pattern detection | Absent | Nothing reads history, so no analysis over it can exist |
+| Urgency inference | Absent | Urgency is taken verbatim from the agent's argument (`tool/ambient.rs:643`), defaulting to Normal. No heuristic |
 
-*Last updated: 2026-02-08*
+### Shipped but never listed
+
+Verified present and missing from the checklist: stale-request garbage
+collection when the owning session dies (`safety.rs:203`); an ntfy.sh push
+channel with a deliberate safe-versus-detailed body split so public channels
+never carry model text (`notifications.rs:137`); Telegram, Discord, and relay
+channels that parse a reply into a permission decision (`channel.rs:235`); a
+third review interface over the debug socket (`server/debug_ambient.rs:53`);
+and `record_permission_via_file` (`safety.rs:379`), the cross-process path that
+lets the CLI reviewer and every reply channel decide against a running daemon.
+
+One dead symbol found while verifying: `expire_stale_permissions_via_file`
+(`safety.rs:420`) is fully implemented with zero callers including tests, and
+is redundant with `expire_dead_session_requests`.
+
+### The honest summary
+
+The parts that carry a decision once a human is asked are real: the queue
+persists, the reviewers work, and the notification fan-out is broad. What is
+missing is the part that decides *when* to ask. The tier classifier that is
+supposed to trigger a permission request is inert, so today an agent is gated
+only by `SessionToolPolicy` and by explicitly calling `request_permission`
+itself. Read this document as describing a working review pipeline with an
+unwired trigger, not a working safety gate.
+
