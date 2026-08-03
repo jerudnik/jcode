@@ -91,6 +91,57 @@ class DocsReferencesTest(unittest.TestCase):
         )
         self.assertEqual(self.rules(findings), set())
 
+    # --- document discovery scope -----------------------------------------
+
+    def test_untracked_document_is_not_scanned(self):
+        """Local reported 146 documents, CI reported 137, same tree. The 9 were
+        apm-generated AGENTS.md/CLAUDE.md/GEMINI.md, gitignored and absent from
+        a clean clone. A gate that scans the checkout rather than the commit
+        gives different verdicts to different people."""
+        # Needs one tracked file: an empty `git ls-files` is indistinguishable
+        # from "no git here" and correctly falls back to a filesystem scan.
+        findings = self.run_on_git_tree(
+            {"docs/real.md": "fine\n"}, {"docs/generated.md": "[x](./gone.md)\n"}
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_tracked_document_is_still_scanned(self):
+        """The control: narrowing scope to git must not narrow it to nothing."""
+        findings = self.run_on_git_tree({"docs/real.md": "[x](./gone.md)\n"}, {})
+        self.assertIn("broken-link", self.rules(findings))
+
+    # --- stale-code-path (D01-F12) ---------------------------------------
+
+    def test_citation_of_a_missing_source_file_is_flagged(self):
+        """The F12 class: modularization moved files and the docs still cite
+        the old path, so the reader is sent somewhere that does not exist."""
+        findings = self.run_on_git_tree(
+            {"docs/a.md": "see `src/platform.rs` for detail\n"}, {}
+        )
+        self.assertIn("stale-code-path", self.rules(findings))
+
+    def test_citation_of_a_tracked_source_file_is_not_flagged(self):
+        """The control. Without this the rule could fire on everything."""
+        findings = self.run_on_git_tree(
+            {"docs/a.md": "see `src/real.rs`\n", "src/real.rs": "fn main() {}\n"}, {}
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_dated_audit_snapshots_are_exempt(self):
+        """A document titled with its date is a record of a tree that has since
+        moved. Its stale paths are accurate history, and flagging them would
+        mean editing evidence to make a counter fall."""
+        findings = self.run_on_git_tree(
+            {"docs/CODE_QUALITY_AUDIT_2026-04-18.md": "see `src/gone.rs`\n"}, {}
+        )
+        self.assertEqual(self.rules(findings), set())
+
+    def test_prose_mentioning_a_path_without_backticks_is_not_flagged(self):
+        """The rule keys on a backticked citation. Bare prose is too noisy to
+        gate on, and widening it was measured at 847 and 3451 hits."""
+        findings = self.run_on_git_tree({"docs/a.md": "the old src/gone.rs file\n"}, {})
+        self.assertEqual(self.rules(findings), set())
+
     def test_existing_link_is_not_flagged(self):
         findings = self.run_on({"docs/a.md": "see [thing](./b.md)\n", "docs/b.md": "hi\n"})
         self.assertEqual(self.rules(findings), set())

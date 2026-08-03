@@ -91,8 +91,28 @@ MACHINE_LOCAL_EXEMPT = (
 )
 
 LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
+# D01-F12. A backticked path into the source tree that no longer exists. The
+# modularization moved whole subsystems into crates/, so `src/platform.rs` now
+# lives at crates/jcode-base/src/platform.rs and every citation of the old path
+# silently sends the reader nowhere.
+CODE_PATH = re.compile(
+    r"`((?:crates|src|scripts|tests)/[A-Za-z0-9_./-]+\.(?:rs|py|sh|nix))(?::\d+)?`"
+)
+
+# Dated audits are records of a tree that has since moved. Their stale paths
+# are accurate history, not drift, so flagging them would mean rewriting
+# evidence to make a counter fall.
+CODE_PATH_EXEMPT = (
+    "docs/CODE_QUALITY_AUDIT_2026-04-18.md",
+    "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md",
+    "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md",
+)
 MACHINE_LOCAL = re.compile(r"~/(?:notes|Documents|Desktop)/|/Users/[A-Za-z0-9._-]+/")
 BASELINE_FILE = Path(__file__).resolve().parent / "docs_references_budget.json"
+BASELINE_KEYS = {
+    "machine-local": "machine_local_by_file",
+    "stale-code-path": "stale_code_paths_by_file",
+}
 
 # A retired rail is only a finding when the prose tells someone to use it.
 RETIRED_RAILS = (
@@ -127,10 +147,32 @@ def in_scope(rel: str) -> bool:
 
 
 def markdown_files(root: Path) -> list[Path]:
+    """Active documents, as the repository defines them.
+
+    Ask git, not the filesystem. `apm compile` generates AGENTS.md, CLAUDE.md
+    and GEMINI.md into the worktree and .gitignore excludes them, so an rglob
+    scans 9 files here that do not exist in a clean clone: the local run
+    reported 146 documents where CI reported 137. Same tree, two numbers, and
+    only one of them is the repository. A gate that governs the checkout rather
+    than the commit gives different verdicts to different people.
+
+    Falls back to the filesystem when git is unavailable, since a weaker scan
+    beats a gate that cannot run at all.
+    """
+    # `_tracked_files` signals "no git here" with an empty set, which is what
+    # the other two consumers already branch on. Testing `is None` instead
+    # meant a tree without a repo scanned zero documents and the gate passed
+    # everything -- the same "guard silently answers fine" failure this file
+    # exists to prevent, so it is spelled the same way in all three places.
+    tracked = _tracked_files(str(root))
+    if not tracked:
+        candidates = sorted(root.rglob("*.md"))
+    else:
+        candidates = sorted(root / rel for rel in tracked if rel.endswith(".md"))
     out = []
-    for path in sorted(root.rglob("*.md")):
+    for path in candidates:
         rel = path.relative_to(root).as_posix()
-        if in_scope(rel):
+        if in_scope(rel) and path.is_file():
             out.append(path)
     return out
 
@@ -221,6 +263,26 @@ def check_machine_local(root: Path, path: Path, text: str) -> list[Finding]:
     return findings
 
 
+def check_code_paths(root: Path, path: Path, text: str, tracked: frozenset[str]) -> list[Finding]:
+    """Citations of source files that are not in the tree (D01-F12)."""
+    rel = path.relative_to(root).as_posix()
+    if rel in CODE_PATH_EXEMPT or not tracked:
+        return []
+    findings = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        for match in CODE_PATH.finditer(line):
+            cited = match.group(1)
+            if cited not in tracked:
+                findings.append(
+                    Finding(
+                        "stale-code-path",
+                        f"{rel}:{lineno}",
+                        f"cites a source path that does not exist: {cited}",
+                    )
+                )
+    return findings
+
+
 def check_retired_rails(root: Path, path: Path, text: str) -> list[Finding]:
     rel = path.relative_to(root).as_posix()
     findings = []
@@ -237,6 +299,7 @@ def check_retired_rails(root: Path, path: Path, text: str) -> list[Finding]:
 
 def run(root: Path) -> list[Finding]:
     findings: list[Finding] = []
+    tracked = _tracked_files(str(root))
     for path in markdown_files(root):
         try:
             text = path.read_text(encoding="utf-8")
@@ -245,37 +308,61 @@ def run(root: Path) -> list[Finding]:
             continue
         findings.extend(check_links(root, path, text))
         findings.extend(check_machine_local(root, path, text))
+        findings.extend(check_code_paths(root, path, text, tracked))
         findings.extend(check_retired_rails(root, path, text))
     return findings
 
 
-def machine_local_counts(findings: list[Finding]) -> dict[str, int]:
-    """Per-file counts of the ratcheted rule, keyed by path without line number."""
+# Rules measured as a per-file ratchet rather than failed on first sight.
+# Both are debts inherited at a nonzero count, so a fatal rule would just be
+# permanently red. Each may only fall.
+RATCHETED = ("machine-local", "stale-code-path")
+
+
+def rule_counts(findings: list[Finding], rule: str) -> dict[str, int]:
+    """Per-file counts of one ratcheted rule, keyed by path without line number."""
     counts: dict[str, int] = {}
     for finding in findings:
-        if finding.rule != "machine-local":
+        if finding.rule != rule:
             continue
         rel = finding.location.rsplit(":", 1)[0]
         counts[rel] = counts.get(rel, 0) + 1
     return counts
 
 
-def load_baseline() -> dict[str, int]:
+def machine_local_counts(findings: list[Finding]) -> dict[str, int]:
+    return rule_counts(findings, "machine-local")
+
+
+def load_baseline(rule: str = "machine-local") -> dict[str, int]:
     if not BASELINE_FILE.exists():
         return {}
     data = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
-    counts = data.get("machine_local_by_file")
+    counts = data.get(BASELINE_KEYS[rule])
+    if counts is None and rule == "stale-code-path":
+        return {}  # key predates this rule; treated as unmeasured, not as zero
     if not isinstance(counts, dict):
         raise SystemExit(f"error: invalid baseline file format: {BASELINE_FILE}")
     return {str(k): int(v) for k, v in counts.items()}
 
 
 def write_baseline(counts: dict[str, int], previous: dict[str, int]) -> None:
+    write_baselines({"machine-local": counts}, {"machine-local": previous})
+
+
+def write_baselines(
+    counts: dict[str, dict[str, int]], previous: dict[str, dict[str, int]]
+) -> None:
     # A baseline that can rise is not a ratchet, it is a laundering mechanism.
-    raised = {
-        f: (previous.get(f, 0), counts[f]) for f in counts if counts[f] > previous.get(f, 0)
-    }
-    if raised and previous:
+    raised = {}
+    for rule, per_file in counts.items():
+        prev = previous.get(rule, {})
+        if not prev:
+            continue  # first measurement of a rule establishes its ceiling
+        for f, now in per_file.items():
+            if now > prev.get(f, 0):
+                raised[f"{rule} {f}"] = (prev.get(f, 0), now)
+    if raised:
         detail = ", ".join(f"{f}: {was} -> {now}" for f, (was, now) in sorted(raised.items()))
         raise SystemExit(
             f"error: --update refuses to raise the baseline ({detail}). "
@@ -283,25 +370,36 @@ def write_baseline(counts: dict[str, int], previous: dict[str, int]) -> None:
         )
     payload = {
         "_comment": (
-            "Per-file count of machine-local documentation references (D01-F08). "
-            "This ratchet may only decrease. Refresh with "
-            "scripts/check_docs_references.py --update after removing or importing "
-            "a reference; --update refuses to raise any file's count."
+            "Per-file ratchets over documentation references. "
+            "machine_local_by_file is D01-F08; stale_code_paths_by_file is "
+            "D01-F12, citations of source files that no longer exist. Both may "
+            "only decrease. Refresh with scripts/check_docs_references.py "
+            "--update; --update refuses to raise any file's count."
         ),
-        "machine_local_by_file": dict(sorted(counts.items())),
-        "total": sum(counts.values()),
     }
+    for rule, key in BASELINE_KEYS.items():
+        per_file = counts.get(rule, {})
+        payload[key] = dict(sorted(per_file.items()))
+        payload[f"{key}_total"] = sum(per_file.values())
     BASELINE_FILE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def ratchet_violations(counts: dict[str, int], baseline: dict[str, int]) -> list[str]:
+REMEDY = {
+    "machine-local": "Import the content or drop the reference",
+    "stale-code-path": "Update the citation to where the code moved, or drop it",
+}
+
+
+def ratchet_violations(
+    counts: dict[str, int], baseline: dict[str, int], rule: str = "machine-local"
+) -> list[str]:
     problems = []
     for path in sorted(set(counts) | set(baseline)):
         now, allowed = counts.get(path, 0), baseline.get(path, 0)
         if now > allowed:
             problems.append(
-                f"machine-local: {path}: {now} reference(s), baseline allows {allowed}. "
-                "Import the content or drop the reference; do not raise the baseline."
+                f"{rule}: {path}: {now} reference(s), baseline allows {allowed}. "
+                f"{REMEDY[rule]}; do not raise the baseline."
             )
     return problems
 
@@ -321,21 +419,26 @@ def main() -> int:
             print(finding)
         return 0
 
-    counts = machine_local_counts(findings)
+    counts = {rule: rule_counts(findings, rule) for rule in RATCHETED}
+    baselines = {rule: load_baseline(rule) for rule in RATCHETED}
 
     if args.update:
-        write_baseline(counts, load_baseline())
-        print(f"docs-references: baseline updated ({sum(counts.values())} machine-local)")
+        write_baselines(counts, baselines)
+        summary = ", ".join(f"{sum(counts[r].values())} {r}" for r in RATCHETED)
+        print(f"docs-references: baseline updated ({summary})")
         return 0
 
-    # Every rule except the ratcheted one is fatal on first occurrence.
-    hard = [f for f in findings if f.rule != "machine-local"]
-    problems = [str(f) for f in hard] + ratchet_violations(counts, load_baseline())
+    # Every rule except the ratcheted ones is fatal on first occurrence.
+    hard = [f for f in findings if f.rule not in RATCHETED]
+    problems = [str(f) for f in hard]
+    for rule in RATCHETED:
+        problems += ratchet_violations(counts[rule], baselines[rule], rule)
 
     if not problems:
+        summary = ", ".join(f"{sum(counts[r].values())} {r}" for r in RATCHETED)
         print(
             f"docs-references: OK ({len(markdown_files(root))} active documents, "
-            f"{sum(counts.values())} machine-local at baseline)"
+            f"{summary} at baseline)"
         )
         return 0
 

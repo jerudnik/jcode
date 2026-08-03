@@ -46,7 +46,14 @@ def tracked_files() -> set[str]:
 
 
 def documents() -> list[Path]:
-    found = list(ROOT.glob("docs/**/*.md")) + list(ROOT.glob("*.md"))
+    # `.audit/` is tracked and cites live code, and omitting it made this
+    # script report 84 where the enforced checker reports 86. The gate's wider
+    # scope is the correct one; this glob was the narrow one.
+    found = (
+        list(ROOT.glob("docs/**/*.md"))
+        + list(ROOT.glob("*.md"))
+        + list(ROOT.glob(".audit/**/*.md"))
+    )
     live = []
     for path in found:
         rel = path.relative_to(ROOT).as_posix()

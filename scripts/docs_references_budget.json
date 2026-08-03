@@ -1,5 +1,22 @@
 {
-  "_comment": "Per-file count of machine-local documentation references (D01-F08). This ratchet may only decrease. Refresh with scripts/check_docs_references.py --update after removing or importing a reference; --update refuses to raise any file's count.",
+  "_comment": "Per-file ratchets over documentation references. machine_local_by_file is D01-F08; stale_code_paths_by_file is D01-F12, citations of source files that no longer exist. Both may only decrease. Refresh with scripts/check_docs_references.py --update; --update refuses to raise any file's count.",
   "machine_local_by_file": {},
-  "total": 0
+  "machine_local_by_file_total": 0,
+  "stale_code_paths_by_file": {
+    ".audit/PLAN.md": 2,
+    "PLAN_MCP_SKILLS.md": 12,
+    "docs/CRATE_OWNERSHIP_BOUNDARIES.md": 13,
+    "docs/DESKTOP_CODEBASE_ARCHITECTURE.md": 9,
+    "docs/MEMORY_BUDGET.md": 5,
+    "docs/MODULAR_ARCHITECTURE_RFC.md": 14,
+    "docs/SWARM_TASK_GRAPH.md": 1,
+    "docs/WINDOWS.md": 17,
+    "docs/architecture/FORK_HARDENING_BLUE_BRIEF.md": 1,
+    "docs/architecture/FORK_HARDENING_FINDINGS.md": 1,
+    "docs/architecture/FORK_SUSTAINABILITY_MODEL.md": 5,
+    "docs/architecture/FORK_SUSTAINABILITY_REVIEW_SYNTHESIS.md": 2,
+    "docs/architecture/jcode-assistant-module-fit-blueprint.md": 1,
+    "docs/fork/patch-ledger.md": 2
+  },
+  "stale_code_paths_by_file_total": 85
 }
