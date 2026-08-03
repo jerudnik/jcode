@@ -34,7 +34,7 @@ src/protocol.rs:            ~1.4k lines
 
 Important existing pieces:
 
-- `src/protocol.rs`
+- `crates/jcode-base/src/protocol.rs`
   - newline-delimited JSON over Unix socket
   - `Request`
   - `ServerEvent`
@@ -45,7 +45,7 @@ Important existing pieces:
   - session lifecycle
   - client events
   - background tasks/swarm/comm state
-- `src/tui/app.rs` and `src/tui/app/*`
+- `crates/jcode-tui/src/tui/app.rs` and `src/tui/app/*`
   - TUI app state root
   - input handling
   - remote connection handling
@@ -53,23 +53,23 @@ Important existing pieces:
   - server event reducer
   - local mode support
   - copy/selection/navigation/session picker/debug overlays
-- `src/tui/ui.rs` and `src/tui/ui_*`
+- `crates/jcode-tui/src/tui/ui.rs` and `src/tui/ui_*`
   - ratatui renderer
   - terminal/cell layout
   - viewport and scroll behavior
   - side panes
   - overlays
   - visual debug capture
-- `src/tui/ui_prepare.rs`
+- `crates/jcode-tui/src/tui/ui_prepare.rs`
   - frame preparation
   - wrapped line maps
   - full prep cache
   - body/streaming/batch preparation
-- `src/tui/ui_messages.rs`
+- `crates/jcode-tui/src/tui/ui_messages.rs`
   - message-to-terminal-line rendering
   - tool/system/background/swarm usage rendering
   - line caches
-- `src/tui/markdown.rs`
+- `crates/jcode-tui/src/tui/markdown.rs`
   - terminal markdown rendering
   - syntax highlighting cache
   - mermaid integration hooks
@@ -109,7 +109,7 @@ Jcode server/runtime/protocol
 
 ### Reuse after extracting away terminal types
 
-- server event reduction logic from `src/tui/app/remote/server_events.rs`
+- server event reduction logic from `crates/jcode-tui/src/tui/app/remote/server_events.rs`
 - message display block construction
 - tool call summaries
 - activity/status models
@@ -192,7 +192,7 @@ jcode-desktop
 
 ## `jcode-protocol`
 
-The existing `src/protocol.rs` is already the natural starting point.
+The existing `crates/jcode-base/src/protocol.rs` is already the natural starting point.
 
 Long-term, extract it into a crate so both TUI and desktop consume the same wire types:
 
@@ -635,7 +635,7 @@ Use the existing server protocol:
 - receive `ServerEvent`
 - send `Request::Message`, `Request::Cancel`, etc.
 
-Implement a desktop protocol reducer that mirrors the important behavior in `src/tui/app/remote/server_events.rs`, but writes to `ClientCore`/`TranscriptBlock`, not `DisplayMessage`.
+Implement a desktop protocol reducer that mirrors the important behavior in `crates/jcode-tui/src/tui/app/remote/server_events.rs`, but writes to `ClientCore`/`TranscriptBlock`, not `DisplayMessage`.
 
 ### Phase 3: extract client-core
 

@@ -203,7 +203,7 @@ forward to *dependents* (data flow).
   its dependencies, injected into the worker's starting context. Fan-out (one dep
   unblocks many) and fan-in (many deps feed one) both fall out naturally.
 - Artifacts default to **by-reference, not by-value**: "I built the API in
-  `crates/foo/api.rs`, types X/Y, commit `abc123`." The repo + git are the shared
+  crates/foo/api.rs, types X/Y, commit `abc123`." The repo + git are the shared
   medium; the downstream agent reads the files itself. Embed by-value only for
   things not in the repo (a decision, a design, an analysis). This keeps context
   small, which matters at depth.

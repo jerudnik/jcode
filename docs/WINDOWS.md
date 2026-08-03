@@ -7,8 +7,8 @@ that the independent hard fork currently distributes a Windows package.
 
 - **Transport layer**: Implemented (`src/transport/`)
 - **Platform module**: Implemented (`crates/jcode-base/src/platform.rs`)
-- **Windows transport**: Implemented but untested (`src/transport/windows.rs`)
-- **Windows platform**: Implemented (`src/platform.rs` has `#[cfg(windows)]` branches)
+- **Windows transport**: Implemented but untested (`crates/jcode-base/src/transport/windows.rs`)
+- **Windows platform**: Implemented (`crates/jcode-base/src/platform.rs` has `#[cfg(windows)]` branches)
 - **Windows CI**: Not yet set up
 - **End-user distribution**: Not provided. Repository-owned distribution is
   exclusively Nix-based, and the flake does not currently expose a Windows
@@ -79,7 +79,7 @@ Both platforms export the same interface:
 | `WriteHalf` | `tokio::net::unix::OwnedWriteHalf` | `Arc<Mutex<Stream>>` wrapper |
 | `SyncStream` | `std::os::unix::net::UnixStream` | `std::fs::File` wrapper |
 
-## Platform Module (`src/platform.rs`)
+## Platform Module (`crates/jcode-base/src/platform.rs`)
 
 Centralizes all non-IPC OS-specific operations:
 
@@ -98,21 +98,21 @@ All OS-specific code has been moved out of application files into the transport 
 
 | File | What was migrated |
 |------|------------------|
-| `src/server.rs` | `UnixListener`, `UnixStream`, `OwnedReadHalf`, `OwnedWriteHalf` |
-| `src/tui/backend.rs` | `UnixStream`, `OwnedWriteHalf`, `OwnedReadHalf` |
-| `src/tui/client.rs` | `UnixStream`, `OwnedWriteHalf` |
-| `src/tui/app.rs` | `UnixListener`, `OwnedWriteHalf`, file permissions |
-| `src/tool/communicate.rs` | `std::os::unix::net::UnixStream` |
-| `src/tool/debug_socket.rs` | `tokio::net::UnixStream` |
+| `crates/jcode-app-core/src/server.rs` | `UnixListener`, `UnixStream`, `OwnedReadHalf`, `OwnedWriteHalf` |
+| `crates/jcode-tui/src/tui/backend.rs` | `UnixStream`, `OwnedWriteHalf`, `OwnedReadHalf` |
+| src/tui/client.rs (deleted since, in `c3184809e`) | `UnixStream`, `OwnedWriteHalf` |
+| `crates/jcode-tui/src/tui/app.rs` | `UnixListener`, `OwnedWriteHalf`, file permissions |
+| `crates/jcode-app-core/src/tool/communicate.rs` | `std::os::unix::net::UnixStream` |
+| `crates/jcode-app-core/src/tool/debug_socket.rs` | `tokio::net::UnixStream` |
 | `src/main.rs` | `UnixStream` (health checks), all `exec()` calls, file permissions |
-| `src/build.rs` | Symlinks, executable permissions |
-| `src/update.rs` | Symlinks, permissions, atomic swap |
-| `src/auth/oauth.rs` | Credential file permissions |
-| `src/skill.rs` | Symlink creation |
-| `src/video_export.rs` | Frame symlinks |
-| `src/ambient.rs` | Process liveness check |
-| `src/registry.rs` | Process liveness check |
-| `src/session.rs` | Process liveness check |
+| `crates/jcode-app-core/src/build.rs` | Symlinks, executable permissions |
+| `crates/jcode-app-core/src/update.rs` | Symlinks, permissions, atomic swap |
+| `crates/jcode-base/src/auth/oauth.rs` | Credential file permissions |
+| `crates/jcode-base/src/skill.rs` | Symlink creation |
+| `crates/jcode-tui/src/video_export.rs` | Frame symlinks |
+| `crates/jcode-app-core/src/ambient.rs` | Process liveness check |
+| `crates/jcode-base/src/registry.rs` | Process liveness check |
+| `crates/jcode-base/src/session.rs` | Process liveness check |
 
 ## Dependencies
 

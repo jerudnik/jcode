@@ -106,6 +106,13 @@ CODE_PATH_EXEMPT = (
     "docs/CODE_QUALITY_AUDIT_2026-04-18.md",
     "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md",
     "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md",
+    # Frozen records of the retired upstream-tracking model. Each carries a
+    # header marking it historical and superseded, and patch-ledger.md says in
+    # its own text that some rows "intentionally describe sync machinery that no
+    # longer exists". Repointing those citations would falsify the record.
+    "docs/architecture/FORK_SUSTAINABILITY_MODEL.md",
+    "docs/architecture/FORK_SUSTAINABILITY_REVIEW_SYNTHESIS.md",
+    "docs/fork/patch-ledger.md",
 )
 MACHINE_LOCAL = re.compile(r"~/(?:notes|Documents|Desktop)/|/Users/[A-Za-z0-9._-]+/")
 BASELINE_FILE = Path(__file__).resolve().parent / "docs_references_budget.json"
@@ -346,6 +353,22 @@ def load_baseline(rule: str = "machine-local") -> dict[str, int]:
     return {str(k): int(v) for k, v in counts.items()}
 
 
+def rule_measured(rule: str) -> bool:
+    """True when the baseline file has recorded this rule at all.
+
+    A rule driven to zero has an EMPTY per-file dict, which is indistinguishable
+    from "never measured" if you only look at the dict. The companion
+    ``<key>_total`` is written on every refresh, so its presence is what marks a
+    rule as measured. Without this, reaching zero would silently disarm the
+    ratchet: the next --update would accept any regression as a first
+    measurement.
+    """
+    if not BASELINE_FILE.exists():
+        return False
+    data = json.loads(BASELINE_FILE.read_text(encoding="utf-8"))
+    return f"{BASELINE_KEYS[rule]}_total" in data
+
+
 def write_baseline(counts: dict[str, int], previous: dict[str, int]) -> None:
     write_baselines({"machine-local": counts}, {"machine-local": previous})
 
@@ -357,7 +380,7 @@ def write_baselines(
     raised = {}
     for rule, per_file in counts.items():
         prev = previous.get(rule, {})
-        if not prev:
+        if not prev and not rule_measured(rule):
             continue  # first measurement of a rule establishes its ceiling
         for f, now in per_file.items():
             if now > prev.get(f, 0):

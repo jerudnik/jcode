@@ -306,6 +306,50 @@ class RatchetTest(unittest.TestCase):
         counts = mod.machine_local_counts(mod.run(root))
         self.assertEqual(counts, mod.load_baseline())
 
+    def test_update_refuses_to_raise_a_rule_that_reached_zero(self):
+        # Regression: a rule driven to zero has an EMPTY per-file dict, which the
+        # "first measurement establishes the ceiling" branch read as "never
+        # measured". Reaching zero therefore DISARMED the ratchet and the next
+        # --update accepted any number of new stale citations. Finishing the
+        # cleanup must not be what unlocks the regression.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "budget.json"
+            original = mod.BASELINE_FILE
+            mod.BASELINE_FILE = target
+            try:
+                # A rule that has been measured records a <key>_total, even at 0.
+                mod.write_baselines(
+                    {"machine-local": {}, "stale-code-path": {}},
+                    {"machine-local": {}, "stale-code-path": {}},
+                )
+                self.assertIn("stale_code_paths_by_file_total", target.read_text())
+                with self.assertRaises(SystemExit) as caught:
+                    mod.write_baselines(
+                        {"machine-local": {}, "stale-code-path": {"docs/a.md": 1}},
+                        {"machine-local": {}, "stale-code-path": {}},
+                    )
+                self.assertIn("refuses to raise", str(caught.exception))
+                self.assertIn("0 -> 1", str(caught.exception))
+            finally:
+                mod.BASELINE_FILE = original
+
+    def test_first_ever_measurement_is_still_allowed(self):
+        # Counter-check to the above: with no baseline file at all, a rule's
+        # first measurement must still establish its ceiling rather than being
+        # refused, otherwise a new rule could never be adopted.
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "budget.json"
+            original = mod.BASELINE_FILE
+            mod.BASELINE_FILE = target
+            try:
+                mod.write_baselines(
+                    {"machine-local": {}, "stale-code-path": {"docs/a.md": 4}},
+                    {"machine-local": {}, "stale-code-path": {}},
+                )
+                self.assertTrue(target.exists())
+            finally:
+                mod.BASELINE_FILE = original
+
 
 if __name__ == "__main__":
     unittest.main()
