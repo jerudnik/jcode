@@ -84,9 +84,22 @@ nix.settings = {
 };
 ```
 
-The flake also declares this cache in `nixConfig`, so `nix run`/`nix build`
-against the flake URL will offer to use it automatically (consumers opt in with
-`--accept-flake-config`).
+The flake also declares this cache in `nixConfig`, but `--accept-flake-config`
+alone is not enough: Nix drops any substituter a non-trusted user asks for, so
+an ordinary end user still compiles the whole workspace from source. Verified on
+a clean Ubuntu VM against `x86_64-linux`, where the documented `nix build` plan
+was 1620 derivations built; adding `trusted-substituters` to `/etc/nix/nix.conf`
+and restarting the daemon changed the same plan to 7 paths fetched, including
+`jcode-0.46.0`.
+
+To actually consume the cache you must be a trusted user, or root must
+pre-authorize it (this is the point of the `nix.settings` block above; on a
+non-NixOS host, add it to `/etc/nix/nix.conf`):
+
+```
+trusted-substituters = https://jerudnik-jcode.cachix.org
+trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=
+```
 
 The cache only ever stores successful `nix build` outputs from trusted branch
 builds, signed with a key whose private half lives solely in CI secrets. It is

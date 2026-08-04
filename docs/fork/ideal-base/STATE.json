@@ -435,14 +435,15 @@
       "updated_at": "2026-08-02T22:12:44.076813Z"
     },
     "G05": {
-      "state": "authorization_blocked",
-      "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
+      "state": "verified_with_defect",
+      "reviewed_commit": "a632aed2c6da0c640463e15e1d70707b48987143",
       "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
       "evidence": [
-        "docs/fork/ideal-base/evidence/G05/BLOCKED.md"
+        "docs/fork/ideal-base/evidence/G05/BLOCKED.md",
+        "docs/fork/ideal-base/evidence/G05/VERIFIED.md"
       ],
-      "summary": "AUTHORIZATION BLOCKED, not incomplete and not verified. Requires provisioning a throwaway remote host, which is external infrastructure the agent must not create unilaterally. No local work remains. Named next action, with explicit user authorization: provision a disposable host, acquire the pinned fork revision through Nix WITH NO CREDENTIALS PRESENT (that absence is itself the assertion, since the public Cachix path must work unauthenticated and running it with credentials available would prove nothing about the end-user path), launch the binary, and record the transcript under docs/fork/ideal-base/evidence/G05/. G03 already proved the flake builds and the binary runs and serves, so a G05 failure would isolate to acquisition rather than the package; that narrows the gate but does not substitute for it, because G03 built locally, which is exactly the path G05 exists to not exercise.",
-      "updated_at": "2026-08-02T22:16:13.347870Z"
+      "summary": "Verified unauthenticated on a disposable Ubuntu VM as a non-trusted user with no credentials present. The cache is genuinely public: fetching jcode-0.46.0 for x86_64-linux needs no credentials. But the gate surfaced a real defect: the documented command does not use the cache. As an ordinary untrusted user the plan was 1620 derivations built, unchanged by --accept-flake-config, because Nix discards substituters requested by non-trusted users. Adding root trusted-substituters changed the same plan to 7 paths fetched including jcode-0.46.0; reverting it returned exactly 1620, so the control is bidirectional and isolates trust config as the sole cause. docs/NIX.md:87 corrected. Limitation: x86_64-linux measured by resolution plan, not execution, since amd64 emulation is unavailable on this arm64 host (isolated by a successful arm64 control); aarch64-linux is uncached by design. Prior session acceptance reverted and kept as a recorded failed control.",
+      "updated_at": "2026-08-04T03:40:43.383964Z"
     },
     "S01": {
       "state": "pending",
