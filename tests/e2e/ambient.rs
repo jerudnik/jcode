@@ -226,6 +226,11 @@ async fn test_ambient_end_cycle_tool() -> Result<()> {
 }
 
 /// Test ambient tools: request_permission via mock agent
+///
+/// The mock's reply text is scripted, so asserting on it proves only that the
+/// mock replayed its own script. The outcome that matters is whether the tool
+/// actually filed the request with the safety system, so this reads the queue
+/// back rather than trusting the canned sentence.
 #[tokio::test]
 async fn test_ambient_request_permission_tool() -> Result<()> {
     let _env = setup_test_env()?;
@@ -272,10 +277,30 @@ async fn test_ambient_request_permission_tool() -> Result<()> {
     jcode::tool::ambient::unregister_ambient_session(&ambient_session_id);
     assert_eq!(response, "Permission requested.");
 
+    // Read the request back off disk through a freshly loaded SafetySystem,
+    // the same path a restarted process uses. `run_once_capture` above returns
+    // the mock's scripted text whether or not the tool did anything, so this is
+    // the assertion that can actually fail.
+    let pending = jcode::safety::SafetySystem::new().pending_requests();
+    let filed = pending
+        .iter()
+        .find(|request| request.action == "create_pull_request")
+        .expect("request_permission must file the request with the safety system");
+    assert_eq!(filed.description, "Create PR for test fixes");
+    assert_eq!(filed.rationale, "Found 3 failing tests in auth module");
+    assert!(
+        matches!(filed.urgency, jcode::safety::Urgency::High),
+        "urgency from the tool call must survive to the queued request, got {:?}",
+        filed.urgency
+    );
+
     Ok(())
 }
 
 /// Test ambient tools: schedule_ambient via mock agent
+///
+/// Asserts the scheduled item actually reaches the queue. The agent's reply is
+/// scripted by the mock, so it stays green even if the tool schedules nothing.
 #[tokio::test]
 async fn test_ambient_schedule_tool() -> Result<()> {
     let _env = setup_test_env()?;
@@ -316,6 +341,29 @@ async fn test_ambient_schedule_tool() -> Result<()> {
 
     let response = agent.run_once_capture("Schedule next cycle").await?;
     assert_eq!(response, "Scheduled next cycle.");
+
+    // Load the queue back through AmbientManager, which reads the same
+    // ambient/queue.json the runner consumes at startup.
+    let manager = jcode::ambient::AmbientManager::new()?;
+    let items = manager.queue().items();
+    assert_eq!(
+        items.len(),
+        1,
+        "one schedule_ambient call must leave exactly one queued item, found {:?}",
+        items
+    );
+    let item = &items[0];
+    assert_eq!(item.context, "Check CI results and verify test fixes");
+    assert!(
+        matches!(item.priority, jcode::ambient::Priority::Normal),
+        "priority from the tool call must reach the queue, got {:?}",
+        item.priority
+    );
+    assert!(
+        matches!(item.target, jcode::ambient::ScheduleTarget::Ambient),
+        "schedule_ambient must target the ambient runner, got {:?}",
+        item.target
+    );
 
     Ok(())
 }
