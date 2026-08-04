@@ -24,7 +24,26 @@ $ grep -rn "\.classify(" crates/ --include=*.rs
 crates/jcode-base/src/safety.rs:551 ... :590      (26 lines, all inside #[cfg(test)])
 ```
 
-One file, and every `.classify(` caller is a test in that same file.
+Within `crates/`, one file, and every `.classify(` caller is a test in that same
+file.
+
+**Correction, made after merge.** The sentence above originally read "One file,
+and every `.classify(` caller is a test in that same file", which overstated what
+this grep shows. The grep is scoped to `crates/`, and the repository-wide search
+finds a second pre-existing caller outside that path:
+
+```
+$ git grep -l "\.classify(" 95dbff895 -- '*.rs'
+crates/jcode-base/src/safety.rs
+tests/e2e/safety.rs
+```
+
+`tests/e2e/safety.rs:16-34` asserted the tier mapping before this node and is
+unchanged by it. It is a test, so the substantive claim survives: no
+**production** caller existed, and the gate could not run. But the scoped grep
+alone did not establish that, and the original wording implied a
+repository-wide result it had not checked. The repo-wide command above is the
+one that actually supports the claim.
 
 After:
 
@@ -128,6 +147,40 @@ failure is `server::debug_command_exec::tests::debug_tool_selfdev_reload_returns
 ("Could not find jcode repository directory"), reconfirmed as pre-existing by
 stashing this change and rerunning it on the clean baseline, where it fails
 identically. `cargo clippy --all-targets --all-features` is clean.
+
+## Control 3, run after merge: the pre-existing e2e test does not cover this
+
+`tests/e2e/ambient.rs:230` (`test_ambient_request_permission_tool`) registers an
+ambient session and drives `request_permission` through the real agent turn, so
+it looked like independent coverage of the `TIER_GATE_EXEMPT` carve-out. It is
+not.
+
+Control: deleted `"request_permission"` from `TIER_GATE_EXEMPT`, confirmed the
+deletion on disk, and reran that e2e test. **It passed.** The control passing was
+the opposite of the prediction, so the assumption, not the gate, was wrong.
+
+Diagnosis, before concluding anything about the gate: replaced the exemption with
+an unconditional `panic!` on `request_permission` and reran the same test. It
+panicked at `ambient.rs:142`, proving the gate **is** on that path and the
+exemption **is** load-bearing at runtime. The e2e test simply cannot see it: it
+asserts `response == "Permission requested."`, which is a canned `MockProvider`
+string queued for the turn after the tool call, so it is insensitive to whether
+the tool succeeded or was refused.
+
+The same deletion **does** fail the unit test
+`tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask`
+(`tests.rs:1008`), which is the test that actually holds this property.
+
+Two things worth keeping from this:
+
+- The exempt list's coverage rests on the unit test alone. The e2e test is not a
+  second, independent check, and should not be counted as one.
+- A test that asserts only a mocked provider's reply cannot detect a changed tool
+  outcome. That is a general weakness of the ambient e2e tests, not specific to
+  this node.
+
+Both mutations were planted from a `cp` backup and restored with `diff -q`
+confirming byte-identical files, and the suite was rerun green afterward.
 
 ## Scope not covered, stated rather than implied
 
