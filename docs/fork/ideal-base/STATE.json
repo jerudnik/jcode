@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01-FIX-2",
-    "state": "pending",
-    "reviewed_commit": null,
-    "published_commit": null,
-    "updated_at": "2026-08-03T08:10:20Z",
-    "summary": "Injected from D01-F14, same rule as D01-FIX-1: three complete ambient implementations are inert because their wires are unconnected, which is a product defect rather than a prose defect. Two of the three RE-VERIFIED 2026-08-03 by grep rather than inherited: UsageLog::record has no non-test caller, and active_user_sessions has reads at runner.rs:176/585/879 with no writer beyond RwLock::new(0), so ambient can never pause for an active user. The RateLimitInfo wire is carried from the register and must be re-verified when this node starts. docs/AMBIENT_MODE.md already marks each row Inert."
+    "node": "D01",
+    "state": "accepted",
+    "reviewed_commit": "568049bf098379599dd36cf1eb3792d01fe0d681",
+    "published_commit": "adce8b1c6bf5a20d539ec8c0dbfd0f0a32ff11bb",
+    "updated_at": "2026-08-04T18:58:09Z",
+    "summary": "All 7 acceptance gates answered against executed citations; d01_scoreboard.sh TOTAL=0 with every counter proven responsive by a planted control. 14 findings dispositioned: 12 corrected, 2 referred to D01-FIX-1/D01-FIX-2 as product defects rather than softened prose. Gate 6 was run with the pinned apm-cli 0.21.0 from nixpkgs after three sessions recorded it as un-runnable: apm compile --validate is VACUOUS (exits 0 on a truncated and NUL-overwritten primitive, counting files discovered rather than validated), so wiring it into CI is refused as a check that cannot fail; the drift half is live and already enforced by check_agent_instructions.py at fork-ci.yml:254, verified to AGREE with the real compiler. Docs corpus 130 active / 0 stale-code-path / 0 machine-local in scope, with archives and frozen forensic records excluded by documented policy."
   },
   "nodes": {
     "W0": {
@@ -608,14 +608,15 @@
       "updated_at": "2026-07-29T08:56:12Z"
     },
     "D01": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "568049bf098379599dd36cf1eb3792d01fe0d681",
+      "published_commit": "adce8b1c6bf5a20d539ec8c0dbfd0f0a32ff11bb",
       "evidence": [
-        "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md"
+        "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md",
+        "docs/fork/ideal-base/evidence/D01/GATE6_APM_VALIDATE.md"
       ],
-      "summary": "D01-A re-audit done 2026-08-02 against merged main, which the register itself required before any lane could start. All ten D01-Fxx findings REPRODUCE; none was superseded. Corrected the three that are mechanical source-vs-prose drift, each verified by parsing both sides rather than by reading: F02 (MiniMax preset env var and default model; checked every OpenAiCompatibleProfile preset, MiniMax was the only drift), F03 (mermaid caps 64/12/8 vs shipped 512/24/16, both occurrences), F10 (all pre-crate-split paths in OAUTH.md and MEMORY_BUDGET.md remapped and confirmed to resolve on disk). Seven remain open because they need a decision about what the product should claim, not a lookup: F01 undisclosed default post-login validation, F04 a file that calls graph support both planned and implemented, F05 two shipped subsystems still labelled 'Status: Design', F06 a hard-coded provider list, F07 a doc asserting a retired packaging rail, F08 now 14 (not 10) ~/notes references after the post-merge recount the register asked for, F09 the missing docs/README.md authority map and the deterministic checker. F09 is the durable fix for the F02/F03 class: correcting constants by hand only resets the clock, since the defect is that no gate compares documented values to source values. D01 stays open.",
-      "updated_at": "2026-08-02T05:13:45.245069Z"
+      "summary": "All 7 acceptance gates answered against executed citations; d01_scoreboard.sh TOTAL=0 with every counter proven responsive by a planted control. 14 findings dispositioned: 12 corrected, 2 referred to D01-FIX-1/D01-FIX-2 as product defects rather than softened prose. Gate 6 was run with the pinned apm-cli 0.21.0 from nixpkgs after three sessions recorded it as un-runnable: apm compile --validate is VACUOUS (exits 0 on a truncated and NUL-overwritten primitive, counting files discovered rather than validated), so wiring it into CI is refused as a check that cannot fail; the drift half is live and already enforced by check_agent_instructions.py at fork-ci.yml:254, verified to AGREE with the real compiler. Docs corpus 130 active / 0 stale-code-path / 0 machine-local in scope, with archives and frozen forensic records excluded by documented policy.",
+      "updated_at": "2026-08-04T18:58:09Z"
     },
     "R08": {
       "state": "accepted",
