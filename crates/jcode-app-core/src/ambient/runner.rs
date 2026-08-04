@@ -629,6 +629,25 @@ impl AmbientRunnerHandle {
                     continue;
                 }
 
+                // The user left. Nothing else clears this: the paths below only
+                // rewrite Running or Idle, so a stale "user session active"
+                // would otherwise be reported until the next completed cycle.
+                {
+                    let mut s = self.inner.state.write().await;
+                    if matches!(
+                        s.status,
+                        AmbientStatus::Paused { ref reason } if reason == "user session active"
+                    ) {
+                        s.status = AmbientStatus::Idle;
+                        if let Err(err) = s.save() {
+                            logging::warn(&format!(
+                                "Ambient runner: failed to persist resume after user left: {}",
+                                err
+                            ));
+                        }
+                    }
+                }
+
                 // Drop stale permission requests whose originating session is no longer active.
                 match self
                     .inner

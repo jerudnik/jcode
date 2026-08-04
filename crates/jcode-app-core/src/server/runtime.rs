@@ -355,6 +355,14 @@ impl ServerRuntime {
                 "client_count_incremented",
             ),
         );
+        // Wake ambient so it re-reads the count. The disconnect path already
+        // nudges; without the matching nudge here a runner that is parked in
+        // Scheduled sleeps through the user's arrival (up to max_interval, two
+        // hours by default) and can start a cycle beside an active user, which
+        // is exactly what pause_on_active_session exists to prevent.
+        if let Some(ref runner) = self.ambient_runner {
+            runner.nudge();
+        }
         true
     }
 
