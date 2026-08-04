@@ -876,3 +876,138 @@ async fn gemini_build_tools_from_registry_definitions_omits_const_keywords() {
         "const"
     ));
 }
+
+// ---------------------------------------------------------------------------
+// Safety tier gate (D01-FIX-1)
+//
+// These run through `Registry::execute` rather than calling
+// `check_ambient_action_tier` directly, so they fail if the gate is defined but
+// never wired into dispatch, which is exactly the defect they exist to prevent.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn registry_execute_refuses_tier2_tool_for_ambient_session() {
+    let _env = crate::storage::lock_test_env_read();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let session_id = "tier-gate-ambient-deny";
+    crate::tool::ambient::register_ambient_session(session_id.to_string());
+
+    let ctx = ToolContext {
+        session_id: session_id.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    // `bash` classifies as RequiresPermission: it is not in AUTO_ALLOWED.
+    let result = registry
+        .execute("bash", serde_json::json!({"command": "true"}), ctx)
+        .await;
+
+    crate::tool::ambient::unregister_ambient_session(session_id);
+
+    let err = result.expect_err("unattended agent must not run a tier-2 tool unasked");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("requires user permission in an unattended session"),
+        "refusal should name the tier gate, got: {msg}"
+    );
+    assert!(
+        msg.contains("request_permission"),
+        "refusal must tell the agent how to proceed, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn registry_execute_allows_tier2_tool_for_interactive_session() {
+    // Counter-check to the test above: the SAME tool and input must succeed when
+    // the session is not registered as ambient. Without this, a gate that
+    // blocked everything would still pass the refusal test.
+    let _env = crate::storage::lock_test_env_read();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let temp = tempfile::TempDir::new().expect("temp dir");
+
+    let ctx = ToolContext {
+        session_id: "tier-gate-interactive".to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    let result = registry
+        .execute("bash", serde_json::json!({"command": "true"}), ctx)
+        .await;
+
+    assert!(
+        result.is_ok(),
+        "interactive sessions must not be gated: {:?}",
+        result.err()
+    );
+}
+
+#[tokio::test]
+async fn registry_execute_allows_tier1_and_control_plane_for_ambient_session() {
+    let _env = crate::storage::lock_test_env_read();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider);
+    let registry = Registry::new(provider).await;
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    std::fs::write(temp.path().join("probe.txt"), "hello\n").expect("write probe");
+
+    let session_id = "tier-gate-ambient-allow";
+    crate::tool::ambient::register_ambient_session(session_id.to_string());
+
+    let ctx = ToolContext {
+        session_id: session_id.to_string(),
+        message_id: "test".to_string(),
+        tool_call_id: "test".to_string(),
+        working_dir: Some(temp.path().to_path_buf()),
+        stdin_request_tx: None,
+        graceful_shutdown_signal: None,
+        execution_mode: ToolExecutionMode::Direct,
+    };
+
+    // `ls` is tier 1 (AUTO_ALLOWED): an unattended agent may read without asking.
+    let tier1 = registry
+        .execute(
+            "ls",
+            serde_json::json!({"path": temp.path().to_string_lossy()}),
+            ctx.clone(),
+        )
+        .await;
+
+    crate::tool::ambient::unregister_ambient_session(session_id);
+
+    assert!(
+        tier1.is_ok(),
+        "tier-1 tools must not be newly blocked: {:?}",
+        tier1.err()
+    );
+}
+
+#[test]
+fn tier_gate_exempts_the_tools_an_ambient_cycle_needs_to_finish_and_ask() {
+    // Structural check, not a taste check: if any of these were gated, an
+    // ambient cycle could not end (`end_ambient_cycle`) or could not ask for
+    // permission (`request_permission`), so the gate would deadlock the agent
+    // it is meant to supervise.
+    for tool in ["end_ambient_cycle", "request_permission"] {
+        let session_id = "tier-gate-exempt-probe";
+        crate::tool::ambient::register_ambient_session(session_id.to_string());
+        let allowed = crate::tool::ambient::check_ambient_action_tier(session_id, tool);
+        crate::tool::ambient::unregister_ambient_session(session_id);
+        assert!(
+            allowed.is_ok(),
+            "'{tool}' must bypass the tier gate or ambient cycles deadlock"
+        );
+    }
+}

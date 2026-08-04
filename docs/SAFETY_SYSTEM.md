@@ -524,7 +524,7 @@ and the difference between two of them matters more than the rest:
 
 | Item | State | Evidence |
 |---|---|---|
-| Action classifier (tier 1/2/3) | **Inert** | `safety.rs:177` `classify` and the `AUTO_ALLOWED` table (`safety.rs:132`) are complete, but `ActionTier` appears in no file outside `safety.rs` and its tests. Tool dispatch (`tool/mod.rs:568`) gates on `SessionToolPolicy` instead, so the tier table protects nothing today |
+| Action classifier (tier 1/2) | Partial | Wired for unattended sessions only. `Registry::execute` (`tool/mod.rs:581`) calls `check_ambient_action_tier` (`tool/ambient.rs:137`), which consults `classify` (`safety.rs:177`) and refuses a tier-2 tool when the session is ambient-registered. Proven by `registry_execute_refuses_tier2_tool_for_ambient_session`, which fails (ambient `bash` succeeds) when the dispatch call is removed. Interactive sessions are never gated, and the control-plane tools in `TIER_GATE_EXEMPT` bypass it so a cycle can still end and ask. Not covered: subagent/swarm workers (fresh unregistered session ids, `tool/subagent.rs:62`), the overnight supervisor (`overnight.rs:260`), and scheduled resume/spawn |
 | Review queue (persistent) | Shipped | `safety.rs:363` `persist_queue`, written on every request and decision, reloaded at startup, read cross-process |
 | `request_permission` tool | Shipped | `tool/ambient.rs:551`, registered for ambient sessions at `tool/mod.rs:1054` |
 | Transcript logger | Partial | Cycle transcripts persist (`safety.rs:335` `save_transcript`, called at `ambient/runner.rs:779`). Per-action logging does not: `log_action` (`safety.rs:278`) has only test callers and the runner hardcodes `actions: Vec::new()`, so every stored transcript has an empty action list |
@@ -583,10 +583,16 @@ is redundant with `expire_dead_session_requests`.
 ### The honest summary
 
 The parts that carry a decision once a human is asked are real: the queue
-persists, the reviewers work, and the notification fan-out is broad. What is
-missing is the part that decides *when* to ask. The tier classifier that is
-supposed to trigger a permission request is inert, so today an agent is gated
-only by `SessionToolPolicy` and by explicitly calling `request_permission`
-itself. Read this document as describing a working review pipeline with an
-unwired trigger, not a working safety gate.
+persists, the reviewers work, and the notification fan-out is broad. The part
+that decides *when* to ask now runs, but only for ambient sessions: an
+unattended agent is refused a tier-2 tool at dispatch and told to call
+`request_permission`. Three things this still does not do. It does not cover
+every unattended path, since subagent/swarm workers, the overnight supervisor,
+and scheduled resume/spawn run under session ids that are never
+ambient-registered. It does not gate interactive sessions, which remain bound
+only by `SessionToolPolicy`. And approval does not resume the refused call:
+`record_decision` appends to history and drops the request, and nothing re-runs
+the original action, so the agent must retry the work itself. Read this
+document as describing a working review pipeline with a trigger wired on one
+path, not a complete safety gate.
 
