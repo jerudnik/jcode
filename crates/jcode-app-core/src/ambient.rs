@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+mod cycle_usage;
 mod directives;
 mod manager;
 mod paths;

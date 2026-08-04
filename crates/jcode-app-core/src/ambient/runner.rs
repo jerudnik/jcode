@@ -11,6 +11,7 @@ use crate::ambient::{
     self, AmbientCycleResult, AmbientLock, AmbientManager, AmbientState, AmbientStatus,
     CycleStatus, ScheduleTarget, ScheduledItem,
 };
+use crate::ambient::cycle_usage::CycleUsage;
 use crate::ambient_scheduler::{AdaptiveScheduler, AmbientSchedulerConfig};
 use crate::config::config;
 use crate::logging;
@@ -59,6 +60,11 @@ struct AmbientRunnerInner {
     /// Soft interrupt queue for the currently-running ambient agent (if any).
     /// Telegram replies push messages here so they arrive mid-cycle.
     active_cycle_queue: RwLock<Option<SoftInterruptQueue>>,
+    /// Tokens spent by the most recent ambient cycle, handed to the scheduler's
+    /// usage log by the loop. The agent that knows these numbers is local to
+    /// `run_cycle`, which has five exits, while the log lives on the scheduler
+    /// in `run_loop`; this is the one place both can reach.
+    last_cycle_usage: RwLock<Option<CycleUsage>>,
 }
 
 impl AmbientRunnerHandle {
@@ -87,6 +93,7 @@ impl AmbientRunnerHandle {
                 notifier: NotificationDispatcher::new(),
                 active_user_sessions,
                 active_cycle_queue: RwLock::new(None),
+                last_cycle_usage: RwLock::new(None),
             }),
         }
     }
@@ -785,6 +792,23 @@ impl AmbientRunnerHandle {
                 *aq = None;
             }
 
+            // Feed what the cycle spent into the scheduler's usage log, which is
+            // how the next interval learns that ambient has been expensive.
+            // Done here rather than per-exit in run_cycle so the error path,
+            // which still spent tokens, is recorded too.
+            if let Some(usage) = self.inner.last_cycle_usage.write().await.take() {
+                scheduler.usage_log.record(usage.into_record());
+                // `record` only persists every 10th entry, which suits a chatty
+                // caller but not this one: ambient cycles are 5 to 120 minutes
+                // apart, so batching ten of them risks losing up to a day of
+                // history to a restart, and the log exists to be `load`ed at
+                // startup. One small JSON write per cycle is far cheaper than
+                // the history it protects.
+                if let Err(err) = scheduler.usage_log.save() {
+                    logging::warn(&format!("Failed to persist ambient usage log: {}", err));
+                }
+            }
+
             match cycle_result {
                 Ok(result) => {
                     logging::info(&format!(
@@ -892,6 +916,13 @@ impl AmbientRunnerHandle {
     }
 
     /// Update the running status detail and persist to disk for waybar.
+    /// Stash what this cycle spent so `run_loop` can hand it to the usage log.
+    async fn record_cycle_usage(&self, agent: &Agent, provider: &Arc<dyn Provider>) {
+        if let Some(usage) = CycleUsage::from_agent(agent, provider) {
+            *self.inner.last_cycle_usage.write().await = Some(usage);
+        }
+    }
+
     async fn set_running_detail(&self, detail: &str) {
         let mut s = self.inner.state.write().await;
         s.status = AmbientStatus::Running {
@@ -980,6 +1011,11 @@ impl AmbientRunnerHandle {
         self.set_running_detail("running agent").await;
 
         let run_result = agent.run_once_capture(&initial_message).await;
+
+        // Every exit below this line returns a cycle result, so recording here
+        // covers all of them, including the error and incomplete paths that
+        // still spent tokens.
+        self.record_cycle_usage(&agent, &cycle_provider).await;
 
         // Check if end_ambient_cycle was called
         if let Some(result) = ambient_tools::take_cycle_result() {
