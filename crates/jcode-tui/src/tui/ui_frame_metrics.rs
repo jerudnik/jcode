@@ -284,6 +284,9 @@ const SLOW_FRAME_HISTORY_MAX_SAMPLES: usize = 128;
 const SLOW_FRAME_LOG_INTERVAL_MS: u64 = 1_000;
 
 static FRAME_PERF_STATS: OnceLock<Mutex<FramePerfStats>> = OnceLock::new();
+// Only the non-test accessor reads this; under `cfg(test)` the history is
+// per-thread, which would leave this static unreferenced and trip dead_code.
+#[cfg(not(test))]
 static SLOW_FRAME_HISTORY: OnceLock<Mutex<SlowFrameHistory>> = OnceLock::new();
 static FRAME_RESOURCE_START: OnceLock<Mutex<Option<FrameResourceStart>>> = OnceLock::new();
 
