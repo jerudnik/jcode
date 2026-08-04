@@ -244,3 +244,187 @@ async fn ambient_cycle_records_what_it_spent_in_the_usage_log() {
         "output tokens must reach the log"
     );
 }
+
+/// Builds a provider that will attempt a tier-2 `write` to `target` on its
+/// first turn, then finish.
+fn provider_attempting_write(target: &std::path::Path) -> Arc<dyn Provider> {
+    let provider = StreamingTestProvider::default();
+    provider.queue_response(vec![
+        StreamEvent::ToolUseStart {
+            id: "attempted_write".to_string(),
+            name: "write".to_string(),
+        },
+        StreamEvent::ToolInputDelta(
+            serde_json::json!({
+                "file_path": target.display().to_string(),
+                "content": "tier-2 write by an unattended agent",
+            })
+            .to_string(),
+        ),
+        StreamEvent::ToolUseEnd,
+        StreamEvent::MessageEnd {
+            stop_reason: Some("tool_use".to_string()),
+        },
+    ]);
+    provider.queue_response(vec![
+        StreamEvent::TextDelta("finished".to_string()),
+        StreamEvent::MessageEnd { stop_reason: None },
+    ]);
+    Arc::new(provider)
+}
+
+fn scheduled_item(id: &str, target: ScheduleTarget, session_id: &str, dir: &str) -> ScheduledItem {
+    ScheduledItem {
+        id: id.to_string(),
+        scheduled_for: chrono::Utc::now(),
+        context: "scheduled work".to_string(),
+        priority: Priority::Normal,
+        target,
+        created_by_session: session_id.to_string(),
+        created_at: chrono::Utc::now(),
+        working_dir: Some(dir.to_string()),
+        task_description: Some("scheduled work".to_string()),
+        relevant_files: Vec::new(),
+        git_branch: None,
+        additional_context: None,
+    }
+}
+
+/// A gated ambient cycle must not be able to launder a tier-2 action through
+/// `schedule_ambient`.
+///
+/// `schedule_ambient` is deliberately tier-gate exempt (see `TIER_GATE_EXEMPT`
+/// in `tool/ambient.rs`) because enqueuing is not itself a tier-2 action. That
+/// is only true while the agent which later RUNS the item inherits the gate.
+/// This drives the real dispatch path (`deliver_ready_direct_items`), not the
+/// gate function directly, so it fails if the spawn seam stops registering.
+#[tokio::test]
+async fn scheduled_spawn_does_not_launder_tier_two_past_the_gate() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+
+    let target = temp.path().join("must_not_exist.txt");
+    let provider = provider_attempting_write(&target);
+
+    let mut parent = Session::create_with_id(
+        "session_gated_ambient_parent".to_string(),
+        None,
+        Some("Gated ambient parent".to_string()),
+    );
+    parent.working_dir = Some(temp.path().display().to_string());
+    parent.save().expect("save parent session");
+    let parent_guard = crate::tool::ambient::AmbientSessionGuard::new(parent.id.clone());
+
+    // Precondition: the parent really is gated for a direct tier-2 action.
+    assert!(
+        crate::tool::ambient::check_ambient_action_tier(&parent.id, "write").is_err(),
+        "precondition: a registered ambient session must be refused a direct tier-2 write"
+    );
+
+    let item = scheduled_item(
+        "sched_no_launder",
+        ScheduleTarget::Spawn {
+            parent_session_id: parent.id.clone(),
+        },
+        &parent.id,
+        &temp.path().display().to_string(),
+    );
+
+    let runner = AmbientRunnerHandle::new(Arc::new(crate::safety::SafetySystem::new()));
+    runner
+        .deliver_ready_direct_items(&provider, vec![item])
+        .await;
+
+    assert!(
+        !target.exists(),
+        "a session spawned for a scheduled item runs unattended, so it must inherit the \
+         ambient tier gate; otherwise `schedule_ambient` is an escalation path"
+    );
+    drop(parent_guard);
+}
+
+/// The fallback resume path is unattended too: live delivery has already
+/// failed, so no human is reading the session that gets resumed.
+#[tokio::test]
+async fn resumed_dead_session_does_not_take_tier_two_actions() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+
+    let target = temp.path().join("must_not_exist_resume.txt");
+    let provider = provider_attempting_write(&target);
+
+    let mut dead = Session::create_with_id(
+        "session_dead_for_resume".to_string(),
+        None,
+        Some("Dead session".to_string()),
+    );
+    dead.working_dir = Some(temp.path().display().to_string());
+    dead.status = crate::session::SessionStatus::Closed;
+    dead.save().expect("save dead session");
+
+    let item = scheduled_item(
+        "sched_resume_dead",
+        ScheduleTarget::Session {
+            session_id: dead.id.clone(),
+        },
+        &dead.id,
+        &temp.path().display().to_string(),
+    );
+
+    // No server is listening, so live delivery fails and this falls back to the
+    // headless resume path under test.
+    let runner = AmbientRunnerHandle::new(Arc::new(crate::safety::SafetySystem::new()));
+    runner
+        .deliver_ready_direct_items(&provider, vec![item])
+        .await;
+
+    assert!(
+        !target.exists(),
+        "resuming a dead session to deliver a scheduled reminder is unattended, so it must \
+         inherit the ambient tier gate"
+    );
+}
+
+/// The gate keys on session ID, so a leaked registration would gate an
+/// unrelated later session that reused the ID. The guard must clean up even
+/// when the unattended run fails.
+#[tokio::test]
+async fn ambient_session_guard_unregisters_on_failure() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+
+    let session_id = "session_guard_cleanup_probe";
+    {
+        let _scoped = crate::tool::ambient::AmbientSessionGuard::new(session_id);
+        assert!(
+            crate::tool::ambient::check_ambient_action_tier(session_id, "write").is_err(),
+            "session must be gated while the guard is alive"
+        );
+    }
+    assert!(
+        crate::tool::ambient::check_ambient_action_tier(session_id, "write").is_ok(),
+        "guard must unregister on drop; a leaked ID would gate a later unrelated session"
+    );
+}
+
+/// The ambient registry is global, so a test that leaks an ID would gate an
+/// unrelated test running later. Runs after the scheduled-dispatch tests and
+/// asserts they left nothing behind.
+#[tokio::test]
+async fn zz_scheduled_dispatch_tests_leave_no_registered_sessions() {
+    let _guard = crate::storage::lock_test_env();
+    for id in [
+        "session_gated_ambient_parent",
+        "session_dead_for_resume",
+        "session_guard_cleanup_probe",
+    ] {
+        assert!(
+            crate::tool::ambient::check_ambient_action_tier(id, "write").is_ok(),
+            "session '{id}' is still registered ambient after its test; a leaked ID gates \
+             unrelated later sessions"
+        );
+    }
+}

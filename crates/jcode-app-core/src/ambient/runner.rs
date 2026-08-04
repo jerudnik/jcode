@@ -425,6 +425,11 @@ impl AmbientRunnerHandle {
             registry.register_selfdev_tools().await;
         }
 
+        // Resuming a dead session to deliver a scheduled reminder is also
+        // unattended: the live-delivery attempt already failed, so no human is
+        // reading this session. It inherits the tier gate for the same reason
+        // the spawn path does.
+        let _ambient_guard = ambient_tools::AmbientSessionGuard::new(session_id.to_string());
         let mut agent = Agent::new(cycle_provider, registry);
         agent.set_debug(session.is_debug);
         agent.restore_session(session_id)?;
@@ -497,6 +502,12 @@ impl AmbientRunnerHandle {
             registry.register_selfdev_tools().await;
         }
 
+        // A scheduled item runs with no human present, so the agent that runs it
+        // must inherit the ambient tier gate. Without this, `schedule_ambient`
+        // (tier-gate exempt) would be an escalation path: a gated cycle could
+        // schedule the tier-2 action it is refused and have this ungated child
+        // perform it.
+        let _ambient_guard = ambient_tools::AmbientSessionGuard::new(child_session_id.clone());
         let mut agent = Agent::new_with_session(cycle_provider, registry, child, None);
         agent.set_debug(child_is_debug);
         if item.working_dir.is_some() {
