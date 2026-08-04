@@ -2,7 +2,7 @@
 
 Date: 2026-06-26
 Status: NS1/NS2/NS4 shipped (see
-[patch-ledger.md](../fork/patch-ledger.md)); NS3 and NS5 remain proposed.
+NS1/NS2/NS4 shipped); NS3 and NS5 remain proposed.
 Scope: the friction around the jcode shared daemon, self-developed binaries that differ
 substantially from the running one, and the NixOS/Home-Manager packaging.
 

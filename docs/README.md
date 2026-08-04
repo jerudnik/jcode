@@ -73,8 +73,6 @@ correcting them would destroy their value as evidence.
 | `docs/fork/recovery/` (131 files) | forensic integrity, self-declared |
 | `docs/fork/normalization/` (26 files) | append-only snapshot, self-declared |
 | `docs/fork/ideal-base/` (152 files) | program ledger; `DECISIONS.md` is explicitly append-only |
-| [`fork-sync-policy.md`](./fork-sync-policy.md) | retired at the 2026-07-27 hard fork |
-| `fork/patch-ledger.md` | retired with the patch-stack model |
 
 `docs/fork/ideal-base/` is a live program, but its records are appended rather
 than rewritten. Do not edit a prior decision to make the program look tidier.

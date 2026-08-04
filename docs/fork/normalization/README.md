@@ -37,7 +37,7 @@ validation. See [`STATUS.md`](STATUS.md) and
   immutable channel, live handoff, verification, and rollback procedure.
 - [`../recovery/reviews/2026-07-16-w7-review.md`](../recovery/reviews/2026-07-16-w7-review.md):
   reviewed W7 scope and implementation order.
-- [`../SYNC_MODEL.md`](../SYNC_MODEL.md): current monitored-curation policy,
+- [`../../BRANCHING.md`](../../BRANCHING.md): the hard-fork rails,
   which normalization must refresh without silently returning to broad replay.
 
 Normalization evidence belongs under `evidence/` and independent reviews under

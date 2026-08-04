@@ -2,13 +2,6 @@
   "_comment": "Per-file ratchets over documentation references. machine_local_by_file is D01-F08; stale_code_paths_by_file is D01-F12, citations of source files that no longer exist. Both may only decrease. Refresh with scripts/check_docs_references.py --update; --update refuses to raise any file's count.",
   "machine_local_by_file": {},
   "machine_local_by_file_total": 0,
-  "stale_code_paths_by_file": {
-    "docs/CODE_QUALITY_AUDIT_2026-04-18.md": 274,
-    "docs/PROVIDER_SESSION_SHARED_CONTRACT_AUDIT.md": 32,
-    "docs/architecture/FORK_SUSTAINABILITY_MODEL.md": 5,
-    "docs/architecture/FORK_SUSTAINABILITY_REVIEW_SYNTHESIS.md": 2,
-    "docs/fork/ideal-base/D01_DOCUMENTATION_AUDIT.md": 2,
-    "docs/fork/patch-ledger.md": 2
-  },
-  "stale_code_paths_by_file_total": 317
+  "stale_code_paths_by_file": {},
+  "stale_code_paths_by_file_total": 0
 }

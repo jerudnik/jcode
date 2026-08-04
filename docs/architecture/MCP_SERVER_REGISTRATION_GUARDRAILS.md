@@ -4,7 +4,7 @@ See also:
 
 - [`MCP_SERVE_FORKBOMB_INCIDENT.md`](./MCP_SERVE_FORKBOMB_INCIDENT.md)
 - [`../SERVER_LIFECYCLE_INVARIANTS.md`](../SERVER_LIFECYCLE_INVARIANTS.md)
-- [`../fork/SYNC_MODEL.md`](../fork/SYNC_MODEL.md)
+- [`../BRANCHING.md`](../BRANCHING.md)
 
 This is the safety contract for registering MCP servers in `~/.jcode/mcp.json`
 and project-local variants.

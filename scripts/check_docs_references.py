@@ -106,8 +106,9 @@ CODE_PATH = re.compile(
 # will rot the next time code moves. The per-file ratchet already says "this
 # debt is inherited and may not grow" without giving up the file: a frozen
 # record sits at its measured count forever, while a new stale citation in it
-# still fails. Measured when the exemption was removed: it was hiding 317
-# citations across 6 files, 32 of which pointed at live code.
+# still fails. Measured when the exemption was removed: those 6 files carried
+# 359 backticked code citations, 42 resolving to live code and 317 stale; the
+# exemption hid all 359, and only the 317 stale ones became the seeded baseline.
 MACHINE_LOCAL = re.compile(r"~/(?:notes|Documents|Desktop)/|/Users/[A-Za-z0-9._-]+/")
 BASELINE_FILE = Path(__file__).resolve().parent / "docs_references_budget.json"
 BASELINE_KEYS = {

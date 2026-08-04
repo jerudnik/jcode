@@ -128,7 +128,7 @@ fn main() {
     // selfdev) may override with JCODE_BUILD_SOURCE_DIR; otherwise it is the
     // workspace root this build script derived. Kept on `jcode-build-meta` only,
     // never threaded into `buildDepsOnly`, so it cannot perturb the crane
-    // dependency cache (see the patch-ledger "Nix dependency-cache stability" row).
+    // dependency cache.
     let source_dir = std::env::var("JCODE_BUILD_SOURCE_DIR")
         .ok()
         .filter(|value| !value.trim().is_empty())
