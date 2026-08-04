@@ -5,11 +5,11 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "D01-FIX-1",
-    "state": "in_progress",
-    "reviewed_commit": null,
-    "published_commit": null,
-    "updated_at": "2026-08-04T19:47:29Z",
-    "summary": "Implemented on automation/d01-fix-1-tier-gate, awaiting merge. SafetySystem::classify is now called from Registry::execute for ambient sessions: a tier-2 (RequiresPermission) tool invoked by an unattended agent is refused with instructions to call request_permission and retry, while AUTO_ALLOWED tier-1 reads pass. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code, because those classify tier-2 yet gating them would deadlock the cycle or block the permission request itself; batch re-enters execute per inner call so inner tools are still classified. Approval cannot resume a refused call (record_decision re-runs nothing), so the gate is a refusal, not a suspension. Two controls: removing the dispatch call made ambient bash succeed; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Gate covers ambient-registered sessions only; subagent/swarm children (fresh session id, never registered), overnight.rs:260, and scheduled resume remain uncovered, recorded in the evidence. Node text says tier 1/2/3 but ActionTier has two variants; doc matched to code."
+    "state": "accepted",
+    "reviewed_commit": "3c34c1be4a0f687336f0896334726315a0f204ba",
+    "published_commit": "5465b45e75fca83c2c1ac65b4eb67b34b5d41e04",
+    "updated_at": "2026-08-04T20:10:49Z",
+    "summary": "SafetySystem::classify is now called from Registry::execute for ambient sessions, so the documented tier gate actually runs. Tier-2 (RequiresPermission) tools invoked by an unattended agent are refused with instructions to call request_permission and retry; AUTO_ALLOWED tier-1 reads pass; interactive sessions are unaffected because they are never ambient-registered. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code: those classify tier-2, but gating them would mean a cycle could never end and the tool used to ask for permission would itself be blocked. batch re-enters execute per inner call, so inner tools are still classified. Approval cannot resume a refused call because record_decision re-runs nothing, so the gate is a refusal and the message says so rather than falsely promising a resume. Two controls, because one control could not distinguish a correct gate from a gate that blocks everything: removing the dispatch call made ambient bash return 'Command completed successfully'; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Three of four tests drive Registry::execute so they fail if the gate is unwired. NOT COVERED, recorded rather than implied: subagent/swarm children get a fresh session id (subagent.rs:62) and are never ambient-registered while ambient sessions do get those tools, a reachable bypass; overnight.rs:260 and scheduled resume are likewise unregistered. Closing those needs a decision on ancestry-aware registration vs unattended-ness on ToolContext. CORRECTION: the node text says tier 1/2/3 but ActionTier has two variants, so the doc was matched to code; the row moved Inert -> Partial, not Shipped, because of the uncovered paths. Merged as PR #115."
   },
   "nodes": {
     "W0": {
@@ -709,14 +709,14 @@
       "updated_at": "2026-08-02T02:42:48Z"
     },
     "D01-FIX-1": {
-      "state": "in_progress",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "3c34c1be4a0f687336f0896334726315a0f204ba",
+      "published_commit": "5465b45e75fca83c2c1ac65b4eb67b34b5d41e04",
       "evidence": [
         "docs/fork/ideal-base/evidence/D01-FIX-1/TIER_GATE_WIRE.md"
       ],
-      "summary": "Implemented on automation/d01-fix-1-tier-gate, awaiting merge. SafetySystem::classify is now called from Registry::execute for ambient sessions: a tier-2 (RequiresPermission) tool invoked by an unattended agent is refused with instructions to call request_permission and retry, while AUTO_ALLOWED tier-1 reads pass. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code, because those classify tier-2 yet gating them would deadlock the cycle or block the permission request itself; batch re-enters execute per inner call so inner tools are still classified. Approval cannot resume a refused call (record_decision re-runs nothing), so the gate is a refusal, not a suspension. Two controls: removing the dispatch call made ambient bash succeed; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Gate covers ambient-registered sessions only; subagent/swarm children (fresh session id, never registered), overnight.rs:260, and scheduled resume remain uncovered, recorded in the evidence. Node text says tier 1/2/3 but ActionTier has two variants; doc matched to code.",
-      "updated_at": "2026-08-04T19:47:29Z"
+      "summary": "SafetySystem::classify is now called from Registry::execute for ambient sessions, so the documented tier gate actually runs. Tier-2 (RequiresPermission) tools invoked by an unattended agent are refused with instructions to call request_permission and retry; AUTO_ALLOWED tier-1 reads pass; interactive sessions are unaffected because they are never ambient-registered. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code: those classify tier-2, but gating them would mean a cycle could never end and the tool used to ask for permission would itself be blocked. batch re-enters execute per inner call, so inner tools are still classified. Approval cannot resume a refused call because record_decision re-runs nothing, so the gate is a refusal and the message says so rather than falsely promising a resume. Two controls, because one control could not distinguish a correct gate from a gate that blocks everything: removing the dispatch call made ambient bash return 'Command completed successfully'; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Three of four tests drive Registry::execute so they fail if the gate is unwired. NOT COVERED, recorded rather than implied: subagent/swarm children get a fresh session id (subagent.rs:62) and are never ambient-registered while ambient sessions do get those tools, a reachable bypass; overnight.rs:260 and scheduled resume are likewise unregistered. Closing those needs a decision on ancestry-aware registration vs unattended-ness on ToolContext. CORRECTION: the node text says tier 1/2/3 but ActionTier has two variants, so the doc was matched to code; the row moved Inert -> Partial, not Shipped, because of the uncovered paths. Merged as PR #115.",
+      "updated_at": "2026-08-04T20:10:49Z"
     },
     "D01-FIX-2": {
       "state": "pending",
