@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01",
-    "state": "accepted",
-    "reviewed_commit": "568049bf098379599dd36cf1eb3792d01fe0d681",
-    "published_commit": "adce8b1c6bf5a20d539ec8c0dbfd0f0a32ff11bb",
-    "updated_at": "2026-08-04T18:58:09Z",
-    "summary": "All 7 acceptance gates answered against executed citations; d01_scoreboard.sh TOTAL=0 with every counter proven responsive by a planted control. 14 findings dispositioned: 12 corrected, 2 referred to D01-FIX-1/D01-FIX-2 as product defects rather than softened prose. Gate 6 was run with the pinned apm-cli 0.21.0 from nixpkgs after three sessions recorded it as un-runnable: apm compile --validate is VACUOUS (exits 0 on a truncated and NUL-overwritten primitive, counting files discovered rather than validated), so wiring it into CI is refused as a check that cannot fail; the drift half is live and already enforced by check_agent_instructions.py at fork-ci.yml:254, verified to AGREE with the real compiler. Docs corpus 130 active / 0 stale-code-path / 0 machine-local in scope, with archives and frozen forensic records excluded by documented policy."
+    "node": "D01-FIX-1",
+    "state": "in_progress",
+    "reviewed_commit": null,
+    "published_commit": null,
+    "updated_at": "2026-08-04T19:47:29Z",
+    "summary": "Implemented on automation/d01-fix-1-tier-gate, awaiting merge. SafetySystem::classify is now called from Registry::execute for ambient sessions: a tier-2 (RequiresPermission) tool invoked by an unattended agent is refused with instructions to call request_permission and retry, while AUTO_ALLOWED tier-1 reads pass. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code, because those classify tier-2 yet gating them would deadlock the cycle or block the permission request itself; batch re-enters execute per inner call so inner tools are still classified. Approval cannot resume a refused call (record_decision re-runs nothing), so the gate is a refusal, not a suspension. Two controls: removing the dispatch call made ambient bash succeed; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Gate covers ambient-registered sessions only; subagent/swarm children (fresh session id, never registered), overnight.rs:260, and scheduled resume remain uncovered, recorded in the evidence. Node text says tier 1/2/3 but ActionTier has two variants; doc matched to code."
   },
   "nodes": {
     "W0": {
@@ -709,12 +709,14 @@
       "updated_at": "2026-08-02T02:42:48Z"
     },
     "D01-FIX-1": {
-      "state": "pending",
+      "state": "in_progress",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": "Injected from D01-F13: a documentation-audit finding that is not a documentation defect, so softening the prose was forbidden and a separately owned product node is the correct move. Claim RE-VERIFIED 2026-08-03 before the node was created rather than inherited from the register: ActionTier appears in exactly one file, crates/jcode-base/src/safety.rs, and .classify( has zero callers outside it, so the documented tier 1/2/3 gate cannot run at all. docs/SAFETY_SYSTEM.md already says the gate is inert, and that sentence stays true until this node lands.",
-      "updated_at": "2026-08-03T08:10:20Z"
+      "evidence": [
+        "docs/fork/ideal-base/evidence/D01-FIX-1/TIER_GATE_WIRE.md"
+      ],
+      "summary": "Implemented on automation/d01-fix-1-tier-gate, awaiting merge. SafetySystem::classify is now called from Registry::execute for ambient sessions: a tier-2 (RequiresPermission) tool invoked by an unattended agent is refused with instructions to call request_permission and retry, while AUTO_ALLOWED tier-1 reads pass. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code, because those classify tier-2 yet gating them would deadlock the cycle or block the permission request itself; batch re-enters execute per inner call so inner tools are still classified. Approval cannot resume a refused call (record_decision re-runs nothing), so the gate is a refusal, not a suspension. Two controls: removing the dispatch call made ambient bash succeed; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Gate covers ambient-registered sessions only; subagent/swarm children (fresh session id, never registered), overnight.rs:260, and scheduled resume remain uncovered, recorded in the evidence. Node text says tier 1/2/3 but ActionTier has two variants; doc matched to code.",
+      "updated_at": "2026-08-04T19:47:29Z"
     },
     "D01-FIX-2": {
       "state": "pending",

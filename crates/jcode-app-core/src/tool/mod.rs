@@ -575,6 +575,10 @@ impl Registry {
                 return Err(anyhow::anyhow!("Tool '{}' is disabled", resolved_name));
             }
         }
+        // Safety tier gate: an unattended (ambient) agent may not take a tier-2
+        // action without a human. Interactive sessions are never registered as
+        // ambient, so this is a no-op for them.
+        ambient::check_ambient_action_tier(&ctx.session_id, resolved_name)?;
         let tool = match tools.get(resolved_name) {
             Some(tool) => tool.clone(),
             None => {
