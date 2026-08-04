@@ -1012,3 +1012,47 @@ fn test_flicker_frame_history_ignores_manual_scroll_feedback() {
     assert_eq!(payload["buffered_samples"], 3);
     assert_eq!(payload["buffered_events"], 0);
 }
+
+/// Guards the per-test isolation of `SLOW_FRAME_HISTORY`. Without it this test
+/// and `test_slow_frame_history_retains_recent_samples` share one process-wide
+/// buffer, so whichever runs second sees the other's samples. That is exactly
+/// the cross-test bleed that made the sibling test fail under load and pass in
+/// isolation. Reverting the `cfg(test)` thread-local makes this fail.
+#[test]
+fn test_slow_frame_history_is_isolated_per_test_thread() {
+    clear_slow_frame_history_for_tests();
+    for _ in 0..64 {
+        record_slow_frame_sample(SlowFrameSample {
+            timestamp_ms: 7,
+            threshold_ms: 40.0,
+            session_id: None,
+            session_name: None,
+            status: "Isolation".to_string(),
+            diff_mode: "Off".to_string(),
+            centered: false,
+            is_processing: false,
+            auto_scroll_paused: false,
+            display_messages: 0,
+            display_messages_version: 0,
+            user_messages: 0,
+            queued_messages: 0,
+            streaming_text_len: 0,
+            prepare_ms: 1.0,
+            draw_ms: 1.0,
+            total_ms: 99.0,
+            messages_ms: None,
+            input_event: None,
+            scroll_delta: None,
+            model_picker_open: false,
+            resources: Default::default(),
+            perf: FramePerfStats::default(),
+        });
+    }
+    let payload = debug_slow_frame_history(128);
+    // Exactly what this thread wrote: no sibling test's samples, and none of
+    // this test's samples visible to them.
+    assert_eq!(payload["buffered_samples"], 64);
+    for sample in payload["samples"].as_array().expect("samples array") {
+        assert_eq!(sample["status"], "Isolation");
+    }
+}
