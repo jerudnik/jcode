@@ -232,7 +232,10 @@ async fn ambient_cycle_records_what_it_spent_in_the_usage_log() {
     );
     let record = &records[0];
     assert!(
-        matches!(record.source, crate::ambient_scheduler::UsageSource::Ambient),
+        matches!(
+            record.source,
+            crate::ambient_scheduler::UsageSource::Ambient
+        ),
         "a cycle run by the ambient runner must be attributed to Ambient, not the user"
     );
     assert_eq!(record.tokens_input, 4321, "input tokens must reach the log");
@@ -241,4 +244,3 @@ async fn ambient_cycle_records_what_it_spent_in_the_usage_log() {
         "output tokens must reach the log"
     );
 }
-

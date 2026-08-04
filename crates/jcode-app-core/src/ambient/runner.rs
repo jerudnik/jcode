@@ -7,11 +7,11 @@
 //! providing status for the TUI widget and debug socket.
 
 use crate::agent::Agent;
+use crate::ambient::cycle_usage::CycleUsage;
 use crate::ambient::{
     self, AmbientCycleResult, AmbientLock, AmbientManager, AmbientState, AmbientStatus,
     CycleStatus, ScheduleTarget, ScheduledItem,
 };
-use crate::ambient::cycle_usage::CycleUsage;
 use crate::ambient_scheduler::{AdaptiveScheduler, AmbientSchedulerConfig};
 use crate::config::config;
 use crate::logging;

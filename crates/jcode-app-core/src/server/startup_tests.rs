@@ -289,10 +289,7 @@ async fn ambient_pauses_while_a_user_client_is_connected() {
 ///
 /// Polls both directions rather than sleeping a fixed span, so neither the
 /// pause nor the resume assertion is a race against a concurrent loop.
-async fn pause_settles(
-    runner: &crate::ambient_runner::AmbientRunnerHandle,
-    want: bool,
-) -> bool {
+async fn pause_settles(runner: &crate::ambient_runner::AmbientRunnerHandle, want: bool) -> bool {
     for _ in 0..150 {
         let paused = matches!(
             runner.state().await.status,
