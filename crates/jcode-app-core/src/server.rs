@@ -628,14 +628,10 @@ impl Server {
         };
         crate::process_title::set_server_title(&identity.name);
 
-        // Initialize the background runner even when ambient mode is disabled so
-        // session-targeted scheduled tasks still have a live delivery loop.
-        let ambient_runner = {
-            let safety = Arc::new(crate::safety::SafetySystem::new());
-            let handle = AmbientRunnerHandle::new(safety);
-            crate::tool::ambient::init_schedule_runner(handle.clone());
-            Some(handle)
-        };
+        // Allocated before the runner so both share one counter, not two that
+        // have to be kept in agreement.
+        let client_count = Arc::new(RwLock::new(0));
+        let ambient_runner = Some(AmbientRunnerHandle::for_server(Arc::clone(&client_count)));
 
         let LoadedSwarmRuntimeState {
             plans: restored_swarm_plans,
@@ -654,7 +650,7 @@ impl Server {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             is_processing: Arc::new(RwLock::new(false)),
             session_id: Arc::new(RwLock::new(String::new())),
-            client_count: Arc::new(RwLock::new(0)),
+            client_count,
             client_connections: Arc::new(RwLock::new(HashMap::new())),
             file_touch: FileTouchService::new(),
             swarm_state: SwarmState::new(

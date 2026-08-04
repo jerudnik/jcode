@@ -49,8 +49,13 @@ struct AmbientRunnerInner {
     safety: Arc<SafetySystem>,
     /// Notification dispatcher for push/email/desktop alerts
     notifier: NotificationDispatcher,
-    /// Number of active user sessions (for pause logic)
-    active_user_sessions: RwLock<usize>,
+    /// Number of connected user clients, shared with the server rather than
+    /// mirrored into it. `ServerRuntime` already documents (runtime.rs) how
+    /// easily a second counter kept "in lockstep" drifts from the table that
+    /// is the real source of truth, so this holds the SAME allocation the
+    /// server increments on connect and decrements on disconnect. There is no
+    /// writer here on purpose: a setter would be a second place to forget.
+    active_user_sessions: Arc<RwLock<usize>>,
     /// Soft interrupt queue for the currently-running ambient agent (if any).
     /// Telegram replies push messages here so they arrive mid-cycle.
     active_cycle_queue: RwLock<Option<SoftInterruptQueue>>,
@@ -58,6 +63,18 @@ struct AmbientRunnerInner {
 
 impl AmbientRunnerHandle {
     pub fn new(safety: Arc<SafetySystem>) -> Self {
+        Self::new_with_user_sessions(safety, Arc::new(RwLock::new(0)))
+    }
+
+    /// Build a runner that reads live user-client presence from `active_user_sessions`.
+    ///
+    /// The server passes its own `client_count` allocation here. Debug-socket
+    /// pings deliberately do not touch that counter, so "a user is attached"
+    /// stays true to its name.
+    pub fn new_with_user_sessions(
+        safety: Arc<SafetySystem>,
+        active_user_sessions: Arc<RwLock<usize>>,
+    ) -> Self {
         let state = AmbientState::load().unwrap_or_default();
         Self {
             inner: Arc::new(AmbientRunnerInner {
@@ -68,10 +85,21 @@ impl AmbientRunnerHandle {
                 running: RwLock::new(false),
                 safety,
                 notifier: NotificationDispatcher::new(),
-                active_user_sessions: RwLock::new(0),
+                active_user_sessions,
                 active_cycle_queue: RwLock::new(None),
             }),
         }
+    }
+
+    /// Build the server's runner and register it as the schedule delivery loop.
+    ///
+    /// Built even when ambient mode is disabled, so session-targeted scheduled
+    /// tasks still have a live delivery loop.
+    pub fn for_server(active_user_sessions: Arc<RwLock<usize>>) -> Self {
+        let safety = Arc::new(crate::safety::SafetySystem::new());
+        let handle = Self::new_with_user_sessions(safety, active_user_sessions);
+        crate::tool::ambient::init_schedule_runner(handle.clone());
+        handle
     }
 
     /// Nudge the ambient loop to check sooner (e.g., after session close/crash).
