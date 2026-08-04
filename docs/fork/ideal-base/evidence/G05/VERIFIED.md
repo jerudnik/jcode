@@ -1,8 +1,9 @@
 # G05: unauthenticated public acquisition
 
-Result: **the gate's real question is answered, and the answer is a defect.**
-The cache is genuinely public and unauthenticated, but the documented end-user
-command does not use it. `docs/NIX.md` has been corrected.
+Result: **gate met end to end, and it surfaced a documentation defect.**
+The `x86_64-linux` binary was fetched from public Cachix with no credentials,
+with all local building forbidden, and launched. Separately, the command
+`docs/NIX.md` told users to run did not use the cache at all; corrected.
 
 Environment: disposable OrbStack VM `jcode-g05-arm` (Ubuntu, aarch64), Nix
 installed from `nixos.org/nix/install` inside the VM. Fork revision
@@ -20,9 +21,8 @@ would prove nothing about the end-user path.
 
 ## Measurement
 
-Target `x86_64-linux`, the arch Cachix is populated for. `--dry-run` still
-queries substituters, so it reports fetch-vs-build without needing emulation
-(amd64 emulation is unavailable on this arm64 host; see Limitations).
+Target `x86_64-linux`, the arch Cachix is populated for. OrbStack registers
+`qemu-x86_64` binfmt, so the VM executes x86-64 binaries transparently.
 
 | # | Command (all as the untrusted user) | Plan |
 |---|---|---|
@@ -44,25 +44,49 @@ configuration: same revision, same command, same VM, same network. 1620 built
 -> 7 fetched isolates the cause to trust config alone, not to network reach,
 not to cache contents, not to the package.
 
+## Acquisition and launch, not just a plan
+
+The table above is `--dry-run`. The gate was then satisfied for real:
+
+    nix build --max-jobs 0 --accept-flake-config ...#packages.x86_64-linux.jcode
+      copying path '...-jcode-0.46.0' from 'https://jerudnik-jcode.cachix.org'
+      EXIT=0
+      -r-xr-xr-x 1 root root 142610888 /tmp/g05out/bin/jcode
+
+`--max-jobs 0` forbids all local building, so exit 0 is only reachable by
+substitution. The fetched file is genuinely x86-64, read from the ELF header
+rather than inferred:
+
+    magic: b'\x7fELF'   e_machine: 0x3e   (0x3e = x86-64, 0xb7 = aarch64)
+
+It then launched:
+
+    /tmp/g05out/bin/jcode --version  ->  jcode v0.46.0 (a632aed)   EXIT=0
+
+matching the revision under test.
+
 ## What this proves and does not prove
 
-Proven: the cache is reachable and usable with no credentials of any kind, and
-the published `jcode-0.46.0` closure for `x86_64-linux` is complete enough to
-install without compiling.
+Proven: the cache is reachable and usable with no credentials of any kind; the
+published `jcode-0.46.0` closure for `x86_64-linux` installs without compiling;
+and the acquired binary runs.
 
 Disproven: `docs/NIX.md:87`'s claim that `--accept-flake-config` is sufficient.
 It is not. Nix discards substituters requested by non-trusted users regardless
 of that flag. Corrected in the same commit as this file.
 
-Not proven: end-to-end launch of the fetched `x86_64-linux` binary. It cannot
-execute on this arm64 host. G03 separately covers "the binary runs".
+Not proven: behavior on real x86-64 silicon. Execution here is qemu emulation,
+which is sufficient to show the artifact is not corrupt and its entry point
+works, but is not a substitute for native hardware.
 
 ## Limitations, stated rather than papered over
 
-- **Architecture.** `orb create -a amd64` fails on this arm64 host
+- **Emulated, not native.** `orb create -a amd64` fails on this arm64 host
   (`machine didn't start in 30s`); the arm64 control (`orb create ubuntu`)
-  succeeded immediately, isolating the failure to amd64 emulation rather than
-  OrbStack. So `x86_64-linux` was measured by resolution plan, not by execution.
+  succeeded immediately, isolating that failure to amd64 VM creation. The
+  x86_64 binary still ran, via `qemu-x86_64` binfmt inside the arm64 VM. I
+  initially recorded "cannot execute on this host" and that was wrong: the run
+  contradicted it, and the binfmt registration explains why.
 - **aarch64-linux is uncached by design** (`nix.yml:5`, `docs/NIX.md:30`), so a
   native VM run here would compile from source no matter what. That is expected
   behavior, not a cache failure.
