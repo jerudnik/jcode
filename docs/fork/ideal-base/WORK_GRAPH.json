@@ -1392,7 +1392,18 @@
         "depends_on": [
           "F21",
           "F27",
-          "D01"
+          "D01",
+          "R03",
+          "R08",
+          "R09",
+          "R10",
+          "F30-FIX-1",
+          "F30-FIX-2",
+          "F30-FIX-3",
+          "F30-FIX-4",
+          "R05-FIX-1",
+          "D01-FIX-1",
+          "D01-FIX-2"
         ],
         "priority": 75,
         "owned_paths": [
@@ -3140,7 +3151,18 @@
       "depends_on": [
         "F21",
         "F27",
-        "D01"
+        "D01",
+        "R03",
+        "R08",
+        "R09",
+        "R10",
+        "F30-FIX-1",
+        "F30-FIX-2",
+        "F30-FIX-3",
+        "F30-FIX-4",
+        "R05-FIX-1",
+        "D01-FIX-1",
+        "D01-FIX-2"
       ],
       "priority": 75,
       "owned_paths": [
