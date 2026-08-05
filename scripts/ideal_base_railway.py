@@ -728,6 +728,25 @@ def validate_repository(
 def ready_nodes(
     graph: dict[str, Any], state: dict[str, Any], nodes: dict[str, dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """Every node the railway can act on right now, with the action to take.
+
+    A child is offered while it is ``pending`` (dispatch the work) and again
+    while it is ``implemented`` or ``verifying`` (run the gates). The lifecycle
+    in EXECUTION_PROTOCOL section 5 is
+    ``pending -> in_progress -> implemented -> verifying -> accepted``, and
+    "implementation is not acceptance": a node at ``implemented`` has outstanding
+    work, namely the verification its own gates demand. Offering only ``pending``
+    children made those two states invisible, so a wave whose remaining children
+    were all awaiting verification projected NOTHING and the railway silently
+    reported it had no next action. That is how D01-FIX-2 and G02, both
+    correctly checkpointed, emptied the projection and failed the
+    always-offer-some-action test.
+
+    ``in_progress`` is deliberately NOT offered: it means an owner is already
+    executing that node, and re-offering it invites duplicate work. ``blocked``
+    is likewise withheld because it names a missing input by definition, so
+    dispatching it would be dispatching something known to be unable to proceed.
+    """
     records = state["nodes"]
     root_ids = [node["id"] for node in graph["root_nodes"]]
     ready: list[dict[str, Any]] = []
@@ -746,7 +765,14 @@ def ready_nodes(
         children = graph["expansions"][root_id]
         runnable_children = []
         for child in children:
-            if records[child["id"]]["state"] != "pending":
+            child_state = records[child["id"]]["state"]
+            if child_state in {"implemented", "verifying"}:
+                # Awaiting its gates, not awaiting a dependency: a node only
+                # reaches these states after its work exists, so dependency
+                # completeness is not re-checked here.
+                runnable_children.append({**child, "action": "verify"})
+                continue
+            if child_state != "pending":
                 continue
             if all(
                 records[dependency]["state"] in DEPENDENCY_COMPLETE
