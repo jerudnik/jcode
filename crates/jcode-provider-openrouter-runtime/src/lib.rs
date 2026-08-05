@@ -540,7 +540,7 @@ async fn fetch_models_from_api(
     models_cache: Arc<RwLock<ModelsCache>>,
     cache_namespace: Option<String>,
 ) -> Result<Vec<ModelInfo>> {
-    let url = format!("{}/models", api_base);
+    let url = jcode_base::provider_catalog::openai_compatible_models_url(&api_base);
     let response =
         apply_kimi_coding_agent_headers(auth.apply(client.get(&url)).await?, &api_base, None)
             .send()

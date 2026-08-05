@@ -54,7 +54,7 @@ async fn probe_openai_compatible_key(api_base: &str, api_key: &str) -> String {
     }
     let client = crate::provider::shared_http_client();
     let response = client
-        .get(format!("{}/models", base))
+        .get(jcode_provider_metadata::openai_compatible_models_url(base))
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Accept", "application/json")
         .timeout(HTTP_TIMEOUT)
