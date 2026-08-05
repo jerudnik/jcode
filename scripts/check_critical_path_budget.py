@@ -217,7 +217,7 @@ EXPECTED_FILE_COUNTS: dict[str, int] = {
     "lifecycle": 64,
     "persistence": 10,
     "updater": 8,
-    "provider_infrastructure": 19,
+    "provider_infrastructure": 20,
     "tui": 193,
 }
 

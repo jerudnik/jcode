@@ -336,14 +336,18 @@ struct UsageRecord {
 
 ### Rate Limit Discovery
 
-Rate limits are learned from provider response headers:
+Rate limits are learned from provider response headers. The header family is
+vendor-specific: Anthropic uses `anthropic-ratelimit-*`, while OpenAI and
+several others use `x-ratelimit-*`. Both are parsed
+(`jcode-provider-core/src/rate_limit_headers.rs`); only the Anthropic runtime
+currently records readings.
 
 ```
-x-ratelimit-limit-requests: 50
-x-ratelimit-remaining-requests: 42
-x-ratelimit-limit-tokens: 100000
-x-ratelimit-remaining-tokens: 85000
-x-ratelimit-reset-requests: 2026-02-08T15:00:00Z
+anthropic-ratelimit-requests-limit: 50
+anthropic-ratelimit-requests-remaining: 42
+anthropic-ratelimit-tokens-limit: 100000
+anthropic-ratelimit-tokens-remaining: 85000
+anthropic-ratelimit-tokens-reset: 2026-02-08T15:00:00Z
 ```
 
 When headers aren't available, fall back to conservative defaults and adjust based on whether rate limit errors occur.
@@ -967,9 +971,9 @@ rows say which layer runs.
 |---|---|---|
 | `schedule_ambient` tool | Shipped | `tool/ambient.rs:302`, registered at `tool/mod.rs:1048` |
 | Scheduled queue (persistent, with context) | Shipped | `ambient/persistence.rs:57` `ScheduledQueue`, saved on every mutation |
-| Adaptive resource calculator | **Inert** | `ambient/scheduler.rs:188` `calculate_interval` implements the documented algorithm, but both production callers (`runner.rs:751`, `runner.rs:901`) pass `None`, so it always returns the max interval. Only tests exercise the adaptive path |
+| Adaptive resource calculator | **Shipped** | `ambient/scheduler.rs:188` `calculate_interval` implements the documented algorithm, and both production callers (`runner.rs:751`, `runner.rs:901`) now feed it real readings through `ambient/rate_limit_source.rs` `next_interval`. The Anthropic runtime records `anthropic-ratelimit-*` response headers (`jcode-provider-core/src/rate_limit_headers.rs`); readings older than 5 minutes are discarded, so the scheduler falls back to the max interval rather than acting on stale headroom. Covered by `recorded_headroom_shortens_the_next_interval` and `absent_reading_keeps_the_maximum_interval` |
 | Usage history tracking | Shipped | `ambient/scheduler.rs:26` `UsageLog`, fed by `runner.rs:811` after every cycle including the error path, so `usage.json` is written and rate queries are real. Verified by control: removing the `record` call fails `ambient_cycle_records_what_it_spent_in_the_usage_log` with `found []` |
-| Rate limit awareness | Absent | No `x-ratelimit`/`anthropic-ratelimit` parsing anywhere. `RateLimitInfo` has no production constructor |
+| Rate limit awareness | **Partial** | `anthropic-ratelimit-*` parsing exists (`jcode-provider-core/src/rate_limit_headers.rs`) and `RateLimitInfo` now has a production constructor (`ambient/rate_limit_source.rs`), fed by the Anthropic runtime. Partial rather than Shipped because only that one runtime records readings; the other provider runtimes still report nothing, so ambient runs against them stay at the max interval |
 | Event triggers | Partial | Session close is wired (`server/runtime.rs:424` nudge on disconnect). Crash and git-push triggers do not exist |
 | Active session detection, pause/throttle | Shipped | `runner.rs` `should_pause`, reading the counter the server increments at `server/runtime.rs:351` and decrements at `:374`; one `Arc` is shared with the runner at `server.rs:633`. Verified by control: allocating the runner its own counter fails `ambient_pauses_while_a_user_client_is_connected` on the pause assertion |
 
@@ -991,7 +995,7 @@ rows say which layer runs.
 | Queue preview | Shipped | `tui/info_widget.rs:1907` |
 | Last cycle summary | Shipped | `tui/info_widget.rs:1946` |
 | Next wake estimate | Shipped | `tui/info_widget.rs:1886` countdown |
-| Budget bar | **Inert** | The bar renders (`info_widget.rs:1988`), but both producers hardcode `budget_percent: None`, so it never appears. Downstream of the adaptive-calculator row in Phase 3, which is the one wire still dangling |
+| Budget bar | **Inert** | The bar renders (`info_widget.rs:1988`), but both producers still hardcode `budget_percent: None` (`ambient_widget.rs:64`, `tui/mod.rs:2113`), so it never appears. The adaptive calculator is now fed, but that wire reaches the scheduler only; surfacing headroom in the TUI is a separate, still-unbuilt connection |
 
 ### Shipped but never listed
 
