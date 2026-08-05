@@ -489,3 +489,104 @@ async fn test_schedule_tool_requires_time() {
         .expect_err("should require wake_in_minutes or wake_at");
     assert!(err.to_string().contains("wake_in_minutes"));
 }
+
+// ---------------------------------------------------------------------------
+// Ambient gate inheritance (D01-FIX-4)
+//
+// `AmbientSessionGuard::inherit` is the seam that keeps a spawned worker at
+// exactly its parent's authority. The two branches are asserted separately, so
+// a guard that always registers (breaking interactive use) and a guard that
+// never registers (leaving the escalation open) each fail a DIFFERENT test.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn guard_inherit_registers_child_when_parent_is_ambient() {
+    let parent = "d01f4_inherit_parent_ambient";
+    let child = "d01f4_inherit_child_gated";
+    unregister_ambient_session(parent);
+    unregister_ambient_session(child);
+
+    let _parent_guard = AmbientSessionGuard::new(parent.to_string());
+    let child_guard = AmbientSessionGuard::inherit(parent, child.to_string());
+
+    assert!(
+        child_guard.is_some(),
+        "a worker spawned by an unattended agent must inherit the gate"
+    );
+    assert!(
+        is_ambient_session_registered(child),
+        "the inherited child must be registered, or the gate cannot see it"
+    );
+    assert!(
+        check_ambient_action_tier(child, "write").is_err(),
+        "an inherited worker must be refused a tier-2 write"
+    );
+
+    drop(child_guard);
+    assert!(
+        !is_ambient_session_registered(child),
+        "the guard must unregister the child on drop"
+    );
+    unregister_ambient_session(parent);
+}
+
+#[test]
+fn guard_inherit_leaves_child_ungated_when_parent_is_interactive() {
+    // Counter-check to the test above, and the reason `inherit` exists rather
+    // than an unconditional register: an interactive user's subagent must keep
+    // running tier-2 tools. Without this assertion, a guard that registered
+    // every child would still pass the gating test.
+    let parent = "d01f4_inherit_parent_interactive";
+    let child = "d01f4_inherit_child_ungated";
+    unregister_ambient_session(parent);
+    unregister_ambient_session(child);
+
+    let child_guard = AmbientSessionGuard::inherit(parent, child.to_string());
+
+    assert!(
+        child_guard.is_none(),
+        "an interactive parent must not gate its worker"
+    );
+    assert!(
+        !is_ambient_session_registered(child),
+        "no registration may leak from an interactive spawn"
+    );
+    assert!(
+        check_ambient_action_tier(child, "write").is_ok(),
+        "an interactive user's subagent must still be allowed a tier-2 write"
+    );
+}
+
+#[test]
+fn inherited_and_registered_sessions_still_run_tier_one_tools() {
+    // The acceptance side of the gate. Every other test here asserts that
+    // something is REFUSED, so a "fix" which refused everything unattended would
+    // pass all of them while making an ambient agent useless. An unattended agent
+    // is supposed to keep reading, grepping and listing without a human; only
+    // tier 2 needs permission.
+    let parent = "d01f4_tier_one_parent";
+    let child = "d01f4_tier_one_child";
+    unregister_ambient_session(parent);
+    unregister_ambient_session(child);
+
+    let _parent_guard = AmbientSessionGuard::new(parent.to_string());
+    let _child_guard = AmbientSessionGuard::inherit(parent, child.to_string());
+
+    for tool in ["read", "grep", "glob", "ls", "todo"] {
+        assert!(
+            check_ambient_action_tier(parent, tool).is_ok(),
+            "a registered ambient session must still be allowed the tier-1 tool '{tool}'"
+        );
+        assert!(
+            check_ambient_action_tier(child, tool).is_ok(),
+            "an inherited worker must still be allowed the tier-1 tool '{tool}'"
+        );
+    }
+
+    // ... and the refusal stays specific to tier 2 rather than turning blanket.
+    assert!(
+        check_ambient_action_tier(child, "write").is_err(),
+        "the same inherited worker must still be refused tier 2"
+    );
+    unregister_ambient_session(parent);
+}
