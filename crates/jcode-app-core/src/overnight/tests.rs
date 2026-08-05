@@ -6,7 +6,6 @@
 //! byte-identical to before this change.
 
 use super::*;
-use super::*;
 
 fn test_manifest(root: &Path, run_id: &str) -> OvernightManifest {
     let run_dir = root.join("run");
