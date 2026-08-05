@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01-FIX-1",
-    "state": "accepted",
-    "reviewed_commit": "3c34c1be4a0f687336f0896334726315a0f204ba",
-    "published_commit": "5465b45e75fca83c2c1ac65b4eb67b34b5d41e04",
-    "updated_at": "2026-08-04T20:10:49Z",
-    "summary": "SafetySystem::classify is now called from Registry::execute for ambient sessions, so the documented tier gate actually runs. Tier-2 (RequiresPermission) tools invoked by an unattended agent are refused with instructions to call request_permission and retry; AUTO_ALLOWED tier-1 reads pass; interactive sessions are unaffected because they are never ambient-registered. TIER_GATE_EXEMPT carves out the control plane (end_ambient_cycle, request_permission, schedule_ambient, send_message, batch), each argued from code: those classify tier-2, but gating them would mean a cycle could never end and the tool used to ask for permission would itself be blocked. batch re-enters execute per inner call, so inner tools are still classified. Approval cannot resume a refused call because record_decision re-runs nothing, so the gate is a refusal and the message says so rather than falsely promising a resume. Two controls, because one control could not distinguish a correct gate from a gate that blocks everything: removing the dispatch call made ambient bash return 'Command completed successfully'; making the gate refuse tier 1 blocked ls. Both restored and diff-verified byte-identical. Three of four tests drive Registry::execute so they fail if the gate is unwired. NOT COVERED, recorded rather than implied: subagent/swarm children get a fresh session id (subagent.rs:62) and are never ambient-registered while ambient sessions do get those tools, a reachable bypass; overnight.rs:260 and scheduled resume are likewise unregistered. Closing those needs a decision on ancestry-aware registration vs unattended-ness on ToolContext. CORRECTION: the node text says tier 1/2/3 but ActionTier has two variants, so the doc was matched to code; the row moved Inert -> Partial, not Shipped, because of the uncovered paths. Merged as PR #115."
+    "node": "G02",
+    "state": "implemented",
+    "reviewed_commit": null,
+    "published_commit": null,
+    "updated_at": "2026-08-05T04:20:54Z",
+    "summary": "Authorization granted; run performed on 9d1470f86, pending merge. Catalog tier across 10 providers: 7 pass (claude 11, openai 9, cursor 28, antigravity 24, deepseek 2, minimax 8, zai 8); gemini and copilot not signed in with named next action (jcode login --provider); perplexity 404. Full spending tier passes on claude (13/13, 4 calls, 2188 tokens) and through the Bifrost gateway on bridge/gpt-5.5 (12/12, 3 calls, 1018 tokens). Found a real defect: perplexity builds {api_base}/models but its base lacks /v1; live checks show models needs /v1 while chat needs the base without it, so appending /v1 would break chat and the fix must be a per-provider models-path override. Gateway leg controlled with a closed-port base that fails the catalog check, after an uncontrolled first attempt was traced to a persisted openai-compatible.env."
   },
   "nodes": {
     "W0": {
@@ -405,14 +405,15 @@
       "updated_at": "2026-08-02T22:10:01.949403Z"
     },
     "G02": {
-      "state": "authorization_blocked",
-      "reviewed_commit": "35c13d5d894319b39ecbe596c4b71184de39fe4f",
-      "published_commit": "b882507834034c15bcfb0ea9e270a95425d34970",
+      "state": "implemented",
+      "reviewed_commit": null,
+      "published_commit": null,
       "evidence": [
-        "docs/fork/ideal-base/evidence/G02/BLOCKED.md"
+        "docs/fork/ideal-base/evidence/G02/BLOCKED.md",
+        "docs/fork/ideal-base/evidence/G02/VERIFIED.md"
       ],
-      "summary": "AUTHORIZATION BLOCKED, not incomplete and not verified. Both tiers make authenticated network calls against real provider endpoints with live credentials and the catalog tier can incur spend, which is an external side effect with real cost and outside what an agent may self-authorize. Nothing in the repo blocks this: no code to write, no test to fix, no local investigation left. Recorded blocked rather than pending so the ledger stops implying local work remains. Named next action, with explicit user authorization: run the minimal tier first so the cheapest check surfaces credential or endpoint problems before anything expensive runs, then the full pre-release catalog tier from a clean credential state, and attach both transcripts under docs/fork/ideal-base/evidence/G02/.",
-      "updated_at": "2026-08-02T22:16:13.347870Z"
+      "summary": "Authorization granted; run performed on 9d1470f86, pending merge. Catalog tier across 10 providers: 7 pass (claude 11, openai 9, cursor 28, antigravity 24, deepseek 2, minimax 8, zai 8); gemini and copilot not signed in with named next action (jcode login --provider); perplexity 404. Full spending tier passes on claude (13/13, 4 calls, 2188 tokens) and through the Bifrost gateway on bridge/gpt-5.5 (12/12, 3 calls, 1018 tokens). Found a real defect: perplexity builds {api_base}/models but its base lacks /v1; live checks show models needs /v1 while chat needs the base without it, so appending /v1 would break chat and the fix must be a per-provider models-path override. Gateway leg controlled with a closed-port base that fails the catalog check, after an uncontrolled first attempt was traced to a persisted openai-compatible.env.",
+      "updated_at": "2026-08-05T04:20:54Z"
     },
     "G03": {
       "state": "accepted",

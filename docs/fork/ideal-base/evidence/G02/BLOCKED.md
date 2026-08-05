@@ -1,6 +1,10 @@
 # G02: authorization blocked
 
-**State: `authorization_blocked`. Not incomplete, and not verified.**
+**Superseded. Authorization was granted and the run was performed; see
+`VERIFIED.md` in this directory for the result. This file is kept as the record
+of the decision that gated it.**
+
+**State when written: `authorization_blocked`. Not incomplete, and not verified.**
 
 ## What the node requires
 
