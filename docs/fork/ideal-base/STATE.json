@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "G02-FIX-1",
+    "node": "D01-FIX-4",
     "state": "accepted",
-    "reviewed_commit": "4f95bdbf4590bbfdcdf62a6c79fc41fceac61aff",
-    "published_commit": "4308b6a149248612f2706950e77b4368ad78ab3f",
-    "updated_at": "2026-08-05T10:20:57Z",
-    "summary": "Perplexity catalog 404 fixed and verified with a real key: GET /models 404, GET /v1/models 200 with a catalog body. Sparse override table keyed on api_base; catalog.rs untouched, so the size ratchet, file-count registry, digest pin and Governance Root stay out of scope. The earlier models_path field design is abandoned at tag g02f1-field-attempt: catalog.rs had 28 lines of headroom and the field needed 36, so it could never have fit. Blast radius settled mechanically, exactly 1 of 36 profiles differs. CI 16 pass 0 fail."
+    "reviewed_commit": "c865aeffb404d810a083c9b252c44d371d8b9796",
+    "published_commit": "0faa1629cde84a08edf2a8fe1db877b370063107",
+    "updated_at": "2026-08-05T18:33:04Z",
+    "summary": "Gated the two unattended paths the ambient tier gate missed. AmbientSessionGuard::inherit(parent, child) registers a subagent worker only when its parent is registered, so an ambient parent's worker is gated while an interactive user's worker is not; the overnight supervisor registers unconditionally for the whole loop, so ? returns still unregister on drop. Six tests, including one asserting tier-1 read/grep/glob/ls/todo still run for both registered and inherited sessions, since every other test asserts a refusal. Five controls, each confirmed on disk before its exit code was read and restored byte-identical, each failing on a different assertion: deleting the inherit call, registering unconditionally (fails the interactive assertion while the gating half still passes), deleting the overnight guard, registering without the RAII guard, and making AutoAllowed refuse. Split the 228-line test module out of overnight.rs (1275 to 1101 LOC) with zero production lines relocated, after a first attempt that extracted production probes was correctly rejected by the swallowed-error ratchet on path novelty; no budget was re-baselined. CI caught a duplicated glob import my local clippy missed for lack of --all-targets; fixed and control-verified against CI's exact command. Merged as PR #128."
   },
   "nodes": {
     "W0": {
@@ -732,12 +732,12 @@
       "updated_at": "2026-08-05T06:33:53Z"
     },
     "W7": {
-      "state": "pending",
+      "state": "in_progress",
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [],
-      "summary": "Wave opened to hold the two ambient-safety nodes split out of W6. W6 already carried eleven children against a twelve-child deep-gate review budget, and the budget was NOT re-baselined; the root budget had headroom (8 of 10), so a new wave was the correct relief. Both children share one seam: the ambient tier gate keys only on a registered session id, so any path that runs an agent without registering is ungated by construction.",
-      "updated_at": "2026-08-05T05:05:18Z"
+      "summary": "Wave open. D01-FIX-4 (ambient tier gate misses two unattended paths) is implemented and merged as PR #128; D01-FIX-3 (rate-limit headers to the ambient scheduler) is not started. The wave closes when D01-FIX-3 lands.",
+      "updated_at": "2026-08-05T18:32:31Z"
     },
     "D01-FIX-3": {
       "state": "pending",
@@ -748,12 +748,14 @@
       "updated_at": "2026-08-05T05:05:18Z"
     },
     "D01-FIX-4": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "Found in the D01-FIX-1 follow-up sweep, 2026-08-05, and re-derived by grep rather than inherited. The ambient tier gate keys ONLY on ctx.session_id (tool/mod.rs:581 -> check_ambient_action_tier), and AmbientSessionGuard::new is registered in exactly one file, ambient/runner.rs. Two paths run agents with no human present and never register: overnight.rs:401 calls run_once_capture with no guard, and tool/subagent.rs runs its worker on a session minted by Session::create, a fresh id nothing registers, so the worker is ungated regardless of its parent. classify is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so bash, write and edit are all tier 2. Scope recorded honestly rather than oversold: subagent is itself tier 2 and not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today, which makes this defense-in-depth against future edits to an 11-entry list nobody watches, not a live exploit. subagent must INHERIT the parent's ambient status so an interactive user's subagent stays ungated.",
-      "updated_at": "2026-08-05T05:05:18Z"
+      "state": "accepted",
+      "reviewed_commit": "c865aeffb404d810a083c9b252c44d371d8b9796",
+      "published_commit": "0faa1629cde84a08edf2a8fe1db877b370063107",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/D01-FIX-4/README.md"
+      ],
+      "summary": "Gated the two unattended paths the ambient tier gate missed. AmbientSessionGuard::inherit(parent, child) registers a subagent worker only when its parent is registered, so an ambient parent's worker is gated while an interactive user's worker is not; the overnight supervisor registers unconditionally for the whole loop, so ? returns still unregister on drop. Six tests, including one asserting tier-1 read/grep/glob/ls/todo still run for both registered and inherited sessions, since every other test asserts a refusal. Five controls, each confirmed on disk before its exit code was read and restored byte-identical, each failing on a different assertion: deleting the inherit call, registering unconditionally (fails the interactive assertion while the gating half still passes), deleting the overnight guard, registering without the RAII guard, and making AutoAllowed refuse. Split the 228-line test module out of overnight.rs (1275 to 1101 LOC) with zero production lines relocated, after a first attempt that extracted production probes was correctly rejected by the swallowed-error ratchet on path novelty; no budget was re-baselined. CI caught a duplicated glob import my local clippy missed for lack of --all-targets; fixed and control-verified against CI's exact command. Merged as PR #128.",
+      "updated_at": "2026-08-05T18:33:04Z"
     },
     "G02-FIX-1": {
       "state": "accepted",
