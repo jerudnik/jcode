@@ -7,6 +7,7 @@
 //! providing status for the TUI widget and debug socket.
 
 use crate::agent::Agent;
+use crate::ambient::cycle_usage::CycleUsage;
 use crate::ambient::{
     self, AmbientCycleResult, AmbientLock, AmbientManager, AmbientState, AmbientStatus,
     CycleStatus, ScheduleTarget, ScheduledItem,
@@ -49,15 +50,37 @@ struct AmbientRunnerInner {
     safety: Arc<SafetySystem>,
     /// Notification dispatcher for push/email/desktop alerts
     notifier: NotificationDispatcher,
-    /// Number of active user sessions (for pause logic)
-    active_user_sessions: RwLock<usize>,
+    /// Number of connected user clients, shared with the server rather than
+    /// mirrored into it. `ServerRuntime` already documents (runtime.rs) how
+    /// easily a second counter kept "in lockstep" drifts from the table that
+    /// is the real source of truth, so this holds the SAME allocation the
+    /// server increments on connect and decrements on disconnect. There is no
+    /// writer here on purpose: a setter would be a second place to forget.
+    active_user_sessions: Arc<RwLock<usize>>,
     /// Soft interrupt queue for the currently-running ambient agent (if any).
     /// Telegram replies push messages here so they arrive mid-cycle.
     active_cycle_queue: RwLock<Option<SoftInterruptQueue>>,
+    /// Tokens spent by the most recent ambient cycle, handed to the scheduler's
+    /// usage log by the loop. The agent that knows these numbers is local to
+    /// `run_cycle`, which has five exits, while the log lives on the scheduler
+    /// in `run_loop`; this is the one place both can reach.
+    last_cycle_usage: RwLock<Option<CycleUsage>>,
 }
 
 impl AmbientRunnerHandle {
     pub fn new(safety: Arc<SafetySystem>) -> Self {
+        Self::new_with_user_sessions(safety, Arc::new(RwLock::new(0)))
+    }
+
+    /// Build a runner that reads live user-client presence from `active_user_sessions`.
+    ///
+    /// The server passes its own `client_count` allocation here. Debug-socket
+    /// pings deliberately do not touch that counter, so "a user is attached"
+    /// stays true to its name.
+    pub fn new_with_user_sessions(
+        safety: Arc<SafetySystem>,
+        active_user_sessions: Arc<RwLock<usize>>,
+    ) -> Self {
         let state = AmbientState::load().unwrap_or_default();
         Self {
             inner: Arc::new(AmbientRunnerInner {
@@ -68,10 +91,22 @@ impl AmbientRunnerHandle {
                 running: RwLock::new(false),
                 safety,
                 notifier: NotificationDispatcher::new(),
-                active_user_sessions: RwLock::new(0),
+                active_user_sessions,
                 active_cycle_queue: RwLock::new(None),
+                last_cycle_usage: RwLock::new(None),
             }),
         }
+    }
+
+    /// Build the server's runner and register it as the schedule delivery loop.
+    ///
+    /// Built even when ambient mode is disabled, so session-targeted scheduled
+    /// tasks still have a live delivery loop.
+    pub fn for_server(active_user_sessions: Arc<RwLock<usize>>) -> Self {
+        let safety = Arc::new(crate::safety::SafetySystem::new());
+        let handle = Self::new_with_user_sessions(safety, active_user_sessions);
+        crate::tool::ambient::init_schedule_runner(handle.clone());
+        handle
     }
 
     /// Nudge the ambient loop to check sooner (e.g., after session close/crash).
@@ -390,6 +425,11 @@ impl AmbientRunnerHandle {
             registry.register_selfdev_tools().await;
         }
 
+        // Resuming a dead session to deliver a scheduled reminder is also
+        // unattended: the live-delivery attempt already failed, so no human is
+        // reading this session. It inherits the tier gate for the same reason
+        // the spawn path does.
+        let _ambient_guard = ambient_tools::AmbientSessionGuard::new(session_id.to_string());
         let mut agent = Agent::new(cycle_provider, registry);
         agent.set_debug(session.is_debug);
         agent.restore_session(session_id)?;
@@ -462,6 +502,12 @@ impl AmbientRunnerHandle {
             registry.register_selfdev_tools().await;
         }
 
+        // A scheduled item runs with no human present, so the agent that runs it
+        // must inherit the ambient tier gate. Without this, `schedule_ambient`
+        // (tier-gate exempt) would be an escalation path: a gated cycle could
+        // schedule the tier-2 action it is refused and have this ungated child
+        // perform it.
+        let _ambient_guard = ambient_tools::AmbientSessionGuard::new(child_session_id.clone());
         let mut agent = Agent::new_with_session(cycle_provider, registry, child, None);
         agent.set_debug(child_is_debug);
         if item.working_dir.is_some() {
@@ -601,6 +647,25 @@ impl AmbientRunnerHandle {
                     continue;
                 }
 
+                // The user left. Nothing else clears this: the paths below only
+                // rewrite Running or Idle, so a stale "user session active"
+                // would otherwise be reported until the next completed cycle.
+                {
+                    let mut s = self.inner.state.write().await;
+                    if matches!(
+                        s.status,
+                        AmbientStatus::Paused { ref reason } if reason == "user session active"
+                    ) {
+                        s.status = AmbientStatus::Idle;
+                        if let Err(err) = s.save() {
+                            logging::warn(&format!(
+                                "Ambient runner: failed to persist resume after user left: {}",
+                                err
+                            ));
+                        }
+                    }
+                }
+
                 // Drop stale permission requests whose originating session is no longer active.
                 match self
                     .inner
@@ -738,6 +803,23 @@ impl AmbientRunnerHandle {
                 *aq = None;
             }
 
+            // Feed what the cycle spent into the scheduler's usage log, which is
+            // how the next interval learns that ambient has been expensive.
+            // Done here rather than per-exit in run_cycle so the error path,
+            // which still spent tokens, is recorded too.
+            if let Some(usage) = self.inner.last_cycle_usage.write().await.take() {
+                scheduler.usage_log.record(usage.into_record());
+                // `record` only persists every 10th entry, which suits a chatty
+                // caller but not this one: ambient cycles are 5 to 120 minutes
+                // apart, so batching ten of them risks losing up to a day of
+                // history to a restart, and the log exists to be `load`ed at
+                // startup. One small JSON write per cycle is far cheaper than
+                // the history it protects.
+                if let Err(err) = scheduler.usage_log.save() {
+                    logging::warn(&format!("Failed to persist ambient usage log: {}", err));
+                }
+            }
+
             match cycle_result {
                 Ok(result) => {
                     logging::info(&format!(
@@ -845,6 +927,13 @@ impl AmbientRunnerHandle {
     }
 
     /// Update the running status detail and persist to disk for waybar.
+    /// Stash what this cycle spent so `run_loop` can hand it to the usage log.
+    async fn record_cycle_usage(&self, agent: &Agent, provider: &Arc<dyn Provider>) {
+        if let Some(usage) = CycleUsage::from_agent(agent, provider) {
+            *self.inner.last_cycle_usage.write().await = Some(usage);
+        }
+    }
+
     async fn set_running_detail(&self, detail: &str) {
         let mut s = self.inner.state.write().await;
         s.status = AmbientStatus::Running {
@@ -933,6 +1022,11 @@ impl AmbientRunnerHandle {
         self.set_running_detail("running agent").await;
 
         let run_result = agent.run_once_capture(&initial_message).await;
+
+        // Every exit below this line returns a cycle result, so recording here
+        // covers all of them, including the error and incomplete paths that
+        // still spent tokens.
+        self.record_cycle_usage(&agent, &cycle_provider).await;
 
         // Check if end_ambient_cycle was called
         if let Some(result) = ambient_tools::take_cycle_result() {
