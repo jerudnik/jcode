@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "F26-FIX-1",
-    "state": "superseded",
-    "reviewed_commit": "a02dae116f9daec60accde6702a1a5318472ac3e",
-    "published_commit": "ddcd1a9ef3b5231ceefb76d762529f373350de8d",
-    "updated_at": "2026-08-05T07:05:54Z",
-    "summary": "Superseded: the node's premise was falsified by measurement, not refused. Production unregister exists (Session::mark_closed_and_persist, 7 callers incl. 5 headless in ambient/runner.rs); the sweep reclaims by PID liveness rather than a 24h window (grep for 86400 / 24*60 / hours(24) returns nothing); live machine shows 27 active-PID + 5 streaming-PID markers, all 32 live, 0 dead. Re-derived rather than inherited: every path in the original evidence was stale after the jcode-base crate split, and all three claims still hold at the new locations. superseded rather than rejected because rejected is not in DEPENDENCY_COMPLETE and would deadlock the signoff tail."
+    "node": "G02",
+    "state": "accepted",
+    "reviewed_commit": "6fb703745754037687f4bc002d521ab6b0de82aa",
+    "published_commit": "a5e1cb5943806a5cdc3c41a0d7ac86293624156f",
+    "updated_at": "2026-08-05T07:48:00Z",
+    "summary": "Accepted with its defect owned rather than retired. Gate: 'Fresh catalog coverage or authorization_blocked with named next action'. Authorization was granted and the run performed on 9d1470f86. Catalog tier across 10 providers: 7 pass (claude 11, openai 9, cursor 28, antigravity 24, deepseek 2, minimax 8, zai 8). Gemini and copilot are not signed in and carry the named next action 'jcode login --provider', which is the gate's own alternative rather than a failure. Perplexity returned HTTP 404 on the live model catalog, and that is a real defect in this repository, not a provider outage: the catalog URL is built as {api_base}/models at openrouter-runtime lib.rs:543 while perplexity's api_base carries no /v1. Re-derived at acceptance time WITH a bearer attached, because an unauthenticated 404 can be a missing-credential shape rather than a routing fact: GET /models 404 with and without a key, GET /v1/models 401 invalid_api_key, POST /chat/completions 401, POST /v1/chat/completions 404. The routes are genuinely inverted, so appending /v1 to api_base would fix the catalog and break chat. That probe also corrected one of my own readings: gemini-api first looked like a second instance at 404, but with a bearer it returns 400 'Please pass a valid API key', which is Google's missing-credential shape and not a defect. Across all 6 profiles whose api_base lacks /v1, perplexity is the only inversion. The repair is owned by G02-FIX-1 (merged 36639e43e), injected before this acceptance under EXECUTION_PROTOCOL section 5 so that accepting this node does not orphan the only record of the defect. Full spending tier passes on claude (13/13, 4 calls, 2188 tokens) and through the Bifrost gateway on bridge/gpt-5.5 (12/12, 3 calls, 1018 tokens), with the gateway leg controlled by a closed-port base that fails the catalog check after an uncontrolled first attempt was traced to a persisted openai-compatible.env."
   },
   "nodes": {
     "W0": {
@@ -407,15 +407,15 @@
       "updated_at": "2026-08-02T22:10:01.949403Z"
     },
     "G02": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "6fb703745754037687f4bc002d521ab6b0de82aa",
+      "published_commit": "a5e1cb5943806a5cdc3c41a0d7ac86293624156f",
       "evidence": [
         "docs/fork/ideal-base/evidence/G02/BLOCKED.md",
         "docs/fork/ideal-base/evidence/G02/VERIFIED.md"
       ],
-      "summary": "Authorization granted; run performed on 9d1470f86, pending merge. Catalog tier across 10 providers: 7 pass (claude 11, openai 9, cursor 28, antigravity 24, deepseek 2, minimax 8, zai 8); gemini and copilot not signed in with named next action (jcode login --provider); perplexity 404. Full spending tier passes on claude (13/13, 4 calls, 2188 tokens) and through the Bifrost gateway on bridge/gpt-5.5 (12/12, 3 calls, 1018 tokens). Found a real defect: perplexity builds {api_base}/models but its base lacks /v1; live checks show models needs /v1 while chat needs the base without it, so appending /v1 would break chat and the fix must be a per-provider models-path override. Gateway leg controlled with a closed-port base that fails the catalog check, after an uncontrolled first attempt was traced to a persisted openai-compatible.env.",
-      "updated_at": "2026-08-05T04:20:54Z"
+      "summary": "Accepted with its defect owned rather than retired. Gate: 'Fresh catalog coverage or authorization_blocked with named next action'. Authorization was granted and the run performed on 9d1470f86. Catalog tier across 10 providers: 7 pass (claude 11, openai 9, cursor 28, antigravity 24, deepseek 2, minimax 8, zai 8). Gemini and copilot are not signed in and carry the named next action 'jcode login --provider', which is the gate's own alternative rather than a failure. Perplexity returned HTTP 404 on the live model catalog, and that is a real defect in this repository, not a provider outage: the catalog URL is built as {api_base}/models at openrouter-runtime lib.rs:543 while perplexity's api_base carries no /v1. Re-derived at acceptance time WITH a bearer attached, because an unauthenticated 404 can be a missing-credential shape rather than a routing fact: GET /models 404 with and without a key, GET /v1/models 401 invalid_api_key, POST /chat/completions 401, POST /v1/chat/completions 404. The routes are genuinely inverted, so appending /v1 to api_base would fix the catalog and break chat. That probe also corrected one of my own readings: gemini-api first looked like a second instance at 404, but with a bearer it returns 400 'Please pass a valid API key', which is Google's missing-credential shape and not a defect. Across all 6 profiles whose api_base lacks /v1, perplexity is the only inversion. The repair is owned by G02-FIX-1 (merged 36639e43e), injected before this acceptance under EXECUTION_PROTOCOL section 5 so that accepting this node does not orphan the only record of the defect. Full spending tier passes on claude (13/13, 4 calls, 2188 tokens) and through the Bifrost gateway on bridge/gpt-5.5 (12/12, 3 calls, 1018 tokens), with the gateway leg controlled by a closed-port base that fails the catalog check after an uncontrolled first attempt was traced to a persisted openai-compatible.env.",
+      "updated_at": "2026-08-05T07:48:00Z"
     },
     "G03": {
       "state": "accepted",
