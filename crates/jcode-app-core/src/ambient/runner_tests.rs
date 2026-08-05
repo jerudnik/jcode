@@ -428,3 +428,136 @@ async fn zz_scheduled_dispatch_tests_leave_no_registered_sessions() {
         );
     }
 }
+
+/// An unattended agent must not be able to launder a tier-2 action through
+/// `subagent`.
+///
+/// This drives the real `run_subagent_worker` path rather than calling the
+/// guard directly, so it fails if the inheritance is defined but never wired
+/// into the spawn seam, which is exactly the defect it exists to prevent. The
+/// worker runs on a session id minted by `Session::create` that nothing else
+/// registers, so without the inherited guard it is ungated regardless of its
+/// parent.
+#[tokio::test]
+async fn subagent_worker_inherits_the_gate_from_an_ambient_parent() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+
+    let target = temp.path().join("subagent_must_not_write.txt");
+    let provider = provider_attempting_write(&target);
+
+    let mut parent = Session::create_with_id(
+        "session_gated_subagent_parent".to_string(),
+        None,
+        Some("Gated subagent parent".to_string()),
+    );
+    parent.working_dir = Some(temp.path().display().to_string());
+    parent.save().expect("save parent session");
+    let _parent_guard = crate::tool::ambient::AmbientSessionGuard::new(parent.id.clone());
+
+    // Precondition: the parent really is gated for a direct tier-2 action.
+    assert!(
+        crate::tool::ambient::check_ambient_action_tier(&parent.id, "write").is_err(),
+        "precondition: a registered ambient session must be refused a direct tier-2 write"
+    );
+
+    let registry = crate::tool::Registry::new(provider.clone()).await;
+    let subagent_parent = crate::tool::subagent::SubagentParent {
+        session_id: parent.id.clone(),
+        working_dir: Some(temp.path().to_path_buf()),
+        model: "test-model".to_string(),
+        provider_key: None,
+        route_api_method: None,
+    };
+
+    let _ = crate::tool::subagent::run_subagent_worker(
+        provider,
+        registry,
+        subagent_parent,
+        "gated worker probe",
+        "general-purpose",
+        "attempt a write",
+        None,
+    )
+    .await;
+
+    assert!(
+        !target.exists(),
+        "a worker spawned by an unattended agent wrote {} without a human; \
+         the subagent spawn seam is not inheriting the ambient tier gate",
+        target.display()
+    );
+}
+
+/// An overnight run is unattended by construction and must be gated.
+///
+/// This drives the real `run_supervisor` loop rather than calling the guard
+/// directly, so it fails if the guard is defined but never wired into the
+/// overnight path, which is the defect it exists to prevent. The manifest is
+/// built already past its wake and grace windows so the loop takes exactly one
+/// coordinator turn and then completes.
+#[tokio::test]
+async fn overnight_supervisor_gates_a_tier_two_tool() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+
+    let target = temp.path().join("overnight_must_not_write.txt");
+    let provider = provider_attempting_write(&target);
+
+    let mut child = Session::create_with_id(
+        "session_overnight_coordinator".to_string(),
+        None,
+        Some("Overnight coordinator".to_string()),
+    );
+    child.working_dir = Some(temp.path().display().to_string());
+    child.save().expect("save coordinator session");
+
+    let manifest = crate::overnight::test_manifest_past_wake(temp.path(), &child.id);
+    crate::overnight::save_manifest(&manifest).expect("save manifest");
+
+    let registry = crate::tool::Registry::new(provider.clone()).await;
+    let _ = crate::overnight::run_supervisor(manifest, child, provider, registry, false).await;
+
+    assert!(
+        !target.exists(),
+        "the overnight coordinator wrote {} with no human present; \
+         the overnight supervisor is not registering its session with the ambient tier gate",
+        target.display()
+    );
+}
+
+/// Counter-check to the test above: the overnight guard must not survive the
+/// run. A leaked registration is not inert, since session IDs are the gate's
+/// only key and a stale ID would gate a later, unrelated session.
+#[tokio::test]
+async fn overnight_supervisor_unregisters_its_session_on_exit() {
+    let _guard = crate::storage::lock_test_env();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let _home = EnvVarGuard::set("JCODE_HOME", temp.path());
+
+    let target = temp.path().join("overnight_cleanup_probe.txt");
+    let provider = provider_attempting_write(&target);
+
+    let mut child = Session::create_with_id(
+        "session_overnight_cleanup".to_string(),
+        None,
+        Some("Overnight cleanup probe".to_string()),
+    );
+    child.working_dir = Some(temp.path().display().to_string());
+    child.save().expect("save coordinator session");
+    let child_id = child.id.clone();
+
+    let manifest = crate::overnight::test_manifest_past_wake(temp.path(), &child_id);
+    crate::overnight::save_manifest(&manifest).expect("save manifest");
+
+    let registry = crate::tool::Registry::new(provider.clone()).await;
+    let _ = crate::overnight::run_supervisor(manifest, child, provider, registry, false).await;
+
+    assert!(
+        crate::tool::ambient::check_ambient_action_tier(&child_id, "write").is_ok(),
+        "the overnight guard leaked its registration past the run; a later session \
+         reusing this id would be gated with no unattended agent present"
+    );
+}

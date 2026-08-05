@@ -53,6 +53,23 @@ impl AmbientSessionGuard {
         register_ambient_session(session_id.clone());
         Self { session_id }
     }
+
+    /// Registers `child_session_id` only if `parent_session_id` is itself
+    /// ambient, returning `None` when the parent is interactive.
+    ///
+    /// A spawned worker runs with exactly as much authority as whoever spawned
+    /// it, so the gate must be INHERITED rather than applied unconditionally.
+    /// Registering every child would gate an interactive user's worker, which
+    /// would break ordinary use; registering none leaves an unattended agent
+    /// able to do through a worker what it may not do itself, since the worker
+    /// runs on a fresh session ID that nothing registers.
+    pub fn inherit(parent_session_id: &str, child_session_id: impl Into<String>) -> Option<Self> {
+        if is_ambient_session_registered(parent_session_id) {
+            Some(Self::new(child_session_id))
+        } else {
+            None
+        }
+    }
 }
 
 impl Drop for AmbientSessionGuard {

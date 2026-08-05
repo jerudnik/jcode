@@ -2,6 +2,7 @@ use super::{Registry, Tool, ToolContext, ToolOutput};
 use crate::agent::Agent;
 use crate::provider::Provider;
 use crate::session::Session;
+use crate::tool::ambient::AmbientSessionGuard;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -59,8 +60,9 @@ pub(crate) async fn run_subagent_worker(
     prompt: &str,
     model: Option<&str>,
 ) -> Result<String> {
+    let parent_session_id = parent.session_id;
     let mut session = Session::create(
-        Some(parent.session_id),
+        Some(parent_session_id.clone()),
         Some(format!("{} (@{} swarm)", description, subagent_type)),
     );
     session.model = Some(model.unwrap_or(&parent.model).to_string());
@@ -70,6 +72,7 @@ pub(crate) async fn run_subagent_worker(
         session.working_dir = Some(dir.display().to_string());
     }
     session.save()?;
+    let worker_session_id = session.id.clone();
 
     let mut allowed: HashSet<String> = registry.tool_names().await.into_iter().collect();
     for blocked in ["subagent", "task", "todo", "todowrite", "todoread"] {
@@ -80,6 +83,12 @@ pub(crate) async fn run_subagent_worker(
         .apply_to_allowed_set(&mut allowed);
 
     let mut worker = Agent::new_with_session(provider, registry, session, Some(allowed));
+    // The worker runs on a FRESH session id that nothing else registers, so
+    // without this it would be ungated regardless of its parent. Inherit rather
+    // than register unconditionally: an interactive user's subagent must stay
+    // ungated. The guard unregisters on drop, including the `?` paths above the
+    // await and any error the worker itself returns.
+    let _ambient_guard = AmbientSessionGuard::inherit(&parent_session_id, worker_session_id);
     worker.run_once_capture(prompt).await
 }
 
