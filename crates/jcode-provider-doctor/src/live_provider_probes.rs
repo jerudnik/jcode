@@ -95,7 +95,7 @@ pub async fn fetch_live_openai_compatible_models(
     api_key: &str,
 ) -> anyhow::Result<Vec<String>> {
     let resolved = jcode_base::provider_catalog::resolve_openai_compatible_profile(profile);
-    let url = format!("{}/models", resolved.api_base.trim_end_matches('/'));
+    let url = jcode_base::provider_catalog::openai_compatible_models_url(&resolved.api_base);
     let request = jcode_base::provider::shared_http_client().get(&url);
     let request = apply_provider_auth(request, &resolved, api_key);
     let response = tokio::time::timeout(std::time::Duration::from_secs(20), request.send())

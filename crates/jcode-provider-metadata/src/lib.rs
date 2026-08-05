@@ -153,6 +153,39 @@ pub fn openai_compatible_profiles() -> &'static [OpenAiCompatibleProfile] {
     &OPENAI_COMPAT_PROFILES
 }
 
+/// Providers whose model catalog is served from a different route than their
+/// chat endpoint, keyed by `api_base`.
+///
+/// Perplexity serves chat at the bare base but its catalog under `/v1`, so one
+/// `api_base` cannot express both and appending `/v1` would trade a broken
+/// catalog for broken chat.
+///
+/// This is a sparse table rather than a field on `OpenAiCompatibleProfile`
+/// deliberately. A field would force `models_path: None` onto all 36 literals
+/// for the sake of one exception, which both buries the exception in noise and
+/// pushes `catalog.rs` past the 1200-line budget in
+/// `scripts/check_code_size_budget.py` (1172 + 36 = 1208 at minimum).
+const CATALOG_PATH_OVERRIDES: [(&str, &str); 1] = [("https://api.perplexity.ai", "/v1/models")];
+
+/// Resolve the model-catalog URL for an OpenAI-compatible `api_base`.
+///
+/// Keyed on `api_base` rather than on a profile because two of the three
+/// callers only ever hold a bare base string: `fetch_models_from_api` takes an
+/// `api_base: String` and has five callers, none with a profile in scope.
+///
+/// Note that `api_base` is NOT unique across profiles (`openai-api` and
+/// `openai-compatible` share one), so an override applies to every profile
+/// sharing that base. That is asserted in the tests rather than left implicit.
+pub fn openai_compatible_models_url(api_base: &str) -> String {
+    let base = api_base.trim_end_matches('/');
+    for (override_base, path) in CATALOG_PATH_OVERRIDES {
+        if base == override_base.trim_end_matches('/') {
+            return format!("{base}{path}");
+        }
+    }
+    format!("{base}/models")
+}
+
 pub fn login_providers() -> &'static [LoginProviderDescriptor] {
     &LOGIN_PROVIDERS
 }
@@ -697,5 +730,138 @@ mod tests {
             resolve_login_selection("bedrock", &providers).map(|provider| provider.id),
             Some("bedrock")
         );
+    }
+
+    // --- G02-FIX-1: catalog-route override ------------------------------------
+
+    /// Gate 1's control. FAILS if CATALOG_PATH_OVERRIDES loses the perplexity
+    /// entry, which is the state of the tree before this fix.
+    #[test]
+    fn perplexity_catalog_url_carries_the_v1_prefix() {
+        let perplexity = openai_compatible_profiles()
+            .iter()
+            .find(|profile| profile.id == "perplexity")
+            .expect("perplexity profile must exist");
+        assert_eq!(
+            openai_compatible_models_url(perplexity.api_base),
+            "https://api.perplexity.ai/v1/models",
+        );
+    }
+
+    /// Gate 3. The load-bearing assertion: this is the ONLY test that fails if
+    /// the fix were implemented by appending /v1 to api_base, because that edit
+    /// also produces /v1/models and so leaves the catalog test above passing.
+    /// Perplexity serves chat at the bare base; a /v1 chat URL 404s.
+    #[test]
+    fn perplexity_chat_base_must_not_carry_a_v1_prefix() {
+        let perplexity = openai_compatible_profiles()
+            .iter()
+            .find(|profile| profile.id == "perplexity")
+            .expect("perplexity profile must exist");
+        assert_eq!(perplexity.api_base, "https://api.perplexity.ai");
+    }
+
+    /// Gate 4. The override must be inert for every other profile, and in
+    /// particular for the five other profiles whose api_base does not end in
+    /// /v1 -- the population the defect could plausibly have extended to. Each
+    /// was re-probed WITH a bearer and answers 200/400/401, never 404.
+    #[test]
+    fn only_perplexity_overrides_its_catalog_path() {
+        assert_eq!(CATALOG_PATH_OVERRIDES.len(), 1);
+        for profile in openai_compatible_profiles() {
+            if profile.id == "perplexity" {
+                continue;
+            }
+            assert_eq!(
+                openai_compatible_models_url(profile.api_base),
+                format!("{}/models", profile.api_base.trim_end_matches('/')),
+                "profile {} must keep the default catalog route",
+                profile.id
+            );
+        }
+        for id in ["zai", "gemini-api", "deepseek", "fpt", "deepinfra"] {
+            let profile = openai_compatible_profiles()
+                .iter()
+                .find(|profile| profile.id == id)
+                .unwrap_or_else(|| panic!("profile {id} must exist"));
+            assert!(
+                !profile.api_base.trim_end_matches('/').ends_with("/v1"),
+                "{id} is expected to be one of the non-/v1 profiles"
+            );
+            assert_eq!(
+                openai_compatible_models_url(profile.api_base),
+                format!("{}/models", profile.api_base.trim_end_matches('/'))
+            );
+        }
+    }
+
+    /// The lookup key is api_base, which is NOT unique: openai-api and
+    /// openai-compatible share https://api.openai.com/v1. An override therefore
+    /// applies to every profile sharing that base. Fail loudly if a future
+    /// override is added for one of a shared pair, since that would silently
+    /// reroute its twin.
+    #[test]
+    fn overridden_bases_are_not_shared_by_profiles_that_disagree() {
+        for (override_base, _) in CATALOG_PATH_OVERRIDES {
+            let sharing: Vec<_> = openai_compatible_profiles()
+                .iter()
+                .filter(|profile| {
+                    profile.api_base.trim_end_matches('/') == override_base.trim_end_matches('/')
+                })
+                .map(|profile| profile.id)
+                .collect();
+            assert_eq!(
+                sharing.len(),
+                1,
+                "override for {override_base} would also apply to {sharing:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_bases_default_and_trailing_slashes_normalize() {
+        assert_eq!(
+            openai_compatible_models_url("https://example.test/v1"),
+            "https://example.test/v1/models"
+        );
+        assert_eq!(
+            openai_compatible_models_url("https://api.perplexity.ai/"),
+            "https://api.perplexity.ai/v1/models"
+        );
+    }
+
+    /// Gate 2. All three {api_base}/models construction sites must resolve
+    /// through the shared helper. A unit test in this crate cannot execute
+    /// three downstream crates' network calls, so this asserts against their
+    /// source text: it fails, naming the drifted file, if any site is reverted
+    /// to a bare format!.
+    #[test]
+    fn all_catalog_url_sites_route_through_the_resolver() {
+        let sites = [
+            "crates/jcode-provider-openrouter-runtime/src/lib.rs",
+            "crates/jcode-provider-doctor/src/live_provider_probes.rs",
+            "crates/jcode-base/src/usage/api_keys.rs",
+        ];
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("workspace root");
+        for site in sites {
+            let path = root.join(site);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("cannot read {site}: {error}"));
+            assert!(
+                source.contains("openai_compatible_models_url"),
+                "{site} no longer routes its catalog URL through \
+                 openai_compatible_models_url"
+            );
+            for line in source.lines() {
+                assert!(
+                    !line.contains(r#"format!("{}/models""#),
+                    "{site} rebuilds the catalog URL with a bare format!: {}",
+                    line.trim()
+                );
+            }
+        }
     }
 }
