@@ -190,13 +190,87 @@ class IdealBaseRailwayTests(unittest.TestCase):
         with self.assertRaisesRegex(railway.RailwayError, "every child is complete"):
             railway.validate_expansion_consistency(graph, copied)
 
-        # Coherent states pass: a fully accepted wave, and an untouched one.
+        # A complete root must not strand an incomplete child. This is the
+        # mirror of the pending-root case: `ready_nodes` only walks children of
+        # an open root, so completing the root drops the unfinished child out of
+        # `next` entirely. It is not done, not blocked, and no longer offered.
+        copied = json.loads(json.dumps(state))
         copied["nodes"][root_id]["state"] = "accepted"
+        for child in children:
+            copied["nodes"][child["id"]]["state"] = "accepted"
+        copied["nodes"][children[0]["id"]]["state"] = "pending"
+        with self.assertRaisesRegex(railway.RailwayError, "children are not complete"):
+            railway.validate_expansion_consistency(graph, copied)
+
+        # The whole complete-root row is guarded, not just the pending child,
+        # and every non-terminal child state strands the same way.
+        for stranded in ("in_progress", "implemented", "verifying", "blocked"):
+            copied["nodes"][children[0]["id"]]["state"] = stranded
+            with self.assertRaisesRegex(
+                railway.RailwayError, "children are not complete"
+            ):
+                railway.validate_expansion_consistency(graph, copied)
+
+        # The harm is the stranding, not the message: assert the projection.
+        # `next` must not silently drop the child it can no longer dispatch.
+        copied["nodes"][children[0]["id"]]["state"] = "pending"
+        nodes = {node["id"]: node for node in graph["all_nodes"]}
+        nodes.update({node["id"]: node for node in graph["root_nodes"]})
+        projected = {node["id"] for node in railway.ready_nodes(graph, copied, nodes)}
+        self.assertNotIn(
+            children[0]["id"],
+            projected,
+            "a pending child under an accepted root is unreachable, which is "
+            "exactly why the guard must reject that state",
+        )
+
+        # Coherent states pass: a fully accepted wave, and an untouched one.
+        copied = json.loads(json.dumps(state))
+        copied["nodes"][root_id]["state"] = "accepted"
+        for child in children:
+            copied["nodes"][child["id"]]["state"] = "accepted"
         railway.validate_expansion_consistency(graph, copied)
         copied["nodes"][root_id]["state"] = "pending"
         for child in children:
             copied["nodes"][child["id"]]["state"] = "pending"
         railway.validate_expansion_consistency(graph, copied)
+
+    def test_closing_a_wave_may_still_repair_a_pre_existing_violation(self) -> None:
+        """The new guard must not make an already-drifted wave unclosable.
+
+        `checkpoint` deliberately compares violations before and after: it
+        refuses to INTRODUCE one but must stay able to REPAIR one, or two roots
+        drifting at once would deadlock, since neither could be fixed first.
+        The complete-root rule adds violations to a state that is mid-repair,
+        so this pins the delta property that keeps repair possible.
+        """
+        graph, state, _ = railway.validate_repository()
+        root_id = next(
+            root for root, children in graph["expansions"].items() if children
+        )
+        children = graph["expansions"][root_id]
+
+        # Before: root accepted, one child stranded -> a real violation.
+        before_state = json.loads(json.dumps(state))
+        before_state["nodes"][root_id]["state"] = "accepted"
+        for child in children:
+            before_state["nodes"][child["id"]]["state"] = "accepted"
+        before_state["nodes"][children[0]["id"]]["state"] = "pending"
+        before = railway.expansion_violations(graph, before_state)
+        self.assertIn(root_id, before)
+
+        # After: the stranded child is finished. The violation is repaired, so
+        # the delta must be empty and the checkpoint must remain permitted.
+        after_state = json.loads(json.dumps(before_state))
+        after_state["nodes"][children[0]["id"]]["state"] = "accepted"
+        after = railway.expansion_violations(graph, after_state)
+        introduced = {
+            root: message
+            for root, message in after.items()
+            if before.get(root) != message
+        }
+        self.assertEqual(introduced, {}, "repairing a violation must stay allowed")
+        self.assertNotIn(root_id, after)
 
     def test_atomic_json_write_is_complete(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -625,7 +699,38 @@ class CheckpointSchemaV2Tests(unittest.TestCase):
                 ]
             )
 
+    def complete_children_of(self, root_id: str) -> None:
+        """Mark a root's children accepted, as they must be before it closes.
+
+        A wave is closed after its children finish, so the state just before an
+        accepting checkpoint always shows a complete-children/open-root
+        violation. That is not a defect in the fixture, it is the normal
+        pre-close shape, and it is exactly why `checkpoint` judges consistency
+        as a delta rather than demanding a globally clean result.
+        """
+        graph = railway.load_json(railway.GRAPH_PATH)
+        written = json.loads(self.state_path.read_text())
+        for child in graph["expansions"][root_id]:
+            written["nodes"][child["id"]].update(
+                {
+                    "state": "accepted",
+                    "reviewed_commit": self.head,
+                    "published_commit": self.BASELINE_MAIN,
+                    "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+                }
+            )
+        self.state_path.write_text(json.dumps(written, indent=2))
+
     def test_accepted_checkpoint_writes_both_commits_and_last_checkpoint(self) -> None:
+        self.complete_children_of("W0")
+        # The pre-close state is itself a violation (complete children under an
+        # open root), so a passing checkpoint here also proves the delta rule:
+        # `checkpoint` repairs an existing violation instead of refusing it.
+        graph = railway.load_json(railway.GRAPH_PATH)
+        before = railway.expansion_violations(
+            graph, json.loads(self.state_path.read_text())
+        )
+        self.assertIn("W0", before)
         code = self.run_checkpoint(
             [
                 "W0",
