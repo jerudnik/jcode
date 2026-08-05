@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01-FIX-4",
-    "state": "pending",
+    "node": "D01-FIX-2",
+    "state": "implemented",
     "reviewed_commit": null,
     "published_commit": null,
-    "updated_at": "2026-08-05T05:05:18Z",
-    "summary": "Found in the D01-FIX-1 follow-up sweep, 2026-08-05, and re-derived by grep rather than inherited. The ambient tier gate keys ONLY on ctx.session_id (tool/mod.rs:581 -> check_ambient_action_tier), and AmbientSessionGuard::new is registered in exactly one file, ambient/runner.rs. Two paths run agents with no human present and never register: overnight.rs:401 calls run_once_capture with no guard, and tool/subagent.rs runs its worker on a session minted by Session::create, a fresh id nothing registers, so the worker is ungated regardless of its parent. classify is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so bash, write and edit are all tier 2. Scope recorded honestly rather than oversold: subagent is itself tier 2 and not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today, which makes this defense-in-depth against future edits to an 11-entry list nobody watches, not a live exploit. subagent must INHERIT the parent's ambient status so an interactive user's subagent stays ungated."
+    "updated_at": "2026-08-05T05:28:59Z",
+    "summary": "Wires 1 and 3 delivered and merged as PR #118 (merge 9ac36a8c7, branch tip 2e6400fb2); wire 2 split to D01-FIX-3 after measurement. Both wires re-verified HERE by control rather than trusted from the merge: removing the record call fails the usage test with 'found []' (left 0, right 1), and giving the runner its own counter fails the pause test on the pause assertion at startup_tests.rs:269. The two controls fail on DIFFERENT assertions in different files, and under each the other test stays green, so neither fix masks the other; both were confirmed on disk before their exit codes were read and restored byte-identical. docs/AMBIENT_MODE.md moved those two rows Inert -> Shipped only after the behavior ran, citing the controls, and five line citations that wire 3's insertions had shifted were repaired so all eight runner.rs references resolve. The adaptive calculator and budget bar are reported as STILL INERT with the D01-FIX-3 dependency named, re-measured on this tree (2 budget_percent producers hardcode None, 2 non-test calculate_interval callers pass None) rather than claimed. Held at implemented rather than accepted because the doc reconciliation is on automation/s01-dependency-fix and not yet main-ancestral."
   },
   "nodes": {
     "W0": {
@@ -720,12 +720,14 @@
       "updated_at": "2026-08-04T20:10:49Z"
     },
     "D01-FIX-2": {
-      "state": "pending",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": "Injected from D01-F14, same rule as D01-FIX-1: three complete ambient implementations are inert because their wires are unconnected, which is a product defect rather than a prose defect. Two of the three RE-VERIFIED 2026-08-03 by grep rather than inherited: UsageLog::record has no non-test caller, and active_user_sessions has reads at runner.rs:176/585/879 with no writer beyond RwLock::new(0), so ambient can never pause for an active user. The RateLimitInfo wire is carried from the register and must be re-verified when this node starts. docs/AMBIENT_MODE.md already marks each row Inert.",
-      "updated_at": "2026-08-03T08:10:20Z"
+      "evidence": [
+        "docs/fork/ideal-base/evidence/D01-FIX-2/README.md"
+      ],
+      "summary": "Wires 1 and 3 delivered and merged as PR #118 (merge 9ac36a8c7, branch tip 2e6400fb2); wire 2 split to D01-FIX-3 after measurement. Both wires re-verified HERE by control rather than trusted from the merge: removing the record call fails the usage test with 'found []' (left 0, right 1), and giving the runner its own counter fails the pause test on the pause assertion at startup_tests.rs:269. The two controls fail on DIFFERENT assertions in different files, and under each the other test stays green, so neither fix masks the other; both were confirmed on disk before their exit codes were read and restored byte-identical. docs/AMBIENT_MODE.md moved those two rows Inert -> Shipped only after the behavior ran, citing the controls, and five line citations that wire 3's insertions had shifted were repaired so all eight runner.rs references resolve. The adaptive calculator and budget bar are reported as STILL INERT with the D01-FIX-3 dependency named, re-measured on this tree (2 budget_percent producers hardcode None, 2 non-test calculate_interval callers pass None) rather than claimed. Held at implemented rather than accepted because the doc reconciliation is on automation/s01-dependency-fix and not yet main-ancestral.",
+      "updated_at": "2026-08-05T05:28:59Z"
     },
     "W7": {
       "state": "pending",
