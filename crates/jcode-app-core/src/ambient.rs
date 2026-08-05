@@ -9,6 +9,7 @@ mod manager;
 mod paths;
 mod persistence;
 mod prompt;
+mod rate_limit_source;
 pub mod runner;
 pub mod scheduler;
 

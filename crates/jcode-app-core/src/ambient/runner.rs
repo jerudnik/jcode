@@ -8,6 +8,7 @@
 
 use crate::agent::Agent;
 use crate::ambient::cycle_usage::CycleUsage;
+use crate::ambient::rate_limit_source;
 use crate::ambient::{
     self, AmbientCycleResult, AmbientLock, AmbientManager, AmbientState, AmbientStatus,
     CycleStatus, ScheduleTarget, ScheduledItem,
@@ -747,8 +748,7 @@ impl AmbientRunnerHandle {
 
             if !should_run {
                 let sleep_secs = if ambient_allowed {
-                    let interval = scheduler
-                        .calculate_interval(None)
+                    let interval = rate_limit_source::next_interval(&scheduler, provider.name())
                         .as_secs()
                         .max(MAX_IDLE_POLL_SECS);
                     let next_direct_secs = next_direct_due
@@ -898,7 +898,7 @@ impl AmbientRunnerHandle {
             let _ = lock.release();
 
             // Calculate next sleep interval
-            let interval = scheduler.calculate_interval(None);
+            let interval = rate_limit_source::next_interval(&scheduler, provider.name());
             let sleep_secs = interval.as_secs().max(30);
 
             // Update state with scheduled wake

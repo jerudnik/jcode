@@ -43,6 +43,7 @@ use jcode_provider_core::{
     anthropic_is_1m_model as is_1m_model,
     anthropic_map_tool_name_from_oauth as map_tool_name_from_oauth,
     anthropic_strip_1m_suffix as strip_1m_suffix,
+    rate_limit_headers::{self, ANTHROPIC as ANTHROPIC_RATE_LIMITS},
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -1770,6 +1771,10 @@ async fn stream_response(
             retry_after,
         ));
     }
+
+    // Record remaining quota from the successful response so background
+    // schedulers can back off before they start competing with interactive use.
+    rate_limit_headers::observe("anthropic", response.headers(), ANTHROPIC_RATE_LIMITS);
 
     let _ = tx
         .send(Ok(StreamEvent::ConnectionPhase {
