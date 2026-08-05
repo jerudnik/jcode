@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "G02",
-    "state": "implemented",
+    "node": "D01-FIX-4",
+    "state": "pending",
     "reviewed_commit": null,
     "published_commit": null,
-    "updated_at": "2026-08-05T04:20:54Z",
-    "summary": "Authorization granted; run performed on 9d1470f86, pending merge. Catalog tier across 10 providers: 7 pass (claude 11, openai 9, cursor 28, antigravity 24, deepseek 2, minimax 8, zai 8); gemini and copilot not signed in with named next action (jcode login --provider); perplexity 404. Full spending tier passes on claude (13/13, 4 calls, 2188 tokens) and through the Bifrost gateway on bridge/gpt-5.5 (12/12, 3 calls, 1018 tokens). Found a real defect: perplexity builds {api_base}/models but its base lacks /v1; live checks show models needs /v1 while chat needs the base without it, so appending /v1 would break chat and the fix must be a per-provider models-path override. Gateway leg controlled with a closed-port base that fails the catalog check, after an uncontrolled first attempt was traced to a persisted openai-compatible.env."
+    "updated_at": "2026-08-05T05:05:18Z",
+    "summary": "Found in the D01-FIX-1 follow-up sweep, 2026-08-05, and re-derived by grep rather than inherited. The ambient tier gate keys ONLY on ctx.session_id (tool/mod.rs:581 -> check_ambient_action_tier), and AmbientSessionGuard::new is registered in exactly one file, ambient/runner.rs. Two paths run agents with no human present and never register: overnight.rs:401 calls run_once_capture with no guard, and tool/subagent.rs runs its worker on a session minted by Session::create, a fresh id nothing registers, so the worker is ungated regardless of its parent. classify is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so bash, write and edit are all tier 2. Scope recorded honestly rather than oversold: subagent is itself tier 2 and not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today, which makes this defense-in-depth against future edits to an 11-entry list nobody watches, not a live exploit. subagent must INHERIT the parent's ambient status so an interactive user's subagent stays ungated."
   },
   "nodes": {
     "W0": {
@@ -726,6 +726,30 @@
       "evidence": [],
       "summary": "Injected from D01-F14, same rule as D01-FIX-1: three complete ambient implementations are inert because their wires are unconnected, which is a product defect rather than a prose defect. Two of the three RE-VERIFIED 2026-08-03 by grep rather than inherited: UsageLog::record has no non-test caller, and active_user_sessions has reads at runner.rs:176/585/879 with no writer beyond RwLock::new(0), so ambient can never pause for an active user. The RateLimitInfo wire is carried from the register and must be re-verified when this node starts. docs/AMBIENT_MODE.md already marks each row Inert.",
       "updated_at": "2026-08-03T08:10:20Z"
+    },
+    "W7": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Wave opened to hold the two ambient-safety nodes split out of W6. W6 already carried eleven children against a twelve-child deep-gate review budget, and the budget was NOT re-baselined; the root budget had headroom (8 of 10), so a new wave was the correct relief. Both children share one seam: the ambient tier gate keys only on a registered session id, so any path that runs an agent without registering is ungated by construction.",
+      "updated_at": "2026-08-05T05:05:18Z"
+    },
+    "D01-FIX-3": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Split out of D01-FIX-2 wire 2 on 2026-08-05 after its scope was MEASURED rather than assumed. D01-FIX-2 framed all three wires as 'a connection, not a feature build'; that premise is false for this one. Re-derived counts: 0 production RateLimitInfo constructors, 0 x-ratelimit header parses anywhere, both non-test calculate_interval call sites pass None, and 42 impl Provider blocks plus 67 match sites sit between the HTTP response and the scheduler with no StreamEvent variant carrying headers. That is a cross-cutting transport change, so it was referred to its own node rather than quietly built under a premise that no longer held. Consequence recorded rather than hidden: wire 1's scheduler payoff is gated behind this node, since 50 records of 1.8M tokens leave the interval at 7200s -> 7200s on the None path production actually uses.",
+      "updated_at": "2026-08-05T05:05:18Z"
+    },
+    "D01-FIX-4": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Found in the D01-FIX-1 follow-up sweep, 2026-08-05, and re-derived by grep rather than inherited. The ambient tier gate keys ONLY on ctx.session_id (tool/mod.rs:581 -> check_ambient_action_tier), and AmbientSessionGuard::new is registered in exactly one file, ambient/runner.rs. Two paths run agents with no human present and never register: overnight.rs:401 calls run_once_capture with no guard, and tool/subagent.rs runs its worker on a session minted by Session::create, a fresh id nothing registers, so the worker is ungated regardless of its parent. classify is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so bash, write and edit are all tier 2. Scope recorded honestly rather than oversold: subagent is itself tier 2 and not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today, which makes this defense-in-depth against future edits to an 11-entry list nobody watches, not a live exploit. subagent must INHERIT the parent's ambient status so an interactive user's subagent stays ungated.",
+      "updated_at": "2026-08-05T05:05:18Z"
     }
   }
 }

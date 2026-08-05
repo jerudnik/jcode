@@ -90,6 +90,15 @@
         "W5"
       ],
       "priority": 70
+    },
+    {
+      "id": "W7",
+      "content": "Close the ambient safety gaps that the D01-FIX-1 tier-gate wire exposed. W6 already carried eleven deferred product defects and hit the twelve-child deep-gate review budget, so these were split into their own wave rather than re-baselining that budget. Both children concern the SAME seam: the ambient tier gate keys only on a registered session id, so a path that runs an agent without registering is ungated by construction. Expand after W6's D01-FIX-1 and D01-FIX-2 land, since both children depend on those wires.",
+      "kind": "implement",
+      "depends_on": [
+        "W6"
+      ],
+      "priority": 65
     }
   ],
   "expansions": {
@@ -1403,7 +1412,9 @@
           "F30-FIX-4",
           "R05-FIX-1",
           "D01-FIX-1",
-          "D01-FIX-2"
+          "D01-FIX-2",
+          "D01-FIX-3",
+          "D01-FIX-4"
         ],
         "priority": 75,
         "owned_paths": [
@@ -1835,7 +1846,7 @@
       },
       {
         "id": "D01-FIX-2",
-        "content": "Connect three dangling wires that leave complete ambient implementations inert (D01-F14, reproduced 2026-08-03). (1) `UsageLog::record` (ambient/scheduler.rs) has no non-test caller, so usage.json is never written and every rate query returns 0. (2) `RateLimitInfo` has no production constructor and no x-ratelimit header is parsed anywhere, so both calculate_interval call sites pass None and the adaptive scheduler always returns the max interval. (3) `active_user_sessions` (ambient/runner.rs:53) is read at :176, :585 and :879 but has no writer beyond the RwLock::new(0) initializer, so it is permanently 0 and ambient never pauses for an active user. The budget bar is inert downstream of (1) and (2), since both producers hardcode budget_percent: None. Each fix is a connection, not a feature build. Do not soften docs/AMBIENT_MODE.md, which already marks each row Inert with evidence.",
+        "content": "Connect two dangling wires that leave complete ambient implementations inert (D01-F14, reproduced 2026-08-03; SCOPE NARROWED 2026-08-05). (1) `UsageLog::record` (ambient/scheduler.rs) has no non-test caller, so usage.json is never written and every rate query returns 0. (2) `active_user_sessions` (ambient/runner.rs:53) is read at :176, :585 and :879 but has no writer beyond the RwLock::new(0) initializer, so it is permanently 0 and ambient never pauses for an active user. Each of these two IS a connection, not a feature build. The original third wire (RateLimitInfo / x-ratelimit -> calculate_interval) was SPLIT OUT to D01-FIX-3 after its scope was measured rather than assumed: it has 0 production constructors, no header parsed anywhere, and 42 `impl Provider` blocks plus 67 match sites between the response and the scheduler, so it is a cross-cutting transport change that does not fit this node's premise. Consequence recorded rather than hidden: the budget bar stays inert downstream of the split, since `budget_percent` producers hardcode None, and wire 1's SCHEDULER payoff is gated behind D01-FIX-3 (50 records of 1.8M tokens leave the interval at 7200s -> 7200s on the None path production uses). Wire 1's own justification here is the prompt's hardcoded 'estimated from history'. Do not soften docs/AMBIENT_MODE.md, which already marks each row Inert with evidence.",
         "kind": "implement",
         "depends_on": [
           "D01"
@@ -1848,19 +1859,86 @@
         ],
         "acceptance_gates": [
           "usage.json is written after a real ambient turn, and a rate query returns nonzero; test FAILS when the record call is removed",
-          "calculate_interval receives Some(RateLimitInfo) from a parsed response header, and returns an interval below max under load; the None path stays covered",
           "active_user_sessions has a production writer; ambient pauses when a user session is active, proven by a test that FAILS with the writer removed",
-          "budget_percent reaches the bar as Some(_) for at least one producer",
-          "Each of the three wires is verified independently, so one fix cannot mask another"
+          "Each of the two wires is verified independently, so one fix cannot mask another",
+          "The budget bar and the adaptive interval are reported as STILL INERT with the D01-FIX-3 dependency named, rather than claimed or quietly dropped"
         ],
         "evidence": [
-          "writer/caller greps before and after for all three wires",
-          "three failing-control transcripts, one per wire",
-          "usage.json artifact from a real ambient turn"
+          "writer/caller greps before and after for both wires",
+          "two failing-control transcripts, one per wire, each failing on a different assertion",
+          "usage.json artifact from a real ambient turn",
+          "measured None-path interval showing the wire-1 scheduler payoff is D01-FIX-3-gated"
         ],
         "review_model": "opus",
         "class": "deterministic",
         "parent": "W6"
+      }
+    ],
+    "W7": [
+      {
+        "id": "D01-FIX-3",
+        "content": "Wire rate-limit headers through to the ambient scheduler (split out of D01-FIX-2 wire 2, 2026-08-05). D01-FIX-2 framed all three wires as 'a connection, not a feature build'. That premise was measured and is FALSE for this wire, which is why it is now its own node rather than a checkbox on a node whose other two wires are genuine connections. Re-derived counts, not inherited: `RateLimitInfo` has 0 production constructors, no `x-ratelimit` header is parsed anywhere, and the 2 non-test `calculate_interval` call sites both pass `None`, so the adaptive scheduler always returns the max interval. Between the HTTP response and the scheduler sit 42 `impl Provider` blocks and 67 match sites, and no `StreamEvent` variant carries headers. So this is a cross-cutting transport change (surface a header-bearing signal, populate it in at least one provider, thread it to the scheduler), not a one-line reconnection. Wire 1's SCHEDULER payoff is gated behind this node: 50 records of 1.8M tokens leave the interval at 7200s -> 7200s on the `None` path production uses, while `Some(RateLimitInfo)` moves it 300s -> 7200s. Do not soften docs/AMBIENT_MODE.md, which already marks the row Inert with evidence.",
+        "kind": "implement",
+        "depends_on": [
+          "D01-FIX-2"
+        ],
+        "priority": 64,
+        "owned_paths": [
+          "crates/jcode-app-core/src/ambient/**",
+          "crates/jcode-app-core/src/provider/**",
+          "docs/AMBIENT_MODE.md",
+          "docs/fork/ideal-base/evidence/D01-FIX-3/**"
+        ],
+        "acceptance_gates": [
+          "`RateLimitInfo` has at least one production constructor fed by a parsed `x-ratelimit` response header; the greps that found 0 constructors and 0 header parses are rerun and both before/after counts reported",
+          "`calculate_interval` receives `Some(RateLimitInfo)` on a production path and returns an interval BELOW max under load, proven by a test that FAILS when the header plumbing is removed",
+          "The `None` path stays covered and still returns the max interval, so the wire does not trade an inert adaptive scheduler for a broken fixed one",
+          "The chosen transport seam is stated with its blast radius measured (how many of the 42 `impl Provider` blocks and 67 match sites the change actually touches), so a wide refactor cannot be smuggled in as a connection",
+          "`budget_percent` reaches the bar as `Some(_)` from a producer fed by this wire, or the node states in writing that it does not and why",
+          "docs/AMBIENT_MODE.md is updated only after the wire demonstrably runs, and cites the passing test"
+        ],
+        "evidence": [
+          "before/after greps for RateLimitInfo constructors, x-ratelimit parses, and calculate_interval None call sites",
+          "failing-control transcript with the header plumbing removed",
+          "None-path regression evidence showing max interval retained",
+          "measured blast radius of the transport seam"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W7"
+      },
+      {
+        "id": "D01-FIX-4",
+        "content": "Register the two ungated unattended agent paths with the ambient tier gate (found in the D01-FIX-1 follow-up sweep, 2026-08-05). The gate keys ONLY on `ctx.session_id` (tool/mod.rs:581 -> check_ambient_action_tier), and `classify` is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so `bash`, `write` and `edit` are all tier 2. Two paths run agents with no human present and never register: (1) `overnight.rs:401` calls `run_once_capture` on an existing session with no `AmbientSessionGuard`, so an overnight run is wholly ungated. (2) `tool/subagent.rs:83` runs a worker on a session minted by `Session::create`, a FRESH id that nothing registers, so the worker is ungated regardless of its parent. Path (2) is the same escalation ambient_gate.rs already documents for `schedule_ambient` and closes there by having the runner register the spawned session; subagent is that hole with no such closure. Scope note recorded honestly: `subagent` is itself tier 2 and is not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today and this is defense-in-depth rather than a live exploit; it is worth fixing because the current safety depends on an 11-entry list nobody is watching. subagent must INHERIT the parent's ambient status, not register unconditionally, so an interactive user's subagent stays ungated.",
+        "kind": "implement",
+        "depends_on": [
+          "D01-FIX-1"
+        ],
+        "priority": 66,
+        "owned_paths": [
+          "crates/jcode-app-core/src/overnight.rs",
+          "crates/jcode-app-core/src/tool/subagent.rs",
+          "crates/jcode-app-core/src/tool/ambient/**",
+          "docs/SAFETY_SYSTEM.md",
+          "docs/fork/ideal-base/evidence/D01-FIX-4/**"
+        ],
+        "acceptance_gates": [
+          "An overnight run is gated: a tier-2 tool attempted on the overnight path is refused, proven by a test that FAILS when the guard is removed",
+          "A subagent spawned from a REGISTERED parent is gated: its worker is refused a tier-2 tool, proven by a test that FAILS when the inheritance is removed",
+          "A subagent spawned from an UNREGISTERED (interactive) parent is NOT gated, so the fix does not break interactive use; this is a separate assertion from the gated case so one fix cannot mask the other",
+          "The guard is unregistered on every exit path including error returns, proven by asserting the id is absent from the gate after a run that returns Err",
+          "Tier-1 auto-allowed tools still run on both paths, so the wire does not trade an ungated path for a broken one",
+          "docs/SAFETY_SYSTEM.md is updated only after the gate demonstrably runs on both paths, and cites the passing tests"
+        ],
+        "evidence": [
+          "before/after grep for AmbientSessionGuard and register_ambient_session call sites",
+          "two failing-control transcripts, one per path, each failing on a DIFFERENT assertion",
+          "interactive-parent non-gating evidence",
+          "error-path unregistration evidence"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W7"
       }
     ]
   },
@@ -3162,7 +3240,9 @@
         "F30-FIX-4",
         "R05-FIX-1",
         "D01-FIX-1",
-        "D01-FIX-2"
+        "D01-FIX-2",
+        "D01-FIX-3",
+        "D01-FIX-4"
       ],
       "priority": 75,
       "owned_paths": [
@@ -3592,7 +3672,7 @@
     },
     {
       "id": "D01-FIX-2",
-      "content": "Connect three dangling wires that leave complete ambient implementations inert (D01-F14, reproduced 2026-08-03). (1) `UsageLog::record` (ambient/scheduler.rs) has no non-test caller, so usage.json is never written and every rate query returns 0. (2) `RateLimitInfo` has no production constructor and no x-ratelimit header is parsed anywhere, so both calculate_interval call sites pass None and the adaptive scheduler always returns the max interval. (3) `active_user_sessions` (ambient/runner.rs:53) is read at :176, :585 and :879 but has no writer beyond the RwLock::new(0) initializer, so it is permanently 0 and ambient never pauses for an active user. The budget bar is inert downstream of (1) and (2), since both producers hardcode budget_percent: None. Each fix is a connection, not a feature build. Do not soften docs/AMBIENT_MODE.md, which already marks each row Inert with evidence.",
+      "content": "Connect two dangling wires that leave complete ambient implementations inert (D01-F14, reproduced 2026-08-03; SCOPE NARROWED 2026-08-05). (1) `UsageLog::record` (ambient/scheduler.rs) has no non-test caller, so usage.json is never written and every rate query returns 0. (2) `active_user_sessions` (ambient/runner.rs:53) is read at :176, :585 and :879 but has no writer beyond the RwLock::new(0) initializer, so it is permanently 0 and ambient never pauses for an active user. Each of these two IS a connection, not a feature build. The original third wire (RateLimitInfo / x-ratelimit -> calculate_interval) was SPLIT OUT to D01-FIX-3 after its scope was measured rather than assumed: it has 0 production constructors, no header parsed anywhere, and 42 `impl Provider` blocks plus 67 match sites between the response and the scheduler, so it is a cross-cutting transport change that does not fit this node's premise. Consequence recorded rather than hidden: the budget bar stays inert downstream of the split, since `budget_percent` producers hardcode None, and wire 1's SCHEDULER payoff is gated behind D01-FIX-3 (50 records of 1.8M tokens leave the interval at 7200s -> 7200s on the None path production uses). Wire 1's own justification here is the prompt's hardcoded 'estimated from history'. Do not soften docs/AMBIENT_MODE.md, which already marks each row Inert with evidence.",
       "kind": "implement",
       "depends_on": [
         "D01"
@@ -3605,19 +3685,84 @@
       ],
       "acceptance_gates": [
         "usage.json is written after a real ambient turn, and a rate query returns nonzero; test FAILS when the record call is removed",
-        "calculate_interval receives Some(RateLimitInfo) from a parsed response header, and returns an interval below max under load; the None path stays covered",
         "active_user_sessions has a production writer; ambient pauses when a user session is active, proven by a test that FAILS with the writer removed",
-        "budget_percent reaches the bar as Some(_) for at least one producer",
-        "Each of the three wires is verified independently, so one fix cannot mask another"
+        "Each of the two wires is verified independently, so one fix cannot mask another",
+        "The budget bar and the adaptive interval are reported as STILL INERT with the D01-FIX-3 dependency named, rather than claimed or quietly dropped"
       ],
       "evidence": [
-        "writer/caller greps before and after for all three wires",
-        "three failing-control transcripts, one per wire",
-        "usage.json artifact from a real ambient turn"
+        "writer/caller greps before and after for both wires",
+        "two failing-control transcripts, one per wire, each failing on a different assertion",
+        "usage.json artifact from a real ambient turn",
+        "measured None-path interval showing the wire-1 scheduler payoff is D01-FIX-3-gated"
       ],
       "review_model": "opus",
       "class": "deterministic",
       "parent": "W6"
+    },
+    {
+      "id": "D01-FIX-3",
+      "content": "Wire rate-limit headers through to the ambient scheduler (split out of D01-FIX-2 wire 2, 2026-08-05). D01-FIX-2 framed all three wires as 'a connection, not a feature build'. That premise was measured and is FALSE for this wire, which is why it is now its own node rather than a checkbox on a node whose other two wires are genuine connections. Re-derived counts, not inherited: `RateLimitInfo` has 0 production constructors, no `x-ratelimit` header is parsed anywhere, and the 2 non-test `calculate_interval` call sites both pass `None`, so the adaptive scheduler always returns the max interval. Between the HTTP response and the scheduler sit 42 `impl Provider` blocks and 67 match sites, and no `StreamEvent` variant carries headers. So this is a cross-cutting transport change (surface a header-bearing signal, populate it in at least one provider, thread it to the scheduler), not a one-line reconnection. Wire 1's SCHEDULER payoff is gated behind this node: 50 records of 1.8M tokens leave the interval at 7200s -> 7200s on the `None` path production uses, while `Some(RateLimitInfo)` moves it 300s -> 7200s. Do not soften docs/AMBIENT_MODE.md, which already marks the row Inert with evidence.",
+      "kind": "implement",
+      "depends_on": [
+        "D01-FIX-2"
+      ],
+      "priority": 64,
+      "owned_paths": [
+        "crates/jcode-app-core/src/ambient/**",
+        "crates/jcode-app-core/src/provider/**",
+        "docs/AMBIENT_MODE.md",
+        "docs/fork/ideal-base/evidence/D01-FIX-3/**"
+      ],
+      "acceptance_gates": [
+        "`RateLimitInfo` has at least one production constructor fed by a parsed `x-ratelimit` response header; the greps that found 0 constructors and 0 header parses are rerun and both before/after counts reported",
+        "`calculate_interval` receives `Some(RateLimitInfo)` on a production path and returns an interval BELOW max under load, proven by a test that FAILS when the header plumbing is removed",
+        "The `None` path stays covered and still returns the max interval, so the wire does not trade an inert adaptive scheduler for a broken fixed one",
+        "The chosen transport seam is stated with its blast radius measured (how many of the 42 `impl Provider` blocks and 67 match sites the change actually touches), so a wide refactor cannot be smuggled in as a connection",
+        "`budget_percent` reaches the bar as `Some(_)` from a producer fed by this wire, or the node states in writing that it does not and why",
+        "docs/AMBIENT_MODE.md is updated only after the wire demonstrably runs, and cites the passing test"
+      ],
+      "evidence": [
+        "before/after greps for RateLimitInfo constructors, x-ratelimit parses, and calculate_interval None call sites",
+        "failing-control transcript with the header plumbing removed",
+        "None-path regression evidence showing max interval retained",
+        "measured blast radius of the transport seam"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W7"
+    },
+    {
+      "id": "D01-FIX-4",
+      "content": "Register the two ungated unattended agent paths with the ambient tier gate (found in the D01-FIX-1 follow-up sweep, 2026-08-05). The gate keys ONLY on `ctx.session_id` (tool/mod.rs:581 -> check_ambient_action_tier), and `classify` is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so `bash`, `write` and `edit` are all tier 2. Two paths run agents with no human present and never register: (1) `overnight.rs:401` calls `run_once_capture` on an existing session with no `AmbientSessionGuard`, so an overnight run is wholly ungated. (2) `tool/subagent.rs:83` runs a worker on a session minted by `Session::create`, a FRESH id that nothing registers, so the worker is ungated regardless of its parent. Path (2) is the same escalation ambient_gate.rs already documents for `schedule_ambient` and closes there by having the runner register the spawned session; subagent is that hole with no such closure. Scope note recorded honestly: `subagent` is itself tier 2 and is not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today and this is defense-in-depth rather than a live exploit; it is worth fixing because the current safety depends on an 11-entry list nobody is watching. subagent must INHERIT the parent's ambient status, not register unconditionally, so an interactive user's subagent stays ungated.",
+      "kind": "implement",
+      "depends_on": [
+        "D01-FIX-1"
+      ],
+      "priority": 66,
+      "owned_paths": [
+        "crates/jcode-app-core/src/overnight.rs",
+        "crates/jcode-app-core/src/tool/subagent.rs",
+        "crates/jcode-app-core/src/tool/ambient/**",
+        "docs/SAFETY_SYSTEM.md",
+        "docs/fork/ideal-base/evidence/D01-FIX-4/**"
+      ],
+      "acceptance_gates": [
+        "An overnight run is gated: a tier-2 tool attempted on the overnight path is refused, proven by a test that FAILS when the guard is removed",
+        "A subagent spawned from a REGISTERED parent is gated: its worker is refused a tier-2 tool, proven by a test that FAILS when the inheritance is removed",
+        "A subagent spawned from an UNREGISTERED (interactive) parent is NOT gated, so the fix does not break interactive use; this is a separate assertion from the gated case so one fix cannot mask the other",
+        "The guard is unregistered on every exit path including error returns, proven by asserting the id is absent from the gate after a run that returns Err",
+        "Tier-1 auto-allowed tools still run on both paths, so the wire does not trade an ungated path for a broken one",
+        "docs/SAFETY_SYSTEM.md is updated only after the gate demonstrably runs on both paths, and cites the passing tests"
+      ],
+      "evidence": [
+        "before/after grep for AmbientSessionGuard and register_ambient_session call sites",
+        "two failing-control transcripts, one per path, each failing on a DIFFERENT assertion",
+        "interactive-parent non-gating evidence",
+        "error-path unregistration evidence"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W7"
     }
   ],
   "audit_coverage": [
