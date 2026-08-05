@@ -772,6 +772,14 @@
       ],
       "summary": "Perplexity catalog 404 fixed and verified with a real key: GET /models 404, GET /v1/models 200 with a catalog body. Sparse override table keyed on api_base; catalog.rs untouched, so the size ratchet, file-count registry, digest pin and Governance Root stay out of scope. The earlier models_path field design is abandoned at tag g02f1-field-attempt: catalog.rs had 28 lines of headroom and the field needed 36, so it could never have fit. Blast radius settled mechanically, exactly 1 of 36 profiles differs. CI 16 pass 0 fail.",
       "updated_at": "2026-08-05T10:20:57Z"
+    },
+    "D02": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": null,
+      "updated_at": null
     }
   }
 }
