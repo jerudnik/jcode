@@ -967,11 +967,11 @@ rows say which layer runs.
 |---|---|---|
 | `schedule_ambient` tool | Shipped | `tool/ambient.rs:302`, registered at `tool/mod.rs:1048` |
 | Scheduled queue (persistent, with context) | Shipped | `ambient/persistence.rs:57` `ScheduledQueue`, saved on every mutation |
-| Adaptive resource calculator | **Inert** | `ambient/scheduler.rs:188` `calculate_interval` implements the documented algorithm, but both production callers (`runner.rs:686`, `runner.rs:819`) pass `None`, so it always returns the max interval. Only tests exercise the adaptive path |
-| Usage history tracking | **Inert** | `ambient/scheduler.rs:26` `UsageLog` is complete, but `UsageLog::record` has no non-test caller, so `usage.json` is never written and every rate query returns 0 |
+| Adaptive resource calculator | **Inert** | `ambient/scheduler.rs:188` `calculate_interval` implements the documented algorithm, but both production callers (`runner.rs:751`, `runner.rs:901`) pass `None`, so it always returns the max interval. Only tests exercise the adaptive path |
+| Usage history tracking | Shipped | `ambient/scheduler.rs:26` `UsageLog`, fed by `runner.rs:811` after every cycle including the error path, so `usage.json` is written and rate queries are real. Verified by control: removing the `record` call fails `ambient_cycle_records_what_it_spent_in_the_usage_log` with `found []` |
 | Rate limit awareness | Absent | No `x-ratelimit`/`anthropic-ratelimit` parsing anywhere. `RateLimitInfo` has no production constructor |
 | Event triggers | Partial | Session close is wired (`server/runtime.rs:424` nudge on disconnect). Crash and git-push triggers do not exist |
-| Active session detection, pause/throttle | **Inert** | The pause path is complete (`runner.rs:589` `should_pause`), but `active_user_sessions` (`runner.rs:53`) has only reads and no writer in the workspace, so it is permanently 0 and ambient never pauses |
+| Active session detection, pause/throttle | Shipped | `runner.rs` `should_pause`, reading the counter the server increments at `server/runtime.rs:351` and decrements at `:374`; one `Arc` is shared with the runner at `server.rs:633`. Verified by control: allocating the runner its own counter fails `ambient_pauses_while_a_user_client_is_connected` on the pause assertion |
 
 ### Phase 4: Proactive Work
 
@@ -981,7 +981,7 @@ rows say which layer runs.
 | Infer user priorities | Prompt-only | `prompt.rs:112` gathers feedback memories as context; no inference code |
 | Identify actionable work | Prompt-only | No such symbol exists; `prompt.rs:481-507` asks the model |
 | Execute on separate branch | Absent | No worktree or branch creation in ambient. `work_branch_prefix` has no reader outside config display |
-| Report results | Shipped | `notifications.rs:82` `dispatch_cycle_summary`, called at `runner.rs:782` |
+| Report results | Shipped | `notifications.rs:82` `dispatch_cycle_summary`, called at `runner.rs:864` |
 
 ### Phase 5: Info Widget
 
@@ -991,28 +991,37 @@ rows say which layer runs.
 | Queue preview | Shipped | `tui/info_widget.rs:1907` |
 | Last cycle summary | Shipped | `tui/info_widget.rs:1946` |
 | Next wake estimate | Shipped | `tui/info_widget.rs:1886` countdown |
-| Budget bar | **Inert** | The bar renders (`info_widget.rs:1988`), but both producers hardcode `budget_percent: None`, so it never appears. Downstream of the two inert rows in Phase 3 |
+| Budget bar | **Inert** | The bar renders (`info_widget.rs:1988`), but both producers hardcode `budget_percent: None`, so it never appears. Downstream of the adaptive-calculator row in Phase 3, which is the one wire still dangling |
 
 ### Shipped but never listed
 
 The original checklist omitted roughly a third of what ambient actually does.
 Verified present: direct-delivery scheduled tasks including session, spawn, and
-headless-resume targets (`runner.rs:477`), which run even when
+headless-resume targets (`runner.rs:476`), which run even when
 `ambient.enabled = false`; the general `schedule` tool with list and cancel
 (`tool/ambient.rs:757`); two-way messaging over Telegram, Discord, and IMAP
-email with soft-interrupt injection into a live cycle (`runner.rs:102`); a
+email with soft-interrupt injection into a live cycle (`runner.rs:134`); a
 persisted user-directive store that both triggers and steers a cycle
 (`ambient/directives.rs`); the permission and approval system with HTML email
 buttons and stale-request GC (`tool/ambient.rs:552`); a visible cycle mode that
-spawns a TUI (`runner.rs:997`); the debug socket surface
+spawns a TUI (`runner.rs:1119`); the debug socket surface
 (`server/debug_ambient.rs`); and activity-lease coordination so shutdown cannot
-drop a dequeued item (`runner.rs:635`).
+drop a dequeued item (`runner.rs:700`).
 
 ### The one thing to fix first
 
-Three dangling wires make three complete implementations inert: `UsageLog::record`
-has no producer, `RateLimitInfo` has no constructor, and `active_user_sessions`
-has no writer. Because of them the adaptive scheduler always returns the max
-interval, ambient never pauses for an active user session, and the budget bar
-never renders. Each is a small connection, not a feature build.
+One dangling wire remains. Two of the original three are now connected:
+`UsageLog::record` has a producer, and `active_user_sessions` has a writer whose
+counter the runner shares, so ambient does pause for an active user session.
+
+The remaining wire is `RateLimitInfo`, which still has no production constructor
+and no `x-ratelimit` header parsed anywhere, so both production callers of
+`calculate_interval` pass `None` and the adaptive scheduler always returns the
+max interval. The budget bar is downstream of it and still never renders.
+
+That last one is NOT a small connection, and calling it one was wrong. Measured
+rather than assumed: 42 `impl Provider` blocks and 67 match sites sit between the
+HTTP response and the scheduler, and no `StreamEvent` variant carries headers, so
+surfacing the signal is a cross-cutting transport change. It is tracked as its own
+node rather than as a checkbox on this one.
 

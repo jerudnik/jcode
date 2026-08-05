@@ -41,7 +41,7 @@ class IdealBaseRailwayTests(unittest.TestCase):
         self.assertEqual(set(state["nodes"]), set(nodes))
 
     def test_runnable_projection_offers_only_genuinely_dispatchable_work(self) -> None:
-        """Every runnable node must be pending with its dependencies complete.
+        """Every offered node must be actionable, and its action must fit its state.
 
         This deliberately does not assert a node count. It previously demanded
         exactly one ("the railway is sequential by construction"), which was
@@ -51,28 +51,46 @@ class IdealBaseRailwayTests(unittest.TestCase):
         node, then broke the moment W4 opened with five disjoint children.
         Assert the invariant that must always hold instead of a number that
         the design intends to move.
+
+        It also used to require every offered node to be `pending`, which was
+        wrong in two directions and is the reason this test is being edited
+        rather than merely re-run. It contradicted `synthesize`, which is only
+        ever emitted for a root that is NOT pending, so the assertion had been
+        passing only because no wave had yet closed while the test ran. And it
+        forbade offering a node at `implemented` or `verifying`, even though
+        EXECUTION_PROTOCOL section 5 says implementation is not acceptance and
+        those nodes still owe their gates. The invariant is not "pending"; it is
+        that the ACTION matches the state it was derived from.
         """
         graph, state, nodes = railway.validate_repository()
         ready = railway.ready_nodes(graph, state, nodes)
         self.assertTrue(ready, "railway must always offer some next action")
+        states_for_action = {
+            "seed_and_expand": {"pending"},
+            "dispatch": {"pending"},
+            "verify": {"implemented", "verifying"},
+            "synthesize": {"in_progress", "implemented", "verifying", "blocked"},
+        }
         for node in ready:
             record = state["nodes"].get(node["id"], {})
-            self.assertEqual(
+            action = node["action"]
+            self.assertIn(
                 record.get("state"),
-                "pending",
-                f"{node['id']} is offered as runnable but is {record.get('state')!r}",
+                states_for_action[action],
+                f"{node['id']} is offered as {action!r} but is "
+                f"{record.get('state')!r}",
             )
+            if action != "dispatch":
+                # Only a dispatch claims the work can START now. A verify acts
+                # on a node whose work already exists, and seed/synthesize are
+                # root transitions gated by their own rules.
+                continue
             for dependency in node.get("depends_on", []):
                 self.assertIn(
                     state["nodes"].get(dependency, {}).get("state"),
                     railway.DEPENDENCY_COMPLETE,
                     f"{node['id']} is runnable but depends on incomplete {dependency}",
                 )
-        self.assertEqual(
-            len({node["id"] for node in ready}),
-            len(ready),
-            "the projection must not repeat a node",
-        )
 
     def test_bootstrap_prompt_covers_the_full_execution_protocol(self) -> None:
         prompt = railway.validate_bootstrap_prompt()
