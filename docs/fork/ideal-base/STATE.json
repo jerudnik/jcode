@@ -5,11 +5,11 @@
   "active_graph_id": null,
   "last_checkpoint": {
     "node": "D01-FIX-2",
-    "state": "implemented",
-    "reviewed_commit": null,
-    "published_commit": null,
-    "updated_at": "2026-08-05T05:28:59Z",
-    "summary": "Wires 1 and 3 delivered and merged as PR #118 (merge 9ac36a8c7, branch tip 2e6400fb2); wire 2 split to D01-FIX-3 after measurement. Both wires re-verified HERE by control rather than trusted from the merge: removing the record call fails the usage test with 'found []' (left 0, right 1), and giving the runner its own counter fails the pause test on the pause assertion at startup_tests.rs:269. The two controls fail on DIFFERENT assertions in different files, and under each the other test stays green, so neither fix masks the other; both were confirmed on disk before their exit codes were read and restored byte-identical. docs/AMBIENT_MODE.md moved those two rows Inert -> Shipped only after the behavior ran, citing the controls, and five line citations that wire 3's insertions had shifted were repaired so all eight runner.rs references resolve. The adaptive calculator and budget bar are reported as STILL INERT with the D01-FIX-3 dependency named, re-measured on this tree (2 budget_percent producers hardcode None, 2 non-test calculate_interval callers pass None) rather than claimed. Held at implemented rather than accepted because the doc reconciliation is on automation/s01-dependency-fix and not yet main-ancestral."
+    "state": "accepted",
+    "reviewed_commit": "1d49d1b564afa01167eec7ecb5939da176d3a0cf",
+    "published_commit": "a5e1cb5943806a5cdc3c41a0d7ac86293624156f",
+    "updated_at": "2026-08-05T06:33:53Z",
+    "summary": "Two of three listed wires are live in shipped code, each proven by a control that fails on a DIFFERENT assertion (wire 1 a record-count equality, wire 3 a pause boolean), so neither fix masks the other. The third listed wire was measured NOT to be a wire at all and was referred out as D01-FIX-3 rather than quietly built: no StreamEvent carries headers and RateLimitInfo has zero non-test constructors. Gate 4 honored by re-measuring rather than inheriting: the budget bar and adaptive interval are STILL INERT (2 hardcoded None producers, 2 None-passing callers), and on the None path production uses, 50 records of 1.8M tokens leave the interval at 7200s -> 7200s, so wire 1's scheduler payoff is D01-FIX-3-gated. Reviewed 1d49d1b56 and published a5e1cb594 both verified ancestral to main, not merely reachable."
   },
   "nodes": {
     "W0": {
@@ -720,14 +720,14 @@
       "updated_at": "2026-08-04T20:10:49Z"
     },
     "D01-FIX-2": {
-      "state": "implemented",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "accepted",
+      "reviewed_commit": "1d49d1b564afa01167eec7ecb5939da176d3a0cf",
+      "published_commit": "a5e1cb5943806a5cdc3c41a0d7ac86293624156f",
       "evidence": [
         "docs/fork/ideal-base/evidence/D01-FIX-2/README.md"
       ],
-      "summary": "Wires 1 and 3 delivered and merged as PR #118 (merge 9ac36a8c7, branch tip 2e6400fb2); wire 2 split to D01-FIX-3 after measurement. Both wires re-verified HERE by control rather than trusted from the merge: removing the record call fails the usage test with 'found []' (left 0, right 1), and giving the runner its own counter fails the pause test on the pause assertion at startup_tests.rs:269. The two controls fail on DIFFERENT assertions in different files, and under each the other test stays green, so neither fix masks the other; both were confirmed on disk before their exit codes were read and restored byte-identical. docs/AMBIENT_MODE.md moved those two rows Inert -> Shipped only after the behavior ran, citing the controls, and five line citations that wire 3's insertions had shifted were repaired so all eight runner.rs references resolve. The adaptive calculator and budget bar are reported as STILL INERT with the D01-FIX-3 dependency named, re-measured on this tree (2 budget_percent producers hardcode None, 2 non-test calculate_interval callers pass None) rather than claimed. Held at implemented rather than accepted because the doc reconciliation is on automation/s01-dependency-fix and not yet main-ancestral.",
-      "updated_at": "2026-08-05T05:28:59Z"
+      "summary": "Two of three listed wires are live in shipped code, each proven by a control that fails on a DIFFERENT assertion (wire 1 a record-count equality, wire 3 a pause boolean), so neither fix masks the other. The third listed wire was measured NOT to be a wire at all and was referred out as D01-FIX-3 rather than quietly built: no StreamEvent carries headers and RateLimitInfo has zero non-test constructors. Gate 4 honored by re-measuring rather than inheriting: the budget bar and adaptive interval are STILL INERT (2 hardcoded None producers, 2 None-passing callers), and on the None path production uses, 50 records of 1.8M tokens leave the interval at 7200s -> 7200s, so wire 1's scheduler payoff is D01-FIX-3-gated. Reviewed 1d49d1b56 and published a5e1cb594 both verified ancestral to main, not merely reachable.",
+      "updated_at": "2026-08-05T06:33:53Z"
     },
     "W7": {
       "state": "pending",
