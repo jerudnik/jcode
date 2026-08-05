@@ -754,6 +754,14 @@
       "evidence": [],
       "summary": "Found in the D01-FIX-1 follow-up sweep, 2026-08-05, and re-derived by grep rather than inherited. The ambient tier gate keys ONLY on ctx.session_id (tool/mod.rs:581 -> check_ambient_action_tier), and AmbientSessionGuard::new is registered in exactly one file, ambient/runner.rs. Two paths run agents with no human present and never register: overnight.rs:401 calls run_once_capture with no guard, and tool/subagent.rs runs its worker on a session minted by Session::create, a fresh id nothing registers, so the worker is ungated regardless of its parent. classify is deny-by-default against an 11-entry read-only AUTO_ALLOWED, so bash, write and edit are all tier 2. Scope recorded honestly rather than oversold: subagent is itself tier 2 and not in TIER_GATE_EXEMPT, so a gated cycle is refused the CALL today, which makes this defense-in-depth against future edits to an 11-entry list nobody watches, not a live exploit. subagent must INHERIT the parent's ambient status so an interactive user's subagent stays ungated.",
       "updated_at": "2026-08-05T05:05:18Z"
+    },
+    "G02-FIX-1": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Injected by G02 on 2026-08-05 under EXECUTION_PROTOCOL section 5: a verification failure injects a fix node. G02's catalog tier found perplexity returning HTTP 404 on the live model catalog. The claim was re-derived here rather than inherited from G02's evidence, and re-derived WITH a bearer attached, because an unauthenticated 404 can be a missing-credential shape rather than a routing fact: GET /models 404 with and without a key, GET /v1/models 401 invalid_api_key, POST /chat/completions 401, POST /v1/chat/completions 404. The inversion is real, so appending /v1 to api_base would fix the catalog and break chat. Blast radius measured: 36 profiles, 6 without a /v1 api_base, and probing all 6 leaves perplexity as the only inversion. That probe also corrected one of my own readings: gemini-api first looked like a second instance at 404, but with a bearer it returns 400 'Please pass a valid API key', so it is a credential shape and not a defect. No Default impl and no macro exists for OpenAiCompatibleProfile, so a new field touches all 36 literals, all of which are in catalog.rs. Three independent {api_base}/models sites exist and only the doctor one has the profile in scope.",
+      "updated_at": "2026-08-05T07:36:00Z"
     }
   }
 }

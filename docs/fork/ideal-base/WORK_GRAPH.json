@@ -1414,7 +1414,8 @@
           "D01-FIX-1",
           "D01-FIX-2",
           "D01-FIX-3",
-          "D01-FIX-4"
+          "D01-FIX-4",
+          "G02-FIX-1"
         ],
         "priority": 75,
         "owned_paths": [
@@ -1575,6 +1576,35 @@
           "checker fixtures and planted-failure transcripts",
           "command/parser evidence",
           "generated-instruction drift results"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W5"
+      },
+      {
+        "id": "G02-FIX-1",
+        "content": "Give the OpenAI-compatible catalog fetch a per-profile models path, so a provider whose catalog route differs from its chat route can be described instead of broken. Found by G02: Perplexity's live catalog probe returns HTTP 404. The routes are genuinely inverted and this was re-derived here with an API key attached, since an unauthenticated 404 can be an auth artifact rather than a routing fact: GET /models 404 both without a key and with a bearer, GET /v1/models 401 invalid_api_key (so the route exists and only the key is wrong), POST /chat/completions 401, POST /v1/chat/completions 404. So appending /v1 to api_base fixes the catalog and breaks chat, and the fix must be a per-provider catalog-path override rather than an api_base edit. Scope measured rather than assumed: 36 profiles, 6 whose api_base does not end in /v1, and probing all 6 leaves Perplexity as the only inversion (fpt and deepinfra 200, zai and deepseek 401, gemini 404-without-key but 400 'Please pass a valid API key' with a bearer, which is Google's missing-credential shape and not a routing defect). There is no Default impl and no macro for OpenAiCompatibleProfile, so an added field touches all 36 literals; all 36 are in catalog.rs and none elsewhere. Three call sites build {api_base}/models independently: openrouter-runtime lib.rs:543 inside fetch_models_from_api, provider-doctor live_provider_probes.rs:98, and base usage/api_keys.rs:57. Only the doctor site has the profile in scope today; the runtime site is handed a bare api_base String, so the override must reach it without widening that signature carelessly.",
+        "kind": "implement",
+        "depends_on": [
+          "G02"
+        ],
+        "priority": 40,
+        "owned_paths": [
+          "crates/jcode-provider-metadata/**",
+          "crates/jcode-provider-openrouter-runtime/**",
+          "crates/jcode-provider-doctor/**",
+          "crates/jcode-base/src/usage/api_keys.rs",
+          "docs/fork/ideal-base/evidence/G02-FIX-1/**"
+        ],
+        "acceptance_gates": [
+          "A control proves the defect exists before the fix: a test that builds the catalog URL for the perplexity profile FAILS while the override is absent, and passes with it. Removing the override must fail that test again.",
+          "All three {api_base}/models construction sites agree on the resolved catalog path for a given profile, demonstrated by a test that would fail if any one site were reverted to the bare format!.",
+          "Chat routing is proven unchanged: an assertion that the perplexity chat URL still resolves without /v1, which must FAIL if the fix were implemented by editing api_base instead.",
+          "The other 5 non-/v1 profiles are asserted to resolve to their existing catalog path, so the change is inert for them.",
+          "Live re-probe recorded with the response body and status for each route, run with a key attached rather than unauthenticated."
+        ],
+        "evidence": [
+          "docs/fork/ideal-base/evidence/G02-FIX-1/README.md"
         ],
         "review_model": "opus",
         "class": "deterministic",
@@ -3242,7 +3272,8 @@
         "D01-FIX-1",
         "D01-FIX-2",
         "D01-FIX-3",
-        "D01-FIX-4"
+        "D01-FIX-4",
+        "G02-FIX-1"
       ],
       "priority": 75,
       "owned_paths": [
@@ -3403,6 +3434,35 @@
         "checker fixtures and planted-failure transcripts",
         "command/parser evidence",
         "generated-instruction drift results"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W5"
+    },
+    {
+      "id": "G02-FIX-1",
+      "content": "Give the OpenAI-compatible catalog fetch a per-profile models path, so a provider whose catalog route differs from its chat route can be described instead of broken. Found by G02: Perplexity's live catalog probe returns HTTP 404. The routes are genuinely inverted and this was re-derived here with an API key attached, since an unauthenticated 404 can be an auth artifact rather than a routing fact: GET /models 404 both without a key and with a bearer, GET /v1/models 401 invalid_api_key (so the route exists and only the key is wrong), POST /chat/completions 401, POST /v1/chat/completions 404. So appending /v1 to api_base fixes the catalog and breaks chat, and the fix must be a per-provider catalog-path override rather than an api_base edit. Scope measured rather than assumed: 36 profiles, 6 whose api_base does not end in /v1, and probing all 6 leaves Perplexity as the only inversion (fpt and deepinfra 200, zai and deepseek 401, gemini 404-without-key but 400 'Please pass a valid API key' with a bearer, which is Google's missing-credential shape and not a routing defect). There is no Default impl and no macro for OpenAiCompatibleProfile, so an added field touches all 36 literals; all 36 are in catalog.rs and none elsewhere. Three call sites build {api_base}/models independently: openrouter-runtime lib.rs:543 inside fetch_models_from_api, provider-doctor live_provider_probes.rs:98, and base usage/api_keys.rs:57. Only the doctor site has the profile in scope today; the runtime site is handed a bare api_base String, so the override must reach it without widening that signature carelessly.",
+      "kind": "implement",
+      "depends_on": [
+        "G02"
+      ],
+      "priority": 40,
+      "owned_paths": [
+        "crates/jcode-provider-metadata/**",
+        "crates/jcode-provider-openrouter-runtime/**",
+        "crates/jcode-provider-doctor/**",
+        "crates/jcode-base/src/usage/api_keys.rs",
+        "docs/fork/ideal-base/evidence/G02-FIX-1/**"
+      ],
+      "acceptance_gates": [
+        "A control proves the defect exists before the fix: a test that builds the catalog URL for the perplexity profile FAILS while the override is absent, and passes with it. Removing the override must fail that test again.",
+        "All three {api_base}/models construction sites agree on the resolved catalog path for a given profile, demonstrated by a test that would fail if any one site were reverted to the bare format!.",
+        "Chat routing is proven unchanged: an assertion that the perplexity chat URL still resolves without /v1, which must FAIL if the fix were implemented by editing api_base instead.",
+        "The other 5 non-/v1 profiles are asserted to resolve to their existing catalog path, so the change is inert for them.",
+        "Live re-probe recorded with the response body and status for each route, run with a key attached rather than unauthenticated."
+      ],
+      "evidence": [
+        "docs/fork/ideal-base/evidence/G02-FIX-1/README.md"
       ],
       "review_model": "opus",
       "class": "deterministic",
@@ -3957,7 +4017,8 @@
       "id": "A22",
       "item": "Provider doctor and catalog validation",
       "nodes": [
-        "G02"
+        "G02",
+        "G02-FIX-1"
       ],
       "class": "gated"
     },
