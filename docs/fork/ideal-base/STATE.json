@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01-FIX-2",
-    "state": "accepted",
-    "reviewed_commit": "1d49d1b564afa01167eec7ecb5939da176d3a0cf",
-    "published_commit": "a5e1cb5943806a5cdc3c41a0d7ac86293624156f",
-    "updated_at": "2026-08-05T06:33:53Z",
-    "summary": "Two of three listed wires are live in shipped code, each proven by a control that fails on a DIFFERENT assertion (wire 1 a record-count equality, wire 3 a pause boolean), so neither fix masks the other. The third listed wire was measured NOT to be a wire at all and was referred out as D01-FIX-3 rather than quietly built: no StreamEvent carries headers and RateLimitInfo has zero non-test constructors. Gate 4 honored by re-measuring rather than inheriting: the budget bar and adaptive interval are STILL INERT (2 hardcoded None producers, 2 None-passing callers), and on the None path production uses, 50 records of 1.8M tokens leave the interval at 7200s -> 7200s, so wire 1's scheduler payoff is D01-FIX-3-gated. Reviewed 1d49d1b56 and published a5e1cb594 both verified ancestral to main, not merely reachable."
+    "node": "F26-FIX-1",
+    "state": "superseded",
+    "reviewed_commit": "a02dae116f9daec60accde6702a1a5318472ac3e",
+    "published_commit": "ddcd1a9ef3b5231ceefb76d762529f373350de8d",
+    "updated_at": "2026-08-05T07:05:54Z",
+    "summary": "Superseded: the node's premise was falsified by measurement, not refused. Production unregister exists (Session::mark_closed_and_persist, 7 callers incl. 5 headless in ambient/runner.rs); the sweep reclaims by PID liveness rather than a 24h window (grep for 86400 / 24*60 / hours(24) returns nothing); live machine shows 27 active-PID + 5 streaming-PID markers, all 32 live, 0 dead. Re-derived rather than inherited: every path in the original evidence was stale after the jcode-base crate split, and all three claims still hold at the new locations. superseded rather than rejected because rejected is not in DEPENDENCY_COMPLETE and would deadlock the signoff tail."
   },
   "nodes": {
     "W0": {
@@ -71,12 +71,14 @@
       "updated_at": "2026-08-02T02:44:46Z"
     },
     "W6": {
-      "state": "in_progress",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "Fix wave opened. R05-FIX-1 implemented on branch; F26-FIX-1 rejected as a false node after re-verification against shipped code. F30-FIX-1..4 in progress; re-verification found F30-FIX-4 largely false and F30-FIX-3 overstated.",
-      "updated_at": "2026-08-02T02:44:46Z"
+      "state": "accepted",
+      "reviewed_commit": "3ef3d0322b922fb0aeac05d65bd543d2cad01140",
+      "published_commit": "e1896cf69330f54fc864a0bfff53d0681b311ded",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/W6"
+      ],
+      "summary": "W6 synthesis: all 11 children complete (10 accepted, F26-FIX-1 superseded). Human-noticed product defects repaired: todo terminal states (R08), remote-session stall (R09), reload staleness (R10), distribution-policy allowlist/token/lint/residue hardening (F30-FIX-1..4), stall-guard cancel cause (R05-FIX-1), and the two D01 dangling-wire repairs. Each accepted node carries a control that fails when its fix is removed; where a node listed several fixes the controls fail on different assertions so no fix masks another. Two nodes are partially implemented and say so: the majority of their named targets measured as stale, and the disposition with reasons is the substance.",
+      "updated_at": "2026-08-05T07:05:24Z"
     },
     "W0.1": {
       "state": "accepted",
@@ -700,14 +702,14 @@
       "updated_at": "2026-08-02T22:12:44.076813Z"
     },
     "F26-FIX-1": {
-      "state": "rejected",
-      "reviewed_commit": null,
-      "published_commit": null,
+      "state": "superseded",
+      "reviewed_commit": "a02dae116f9daec60accde6702a1a5318472ac3e",
+      "published_commit": "ddcd1a9ef3b5231ceefb76d762529f373350de8d",
       "evidence": [
         "docs/fork/ideal-base/evidence/W6/F26-FIX-1.md"
       ],
-      "summary": "False node. Production unregister exists as Session::mark_closed_and_persist (7 callers, incl. 5 headless in ambient/runner.rs); sweep reclaims by PID liveness not a 24h window; live machine shows 4 markers, 0 dead.",
-      "updated_at": "2026-08-02T02:42:48Z"
+      "summary": "Superseded: the node's premise was falsified by measurement, not refused. Production unregister exists (Session::mark_closed_and_persist, 7 callers incl. 5 headless in ambient/runner.rs); the sweep reclaims by PID liveness rather than a 24h window (grep for 86400 / 24*60 / hours(24) returns nothing); live machine shows 27 active-PID + 5 streaming-PID markers, all 32 live, 0 dead. Re-derived rather than inherited: every path in the original evidence was stale after the jcode-base crate split, and all three claims still hold at the new locations. superseded rather than rejected because rejected is not in DEPENDENCY_COMPLETE and would deadlock the signoff tail.",
+      "updated_at": "2026-08-05T07:05:54Z"
     },
     "D01-FIX-1": {
       "state": "accepted",
