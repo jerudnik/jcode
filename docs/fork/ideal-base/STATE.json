@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01-FIX-4",
+    "node": "D01-FIX-3",
     "state": "accepted",
-    "reviewed_commit": "c865aeffb404d810a083c9b252c44d371d8b9796",
-    "published_commit": "0faa1629cde84a08edf2a8fe1db877b370063107",
-    "updated_at": "2026-08-05T18:33:04Z",
-    "summary": "Gated the two unattended paths the ambient tier gate missed. AmbientSessionGuard::inherit(parent, child) registers a subagent worker only when its parent is registered, so an ambient parent's worker is gated while an interactive user's worker is not; the overnight supervisor registers unconditionally for the whole loop, so ? returns still unregister on drop. Six tests, including one asserting tier-1 read/grep/glob/ls/todo still run for both registered and inherited sessions, since every other test asserts a refusal. Five controls, each confirmed on disk before its exit code was read and restored byte-identical, each failing on a different assertion: deleting the inherit call, registering unconditionally (fails the interactive assertion while the gating half still passes), deleting the overnight guard, registering without the RAII guard, and making AutoAllowed refuse. Split the 228-line test module out of overnight.rs (1275 to 1101 LOC) with zero production lines relocated, after a first attempt that extracted production probes was correctly rejected by the swallowed-error ratchet on path novelty; no budget was re-baselined. CI caught a duplicated glob import my local clippy missed for lack of --all-targets; fixed and control-verified against CI's exact command. Merged as PR #128."
+    "reviewed_commit": "4c16d8ab4e912cf831fb11cc7f831c655ea9b9b9",
+    "published_commit": "f13f08ff3f110039425fd591eba9c9082632cd3b",
+    "updated_at": "2026-08-05T21:17:34Z",
+    "summary": "Real rate-limit headers now reach the ambient scheduler. Vendor header tokens 0 -> 34 (anthropic-ratelimit 22, x-ratelimit 12); production calculate_interval(None) 2 -> 0, with the remaining None at scheduler.rs:366 retained deliberately as the acceptance-side control. Blast radius 6 files +15/-3, touching 1 of 72 impl Provider for and 0 of 419 StreamEvent:: sites. Four controls run and restored byte-identical; control C PASSED with the wire cut, which was fixed by introducing the next_interval seam rather than by bolting on a mirror-test, after which C2 failed correctly (EXIT=101). Does not reach budget_percent: both writers still pass literal None, so the budget bar row stays Inert. Known gap stated not hidden: the Anthropic runtime has no mock-server harness, so the one-line observe(...) call is not unit-testable. Merged as PR #130 via the seventh \u00a74 maintenance window; the merge also refreshed the provider_infrastructure file count 19 -> 20 and the workflow digest, an inventory refresh proven distinct from a debt re-baseline by control."
   },
   "nodes": {
     "W0": {
@@ -732,20 +732,26 @@
       "updated_at": "2026-08-05T06:33:53Z"
     },
     "W7": {
-      "state": "in_progress",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "Wave open. D01-FIX-4 (ambient tier gate misses two unattended paths) is implemented and merged as PR #128; D01-FIX-3 (rate-limit headers to the ambient scheduler) is not started. The wave closes when D01-FIX-3 lands.",
-      "updated_at": "2026-08-05T18:32:31Z"
+      "state": "accepted",
+      "reviewed_commit": "4c16d8ab4e912cf831fb11cc7f831c655ea9b9b9",
+      "published_commit": "f13f08ff3f110039425fd591eba9c9082632cd3b",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/D01-FIX-3_scope_count_refresh.md",
+        "docs/fork/ideal-base/evidence/R07/maintenance-window-pr130-2026-08-05.md"
+      ],
+      "summary": "Wave closed. Both children accepted: D01-FIX-4 (ambient tier gate missed two unattended paths, PR #128) and D01-FIX-3 (real rate-limit headers reach the ambient scheduler, PR #130). The wave's stated closing condition was 'the wave closes when D01-FIX-3 lands', and it has. Ambient safety now has vendor rate-limit headers feeding the adaptive interval calculator (34 header tokens from 0; production calculate_interval(None) 2 -> 0). Remaining ambient gap recorded honestly rather than closed by assertion: the budget bar row stays Inert because neither writer passes a real budget_percent, and the Anthropic runtime has no mock-server harness so the observe(...) call is not unit-testable.",
+      "updated_at": "2026-08-05T21:17:05Z"
     },
     "D01-FIX-3": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": "Split out of D01-FIX-2 wire 2 on 2026-08-05 after its scope was MEASURED rather than assumed. D01-FIX-2 framed all three wires as 'a connection, not a feature build'; that premise is false for this one. Re-derived counts: 0 production RateLimitInfo constructors, 0 x-ratelimit header parses anywhere, both non-test calculate_interval call sites pass None, and 42 impl Provider blocks plus 67 match sites sit between the HTTP response and the scheduler with no StreamEvent variant carrying headers. That is a cross-cutting transport change, so it was referred to its own node rather than quietly built under a premise that no longer held. Consequence recorded rather than hidden: wire 1's scheduler payoff is gated behind this node, since 50 records of 1.8M tokens leave the interval at 7200s -> 7200s on the None path production actually uses.",
-      "updated_at": "2026-08-05T05:05:18Z"
+      "state": "accepted",
+      "reviewed_commit": "4c16d8ab4e912cf831fb11cc7f831c655ea9b9b9",
+      "published_commit": "f13f08ff3f110039425fd591eba9c9082632cd3b",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/D01-FIX-3_scope_count_refresh.md",
+        "docs/fork/ideal-base/evidence/R07/maintenance-window-pr130-2026-08-05.md"
+      ],
+      "summary": "Real rate-limit headers now reach the ambient scheduler. Vendor header tokens 0 -> 34 (anthropic-ratelimit 22, x-ratelimit 12); production calculate_interval(None) 2 -> 0, with the remaining None at scheduler.rs:366 retained deliberately as the acceptance-side control. Blast radius 6 files +15/-3, touching 1 of 72 impl Provider for and 0 of 419 StreamEvent:: sites. Four controls run and restored byte-identical; control C PASSED with the wire cut, which was fixed by introducing the next_interval seam rather than by bolting on a mirror-test, after which C2 failed correctly (EXIT=101). Does not reach budget_percent: both writers still pass literal None, so the budget bar row stays Inert. Known gap stated not hidden: the Anthropic runtime has no mock-server harness, so the one-line observe(...) call is not unit-testable. Merged as PR #130 via the seventh \u00a74 maintenance window; the merge also refreshed the provider_infrastructure file count 19 -> 20 and the workflow digest, an inventory refresh proven distinct from a debt re-baseline by control.",
+      "updated_at": "2026-08-05T21:17:34Z"
     },
     "D01-FIX-4": {
       "state": "accepted",
