@@ -1,0 +1,551 @@
+[20:40:38] S01 round=A commit=1e356391e3bb01f350bfd8a3c34d22d78b195fc9
+[20:40:38] uname=Darwin arm64
+Warning budget OK: current=0 baseline=0
+[20:40:40] PASS A6 warning budget
+Panic-prone budget OK: total=56 files=24
+[20:40:54] PASS A6 panic budget
+Swallowed-error budget improved:
+  - total swallowed-error-like count shrank: 3033 -> 2962
+  - dot_ok count shrank: 1107 -> 1079
+  - let_underscore count shrank: 1120 -> 1097
+  - unwrap_or_default count shrank: 806 -> 786
+  - swallowed-error-like usage shrank: crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs (52 -> 51)
+  - swallowed-error-like usage shrank: crates/jcode-app-core/src/server/lifecycle.rs (11 -> 10)
+  - swallowed-error-like usage shrank: crates/jcode-app-core/src/server/shutdown.rs (8 -> 7)
+  - swallowed-error-like usage shrank: crates/jcode-base/src/config/config_file.rs (5 -> 4)
+  - swallowed-error-like usage shrank: crates/jcode-setup-hints/src/lib.rs (36 -> 14)
+  - swallowed-error-like usage shrank: crates/jcode-setup-hints/src/windows_setup.rs (18 -> 6)
+  - swallowed-error-like usage shrank: crates/jcode-tui/src/tui/app/commands.rs (32 -> 30)
+  - swallowed-error-like usage shrank: src/cli/commands.rs (24 -> 23)
+  - swallowed-error-like usage shrank: src/cli/dispatch.rs (6 -> 5)
+  - swallowed-error-like usage shrank: src/cli/hot_exec.rs (6 -> 2)
+  - swallowed-error-like usage removed: crates/jcode-app-core/src/telemetry_state.rs (23 -> 0)
+Consider running: scripts/check_swallowed_error_budget.py --update
+[20:41:12] PASS A6 swallowed-error budget
+advisory policy: OK as of 2026-08-06
+[20:41:12] PASS A6 advisory policy
+Code-size budget improved:
+  - oversized file shrank: crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs (1874 -> 1785 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/server.rs (2384 -> 2380 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/server/shutdown.rs (1609 -> 1605 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/server/util.rs (1448 -> 1304 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/tool/communicate.rs (3432 -> 3375 LOC)
+  - oversized file shrank: crates/jcode-app-core/src/tool/session_search.rs (2131 -> 2041 LOC)
+  - oversized file shrank: crates/jcode-base/src/provider/mod.rs (2797 -> 2605 LOC)
+  - oversized file shrank: crates/jcode-config-types/src/lib.rs (1902 -> 1856 LOC)
+  - oversized file shrank: crates/jcode-provider-anthropic-runtime/src/lib.rs (2403 -> 2402 LOC)
+  - oversized file shrank: crates/jcode-provider-core/src/lib.rs (1632 -> 1328 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app.rs (2318 -> 2312 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/commands.rs (3353 -> 3299 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/input.rs (3599 -> 3565 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/remote.rs (1915 -> 1795 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/app/remote/key_handling.rs (2712 -> 2681 LOC)
+  - oversized file shrank: crates/jcode-tui/src/tui/ui_header.rs (1612 -> 1584 LOC)
+  - oversized file shrank: src/cli/dispatch.rs (1276 -> 1246 LOC)
+  - oversized file no longer exceeds 1200 LOC: crates/jcode-app-core/src/overnight.rs (1275 -> OK)
+  - oversized file no longer exceeds 1200 LOC: crates/jcode-setup-hints/src/lib.rs (2369 -> OK)
+Consider running: scripts/check_code_size_budget.py --update
+[20:41:13] PASS A4 code size budget
+Test-size budget improved:
+  - oversized test file shrank: crates/jcode-app-core/src/server/comm_control_tests/dag_e2e.rs (1332 -> 1314 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests.rs (1610 -> 1572 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/app/tests/state_model_poke_03.rs (2598 -> 2506 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/session_picker/loading_tests.rs (1268 -> 1229 LOC)
+  - oversized test file shrank: crates/jcode-tui/src/tui/ui_tests/prepare.rs (1286 -> 1265 LOC)
+  - oversized test file shrank: tests/e2e/test_support/mod.rs (1394 -> 1393 LOC)
+  - oversized test file no longer exceeds 1200 LOC: crates/jcode-app-core/src/server/swarm_persistence_tests.rs (1368 -> OK)
+Consider running: scripts/check_test_size_budget.py --update
+[20:41:13] PASS A4 test size budget
+wildcard re-export budget check passed (total=16)
+[20:41:14] PASS A4 wildcard reexport
+dependency boundary check passed
+[20:41:15] PASS A4 dependency boundaries
+render-state tests holding the lock: 45
+render-state tests WITHOUT the lock: 0
+
+OK: within baseline (0).
+[20:41:18] PASS A4 tui render lock
+env lease drop order: ok (1148 files scanned)
+[20:41:19] PASS A4 env lease drop order
+config env lease: ok (no unleased mutations of 147 config-fingerprint env vars in tests)
+[20:41:57] PASS A4 config env lease
+agent-instructions: ok (projected=7433/8192, compiled=7181/8192)
+[20:41:57] PASS A6 agent instructions
+docs-references: OK (130 active documents, 0 machine-local, 0 stale-code-path at baseline)
+[20:41:58] PASS A6 docs references
+ambient roots: ok (21 site(s), all allowlisted with a stated reason)
+[20:42:04] PASS A7 ambient roots
+real-home isolation: running jcode-app-core tests with JCODE_HOME unset...
+real-home isolation: OK (3 roots unchanged after jcode-app-core)
+[20:44:47] PASS A7 real-home isolation
+[20:44:47] F14 lifecycle matrix: rounds=1 binary=/Users/jrudnik/labs/jcode/target/selfdev/jcode (providers stripped)
+[20:44:47] === round 1/1 ===
+[20:45:37] FAIL lease/exit/crash/restart matrix (F03) (exit 1)
+[20:45:42] PASS shutdown+reload coordinator suite (F02/F03/R04)
+[20:45:52] PASS reload state/recovery suites (R01)
+[20:46:18] PASS turn cancel/interrupt suite
+[20:46:27] PASS mcp lifecycle suite (F06/F07/F12)
+[20:46:32] PASS background durability+orphan suite (F04/F05/F12)
+[20:46:39] PASS disconnect-cleanup suite (F10)
+[20:46:41] FAIL pending-activation reconcile suite (F09) (exit 97)
+[20:46:41] PASS residue: no orphaned fixture children
+[20:46:41] === summary ===
+[20:46:41] F14 LIFECYCLE MATRIX: FAIL
+[20:46:41] FAIL A0-A3 lifecycle matrix (1 round) (exit 1)
+[20:44:47] F14 lifecycle matrix: rounds=1 binary=/Users/jrudnik/labs/jcode/target/selfdev/jcode (providers stripped)
+[20:44:47] === round 1/1 ===
+== A. Per-lease-class hold/release fixtures (idle timeout 5s) ==
+FAIL: [client-connection] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71077 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [provider-turn] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71123 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [startup-recovery] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71165 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [debug-job] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71237 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [background-task] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71253 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [mcp-call] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71267 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [swarm-waiter] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 111: 71309 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+FAIL: [scheduled-delivery] could not acquire fixture lease
+docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh: line 152: 71390 Killed: 9                  env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 JCODE_DISABLE_UPDATE_CHECK=1 JCODE_DEFERRED_AUTH_BOOTSTRAP=1 JCODE_DEBUG_CONTROL=1 "${envpairs[@]+"${envpairs[@]}"}" "$BINARY" "$@" > "$dir/daemon.log" 2>&1
+== B. Forced-exit fixture (cleanup hang + SIGTERM -> watchdog 70) ==
+PASS: [forced] watchdog forced exit code 70
+PASS: [forced] durable marker records fired
+PASS: [forced] successor booted over forced-exit residue
+PASS: [forced] successor idle-exited 44
+PASS: [forced-successor] zero socket/hash/metadata residue
+== C. Parent-SIGKILL residue fixture (successor reaps stale socket) ==
+PASS: [sigkill] stale socket residue present as expected after SIGKILL
+PASS: [sigkill] successor daemon booted over stale residue
+PASS: [sigkill] successor idle-exited 44 with clean residue
+PASS: [sigkill-successor] zero socket/hash/metadata residue
+8 fixture failure(s)
+[20:45:37] FAIL lease/exit/crash/restart matrix (F03) (exit 1)
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 1.33s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
+
+running 42 tests
+test server::reload::reload_tests::graceful_shutdown_sessions_skips_idle_sessions ... ok
+test server::client_session::tests::reload_tests::rename_shutdown_signal_moves_registration_to_restored_session ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_does_not_wait_on_running_sessions_without_signal ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_signals_all_running_sessions_including_initiator ... ok
+test server::shutdown::tests::beacon_clean_exit_finalizes_with_reason ... ok
+test server::shutdown::tests::beacon_distinguishes_hard_crash_from_clean_exit ... ok
+test server::shutdown::tests::cleanup_plan_covers_design_step_list ... ok
+test server::shutdown::tests::beacon_finalize_ignores_other_pids_and_double_finalize ... ok
+test server::shutdown::tests::exit_codes_match_design_table ... ok
+test server::shutdown::tests::client_connections_are_not_drain_blocking ... ok
+test server::shutdown::tests::beacon_startup_writes_pid_version_and_started_at ... ok
+test server::shutdown::tests::idle_claim_is_atomic_against_any_lease ... ok
+test server::shutdown::tests::lease_table_acquire_release_idle ... ok
+test server::shutdown::tests::idle_clock_quiescence_epoch ... ok
+test server::shutdown::tests::lease_table_refuses_after_drain_begins ... ok
+test server::shutdown::tests::mcp_disconnect_and_reap_fit_cleanup_step_budget ... ok
+test server::shutdown::tests::reason_lattice_is_total_and_strict ... ok
+test server::shutdown::tests::watchdog_budget_exceeds_drain_plus_cleanup ... ok
+test server::shutdown::tests::watchdog_deadline_only_decreases ... ok
+test server::shutdown::tests::watchdog_cancel_and_fire_are_mutually_exclusive ... ok
+test server::shutdown_fixture_tests::accept_loop_exit_during_termination_drain_awaits_terminal ... ok
+test server::shutdown_fixture_tests::accept_loop_exit_while_running_still_fails_with_code_45 ... ok
+test server::shutdown_fixture_tests::begin_and_wait_reaches_cleaned_with_correct_code ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_treats_member_left_as_unblocked ... ok
+test server::shutdown_fixture_tests::concurrent_idle_claims_and_acquisitions_never_coexist ... ok
+test server::shutdown_fixture_tests::idle_begin_refused_while_any_lease_held_then_succeeds_after_release ... ok
+test server::shutdown_fixture_tests::many_waiters_all_observe_the_single_terminal_outcome ... ok
+test server::shutdown_fixture_tests::pairwise_begin_races_produce_exactly_one_terminal_outcome ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_times_out_and_proceeds ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_does_not_wait_for_triggering_session_checkpoint ... ok
+test server::shutdown_fixture_tests::reload_exec_failure_reenters_termination_with_code_42 ... ok
+test server::shutdown_fixture_tests::reload_refused_on_temporary_and_during_termination ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_ignores_unrelated_events_until_target_leaves ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_waits_until_target_status_change_arrives ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_times_out_on_partial_checkpoint ... ok
+test server::shutdown_fixture_tests::accept_loop_exit_during_reload_drain_does_not_upgrade_reason ... ok
+test server::shutdown_fixture_tests::reload_drain_reaches_handoff_when_leases_release ... ok
+test server::shutdown_fixture_tests::drain_waits_for_release_then_cleans ... ok
+test server::shutdown_fixture_tests::reload_drain_upgraded_by_sigterm_hands_completion_to_termination ... ok
+test server::client_session::tests::clear_tests::handle_clear_session_replaces_runtime_handles_and_updates_shutdown_registration ... ok
+test server::shutdown_fixture_tests::drain_deadline_abandons_stuck_lease ... ok
+test server::shutdown_fixture_tests::weaker_begin_is_superseded_stronger_upgrades_and_shortens ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 1188 filtered out; finished in 2.07s
+
+[20:45:42] PASS shutdown+reload coordinator suite (F02/F03/R04)
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 1.03s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
+
+running 125 tests
+test agent::interrupt_notice::tests::reload_interrupted_non_wait_tool_remains_error ... ok
+test agent::interrupt_notice::tests::interrupted_tool_result_reports_cancel_and_reload_differently ... ok
+test agent::interrupt_notice::tests::cancelled_selfdev_is_an_error_but_reload_is_expected ... ok
+test agent::interrupt_notice::tests::reload_interrupted_bg_wait_is_interrupted_and_resumable ... ok
+test server::client_disconnect_cleanup::tests::running_disconnect_during_reload_is_expected ... ok
+test server::client_disconnect_cleanup::tests::running_disconnect_during_recent_socket_ready_reload_is_expected ... ok
+test server::client_lifecycle::tests::accepted_reload_recovery_continuation_marks_intent_delivered ... ok
+test server::client_lifecycle::tests::reload_starting_rejects_new_turns_for_multiple_sessions ... ok
+test server::client_disconnect_cleanup::tests::reloading_disconnect_save_failure_retains_successor_marker_and_active_session ... ok
+test server::client_disconnect_cleanup::tests::running_disconnect_without_reload_is_crash ... ok
+test agent::tests::mark_closed_persists_soft_interrupts_for_restore_after_reload ... ok
+test server::client_lifecycle::tests::server_reload_starting_is_true_only_for_recent_starting_marker ... ok
+test agent::tests::interrupt::r05_user_cancel_is_not_labelled_a_server_reload ... ok
+test server::client_lifecycle::tests::reload_starting_rejects_new_turn_without_spawning_processing_task ... ok
+test server::client_session::tests::reload_tests::rename_shutdown_signal_moves_registration_to_restored_session ... ok
+test server::client_session::tests::reload_tests::handle_reload_queues_signal_for_canary_session ... ok
+test server::client_session::tests::reload_tests::handle_reload_does_not_wait_for_busy_agent_lock ... ok
+test server::client_session::tests::reload_tests::restored_closed_session_with_pending_user_message_during_reload_should_count_as_interrupted ... ok
+test server::client_session::tests::reload_tests::mark_remote_reload_started_writes_starting_marker ... ok
+test server::client_session::tests::reload_tests::restored_closed_session_with_pending_user_message_during_socket_ready_handoff_counts_as_interrupted ... ok
+test server::client_session::tests::reload_tests::restored_closed_session_with_pending_user_message_without_reload_marker_is_not_interrupted ... ok
+test server::client_state::client_state_tests::history_reload_recovery_does_not_infer_pending_user_turn_without_reload_marker ... ok
+test server::client_state::client_state_tests::history_reload_recovery_does_not_mark_delivered_until_continuation_is_accepted ... ok
+test server::client_state::client_state_tests::history_reload_recovery_infers_pending_active_user_turn_during_reload ... ok
+test server::comm_control::tests::await_members_returns_persisted_final_response_after_reload_retry ... ok
+test server::comm_control::tests::await_members_reuses_persisted_deadline_after_reload_retry ... ok
+test server::debug_command_exec::tests::debug_tool_selfdev_reload_returns_promptly_for_direct_execution ... ok
+test server::reload::r01_tests::recovery_intents_include_attached_non_headless_sessions ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_does_not_wait_on_running_sessions_without_signal ... ok
+test server::client_session::tests::reload_tests::detects_reload_interrupted_tool_result ... ok
+test server::client_session::tests::reload_tests::detects_selfdev_reload_tool_result_even_when_not_marked_error ... ok
+test server::client_session::tests::reload_tests::restored_closed_session_with_reload_marker_still_counts_as_interrupted ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_skips_idle_sessions ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_signals_all_running_sessions_including_initiator ... ok
+test server::client_session::tests::reload_tests::detects_reload_interrupted_generation_text ... ok
+test server::client_session::tests::reload_tests::detects_reload_skipped_tool_result ... ok
+test server::client_session::tests::reload_tests::ignores_normal_tool_errors ... ok
+test server::reload::reload_tests::receive_reload_signal_consumes_already_pending_value ... ok
+test server::client_session::tests::reload_tests::restored_closed_session_without_reload_marker_is_not_interrupted ... ok
+test server::client_session::tests::reload_tests::detects_resumable_reload_interrupted_wait_with_error_bit ... ok
+test server::reload::reload_tests::persist_reload_recovery_intents_records_running_peer_recovery ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_treats_member_left_as_unblocked ... ok
+test server::reload::reload_tests::receive_reload_signal_waits_for_future_value_when_initially_empty ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_does_not_wait_for_triggering_session_checkpoint ... ok
+test server::reload_recovery::tests::garbage_collection_removes_delivered_and_stale_records ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_times_out_and_proceeds ... ok
+test server::reload_recovery::tests::garbage_collection_uses_file_age_for_malformed_and_orphaned_records ... ok
+test server::reload_recovery::tests::mark_delivered_for_missing_session_is_false ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_ignores_unrelated_events_until_target_leaves ... ok
+test server::reload_recovery::tests::sanitize_session_id_strips_path_traversal_and_separators ... ok
+test server::reload_recovery::tests::mark_delivered_is_idempotent_and_matches_exact_continuation ... ok
+test server::reload_state::non_forced_reload_signal_retains_request_force ... ok
+test server::reload_recovery::tests::path_for_session_stays_inside_recovery_dir ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_waits_until_target_status_change_arrives ... ok
+test server::reload_recovery::tests::persist_intent_overwrites_prior_record_for_same_session ... ok
+test server::reload_recovery::tests::pending_directive_does_not_consume_intent ... ok
+test server::reload::reload_tests::graceful_shutdown_sessions_times_out_on_partial_checkpoint ... ok
+test server::reload_recovery::tests::session_alias_roundtrips_and_follows_resume_chain ... ok
+test server::reload_state::tests::clear_reload_marker_if_stale_for_pid_clears_foreign_or_completed_markers ... ok
+test server::reload_state::tests::inspect_reload_wait_status_handles_repeated_ready_markers ... ok
+test server::reload_recovery::tests::persist_then_peek_roundtrips_record ... ok
+test server::reload_recovery::tests::peek_for_missing_session_is_none ... ok
+test server::reload_recovery::tests::garbage_collection_sweeps_stale_session_aliases ... ok
+test server::reload_state::tests::clear_reload_marker_if_stale_for_pid_keeps_own_starting_marker ... ok
+test server::reload_state::tests::reload_process_alive_handles_zero_and_dead_pids ... ok
+test server::reload_state::tests::reload_marker_active_treats_failed_phase_as_inactive ... ok
+test server::reload_state::tests::publish_reload_socket_ready_leaves_failed_marker_untouched ... ok
+test server::reload_state::tests::recent_reload_state_ignores_corrupt_marker ... ok
+test server::reload_state::tests::inspect_reload_wait_status_idle_when_last_known_pid_is_dead_without_marker ... ok
+test server::reload_state::tests::wait_for_reload_ack_handles_repeated_unique_requests ... ok
+test server::reload_state::tests::inspect_reload_wait_status_returns_failed_with_marker_detail ... ok
+test server::shutdown_fixture_tests::reload_exec_failure_reenters_termination_with_code_42 ... ok
+test server::shutdown_fixture_tests::reload_refused_on_temporary_and_during_termination ... ok
+test server::reload_state::tests::publish_socket_ready_preserves_starting_runtime_identity ... ok
+test server::reload_state::tests::wait_for_reload_ack_returns_matching_ack ... ok
+test server::reload_state::tests::inspect_reload_wait_status_returns_ready_for_socket_ready_marker ... ok
+test server::reload_trace::tests::record_value_appends_jsonl_trace_event ... ok
+test server::reload_state::tests::restart_identity_projection_carries_dirty_same_commit_without_reclassification ... ok
+test server::reload_trace::tests::record_value_stops_appending_past_size_cap ... ok
+test server::socket_tests::inspect_reload_wait_status_reports_failed_when_reload_pid_is_dead ... ok
+test server::socket_tests::inspect_reload_wait_status_reports_idle_without_marker_or_listener ... ok
+test server::shutdown_fixture_tests::accept_loop_exit_during_reload_drain_does_not_upgrade_reason ... ok
+test server::shutdown_fixture_tests::reload_drain_reaches_handoff_when_leases_release ... ok
+test server::socket_tests::await_reload_handoff_returns_failed_after_marker_transition ... ok
+test server::socket_tests::inspect_reload_wait_status_uses_last_known_pid_when_marker_missing ... ok
+test server::shutdown_fixture_tests::reload_drain_upgraded_by_sigterm_hands_completion_to_termination ... ok
+test server::socket_tests::await_reload_handoff_returns_ready_after_marker_transition ... ok
+test server::socket_tests::inspect_reload_wait_status_keeps_waiting_while_starting_marker_is_active_even_if_socket_is_live ... ok
+test server::util::binary_freshness::newer_binary_tests::never_reloads_into_self_even_if_paths_were_equal ... ok
+test server::socket_tests::publish_reload_socket_ready_clears_marker_for_foreign_pid ... ok
+test server::socket_tests::publish_reload_socket_ready_updates_current_process_marker ... ok
+test server::util::reload_target_tests::downgrade_without_current_exe_falls_back_to_candidate ... ok
+test server::util::reload_target_tests::equal_mtime_candidate_is_used ... ok
+test server::util::reload_target_tests::newer_candidate_is_used ... ok
+test server::util::reload_target_tests::same_binary_is_always_used ... ok
+test server::util::reload_target_tests::strictly_older_candidate_is_blocked_and_uses_current_exe ... ok
+test server::util::reload_target_tests::unreadable_candidate_mtime_is_treated_as_downgrade ... ok
+test server::socket_tests::reload_marker_active_expires_stale_marker ... ok
+test server::socket_tests::wait_for_reload_handoff_event_returns_promptly_when_no_event_arrives ... ok
+test server::socket_tests::reload_marker_active_for_recent_socket_ready_marker ... ok
+test tool::mcp::tests::test_reload_empty_config ... ok
+test server::swarm_persistence::swarm_persistence_tests::gate_debt_and_artifact_hydration_survive_reload ... ok
+test tool::selfdev::tests::do_reload_returns_after_ack_in_direct_mode ... ok
+test tool::selfdev::tests::reload_repo_resolver_uses_working_dir_when_primary_detection_fails ... ok
+test server::tests::startup_recovery_preserves_headed_session_reload_context_for_later_reconnect ... ok
+test server::socket_tests::inspect_reload_wait_status_reports_ready_for_socket_ready_marker ... ok
+test server::tests::startup_recovery_resumes_interrupted_headless_sessions_after_reload ... ok
+test tool::selfdev::tests::test_recovery_directive_prefers_reload_context_when_present ... ok
+test tool::selfdev::tests::test_recovery_directive_returns_none_when_no_reload_recovery_needed ... ok
+test tool::selfdev::tests::test_recovery_directive_uses_interrupted_message_without_reload_context ... ok
+test tool::selfdev::tests::test_reload_context_path ... ok
+test server::util::newest_reload_candidate_integration_tests::freshly_published_daemon_reports_no_phantom_update ... ok
+test tool::selfdev::tests::test_reload_context_serialization ... ok
+test tool::skill::tests::test_reload_all ... ok
+test tool::skill::tests::test_reload_missing_name ... ok
+test tool::skill::tests::test_reload_nonexistent ... ok
+test tool::selfdev::tests::build_reload_waits_for_build_then_reloads ... ok
+test tool::selfdev::tests::reload_timeout_secs_defaults_to_15 ... ok
+test tool::selfdev::tests::reload_in_non_selfdev_session_is_upgrade_in_place ... ok
+test tool::selfdev::tests::test_reload_context_save_and_load_for_session_uses_session_scoped_file ... ok
+test tool::selfdev::tests::reload_timeout_secs_ignores_empty_invalid_and_zero_values ... ok
+test server::util::newest_reload_candidate_integration_tests::daemon_detects_and_targets_a_newly_published_binary ... ok
+test tool::selfdev::tests::reload_timeout_secs_honors_valid_env_override ... ok
+test tool::bash::tests::test_reload_persistable_bash_timeout_promotes_to_background ... ok
+test tool::bash::tests::test_reload_persistable_bash_continues_in_background ... ok
+
+test result: ok. 125 passed; 0 failed; 0 ignored; 0 measured; 1105 filtered out; finished in 8.51s
+
+[20:45:52] PASS reload state/recovery suites (R01)
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 1.54s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
+
+running 79 tests
+test agent::evidence::w7a_error_semantics_tests::interruption_predicate_accepts_classified_wrapped_marker ... ok
+test agent::evidence::w7a_error_semantics_tests::classified_error_chain_preserves_retry_after_secs ... ok
+test agent::evidence::w7a_error_semantics_tests::interruption_predicate_accepts_context_wrapped_marker ... ok
+test agent::evidence::w7a_error_semantics_tests::interruption_predicate_accepts_direct_marker ... ok
+test agent::evidence::w7a_error_semantics_tests::classification_still_reads_class_through_wrapping ... ok
+test agent::evidence::w7a_error_semantics_tests::classified_error_source_exposes_inner_chain ... ok
+test agent::evidence::w7a_error_semantics_tests::interruption_predicate_rejects_plain_and_stream_errors ... ok
+test agent::evidence::w7a_error_semantics_tests::interruption_predicate_rejects_lookalike_string_error ... ok
+test agent::inline_tail::tests::live_text_renders_and_survives_commit ... ok
+test agent::inline_tail::tests::marker_prefers_intent_over_raw_input ... ok
+test agent::inline_tail::tests::finish_without_pending_marker_is_noop ... ok
+test agent::inline_tail::tests::rollback_discards_live_but_keeps_committed ... ok
+test agent::interrupt_notice::tests::cancelled_selfdev_is_an_error_but_reload_is_expected ... ok
+test agent::interrupt_notice::tests::interrupted_tool_result_reports_cancel_and_reload_differently ... ok
+test agent::inline_tail::tests::tool_markers_interleave_and_complete_in_place ... ok
+test agent::interrupt_notice::tests::reload_interrupted_non_wait_tool_remains_error ... ok
+test agent::interrupt_notice::tests::reload_interrupted_bg_wait_is_interrupted_and_resumable ... ok
+test agent::inline_tail::tests::caps_lines_and_chars_and_summary_length ... ok
+test agent::interrupt_notice::tests::cancelled_wait_like_tool_is_not_advertised_as_resumable ... ok
+test agent::interrupt_notice::tests::skipped_tool_notice_names_the_cause ... ok
+test agent::tests::guardrail_notice_absent_for_normal_turns ... ok
+test agent::tests::guardrail_notice_for_refusal_stop ... ok
+test agent::tests::guardrail_notice_for_silent_empty_turn ... ok
+test agent::tests::guardrail_stop_reason_detection ... ok
+test agent::tests::disallowed_tool_call_returns_error_result_instead_of_aborting_turn ... ok
+test agent::tests::finish_evidence_turn_populates_assistant_checkpoint ... ok
+test agent::tests::clear_resets_runtime_interrupt_and_queue_state ... ok
+test agent::tests::hidden_reminder::blank_turn_without_reminder_stores_no_empty_user_text_block ... ok
+test agent::tests::build_memory_prompt_nonblocking_defers_pending_memory_during_tool_loop ... ok
+test agent::tests::interrupt_signal_fire_before_notified_does_not_hang ... ok
+test agent::tests::interrupt_signal_fire_concurrent_with_notified ... ok
+test agent::tests::interrupt_signal_is_set_false_initially ... ok
+test agent::tests::interrupt_signal_is_set_true_after_fire ... ok
+test agent::tests::interrupt_signal_notified_completes_after_fire ... ok
+test agent::tests::interrupt_signal_reset_clears_flag ... ok
+test agent::tests::active_pid::new_agent_registers_active_pid_and_clear_swaps_it ... ok
+test agent::tests::active_pid::agent_drop_tracks_client_pid_and_restore_marker_rewrites ... ok
+test agent::tests::interrupt::r05_user_cancel_is_not_labelled_a_server_reload ... ok
+test agent::tests::mark_closed_persists_soft_interrupts_for_restore_after_reload ... ok
+test agent::tests::env_snapshot_detail_is_minimal_for_empty_sessions_and_full_after_history ... ok
+test agent::tests::mcp_tools_registered_after_lock_are_visible_to_agent ... ok
+test agent::tests::hidden_reminder::hidden_reminder_after_assistant_message_sends_reminder_as_user_text ... ok
+test agent::tests::gmail_is_exposed_by_default_and_can_be_explicitly_disabled ... ok
+test agent::tests::hidden_reminder::hidden_reminder_turn_does_not_store_empty_user_text_block ... ok
+test agent::tests::memory_injection_message_can_persist_to_history ... ok
+test agent::tests::hidden_reminder::hidden_reminder_turn_stores_no_contentless_user_message ... ok
+test agent::tests::memory_injection_message_defaults_to_ephemeral_history ... ok
+test agent::tests::hidden_reminder::hidden_reminder_after_user_message_adds_no_user_turn ... ok
+test agent::tests::mcp_late_registration_rebuild_happens_at_most_once ... ok
+test agent::tests::r12_blocking_raw_transport_error_persists_terminal_provider_response ... ok
+test agent::tests::r12_mpsc_cancel_before_open_persists_interrupted_terminal_response ... ok
+test agent::tests::r12_blocking_stream_event_error_persists_terminal_provider_response ... ok
+test agent::tests::r12_mpsc_mid_stream_cancel_persists_interrupted_terminal_response ... ok
+test agent::tests::r12_mpsc_raw_transport_error_persists_terminal_provider_response ... ok
+test agent::tests::r12_mpsc_stream_event_error_persists_terminal_provider_response ... ok
+test agent::tests::r12_no_colon_provider_open_secret_uses_closed_error_class ... ok
+test agent::tests::r12_no_tool_turn_emits_and_persists_exactly_one_terminal_provider_response ... ok
+test agent::tests::r12_mid_stream_context_limit_retry_persists_terminal_response_per_attempt ... ok
+test agent::tests::r12_raw_secret_prefix_transport_error_uses_closed_error_class ... ok
+test agent::tests::tool_output_to_content_blocks_preserves_labeled_images ... ok
+test agent::tests::run_turn_streaming_mpsc_emits_model_changed_on_midstream_switch ... ok
+test agent::tests::r12_open_context_limit_retry_persists_terminal_response_per_attempt ... ok
+test agent::tools::tests::cap_sdk_tool_content_adds_same_notice ... ok
+test agent::tools::tests::cap_tool_output_adds_visible_truncation_notice ... ok
+test agent::tools::tests::cap_tool_output_leaves_small_output_unchanged ... ok
+test agent::turn_loops::tests::messages_end_with_tool_result_allows_memory_after_tool_results ... ok
+test agent::turn_loops::tests::messages_end_with_tool_result_detects_tool_continuation_context ... ok
+test agent::turn_loops::tests::messages_end_with_tool_result_ignores_plain_user_prompt ... ok
+test agent::turn_streaming_mpsc::tests::wrap_marker_incremental_detects_markers_across_chunk_sizes ... ok
+test agent::turn_streaming_mpsc::tests::wrap_marker_incremental_finds_marker_straddling_delta_boundary ... ok
+test agent::tests::run_turn_streaming_mpsc_emits_keepalive_while_provider_is_quiet ... ok
+test agent::tests::restore_session_resets_runtime_interrupt_and_queue_state ... ok
+test agent::tests::restore_session_rehydrates_injected_memory_ids ... ok
+test agent::tests::tool_snapshot_is_stable_without_new_mcp_tools ... ok
+test agent::tests::validate_tool_allowed_resolves_aliases_against_policy_sets ... ok
+test agent::tests::messages_for_provider_replays_persisted_native_compaction_in_auto_mode ... ok
+test agent::tests::messages_for_provider_falls_back_when_native_auto_crosses_threshold_without_event ... ok
+test agent::tests::oversized_openai_native_compaction_is_persisted_as_text_fallback ... ok
+test agent::tests::messages_for_provider_applies_manual_compaction_in_native_auto_mode ... ok
+
+test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 1151 filtered out; finished in 23.40s
+
+[20:46:18] PASS turn cancel/interrupt suite
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 0.79s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-c3544e827b79141e)
+
+running 48 tests
+test mcp::client::tests::try_reserve_enforces_cap_on_isolated_counter ... ok
+test mcp::client::tests::acquire_returns_some_under_cap_and_drop_is_safe ... ok
+test mcp::client::tests::fake_pid_escalation_orders_term_before_kill ... ok
+test mcp::manager::tests::connect_all_skips_disabled_servers ... ok
+test mcp::manager::tests::call_tool_unconfigured_server_bails_cleanly ... ok
+test mcp::manager::tests::ensure_server_connected_unconfigured_errors ... ok
+test mcp::pool::tests::begin_connect_deduplicates_concurrent_attempts ... ok
+test mcp::manager::tests::connect_on_first_call_fails_cleanly_for_broken_server ... ok
+test mcp::client::tests::real_child_ignoring_term_is_killed_and_reaped_within_grace ... ok
+test mcp::pool::tests::cancelled_leader_connect_does_not_wedge_later_connects ... ok
+test mcp::protocol::protocol_tests::test_disabled_server_survives_save_roundtrip ... ok
+test mcp::protocol::protocol_tests::test_expand_env_placeholders_exact_match_only ... ok
+test mcp::protocol::protocol_tests::test_initialize_result ... ok
+test mcp::protocol::protocol_tests::test_json_rpc_error_response ... ok
+test mcp::protocol::protocol_tests::test_json_rpc_request_serialization ... ok
+test mcp::protocol::protocol_tests::test_json_rpc_response_deserialization ... ok
+test mcp::protocol::protocol_tests::test_load_claude_json_global_and_project_servers ... ok
+test mcp::protocol::protocol_tests::test_load_project_locals_merge_order ... ok
+test mcp::protocol::protocol_tests::test_load_project_locals_resolves_against_given_dir_not_cwd ... ok
+test mcp::protocol::protocol_tests::test_mcp_config_accepts_claude_mcp_servers_key ... ok
+test mcp::protocol::protocol_tests::test_mcp_config_deserialization ... ok
+test mcp::protocol::protocol_tests::test_mcp_config_empty ... ok
+test mcp::protocol::protocol_tests::test_mcp_http_server_is_not_stdio ... ok
+test mcp::protocol::protocol_tests::test_server_disabled_true_claude_style ... ok
+test mcp::protocol::protocol_tests::test_server_disabled_wins_over_enabled ... ok
+test mcp::protocol::protocol_tests::test_server_enabled_defaults_true ... ok
+test mcp::protocol::protocol_tests::test_server_enabled_false_opencode_style ... ok
+test mcp::protocol::protocol_tests::test_tool_call_result_error ... ok
+test mcp::protocol::protocol_tests::test_tool_call_result_text ... ok
+test mcp::protocol::protocol_tests::test_tool_def_deserialization ... ok
+test mcp::protocol::self_reference_guard_tests::detects_jcode_mcp_serve_shims ... ok
+test mcp::protocol::self_reference_guard_tests::drops_only_self_referential_servers ... ok
+test mcp::protocol::self_reference_guard_tests::ignores_non_jcode_mcp_serve_configs ... ok
+test mcp::schema_cache::schema_cache_tests::fingerprint_env_order_independent ... ok
+test mcp::schema_cache::schema_cache_tests::fingerprint_is_stable_and_sensitive ... ok
+test mcp::pool::tests::pooled_child_receives_and_records_owning_daemon_pid ... ok
+test mcp::schema_cache::schema_cache_tests::retain_prunes_removed_servers ... ok
+test mcp::schema_cache::schema_cache_tests::tools_for_respects_fingerprint ... ok
+test mcp::schema_cache::schema_cache_tests::update_reports_change_only_on_diff ... ok
+test mcp::pool::tests::pooled_child_cap_refuses_then_releases_after_disconnect ... ok
+test mcp::pool::tests::stale_dead_clone_does_not_evict_healthy_replacement ... ok
+test mcp::pool::tests::pooled_cap_env_override_parses ... ok
+test mcp::manager::provenance_integration_tests::hung_child_fails_at_health_deadline_and_is_evicted ... ok
+test mcp::manager::provenance_integration_tests::crash_loop_server_gets_one_reconnect_then_cooldown_fast_fail ... ok
+test mcp::manager::provenance_integration_tests::discovery_provenance_end_to_end_with_real_mcp_server ... ok
+test mcp::manager::provenance_integration_tests::killed_child_reconnects_once_and_call_succeeds ... ok
+test mcp::protocol::protocol_tests::load_for_dir_without_project_does_not_load_process_cwd_config ... ok
+test mcp::schema_cache::schema_cache_tests::load_save_roundtrip_via_temp_home ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 1185 filtered out; finished in 5.62s
+
+[20:46:27] PASS mcp lifecycle suite (F06/F07/F12)
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 0.74s
+     Running unittests src/lib.rs (target/debug/deps/jcode_base-c3544e827b79141e)
+
+running 44 tests
+test background::store::tests::read_distinguishes_missing_from_malformed ... ok
+test background::store::tests::write_initial_rejects_existing_running_collision_without_clobbering ... ok
+test background::store::tests::first_terminal_write_wins ... ok
+test background::store::tests::initial_write_refuses_to_clobber_terminal ... ok
+test background::tests::malformed_status_matrix_surfaces_without_false_success_or_crash ... ok
+test background::store::tests::terminal_precedence_survives_concurrent_delivery_update ... ok
+test background::tests::crash_interruption_preserves_old_status_and_reconcile_cleans_temp ... ok
+test background::tests::reconcile_cleans_age_expired_temp_even_when_pid_is_live ... ok
+test background::tests::live_map_prunes_only_after_terminal_persistence ... ok
+test background::tests::reconcile_leaves_non_orphans_alone ... ok
+test background::tests::reconcile_marks_orphan_from_reloaded_process_failed ... ok
+test background::tests::live_task_cap_refuses_then_releases_after_cancel ... ok
+test background::tests::spawn_with_notify_emits_started_ui_activity ... ok
+test background::tests::reconcile_marks_orphan_from_dead_process_failed ... ok
+test background::store::tests::write_failure_is_surfaced_not_swallowed ... ok
+test background::tests::status_read_self_heals_orphaned_task ... ok
+test background::tests::spawn_refuses_to_start_when_initial_persistence_fails ... ok
+test background::tests::tasks_map_prunes_entry_after_natural_completion ... ok
+test background::tests::update_progress_persists_status_and_emits_bus_event ... ok
+test background::tests::update_delivery_applies_to_running_task_completion ... ok
+test compaction::tests::test_guard_between_80_and_95_starts_background_only ... ok
+test compaction::tests::test_hard_compact_aborts_inflight_background_compaction ... ok
+test compaction::tests::test_stale_background_result_discarded_when_context_shrinks ... ok
+test background::tests::wait_returns_on_progress_checkpoint ... ok
+test message::tests::background_task_notifications_include_display_name_when_available ... ok
+test message::tests::format_background_task_notification_markdown_handles_empty_preview ... ok
+test message::tests::background_task_progress_notifications_include_display_name_when_available ... ok
+test message::tests::format_background_task_notification_markdown_highlights_failure_reason ... ok
+test message::tests::format_background_task_notification_markdown_renders_superseded_status ... ok
+test message::tests::format_background_task_notification_markdown_strips_ansi_from_preview ... ok
+test message::tests::format_background_task_notification_markdown_uses_code_block_preview ... ok
+test message::tests::format_background_task_progress_markdown_uses_compact_multiline_layout ... ok
+test message::tests::parse_background_task_progress_notification_extracts_card_fields ... ok
+test message::tests::parse_background_task_notification_markdown_extracts_fields ... ok
+test session::tests::cases::test_render_messages_honors_background_task_display_role_override ... ok
+test message::tests::parse_background_task_progress_notification_supports_legacy_inline_layout ... ok
+test background::tests::wait_returns_on_timeout ... ok
+test background::tests::finalize_non_detached_aborts_adopted_original_future ... ok
+test background::tests::wait_returns_when_task_finishes ... ok
+test background::tests::cancel_retains_tombstone_until_terminal_persistence_recovers ... ok
+test background::tests::terminal_persistence_failure_retains_tombstone_then_recovers ... ok
+test background::store::tests::concurrent_writers_never_tear_json_or_lose_terminal ... ok
+test background::tests::progress_and_delivery_survive_concurrent_terminal_completion ... ok
+test background::tests::cross_instance_concurrency_never_tears_json_or_overwrites_terminal_truth ... ok
+
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 3.46s
+
+[20:46:32] PASS background durability+orphan suite (F04/F05/F12)
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 0.92s
+     Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
+
+running 16 tests
+test server::client_disconnect_cleanup::tests::idle_disconnect_is_closed ... ok
+test server::client_disconnect_cleanup::tests::running_disconnect_during_recent_socket_ready_reload_is_expected ... ok
+test server::client_disconnect_cleanup::tests::missing_agent_cleanup_reports_terminal_not_required ... ok
+test server::client_disconnect_cleanup::tests::disconnect_lock_timeout_leaves_durable_cleanup_record ... ok
+test server::client_disconnect_cleanup::tests::disconnect_agent_lock_timeout_is_observable_without_terminal_persistence ... ok
+test server::client_disconnect_cleanup::tests::running_disconnect_without_reload_is_crash ... ok
+test server::client_disconnect_cleanup::tests::reloading_disconnect_save_failure_retains_successor_marker_and_active_session ... ok
+test server::client_disconnect_cleanup::tests::startup_reconcile_leaves_live_sessions_alone ... ok
+test server::client_disconnect_cleanup::tests::disconnect_cleanup_outcome_contract_distinguishes_all_terminal_states ... ok
+test server::client_disconnect_cleanup::tests::startup_reconcile_maps_clean_disconnect_reason_to_closed ... ok
+test server::client_disconnect_cleanup::tests::crashed_disconnect_save_failure_retains_successor_marker_and_cleans_runtime_state ... ok
+test server::client_disconnect_cleanup::tests::running_disconnect_during_reload_is_expected ... ok
+test server::client_disconnect_cleanup::tests::idle_closed_disconnect_persists_closed_before_preserving_successor_marker ... ok
+test server::client_disconnect_cleanup::tests::startup_reconcile_marks_stale_session_terminal_and_deletes_record ... ok
+test server::client_disconnect_cleanup::tests::successor_connected_cleanup_reports_terminal_not_required ... ok
+test server::client_disconnect_cleanup::tests::disconnect_happy_path_removes_cleanup_record ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 1214 filtered out; finished in 5.32s
+
+[20:46:39] PASS disconnect-cleanup suite (F10)
+dev_cargo: sccache not found; using direct rustc
+    Finished `test` profile [unoptimized] target(s) in 0.36s
+     Running unittests src/lib.rs (target/debug/deps/jcode_build_support-0c363ba7a6a6b489)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 40 filtered out; finished in 0.00s
+
+dev_cargo: explicit cargo test filter matched zero tests; check the test path/name or set JCODE_DEV_CARGO_ALLOW_ZERO_TESTS=1 to allow this intentionally
+[20:46:41] FAIL pending-activation reconcile suite (F09) (exit 97)
+[20:46:41] PASS residue: no orphaned fixture children
+[20:46:41] === summary ===
+[20:46:41] F14 LIFECYCLE MATRIX: FAIL
+[20:46:41] FAIL F14 evidence NOT restored
+[20:46:41] PASS residue: no orphaned fixture children
+[20:46:41] === summary ===
+[20:46:41] S01_ROUND=A N_STEP=18 N_FAIL=2

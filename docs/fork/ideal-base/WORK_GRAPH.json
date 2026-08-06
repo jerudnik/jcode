@@ -1634,6 +1634,36 @@
         "review_model": "opus",
         "class": "deterministic",
         "parent": "W5"
+      },
+      {
+        "id": "S01-FIX-1",
+        "content": "Repair two stale lifecycle-matrix steps that S01's determinism rounds surfaced as reproducible FAILs, both caused by the harness drifting behind the code it exercises (S01 FINDINGS.md S01-F3 and S01-F4). (a) F03's lease_class_fixtures.sh passes the retired --no-update flag to the debug lease command, which has rejected it since 9238c4d86 (2026-07-27); the fixture pipes stderr to /dev/null, so an argument-parse error is laundered into a fake domain failure. Drop the flag and stop swallowing stderr so a parse error can never again read as a lease verdict. (b) run_lifecycle_matrix.sh:85 runs 'cargo test -p jcode-build-support reconcile', a filter matching zero tests since e1d17541e (2026-07-26); dev_cargo.sh exits 97 refusing the empty filter. The intended startup-reconciliation coverage already runs in the F10 step (3 startup_reconcile_* tests of 16), so retarget or retire the step with that coverage asserted, never delete it to make the matrix green.",
+        "kind": "fix",
+        "depends_on": [
+          "F03",
+          "F14",
+          "S01"
+        ],
+        "priority": 80,
+        "owned_paths": [
+          "docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh",
+          "scripts/run_lifecycle_matrix.sh",
+          "docs/fork/ideal-base/evidence/S01-FIX-1/**"
+        ],
+        "acceptance_gates": [
+          "F03 lease fixture runs with stderr visible and its lease step passes on its own merit, not by flag removal alone",
+          "The F09 matrix step either executes a non-empty test set or is retired with the equivalent coverage named and shown to run elsewhere; no step is deleted merely to reach a green matrix",
+          "A full run_lifecycle_matrix.sh sweep reaches 0 FAIL with every step still executing",
+          "Neither repaired file is a protected path, verified against .github/workflows/governance-root.yml"
+        ],
+        "evidence": [
+          "stale-flag repair",
+          "dead-filter disposition",
+          "post-repair matrix sweep"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W5"
       }
     ],
     "W6": [
@@ -3513,6 +3543,36 @@
       ],
       "evidence": [
         "docs/fork/ideal-base/evidence/D02/README.md"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W5"
+    },
+    {
+      "id": "S01-FIX-1",
+      "content": "Repair two stale lifecycle-matrix steps that S01's determinism rounds surfaced as reproducible FAILs, both caused by the harness drifting behind the code it exercises (S01 FINDINGS.md S01-F3 and S01-F4). (a) F03's lease_class_fixtures.sh passes the retired --no-update flag to the debug lease command, which has rejected it since 9238c4d86 (2026-07-27); the fixture pipes stderr to /dev/null, so an argument-parse error is laundered into a fake domain failure. Drop the flag and stop swallowing stderr so a parse error can never again read as a lease verdict. (b) run_lifecycle_matrix.sh:85 runs 'cargo test -p jcode-build-support reconcile', a filter matching zero tests since e1d17541e (2026-07-26); dev_cargo.sh exits 97 refusing the empty filter. The intended startup-reconciliation coverage already runs in the F10 step (3 startup_reconcile_* tests of 16), so retarget or retire the step with that coverage asserted, never delete it to make the matrix green.",
+      "kind": "fix",
+      "depends_on": [
+        "F03",
+        "F14",
+        "S01"
+      ],
+      "priority": 80,
+      "owned_paths": [
+        "docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh",
+        "scripts/run_lifecycle_matrix.sh",
+        "docs/fork/ideal-base/evidence/S01-FIX-1/**"
+      ],
+      "acceptance_gates": [
+        "F03 lease fixture runs with stderr visible and its lease step passes on its own merit, not by flag removal alone",
+        "The F09 matrix step either executes a non-empty test set or is retired with the equivalent coverage named and shown to run elsewhere; no step is deleted merely to reach a green matrix",
+        "A full run_lifecycle_matrix.sh sweep reaches 0 FAIL with every step still executing",
+        "Neither repaired file is a protected path, verified against .github/workflows/governance-root.yml"
+      ],
+      "evidence": [
+        "stale-flag repair",
+        "dead-filter disposition",
+        "post-repair matrix sweep"
       ],
       "review_model": "opus",
       "class": "deterministic",

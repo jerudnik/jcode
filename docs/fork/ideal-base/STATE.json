@@ -783,6 +783,14 @@
       ],
       "summary": "expansion_violations now rejects a complete root with an incomplete child, closing the silent accepted-root row; landed via R07 section 4 window (merge 73d8a640a7, window open 5s, governance restored to hash 43ba61a7a5)",
       "updated_at": "2026-08-06T02:50:15Z"
+    },
+    "S01-FIX-1": {
+      "state": "pending",
+      "reviewed_commit": null,
+      "published_commit": null,
+      "evidence": [],
+      "summary": "Injected 2026-08-06 per EXECUTION_PROTOCOL section 5 (verification failure injects a fix node, then re-runs the same verification node). S01's round A returned N_FAIL=2, falsifying prediction P1, and both failures were attributed to the harness drifting behind the code it exercises rather than to nondeterminism. S01-F3: F03's lease_class_fixtures.sh passes --no-update, retired by 9238c4d86 on 2026-07-27, one day AFTER F14's baseline recorded that step PASS; the fixture pipes stderr to /dev/null, so an argument-parse error is laundered into a fake lease-domain failure. Proven by hand in an isolated env: dropping the flag returns a valid {\"token\":2}, so the retired flag is the sole cause. S01-F4: run_lifecycle_matrix.sh:85 runs 'cargo test -p jcode-build-support reconcile', a filter matching ZERO tests since e1d17541e on 2026-07-26; exit 97 is dev_cargo.sh refusing an empty filter, and that guard is the only reason the dead step was ever visible, since bare cargo test exits 0 on zero matches. Re-derived here rather than inherited: the crate has 0 occurrences of 'reconcile' in src/, while the F10 step already runs 3 startup_reconcile_* tests of its 16. Injected as a separate node because S01 owns only evidence/S01/**, so neither file is S01's to repair, and W1/W2 (which own F03 and F14) are already accepted. Neither target is a protected path, so no R07 section 4 window is needed.",
+      "updated_at": "2026-08-06T21:12:00Z"
     }
   }
 }

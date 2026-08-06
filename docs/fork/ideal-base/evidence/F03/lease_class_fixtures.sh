@@ -82,8 +82,12 @@ debug_cmd() {
   env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
       JCODE_RUNTIME_DIR="$dir" JCODE_HOME="$home" JCODE_NO_TELEMETRY=1 \
       JCODE_DEBUG_CONTROL=1 \
-      "$BINARY" debug --no-update --quiet --socket "$dir/jcode.sock" "$cmd" 2>/dev/null
+      "$BINARY" debug --quiet --socket "$dir/jcode.sock" "$cmd" 2>>"$dir/debug_cmd.stderr"
 }
+# --no-update was retired by 9238c4d86 (2026-07-27) and is now rejected at parse
+# time. This fixture used to pass it and send stderr to /dev/null, which turned
+# an argument-parse error into what read as a lease-domain failure. stderr is
+# now kept per-run so a parse error can never again be mistaken for a verdict.
 
 # wait_exit_var <result_var> <pid> <timeout_s>
 # Sets result_var to the exit code, or empty on timeout. Runs entirely in the
@@ -116,7 +120,10 @@ for class in "${LEASE_CLASSES[@]}"; do
 
   TOKEN=$(debug_cmd "$DIR" "$HOMEDIR" "shutdown:hold_lease:$class" | python3 -c 'import json,sys;print(json.load(sys.stdin)["token"])' 2>/dev/null)
   if [ -z "$TOKEN" ]; then
-    fail "[$class] could not acquire fixture lease"; kill -9 "$PID" 2>/dev/null; rm -rf "$DIR" "$HOMEDIR"; continue
+    # Show what the binary actually said. An empty TOKEN cannot by itself tell a
+    # lease refusal apart from the command never running (bad flag, bad socket).
+    fail "[$class] could not acquire fixture lease; debug stderr: $(tr '\n' ' ' < "$DIR/debug_cmd.stderr" 2>/dev/null | tail -c 300)"
+    kill -9 "$PID" 2>/dev/null; rm -rf "$DIR" "$HOMEDIR"; continue
   fi
 
   # Hold well past timeout (5s) + poll interval (10s): 18s total.
