@@ -15,10 +15,11 @@ the live head and stops on a mismatch, and that read is the authority. Any
 later commit to this branch, including this one, also re-runs CI, so the
 prediction is re-scored rather than inherited.
 
-**Status: PREPARED, NOT EXECUTED.** Everything below the "Sequence executed"
-heading is unfilled. The pre-window sections are complete and were derived
-before the PR was opened, so the prediction can be scored against reality rather
-than written up afterwards to match it.
+**Status: EXECUTED 2026-08-06.** Authorized by the repository owner, run at
+02:42:32Z, closed 02:42:37Z, merge `73d8a640a7acbca3d6b7d16b0d2027e7eeb8542b`.
+The pre-window sections below were derived and committed **before** the window
+opened, so the prediction is scored against reality rather than written up
+afterwards to match it.
 
 ## Why a window is needed
 
@@ -70,8 +71,9 @@ and step 1 may proceed once authorized. Had CI named a third path, or a path
 belonging to someone else's commit, this would be a different window and must
 not be executed as this one.
 
-Authorization is required from the repository owner and has not been given.
-The window is a write to a protected repository and is not self-authorized.
+Authorization is required from the repository owner. It was requested before any
+write and **granted on 2026-08-06**, after which the window was executed. The
+window is a write to a protected repository and is not self-authorized.
 
 ## Pre-flight, run before any write
 
@@ -167,35 +169,98 @@ unfinished".
 
 ## Sequence executed
 
-Not executed. To be filled from the run, following steps 1-8 of design.md §4:
+Executed 2026-08-06 by `transcripts/window-d02.py`, adapted from
+`transcripts/window-pr76.py`. Full output: `/tmp/d02_window_transcript.txt`.
+
+The script defaults to a **dry run**; opening a real window requires typing
+`--commit`. That default is inherited from the pr76 script, which records a
+harness believed read-only performing a live governance write because
+`--dry-run` was opt-in.
 
 | # | step | result |
 |---|---|---|
-| 1 | confirm PR state and head SHA precondition | |
-| 2 | capture pre-change ruleset | |
-| 3 | hash with the pinned encoder | |
-| 4 | record pre-window main tip | |
-| 5 | pre-window `fork-health.sh --live` | |
-| 6 | PUT dropping **only** `Governance Root` | |
-| 7 | SHA-conditioned merge to reviewed head | |
-| 8 | PUT restoring the exact pre-change body | |
-| 9 | body equality proof | |
-| 10 | merge-commit bound | |
-| 11 | two-parent proof | |
-| 12 | post-window `fork-health.sh --live` | |
+| 1 | confirm PR state and head SHA precondition | head `9635f94bd8` == reviewed head; live `main` == PR base `511064cd17`, no drift; `Governance Root` failure, other three success; 6 files, matching declared `changed_files` |
+| 2 | capture pre-change ruleset | 4 contexts, `enforcement=active`, `target=branch`, `bypass_actors=[]`, strict policy on, all `integration_id=15368` |
+| 3 | hash with the pinned encoder | `43ba61a7a5...94f2b`, equal to the known-good steady state |
+| 4 | record pre-window main tip | `511064cd1771a2dffd2c9a8f58e1606991844960` |
+| 5 | pre-window `fork-health.sh --live` | all invariants hold (captured pre-window) |
+| 6 | PUT dropping **only** `Governance Root` | OPEN 02:42:32Z; read-back exact; contexts `['Fork CI Gate','Nix Gate','Security Gate']` |
+| 7 | SHA-conditioned merge to reviewed head | merged `73d8a640a7acbca3d6b7d16b0d2027e7eeb8542b` (`sha` pinned to the reviewed head) |
+| 8 | PUT restoring the exact pre-change body | CLOSED 02:42:37Z; **window open 5 seconds** |
+| 9 | body equality proof | fresh GET re-hashed `43ba61a7a5...94f2b`, identical to step 3; 4 contexts, `active`, `bypass_actors=[]` |
+| 10 | merge-commit bound | both forms return **1** (see below) |
+| 11 | two-parent proof | parents exactly `[511064cd17, 9635f94bd8]`; one first-parent merge in the window, equal to the merge SHA |
+| 12 | post-window `fork-health.sh --live` | all invariants hold; `railway check` at the new published ref exits 0 |
 
-Step 8 runs `fork-health.sh --live` a second time, giving two independent
-comparators rather than one reading trusted twice.
+Steps 5 and 12 are the two independent comparators. Step 9's re-hash is a
+**fresh GET decoded again**, not the script's own read-back trusted twice.
 
-The merge-commit bound is run in both forms, per the correction established in
-the #101 window:
+Post-merge verification on the merged commit, reading
+`scripts/ideal_base_railway.py` out of `73d8a640a7` rather than the worktree:
 
-    git rev-list --count --merges <pre>..github/main              => expect 1
-    git rev-list --count --merges <pre>..github/main --not <head> => expect 1
+    silent strand (root accepted, child in_progress) -> REJECTED, names c2
+    fully complete wave                              -> quiet, no false positive
 
-The `--not` is required. Without it a merge-commit head returns 2 and reads as
-an unreviewed second write. They agree only when the branch is linear, so both
-are recorded.
+The suite passes on merged `main` (27 tests, exit 0).
+
+### One counter is expected to read differently after the merge
+
+`./scripts/d02_scoreboard.sh` now reports `protected_hits 0 (want 2)`. This is
+the counter going **obsolete**, not a regression. It counts protected files in
+`git diff github/main..HEAD`, and that diff is empty because the change landed:
+both files are in the merge commit. The counter measured a pre-merge condition
+and 2 was only ever the correct answer while the work was unlanded. Verified by
+confirming both files are present in `73d8a640a7`, and by exercising the guard
+directly against the merged source, which is the assertion that actually
+matters.
+
+### Merge-commit bound, both forms
+
+    git rev-list --count --merges 511064cd17..github/main              => 1
+    git rev-list --count --merges 511064cd17..github/main --not 9635f94bd8 => 1
+
+Per the #101 correction, the `--not` form is required: without it a
+merge-commit head returns 2 and reads as an unreviewed second write. Both are
+recorded because they agree only when the branch is linear.
+
+## Correction carried into this window's script
+
+`window-pr76.py` read the protected-path list from
+`scripts/required-checks.json`. **That file holds 31 entries; the inline
+`protected=( ... )` array in `.github/workflows/governance-root.yml`, which is
+what the gate actually runs, holds 32.** The extra entry is
+`scripts/test_warning_budget.py`. Reading the JSON is the same defect class that
+produced the PR #106 false all-clear.
+
+`window-d02.py` parses the workflow array, asserts it is non-empty, and
+additionally cross-checks it against the JSON, printing any divergence instead
+of silently preferring one source. For this window both sources yield the same
+two protected files, and that agreement is recorded rather than assumed.
+
+The divergence is **not closed by this window** and is now a live finding:
+`fork-health.sh --live` reports `enforcing 31 paths`, so the health check and
+the gate disagree about how many paths are protected. A change touching only
+`scripts/test_warning_budget.py` would be called clean by the health check and
+tripped by the gate. That is a follow-up, not part of D02.
+
+### Controls on the window script
+
+Five controls, each planted on a copy so the executed script was never mutated,
+each mutation asserted present on disk before its exit code was read, and each
+failing on a **different** assertion:
+
+| control | mutation | assertion that fails |
+|---|---|---|
+| 1 | `REVIEWED_HEAD` set to zeros | head identity: "branch was re-pushed since review" |
+| 2 | `STEADY_STATE` corrupted | governed hash != known-good steady state |
+| 3 | reviewed path expectation narrowed to one file | **acceptance side**: real protected path reads as unreviewed |
+| 4 | protected parse forced to `[]` | zero-pattern artifact refused as an all-clear |
+| 5 | `DROP` pointed at a passing context | gate state: "Nix Gate is success" |
+
+Control 3 is the acceptance-side control. Without it, a script that ignored an
+unexpected protected path would still pass a trips-only check. All five exited
+1; the unmutated script was then confirmed byte-different from every copy and
+re-passed its dry run before `--commit` was used.
 
 ## What this procedure does not close
 

@@ -4,12 +4,12 @@
   "program_state": "railway_ready",
   "active_graph_id": null,
   "last_checkpoint": {
-    "node": "D01-FIX-3",
+    "node": "D02",
     "state": "accepted",
-    "reviewed_commit": "4c16d8ab4e912cf831fb11cc7f831c655ea9b9b9",
-    "published_commit": "f13f08ff3f110039425fd591eba9c9082632cd3b",
-    "updated_at": "2026-08-05T21:17:34Z",
-    "summary": "Real rate-limit headers now reach the ambient scheduler. Vendor header tokens 0 -> 34 (anthropic-ratelimit 22, x-ratelimit 12); production calculate_interval(None) 2 -> 0, with the remaining None at scheduler.rs:366 retained deliberately as the acceptance-side control. Blast radius 6 files +15/-3, touching 1 of 72 impl Provider for and 0 of 419 StreamEvent:: sites. Four controls run and restored byte-identical; control C PASSED with the wire cut, which was fixed by introducing the next_interval seam rather than by bolting on a mirror-test, after which C2 failed correctly (EXIT=101). Does not reach budget_percent: both writers still pass literal None, so the budget bar row stays Inert. Known gap stated not hidden: the Anthropic runtime has no mock-server harness, so the one-line observe(...) call is not unit-testable. Merged as PR #130 via the seventh \u00a74 maintenance window; the merge also refreshed the provider_infrastructure file count 19 -> 20 and the workflow digest, an inventory refresh proven distinct from a debt re-baseline by control."
+    "reviewed_commit": "9635f94bd88ae84478c975dde02392516e49c5f8",
+    "published_commit": "73d8a640a7acbca3d6b7d16b0d2027e7eeb8542b",
+    "updated_at": "2026-08-06T02:50:15Z",
+    "summary": "expansion_violations now rejects a complete root with an incomplete child, closing the silent accepted-root row; landed via R07 section 4 window (merge 73d8a640a7, window open 5s, governance restored to hash 43ba61a7a5)"
   },
   "nodes": {
     "W0": {
@@ -774,12 +774,15 @@
       "updated_at": "2026-08-05T10:20:57Z"
     },
     "D02": {
-      "state": "pending",
-      "reviewed_commit": null,
-      "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "state": "accepted",
+      "reviewed_commit": "9635f94bd88ae84478c975dde02392516e49c5f8",
+      "published_commit": "73d8a640a7acbca3d6b7d16b0d2027e7eeb8542b",
+      "evidence": [
+        "docs/fork/ideal-base/evidence/R07/maintenance-window-d02-2026-08-06.md",
+        "docs/fork/ideal-base/evidence/R07/transcripts/window-d02.py"
+      ],
+      "summary": "expansion_violations now rejects a complete root with an incomplete child, closing the silent accepted-root row; landed via R07 section 4 window (merge 73d8a640a7, window open 5s, governance restored to hash 43ba61a7a5)",
+      "updated_at": "2026-08-06T02:50:15Z"
     }
   }
 }
