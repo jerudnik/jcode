@@ -1,9 +1,19 @@
-# §4 maintenance window: PR #TBD (D02 expansion guard)
+# §4 maintenance window: PR #132 (D02 expansion guard)
 
 Prepared 2026-08-06. When executed this will be the eighth use of the procedure
 under the ordinal series that restarted at PR #100, and the fifteenth recorded
 window overall. Recorded because §4 makes every write and read-back in a window
 evidence.
+
+PR: <https://github.com/jerudnik/jcode/pull/132>, head branch
+`automation/d02-expansion-guard`. The protected-path prediction below was
+scored against head `eefc91a882ffef68fbd9ddb12f7669a61e5fc3dd`.
+
+That SHA is a record of what was scored, **not the head SHA to use at window
+time**: committing this file advances the branch head past it. Step 1 re-reads
+the live head and stops on a mismatch, and that read is the authority. Any
+later commit to this branch, including this one, also re-runs CI, so the
+prediction is re-scored rather than inherited.
 
 **Status: PREPARED, NOT EXECUTED.** Everything below the "Sequence executed"
 heading is unfilled. The pre-window sections are complete and were derived
@@ -45,6 +55,20 @@ clean. It is not protected, so committing it does not change the prediction.
 nothing belonging to anybody else's work.** That is read from the failure log,
 not assumed. A window that trips on paths outside this change is a different
 problem and must not be executed as if it were this one.
+
+**Scored against PR #132, run 31064263271.** `Governance Root` failed in
+`Detect governance-path changes`, and the log names:
+
+    ##[error]governance paths changed; use the recorded ruleset maintenance
+             procedure (design.md section 4)
+    scripts/ideal_base_railway.py
+    tests/test_ideal_base_railway.py
+
+Two files, both predicted, nothing outside this change. The predicted set and
+the observed set are identical, so the window is scoped to this PR's own work
+and step 1 may proceed once authorized. Had CI named a third path, or a path
+belonging to someone else's commit, this would be a different window and must
+not be executed as this one.
 
 Authorization is required from the repository owner and has not been given.
 The window is a write to a protected repository and is not self-authorized.
