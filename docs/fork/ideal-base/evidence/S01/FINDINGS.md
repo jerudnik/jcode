@@ -315,3 +315,63 @@ again, but for the first time by the phenomenon under study rather than by
 harness drift. F3 and F4 were deterministic breakage that would fail identically
 every run; this one flips at fixed tree state. It should be scored as a real P1
 falsification.
+
+### Where an S01-F6 repair can live (capacity derivation)
+
+Re-derived from the files rather than carried over, because an earlier pass of
+this derivation misread `expansions` as a list and got the owner set wrong.
+
+Which node owns the two product files:
+
+| file | owners | states |
+| --- | --- | --- |
+| `lifecycle.rs` | F02, R01, R05, F25 | all `accepted` |
+| `shutdown.rs` | F03, R04, F25 | all `accepted` |
+
+(An earlier note claimed F06 and F10 among these. That was wrong; the list
+above is what `WORK_GRAPH.json` actually says.)
+
+Capacity, counted from the graph:
+
+| wave | children | incomplete |
+| --- | --- | --- |
+| W0-W4R, W6, W7 | 3,10,7,9,11,1,11,2 | 0 |
+| W5 | 12 / 12 (full) | S01, S02, S03, S01-FIX-1 |
+
+`MAX_EXPANSION_CHILDREN = 12` and roots are capped at 10, currently 9. So the
+only structural room for a new node is the last root slot: W5 is full, and
+every other wave is accepted.
+
+**Ownership does NOT forbid it.** I predicted it would, and simulating the
+mutation against `validate_ownership` falsified that prediction. A `W8` root
+declaring `lifecycle.rs`, `shutdown.rs`, or both is **accepted**, because
+`W8.depends_on = ['W7']` puts every earlier wave in its dependency closure and
+`ordered()` is satisfied. The negative control confirms the check is live
+rather than vacuous: the same node with `depends_on: []` is refused with
+`unserialized ownership overlap: F02 ... and S01-FIX-2`. Recording this because
+the structural objection was mine and it did not survive being run.
+
+**Conclusion: do not spend the slot anyway.** Two reasons survive, and either
+is sufficient:
+
+1. **The design says the product is correct.** Design 4.1 marks `PersistentIdle`
+   and `TemporaryIdle` as `n/a` for every class: idle shutdown presupposes
+   quiescence. `drain_blocking_count` excluding `ClientConnection` is C1
+   `abandon`, on purpose. The divergence between the poller and the claim is
+   real but is not a defect the design wants closed by making idle wait on
+   connections; that would contradict C1.
+2. **Production is not affected.** `try_admit_client` increments `client_count`
+   under the same guard, so the uncounted window is one tick wide. The wide
+   version exists only behind debug `hold_lease`.
+
+The defect that remains is in the fixture, not the product: the F03 step asserts
+a full post-release idle window for a class the poller is documented not to
+count, so it is asserting something design 4.1 does not promise. That is
+S01-FIX-1's own territory (it already owns `lease_class_fixtures.sh`) and needs
+no new node.
+
+This is why S01-FIX-1 stays `blocked` rather than being closed. Gate 3 wants a
+sweep at 0 FAIL with every step executing; reaching it means changing the
+client-connection assertion to match design 4.1, which is a decision about the
+fixture's contract and not a repair I should make silently while claiming the
+gate was met on the original terms.
