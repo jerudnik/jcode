@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -831,13 +832,75 @@ def _check_pull_request_trigger(
 def _check_protected_path_declaration(
     context: str, path: str, source: str, protected_paths: list[str], report: Report
 ) -> None:
-    """The audit gate must actually name every protected path it claims to watch."""
-    missing = [p for p in protected_paths if p not in source]
+    """The audit gate's enforced set and the manifest's must be IDENTICAL.
+
+    Containment in one direction is not enough, and reading it that way is what
+    let the two sets drift apart unnoticed. A path the gate enforces but the
+    manifest omits is invisible to a manifest-subset-of-gate check, yet it makes
+    every manifest consumer (`fork-health.sh` most of all) report a smaller
+    boundary than the one actually in force: a change touching only that path
+    reads clean locally and is then rejected by the gate.
+
+    So parse the gate's own `protected=( ... )` array and compare sets both
+    ways. Substring matching cannot do this: it can tell whether a path appears
+    somewhere in the file, never whether the file enforces something extra.
+    """
+    try:
+        enforced = _parse_protected_array(source)
+    except SchemaError as exc:
+        report.fail(f"{context!r} at {path}: {exc}")
+        return
+
+    declared = {p.rstrip("/") for p in protected_paths}
+    enforced = {p.rstrip("/") for p in enforced}
+
+    missing = sorted(declared - enforced)
     if missing:
         report.fail(
             f"{context!r} at {path} does not name protected path(s) {missing!r}; "
             "the audit gate would stay green on a change it is supposed to flag"
         )
+    extra = sorted(enforced - declared)
+    if extra:
+        report.fail(
+            f"{context!r} at {path} enforces protected path(s) {extra!r} that "
+            "scripts/required-checks.json does not declare; every manifest "
+            "consumer would report a smaller protected set than the gate "
+            "actually enforces, so a change touching only those paths reads "
+            "clean and is then rejected by the gate"
+        )
+    if not missing and not extra:
+        report.ok(
+            f"{context!r} at {path} enforces exactly the {len(enforced)} "
+            "protected path(s) the manifest declares"
+        )
+
+
+def _parse_protected_array(source: str) -> set[str]:
+    """Extract the paths from the audit gate's inline `protected=( ... )` array.
+
+    A zero-pattern parse is an artifact, never an answer: it would make the
+    equality check above compare against an empty set and quietly agree with
+    anything. Raise instead.
+    """
+    matches = re.findall(r"protected=\(\s*(.*?)\s*\)", source, re.DOTALL)
+    if not matches:
+        raise SchemaError(
+            "no `protected=( ... )` array found; the audit gate's enforced "
+            "protected-path set is unreadable, so it cannot be compared"
+        )
+    if len(matches) > 1:
+        raise SchemaError(
+            f"found {len(matches)} `protected=( ... )` arrays; the enforced "
+            "protected-path set is ambiguous"
+        )
+    paths = {token for token in matches[0].split() if token}
+    if not paths:
+        raise SchemaError(
+            "`protected=( ... )` array is empty; the audit gate enforces "
+            "nothing and would stay green on every governance change"
+        )
+    return paths
 
 
 # ---------------------------------------------------------------------------
