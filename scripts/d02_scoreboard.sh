@@ -89,7 +89,16 @@ check "protected_hits" "$hits" "2"
 
 echo
 echo "state (not scored: blocked on authorization, not on engineering)"
-note "unpushed commits" "$(git rev-list --count github/main..HEAD)"
+note "commits not in main" "$(git rev-list --count github/main..HEAD)"
+# unpushed is a separate fact from unlanded: work can be fully pushed to the
+# PR branch and still be 5 commits ahead of main. Reporting one number as both
+# is how a pushed branch reads as "nothing sent yet".
+_up="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+if [[ -n "$_up" ]]; then
+  note "unpushed to $_up" "$(git rev-list --count "$_up"..HEAD)"
+else
+  note "unpushed" "no upstream set for $(git rev-parse --abbrev-ref HEAD)"
+fi
 note "working tree" "$(git status --porcelain | wc -l | tr -d ' ') dirty files"
 note "pre-window governed hash" "43ba61a7a5...94f2b (must match post-restore)"
 note "identity asserts captured at" "$(cat /tmp/gwin/expected_base_sha.txt 2>/dev/null || echo 'unknown; re-run preflight')"
