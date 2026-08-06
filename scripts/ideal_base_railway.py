@@ -667,6 +667,13 @@ def expansion_violations(graph: dict[str, Any], state: dict[str, Any]) -> dict[s
     re-doing finished work. W3 reached exactly that state (nine accepted
     children under a pending root) with the gate green, which is why this
     exists.
+
+    The mirror case is a root recorded complete while a child is not. Because
+    ``ready_nodes`` only dispatches children of an open root, completing the
+    root drops the unfinished child out of ``next`` without recording any
+    reason: it is not done, not blocked, and no longer offered. That row went
+    unchecked until D02, so a wave could be closed over a ``pending`` child
+    and ``check`` would still exit 0.
     """
     records = state["nodes"]
     violations: dict[str, str] = {}
@@ -694,6 +701,19 @@ def expansion_violations(graph: dict[str, Any], state: dict[str, Any]) -> dict[s
             violations[root_id] = (
                 f"{root_id}: every child is complete but the root is "
                 f"{root_state!r}; close the wave or record why it cannot close"
+            )
+        elif root_state in DEPENDENCY_COMPLETE and any(
+            child not in DEPENDENCY_COMPLETE for child in child_states
+        ):
+            stranded = sorted(
+                child["id"]
+                for child in children
+                if records[child["id"]]["state"] not in DEPENDENCY_COMPLETE
+            )
+            violations[root_id] = (
+                f"{root_id}: root is {root_state!r} but children are not "
+                f"complete ({', '.join(stranded)}); a complete root stops "
+                "dispatching its children, so this work is stranded"
             )
     return violations
 

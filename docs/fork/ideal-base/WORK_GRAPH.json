@@ -1609,6 +1609,31 @@
         "review_model": "opus",
         "class": "deterministic",
         "parent": "W5"
+      },
+      {
+        "id": "D02",
+        "content": "Guard the accepted-root row of the expansion invariant, which is currently silent. expansion_violations rejects a root that is pending while children progressed, and a root that is not complete while every child is complete, but it never inspects a root that is already complete. Measured on the real tree: for root x child states, the whole root=accepted row is unflagged, including root=accepted with a pending child. Reachability was proven through the supported tool, not by hand-editing: a checkpoint of W0 to accepted while child W0.3 was pending returned EXIT=0 and wrote the orphan, after which `check` still exited 0 and reported OK, and `next` no longer offered W0.3 while the rest of the projection stayed intact. The acceptance-side control on the same command with the same fields refused the guarded direction (W7 in_progress with all children complete, EXIT=1, STATE.json byte-unchanged), so the EXIT=0 is a real asymmetry and not a mis-run. This is the mirror of the rule 608198993 added for the pending-root case: the same orphaning harm, reached from the other side. The candidate guard is that a root in DEPENDENCY_COMPLETE must not have a child outside DEPENDENCY_COMPLETE; it was simulated against the current tree and flags 0 nodes, so it can land without re-baselining anything. Note that checkpoint must keep repairing an existing violation while refusing to introduce one, exactly as the delta check in 608198993 does, or closing a wave becomes impossible.",
+        "kind": "implement",
+        "depends_on": [],
+        "priority": 45,
+        "owned_paths": [
+          "scripts/ideal_base_railway.py",
+          "tests/test_ideal_base_railway.py",
+          "docs/fork/ideal-base/evidence/D02/**"
+        ],
+        "acceptance_gates": [
+          "A control proves the gap exists before the fix: checkpointing a root to accepted while one of its children is pending must SUCCEED on the current checker and must FAIL once the guard lands. Removing the guard must make it succeed again.",
+          "The full root-state x child-state matrix is asserted, not just the one cell: every combination in the accepted-root row is covered, so a future edit cannot re-open a neighbouring cell silently.",
+          "The delta property of 608198993 is preserved and tested: a checkpoint that REPAIRS a pre-existing violation still succeeds, and only a checkpoint that introduces or worsens one is refused. A test must fail if the guard is implemented as an absolute check instead of a delta.",
+          "The guard is proven inert on the real tree: a test asserts 0 violations against the committed WORK_GRAPH.json and STATE.json, so no budget, count, or state is re-baselined to accommodate it.",
+          "`next` behaviour is pinned: the orphaned child is shown to disappear from the projection before the fix and to be offered after it, so the fix is tied to the observable harm rather than to the error string."
+        ],
+        "evidence": [
+          "docs/fork/ideal-base/evidence/D02/README.md"
+        ],
+        "review_model": "opus",
+        "class": "deterministic",
+        "parent": "W5"
       }
     ],
     "W6": [
@@ -3463,6 +3488,31 @@
       ],
       "evidence": [
         "docs/fork/ideal-base/evidence/G02-FIX-1/README.md"
+      ],
+      "review_model": "opus",
+      "class": "deterministic",
+      "parent": "W5"
+    },
+    {
+      "id": "D02",
+      "content": "Guard the accepted-root row of the expansion invariant, which is currently silent. expansion_violations rejects a root that is pending while children progressed, and a root that is not complete while every child is complete, but it never inspects a root that is already complete. Measured on the real tree: for root x child states, the whole root=accepted row is unflagged, including root=accepted with a pending child. Reachability was proven through the supported tool, not by hand-editing: a checkpoint of W0 to accepted while child W0.3 was pending returned EXIT=0 and wrote the orphan, after which `check` still exited 0 and reported OK, and `next` no longer offered W0.3 while the rest of the projection stayed intact. The acceptance-side control on the same command with the same fields refused the guarded direction (W7 in_progress with all children complete, EXIT=1, STATE.json byte-unchanged), so the EXIT=0 is a real asymmetry and not a mis-run. This is the mirror of the rule 608198993 added for the pending-root case: the same orphaning harm, reached from the other side. The candidate guard is that a root in DEPENDENCY_COMPLETE must not have a child outside DEPENDENCY_COMPLETE; it was simulated against the current tree and flags 0 nodes, so it can land without re-baselining anything. Note that checkpoint must keep repairing an existing violation while refusing to introduce one, exactly as the delta check in 608198993 does, or closing a wave becomes impossible.",
+      "kind": "implement",
+      "depends_on": [],
+      "priority": 45,
+      "owned_paths": [
+        "scripts/ideal_base_railway.py",
+        "tests/test_ideal_base_railway.py",
+        "docs/fork/ideal-base/evidence/D02/**"
+      ],
+      "acceptance_gates": [
+        "A control proves the gap exists before the fix: checkpointing a root to accepted while one of its children is pending must SUCCEED on the current checker and must FAIL once the guard lands. Removing the guard must make it succeed again.",
+        "The full root-state x child-state matrix is asserted, not just the one cell: every combination in the accepted-root row is covered, so a future edit cannot re-open a neighbouring cell silently.",
+        "The delta property of 608198993 is preserved and tested: a checkpoint that REPAIRS a pre-existing violation still succeeds, and only a checkpoint that introduces or worsens one is refused. A test must fail if the guard is implemented as an absolute check instead of a delta.",
+        "The guard is proven inert on the real tree: a test asserts 0 violations against the committed WORK_GRAPH.json and STATE.json, so no budget, count, or state is re-baselined to accommodate it.",
+        "`next` behaviour is pinned: the orphaned child is shown to disappear from the projection before the fix and to be offered after it, so the fix is tied to the observable harm rather than to the error string."
+      ],
+      "evidence": [
+        "docs/fork/ideal-base/evidence/D02/README.md"
       ],
       "review_model": "opus",
       "class": "deterministic",
