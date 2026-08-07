@@ -80,7 +80,9 @@
       "phase": "design",
       "content": "Design the smallest safe way to retire governance tools from the completed ideal-base work. Keep the fork-point tag, Nix-only distribution, final decisions, hashes, and checks for live changes. Remove temporary setup files and tools, exact protected-path procedures, merge-time notes, and active progress records.",
       "kind": "explore",
-      "depends_on": ["M00"],
+      "depends_on": [
+        "M00"
+      ],
       "priority": 95,
       "worker_profile": "design",
       "read_only": true,
@@ -98,7 +100,9 @@
       "phase": "design",
       "content": "Design four delivery workflows and one standard set of local commands. Define pull request routing, publication from main, scheduled full checks, release promotion, Nix revision handling, cache rules, and the one required pull request result.",
       "kind": "explore",
-      "depends_on": ["M00"],
+      "depends_on": [
+        "M00"
+      ],
       "priority": 95,
       "worker_profile": "design",
       "read_only": true,
@@ -116,7 +120,9 @@
       "phase": "design",
       "content": "Design narrow RuntimePaths and ReloadEnvironment interfaces. Normal tests must not use the real ~/.jcode, change the process-wide environment, or discover reload state from the surrounding machine. Assign owners for issues #17 and #14, JCODE_TEST_SESSION, session roots, process checks, and reload branches.",
       "kind": "explore",
-      "depends_on": ["M00"],
+      "depends_on": [
+        "M00"
+      ],
       "priority": 95,
       "worker_profile": "design",
       "read_only": true,
@@ -134,7 +140,9 @@
       "phase": "design",
       "content": "Design small steps to remove the root -> jcode-tui -> jcode-app-core -> jcode-base wildcard re-export chain. Use compile times, dependent crates, and code ownership to define clear APIs. Do not create small crates only for style.",
       "kind": "explore",
-      "depends_on": ["M00"],
+      "depends_on": [
+        "M00"
+      ],
       "priority": 90,
       "worker_profile": "design",
       "read_only": true,
@@ -152,7 +160,9 @@
       "phase": "design",
       "content": "Design the security, release, and metrics changes. Pin actions by SHA, add gitleaks and Dependabot for Cargo and GitHub Actions, keep one cargo-audit ignore source, choose the release name, publish metadata-only GitHub Releases, reuse verified cached builds in later jobs, and report coverage, performance, and CI SLO measurements.",
       "kind": "explore",
-      "depends_on": ["M00"],
+      "depends_on": [
+        "M00"
+      ],
       "priority": 90,
       "worker_profile": "design",
       "read_only": true,
@@ -170,7 +180,9 @@
       "phase": "design",
       "content": "List cleanup candidates in scripts, old packaging files, workflows that only dispatch other work, completed-program files, stale comments, and repeated documentation. Set rules for keeping, moving, archiving, or deleting each item before changing files.",
       "kind": "explore",
-      "depends_on": ["M00"],
+      "depends_on": [
+        "M00"
+      ],
       "priority": 85,
       "worker_profile": "context",
       "read_only": true,
@@ -188,7 +200,14 @@
       "phase": "design",
       "content": "Review M01 through M06 independently. Look for hidden dependencies, unsafe order, unnecessary tools, missing restore steps, and conflicting file ownership. Add gap nodes for every high-confidence omission before combining the designs.",
       "kind": "verify",
-      "depends_on": ["M01", "M02", "M03", "M04", "M05", "M06"],
+      "depends_on": [
+        "M01",
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M06"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -206,7 +225,9 @@
       "phase": "design",
       "content": "Combine the reviewed designs into the final work instructions. Keep the current defaults unless M00 through V09 found source-backed reasons to update TASK_GRAPH.json before implementation.",
       "kind": "synthesize",
-      "depends_on": ["V09"],
+      "depends_on": [
+        "V09"
+      ],
       "priority": 100,
       "worker_profile": "synthesize",
       "read_only": false,
@@ -224,12 +245,23 @@
       "phase": "unlock",
       "content": "Change the local governance definition. Remove Governance Root from the required checks, limit protected paths to long-lived rules, keep strict pull request, status, deletion, and non-fast-forward rules, and update comparison tests.",
       "kind": "implement",
-      "depends_on": ["B0"],
+      "depends_on": [
+        "B0"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".github/workflows/governance-root.yml", "scripts/required-checks.json", "scripts/fork-health.sh", "scripts/governance_compare.py", "scripts/generate_governance_fixture.py", "tests/test_governance_compare.py"],
-      "mutexes": ["governance"],
+      "owned_paths": [
+        ".github/workflows/governance-root.yml",
+        "scripts/required-checks.json",
+        "scripts/fork-health.sh",
+        "scripts/governance_compare.py",
+        "scripts/generate_governance_fixture.py",
+        "tests/test_governance_compare.py"
+      ],
+      "mutexes": [
+        "governance"
+      ],
       "acceptance": [
         "Make the expected-state test data and comparison code agree",
         "Keep Fork CI, Security, and Nix required until PR Gate replaces them",
@@ -242,12 +274,22 @@
       "phase": "unlock",
       "content": "Archive the completed ideal-base program. Keep final decisions, the accepted summary, checksums, and private recovery references. Remove active dashboards and execution tools, merge-time notes, raw coordination logs, and evidence that can be rebuilt from the active repository.",
       "kind": "implement",
-      "depends_on": ["B0"],
+      "depends_on": [
+        "B0"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["docs/fork/ideal-base/**", "scripts/ideal_base_*.py", "scripts/graph_page.py", "scripts/status_page.py", "tests/test_ideal_base_railway.py"],
-      "mutexes": ["ideal-base"],
+      "owned_paths": [
+        "docs/fork/ideal-base/**",
+        "scripts/ideal_base_*.py",
+        "scripts/graph_page.py",
+        "scripts/status_page.py",
+        "tests/test_ideal_base_railway.py"
+      ],
+      "mutexes": [
+        "ideal-base"
+      ],
       "acceptance": [
         "Keep the accepted result and support limits easy to find",
         "Keep private archive references and checksums valid",
@@ -260,12 +302,23 @@
       "phase": "unlock",
       "content": "Update long-lived fork and agent documentation for normal pull request governance after the ideal-base work is archived. Edit the APM instruction sources, regenerate agent files, and remove instructions for recording merge times. Keep live check names only in the expected-state manifest.",
       "kind": "implement",
-      "depends_on": ["B0"],
+      "depends_on": [
+        "B0"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".apm/instructions/**", "AGENTS.md", "docs/AGENTS.md", "docs/BRANCHING.md", "docs/agent-workflows.md", "CONTRIBUTING.md"],
-      "mutexes": ["docs"],
+      "owned_paths": [
+        ".apm/instructions/**",
+        "AGENTS.md",
+        "docs/AGENTS.md",
+        "docs/BRANCHING.md",
+        "docs/agent-workflows.md",
+        "CONTRIBUTING.md"
+      ],
+      "mutexes": [
+        "docs"
+      ],
       "acceptance": [
         "Pass apm compile --validate",
         "Explain the normal pull request flow and name the current source files",
@@ -278,7 +331,11 @@
       "phase": "unlock",
       "content": "Check G10A through G10C as one retirement change. Compare old and proposed governance test data, check every kept reference, run APM checks, and prove Git alone can restore the change without hidden external state.",
       "kind": "verify",
-      "depends_on": ["G10A", "G10B", "G10C"],
+      "depends_on": [
+        "G10A",
+        "G10B",
+        "G10C"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -296,7 +353,9 @@
       "phase": "unlock",
       "content": "PERMISSION REQUIRED: after the user approves, push the limited governance-cleanup branch, open and merge its pull request through the current protected process, and apply the matching live GitHub rule change. Do not include later modernization work in this publication.",
       "kind": "verify",
-      "depends_on": ["V10"],
+      "depends_on": [
+        "V10"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": false,
@@ -316,7 +375,9 @@
       "phase": "unlock",
       "content": "Check the published governance cleanup from a fresh checkout. Confirm main history, live required checks, no old protection settings, access to the archived ideal-base result, and a clean work branch rebased onto the new main branch.",
       "kind": "verify",
-      "depends_on": ["H10"],
+      "depends_on": [
+        "H10"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -334,7 +395,9 @@
       "phase": "unlock",
       "content": "Record barrier B1 after governance is updated, then start the parallel implementation work from the new official main commit.",
       "kind": "synthesize",
-      "depends_on": ["V11"],
+      "depends_on": [
+        "V11"
+      ],
       "priority": 100,
       "worker_profile": "synthesize",
       "read_only": false,
@@ -350,18 +413,32 @@
     {
       "id": "P20",
       "phase": "implementation",
-      "content": "Make just and a small number of scripts the standard command source. Change ci_local so local runs and CI call the same recipes instead of reading workflow YAML. Split dev_cargo only when that removes separate control paths, and keep remote-build and cache safety.",
+      "content": "Make just and a small number of scripts the standard command source. Change ci_local so local runs and CI call the same recipes instead of reading workflow YAML. Split dev_cargo only when that removes separate control paths, and keep remote-build and cache safety. Include a lint-docs recipe that runs vale on live documentation using the repository .vale.ini.",
       "kind": "implement",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["justfile", "scripts/dev_cargo.sh", "scripts/cargo_exec.sh", "scripts/ci_local.sh", "scripts/ci_workflow_commands.py", "scripts/remote_build.sh", "scripts/remote_config.sh", "tests/test_ci_workflow_commands.py"],
-      "mutexes": ["pipeline-scripts"],
+      "owned_paths": [
+        "justfile",
+        "scripts/dev_cargo.sh",
+        "scripts/cargo_exec.sh",
+        "scripts/ci_local.sh",
+        "scripts/ci_workflow_commands.py",
+        "scripts/remote_build.sh",
+        "scripts/remote_config.sh",
+        "tests/test_ci_workflow_commands.py"
+      ],
+      "mutexes": [
+        "pipeline-scripts"
+      ],
       "acceptance": [
         "Provide standard check, test, full-test, package, and release-check commands",
         "Let CI call the same commands without reading YAML",
-        "Pass remote fallback and target cleanup safety tests"
+        "Pass remote fallback and target cleanup safety tests",
+        "Provide a lint-docs command that runs vale and passes on live documentation"
       ],
       "falsification": "Keep the simpler current boundary and centralize only the recipes if a split adds more public options or wrappers than it removes."
     },
@@ -370,12 +447,22 @@
       "phase": "implementation",
       "content": "Keep documentation-only Git revisions from changing executable build identity, while provenance still records the exact repository revision. Publish from main only when package inputs change, and prove downstream Nix pins use the correct build output.",
       "kind": "implement",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["flake.nix", "flake.lock", "nix/**", "docs/NIX.md", "tests/test_nix_distribution_policy.py"],
-      "mutexes": ["nix"],
+      "owned_paths": [
+        "flake.nix",
+        "flake.lock",
+        "nix/**",
+        "docs/NIX.md",
+        "tests/test_nix_distribution_policy.py"
+      ],
+      "mutexes": [
+        "nix"
+      ],
       "acceptance": [
         "Keep the executable derivation unchanged after a documentation-only commit",
         "Record the exact repository revision in provenance",
@@ -388,12 +475,23 @@
       "phase": "implementation",
       "content": "Update supply-chain checks. Pin every action to a full commit SHA, replace the custom token-prefix scanner with pinned gitleaks, add Dependabot for Cargo and GitHub Actions, and use .cargo/audit.toml as the only advisory ignore list while keeping owner and expiry checks.",
       "kind": "implement",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".cargo/audit.toml", ".github/dependabot.yml", ".gitleaks.toml", "scripts/security_preflight.sh", "scripts/check_advisory_policy.py", "docs/security/**"],
-      "mutexes": ["security"],
+      "owned_paths": [
+        ".cargo/audit.toml",
+        ".github/dependabot.yml",
+        ".gitleaks.toml",
+        "scripts/security_preflight.sh",
+        "scripts/check_advisory_policy.py",
+        "docs/security/**"
+      ],
+      "mutexes": [
+        "security"
+      ],
       "acceptance": [
         "Pin every external action to a full SHA and include an update comment",
         "Make secret scanning catch planted generic and provider-specific test secrets",
@@ -406,12 +504,27 @@
       "phase": "implementation",
       "content": "Replace the current pull request and main workflows with small workflows that call P20 commands. Use one pull request classifier and one PR Gate, publish only from main, run broad checks on a schedule, and remove duplicate Fork CI and Security runs after merge. Include P21 routing and P22 security checks.",
       "kind": "implement",
-      "depends_on": ["P20", "P21", "P22"],
+      "depends_on": [
+        "P20",
+        "P21",
+        "P22"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".github/workflows/ci.yml", ".github/workflows/fork-ci.yml", ".github/workflows/security.yml", ".github/workflows/nix.yml", ".github/workflows/freebsd-smoke.yml", ".github/workflows/pr.yml", ".github/workflows/main.yml", ".github/workflows/scheduled.yml"],
-      "mutexes": ["workflows"],
+      "owned_paths": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/fork-ci.yml",
+        ".github/workflows/security.yml",
+        ".github/workflows/nix.yml",
+        ".github/workflows/freebsd-smoke.yml",
+        ".github/workflows/pr.yml",
+        ".github/workflows/main.yml",
+        ".github/workflows/scheduled.yml"
+      ],
+      "mutexes": [
+        "workflows"
+      ],
       "acceptance": [
         "Pass actionlint",
         "Return exactly one required PR Gate result for every pull request path",
@@ -424,7 +537,9 @@
       "phase": "implementation",
       "content": "Check the delivery changes with workflow test data, matching local commands, Nix derivation comparisons, planted security test cases, and measured job estimates. Prove that code, documentation, dependency, and workflow-only pull requests all finish with the correct result.",
       "kind": "verify",
-      "depends_on": ["P23"],
+      "depends_on": [
+        "P23"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -442,12 +557,23 @@
       "phase": "implementation",
       "content": "Make RuntimePaths the single source for home, state, sessions, logs, cache, sockets, and test roots. Move normal tests to temporary roots, and allow access to the real ~/.jcode only in tests clearly marked as live.",
       "kind": "implement",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["crates/jcode-core/**", "crates/jcode-storage/**", "crates/jcode-base/src/env.rs", "crates/jcode-base/src/storage.rs", "crates/jcode-base/src/session.rs", "tests/e2e/test_support/**"],
-      "mutexes": ["runtime-paths"],
+      "owned_paths": [
+        "crates/jcode-core/**",
+        "crates/jcode-storage/**",
+        "crates/jcode-base/src/env.rs",
+        "crates/jcode-base/src/storage.rs",
+        "crates/jcode-base/src/session.rs",
+        "tests/e2e/test_support/**"
+      ],
+      "mutexes": [
+        "runtime-paths"
+      ],
       "acceptance": [
         "Create and remove temporary Jcode roots in normal tests",
         "Read and write none of the operator's ~/.jcode in normal tests",
@@ -460,12 +586,21 @@
       "phase": "implementation",
       "content": "Put executable lookup, repository and build metadata, running process identity, launch, termination, and reload state behind ReloadEnvironment. Remove mixed JCODE_TEST_SESSION branches from do_reload and keep strict failures for real sessions.",
       "kind": "implement",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 95,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["crates/jcode-app-core/src/tool/selfdev/**", "crates/jcode-app-core/src/server/reload.rs", "crates/jcode-app-core/src/update.rs", "crates/jcode-selfdev-types/**"],
-      "mutexes": ["reload"],
+      "owned_paths": [
+        "crates/jcode-app-core/src/tool/selfdev/**",
+        "crates/jcode-app-core/src/server/reload.rs",
+        "crates/jcode-app-core/src/update.rs",
+        "crates/jcode-selfdev-types/**"
+      ],
+      "mutexes": [
+        "reload"
+      ],
       "acceptance": [
         "Test reload behavior without discovering processes or repositories from the surrounding machine",
         "Make stale daemon, newest binary, failed replacement, and recovery cases repeatable",
@@ -478,12 +613,26 @@
       "phase": "implementation",
       "content": "Use RuntimePaths and ReloadEnvironment throughout lifecycle and repeatability tests. Add a check that fails when a normal test touches the real ~/.jcode. Run the two-round lifecycle matrix while ordinary Jcode sessions remain active.",
       "kind": "implement",
-      "depends_on": ["T20", "T21", "P20", "P21"],
+      "depends_on": [
+        "T20",
+        "T21",
+        "P20",
+        "P21"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["crates/jcode-app-core/src/**/*test*.rs", "crates/jcode-base/src/**/*test*.rs", "tests/**", "scripts/run_lifecycle_matrix.sh", "scripts/lease_class_fixtures.sh"],
-      "mutexes": ["runtime-paths", "reload"],
+      "owned_paths": [
+        "crates/jcode-app-core/src/**/*test*.rs",
+        "crates/jcode-base/src/**/*test*.rs",
+        "tests/**",
+        "scripts/run_lifecycle_matrix.sh",
+        "scripts/lease_class_fixtures.sh"
+      ],
+      "mutexes": [
+        "runtime-paths",
+        "reload"
+      ],
       "acceptance": [
         "Pass two lifecycle rounds in a row while normal Jcode sessions run",
         "Leave no files in the real home or temporary roots",
@@ -496,7 +645,9 @@
       "phase": "implementation",
       "content": "Independently test isolation and repeatable reload behavior during concurrent runs, crashes, restarts, and cleanup. Search testable production paths for hidden std::env changes and direct home-directory lookup.",
       "kind": "verify",
-      "depends_on": ["T22"],
+      "depends_on": [
+        "T22"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -514,7 +665,9 @@
       "phase": "implementation",
       "content": "After the new commands and workflows are known, make a final list of reachable scripts and old files. Mark each deletion candidate as a supported command, current bug reproducer, benchmark, historical probe, or dead file.",
       "kind": "explore",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 80,
       "worker_profile": "context",
       "read_only": true,
@@ -532,12 +685,25 @@
       "phase": "implementation",
       "content": "After P23 creates the new pipeline, delete or move only files confirmed by C20. Remove old packaging, unsupported dispatch-only workflows, YAML-reading helpers, historical probes, and repeated scripts. Update every direct caller in the same commit.",
       "kind": "implement",
-      "depends_on": ["C20", "P23", "V21"],
+      "depends_on": [
+        "C20",
+        "P23",
+        "V21"
+      ],
       "priority": 75,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["scripts/**", "packaging/**", "examples/**", ".github/workflows/**"],
-      "mutexes": ["pipeline-scripts", "workflows", "ideal-base"],
+      "owned_paths": [
+        "scripts/**",
+        "packaging/**",
+        "examples/**",
+        ".github/workflows/**"
+      ],
+      "mutexes": [
+        "pipeline-scripts",
+        "workflows",
+        "ideal-base"
+      ],
       "acceptance": [
         "Remove at least 25 percent of script lines or explain every remaining exception",
         "Keep every supported command and open-issue reproducer",
@@ -550,16 +716,34 @@
       "phase": "implementation",
       "content": "Stop required-check names and workflow documentation from drifting apart. Use scripts/required-checks.json or its replacement as the only list of named checks. Generate or link documentation from it, update stale workflow comments, and regenerate APM files.",
       "kind": "implement",
-      "depends_on": ["P23", "V11", "C21"],
+      "depends_on": [
+        "P23",
+        "V11",
+        "C21"
+      ],
       "priority": 85,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".apm/instructions/**", "AGENTS.md", "docs/AGENTS.md", "docs/agent-workflows.md", "docs/BRANCHING.md", "docs/NIX.md", "CONTRIBUTING.md", "RELEASING.md", "scripts/required-checks.json"],
-      "mutexes": ["docs", "governance"],
+      "owned_paths": [
+        ".apm/instructions/**",
+        "AGENTS.md",
+        "docs/AGENTS.md",
+        "docs/agent-workflows.md",
+        "docs/BRANCHING.md",
+        "docs/NIX.md",
+        "CONTRIBUTING.md",
+        "RELEASING.md",
+        "scripts/required-checks.json"
+      ],
+      "mutexes": [
+        "docs",
+        "governance"
+      ],
       "acceptance": [
         "Use the same required check name in live rules, expected state, workflow jobs, and documentation",
         "Pass APM validation and documentation reference checks",
-        "Keep no copied list of required checks in prose"
+        "Keep no copied list of required checks in prose",
+        "Run vale in the pull request gate for changed live documentation, keeping docs/fork and docs/archive excluded"
       ],
       "falsification": "Keep an automatic comparison if generated documentation can differ silently from the expected live state. Do not trust copied prose."
     },
@@ -568,7 +752,10 @@
       "phase": "implementation",
       "content": "Check cleanup work and documentation. Run reference checks, confirm commands exist, run script syntax checks and tests, validate APM files, and compare repository size and file counts with the starting measurements.",
       "kind": "verify",
-      "depends_on": ["C21", "C22"],
+      "depends_on": [
+        "C21",
+        "C22"
+      ],
       "priority": 90,
       "worker_profile": "verify",
       "read_only": true,
@@ -586,7 +773,9 @@
       "phase": "implementation",
       "content": "List the public APIs and imports that use the wildcard re-export chain. Prepare small automated edit batches, downstream compatibility tests, and starting compile times without changing production files.",
       "kind": "explore",
-      "depends_on": ["B1"],
+      "depends_on": [
+        "B1"
+      ],
       "priority": 80,
       "worker_profile": "context",
       "read_only": true,
@@ -604,12 +793,19 @@
       "phase": "architecture",
       "content": "Move repeated external dependencies into workspace.dependencies and adopt workspace = true in small steps. Keep all features and target-specific declarations, and choose one rand version deliberately.",
       "kind": "implement",
-      "depends_on": ["V21"],
+      "depends_on": [
+        "V21"
+      ],
       "priority": 80,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["Cargo.toml", "crates/*/Cargo.toml"],
-      "mutexes": ["manifests"],
+      "owned_paths": [
+        "Cargo.toml",
+        "crates/*/Cargo.toml"
+      ],
+      "mutexes": [
+        "manifests"
+      ],
       "acceptance": [
         "Pass Cargo metadata and machete",
         "Change no dependency feature or target behavior by accident",
@@ -622,12 +818,22 @@
       "phase": "architecture",
       "content": "Remove the root crate wildcard re-export of jcode-tui. Change users to explicit crate and module paths, keep the intended root API small, and compare compile time and binary behavior with the A21 measurements.",
       "kind": "implement",
-      "depends_on": ["A20", "A21", "V21"],
+      "depends_on": [
+        "A20",
+        "A21",
+        "V21"
+      ],
       "priority": 75,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["src/**", "Cargo.toml"],
-      "mutexes": ["manifests", "root-surface"],
+      "owned_paths": [
+        "src/**",
+        "Cargo.toml"
+      ],
+      "mutexes": [
+        "manifests",
+        "root-surface"
+      ],
       "acceptance": [
         "Remove the root wildcard re-export",
         "Pass CLI, binary, example, and public API tests",
@@ -640,12 +846,21 @@
       "phase": "architecture",
       "content": "Remove the jcode-tui wildcard re-export of jcode-app-core. Change the TUI and direct users to explicit imports, and keep presentation dependencies pointing in one direction.",
       "kind": "implement",
-      "depends_on": ["A22"],
+      "depends_on": [
+        "A22"
+      ],
       "priority": 75,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["crates/jcode-tui/**", "crates/jcode-tui-*/**", "src/**"],
-      "mutexes": ["root-surface", "tui-surface"],
+      "owned_paths": [
+        "crates/jcode-tui/**",
+        "crates/jcode-tui-*/**",
+        "src/**"
+      ],
+      "mutexes": [
+        "root-surface",
+        "tui-surface"
+      ],
       "acceptance": [
         "Remove the jcode-tui wildcard export of app-core",
         "Make presentation crates import only declared APIs",
@@ -658,12 +873,21 @@
       "phase": "architecture",
       "content": "Remove the jcode-app-core wildcard re-export of jcode-base. Use explicit imports and small APIs only where they are truly public. Then test provider, server, tool, session, and reload code.",
       "kind": "implement",
-      "depends_on": ["A23"],
+      "depends_on": [
+        "A23"
+      ],
       "priority": 75,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["crates/jcode-app-core/**", "crates/jcode-base/**", "src/**"],
-      "mutexes": ["tui-surface", "app-surface"],
+      "owned_paths": [
+        "crates/jcode-app-core/**",
+        "crates/jcode-base/**",
+        "src/**"
+      ],
+      "mutexes": [
+        "tui-surface",
+        "app-surface"
+      ],
       "acceptance": [
         "Remove the app-core wildcard export of base",
         "Show layer ownership in Cargo metadata and imports",
@@ -676,12 +900,21 @@
       "phase": "architecture",
       "content": "Reduce complexity in large production modules. Rank them by change frequency, number of dependents, error-handling debt, and compile cost. Expand this node into at most five separate child tasks. Each split needs a measured benefit, and no child may add a crate without proving a better boundary.",
       "kind": "implement",
-      "depends_on": ["A24"],
+      "depends_on": [
+        "A24"
+      ],
       "priority": 70,
       "worker_profile": "synthesize",
       "read_only": false,
-      "owned_paths": ["crates/jcode-app-core/src/**", "crates/jcode-base/src/**", "crates/jcode-tui/src/**", "src/**"],
-      "mutexes": ["architecture-hotspots"],
+      "owned_paths": [
+        "crates/jcode-app-core/src/**",
+        "crates/jcode-base/src/**",
+        "crates/jcode-tui/src/**",
+        "src/**"
+      ],
+      "mutexes": [
+        "architecture-hotspots"
+      ],
       "expandable": true,
       "required_children_min": 3,
       "required_children_max": 5,
@@ -697,7 +930,9 @@
       "phase": "architecture",
       "content": "Independently check the full architecture change. Compare dependency graphs, number of reverse dependencies, wildcard exports, compile times, public API behavior, and focused and full tests with the starting measurements.",
       "kind": "verify",
-      "depends_on": ["A25"],
+      "depends_on": [
+        "A25"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -715,12 +950,20 @@
       "phase": "observability",
       "content": "Add a read-only CI metrics collector. Report pull request lead time, required-check delay, runner-minutes, cancellation, infrastructure failures, first-pass success, and release time in a workflow summary and saved artifact.",
       "kind": "implement",
-      "depends_on": ["P23", "C21"],
+      "depends_on": [
+        "P23",
+        "C21"
+      ],
       "priority": 70,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["scripts/ci_metrics.py", "tests/test_ci_metrics.py"],
-      "mutexes": ["observability"],
+      "owned_paths": [
+        "scripts/ci_metrics.py",
+        "tests/test_ci_metrics.py"
+      ],
+      "mutexes": [
+        "observability"
+      ],
       "acceptance": [
         "Handle pagination, missing runs, and cancelled jobs",
         "Commit no metrics to main",
@@ -733,12 +976,26 @@
       "phase": "observability",
       "content": "Try cargo-nextest and scheduled llvm-cov without changing merge rules. Keep doctests and process-sensitive test groups explicit, produce slow-test and JUnit data, explain every ignored test, and keep nextest only if measurements show faster runs or better diagnostics.",
       "kind": "implement",
-      "depends_on": ["P20", "V21", "C21", "O20"],
+      "depends_on": [
+        "P20",
+        "V21",
+        "C21",
+        "O20"
+      ],
       "priority": 70,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".config/nextest.toml", "scripts/test_fast.sh", "scripts/test_full.sh", "scripts/coverage.sh", "crates/**/tests/**", "tests/**"],
-      "mutexes": ["test-runner"],
+      "owned_paths": [
+        ".config/nextest.toml",
+        "scripts/test_fast.sh",
+        "scripts/test_full.sh",
+        "scripts/coverage.sh",
+        "crates/**/tests/**",
+        "tests/**"
+      ],
+      "mutexes": [
+        "test-runner"
+      ],
       "acceptance": [
         "Keep doctests and process-sensitive test groups explicit",
         "Give every ignored test a reason and runbook category",
@@ -751,12 +1008,25 @@
       "phase": "observability",
       "content": "Choose stable benchmarks for startup, warm compile time, TUI delay, and memory from existing tools. Use consistent machine-readable output, define nonblocking regression ranges, and remove repeated benchmark scripts found during cleanup.",
       "kind": "implement",
-      "depends_on": ["P23", "C21", "V24"],
+      "depends_on": [
+        "P23",
+        "C21",
+        "V24"
+      ],
       "priority": 65,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["scripts/bench_compile.sh", "scripts/bench_startup.py", "scripts/bench_startup_visible_ready.py", "scripts/benchmark_tools.sh", "src/bin/tui_bench/**", "docs/TERMINAL_BENCH.md"],
-      "mutexes": ["performance"],
+      "owned_paths": [
+        "scripts/bench_compile.sh",
+        "scripts/bench_startup.py",
+        "scripts/bench_startup_visible_ready.py",
+        "scripts/benchmark_tools.sh",
+        "src/bin/tui_bench/**",
+        "docs/TERMINAL_BENCH.md"
+      ],
+      "mutexes": [
+        "performance"
+      ],
       "acceptance": [
         "Repeat benchmarks reliably enough to set trend ranges",
         "Keep output machine-readable and limited in size",
@@ -769,12 +1039,28 @@
       "phase": "release",
       "content": "Define the official fork release name and promotion process. Use v1.0.0 unless the operator chooses another name before tagging. Check main history, Cargo version, changelog, tag, cached Nix builds, SBOM, provenance, metadata-only GitHub Release, install, and rollback.",
       "kind": "implement",
-      "depends_on": ["P21", "P23", "C21", "C22", "O21"],
+      "depends_on": [
+        "P21",
+        "P23",
+        "C21",
+        "C22",
+        "O21"
+      ],
       "priority": 75,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".github/workflows/release.yml", "RELEASING.md", "CHANGELOG.md", "scripts/release_check.py", "tests/test_release_check.py"],
-      "mutexes": ["workflows", "docs", "release"],
+      "owned_paths": [
+        ".github/workflows/release.yml",
+        "RELEASING.md",
+        "CHANGELOG.md",
+        "scripts/release_check.py",
+        "tests/test_release_check.py"
+      ],
+      "mutexes": [
+        "workflows",
+        "docs",
+        "release"
+      ],
       "acceptance": [
         "Reject old v0 tags outside main history as release proof",
         "Use or verify cached Nix output instead of adding a second binary channel",
@@ -787,12 +1073,24 @@
       "phase": "observability",
       "content": "Add O20 through O22 to the scheduled workflow and publish limited summaries and artifacts. Block pull requests only on stable checks that give repeatable results. Add no automatic retry that hides the first flaky failure.",
       "kind": "implement",
-      "depends_on": ["O20", "O21", "O22", "O23"],
+      "depends_on": [
+        "O20",
+        "O21",
+        "O22",
+        "O23"
+      ],
       "priority": 80,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": [".github/workflows/scheduled.yml", ".github/workflows/release.yml"],
-      "mutexes": ["workflows", "observability", "release"],
+      "owned_paths": [
+        ".github/workflows/scheduled.yml",
+        ".github/workflows/release.yml"
+      ],
+      "mutexes": [
+        "workflows",
+        "observability",
+        "release"
+      ],
       "acceptance": [
         "Pass scheduled workflow syntax checks and dry-run test data",
         "Save metrics, coverage, and performance output without commits to main",
@@ -805,7 +1103,9 @@
       "phase": "observability",
       "content": "Check metrics and release readiness with test data, one local run equal to the scheduled workflow, a release rehearsal with a tag candidate that cannot publish, and an independent review of secrets, permissions, retention, and rollback.",
       "kind": "verify",
-      "depends_on": ["O24"],
+      "depends_on": [
+        "O24"
+      ],
       "priority": 95,
       "worker_profile": "verify",
       "read_only": true,
@@ -823,7 +1123,13 @@
       "phase": "integration",
       "content": "Combine the verified delivery, isolation, cleanup, architecture, metrics, and release work into one integration list. Confirm that every worker commit has limited scope, follows dependencies, and starts from the main branch that includes the governance update.",
       "kind": "synthesize",
-      "depends_on": ["V20", "V21", "V22", "V23", "V24"],
+      "depends_on": [
+        "V20",
+        "V21",
+        "V22",
+        "V23",
+        "V24"
+      ],
       "priority": 100,
       "worker_profile": "synthesize",
       "read_only": false,
@@ -841,12 +1147,18 @@
       "phase": "integration",
       "content": "Apply the commits approved by B2 to one fresh branch from the official main branch. Resolve conflicts without losing reviewed behavior, update only final documentation that crosses tasks, and record every Modernization-Node trailer.",
       "kind": "implement",
-      "depends_on": ["B2"],
+      "depends_on": [
+        "B2"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": false,
-      "owned_paths": ["**"],
-      "mutexes": ["integration"],
+      "owned_paths": [
+        "**"
+      ],
+      "mutexes": [
+        "integration"
+      ],
       "acceptance": [
         "Include only approved node changes on the integration branch",
         "Keep all tests and policy during conflict resolution",
@@ -859,7 +1171,9 @@
       "phase": "integration",
       "content": "Run final local checks from narrow to broad: graph validation, APM validation, reference, security, and workflow checks, focused crate tests, the fast suite, preflight, Nix flake check, package and provenance build, and one clean install and startup test. Record real exit codes and leftover files.",
       "kind": "verify",
-      "depends_on": ["I30"],
+      "depends_on": [
+        "I30"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": true,
@@ -877,7 +1191,9 @@
       "phase": "integration",
       "content": "Independently try to find problems in the exact F30 commit. Repeat critical checks, inspect deletions and security boundaries, verify release names and rollback, and confirm that the work removed complexity instead of moving it.",
       "kind": "verify",
-      "depends_on": ["F30"],
+      "depends_on": [
+        "F30"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -895,7 +1211,9 @@
       "phase": "publication",
       "content": "PERMISSION REQUIRED: after the user approves, push the reviewed integration branch and open the modernization pull request. Wait for PR Gate to pass. Then change the live rules from the old required checks to the reviewed PR Gate as one operation, confirm the pull request can merge, merge without bypass, and verify main. Restore the old rules if the merge cannot finish. Do not publish a release in this node.",
       "kind": "verify",
-      "depends_on": ["F31"],
+      "depends_on": [
+        "F31"
+      ],
       "priority": 100,
       "worker_profile": "implement",
       "read_only": false,
@@ -915,7 +1233,9 @@
       "phase": "publication",
       "content": "Check the merged modernization from a fresh checkout and live GitHub state. Measure the first pull request and main workflow routes, confirm behavior for a documentation-only main change, test install and startup, and compare required checks with the expected-state manifest.",
       "kind": "verify",
-      "depends_on": ["H30"],
+      "depends_on": [
+        "H30"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -933,7 +1253,9 @@
       "phase": "publication",
       "content": "Schedule a read-only review for 30 days after publication. It must report pull request delay, runner-minutes, first-pass success, release time, test-isolation incidents, script-line reduction, and architecture measurements to the original session or a new audit session.",
       "kind": "implement",
-      "depends_on": ["V30"],
+      "depends_on": [
+        "V30"
+      ],
       "priority": 70,
       "worker_profile": "synthesize",
       "read_only": true,
@@ -951,7 +1273,9 @@
       "phase": "release",
       "content": "PERMISSION REQUIRED: after the user approves the final version and release notes, create the first official fork tag, run the release workflow, and create the metadata-only GitHub Release. Publish no binaries outside Nix.",
       "kind": "verify",
-      "depends_on": ["V30"],
+      "depends_on": [
+        "V30"
+      ],
       "priority": 90,
       "worker_profile": "implement",
       "read_only": false,
@@ -971,7 +1295,9 @@
       "phase": "release",
       "content": "Check the published release in a clean environment. Install and run the tagged Nix package, verify its version, provenance, and SBOM, reinstall the previous known-good revision, and confirm that the metadata-only release has no binary files.",
       "kind": "verify",
-      "depends_on": ["H31"],
+      "depends_on": [
+        "H31"
+      ],
       "priority": 100,
       "worker_profile": "verify",
       "read_only": true,
@@ -989,12 +1315,19 @@
       "phase": "closeout",
       "content": "Write the final modernization result. Record before-and-after measurements, remaining limits, deferred work, exact published commits and tag, and the scheduled 30-day review. Stop owned swarm workers and leave no old task graph or worktree state.",
       "kind": "synthesize",
-      "depends_on": ["F32", "V31"],
+      "depends_on": [
+        "F32",
+        "V31"
+      ],
       "priority": 100,
       "worker_profile": "synthesize",
       "read_only": false,
-      "owned_paths": ["docs/modernization/README.md"],
-      "mutexes": ["docs"],
+      "owned_paths": [
+        "docs/modernization/README.md"
+      ],
+      "mutexes": [
+        "docs"
+      ],
       "acceptance": [
         "Record Modernization-Barrier: B3",
         "Publish before-and-after measurements and clear remaining limits",
