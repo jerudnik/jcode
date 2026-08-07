@@ -79,10 +79,16 @@ for round in $(seq 1 "$ROUNDS"); do
         "${CARGO[@]}" test -p jcode-base --lib background
 
     # -- disconnect cleanup + startup reconciliation (F09/F10) -----------
+    # The F09 filter used to read "-p jcode-build-support reconcile". e1d17541e
+    # (2026-07-26) MOVED those tests to tool/selfdev/reconcile_tests.rs while
+    # retiring the distribution surface, so the old filter matched zero tests and
+    # dev_cargo.sh exited 97 refusing it. Retargeted to their real home rather
+    # than deleted; a bare `cargo test` would have exited 0 on zero matches and
+    # hidden this for as long as the step existed.
     run_step "disconnect-cleanup suite (F10)" \
         "${CARGO[@]}" test -p jcode-app-core --lib client_disconnect_cleanup
     run_step "pending-activation reconcile suite (F09)" \
-        "${CARGO[@]}" test -p jcode-build-support reconcile
+        "${CARGO[@]}" test -p jcode-app-core --lib selfdev::reconcile
 
     # -- residue ---------------------------------------------------------
     orphans=$(pgrep -lf 'fake-mcp-server|crash-loop-mcp-server|hung-mcp-server|stale-gen-mcp|slow-mcp\.sh|owner-aware-mcp' 2>/dev/null || true)
