@@ -1,0 +1,19 @@
+extends: substitution
+message: "Coined term: use '%s' instead of '%s'."
+level: error
+ignorecase: true
+swap:
+  durable rail: long-lived branch
+  durable rails: long-lived branches
+  maintenance window: merge record
+  advertised surface: public API
+  advertised-surface: public-API
+  evidence defect: wrong or missing evidence
+  signoff: approval
+  sign-off: approval
+  closeout: finish
+  close-out: finish
+  disposition: decision
+  prewarm: warm up
+  railway: pipeline
+  work contract: instructions

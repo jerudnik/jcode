@@ -1,0 +1,15 @@
+extends: existence
+message: "Hedge or filler: delete '%s' or state the fact."
+level: warning
+ignorecase: true
+tokens:
+  - it is worth noting
+  - it should be noted
+  - as appropriate
+  - where applicable
+  - in principle
+  - modulo
+  - needless to say
+  - for all intents and purposes
+  - going forward
+  - at this juncture
