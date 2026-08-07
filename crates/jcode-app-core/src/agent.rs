@@ -349,13 +349,7 @@ impl Drop for TestActivePidMarkerGuard {
 
 impl Agent {
     fn should_track_client_cache(&self) -> bool {
-        match std::env::var("JCODE_TRACK_CLIENT_CACHE") {
-            Ok(value) => {
-                let value = value.trim();
-                !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
-            }
-            Err(_) => false,
-        }
+        crate::env::flag_enabled("JCODE_TRACK_CLIENT_CACHE")
     }
 
     fn build_base(

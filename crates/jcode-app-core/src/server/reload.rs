@@ -107,13 +107,7 @@ pub(super) async fn await_reload_signal(
         );
         super::acknowledge_reload_signal(&signal);
 
-        if std::env::var("JCODE_TEST_SESSION")
-            .map(|value| {
-                let trimmed = value.trim();
-                !trimmed.is_empty() && trimmed != "0" && !trimmed.eq_ignore_ascii_case("false")
-            })
-            .unwrap_or(false)
-        {
+        if crate::env::flag_enabled("JCODE_TEST_SESSION") {
             crate::logging::info(
                 "Server: JCODE_TEST_SESSION set, skipping process exec for reload test",
             );

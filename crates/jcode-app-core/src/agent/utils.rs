@@ -3,13 +3,7 @@ use std::path::Path;
 use std::process::Command;
 
 pub(super) fn trace_enabled() -> bool {
-    match std::env::var("JCODE_TRACE") {
-        Ok(value) => {
-            let value = value.trim();
-            !value.is_empty() && value != "0" && value.to_lowercase() != "false"
-        }
-        Err(_) => false,
-    }
+    crate::env::flag_enabled("JCODE_TRACE")
 }
 
 pub(super) fn git_state_for_dir(dir: &Path) -> Option<GitState> {

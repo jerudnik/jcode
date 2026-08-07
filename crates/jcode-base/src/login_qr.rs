@@ -3,13 +3,7 @@ use qrcode::{Color, QrCode, types::QrError};
 const QUIET_ZONE_WIDTH: usize = 2;
 
 fn env_truthy(key: &str) -> bool {
-    std::env::var(key)
-        .ok()
-        .map(|value| {
-            let trimmed = value.trim();
-            !trimmed.is_empty() && trimmed != "0" && !trimmed.eq_ignore_ascii_case("false")
-        })
-        .unwrap_or(false)
+    crate::env::flag_enabled(key)
 }
 
 fn qr_rendering_enabled() -> bool {
