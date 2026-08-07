@@ -328,6 +328,16 @@ the *seed*, not the *shape*.
 The comprehensiveness guarantee therefore does **not** depend on the first agent
 being smart. A mediocre first decomposition still gets caught and expanded.
 
+The recursion right is not an instruction to spend the entire member budget.
+Concurrency is a ceiling, not a target: expand only when a node has independently
+checkable outputs with distinct ownership or evidence scopes, and use the
+smallest sufficient child set. A projected plan may label a node `EXECUTION
+SHAPE: ATOMIC` or `EXECUTION SHAPE: COMPOSITE`. That label guides the worker and
+keeps reviewed leaves bounded; it does not remove the worker's right to expand an
+atomic node when execution uncovers genuinely independent work. Critique gates
+likewise inject focused, evidence-backed gaps that affect acceptance,
+correctness, safety, or claimed coverage, not speculative nice-to-haves.
+
 ```mermaid
 flowchart LR
   A[fully scripted: system dictates facets] --- B[seeded: first agent drafts, gates+recursion correct it] --- C[fully emergent: agent decides everything, no gates]

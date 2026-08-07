@@ -342,8 +342,8 @@ struct TaskSnapshot {
 ///
 /// This is the mechanism that makes the swarm's large agent budget actually get
 /// used: every dispatched node carries an in-band directive telling the worker
-/// it may `expand_node` into MANY parallel children and must close with a typed
-/// artifact, and every gate carries the `inject_gap`-or-pass contract. Without
+/// it may `expand_node` into the smallest sufficient parallel child set and
+/// close with a typed artifact; every gate carries the `inject_gap`-or-pass contract. Without
 /// it, only the seeding session (which ran at `swarm-deep` effort) knows the
 /// deep workflow, and freshly spawned workers execute serially. A re-woken
 /// composite synthesis keeps its dedicated synthesis brief instead, since

@@ -65,6 +65,9 @@
       "read_only": true,
       "owned_paths": [],
       "mutexes": [],
+      "expandable": true,
+      "required_children_min": 3,
+      "required_children_max": 4,
       "acceptance": [
         "Authoritative remote, branch ancestry, and clean worktree are recorded",
         "Live GitHub rules and workflow names are compared with scripts/required-checks.json",
@@ -619,7 +622,7 @@
       "phase": "architecture",
       "content": "Remove the root crate's wildcard re-export of jcode-tui. Replace consumers with explicit crate/module paths, keep the intended root API narrow, and measure compile and binary behavior against A21 baselines.",
       "kind": "implement",
-      "depends_on": ["A20", "A21", "O21"],
+      "depends_on": ["A20", "A21", "V21"],
       "priority": 75,
       "worker_profile": "implement",
       "read_only": false,

@@ -9,7 +9,7 @@ This directory converts the repository audit into an executable, restartable pla
 - The native swarm task graph owns live assignment, concurrency, progress, typed artifacts, retries, and gap injection.
 - Git commits carrying `Modernization-Node:` trailers provide restart hints. Phase joins also carry `Modernization-Barrier:` trailers.
 
-The plan contains 52 nodes and four phase barriers. Default worker concurrency is 6 and must never exceed 8.
+The plan contains 52 nodes and four phase barriers. Default worker concurrency is 6 and must never exceed 8. `waves` also reports the static ready-frontier width so a high concurrency setting cannot disguise a serial graph.
 
 ## Outcome
 
@@ -88,14 +88,11 @@ The JSON contains exact `task_graph` and `run_plan` argument objects. Projected 
 7. At phase barriers, use `swarm await_members`, synthesize the reports, stop unneeded workers, and make a bounded barrier commit.
 8. A full run stops when an `H*` worker reports blocked. Obtain fresh user authorization in the originating session, then resume that node. When using `next`, a non-empty `authorization_nodes` array is an earlier stop: do not call `run_plan` until authorization is granted. The embedded worker warning is defense in depth.
 
-Recommended routing follows `.jcode/swarm-prompt.md`:
+Routing follows `.jcode/swarm-prompt.md`, the repository's sole routing authority. Run `swarm list_models` before pinning a non-default model. The graph's `worker_profile` values are prompt and reporting hints, not model selectors: one `run_plan` invocation applies one `model` and `effort` to every worker it creates. Use a capable general route for the complete `seed`, or drive profile-homogeneous waves when route specialization is worth the extra coordination.
 
-- design, investigation, verification, and review: Fable 5;
-- implementation: GPT-5.5 at low effort;
-- bulk context retrieval: GPT-5.5 at no reasoning effort;
-- synthesis: coordinator or an explicitly assigned synthesis worker.
+Every projected node declares an execution shape. Normal reviewed leaves are `ATOMIC`: finish the bounded node once acceptance is proved or falsification triggers, and do not split it merely to consume the agent budget. Nodes marked `expandable` are `COMPOSITE` and must create the smallest sufficient disjoint child set. `M00` deliberately opens with three to four read-only drift checks; `A25` creates three to five disjoint hotspot children.
 
-Run `swarm list_models` before pinning a non-default model.
+Concurrency is a ceiling, not a target. The static graph still contains necessary serial gates and architecture migrations. Use the `waves` summary to distinguish scheduler starvation from a narrow ready frontier, and widen dependencies only when ownership, acceptance, and dataflow remain honest.
 
 ## Commit and resume protocol
 

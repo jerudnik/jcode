@@ -335,21 +335,26 @@ pub fn append_deep_node_instructions(message: &str, node_id: &str) -> String {
     out.push_str(SWARM_DEEP_NODE_MARKER);
     out.push_str(&format!(
         "\nYou are executing node '{node_id}' of a deep task graph with a large parallel agent \
-budget (up to {MAX_SWARM_MEMBERS} live agents per swarm; using it is expected, not wasteful). \
-Choose one of exactly two finishes for this node:\n\
-1. Decompose for parallelism: if this node contains more than one independently checkable \
-concern, do NOT work through it serially. Call the swarm tool with action=\"expand_node\", \
-node_id=\"{node_id}\", and MANY independent children (add depends_on edges only for real data \
-dependencies, so the ready set stays wide). Then finish your turn; the children fan out to \
-parallel agents and you will be re-woken to synthesize their results.\n\
-2. Execute atomically: do the work, then call the swarm tool with action=\"complete_node\", \
-node_id=\"{node_id}\", and a typed artifact: findings, evidence (file:line refs), validation, \
-open_questions, a REQUIRED confidence (low, medium, or high; report low honestly, it routes \
-follow-up work to shore up your scope instead of counting against you), and an honest \
-what_i_did_not_check (the critique gate turns those into new nodes, so listing them is how \
-coverage grows).\n\
-These are the ONLY two ways this node can close: a turn that ends without expand_node or \
-complete_node gets the node re-queued to a fresh agent, and a repeat fails it.\n"
+	budget (up to {MAX_SWARM_MEMBERS} live agents per swarm). That budget is a ceiling, not a \
+	target: use parallelism when it shortens independent work, not to multiply coordination. \
+	First honor any explicit `EXECUTION SHAPE: ATOMIC` or `EXECUTION SHAPE: COMPOSITE` contract \
+	in the assignment. Choose one of exactly two finishes for this node:\n\
+	1. Decompose for parallelism: when the node is declared COMPOSITE, or when execution reveals \
+	two or more independently checkable outputs with disjoint scopes, call the swarm tool with \
+	action=\"expand_node\", node_id=\"{node_id}\", and the smallest sufficient child set \
+	(normally two to six). Give each child a distinct output and ownership boundary. Add \
+	depends_on edges only for real data dependencies so the ready set stays wide. Do not split a \
+	cohesive leaf merely to keep worker slots busy. Then finish your turn; the children fan out \
+	and you will be re-woken to synthesize their results.\n\
+	2. Execute atomically: when the node is declared ATOMIC or is one cohesive task, do the work \
+	and stop once its acceptance is proved or its falsification condition triggers. Then call the \
+	swarm tool with action=\"complete_node\", node_id=\"{node_id}\", and a typed artifact: \
+	findings, evidence (file:line refs), validation, open_questions, a REQUIRED confidence (low, \
+	medium, or high; report low honestly, it routes follow-up work to shore up your scope instead \
+	of counting against you), and an honest what_i_did_not_check (the critique gate turns \
+	material omissions into new nodes).\n\
+	These are the ONLY two ways this node can close: a turn that ends without expand_node or \
+	complete_node gets the node re-queued to a fresh agent, and a repeat fails it.\n"
     ));
     out.push_str("</system-reminder>");
     out
@@ -439,10 +444,12 @@ pub fn append_deep_gate_instructions(
         "\nYou are executing critique/verify gate '{gate_id}' of a deep task graph. Your job is \
 to find gaps, not to pass work through. Read every audited artifact, especially each \
 what_i_did_not_check list, and probe them. Finish in one of exactly two ways:\n\
-1. Gaps or failures found: call the swarm tool with action=\"inject_gap\", \
-gate_id=\"{gate_id}\", and one new node per gap (they run in parallel and you re-run \
-afterwards). The parent cannot close until they drain, so be thorough now. Injecting nodes \
-is SUCCESS for a gate, not failure: a growing graph is the system working.\n\
+	1. Material gaps or failures found: call the swarm tool with action=\"inject_gap\", \
+	gate_id=\"{gate_id}\", and one focused node per independent, evidence-backed gap. Combine \
+	symptoms with the same root cause. A gap must affect acceptance, correctness, safety, or the \
+	claimed coverage; do not inject speculative nice-to-haves merely to grow the graph. The nodes \
+	run in parallel and you re-run afterwards. Injecting justified nodes is SUCCESS for a gate, \
+	not failure.\n\
 2. Genuinely clean: call the swarm tool with action=\"complete_node\", node_id=\"{gate_id}\", \
 and an artifact whose findings account for EVERY node you audited BY ID with what you \
 checked and why no gaps remain. The server rejects a pass whose findings/open_questions \
@@ -730,6 +737,9 @@ mod tests {
         assert!(out.contains("action=\"complete_node\", node_id=\"explore.parser\""));
         // The budget is advertised so workers know fan-out is expected.
         assert!(out.contains(&MAX_SWARM_MEMBERS.to_string()));
+        assert!(out.contains("ceiling, not a target"));
+        assert!(out.contains("smallest sufficient child set"));
+        assert!(out.contains("EXECUTION SHAPE: ATOMIC"));
         assert!(out.contains("what_i_did_not_check"));
         // Idempotent: re-appending (even with a different id) is a no-op.
         assert_eq!(append_deep_node_instructions(&out, "other"), out);
@@ -741,6 +751,8 @@ mod tests {
         assert!(out.contains(SWARM_DEEP_NODE_MARKER));
         assert!(out.contains("action=\"inject_gap\", gate_id=\"root::gate\""));
         assert!(out.contains("action=\"complete_node\", node_id=\"root::gate\""));
+        assert!(out.contains("evidence-backed gap"));
+        assert!(out.contains("speculative nice-to-haves"));
         assert!(out.contains("what_i_did_not_check"));
         // No audit scope / low-confidence siblings: no callouts.
         assert!(!out.contains("AUDIT SCOPE"));

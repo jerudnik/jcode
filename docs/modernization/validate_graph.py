@@ -323,6 +323,20 @@ def topological_waves(
     return waves
 
 
+def wave_metrics(graph: dict[str, Any], waves: list[list[str]]) -> dict[str, Any]:
+    node_count = sum(len(wave) for wave in waves)
+    wave_count = len(waves)
+    return {
+        "wave_count": wave_count,
+        "singleton_waves": sum(len(wave) == 1 for wave in waves),
+        "max_width": max((len(wave) for wave in waves), default=0),
+        "equal_duration_average_parallelism": (
+            round(node_count / wave_count, 2) if wave_count else 0.0
+        ),
+        "configured_concurrency": graph.get("default_concurrency"),
+    }
+
+
 def git_trailers() -> tuple[set[str], set[str]]:
     try:
         messages = subprocess.check_output(
@@ -363,6 +377,20 @@ def git_trailers() -> tuple[set[str], set[str]]:
 
 def swarm_content(node: dict[str, Any], *, barrier: bool = False) -> str:
     sections = [node["content"]]
+    if node.get("expandable"):
+        sections.append(
+            "EXECUTION SHAPE: COMPOSITE. Expand into the smallest sufficient set of "
+            f"{node.get('required_children_min')} to {node.get('required_children_max')} "
+            "independent child nodes with distinct outputs and disjoint ownership. Do not "
+            "mutate before the expansion is accepted."
+        )
+    else:
+        sections.append(
+            "EXECUTION SHAPE: ATOMIC. This reviewed node is intended to be one bounded "
+            "worker task. Do not expand it merely to consume the agent budget. Expand only "
+            "if execution uncovers multiple independently verifiable concerns that cannot "
+            "honestly close inside this node's scope."
+        )
     acceptance = node.get("acceptance", [])
     if acceptance:
         sections.append("Acceptance:\n" + "\n".join(f"- {item}" for item in acceptance))
@@ -398,11 +426,6 @@ def swarm_content(node: dict[str, Any], *, barrier: bool = False) -> str:
         sections.append(
             "MANUAL AUTHORIZATION GATE: report blocked until the coordinator obtains fresh, "
             "explicit user authorization in the originating session. Do not perform the external write first."
-        )
-    if node.get("expandable"):
-        sections.append(
-            f"COMPOSITE NODE: expand into {node.get('required_children_min')} to "
-            f"{node.get('required_children_max')} disjoint child nodes before mutation."
         )
     return "\n\n".join(sections)
 
@@ -449,11 +472,20 @@ def command_validate(graph: dict[str, Any], as_json: bool) -> int:
 
 def command_waves(graph: dict[str, Any], as_json: bool) -> int:
     waves = topological_waves(graph)
+    metrics = wave_metrics(graph, waves)
     if as_json:
-        print(json.dumps({"waves": waves}, indent=2))
+        print(json.dumps({"metrics": metrics, "waves": waves}, indent=2))
     else:
         for index, wave in enumerate(waves, start=1):
-            print(f"wave {index:02d}: {' '.join(wave)}")
+            print(f"wave {index:02d} width={len(wave)}: {' '.join(wave)}")
+        print(
+            "summary: "
+            f"waves={metrics['wave_count']} "
+            f"singleton={metrics['singleton_waves']} "
+            f"max_width={metrics['max_width']} "
+            f"equal_duration_avg={metrics['equal_duration_average_parallelism']:.2f} "
+            f"configured_concurrency={metrics['configured_concurrency']}"
+        )
     return 0
 
 
