@@ -657,7 +657,9 @@ def _validate_state_v2(
             )
 
 
-def expansion_violations(graph: dict[str, Any], state: dict[str, Any]) -> dict[str, str]:
+def expansion_violations(
+    graph: dict[str, Any], state: dict[str, Any]
+) -> dict[str, str]:
     """Roots whose recorded state contradicts their children, by root id.
 
     ``validate_state`` only checks each record in isolation, so a root could sit
@@ -865,17 +867,11 @@ def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def command_checkpoint(args: argparse.Namespace) -> int:
-    # Deliberately not `validate_repository()`: that also enforces expansion
-    # consistency, and a checkpoint is precisely how an inconsistent root is
-    # repaired. Gating entry on it would deadlock the only tool that can fix
-    # the problem. Consistency is enforced on the *resulting* state below, so
-    # a checkpoint may repair an inconsistency but never introduce one.
-    graph = load_json(GRAPH_PATH)
-    state = load_json(STATE_PATH)
-    nodes = validate_graph(graph)
-    validate_state(state, nodes, published_ref=args.published_ref)
-    schema_version = state.get("schema_version")
+def _build_checkpoint_update(
+    args: argparse.Namespace,
+    nodes: dict[str, dict[str, Any]],
+    schema_version: int,
+) -> dict[str, Any]:
     if args.node not in nodes:
         raise RailwayError(f"unknown node: {args.node}")
     if args.state not in ALLOWED_STATES:
@@ -912,7 +908,33 @@ def command_checkpoint(args: argparse.Namespace) -> int:
         record_update = _build_checkpoint_record_v1(args)
     else:
         raise RailwayError("unsupported STATE.json schema_version")
+    return record_update
 
+
+def _last_checkpoint_record(
+    args: argparse.Namespace,
+    record_update: dict[str, Any],
+    schema_version: int,
+) -> dict[str, Any]:
+    if schema_version == 2:
+        return {
+            "node": args.node,
+            "state": args.state,
+            "reviewed_commit": record_update["reviewed_commit"],
+            "published_commit": record_update["published_commit"],
+            "updated_at": args.updated_at,
+            "summary": args.summary,
+        }
+    return {
+        "node": args.node,
+        "state": args.state,
+        "commit": record_update["commit"],
+        "updated_at": args.updated_at,
+        "summary": args.summary,
+    }
+
+
+def _state_lock_path() -> Path:
     lock_value = subprocess.check_output(
         ["git", "rev-parse", "--git-path", "jcode-ideal-base-state.lock"],
         cwd=REPO_ROOT,
@@ -922,28 +944,37 @@ def command_checkpoint(args: argparse.Namespace) -> int:
     if not lock_path.is_absolute():
         lock_path = REPO_ROOT / lock_path
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+") as lock:
+    return lock_path
+
+
+def _apply_checkpoint_transaction(
+    graph: dict[str, Any],
+    state: dict[str, Any],
+    nodes: dict[str, dict[str, Any]],
+    requests: list[argparse.Namespace],
+    *,
+    published_ref: str,
+) -> dict[str, Any]:
+    schema_version = state.get("schema_version")
+    updates = [
+        (request, _build_checkpoint_update(request, nodes, schema_version))
+        for request in requests
+    ]
+
+    with _state_lock_path().open("a+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         latest = load_json(STATE_PATH)
-        record = latest["nodes"][args.node]
-        record.update(record_update)
-        if schema_version == 2:
-            latest["last_checkpoint"] = {
-                "node": args.node,
-                "state": args.state,
-                "reviewed_commit": record_update["reviewed_commit"],
-                "published_commit": record_update["published_commit"],
-                "updated_at": args.updated_at,
-                "summary": args.summary,
-            }
-        else:
-            latest["last_checkpoint"] = {
-                "node": args.node,
-                "state": args.state,
-                "commit": record_update["commit"],
-                "updated_at": args.updated_at,
-                "summary": args.summary,
-            }
+        if latest.get("schema_version") != schema_version:
+            raise RailwayError(
+                "STATE.json schema changed while checkpoint waited for lock"
+            )
+        validate_state(latest, nodes, published_ref=published_ref)
+        before = expansion_violations(graph, latest)
+        for request, record_update in updates:
+            latest["nodes"][request.node].update(record_update)
+            latest["last_checkpoint"] = _last_checkpoint_record(
+                request, record_update, schema_version
+            )
         # Validate the prospective state before it reaches disk. Writing first
         # and validating after would leave a rejected state persisted, which is
         # worse than the inconsistency being prevented.
@@ -952,8 +983,7 @@ def command_checkpoint(args: argparse.Namespace) -> int:
         # not introduce or worsen a violation, but it must stay able to repair
         # one. Demanding a globally clean result would deadlock repair whenever
         # two roots drifted at once, since neither could be fixed first.
-        validate_state(latest, nodes, published_ref=args.published_ref)
-        before = expansion_violations(graph, state)
+        validate_state(latest, nodes, published_ref=published_ref)
         after = expansion_violations(graph, latest)
         introduced = {
             root: message
@@ -961,16 +991,128 @@ def command_checkpoint(args: argparse.Namespace) -> int:
             if before.get(root) != message
         }
         if introduced:
-            raise RailwayError(
-                "; ".join(introduced[key] for key in sorted(introduced))
-            )
+            raise RailwayError("; ".join(introduced[key] for key in sorted(introduced)))
         atomic_write_json(STATE_PATH, latest)
+    return latest
+
+
+def command_checkpoint(args: argparse.Namespace) -> int:
+    # Deliberately not `validate_repository()`: that also enforces expansion
+    # consistency, and a checkpoint is precisely how an inconsistent root is
+    # repaired. Gating entry on it would deadlock the only tool that can fix
+    # the problem. Consistency is enforced on the *resulting* state below, so
+    # a checkpoint may repair an inconsistency but never introduce one.
+    graph = load_json(GRAPH_PATH)
+    state = load_json(STATE_PATH)
+    nodes = validate_graph(graph)
+    validate_state(state, nodes, published_ref=args.published_ref)
+    latest = _apply_checkpoint_transaction(
+        graph, state, nodes, [args], published_ref=args.published_ref
+    )
     print(f"checkpointed {args.node} -> {args.state}")
     remaining = expansion_violations(graph, latest)
     if remaining:
         # Surface, do not fail: the checkpoint was legitimate and is written.
         # These are pre-existing inconsistencies that this checkpoint did not
         # cause, and each needs its own repairing checkpoint.
+        for key in sorted(remaining):
+            print(f"warning: {remaining[key]}")
+    return 0
+
+
+_BATCH_UPDATE_FIELDS = {
+    "node",
+    "state",
+    "commit",
+    "reviewed_commit",
+    "published_commit",
+    "evidence",
+    "summary",
+    "updated_at",
+}
+
+
+def _load_checkpoint_batch(args: argparse.Namespace) -> list[argparse.Namespace]:
+    payload = load_json(Path(args.plan))
+    if set(payload) != {"updates"}:
+        raise RailwayError("checkpoint batch must contain only an 'updates' field")
+    updates = payload["updates"]
+    if not isinstance(updates, list) or not updates:
+        raise RailwayError("checkpoint batch 'updates' must be a non-empty list")
+    requests = []
+    for index, update in enumerate(updates, start=1):
+        label = f"checkpoint batch update {index}"
+        if not isinstance(update, dict):
+            raise RailwayError(f"{label} must be an object")
+        unknown = sorted(set(update) - _BATCH_UPDATE_FIELDS)
+        if unknown:
+            raise RailwayError(f"{label} has unknown fields: {', '.join(unknown)}")
+        missing = [
+            field
+            for field in ("node", "state", "summary", "updated_at")
+            if not isinstance(update.get(field), str) or not update[field]
+        ]
+        if missing:
+            raise RailwayError(f"{label} requires non-empty: {', '.join(missing)}")
+        evidence = update.get("evidence")
+        if evidence is not None and (
+            not isinstance(evidence, list)
+            or any(not isinstance(item, str) for item in evidence)
+        ):
+            raise RailwayError(f"{label} evidence must be a list of paths")
+        requests.append(
+            argparse.Namespace(
+                node=update["node"],
+                state=update["state"],
+                commit=update.get("commit"),
+                reviewed_commit=update.get("reviewed_commit"),
+                published_commit=update.get("published_commit"),
+                published_ref=args.published_ref,
+                evidence=evidence,
+                summary=update["summary"],
+                updated_at=update["updated_at"],
+            )
+        )
+    return requests
+
+
+def _validate_checkpoint_batch_scope(
+    graph: dict[str, Any], requests: list[argparse.Namespace]
+) -> str:
+    if any(request.state not in DEPENDENCY_COMPLETE for request in requests):
+        raise RailwayError(
+            "checkpoint batch may contain only dependency-complete states"
+        )
+    node_ids = {request.node for request in requests}
+    if len(node_ids) < 2:
+        raise RailwayError("checkpoint batch requires at least two unique nodes")
+    matching_roots = []
+    for root_id, children in graph["expansions"].items():
+        scope = {root_id, *(child["id"] for child in children)}
+        if root_id in node_ids and node_ids <= scope:
+            matching_roots.append(root_id)
+    if len(matching_roots) != 1:
+        raise RailwayError(
+            "checkpoint batch must contain exactly one expansion root and only "
+            "that root's direct children"
+        )
+    return matching_roots[0]
+
+
+def command_checkpoint_batch(args: argparse.Namespace) -> int:
+    graph = load_json(GRAPH_PATH)
+    state = load_json(STATE_PATH)
+    nodes = validate_graph(graph)
+    validate_state(state, nodes, published_ref=args.published_ref)
+    requests = _load_checkpoint_batch(args)
+    root_id = _validate_checkpoint_batch_scope(graph, requests)
+    latest = _apply_checkpoint_transaction(
+        graph, state, nodes, requests, published_ref=args.published_ref
+    )
+    sequence = ", ".join(f"{request.node} -> {request.state}" for request in requests)
+    print(f"checkpointed batch for {root_id}: {sequence}")
+    remaining = expansion_violations(graph, latest)
+    if remaining:
         for key in sorted(remaining):
             print(f"warning: {remaining[key]}")
     return 0
@@ -1007,9 +1149,7 @@ def _build_checkpoint_record_v2(
             ("--published-commit", published_commit),
         ):
             if not commit or not FULL_SHA.match(commit):
-                raise RailwayError(
-                    f"completed checkpoint requires a 40-hex {label}"
-                )
+                raise RailwayError(f"completed checkpoint requires a 40-hex {label}")
         if not git_commit_object_exists(reviewed_commit):
             raise RailwayError(
                 f"reviewed_commit object does not exist: {reviewed_commit}"
@@ -1058,12 +1198,16 @@ def build_parser() -> argparse.ArgumentParser:
     check = subparsers.add_parser(
         "check", help="validate graph, state, links, evidence, and protected hash"
     )
-    check.add_argument("--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help)
+    check.add_argument(
+        "--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help
+    )
     check.set_defaults(handler=command_check)
     status = subparsers.add_parser(
         "status", help="summarize durable node state and runnable work"
     )
-    status.add_argument("--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help)
+    status.add_argument(
+        "--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help
+    )
     status.set_defaults(handler=command_status)
     next_parser = subparsers.add_parser(
         "next", help="print currently runnable graph nodes"
@@ -1097,6 +1241,17 @@ def build_parser() -> argparse.ArgumentParser:
     checkpoint.add_argument("--summary", required=True)
     checkpoint.add_argument("--updated-at", required=True, help="RFC3339 timestamp")
     checkpoint.set_defaults(handler=command_checkpoint)
+    checkpoint_batch = subparsers.add_parser(
+        "checkpoint-batch",
+        help="atomically close one expansion root and its direct children",
+    )
+    checkpoint_batch.add_argument(
+        "plan", help="JSON file containing an ordered updates list"
+    )
+    checkpoint_batch.add_argument(
+        "--published-ref", default=DEFAULT_PUBLISHED_REF, help=published_ref_help
+    )
+    checkpoint_batch.set_defaults(handler=command_checkpoint_batch)
     return parser
 
 

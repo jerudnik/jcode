@@ -77,8 +77,7 @@ class IdealBaseRailwayTests(unittest.TestCase):
             self.assertIn(
                 record.get("state"),
                 states_for_action[action],
-                f"{node['id']} is offered as {action!r} but is "
-                f"{record.get('state')!r}",
+                f"{node['id']} is offered as {action!r} but is {record.get('state')!r}",
             )
             if action != "dispatch":
                 # Only a dispatch claims the work can START now. A verify acts
@@ -390,9 +389,7 @@ class SchemaV2ValidatorTests(unittest.TestCase):
         # Lenient opt-in: same state validates, and the published-side checks
         # (existence + ancestry) still ran strictly, proving only step 1 was
         # degraded.
-        with mock.patch.dict(
-            os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}
-        ):
+        with mock.patch.dict(os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}):
             railway.validate_state(
                 accepted_state(), self.nodes, published_ref=self.BASELINE_MAIN
             )
@@ -401,9 +398,7 @@ class SchemaV2ValidatorTests(unittest.TestCase):
         # existence check is not covered by the opt-in.
         fabricated = accepted_state()
         fabricated["nodes"]["W0"]["published_commit"] = missing
-        with mock.patch.dict(
-            os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}
-        ):
+        with mock.patch.dict(os.environ, {railway.MISSING_REVIEWED_OBJECTS_ENV: "1"}):
             with self.assertRaisesRegex(
                 railway.RailwayError, "published_commit object does not exist"
             ):
@@ -428,9 +423,7 @@ class SchemaV2ValidatorTests(unittest.TestCase):
         # commit that exists but is not on the baseline must fail even
         # though object existence alone would pass.
         self.assertTrue(railway.git_commit_object_exists(self.head))
-        self.assertFalse(
-            railway.git_commit_is_ancestor(self.head, self.BASELINE_MAIN)
-        )
+        self.assertFalse(railway.git_commit_is_ancestor(self.head, self.BASELINE_MAIN))
         with self.assertRaisesRegex(railway.RailwayError, "not an ancestor"):
             railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
 
@@ -463,9 +456,7 @@ class SchemaV2ValidatorTests(unittest.TestCase):
                 "evidence": ["docs/fork/ideal-base/evidence/README.md"],
             }
         )
-        self.assertFalse(
-            railway.git_commit_is_ancestor(self.head, self.BASELINE_MAIN)
-        )
+        self.assertFalse(railway.git_commit_is_ancestor(self.head, self.BASELINE_MAIN))
         railway.validate_state(state, self.nodes, published_ref=self.BASELINE_MAIN)
 
     def test_unresolved_published_ref_fails_closed(self) -> None:
@@ -496,8 +487,8 @@ class SchemaV2ValidatorTests(unittest.TestCase):
             # duration of this test to exercise the fail-closed path through
             # the real validator entry point, not just the bare helper.
             original_is_shallow = railway.git_repository_is_shallow
-            railway.git_repository_is_shallow = (
-                lambda *, cwd=Path(directory): original_is_shallow(cwd=cwd)
+            railway.git_repository_is_shallow = lambda *, cwd=Path(directory): (
+                original_is_shallow(cwd=cwd)
             )
             try:
                 state = self.minimal_state()
@@ -665,6 +656,55 @@ class CheckpointSchemaV2Tests(unittest.TestCase):
         finally:
             railway.STATE_PATH = original_state_path
 
+    def run_checkpoint_batch(self, updates: list[dict]) -> int:
+        plan_path = Path(self.tempdir.name) / "checkpoint-batch.json"
+        plan_path.write_text(json.dumps({"updates": updates}, indent=2))
+        original_state_path = railway.STATE_PATH
+        railway.STATE_PATH = self.state_path
+        try:
+            parser = railway.build_parser()
+            args = parser.parse_args(
+                [
+                    "checkpoint-batch",
+                    str(plan_path),
+                    "--published-ref",
+                    self.BASELINE_MAIN,
+                ]
+            )
+            return args.handler(args)
+        finally:
+            railway.STATE_PATH = original_state_path
+
+    def final_child_fixture(self, root_id: str = "W0") -> str:
+        graph = railway.load_json(railway.GRAPH_PATH)
+        children = graph["expansions"][root_id]
+        final_child = children[-1]["id"]
+        written = json.loads(self.state_path.read_text())
+        written["nodes"][root_id]["state"] = "in_progress"
+        for child in children[:-1]:
+            written["nodes"][child["id"]].update(
+                {
+                    "state": "accepted",
+                    "reviewed_commit": self.head,
+                    "published_commit": self.BASELINE_MAIN,
+                    "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+                }
+            )
+        written["nodes"][final_child]["state"] = "implemented"
+        self.state_path.write_text(json.dumps(written, indent=2))
+        return final_child
+
+    def accepted_update(self, node: str, summary: str) -> dict:
+        return {
+            "node": node,
+            "state": "accepted",
+            "reviewed_commit": self.head,
+            "published_commit": self.BASELINE_MAIN,
+            "evidence": ["docs/fork/ideal-base/evidence/README.md"],
+            "summary": summary,
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+
     def test_bare_commit_flag_is_rejected_against_schema_v2(self) -> None:
         with self.assertRaisesRegex(railway.RailwayError, r"--commit is not valid"):
             self.run_checkpoint(
@@ -800,6 +840,89 @@ class CheckpointSchemaV2Tests(unittest.TestCase):
                     "2026-01-01T00:00:00Z",
                 ]
             )
+
+    def test_batch_closes_final_child_and_root_without_transient_violation(
+        self,
+    ) -> None:
+        final_child = self.final_child_fixture()
+        before = self.state_path.read_bytes()
+        with self.assertRaisesRegex(railway.RailwayError, "every child is complete"):
+            self.run_checkpoint(
+                [
+                    final_child,
+                    "--state",
+                    "accepted",
+                    "--reviewed-commit",
+                    self.head,
+                    "--published-commit",
+                    self.BASELINE_MAIN,
+                    "--evidence",
+                    "docs/fork/ideal-base/evidence/README.md",
+                    "--published-ref",
+                    self.BASELINE_MAIN,
+                    "--summary",
+                    "final child",
+                    "--updated-at",
+                    "2026-01-01T00:00:00Z",
+                ]
+            )
+        self.assertEqual(self.state_path.read_bytes(), before)
+        with self.assertRaisesRegex(railway.RailwayError, "children are not complete"):
+            self.run_checkpoint(
+                [
+                    "W0",
+                    "--state",
+                    "accepted",
+                    "--reviewed-commit",
+                    self.head,
+                    "--published-commit",
+                    self.BASELINE_MAIN,
+                    "--evidence",
+                    "docs/fork/ideal-base/evidence/README.md",
+                    "--published-ref",
+                    self.BASELINE_MAIN,
+                    "--summary",
+                    "root first",
+                    "--updated-at",
+                    "2026-01-01T00:00:00Z",
+                ]
+            )
+        self.assertEqual(self.state_path.read_bytes(), before)
+
+        code = self.run_checkpoint_batch(
+            [
+                self.accepted_update(final_child, "final child"),
+                self.accepted_update("W0", "root close"),
+                self.accepted_update(final_child, "final audit checkpoint"),
+            ]
+        )
+        self.assertEqual(code, 0)
+        written = json.loads(self.state_path.read_text())
+        self.assertEqual(written["nodes"][final_child]["state"], "accepted")
+        self.assertEqual(written["nodes"]["W0"]["state"], "accepted")
+        self.assertEqual(written["last_checkpoint"]["node"], final_child)
+        self.assertEqual(
+            written["last_checkpoint"]["summary"], "final audit checkpoint"
+        )
+        self.assertNotIn(
+            "W0",
+            railway.expansion_violations(
+                railway.load_json(railway.GRAPH_PATH), written
+            ),
+        )
+
+    def test_invalid_checkpoint_batch_is_atomic(self) -> None:
+        final_child = self.final_child_fixture()
+        before = self.state_path.read_bytes()
+        invalid_root = self.accepted_update("W0", "root close")
+        invalid_root["evidence"] = ["does/not/exist"]
+        with self.assertRaisesRegex(
+            railway.RailwayError, "evidence path does not exist"
+        ):
+            self.run_checkpoint_batch(
+                [self.accepted_update(final_child, "final child"), invalid_root]
+            )
+        self.assertEqual(self.state_path.read_bytes(), before)
 
 
 if __name__ == "__main__":
