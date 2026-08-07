@@ -118,6 +118,10 @@ After a node survives verification:
 1. Commit its bounded implementation and tests.
 2. Commit bounded evidence/review updates when appropriate.
 3. Run `ideal_base_railway.py checkpoint` with the accepted commit and evidence.
+   When the last incomplete child and its expansion root must become complete
+   together, use `checkpoint-batch` with one ordered JSON `updates` list. The batch
+   is limited to one root and its direct children, validates the final state once,
+   and writes once so neither forbidden intermediate expansion state reaches disk.
 4. Commit the coordinator-owned `STATE.json` checkpoint separately or with the
    bounded evidence commit.
 5. Re-run `check`, `status`, and `next --json`.
