@@ -2,12 +2,8 @@
 
 ## Verdict
 
-> **SUPERSEDED CANDIDATE.** Independent review and full preflight rejected this
-> package; see `FINDINGS.md` S01-F8. A replacement exact-HEAD signoff is in
-> progress. The text below records the superseded candidate honestly.
-
-**IMPLEMENTED at the superseded candidate, not final.** The complete deterministic
-ideal-base matrix passed twice at one fixed source commit. Both normalized
+**IMPLEMENTED, ready for independent S02 re-review.** The complete deterministic
+ideal-base matrix passed twice at one fixed repaired source commit. Both normalized
 transcripts are byte-identical under the normalizer frozen before the first
 round, and both rounds left zero owned residue.
 
@@ -17,7 +13,7 @@ to authoritative `main`.
 
 ## Fixed identities
 
-- Source/runtime commit: `356476265ad6164970d2753f24da4dce9bdc89d5`
+- Source/runtime commit: `ad7a7d585f77d48dedf47f9e44f6ff838f4405f1`
 - Branch: `automation/s01-fix-1`
 - Host: `Darwin arm64`
 - Dev shell: Rust `rustc 1.96.0 (ac68faa20 2026-05-25)`
@@ -27,9 +23,10 @@ to authoritative `main`.
 - Normalizer contract: `NORMALIZER_SPEC.md`, frozen before execution
 
 `prewarm.sh` completed at the exact source/runtime commit before either final
-round. The final executions were originally labeled E and F while the harness
-was being stabilized; they are preserved here canonically as `round-A.log` and
-`round-B.log`. No commit or cache mutation occurred between them.
+round. The final executions were originally labeled G and H while preserving
+superseded attempts; they are recorded canonically as `round-A.log` and
+`round-B.log`. HEAD and the harness remained unchanged between them, with no
+cache clear, prewarm, or other setup mutation between rounds.
 
 ## Results
 
@@ -38,7 +35,7 @@ was being stabilized; they are preserved here canonically as `round-A.log` and
 | Matrix steps | 18 | 18 |
 | Failed steps | 0 | 0 |
 | Transcript lines | 577 | 577 |
-| Normalized SHA-256 | `e7da251556fb96a0151be959d9eb3b42cdebc71e3c1340deb8d826da6e9f5bef` | `e7da251556fb96a0151be959d9eb3b42cdebc71e3c1340deb8d826da6e9f5bef` |
+| Normalized SHA-256 | `4db50a069513cc2d28c78320713101264f1e635a409b115576a61ea3299f1c52` | `4db50a069513cc2d28c78320713101264f1e635a409b115576a61ea3299f1c52` |
 | Owned fixture residue | none | none |
 | F14 evidence restored | byte-identical | byte-identical |
 
@@ -55,7 +52,7 @@ Every matrix category passed twice:
 - F14 evidence restoration
 - owned-process residue check
 
-The frozen normalizer controls also passed: D1 detects an outcome-bearing
+The frozen normalizer controls also passed from a clean worktree: D1 detects an outcome-bearing
 one-character change; D2 erases only listed legitimate variation; D3 accepts
 the clean specimen; D4 refuses empty and truncated captures. See `controls.log`.
 
@@ -90,9 +87,12 @@ python3 docs/fork/ideal-base/evidence/S01/controls.py
 (cd docs/fork/ideal-base/evidence/S01 && shasum -a 256 -c SHA256SUMS)
 ```
 
-The matrix itself re-runs active documentation and generated-instruction checks.
-The post-round verification also confirmed the frozen F14 `SHA256SUMS` and no
-owned fixture process remained.
+The repaired source commit passed full local `scripts/preflight.sh` before
+prewarm, including rustfmt and Clippy. The unused-dependency check was unavailable
+locally (`cargo-machete` absent) and remains explicitly CI-enforced rather than
+claimed as run. The matrix itself re-runs active documentation and
+generated-instruction checks. The post-round verification also confirmed the
+frozen F14 `SHA256SUMS` and no owned fixture process remained.
 
 ## Edge cases considered
 
@@ -105,6 +105,10 @@ owned fixture process remained.
 - accidental mutation of F14's accepted evidence
 - empty or truncated captures that would hash stably
 - a normalizer widened after observing a mismatch
+- a globally ignored evidence log cited but not tracked
+- accepted-node prose drifting beyond an amended fixture's assertions
+- an independently reviewed governance branch left outside the signoff ancestry
+- rustfmt/Clippy coverage missing from the deterministic matrix itself
 
 ## Open questions and external boundaries
 

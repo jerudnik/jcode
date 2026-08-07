@@ -442,7 +442,7 @@ harness premise is rejected rather than retried again.
 
 Candidate `efb730a9a` passed its two recorded rounds, but it is **superseded**
 and is not the final signoff subject. Two independent closeout surfaces found
-four blockers before publication:
+five blockers before publication:
 
 1. Full `scripts/preflight.sh` failed `rustfmt --check` in
    `tool/selfdev/reload.rs` and `jcode-core/src/env.rs`; Clippy passed.
@@ -456,9 +456,36 @@ four blockers before publication:
    `automation/protected-path-equality` governance fix (`1e356391e`) was not an
    ancestor of either `main` or the S01 branch, even though final signoff must
    include it.
+5. Full preflight then exposed stale accepted-node semantics: S01-FIX-1's summary
+   claimed F09 was retired, while the amended fixture and repository history prove
+   the coverage moved to `jcode-app-core` and is still active.
 
 Response before any replacement round: preserve the BLOCKED review, merge the
 reviewed governance fix, apply only the two rustfmt changes, force-track the
 cited sweep log with a checksum manifest, correct F03's prose and checksum,
-then prewarm and rerun the pair at one new exact commit. The frozen normalizer
-is unchanged.
+correct S01-FIX-1's accepted summary, then prewarm and rerun the pair at one new
+exact commit. The frozen normalizer is unchanged.
+
+---
+
+## S01-F9: repaired exact-HEAD signoff passes twice
+
+Source/runtime commit `ad7a7d585f77d48dedf47f9e44f6ff838f4405f1`
+passed full local `scripts/preflight.sh` before prewarm, including rustfmt and
+Clippy. The only unavailable gate was the explicitly CI-enforced
+unused-dependency check because `cargo-machete` is absent locally.
+
+After one exact-HEAD prewarm, consecutive executions G and H each reported
+`N_STEP=18 N_FAIL=0`, 577 transcript lines, byte-identical F14 restoration, and
+zero owned fixture residue. The frozen normalizer produced the same digest for
+both:
+
+```
+4db50a069513cc2d28c78320713101264f1e635a409b115576a61ea3299f1c52
+```
+
+Frozen controls passed from a clean worktree before execution. All previously
+identified determinism, evidence-packaging, formatting, accepted-node semantics,
+and review-ancestry defects were repaired before the candidate HEAD was frozen.
+G/H are now canonical `round-A.log`/`round-B.log`; S01 is `implemented` pending
+independent S02 re-review and S03 publication.

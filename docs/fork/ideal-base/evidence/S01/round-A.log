@@ -1,9 +1,9 @@
-[07:18:50] S01 round commit=356476265ad6164970d2753f24da4dce9bdc89d5
-[07:18:50] uname=Darwin arm64
+[08:25:16] S01 round commit=ad7a7d585f77d48dedf47f9e44f6ff838f4405f1
+[08:25:16] uname=Darwin arm64
 Warning budget OK: current=0 baseline=0
-[07:18:53] PASS A6 warning budget
+[08:25:19] PASS A6 warning budget
 Panic-prone budget OK: total=56 files=24
-[07:19:10] PASS A6 panic budget
+[08:25:34] PASS A6 panic budget
 Swallowed-error budget improved:
   - total swallowed-error-like count shrank: 3033 -> 2959
   - dot_ok count shrank: 1107 -> 1076
@@ -24,9 +24,9 @@ Swallowed-error budget improved:
   - swallowed-error-like usage shrank: src/cli/hot_exec.rs (6 -> 2)
   - swallowed-error-like usage removed: crates/jcode-app-core/src/telemetry_state.rs (23 -> 0)
 Consider running: scripts/check_swallowed_error_budget.py --update
-[07:19:26] PASS A6 swallowed-error budget
+[08:25:50] PASS A6 swallowed-error budget
 advisory policy: OK as of 2026-08-07
-[07:19:26] PASS A6 advisory policy
+[08:25:50] PASS A6 advisory policy
 Code-size budget improved:
   - oversized file shrank: crates/jcode-app-core/src/agent/turn_streaming_mpsc.rs (1874 -> 1785 LOC)
   - oversized file shrank: crates/jcode-app-core/src/server.rs (2384 -> 2380 LOC)
@@ -51,7 +51,7 @@ Code-size budget improved:
   - oversized file no longer exceeds 1200 LOC: crates/jcode-app-core/src/overnight.rs (1275 -> OK)
   - oversized file no longer exceeds 1200 LOC: crates/jcode-setup-hints/src/lib.rs (2369 -> OK)
 Consider running: scripts/check_code_size_budget.py --update
-[07:19:27] PASS A4 code size budget
+[08:25:50] PASS A4 code size budget
 Test-size budget improved:
   - oversized test file shrank: crates/jcode-app-core/src/server/comm_control_tests/dag_e2e.rs (1332 -> 1314 LOC)
   - oversized test file shrank: crates/jcode-tui/src/tui/app/tests.rs (1610 -> 1572 LOC)
@@ -61,45 +61,45 @@ Test-size budget improved:
   - oversized test file shrank: tests/e2e/test_support/mod.rs (1394 -> 1393 LOC)
   - oversized test file no longer exceeds 1200 LOC: crates/jcode-app-core/src/server/swarm_persistence_tests.rs (1368 -> OK)
 Consider running: scripts/check_test_size_budget.py --update
-[07:19:27] PASS A4 test size budget
+[08:25:51] PASS A4 test size budget
 wildcard re-export budget check passed (total=16)
-[07:19:29] PASS A4 wildcard reexport
+[08:25:52] PASS A4 wildcard reexport
 dependency boundary check passed
-[07:19:29] PASS A4 dependency boundaries
+[08:25:52] PASS A4 dependency boundaries
 render-state tests holding the lock: 45
 render-state tests WITHOUT the lock: 0
 
 OK: within baseline (0).
-[07:19:32] PASS A4 tui render lock
+[08:25:55] PASS A4 tui render lock
 env lease drop order: ok (1148 files scanned)
-[07:19:33] PASS A4 env lease drop order
+[08:25:57] PASS A4 env lease drop order
 config env lease: ok (no unleased mutations of 147 config-fingerprint env vars in tests)
-[07:20:09] PASS A4 config env lease
+[08:26:34] PASS A4 config env lease
 agent-instructions: ok (projected=7433/8192, compiled=7181/8192)
-[07:20:09] PASS A6 agent instructions
+[08:26:34] PASS A6 agent instructions
 docs-references: OK (130 active documents, 0 machine-local, 0 stale-code-path at baseline)
-[07:20:10] PASS A6 docs references
+[08:26:35] PASS A6 docs references
 ambient roots: ok (21 site(s), all allowlisted with a stated reason)
-[07:20:16] PASS A7 ambient roots
+[08:26:42] PASS A7 ambient roots
 real-home isolation: running jcode-app-core tests with JCODE_HOME unset...
 real-home isolation: OK (3 roots unchanged after jcode-app-core)
-[07:24:17] PASS A7 real-home isolation
-[07:24:17] F14 lifecycle matrix: rounds=1 binary=/Users/jrudnik/labs/jcode/target/selfdev/jcode (providers stripped)
-[07:24:17] === round 1/1 ===
-[07:29:17] PASS lease/exit/crash/restart matrix (F03)
-[07:29:27] PASS shutdown+reload coordinator suite (F02/F03/R04)
-[07:29:44] PASS reload state/recovery suites (R01)
-[07:30:21] PASS turn cancel/interrupt suite
-[07:30:32] PASS mcp lifecycle suite (F06/F07/F12)
-[07:30:43] PASS background durability+orphan suite (F04/F05/F12)
-[07:30:53] PASS disconnect-cleanup suite (F10)
-[07:30:56] PASS pending-activation reconcile suite (F09)
-[07:30:56] PASS residue: no orphaned fixture children
-[07:30:56] === summary ===
-[07:30:56] F14 LIFECYCLE MATRIX: PASS (1 rounds)
-[07:30:56] PASS A0-A3 lifecycle matrix (1 round)
-[07:24:17] F14 lifecycle matrix: rounds=1 binary=/Users/jrudnik/labs/jcode/target/selfdev/jcode (providers stripped)
-[07:24:17] === round 1/1 ===
+[08:29:49] PASS A7 real-home isolation
+[08:29:49] F14 lifecycle matrix: rounds=1 binary=/Users/jrudnik/labs/jcode/target/selfdev/jcode (providers stripped)
+[08:29:49] === round 1/1 ===
+[08:35:38] PASS lease/exit/crash/restart matrix (F03)
+[08:35:48] PASS shutdown+reload coordinator suite (F02/F03/R04)
+[08:36:01] PASS reload state/recovery suites (R01)
+[08:36:29] PASS turn cancel/interrupt suite
+[08:36:40] PASS mcp lifecycle suite (F06/F07/F12)
+[08:36:49] PASS background durability+orphan suite (F04/F05/F12)
+[08:36:57] PASS disconnect-cleanup suite (F10)
+[08:37:00] PASS pending-activation reconcile suite (F09)
+[08:37:00] PASS residue: no orphaned fixture children
+[08:37:00] === summary ===
+[08:37:00] F14 LIFECYCLE MATRIX: PASS (1 rounds)
+[08:37:00] PASS A0-A3 lifecycle matrix (1 round)
+[08:29:49] F14 lifecycle matrix: rounds=1 binary=/Users/jrudnik/labs/jcode/target/selfdev/jcode (providers stripped)
+[08:29:49] === round 1/1 ===
 == A. Per-lease-class hold/release fixtures (idle timeout 5s) ==
 PASS: [client-connection] daemon alive past idle timeout while leased
 PASS: [client-connection] post-release window not asserted (C1 abandon contract, design 4.1)
@@ -145,9 +145,9 @@ PASS: [sigkill] successor daemon booted over stale residue
 PASS: [sigkill] successor idle-exited 44 with clean residue
 PASS: [sigkill-successor] zero socket/hash/metadata residue
 ALL F03 FIXTURES PASSED
-[07:29:17] PASS lease/exit/crash/restart matrix (F03)
+[08:35:38] PASS lease/exit/crash/restart matrix (F03)
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.39s
+    Finished `test` profile [unoptimized] target(s) in 1.99s
      Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
 
 running 42 tests
@@ -194,11 +194,11 @@ test server::shutdown_fixture_tests::reload_exec_failure_reenters_termination_wi
 test server::shutdown_fixture_tests::reload_refused_on_temporary_and_during_termination ... ok
 test server::shutdown_fixture_tests::weaker_begin_is_superseded_stronger_upgrades_and_shortens ... ok
 
-test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 7.04s
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 6.78s
 
-[07:29:27] PASS shutdown+reload coordinator suite (F02/F03/R04)
+[08:35:48] PASS shutdown+reload coordinator suite (F02/F03/R04)
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.31s
+    Finished `test` profile [unoptimized] target(s) in 1.13s
      Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
 
 running 126 tests
@@ -329,11 +329,11 @@ test tool::skill::tests::test_reload_all ... ok
 test tool::skill::tests::test_reload_missing_name ... ok
 test tool::skill::tests::test_reload_nonexistent ... ok
 
-test result: ok. 126 passed; 0 failed; 0 ignored; 0 measured; 1105 filtered out; finished in 14.86s
+test result: ok. 126 passed; 0 failed; 0 ignored; 0 measured; 1105 filtered out; finished in 11.41s
 
-[07:29:44] PASS reload state/recovery suites (R01)
+[08:36:01] PASS reload state/recovery suites (R01)
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.34s
+    Finished `test` profile [unoptimized] target(s) in 0.94s
      Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
 
 running 79 tests
@@ -417,11 +417,11 @@ test agent::turn_loops::tests::messages_end_with_tool_result_ignores_plain_user_
 test agent::turn_streaming_mpsc::tests::wrap_marker_incremental_detects_markers_across_chunk_sizes ... ok
 test agent::turn_streaming_mpsc::tests::wrap_marker_incremental_finds_marker_straddling_delta_boundary ... ok
 
-test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 1152 filtered out; finished in 34.43s
+test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 1152 filtered out; finished in 25.91s
 
-[07:30:21] PASS turn cancel/interrupt suite
+[08:36:29] PASS turn cancel/interrupt suite
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.21s
+    Finished `test` profile [unoptimized] target(s) in 0.87s
      Running unittests src/lib.rs (target/debug/deps/jcode_base-c3544e827b79141e)
 
 running 48 tests
@@ -474,11 +474,11 @@ test mcp::schema_cache::schema_cache_tests::retain_prunes_removed_servers ... ok
 test mcp::schema_cache::schema_cache_tests::tools_for_respects_fingerprint ... ok
 test mcp::schema_cache::schema_cache_tests::update_reports_change_only_on_diff ... ok
 
-test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 1185 filtered out; finished in 7.56s
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 1185 filtered out; finished in 7.62s
 
-[07:30:32] PASS mcp lifecycle suite (F06/F07/F12)
+[08:36:40] PASS mcp lifecycle suite (F06/F07/F12)
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.14s
+    Finished `test` profile [unoptimized] target(s) in 0.89s
      Running unittests src/lib.rs (target/debug/deps/jcode_base-c3544e827b79141e)
 
 running 44 tests
@@ -527,11 +527,11 @@ test message::tests::parse_background_task_progress_notification_extracts_card_f
 test message::tests::parse_background_task_progress_notification_supports_legacy_inline_layout ... ok
 test session::tests::cases::test_render_messages_honors_background_task_display_role_override ... ok
 
-test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 8.16s
+test result: ok. 44 passed; 0 failed; 0 ignored; 0 measured; 1189 filtered out; finished in 7.47s
 
-[07:30:43] PASS background durability+orphan suite (F04/F05/F12)
+[08:36:49] PASS background durability+orphan suite (F04/F05/F12)
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.36s
+    Finished `test` profile [unoptimized] target(s) in 0.97s
      Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
 
 running 16 tests
@@ -552,11 +552,11 @@ test server::client_disconnect_cleanup::tests::startup_reconcile_maps_clean_disc
 test server::client_disconnect_cleanup::tests::startup_reconcile_marks_stale_session_terminal_and_deletes_record ... ok
 test server::client_disconnect_cleanup::tests::successor_connected_cleanup_reports_terminal_not_required ... ok
 
-test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 1215 filtered out; finished in 8.02s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 1215 filtered out; finished in 5.97s
 
-[07:30:53] PASS disconnect-cleanup suite (F10)
+[08:36:57] PASS disconnect-cleanup suite (F10)
 dev_cargo: sccache not found; using direct rustc
-    Finished `test` profile [unoptimized] target(s) in 1.26s
+    Finished `test` profile [unoptimized] target(s) in 1.08s
      Running unittests src/lib.rs (target/debug/deps/jcode_app_core-81797edc1c96f92f)
 
 running 4 tests
@@ -565,13 +565,13 @@ test tool::selfdev::reconcile_tests::freshly_queued_request_survives_reconcile_b
 test tool::selfdev::reconcile_tests::reconcile_keeps_running_request_not_yet_registered_in_live_task_map ... ok
 test tool::selfdev::reconcile_tests::reconcile_pending_state_maps_superseded_background_status ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1227 filtered out; finished in 0.58s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 1227 filtered out; finished in 0.51s
 
-[07:30:56] PASS pending-activation reconcile suite (F09)
-[07:30:56] PASS residue: no orphaned fixture children
-[07:30:56] === summary ===
-[07:30:56] F14 LIFECYCLE MATRIX: PASS (1 rounds)
-[07:30:57] PASS F14 evidence restored byte-identical
-[07:30:57] PASS residue: no orphaned fixture children
-[07:30:57] === summary ===
-[07:30:57] S01_ROUND N_STEP=18 N_FAIL=0
+[08:37:00] PASS pending-activation reconcile suite (F09)
+[08:37:00] PASS residue: no orphaned fixture children
+[08:37:00] === summary ===
+[08:37:00] F14 LIFECYCLE MATRIX: PASS (1 rounds)
+[08:37:00] PASS F14 evidence restored byte-identical
+[08:37:00] PASS residue: no orphaned fixture children
+[08:37:00] === summary ===
+[08:37:00] S01_ROUND N_STEP=18 N_FAIL=0

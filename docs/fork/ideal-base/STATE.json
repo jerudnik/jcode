@@ -449,7 +449,7 @@
       "updated_at": "2026-08-04T03:47:53.527489Z"
     },
     "S01": {
-      "state": "in_progress",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [
@@ -461,8 +461,8 @@
         "docs/fork/ideal-base/evidence/S01/controls.log",
         "docs/fork/ideal-base/evidence/S01/FINDINGS.md"
       ],
-      "summary": "IN PROGRESS: candidate efb730a9a / runtime subject 356476265 was superseded after full preflight found two rustfmt diffs and independent S02 review 41bf14a6a found an untracked cited sweep log plus stale F03 coverage prose. The reviewed protected-path-equality branch was also absent from the candidate. Repairs are being folded into one new exact source commit before prewarm and a fresh two-round signoff; the frozen normalizer remains unchanged.",
-      "updated_at": "2026-08-07T08:11:00Z"
+      "summary": "IMPLEMENTED: repaired source/runtime commit ad7a7d585 passed full local preflight, exact-HEAD prewarm, and two consecutive 18/18 deterministic rounds with zero residue. Canonical rounds A/B each have 577 lines and identical normalized SHA-256 4db50a069513cc2d28c78320713101264f1e635a409b115576a61ea3299f1c52. Independent S02 re-review and S03 publication remain pending; reviewed/published commits stay null until their railway stages.",
+      "updated_at": "2026-08-07T08:50:00Z"
     },
     "S02": {
       "state": "pending",
