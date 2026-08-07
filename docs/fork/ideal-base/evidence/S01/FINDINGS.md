@@ -375,3 +375,43 @@ sweep at 0 FAIL with every step executing; reaching it means changing the
 client-connection assertion to match design 4.1, which is a decision about the
 fixture's contract and not a repair I should make silently while claiming the
 gate was met on the original terms.
+
+---
+
+## S01-F7: first valid round pair — N_FAIL=0 twice, hashes unequal, cause = libtest interleaving (P4 confirmed)
+
+The first pair where both rounds passed (rounds A/B at `b28bc9b7e`, both
+`N_STEP=18 N_FAIL=0`) hashed unequal:
+
+```
+77355b302e0e86193736cdd8e1aa62cc842e852306d75907f5c21098e2adf3ee  577  (A)
+898163015975f614bd6e743c9c150e191aced3846ab42533aaca369f14fa63bb  577  (B)
+```
+
+Localization: a line-sorted diff of the two NORMALIZED transcripts leaves only
+the round-label lines (`round=A` vs `round=B`). Every other differing line in
+the unsorted diff is a `test ... ok` line present in BOTH transcripts at a
+different position, i.e. pure reordering of libtest output, which prints in
+completion order across test threads. No verdict token, test name, count,
+error, or step label differed. This is exactly prediction P4, and P3's "NOT in
+a verdict token" clause held.
+
+Response, per the pre-committed P4 remedy (harness fix, normalizer stays
+frozen):
+
+1. `RUST_TEST_THREADS=1` exported by `s01_matrix.sh`, serializing libtest so
+   result lines print in a deterministic order.
+2. The self-identifying round label removed from the transcript BODY (it made
+   hash equality impossible by construction); the label lives in the log
+   filename only. This was a harness authoring error in the original script,
+   visible in the sorted diff above.
+
+The A/B pair that observed the disagreement is thereby superseded; the
+determinism claim rests on a fresh pair run under the pinned harness.
+
+Also observed while stabilizing earlier attempts (environmental, not
+determinism findings): the A7 real-home isolation gate legitimately FAILs
+while any live jcode session is writing `~/.jcode/sessions/*`; rounds must run
+on a quiet machine. And every gate must run inside `nix develop` — the bare
+shell lacks cargo and python `tomllib`, which presented as A6 exit-127
+failures in the first attempt.
