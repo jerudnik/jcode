@@ -432,6 +432,26 @@ fn reload_repo_resolver_uses_working_dir_when_primary_detection_fails() {
     assert_eq!(resolved.as_deref(), Some(repo.path()));
 }
 
+#[test]
+fn reload_repo_fallback_synthesizes_dir_only_for_test_sessions() {
+    // Test sessions fake all repo-derived state downstream, so a missing repo
+    // (e.g. remote builders syncing sources without `.git`) must not fail.
+    let fallback = reload::reload_repo_dir_or_test_fallback(None, true)
+        .expect("test session must not require a discoverable repo");
+    assert!(fallback.starts_with(std::env::temp_dir()));
+
+    // Real sessions still hard-require repo discovery.
+    let err = reload::reload_repo_dir_or_test_fallback(None, false)
+        .expect_err("non-test session must require a repo");
+    assert!(err.to_string().contains("Could not find jcode repository"));
+
+    // A resolved repo always wins, regardless of session type.
+    let repo = create_repo_fixture();
+    let resolved = reload::reload_repo_dir_or_test_fallback(Some(repo.path().to_path_buf()), true)
+        .expect("resolved repo should pass through");
+    assert_eq!(resolved, repo.path());
+}
+
 #[tokio::test]
 async fn enter_creates_selfdev_session_in_test_mode() {
     let _lock = lock_env();
