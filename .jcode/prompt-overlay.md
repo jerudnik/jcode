@@ -1,7 +1,8 @@
 # Jcode project overlay
 
-- Default to the TUI/CLI unless the user explicitly names the desktop app.
-- Complete work end to end: inspect, implement, validate, document durable contract changes, and commit only owned files.
-- Discover current hosts, models, versions, workflows, and builders instead of relying on memory.
-- After selfdev reload, continue automatically and verify the binary or UI.
-- Operational commands live in `docs/agent-workflows.md`; do not duplicate them here.
+- Default to the TUI/CLI unless the user names the desktop app.
+- Finish work end to end: plan, verify, implement, validate, update docs, commit only owned files.
+- Discover hosts, models, versions, and workflows from the live system, not memory.
+- After selfdev reload, continue automatically and verify.
+- Commands live in `docs/agent-workflows.md`; do not duplicate them here.
+- Write plain language: ordinary words, no coined terms, no hedging, no process narration. Rules: `plain-language` skill. Old jargon: `docs/GLOSSARY.md`.

@@ -2,6 +2,13 @@
 
 Recorded: 2026-08-07
 
+In plain terms: an audit found cleanup work (simpler CI, safer tests, clearer
+crate boundaries, smaller scripts). This directory holds that work as a list of
+52 tasks with dependencies, plus a script that checks the list and feeds it to
+the swarm scheduler. Three tasks stop and ask the user for permission before
+anything is published, merged, or released. Unfamiliar terms are defined in
+`../GLOSSARY.md`.
+
 This directory converts the repository audit into an executable, restartable plan. It does **not** create a second scheduler or mutable program ledger.
 
 - `TASK_GRAPH.json` is the reviewed desired-state DAG.

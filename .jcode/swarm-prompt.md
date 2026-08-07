@@ -10,9 +10,8 @@
   it.
 - Use `xai/grok-4.5` at xhigh as the Sol fallback. Use `k3` (Kimi K3) at xhigh
   where Opus or Fable would otherwise be used; prefer fast routes when applicable.
-- Rotate suitable independent/bulk lanes across `deepseek-v4-pro`, `MiniMax-M3`,
-  and `glm-5.2` to keep rotations fresh and spread provider load without lowering
-  task capability.
+- When work is not complicated or mechanical, spread provider load by rotating model assignments across `deepseek-v4-pro`, `MiniMax-M3`,
+  and `glm-5.2`
 - One `run_plan` applies one model/effort to all workers it creates. Keep such
   runs profile-homogeneous; otherwise use explicit spawns.
 
