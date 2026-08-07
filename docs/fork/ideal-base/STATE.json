@@ -67,8 +67,8 @@
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [],
-      "summary": "IN PROGRESS: G01-G05 are accepted with explicit advertised-surface limitations; S01 deterministic signoff and S02 independent re-review are implemented and green. S03 final disposition is implemented and awaiting Opus review plus explicitly authorized merge-only publication. Post-merge coordinator checkpoint must accept W5/S01/S01-FIX-1/S02/S03 with real reviewed/published identities.",
-      "updated_at": "2026-08-07T09:10:00Z"
+      "summary": "IN PROGRESS: G01-G05 are accepted with explicit advertised-surface limitations; S01 deterministic signoff, S02 exact-commit review, and S03 final disposition are independently green. External GitHub push/PR/merge remains authorization-gated. Post-merge coordinator checkpoint must accept W5/S01/S01-FIX-1/S02/S03 with real reviewed/published identities.",
+      "updated_at": "2026-08-07T09:18:00Z"
     },
     "W6": {
       "state": "accepted",
@@ -479,10 +479,11 @@
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [
-        "docs/fork/ideal-base/evidence/S03/README.md"
+        "docs/fork/ideal-base/evidence/S03/README.md",
+        "docs/fork/ideal-base/reviews/S03-final-disposition-review.md"
       ],
-      "summary": "IMPLEMENTED: final candidate label is unqualified ideal-base signoff for advertised surfaces. All G01-G05 gates are accepted; S01 passed 18/18 twice with identical frozen-normalizer hash; S02 independently approved with zero blockers. Awaiting independent S03 review, explicit authorization for GitHub push/PR/merge, and the required post-merge local railway checkpoint.",
-      "updated_at": "2026-08-07T09:10:00Z"
+      "summary": "IMPLEMENTED AND INDEPENDENTLY APPROVED: final label is unqualified ideal-base signoff for advertised surfaces. S03 review of af46b27ed found zero blockers and independently reproduced the determinism hash, manifests, graph counts, support limitations, and post-merge mapping. Awaiting explicit authorization for GitHub push/PR/merge, followed by the required local-only accepted-state checkpoint.",
+      "updated_at": "2026-08-07T09:18:00Z"
     },
     "R01": {
       "state": "accepted",
