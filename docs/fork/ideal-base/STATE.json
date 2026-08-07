@@ -67,8 +67,8 @@
       "reviewed_commit": null,
       "published_commit": null,
       "evidence": [],
-      "summary": "Signoff wave opened. G04 verified satisfied by shipped state with no work required. G01/G02/G03/G05 remain external gates needing authorization or hardware; S01-S03 blocked on them.",
-      "updated_at": "2026-08-02T02:44:46Z"
+      "summary": "IN PROGRESS: G01-G05 are accepted with explicit advertised-surface limitations; S01 deterministic signoff and S02 independent re-review are implemented and green. S03 final disposition is implemented and awaiting Opus review plus explicitly authorized merge-only publication. Post-merge coordinator checkpoint must accept W5/S01/S01-FIX-1/S02/S03 with real reviewed/published identities.",
+      "updated_at": "2026-08-07T09:10:00Z"
     },
     "W6": {
       "state": "accepted",
@@ -475,12 +475,14 @@
       "updated_at": "2026-08-07T09:08:00Z"
     },
     "S03": {
-      "state": "pending",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/evidence/S03/README.md"
+      ],
+      "summary": "IMPLEMENTED: final candidate label is unqualified ideal-base signoff for advertised surfaces. All G01-G05 gates are accepted; S01 passed 18/18 twice with identical frozen-normalizer hash; S02 independently approved with zero blockers. Awaiting independent S03 review, explicit authorization for GitHub push/PR/merge, and the required post-merge local railway checkpoint.",
+      "updated_at": "2026-08-07T09:10:00Z"
     },
     "R01": {
       "state": "accepted",
