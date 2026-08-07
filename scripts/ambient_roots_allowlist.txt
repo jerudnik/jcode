@@ -15,7 +15,7 @@ crates/jcode-base/src/mobile_server.rs:106  # regression test: names the real ho
 crates/jcode-provider-copilot-runtime/src/copilot_tests.rs:705  # regression test: names the real home in order to assert machine_id never resolves under it
 crates/jcode-provider-openai-runtime/src/openai_tests.rs:131  # Test-only probe for a real ~/.codex/auth.json; the point is to detect the developer's actual Codex credentials, and the test skips when absent.
 crates/jcode-provider-openrouter/src/lib.rs:807  # regression test: names the real home in order to assert the model caches never resolve under it
-crates/jcode-tui/src/tui/remote_diff.rs:92  # Expands `~` in a path the user typed at the diff prompt; must resolve to their real home.
+crates/jcode-tui/src/tui/remote_diff.rs:90  # Expands `~` in a path the user typed at the diff prompt; must resolve to their real home.
 crates/jcode-tui/src/tui/ui_frame_metrics_flicker.rs:350  # Display-only: abbreviates the real home to `~` in a rendered log path. Read-only, never resolves a root for I/O.
 crates/jcode-tui/src/tui/ui_header.rs:466  # Display-only: abbreviates the real home to `~` in the header path. Read-only, never resolves a root for I/O.
 crates/jcode-tui/src/video_export.rs:44  # Locates a real ~/.cargo/bin tool binary; the toolchain lives in the real home regardless of JCODE_HOME.
