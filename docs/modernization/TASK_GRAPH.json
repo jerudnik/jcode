@@ -1,0 +1,1003 @@
+{
+  "schema_version": 1,
+  "program": "post-ideal-base-modernization",
+  "recorded": "2026-08-07",
+  "graph_mode": "deep",
+  "default_concurrency": 6,
+  "maximum_concurrency": 8,
+  "declared_node_count": 52,
+  "declared_barrier_count": 4,
+  "objective": "Modernize Jcode's delivery, test isolation, architecture, security, release, observability, and repository surface while deleting completed-program machinery and preserving the independent Nix-only fork contract.",
+  "defaults": {
+    "first_authoritative_release": "v1.0.0",
+    "required_pr_context_target": "PR Gate",
+    "workflow_target": [
+      "pr.yml",
+      "main.yml",
+      "scheduled.yml",
+      "release.yml"
+    ],
+    "operator_intervention_nodes": [
+      "H10",
+      "H30",
+      "H31"
+    ]
+  },
+  "artifact_schema": {
+    "required": [
+      "findings",
+      "evidence",
+      "edge_cases_considered",
+      "validation",
+      "open_questions",
+      "confidence",
+      "what_i_did_not_check"
+    ],
+    "confidence": [
+      "low",
+      "medium",
+      "high"
+    ]
+  },
+  "execution_policy": {
+    "live_scheduler": "native swarm task graph",
+    "durable_progress": "bounded commits carrying Modernization-Node trailers; phase joins also carry Modernization-Barrier trailers",
+    "failure_recovery": "A failed verification injects one fix node depending on the failed implementation, then reruns the same verification. Do not repeat an unchanged failing experiment.",
+    "file_ownership": "Only one active implementation node may own a path. Mutex labels are dependency-ordered and validated statically.",
+    "expensive_validation": "Run narrow checks inside leaves. Run broad Cargo, Nix, and hosted CI only at declared join nodes.",
+    "external_writes": "Stop at nodes marked requires_authorization until the user authorizes the named push, merge, live ruleset mutation, or release publication."
+  },
+  "barriers": [
+    "B0",
+    "B1",
+    "B2",
+    "B3"
+  ],
+  "nodes": [
+    {
+      "id": "M00",
+      "phase": "design",
+      "content": "Bootstrap the modernization run. Revalidate Git/worktree/remotes, live required checks, recent workflow timings, open issues, current scripts/workflows, and the audit baseline before any mutation. Report drift and stop if the audit's premises no longer hold.",
+      "kind": "explore",
+      "depends_on": [],
+      "priority": 100,
+      "worker_profile": "context",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Authoritative remote, branch ancestry, and clean worktree are recorded",
+        "Live GitHub rules and workflow names are compared with scripts/required-checks.json",
+        "Every material audit metric is confirmed or explicitly revised"
+      ],
+      "falsification": "If authoritative main, workflow topology, or completed ideal-base status materially differs, stop and revise the graph before implementation."
+    },
+    {
+      "id": "M01",
+      "phase": "design",
+      "content": "Design the smallest safe retirement of completed ideal-base governance machinery. Preserve fork-point, Nix-only distribution, final decisions, hashes, and live drift checks while removing construction scaffolding, byte-exact protected-path ceremony, maintenance windows, and active execution ledgers.",
+      "kind": "explore",
+      "depends_on": ["M00"],
+      "priority": 95,
+      "worker_profile": "design",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Retained and retired artifacts are enumerated",
+        "A rollback path exists for every deletion",
+        "The proposed live ruleset remains strict on PRs, status checks, deletion, and force-push"
+      ],
+      "falsification": "If any retired artifact still protects a current product or distribution invariant that has no replacement, retain it and revise the retirement scope."
+    },
+    {
+      "id": "M02",
+      "phase": "design",
+      "content": "Design the four-workflow delivery target and one canonical local command surface. Specify PR routing, main publication, scheduled broad checks, release promotion, Nix revision decoupling, cache policy, and the single final required PR context.",
+      "kind": "explore",
+      "depends_on": ["M00"],
+      "priority": 95,
+      "worker_profile": "design",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Every current required gate maps to the target topology",
+        "Documentation-only changes do not run full Rust tests",
+        "Local and CI commands share one implementation source"
+      ],
+      "falsification": "If strict merge-candidate testing or exact Nix provenance cannot be preserved without post-merge full retesting, document the counterexample and retain only the necessary run."
+    },
+    {
+      "id": "M03",
+      "phase": "design",
+      "content": "Design RuntimePaths and ReloadEnvironment seams that eliminate normal-test access to real ~/.jcode, process-global environment mutation, and ambient reload discovery. Map issue #17, issue #14, JCODE_TEST_SESSION, session roots, process inspection, and reload branches to explicit owners.",
+      "kind": "explore",
+      "depends_on": ["M00"],
+      "priority": 95,
+      "worker_profile": "design",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Every real-home and global-environment access has an injection plan",
+        "The seam remains narrow rather than becoming a universal service locator",
+        "Acceptance includes running tests while ordinary Jcode sessions remain active"
+      ],
+      "falsification": "If a path truly requires live user state for a normal deterministic test, reclassify that test as explicit live validation instead of weakening isolation."
+    },
+    {
+      "id": "M04",
+      "phase": "design",
+      "content": "Design an incremental removal of the root -> jcode-tui -> jcode-app-core -> jcode-base wildcard re-export spine. Use compile timing, dependency fan-out, and source ownership to define explicit surfaces without starting an aesthetic microcrate campaign.",
+      "kind": "explore",
+      "depends_on": ["M00"],
+      "priority": 90,
+      "worker_profile": "design",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Each migration layer has a bounded compile-and-test gate",
+        "New crates require a measured boundary benefit",
+        "Public API compatibility and downstream imports are enumerated"
+      ],
+      "falsification": "If explicit imports increase rebuild time or public coupling without clarifying ownership, stop that layer and keep the existing boundary."
+    },
+    {
+      "id": "M05",
+      "phase": "design",
+      "content": "Design security, release, and observability modernization: SHA-pinned actions, gitleaks, Dependabot for Cargo/actions, one cargo-audit ignore source, release namespace, metadata-only GitHub Releases, cache promotion, coverage/performance trends, and CI SLO metrics.",
+      "kind": "explore",
+      "depends_on": ["M00"],
+      "priority": 90,
+      "worker_profile": "design",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "The design preserves advisory ownership/expiry, SBOM, provenance, and Nix-only binaries",
+        "Metrics publish as artifacts or summaries rather than repository churn",
+        "Release and rollback are testable without a second binary channel"
+      ],
+      "falsification": "If a proposed tool duplicates an existing maintained capability or adds more ceremony than risk reduction, omit it."
+    },
+    {
+      "id": "M06",
+      "phase": "design",
+      "content": "Classify the repository cleanup surface: scripts, packaging residue, dispatch-only workflows, completed-program artifacts, stale comments, and duplicated documentation. Define keep, move, archive, and delete rules before mutation.",
+      "kind": "explore",
+      "depends_on": ["M00"],
+      "priority": 85,
+      "worker_profile": "context",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Manual entrypoints are distinguished from dead files",
+        "Every deletion has a repository-reference and operator-use check",
+        "The cleanup target is at least 25 percent fewer script lines without losing supported workflows"
+      ],
+      "falsification": "If an apparently unreferenced file has a documented manual operator or open-bug role, retain or relocate it instead of deleting it."
+    },
+    {
+      "id": "V09",
+      "phase": "design",
+      "content": "Independently critique M01-M06 for hidden coupling, unsafe ordering, unnecessary tools, missing rollback paths, and file-ownership conflicts. Inject gap nodes for any high-confidence omission before synthesis.",
+      "kind": "verify",
+      "depends_on": ["M01", "M02", "M03", "M04", "M05", "M06"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Every design receives an independent critique",
+        "No low-confidence finding remains unaddressed",
+        "The proposed implementation wave has disjoint write ownership"
+      ],
+      "falsification": "Any unmitigated high-risk overlap, irreversible deletion, or unsupported invariant blocks B0."
+    },
+    {
+      "id": "B0",
+      "phase": "design",
+      "content": "Synthesize the reviewed designs into the final execution contract. Keep defaults unless M00-V09 produced source-backed reasons to amend TASK_GRAPH.json before implementation.",
+      "kind": "synthesize",
+      "depends_on": ["V09"],
+      "priority": 100,
+      "worker_profile": "synthesize",
+      "read_only": false,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Design decisions are internally consistent",
+        "Authorization nodes and rollback points are explicit",
+        "The next wave can run with three disjoint writers"
+      ],
+      "falsification": "If the design cannot be expressed with the existing native DAG and swarm primitives, stop rather than building another scheduler."
+    },
+    {
+      "id": "G10A",
+      "phase": "unlock",
+      "content": "Implement the local governance desired-state change: remove Governance Root as a required context, shrink protected-path inventory to durable invariants, keep strict PR/status/deletion/non-fast-forward rules, and update governance comparison tests.",
+      "kind": "implement",
+      "depends_on": ["B0"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".github/workflows/governance-root.yml", "scripts/required-checks.json", "scripts/fork-health.sh", "scripts/governance_compare.py", "scripts/generate_governance_fixture.py", "tests/test_governance_compare.py"],
+      "mutexes": ["governance"],
+      "acceptance": [
+        "Desired-state fixture and comparator agree",
+        "Fork CI, Security, and Nix remain required until the replacement PR Gate lands",
+        "No bypass actor or force-push permission is introduced"
+      ],
+      "falsification": "If removing Governance Root permits direct unverified main mutation or loses drift detection, restore the missing control before proceeding."
+    },
+    {
+      "id": "G10B",
+      "phase": "unlock",
+      "content": "Freeze the completed ideal-base program. Preserve final decisions, accepted summary, checksums, and private recovery references; remove active railway/dashboard machinery, maintenance-window ceremony, raw coordination transcripts, and rebuildable evidence from the active repository surface.",
+      "kind": "implement",
+      "depends_on": ["B0"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["docs/fork/ideal-base/**", "scripts/ideal_base_*.py", "scripts/graph_page.py", "scripts/status_page.py", "tests/test_ideal_base_railway.py"],
+      "mutexes": ["ideal-base"],
+      "acceptance": [
+        "Final accepted outcome and support limitations remain discoverable",
+        "Private recovery archive references and checksums remain valid",
+        "No current CI, build, release, or runtime path references a deleted program tool"
+      ],
+      "falsification": "If an artifact is the sole source of a current operational contract or unrecoverable evidence, retain a compact canonical form."
+    },
+    {
+      "id": "G10C",
+      "phase": "unlock",
+      "content": "Update durable fork and agent documentation for normal PR governance after ideal-base retirement. Edit APM instruction primitives, regenerate agent surfaces, and remove maintenance-window instructions without duplicating live check names outside the desired-state manifest.",
+      "kind": "implement",
+      "depends_on": ["B0"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".apm/instructions/**", "AGENTS.md", "docs/AGENTS.md", "docs/BRANCHING.md", "docs/agent-workflows.md", "CONTRIBUTING.md"],
+      "mutexes": ["docs"],
+      "acceptance": [
+        "apm compile --validate passes",
+        "Documentation describes normal PR flow and current source-of-truth files",
+        "No durable procedure assumes a remote named origin"
+      ],
+      "falsification": "If generated surfaces diverge from primitives or a removed procedure remains required by live GitHub settings, stop and reconcile before review."
+    },
+    {
+      "id": "V10",
+      "phase": "unlock",
+      "content": "Verify G10A-G10C as one retirement candidate. Exercise governance comparison against old and proposed fixtures, validate all retained references, run APM checks, and prove the change can be rolled back from Git without hidden external state.",
+      "kind": "verify",
+      "depends_on": ["G10A", "G10B", "G10C"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Governance comparison and relevant unit tests pass",
+        "No broken active documentation references remain",
+        "An independent reviewer approves the retirement boundary"
+      ],
+      "falsification": "Any unowned live invariant or stale protected GitHub setting blocks publication."
+    },
+    {
+      "id": "H10",
+      "phase": "unlock",
+      "content": "AUTHORIZATION GATE: after explicit user approval, push the bounded governance-retirement branch, open/merge its PR through the existing protected process, and apply the matching live GitHub ruleset change. Do not combine later modernization work into this unlock publication.",
+      "kind": "verify",
+      "depends_on": ["V10"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [],
+      "mutexes": [],
+      "external_write": true,
+      "requires_authorization": true,
+      "acceptance": [
+        "The retirement commit is reachable from authoritative main",
+        "Live ruleset matches scripts/required-checks.json",
+        "Required PR checks remain strict and green"
+      ],
+      "falsification": "If the live ruleset cannot be changed atomically with a recoverable path, restore the prior rules before continuing."
+    },
+    {
+      "id": "V11",
+      "phase": "unlock",
+      "content": "Verify the published unlock from a fresh checkout. Confirm main ancestry, live required checks, no classic protection drift, archived ideal-base discoverability, and a clean execution branch rebased from new main.",
+      "kind": "verify",
+      "depends_on": ["H10"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Fresh local and live governance snapshots agree",
+        "Normal workflow changes no longer require a special maintenance window",
+        "Execution resumes from the published main SHA"
+      ],
+      "falsification": "Any discrepancy between desired and live governance returns the program to G10A through a fix node."
+    },
+    {
+      "id": "B1",
+      "phase": "unlock",
+      "content": "Record the governance-unlocked phase barrier and seed the parallel implementation wave from the new authoritative main commit.",
+      "kind": "synthesize",
+      "depends_on": ["V11"],
+      "priority": 100,
+      "worker_profile": "synthesize",
+      "read_only": false,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Modernization-Barrier: B1 is recorded on a commit reachable from the execution branch",
+        "All next-wave workers receive disjoint owned paths",
+        "Concurrency starts at six and never exceeds eight"
+      ],
+      "falsification": "If the execution branch is not based on the published unlock, do not start parallel mutation."
+    },
+    {
+      "id": "P20",
+      "phase": "implementation",
+      "content": "Make just and a small set of scripts the command source of truth. Invert ci_local so CI and local execution call the same recipes instead of parsing workflow YAML, split dev_cargo responsibilities only where it reduces controls, and preserve remote-build/cache safety.",
+      "kind": "implement",
+      "depends_on": ["B1"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["justfile", "scripts/dev_cargo.sh", "scripts/cargo_exec.sh", "scripts/ci_local.sh", "scripts/ci_workflow_commands.py", "scripts/remote_build.sh", "scripts/remote_config.sh", "tests/test_ci_workflow_commands.py"],
+      "mutexes": ["pipeline-scripts"],
+      "acceptance": [
+        "Canonical check, test, full-test, package, and release-check commands exist",
+        "CI can invoke the same commands without YAML extraction",
+        "Remote fallback and target cleanup safety tests pass"
+      ],
+      "falsification": "If the split adds more public knobs or wrappers than it removes, keep the simpler existing boundary and only centralize recipes."
+    },
+    {
+      "id": "P21",
+      "phase": "implementation",
+      "content": "Decouple documentation-only Git revisions from executable rebuild identity while retaining exact repository revision in provenance. Route main publication by package-affecting inputs and prove downstream Nix pins still substitute the correct closure.",
+      "kind": "implement",
+      "depends_on": ["B1"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["flake.nix", "flake.lock", "nix/**", "docs/NIX.md", "tests/test_nix_distribution_policy.py"],
+      "mutexes": ["nix"],
+      "acceptance": [
+        "A documentation-only commit leaves the executable derivation unchanged",
+        "Provenance still names the exact repository revision",
+        "Nix package, SBOM, provenance, and distribution-policy checks pass"
+      ],
+      "falsification": "If exact revision provenance becomes unverifiable or a downstream pin resolves the wrong executable source, retain per-commit package identity and document the unavoidable cost."
+    },
+    {
+      "id": "P22",
+      "phase": "implementation",
+      "content": "Modernize supply-chain checks: pin every action to a full commit SHA, replace the custom token-prefix scanner with pinned gitleaks, add Dependabot for Cargo and GitHub Actions, and make .cargo/audit.toml the sole advisory ignore list while preserving ownership and expiry enforcement.",
+      "kind": "implement",
+      "depends_on": ["B1"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".cargo/audit.toml", ".github/dependabot.yml", ".gitleaks.toml", "scripts/security_preflight.sh", "scripts/check_advisory_policy.py", "docs/security/**"],
+      "mutexes": ["security"],
+      "acceptance": [
+        "All external action uses are full-SHA pinned with update comments",
+        "Secret scanning catches planted generic and provider-specific fixtures",
+        "Advisory policy and cargo audit consume one ignore source"
+      ],
+      "falsification": "If gitleaks or dependency automation creates uncontrolled noise or misses current planted fixtures, adjust configuration before workflow integration."
+    },
+    {
+      "id": "P23",
+      "phase": "implementation",
+      "content": "Replace the current PR/main workflow topology with thin workflows that call P20 commands: one PR classifier and PR Gate, publication-only main flow, scheduled broad validation, and no duplicate post-merge Fork CI or Security suite. Integrate P21 routing and P22 security checks.",
+      "kind": "implement",
+      "depends_on": ["P20", "P21", "P22"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".github/workflows/ci.yml", ".github/workflows/fork-ci.yml", ".github/workflows/security.yml", ".github/workflows/nix.yml", ".github/workflows/freebsd-smoke.yml", ".github/workflows/pr.yml", ".github/workflows/main.yml", ".github/workflows/scheduled.yml"],
+      "mutexes": ["workflows"],
+      "acceptance": [
+        "actionlint passes",
+        "Every PR path produces exactly one required PR Gate result",
+        "Main push runs publication/smoke only and scheduled flow owns broad repeats"
+      ],
+      "falsification": "If any supported change can merge without its prior blocking behavior or a required context can remain pending because of routing, stop and repair the aggregate gate."
+    },
+    {
+      "id": "V20",
+      "phase": "implementation",
+      "content": "Verify the delivery rewrite with workflow fixtures, local command parity, Nix derivation comparison, planted security fixtures, and measured job projections. Prove code, docs, dependency, and workflow-only PR routes all terminate correctly.",
+      "kind": "verify",
+      "depends_on": ["P23"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "All route fixtures produce the intended jobs and final gate",
+        "Projected post-merge docs cost is below five runner-minutes",
+        "Independent review finds no security or publication regression"
+      ],
+      "falsification": "A route that skips a needed check, leaves a required check pending, or rebuilds docs-only executable output returns to P23 or P21."
+    },
+    {
+      "id": "T20",
+      "phase": "implementation",
+      "content": "Implement RuntimePaths as the explicit authority for home, state, sessions, logs, cache, sockets, and test roots. Migrate normal tests to disposable roots and prohibit implicit real ~/.jcode access outside explicitly marked live tests.",
+      "kind": "implement",
+      "depends_on": ["B1"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["crates/jcode-core/**", "crates/jcode-storage/**", "crates/jcode-base/src/env.rs", "crates/jcode-base/src/storage.rs", "crates/jcode-base/src/session.rs", "tests/e2e/test_support/**"],
+      "mutexes": ["runtime-paths"],
+      "acceptance": [
+        "Normal tests create and remove disposable Jcode roots",
+        "No normal test reads or writes the operator's ~/.jcode",
+        "Runtime behavior outside tests preserves existing path semantics"
+      ],
+      "falsification": "Any normal test that still requires the operator to stop Jcode sessions blocks completion."
+    },
+    {
+      "id": "T21",
+      "phase": "implementation",
+      "content": "Implement ReloadEnvironment around executable discovery, repository/build metadata, running-process identity, launch/termination, and reload state. Remove the interleaved JCODE_TEST_SESSION branches from do_reload while preserving real-session hard failures.",
+      "kind": "implement",
+      "depends_on": ["B1"],
+      "priority": 95,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["crates/jcode-app-core/src/tool/selfdev/**", "crates/jcode-app-core/src/server/reload.rs", "crates/jcode-app-core/src/update.rs", "crates/jcode-selfdev-types/**"],
+      "mutexes": ["reload"],
+      "acceptance": [
+        "Reload behavior is covered without ambient process or repository discovery",
+        "Stale daemon, newest binary, failed replacement, and recovery paths are deterministic",
+        "Real sessions retain strict safety errors"
+      ],
+      "falsification": "If the seam becomes a general service locator or obscures production errors, narrow it before integration."
+    },
+    {
+      "id": "T22",
+      "phase": "implementation",
+      "content": "Integrate RuntimePaths and ReloadEnvironment across lifecycle and determinism tests. Add a guard that fails if normal tests touch real ~/.jcode and rerun the two-round lifecycle matrix while ordinary Jcode sessions remain active.",
+      "kind": "implement",
+      "depends_on": ["T20", "T21", "P20", "P21"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["crates/jcode-app-core/src/**/*test*.rs", "crates/jcode-base/src/**/*test*.rs", "tests/**", "scripts/run_lifecycle_matrix.sh", "scripts/lease_class_fixtures.sh"],
+      "mutexes": ["runtime-paths", "reload"],
+      "acceptance": [
+        "Two consecutive lifecycle rounds pass with normal Jcode sessions running",
+        "No residue appears in the real home or disposable roots",
+        "Issues #17 and #14 have source-backed closure evidence"
+      ],
+      "falsification": "Any external-session contamination, global-env race, or reload false-positive returns to T20 or T21 rather than adding sleeps or serialization."
+    },
+    {
+      "id": "V21",
+      "phase": "implementation",
+      "content": "Independently verify test isolation and reload determinism under concurrency, crash, restart, and cleanup cases. Inspect for hidden std::env mutation and direct home discovery in testable production paths.",
+      "kind": "verify",
+      "depends_on": ["T22"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Isolation passes with concurrent live sessions and test processes",
+        "No hidden real-home write remains in normal tests",
+        "Independent reviewer approves issue closure"
+      ],
+      "falsification": "A single reproducible cross-test or live-session interference blocks architecture work."
+    },
+    {
+      "id": "C20",
+      "phase": "implementation",
+      "content": "Perform the final script and residue reachability census after the new command/workflow target is known. Classify every deletion candidate as supported command, active bug reproducer, benchmark, historical probe, or dead file.",
+      "kind": "explore",
+      "depends_on": ["B1"],
+      "priority": 80,
+      "worker_profile": "context",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Every candidate has repository-reference and documented-operator checks",
+        "Open-issue reproducers are retained or relocated",
+        "A bounded deletion manifest is ready"
+      ],
+      "falsification": "Uncertain operator ownership means retain-by-default and create a follow-up question, not delete."
+    },
+    {
+      "id": "C21",
+      "phase": "implementation",
+      "content": "Delete or relocate only the C20-confirmed residue after P23 establishes the new pipeline. Remove obsolete packaging, dispatch-only unsupported workflows, YAML extraction helpers, historical probes, and duplicated scripts; update direct callers in the same commit.",
+      "kind": "implement",
+      "depends_on": ["C20", "P23", "V21"],
+      "priority": 75,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["scripts/**", "packaging/**", "examples/**", ".github/workflows/**"],
+      "mutexes": ["pipeline-scripts", "workflows", "ideal-base"],
+      "acceptance": [
+        "Script lines fall by at least 25 percent or every retained exception is justified",
+        "No supported command or open-issue reproducer is lost",
+        "Reference, shell syntax, and targeted tests pass"
+      ],
+      "falsification": "Any deleted file is still called by a supported workflow, documented procedure, open issue, or operator entrypoint. Restore it and correct the census."
+    },
+    {
+      "id": "C22",
+      "phase": "implementation",
+      "content": "Eliminate required-check and workflow documentation drift. Make scripts/required-checks.json or its successor the sole named-context inventory, generate or link documentation from it, refresh stale workflow comments, and regenerate APM outputs.",
+      "kind": "implement",
+      "depends_on": ["P23", "V11", "C21"],
+      "priority": 85,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".apm/instructions/**", "AGENTS.md", "docs/AGENTS.md", "docs/agent-workflows.md", "docs/BRANCHING.md", "docs/NIX.md", "CONTRIBUTING.md", "RELEASING.md", "scripts/required-checks.json"],
+      "mutexes": ["docs", "governance"],
+      "acceptance": [
+        "Live rules, desired state, workflow jobs, and docs name the same required context",
+        "APM validation and documentation reference checks pass",
+        "No static duplicate check list remains in prose"
+      ],
+      "falsification": "If generated documentation can silently differ from live desired state, retain an automated comparison instead of trusting prose."
+    },
+    {
+      "id": "V22",
+      "phase": "implementation",
+      "content": "Verify cleanup and documentation integrity. Run reference audits, command existence checks, script syntax/tests, APM validation, and compare repository size/inventory against the baseline.",
+      "kind": "verify",
+      "depends_on": ["C21", "C22"],
+      "priority": 90,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "All documented commands exist",
+        "No active reference points to retired files",
+        "Cleanup reduction is measured and independently reviewed"
+      ],
+      "falsification": "A broken supported path or unexplained deletion returns to C21 or C22."
+    },
+    {
+      "id": "A21",
+      "phase": "implementation",
+      "content": "Build the explicit public-surface and import migration census for the re-export spine. Produce codemod batches, downstream compatibility tests, and compile-time baselines without editing production files.",
+      "kind": "explore",
+      "depends_on": ["B1"],
+      "priority": 80,
+      "worker_profile": "context",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Every wildcard export and dependent import is mapped",
+        "Migration batches are small enough for narrow compilation",
+        "Cold and warm compile baselines are recorded"
+      ],
+      "falsification": "If the spine is serving a deliberate stable facade with measurable compile benefit, preserve that layer and narrow only accidental exports."
+    },
+    {
+      "id": "A20",
+      "phase": "architecture",
+      "content": "Centralize commonly repeated external dependencies in workspace.dependencies and adopt workspace = true incrementally. Preserve features and target-specific declarations and resolve the rand specification drift deliberately.",
+      "kind": "implement",
+      "depends_on": ["V21"],
+      "priority": 80,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["Cargo.toml", "crates/*/Cargo.toml"],
+      "mutexes": ["manifests"],
+      "acceptance": [
+        "Cargo metadata and machete pass",
+        "No dependency feature or target behavior changes unintentionally",
+        "Repeated version declarations are materially reduced"
+      ],
+      "falsification": "If centralization obscures materially different feature contracts or causes broad unnecessary rebuild coupling, leave those dependencies local."
+    },
+    {
+      "id": "A22",
+      "phase": "architecture",
+      "content": "Remove the root crate's wildcard re-export of jcode-tui. Replace consumers with explicit crate/module paths, keep the intended root API narrow, and measure compile and binary behavior against A21 baselines.",
+      "kind": "implement",
+      "depends_on": ["A20", "A21", "O21"],
+      "priority": 75,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["src/**", "Cargo.toml"],
+      "mutexes": ["manifests", "root-surface"],
+      "acceptance": [
+        "No root wildcard re-export remains",
+        "CLI, bins, examples, and public API tests pass",
+        "Compile timing does not regress beyond the agreed noise budget"
+      ],
+      "falsification": "A material compile or compatibility regression without ownership benefit stops the layer and triggers a narrower facade design."
+    },
+    {
+      "id": "A23",
+      "phase": "architecture",
+      "content": "Remove jcode-tui's wildcard re-export of jcode-app-core. Convert TUI and direct consumers to explicit imports while keeping presentation dependencies one-way.",
+      "kind": "implement",
+      "depends_on": ["A22"],
+      "priority": 75,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["crates/jcode-tui/**", "crates/jcode-tui-*/**", "src/**"],
+      "mutexes": ["root-surface", "tui-surface"],
+      "acceptance": [
+        "No jcode-tui wildcard app-core export remains",
+        "Presentation crates import only declared APIs",
+        "TUI fast tests and build timing pass"
+      ],
+      "falsification": "If the migration creates circular dependencies or forces presentation details into app-core, stop and repair the boundary rather than adding another re-export."
+    },
+    {
+      "id": "A24",
+      "phase": "architecture",
+      "content": "Remove jcode-app-core's wildcard re-export of jcode-base. Introduce explicit imports and narrow facades where truly public, then validate provider, server, tool, session, and reload paths.",
+      "kind": "implement",
+      "depends_on": ["A23"],
+      "priority": 75,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["crates/jcode-app-core/**", "crates/jcode-base/**", "src/**"],
+      "mutexes": ["tui-surface", "app-surface"],
+      "acceptance": [
+        "No app-core wildcard base export remains",
+        "Layer ownership is explicit in Cargo metadata and imports",
+        "Workspace check, fast tests, and compile comparison pass"
+      ],
+      "falsification": "If explicitization only relocates glob behavior or materially worsens change fan-out, redesign the facade before continuing."
+    },
+    {
+      "id": "A25",
+      "phase": "architecture",
+      "content": "Composite hotspot paydown. Rank oversized production modules by churn, fan-out, error debt, and compile cost; expand into at most five disjoint child nodes, each with a measured reason to split and no new crate unless the boundary benefit is proven.",
+      "kind": "implement",
+      "depends_on": ["A24"],
+      "priority": 70,
+      "worker_profile": "synthesize",
+      "read_only": false,
+      "owned_paths": ["crates/jcode-app-core/src/**", "crates/jcode-base/src/**", "crates/jcode-tui/src/**", "src/**"],
+      "mutexes": ["architecture-hotspots"],
+      "expandable": true,
+      "required_children_min": 3,
+      "required_children_max": 5,
+      "acceptance": [
+        "Each child owns disjoint files and has a before/after complexity metric",
+        "No new 1200-line production file is introduced",
+        "At least three high-value hotspots improve without public behavior change"
+      ],
+      "falsification": "If size reduction does not improve ownership, testability, or compile/change coupling, do not split that hotspot."
+    },
+    {
+      "id": "V24",
+      "phase": "architecture",
+      "content": "Independently verify the complete architecture migration. Compare dependency graph, reverse fan-out, wildcard-export budget, compile timings, public API behavior, and targeted/full tests against the baseline.",
+      "kind": "verify",
+      "depends_on": ["A25"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Wildcard re-export spine is removed or every retained facade is justified",
+        "Compile and test measurements meet agreed budgets",
+        "Independent review finds no layering regression"
+      ],
+      "falsification": "Any unexplained compatibility, dependency-cycle, or compile regression blocks B2."
+    },
+    {
+      "id": "O20",
+      "phase": "observability",
+      "content": "Implement a read-only CI metrics collector that reports PR lead time, required-gate latency, runner-minutes, cancellation, infrastructure failure, first-pass success, and release timing as a workflow summary and retained artifact.",
+      "kind": "implement",
+      "depends_on": ["P23", "C21"],
+      "priority": 70,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["scripts/ci_metrics.py", "tests/test_ci_metrics.py"],
+      "mutexes": ["observability"],
+      "acceptance": [
+        "Collector handles pagination, missing runs, and cancelled jobs",
+        "No metrics are committed to main",
+        "Baseline and target SLOs render in one summary"
+      ],
+      "falsification": "If metrics require privileged secrets or create repository churn, reduce scope to public API data and ephemeral artifacts."
+    },
+    {
+      "id": "O21",
+      "phase": "observability",
+      "content": "Pilot cargo-nextest and scheduled llvm-cov without changing merge policy. Preserve doctests and process-sensitive suites explicitly, emit slow-test/JUnit data, annotate every ignored test, and adopt nextest only if measured runtime or diagnostics improve.",
+      "kind": "implement",
+      "depends_on": ["P20", "V21", "C21", "O20"],
+      "priority": 70,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".config/nextest.toml", "scripts/test_fast.sh", "scripts/test_full.sh", "scripts/coverage.sh", "crates/**/tests/**", "tests/**"],
+      "mutexes": ["test-runner"],
+      "acceptance": [
+        "Doctests and process-sensitive suites remain explicit",
+        "Every ignored test has reason and runbook classification",
+        "Nextest is retained only with measured benefit"
+      ],
+      "falsification": "If nextest loses coverage, hides process-order bugs, or does not improve feedback, remove it and keep only coverage/slow-test reporting."
+    },
+    {
+      "id": "O22",
+      "phase": "observability",
+      "content": "Select stable startup, warm compile, TUI latency, and memory benchmarks from existing tools. Normalize outputs, define non-blocking regression bands, and remove duplicate benchmark scripts discovered during consolidation.",
+      "kind": "implement",
+      "depends_on": ["P23", "C21", "V24"],
+      "priority": 65,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["scripts/bench_compile.sh", "scripts/bench_startup.py", "scripts/bench_startup_visible_ready.py", "scripts/benchmark_tools.sh", "src/bin/tui_bench/**", "docs/TERMINAL_BENCH.md"],
+      "mutexes": ["performance"],
+      "acceptance": [
+        "Benchmarks are repeatable enough to define trend bands",
+        "Outputs are machine-readable and bounded",
+        "Scheduled execution is non-blocking until variance is understood"
+      ],
+      "falsification": "If host variance overwhelms the signal, keep the benchmark local and do not create a noisy CI gate."
+    },
+    {
+      "id": "O23",
+      "phase": "release",
+      "content": "Establish the authoritative fork release identity and promotion flow. Default to v1.0.0 unless the operator overrides before tagging; verify main ancestry, Cargo/changelog/tag coherence, cached Nix closures, SBOM/provenance, metadata-only GitHub Release, install, and rollback.",
+      "kind": "implement",
+      "depends_on": ["P21", "P23", "C21", "C22", "O21"],
+      "priority": 75,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".github/workflows/release.yml", "RELEASING.md", "CHANGELOG.md", "scripts/release_check.py", "tests/test_release_check.py"],
+      "mutexes": ["workflows", "docs", "release"],
+      "acceptance": [
+        "Non-ancestor historical v0 tags cannot satisfy release checks",
+        "Release consumes or verifies cached Nix outputs rather than creating a second channel",
+        "Previous release rollback remains documented and testable"
+      ],
+      "falsification": "If v1.0.0 conflicts with a product decision, stop before publication and substitute an explicit fork-prefixed namespace throughout."
+    },
+    {
+      "id": "O24",
+      "phase": "observability",
+      "content": "Wire O20-O22 into the scheduled workflow and publish bounded summaries/artifacts. Keep PR blocking limited to deterministic established gates; add no automatic retries that conceal flaky failures.",
+      "kind": "implement",
+      "depends_on": ["O20", "O21", "O22", "O23"],
+      "priority": 80,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [".github/workflows/scheduled.yml", ".github/workflows/release.yml"],
+      "mutexes": ["workflows", "observability", "release"],
+      "acceptance": [
+        "Scheduled workflow syntax and dry-run fixtures pass",
+        "Metrics, coverage, and performance outputs are retained without main-branch churn",
+        "No flaky retry masks a first failure"
+      ],
+      "falsification": "If scheduled jobs require unsupported credentials or exceed their time budget without actionable output, reduce or split them before merge."
+    },
+    {
+      "id": "V23",
+      "phase": "observability",
+      "content": "Verify observability and release readiness with fixture data, one local scheduled-equivalent run, release dry run against a non-publishing tag candidate, and independent review of secrets, permissions, retention, and rollback.",
+      "kind": "verify",
+      "depends_on": ["O24"],
+      "priority": 95,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Metrics and reports are correct on planted edge cases",
+        "Release dry run performs no publication and validates exact identities",
+        "Workflow permissions remain least-privilege"
+      ],
+      "falsification": "Any secret exposure, mutable action, incorrect release identity, or unactionable noisy metric blocks B2."
+    },
+    {
+      "id": "B2",
+      "phase": "integration",
+      "content": "Synthesize verified delivery, isolation, cleanup, architecture, observability, and release work into one integration manifest. Confirm all worker commits are bounded, dependency-ordered, and based on the governance-unlocked main.",
+      "kind": "synthesize",
+      "depends_on": ["V20", "V21", "V22", "V23", "V24"],
+      "priority": 100,
+      "worker_profile": "synthesize",
+      "read_only": false,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Every implementation node has a bounded commit and validation artifact",
+        "No unresolved low-confidence review remains",
+        "Integration order and conflict ownership are explicit"
+      ],
+      "falsification": "Unresolved overlap, stale base ancestry, or missing verification blocks integration."
+    },
+    {
+      "id": "I30",
+      "phase": "integration",
+      "content": "Integrate the B2-approved commits onto one fresh branch from authoritative main. Resolve conflicts by preserving reviewed behavior, update only final cross-cutting documentation, and record the complete Modernization-Node trailer set.",
+      "kind": "implement",
+      "depends_on": ["B2"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": ["**"],
+      "mutexes": ["integration"],
+      "acceptance": [
+        "Integration branch contains only approved node changes",
+        "No conflict resolution drops tests or policy",
+        "Modernization-Barrier: B2 and node trailers are recorded"
+      ],
+      "falsification": "If reviewed commits cannot integrate without redesign or behavior loss, stop and inject a focused conflict-fix node."
+    },
+    {
+      "id": "F30",
+      "phase": "integration",
+      "content": "Run the narrow-to-broad final local gate: graph validator, APM validation, reference/security/workflow checks, targeted crate tests, fast suite, preflight, Nix flake check, package/provenance build, and one clean install/startup smoke. Capture actual exit codes and residue.",
+      "kind": "verify",
+      "depends_on": ["I30"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "All declared local and Nix gates pass",
+        "No real-home, process, worktree, or build residue remains",
+        "Measured command and package behavior matches the target design"
+      ],
+      "falsification": "A surprising or contradictory result stops the gate. Diagnose the premise or setup before rerunning."
+    },
+    {
+      "id": "F31",
+      "phase": "integration",
+      "content": "Perform an independent adversarial review of the exact F30 commit. Reproduce critical gates, inspect deletions and security boundaries, verify release identity and rollback, and confirm that the program reduced rather than relocated complexity.",
+      "kind": "verify",
+      "depends_on": ["F30"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Reviewer names the exact commit and independently reproduces critical checks",
+        "Zero unresolved high-severity findings remain",
+        "Complexity and CI-cost deltas are measured"
+      ],
+      "falsification": "Any high-severity correctness, security, release, or recoverability finding injects a fix and re-review node before publication."
+    },
+    {
+      "id": "H30",
+      "phase": "publication",
+      "content": "AUTHORIZATION GATE: after explicit user approval, push the reviewed integration branch and open the modernization PR. Wait for the new PR Gate to pass, atomically cut the live ruleset from the legacy required contexts to the reviewed desired-state PR Gate, confirm mergeability, then merge without bypass and verify main. Restore the old live rules if merge cannot complete. Do not publish a release in this node.",
+      "kind": "verify",
+      "depends_on": ["F31"],
+      "priority": 100,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [],
+      "mutexes": [],
+      "external_write": true,
+      "requires_authorization": true,
+      "acceptance": [
+        "The new PR Gate passes before the live ruleset cutover",
+        "The live ruleset is atomically changed to match the reviewed desired-state manifest",
+        "The merge completes without bypass and is reachable from authoritative main"
+      ],
+      "falsification": "A PR Gate failure, missing status, non-atomic ruleset cutover, merge failure, or live configuration mismatch blocks merge and restores the prior ruleset."
+    },
+    {
+      "id": "V30",
+      "phase": "publication",
+      "content": "Verify the published modernization from a fresh checkout and live GitHub state. Measure the first PR/main workflow route, confirm docs-only main publication behavior, test install/startup, and compare required checks to the desired-state manifest.",
+      "kind": "verify",
+      "depends_on": ["H30"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Live required checks and workflow topology match the target",
+        "Fresh install/startup succeeds from Cachix",
+        "Observed post-merge routing shows no duplicate full suite"
+      ],
+      "falsification": "If live behavior differs from reviewed local behavior, stop release work and repair main through a normal PR."
+    },
+    {
+      "id": "F32",
+      "phase": "publication",
+      "content": "Schedule a 30-day non-mutating SLO review that will report PR latency, runner-minutes, first-pass success, release timing, test isolation incidents, script-line reduction, and architecture metrics back to the originating session or a spawned audit session.",
+      "kind": "implement",
+      "depends_on": ["V30"],
+      "priority": 70,
+      "worker_profile": "synthesize",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "A durable scheduled task exists with measurable success criteria",
+        "The task performs no external write without fresh authorization",
+        "The review points to this graph and published main SHA"
+      ],
+      "falsification": "If the scheduler cannot deliver a reliable follow-up, create an issue milestone instead of pretending the feedback loop exists."
+    },
+    {
+      "id": "H31",
+      "phase": "release",
+      "content": "AUTHORIZATION GATE: after explicit user approval of the final version and notes, create the first authoritative fork tag, run the release workflow, and create the metadata-only GitHub Release. Publish no non-Nix binaries.",
+      "kind": "verify",
+      "depends_on": ["V30"],
+      "priority": 90,
+      "worker_profile": "implement",
+      "read_only": false,
+      "owned_paths": [],
+      "mutexes": [],
+      "external_write": true,
+      "requires_authorization": true,
+      "acceptance": [
+        "Tag points to authoritative main and uses the approved namespace",
+        "Release metadata contains install and rollback instructions",
+        "Nix closures, SBOM, and provenance verify"
+      ],
+      "falsification": "Any tag/version mismatch, cache miss, provenance failure, or unintended binary asset blocks release publication."
+    },
+    {
+      "id": "V31",
+      "phase": "release",
+      "content": "Verify the published release from a clean environment. Install and run the tagged Nix package, verify version/provenance/SBOM, reinstall the previous known-good revision, and confirm the metadata-only release contains no binary assets.",
+      "kind": "verify",
+      "depends_on": ["H31"],
+      "priority": 100,
+      "worker_profile": "verify",
+      "read_only": true,
+      "owned_paths": [],
+      "mutexes": [],
+      "acceptance": [
+        "Tagged install and startup succeed",
+        "Rollback succeeds",
+        "Release metadata and Nix-only policy agree"
+      ],
+      "falsification": "A failed install, rollback, provenance check, or policy mismatch keeps the release node incomplete and triggers a normal repair PR."
+    },
+    {
+      "id": "B3",
+      "phase": "closeout",
+      "content": "Synthesize the final modernization outcome. Record before/after metrics, retained limitations, deferred work, exact published commits and tag, and the scheduled 30-day review. Remove owned swarm workers and leave no stale task graph or worktree state.",
+      "kind": "synthesize",
+      "depends_on": ["F32", "V31"],
+      "priority": 100,
+      "worker_profile": "synthesize",
+      "read_only": false,
+      "owned_paths": ["docs/modernization/README.md"],
+      "mutexes": ["docs"],
+      "acceptance": [
+        "Modernization-Barrier: B3 is recorded",
+        "Before/after metrics and honest limitations are published",
+        "Owned workers, branches, and worktrees are cleaned up after merge"
+      ],
+      "falsification": "If any external verification or scheduled feedback loop is missing, closeout remains incomplete rather than claiming success."
+    }
+  ]
+}
