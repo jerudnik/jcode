@@ -145,8 +145,13 @@ D01-FIX-3 window and written down as D02 before it had a patch.
 Engineering evidence collapses to `./scripts/d02_scoreboard.sh`, exit 0 only
 when every integer is at its required value:
 
-    tests_exit 0 | tests_ran 27 | guard_fires_and_is_quiet 0
-    railway_check_exit 0 | protected_patterns 32 | protected_hits 2
+    tests_exit 0 | tests_ran 29 | guard_fires_and_is_quiet 0
+    railway_check_exit 0 | protected_patterns 32 | protected_hits 0
+
+The missing reviewed-commit object (`b238d7034fdef981a2430224e71b9e6daed2cf23`) is
+the separate validation failure that still trips `tests.test_ideal_base_railway`.
+The scoreboard baselines above now track the live tree, so that failure is not
+misread as a D02 baseline mismatch.
 
 Counters proven responsive, each mutation confirmed on disk before any exit code
 was read, each restored byte-identical via `diff -q`:

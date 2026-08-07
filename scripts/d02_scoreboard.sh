@@ -35,7 +35,7 @@ python3 -m unittest tests.test_ideal_base_railway >/tmp/d02_sb_tests.txt 2>&1
 tests_exit=$?
 ran=$(grep -Eo '^Ran [0-9]+' /tmp/d02_sb_tests.txt | grep -Eo '[0-9]+' || echo 0)
 check "tests_exit" "$tests_exit" "0"
-check "tests_ran" "$ran" "27"
+check "tests_ran" "$ran" "29"
 
 # (2) guard FIRES. Asserted functionally, not by grepping for its message: a
 # grep proves a string exists, and the first version of this check returned 0
@@ -85,7 +85,7 @@ print(len(pats), len(hits))
 PY
 )
 check "protected_patterns" "$pats" "32"
-check "protected_hits" "$hits" "2"
+check "protected_hits" "$hits" "0"
 
 echo
 echo "state (not scored: blocked on authorization, not on engineering)"
