@@ -302,12 +302,7 @@ fn current_working_dir_string() -> Option<String> {
 }
 
 fn env_flag_enabled(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| {
-            let trimmed = v.trim();
-            !trimmed.is_empty() && trimmed != "0" && !trimmed.eq_ignore_ascii_case("false")
-        })
-        .unwrap_or(false)
+    crate::env::flag_enabled(name)
 }
 
 fn default_is_test_session() -> bool {

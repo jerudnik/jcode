@@ -568,13 +568,7 @@ mod tests {
     }
 
     fn env_truthy(key: &str) -> bool {
-        std::env::var(key)
-            .ok()
-            .map(|value| {
-                let value = value.trim();
-                !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
-            })
-            .unwrap_or(false)
+        jcode_base::env::flag_enabled(key)
     }
 
     struct LiveTestApiKey {

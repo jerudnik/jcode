@@ -43,11 +43,5 @@ pub(super) fn is_cargo_test_binary_path(exe: &Path) -> bool {
 }
 
 pub(super) fn env_truthy(key: &str) -> bool {
-    match std::env::var(key) {
-        Ok(value) => {
-            let trimmed = value.trim();
-            !trimmed.is_empty() && trimmed != "0" && !trimmed.eq_ignore_ascii_case("false")
-        }
-        Err(_) => false,
-    }
+    crate::env::flag_enabled(key)
 }

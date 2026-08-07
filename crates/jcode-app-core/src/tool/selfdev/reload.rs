@@ -237,6 +237,26 @@ pub(super) fn resolve_selfdev_reload_repo_dir_from(
     primary.or_else(|| working_dir.and_then(build::find_repo_in_ancestors))
 }
 
+/// Resolve the repo dir for a reload, or fall back to a synthetic path in test
+/// sessions.
+///
+/// A test session (`JCODE_TEST_SESSION`) fakes everything repo-derived further
+/// down `do_reload` — source state, publish, smoke test, and the on-disk binary
+/// check — so repo discovery must not be load-bearing there either. Build/test
+/// environments without a discoverable repository (e.g. remote builders that
+/// sync the source tree without `.git`) exercise the reload signal/ack
+/// contract, which does not depend on repository identity.
+pub(super) fn reload_repo_dir_or_test_fallback(
+    resolved: Option<std::path::PathBuf>,
+    is_test_session: bool,
+) -> Result<std::path::PathBuf> {
+    match resolved {
+        Some(dir) => Ok(dir),
+        None if is_test_session => Ok(std::env::temp_dir().join("jcode-test-session-repo")),
+        None => Err(anyhow::anyhow!("Could not find jcode repository directory")),
+    }
+}
+
 impl SelfDevTool {
     pub(super) async fn do_reload(
         &self,
@@ -245,8 +265,10 @@ impl SelfDevTool {
         execution_mode: ToolExecutionMode,
         working_dir: Option<&std::path::Path>,
     ) -> Result<ToolOutput> {
-        let repo_dir = resolve_selfdev_reload_repo_dir(working_dir)
-            .ok_or_else(|| anyhow::anyhow!("Could not find jcode repository directory"))?;
+        let repo_dir = reload_repo_dir_or_test_fallback(
+            resolve_selfdev_reload_repo_dir(working_dir),
+            SelfDevTool::is_test_session(),
+        )?;
 
         let target_binary = build::find_dev_binary(&repo_dir)
             .unwrap_or_else(|| build::release_binary_path(&repo_dir));

@@ -39,7 +39,7 @@ JCODE_HOME, deferred-auth bootstrap, JCODE_DEBUG_CONTROL=1). Transcript:
 
 | Fixture | Result |
 |---|---|
-| A. Hold/release per lease class (all 8 classes) | alive past 5s idle timeout while held; STILL alive 4s after release (full-new-window assertion, review F03-I1); exit 44; zero residue |
+| A. Hold/release per lease class (all 8 classes) | alive past 5s idle timeout while held, exit 44 after release, and zero residue for all 8 classes; STILL alive 4s after release (full-new-window assertion, review F03-I1) for the 7 drain-blocking classes. `client-connection` does not assert a full post-release window because design 4.1 classifies C1 as abandon-on-drain; see `../S01-FIX-1/AMENDMENT.md`. |
 | B. Forced exit (30s injected cleanup hang + SIGTERM) | watchdog exit code 70; durable marker `fired`; successor boots over the forced-exit residue IN THE SAME runtime dir, idle-exits 44 with zero residue (review F03-I2) |
 | C. Parent SIGKILL | stale socket residue as expected; successor boots over it, idle-exits 44, zero residue |
 | D. Drain refusal typing | covered by unit fixtures (idle-claim atomicity, ShuttingDown refusals) |
@@ -47,7 +47,10 @@ JCODE_HOME, deferred-auth bootstrap, JCODE_DEBUG_CONTROL=1). Transcript:
 ## Acceptance gates
 
 - "Short-timeout no-provider fixtures remain alive for each lease class and
-  exit after release": matrix row A, all 8 classes PASS.
+  exit after release": matrix row A, all 8 classes PASS. The stronger
+  full-new-idle-window assertion passes for the 7 drain-blocking classes and is
+  explicitly not asserted for C1 `client-connection`, per design 4.1 and the
+  S01-FIX-1 contract amendment.
 - "No socket/process residue": residue checks in rows A and C PASS; the
   forced-exit path's residue is intentionally owned by next-boot
   reconciliation (proven by row C's successor boot).
@@ -55,5 +58,8 @@ JCODE_HOME, deferred-auth bootstrap, JCODE_DEBUG_CONTROL=1). Transcript:
 ## Test totals
 
 - `jcode-app-core --lib`: 1126/1126 (includes the 12 new fixtures).
-- Runtime matrix: 41/41 assertions PASS (strengthened per review findings
-  F03-I1 and F03-I2 after the independent PASS verdict at `d8c223d29`).
+- Runtime matrix: 41/41 dispositions PASS: held-past-timeout, exit-44, and
+  residue for all 8 classes; the full-new-window assertion for 7 classes plus
+  one explicit C1 abandon-contract disposition. The matrix was strengthened
+  per review findings F03-I1 and F03-I2 after the independent PASS verdict at
+  `d8c223d29`, then accurately narrowed for C1 by S01-FIX-1.

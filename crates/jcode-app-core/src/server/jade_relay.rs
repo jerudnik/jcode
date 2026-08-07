@@ -107,13 +107,7 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 }
 
 fn env_flag(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .map(|value| {
-            let trimmed = value.trim();
-            !trimmed.is_empty() && trimmed != "0" && !trimmed.eq_ignore_ascii_case("false")
-        })
-        .unwrap_or(false)
+    crate::env::flag_enabled(name)
 }
 
 fn normalize_api_base(api_base: &str) -> String {

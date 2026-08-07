@@ -375,3 +375,117 @@ sweep at 0 FAIL with every step executing; reaching it means changing the
 client-connection assertion to match design 4.1, which is a decision about the
 fixture's contract and not a repair I should make silently while claiming the
 gate was met on the original terms.
+
+---
+
+## S01-F7: first valid round pair — N_FAIL=0 twice, hashes unequal, cause = libtest interleaving (P4 confirmed)
+
+The first pair where both rounds passed (rounds A/B at `b28bc9b7e`, both
+`N_STEP=18 N_FAIL=0`) hashed unequal:
+
+```
+77355b302e0e86193736cdd8e1aa62cc842e852306d75907f5c21098e2adf3ee  577  (A)
+898163015975f614bd6e743c9c150e191aced3846ab42533aaca369f14fa63bb  577  (B)
+```
+
+Localization: a line-sorted diff of the two NORMALIZED transcripts leaves only
+the round-label lines (`round=A` vs `round=B`). Every other differing line in
+the unsorted diff is a `test ... ok` line present in BOTH transcripts at a
+different position, i.e. pure reordering of libtest output, which prints in
+completion order across test threads. No verdict token, test name, count,
+error, or step label differed. This is exactly prediction P4, and P3's "NOT in
+a verdict token" clause held.
+
+Response, per the pre-committed P4 remedy (harness fix, normalizer stays
+frozen):
+
+1. `RUST_TEST_THREADS=1` exported by `s01_matrix.sh`, serializing libtest so
+   result lines print in a deterministic order.
+2. The self-identifying round label removed from the transcript BODY (it made
+   hash equality impossible by construction); the label lives in the log
+   filename only. This was a harness authoring error in the original script,
+   visible in the sorted diff above.
+
+The A/B pair that observed the disagreement is thereby superseded; the
+determinism claim rests on a fresh pair run under the pinned harness.
+
+Also observed while stabilizing earlier attempts (environmental, not
+determinism findings): the A7 real-home isolation gate legitimately FAILs
+while any live jcode session is writing `~/.jcode/sessions/*`; rounds must run
+on a quiet machine. And every gate must run inside `nix develop` — the bare
+shell lacks cargo and python `tomllib`, which presented as A6 exit-127
+failures in the first attempt.
+
+### Superseded C/D pair: prewarm was not rerun after the harness commit
+
+The first pair under the test-order pin also passed twice but hashed unequal:
+
+```
+d7822787a3493e113c6859fc61b72981e3cd43fde22d21107239c326ca6a5edd  580  (C)
+6eb145b62be373db88c22193b2d68183abcf670bccd7c4b8dea91f89231e2d86  577  (D)
+```
+
+The normalized diff had exactly one hunk: C printed three `Compiling ...`
+lines and D did not. Sorting both normalized transcripts produced no diff,
+so again no outcome changed. C warmed the exact cache D consumed. This is P3's
+other predeclared transcript artifact, but the experiment setup was wrong: the
+prewarm had run before the final harness commit, not at the exact signoff HEAD.
+
+Response: `prewarm.sh` now exports the same `RUST_TEST_THREADS=1` pin as the
+matrix. After this finding is committed, prewarm and both replacement rounds
+must run at that one unchanged HEAD. If those replacement hashes differ, the
+harness premise is rejected rather than retried again.
+
+---
+
+## S01-F8: first packaged candidate rejected by full preflight and S02 review
+
+Candidate `efb730a9a` passed its two recorded rounds, but it is **superseded**
+and is not the final signoff subject. Two independent closeout surfaces found
+five blockers before publication:
+
+1. Full `scripts/preflight.sh` failed `rustfmt --check` in
+   `tool/selfdev/reload.rs` and `jcode-core/src/env.rs`; Clippy passed.
+2. Independent Opus S02 review `41bf14a6a` found
+   `S01-FIX-1/gate3-sweep.log` cited by `STATE.json` but absent from Git because
+   the operator's global `*.log` ignore swallowed it.
+3. The same review found `F03/README.md` still claiming a full post-release
+   idle window for all 8 classes after the fixture correctly narrowed that
+   assertion to the 7 drain-blocking classes.
+4. Branch handoff inspection found the already-reviewed
+   `automation/protected-path-equality` governance fix (`1e356391e`) was not an
+   ancestor of either `main` or the S01 branch, even though final signoff must
+   include it.
+5. Full preflight then exposed stale accepted-node semantics: S01-FIX-1's summary
+   claimed F09 was retired, while the amended fixture and repository history prove
+   the coverage moved to `jcode-app-core` and is still active.
+
+Response before any replacement round: preserve the BLOCKED review, merge the
+reviewed governance fix, apply only the two rustfmt changes, force-track the
+cited sweep log with a checksum manifest, correct F03's prose and checksum,
+correct S01-FIX-1's accepted summary, then prewarm and rerun the pair at one new
+exact commit. The frozen normalizer is unchanged.
+
+---
+
+## S01-F9: repaired exact-HEAD signoff passes twice
+
+Source/runtime commit `ad7a7d585f77d48dedf47f9e44f6ff838f4405f1`
+passed full local `scripts/preflight.sh` before prewarm, including rustfmt and
+Clippy. The only unavailable gate was the explicitly CI-enforced
+unused-dependency check because `cargo-machete` is absent locally.
+
+After one exact-HEAD prewarm, consecutive executions G and H each reported
+`N_STEP=18 N_FAIL=0`, 577 transcript lines, byte-identical F14 restoration, and
+zero owned fixture residue. The frozen normalizer produced the same digest for
+both:
+
+```
+4db50a069513cc2d28c78320713101264f1e635a409b115576a61ea3299f1c52
+```
+
+Frozen controls passed from a clean worktree before execution. All previously
+identified determinism, evidence-packaging, formatting, accepted-node semantics,
+and review-ancestry defects were repaired before the candidate HEAD was frozen.
+G/H are now canonical `round-A.log`/`round-B.log`; S01 is `implemented` pending
+independent S02 re-review and S03 publication.

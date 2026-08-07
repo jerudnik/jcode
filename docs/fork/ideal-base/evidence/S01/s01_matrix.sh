@@ -34,6 +34,20 @@
 # and is not silently absorbed by this pin.
 export JCODE_REMOTE_CARGO=0
 
+# TEST-ORDER PIN (RUST_TEST_THREADS=1), decided AFTER the first valid pair,
+# recorded here as a harness change per PREDICTIONS.md P4:
+# The first clean pair (rounds A/B at b28bc9b7e) produced N_FAIL=0 twice but
+# unequal hashes. A sorted-line diff of the two normalized transcripts showed
+# the ONLY difference was the interleaving of `test ... ok` lines within
+# cargo test suites (multi-threaded libtest prints in completion order); no
+# verdict token, count, or step label differed. That is precisely the P4
+# prediction, and P4 pre-committed the remedy: make ordering deterministic in
+# the HARNESS, never by sorting lines in the normalizer (forbidden by the
+# frozen NORMALIZER_SPEC.md). RUST_TEST_THREADS=1 serializes libtest so
+# result lines print in declaration order. The A/B pair that observed the
+# disagreement is superseded by a fresh pair run under this pin.
+export RUST_TEST_THREADS=1
+
 set -uo pipefail
 
 LABEL="${1:?usage: s01_matrix.sh <round-label>}"
@@ -63,7 +77,13 @@ run_step() {
 
 : > "$LOG"
 cd "$REPO"
-log "S01 round=$LABEL commit=$(git rev-parse HEAD)"
+# The round label is deliberately NOT written into the transcript: the two
+# rounds must produce byte-identical normalized transcripts, and a
+# self-identifying "round=A" line makes hash equality impossible by
+# construction. The label lives in the FILENAME (round-$LABEL.log), which is
+# outside the hashed content. Harness change, recorded with the test-order
+# pin above; the normalizer stays frozen.
+log "S01 round commit=$(git rev-parse HEAD)"
 log "uname=$(uname -sm)"
 
 # --- A4/A6/A7: deterministic quality + hygiene gates ---------------------
@@ -127,5 +147,5 @@ else
 fi
 
 log "=== summary ==="
-log "S01_ROUND=$LABEL N_STEP=$NSTEP N_FAIL=$FAIL"
+log "S01_ROUND N_STEP=$NSTEP N_FAIL=$FAIL"
 exit "$FAIL"

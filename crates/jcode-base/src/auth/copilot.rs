@@ -219,13 +219,7 @@ pub fn load_github_token() -> Result<String> {
 }
 
 fn allow_gh_cli_fallback() -> bool {
-    std::env::var("JCODE_COPILOT_ALLOW_GH_AUTH_TOKEN")
-        .ok()
-        .map(|value| {
-            let value = value.trim();
-            !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false")
-        })
-        .unwrap_or(false)
+    crate::env::flag_enabled("JCODE_COPILOT_ALLOW_GH_AUTH_TOKEN")
 }
 
 fn copilot_env_token_present() -> bool {

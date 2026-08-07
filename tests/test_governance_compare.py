@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -616,6 +617,26 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
     def _norm(paths: list[str]) -> set[str]:
         return {p.rstrip("/") for p in paths}
 
+    @staticmethod
+    def _protected_array(text: str) -> set[str]:
+        """Parse the audit gate's inline `protected=( ... )` array.
+
+        Deliberately re-derived here rather than imported: this test's job is
+        to be an independent reader of the artifacts, so it must not inherit
+        the comparator's parse. A zero-pattern parse is an artifact, never an
+        answer, so an empty result fails loudly instead of comparing equal to
+        an empty manifest.
+        """
+        matches = re.findall(r"protected=\(\s*(.*?)\s*\)", text, re.DOTALL)
+        if len(matches) != 1:
+            raise AssertionError(
+                f"expected exactly one `protected=( ... )` array, found {len(matches)}"
+            )
+        paths = {token for token in matches[0].split() if token}
+        if not paths:
+            raise AssertionError("`protected=( ... )` array parsed empty")
+        return paths
+
     def test_protected_set_is_coherent_across_artifacts(self) -> None:
         manifest = load_manifest()
         required = self._norm(manifest["protected_paths"]["required"])
@@ -641,22 +662,47 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
             for a in seq6["local_git"]["assertions"]
             if a.startswith("git diff --quiet")
         )
-        for path in sorted(required):
-            self.assertIn(
-                path,
-                diff_cmd,
-                f"sequence 6 diff assertion does not cover {path}",
-            )
+        # Set equality, not containment. A path the assertion covers but the
+        # manifest omits is invisible to a per-path assertIn loop, which is
+        # exactly how the two sets drifted apart while this test stayed green.
+        seq6_paths = self._norm(
+            [token for token in diff_cmd.split() if "/" in token]
+        )
+        self.assertEqual(
+            required,
+            seq6_paths,
+            f"manifest/sequence-6 diff assertion mismatch: "
+            f"{sorted(required ^ seq6_paths)}",
+        )
 
         workflow_text = load_fixture()["workflows"][
             ".github/workflows/governance-root.yml"
         ]
-        for path in sorted(required):
-            self.assertIn(
-                path,
-                workflow_text,
-                f"governance-root.yml fixture does not name {path}",
-            )
+        fixture_paths = self._norm(
+            sorted(self._protected_array(workflow_text))
+        )
+        self.assertEqual(
+            required,
+            fixture_paths,
+            f"manifest/governance-root.yml fixture mismatch: "
+            f"{sorted(required ^ fixture_paths)}",
+        )
+
+        # The fixture is a copy. The set the gate actually runs is the one in
+        # the live workflow on disk, so hold that to the same equality: a
+        # stale fixture must not be able to certify a drifted gate.
+        live_workflow = (
+            REPO_ROOT / ".github" / "workflows" / "governance-root.yml"
+        ).read_text(encoding="utf-8")
+        live_paths = self._norm(
+            sorted(self._protected_array(live_workflow))
+        )
+        self.assertEqual(
+            required,
+            live_paths,
+            f"manifest/live governance-root.yml mismatch: "
+            f"{sorted(required ^ live_paths)}",
+        )
 
         # The ratchet baselines are deliberately unprotected everywhere; if a
         # future edit adds one back it must happen in all artifacts at once,
