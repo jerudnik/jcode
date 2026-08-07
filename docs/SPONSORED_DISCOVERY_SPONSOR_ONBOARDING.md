@@ -258,7 +258,7 @@ the check.
 ## 6. Roll out and monitor
 
 1. Publish to staging and complete the validation checklist.
-2. Obtain sign-off from the discovery owner and the setup security reviewer.
+2. Obtain approval from the discovery owner and the setup security reviewer.
 3. Publish the entry disabled or outside its campaign window, if supported.
 4. Enable it in production without changing unrelated catalog entries.
 5. Repeat one browse and one select request against production.

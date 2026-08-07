@@ -27,7 +27,7 @@ This independent hard fork and its `main` branch are authoritative. Read `docs/a
 
 - Follow `.jcode/preferred-tools.md` for tool choice and `.jcode/swarm-prompt.md` for routing and worker structure; available routes come from `swarm list_models`.
 
-## Validation and closeout
+## Validation and finishing
 
 - Run narrow checks while iterating and the relevant final gate from `docs/agent-workflows.md`.
 - Prefer local checks, Nix, remote builders, and public Cachix over routine GitHub CI.

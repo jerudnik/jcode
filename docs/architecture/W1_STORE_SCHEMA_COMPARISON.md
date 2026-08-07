@@ -88,7 +88,7 @@ Swarm control state as messages in a control session.
 
 Verdict on C: reject. It is the status quo's failure mode formalized.
 
-## Decision (proposed, needs operator sign-off before code)
+## Decision (proposed, needs operator approval before code)
 
 **B with a strict rule, phased through A's query shapes:**
 
@@ -138,7 +138,7 @@ symptoms; the log would have made each a `grep`.
 - Does W2's per-session event log share the same event enum, or is
   control-plane vs transcript-plane separation worth two schemas?
 
-## DECISION (operator sign-off, 2026-07-05)
+## DECISION (operator approval, 2026-07-05)
 
 Path B approved. Additional framing from the operator: the fork is
 trending toward a multi-host architecture with observation, evaluation,

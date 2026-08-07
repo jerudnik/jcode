@@ -5,7 +5,7 @@ not as current guidance.
 
 This document was written under the fork's earlier upstream-tracking branch
 model. That model no longer exists: `docs/fork/SYNC_MODEL.md` is the authority,
-and it defines a single-rail hard fork with `main` as the only durable rail and
+and it defines a single-rail hard fork with `main` as the only long-lived branch and
 no upstream-tracking contract. The `distro/nix` packaging branch this document
 describes as current does not exist in the repository.
 

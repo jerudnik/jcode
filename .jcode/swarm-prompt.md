@@ -1,22 +1,32 @@
-Model routing for spawned agents. Run `swarm list_models` before relying on a route.
+## Routing
 
-- Implementation, live testing, and process work: `gpt-5.5`, usually medium effort.
-- Verification and critique: the current Opus route, up to high effort.
-- Design, investigation, and debugging: `claude-api:claude-fable-5`.
-- Bulk reading and summarization: `gpt-5.5`, effort none.
-- If routing is unavailable or uncertain, or the user chose a model, omit `model` and inherit.
+- Human model choices win. Run `swarm list_models` and use an exact live route.
+  On failure use the fallback below; never guess or inherit a policy violation.
+- Never use an OpenAI model below GPT-5.6. Prefer `gpt-5.6-sol` at high effort
+  for capable/general work and `gpt-5.6-luna` at high for trivial or mechanical
+  work. Prefer fast variants.
+- `claude-fable-5` is not a default worker. Use it only by human request, as the
+  human-facing orchestrator, or when an explicit swarm/workflow condition names
+  it.
+- Use `xai/grok-4.5` at xhigh as the Sol fallback. Use `k3` (Kimi K3) at xhigh
+  where Opus or Fable would otherwise be used; prefer fast routes when applicable.
+- When work is not complicated or mechanical, spread provider load by rotating model assignments across `deepseek-v4-pro`, `MiniMax-M3`,
+  and `glm-5.2`
+- One `run_plan` applies one model/effort to all workers it creates. Keep such
+  runs profile-homogeneous; otherwise use explicit spawns.
 
-Structure and ownership:
+## Execution
 
-- Every spawn needs a concrete prompt, short `label`, and useful `subagent_type`.
-- The spawner owns descendants. Delegate larger fan-outs to one manager that owns and synthesizes the subtree.
-- Prefer small dependency-aware graphs such as `implement -> review`; turn failures into fix and re-review nodes.
-- Fan out context-disjoint work. Do not mutate files owned by active workers.
-
-Monitoring and recovery:
-
-- A sub-orchestrator's children form another swarm and cannot be inspected directly. Do not retry cross-swarm status calls.
-- Prefer ledgers, task artifacts, and commits as progress signals. DM only after expected artifacts are unusually quiet.
-- Confirm resumed plans match the durable checkpoint; clear or replace stale queued work.
-- Use the native swarm tool, not a blocking debug driver against the active session.
-- Clean up owned workers after reports land unless intentionally retained.
+- Every spawn needs a concrete prompt, short `label`, and `subagent_type`. Give
+  one manager ownership and synthesis when a worker needs more than three children.
+- Concurrency is a ceiling. Fan out disjoint outputs; use light mode for flat
+  work and deep mode only for justified recursive discovery and critique.
+- Deep nodes use the smallest sufficient child set, normally two to six. Do not
+  split a cohesive reviewed leaf merely to fill slots.
+- Prefer `implement -> verify`; make failures focused fix/re-verification paths.
+  Serialize overlapping mutations or use worktrees.
+- Do not reserve a watchdog. Use heartbeats, churn guards, checkpoints, and
+  `await_members`.
+- Observe subtrees through their owner and artifacts. Prefer bounded commits and
+  typed artifacts over polling. On resume, replace stale work and clean up owned
+  workers after reports land.
