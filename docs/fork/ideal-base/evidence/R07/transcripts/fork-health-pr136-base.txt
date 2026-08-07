@@ -1,0 +1,19 @@
+=== Fork health: jerudnik/jcode (governance source: live) ===
+OK:   fork-point (631935dd1d3b) is an ancestor of main
+OK:   docs/BRANCHING.md documents every workflow
+OK:   no Windows CI jobs (issue #19)
+OK:   repository id 1238606714 matches the manifest
+OK:   repository merge methods are merge-commit only
+OK:   effective rules on 'main' are exactly ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']
+OK:   classic branch protection is absent
+OK:   maintained rail 'main' is present
+OK:   required context 'Governance Root' is uniquely defined at .github/workflows/governance-root.yml:governance-root
+OK:   required context 'Fork CI Gate' is uniquely defined at .github/workflows/fork-ci.yml:fork-ci-gate
+OK:   required context 'Security Gate' is uniquely defined at .github/workflows/security.yml:security-gate
+OK:   required context 'Nix Gate' is uniquely defined at .github/workflows/nix.yml:nix-gate
+NOTE: protected-path additions are adjudicated; enforcing 31 paths
+=== Governance: snapshot matches the manifest ===
+OK:   governance snapshot matches scripts/required-checks.json
+INFO: main payload: 1004 commit(s) over fork-point
+
+=== Fork health: all invariants hold ===

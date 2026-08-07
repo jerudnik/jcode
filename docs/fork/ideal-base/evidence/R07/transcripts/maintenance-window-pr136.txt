@@ -1,0 +1,77 @@
+=== R07 section 4 maintenance window: PR #136 ===
+[0] repository id 1238606714 and owner auth confirmed; merge-commit only
+[0] classic branch protection absent (expected baseline)
+[1] head_sha=e8ef0d131a337f8335d11f6d3f365ffb689b97d7
+[1] source=jerudnik:automation/s01-fix-1
+[1] expected_base_sha=6030441ab75476d2ef19cad79f17f40719aeaa4c
+[1] live `main` == expected_base (no drift since review)
+[1] head == REVIEWED_HEAD (branch not re-pushed since review)
+[1] PR is structurally mergeable and reviewed head contains current main
+[1] base comparator source SHA-256=2cd486e4e569bd635ad452273477a7042b7d422d5306eec3d8d4b4a27c118834
+[1] head comparator source SHA-256=864352fd2565470199df2733d6877ee6a4668d608a84de3f89291547fb3bd013
+[1] Governance Root: failure (GitHub Actions app 15368)
+[1] Fork CI Gate: success (GitHub Actions app 15368)
+[1] Security Gate: success (GitHub Actions app 15368)
+[1] Nix Gate: success (GitHub Actions app 15368)
+[1] PR changes 42 files (matches declared changed_files)
+    crates/jcode-app-core/src/agent.rs
+    crates/jcode-app-core/src/agent/utils.rs
+    crates/jcode-app-core/src/server/jade_relay.rs
+    crates/jcode-app-core/src/server/reload.rs
+    crates/jcode-app-core/src/tool/selfdev/mod.rs
+    crates/jcode-app-core/src/tool/selfdev/reload.rs
+    crates/jcode-app-core/src/tool/selfdev/tests.rs
+    crates/jcode-base/src/auth/browser_policy.rs
+    crates/jcode-base/src/auth/copilot.rs
+    crates/jcode-base/src/login_qr.rs
+    crates/jcode-base/src/session.rs
+    crates/jcode-core/src/env.rs
+    crates/jcode-provider-doctor/src/lifecycle_driver.rs
+    crates/jcode-provider-gemini-runtime/src/lib.rs
+    crates/jcode-tui/src/tui/remote_diff.rs
+    docs/fork/ideal-base/STATE.json
+    docs/fork/ideal-base/evidence/F03/README.md
+    docs/fork/ideal-base/evidence/F03/SHA256SUMS
+    docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh
+    docs/fork/ideal-base/evidence/R07/github-governance.proposed.json
+    docs/fork/ideal-base/evidence/R07/maintenance-window-pr136-2026-08-07.md
+    docs/fork/ideal-base/evidence/R07/protected-path-equality-2026-08-06.md
+    docs/fork/ideal-base/evidence/S01-FIX-1/AMENDMENT.md
+    docs/fork/ideal-base/evidence/S01-FIX-1/SHA256SUMS
+    docs/fork/ideal-base/evidence/S01-FIX-1/gate3-sweep.log
+    docs/fork/ideal-base/evidence/S01/FINDINGS.md
+    docs/fork/ideal-base/evidence/S01/NORMALIZED_SHA256SUMS
+    docs/fork/ideal-base/evidence/S01/README.md
+    docs/fork/ideal-base/evidence/S01/SHA256SUMS
+    docs/fork/ideal-base/evidence/S01/controls.log
+    docs/fork/ideal-base/evidence/S01/prewarm.sh
+    docs/fork/ideal-base/evidence/S01/round-A.log
+    docs/fork/ideal-base/evidence/S01/round-B.log
+    docs/fork/ideal-base/evidence/S01/s01_matrix.sh
+    docs/fork/ideal-base/evidence/S03/README.md
+    docs/fork/ideal-base/reviews/S02-exact-commit-re-review.md
+    docs/fork/ideal-base/reviews/S02-exact-commit-review.md
+    docs/fork/ideal-base/reviews/S03-final-disposition-review.md
+    scripts/ambient_roots_allowlist.txt
+    scripts/governance_compare.py
+    scripts/required-checks.json
+    tests/test_governance_compare.py
+[1] protected patterns parsed from governance-root.yml: 32
+[1] governance-named paths (5) all belong to this PR: ['docs/fork/ideal-base/evidence/R07/github-governance.proposed.json', 'scripts/ambient_roots_allowlist.txt', 'scripts/governance_compare.py', 'scripts/required-checks.json', 'tests/test_governance_compare.py']
+[1] cross-check: same protected set under required-checks.json: True
+[2] pre-change canonical SHA-256=43ba61a7a57ffded7a4276917192cdd6028f79d58755cae870cbb2df07494f2b
+[2] pre-change hash == known-good steady state
+[2] head-comparator live-body SHA-256=43ba61a7a57ffded7a4276917192cdd6028f79d58755cae870cbb2df07494f2b
+[2] base and head comparators agree on the complete live ruleset body
+[2] live required contexts: ['Governance Root', 'Fork CI Gate', 'Security Gate', 'Nix Gate']
+[2] semantics verified: enforcement/target/bypass/strictness/integration ids
+[2] drop body: key sets equal, differing values exactly ['rules']
+[2] prospective dropped-body hash=7e6ba479dde06dace3f169dac9980528f42d90c9b9ed1112cec723a2fe8d35a0 (validated pre-write)
+[3] window OPEN 12:54:29Z; `Governance Root` dropped, read-back exact, contexts=['Fork CI Gate', 'Nix Gate', 'Security Gate']
+[4] merged; merge_sha=f403a878ac64ef841d0a328c1d01b081fbf33dd7
+[5] main==merge_sha; parents exactly [base, head]
+[6] window CLOSED 12:54:40Z; restored body hash == step-2 hash exactly
+[7] exactly one first-parent merge in window, == f403a878ac64ef841d0a328c1d01b081fbf33dd7
+
+WINDOW OK  pr=#136 merge_sha=f403a878ac64ef841d0a328c1d01b081fbf33dd7 open=12:54:29Z close=12:54:40Z
+[8] run fork-health.sh --live at expected_base_sha AND merge_sha (separate step)
