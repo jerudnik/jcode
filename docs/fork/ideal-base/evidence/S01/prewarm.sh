@@ -23,6 +23,7 @@ cd "$REPO"
 
 export PATH="$HOME/.cargo/bin:$HOME/.nix-profile/bin:/etc/profiles/per-user/$USER/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export JCODE_REMOTE_CARGO=0
+export RUST_TEST_THREADS=1
 
 CARGO=(env -u IN_NIX_SHELL -u DEV_CARGO_NIX_REEXEC "$REPO/scripts/dev_cargo.sh")
 

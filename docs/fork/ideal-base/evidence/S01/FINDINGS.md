@@ -415,3 +415,23 @@ while any live jcode session is writing `~/.jcode/sessions/*`; rounds must run
 on a quiet machine. And every gate must run inside `nix develop` — the bare
 shell lacks cargo and python `tomllib`, which presented as A6 exit-127
 failures in the first attempt.
+
+### Superseded C/D pair: prewarm was not rerun after the harness commit
+
+The first pair under the test-order pin also passed twice but hashed unequal:
+
+```
+d7822787a3493e113c6859fc61b72981e3cd43fde22d21107239c326ca6a5edd  580  (C)
+6eb145b62be373db88c22193b2d68183abcf670bccd7c4b8dea91f89231e2d86  577  (D)
+```
+
+The normalized diff had exactly one hunk: C printed three `Compiling ...`
+lines and D did not. Sorting both normalized transcripts produced no diff,
+so again no outcome changed. C warmed the exact cache D consumed. This is P3's
+other predeclared transcript artifact, but the experiment setup was wrong: the
+prewarm had run before the final harness commit, not at the exact signoff HEAD.
+
+Response: `prewarm.sh` now exports the same `RUST_TEST_THREADS=1` pin as the
+matrix. After this finding is committed, prewarm and both replacement rounds
+must run at that one unchanged HEAD. If those replacement hashes differ, the
+harness premise is rejected rather than retried again.
