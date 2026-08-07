@@ -45,7 +45,7 @@ Use the fast suite when the change crosses several crates:
 scripts/test_fast.sh
 ```
 
-Run the hard-fork guardrails before closeout for workspace-impacting changes or imported external code:
+Run the hard-fork guardrails before finishing for workspace-impacting changes or imported external code:
 
 ```bash
 scripts/preflight.sh --ratchets-only
@@ -212,7 +212,7 @@ python3 scripts/check_agent_instructions.py
 
 The check enforces the prompt budget, required source paths, link integrity, and the rule that operational command blocks live here rather than in prompt-loaded files. When ignored generated surfaces are present locally, it also verifies that their compiled bodies match the APM sources. Hermetic and CI checkouts validate the source projection because those generated files are intentionally not tracked.
 
-## Closeout
+## Finish
 
 - Run the checks that directly prove the requested result.
 - Update durable docs when contracts changed.

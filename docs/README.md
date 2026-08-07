@@ -16,7 +16,7 @@ agent behavior and are enforced by `scripts/check_agent_instructions.py`.
 
 | Path | Owns |
 | --- | --- |
-| `AGENTS.md` (root) | the repository work contract |
+| `AGENTS.md` (root) | the repository instructions |
 | `docs/AGENTS.md` | documentation maintenance and integration |
 | [`agent-workflows.md`](./agent-workflows.md) | the operational commands and gates |
 | [`BRANCHING.md`](./BRANCHING.md) | branch rails and fork invariants |
@@ -72,7 +72,7 @@ correcting them would destroy their value as evidence.
 | `docs/archive/` (11 files) | superseded material |
 | `docs/fork/recovery/` (131 files) | forensic integrity, self-declared |
 | `docs/fork/normalization/` (26 files) | append-only snapshot, self-declared |
-| `docs/fork/ideal-base/` (152 files) | program ledger; `DECISIONS.md` is explicitly append-only |
+| `docs/fork/ideal-base/` (a finished 2026 cleanup project, see `docs/GLOSSARY.md`) (152 files) | program ledger; `DECISIONS.md` is explicitly append-only |
 
 `docs/fork/ideal-base/` is a live program, but its records are appended rather
 than rewritten. Do not edit a prior decision to make the program look tidier.
