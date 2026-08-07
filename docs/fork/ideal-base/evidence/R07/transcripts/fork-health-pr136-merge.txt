@@ -1,0 +1,22 @@
+waiting for another Nix process to finish fetching input 'https://flakehub.com/f/DeterminateSystems/nixpkgs-weekly/0.1'...
+error (ignored): SQLite database '/Users/jrudnik/.cache/nix/eval-cache-v6/66308edf32e32c314bebd75db67450acfdb9ac4adfd14d3d8c09922fd51f8283.sqlite' is busy
+=== Fork health: jerudnik/jcode (governance source: live) ===
+OK:   fork-point (631935dd1d3b) is an ancestor of main
+OK:   docs/BRANCHING.md documents every workflow
+OK:   no Windows CI jobs (issue #19)
+OK:   repository id 1238606714 matches the manifest
+OK:   repository merge methods are merge-commit only
+OK:   effective rules on 'main' are exactly ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']
+OK:   classic branch protection is absent
+OK:   maintained rail 'main' is present
+OK:   'Governance Root' at .github/workflows/governance-root.yml enforces exactly the 32 protected path(s) the manifest declares
+OK:   required context 'Governance Root' is uniquely defined at .github/workflows/governance-root.yml:governance-root
+OK:   required context 'Fork CI Gate' is uniquely defined at .github/workflows/fork-ci.yml:fork-ci-gate
+OK:   required context 'Security Gate' is uniquely defined at .github/workflows/security.yml:security-gate
+OK:   required context 'Nix Gate' is uniquely defined at .github/workflows/nix.yml:nix-gate
+NOTE: protected-path additions are adjudicated; enforcing 32 paths
+=== Governance: snapshot matches the manifest ===
+OK:   governance snapshot matches scripts/required-checks.json
+INFO: main payload: 1004 commit(s) over fork-point
+
+=== Fork health: all invariants hold ===
