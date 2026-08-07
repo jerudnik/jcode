@@ -253,9 +253,7 @@ pub(super) fn reload_repo_dir_or_test_fallback(
     match resolved {
         Some(dir) => Ok(dir),
         None if is_test_session => Ok(std::env::temp_dir().join("jcode-test-session-repo")),
-        None => Err(anyhow::anyhow!(
-            "Could not find jcode repository directory"
-        )),
+        None => Err(anyhow::anyhow!("Could not find jcode repository directory")),
     }
 }
 

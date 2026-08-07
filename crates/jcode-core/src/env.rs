@@ -81,9 +81,9 @@ mod tests {
             ("0", false),
             ("false", false),
             ("FALSE", false),
-            (" 0 ", false),  // trimmed
-            ("", false),     // empty = unset
-            ("   ", false),  // whitespace-only = unset
+            (" 0 ", false), // trimmed
+            ("", false),    // empty = unset
+            ("   ", false), // whitespace-only = unset
         ] {
             set_var(key, value);
             assert_eq!(flag_enabled(key), expected, "value {value:?}");

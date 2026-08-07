@@ -2,7 +2,11 @@
 
 ## Verdict
 
-**IMPLEMENTED, ready for independent S02 review.** The complete deterministic
+> **SUPERSEDED CANDIDATE.** Independent review and full preflight rejected this
+> package; see `FINDINGS.md` S01-F8. A replacement exact-HEAD signoff is in
+> progress. The text below records the superseded candidate honestly.
+
+**IMPLEMENTED at the superseded candidate, not final.** The complete deterministic
 ideal-base matrix passed twice at one fixed source commit. Both normalized
 transcripts are byte-identical under the normalizer frozen before the first
 round, and both rounds left zero owned residue.

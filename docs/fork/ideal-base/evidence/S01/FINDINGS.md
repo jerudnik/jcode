@@ -435,3 +435,30 @@ Response: `prewarm.sh` now exports the same `RUST_TEST_THREADS=1` pin as the
 matrix. After this finding is committed, prewarm and both replacement rounds
 must run at that one unchanged HEAD. If those replacement hashes differ, the
 harness premise is rejected rather than retried again.
+
+---
+
+## S01-F8: first packaged candidate rejected by full preflight and S02 review
+
+Candidate `efb730a9a` passed its two recorded rounds, but it is **superseded**
+and is not the final signoff subject. Two independent closeout surfaces found
+four blockers before publication:
+
+1. Full `scripts/preflight.sh` failed `rustfmt --check` in
+   `tool/selfdev/reload.rs` and `jcode-core/src/env.rs`; Clippy passed.
+2. Independent Opus S02 review `41bf14a6a` found
+   `S01-FIX-1/gate3-sweep.log` cited by `STATE.json` but absent from Git because
+   the operator's global `*.log` ignore swallowed it.
+3. The same review found `F03/README.md` still claiming a full post-release
+   idle window for all 8 classes after the fixture correctly narrowed that
+   assertion to the 7 drain-blocking classes.
+4. Branch handoff inspection found the already-reviewed
+   `automation/protected-path-equality` governance fix (`1e356391e`) was not an
+   ancestor of either `main` or the S01 branch, even though final signoff must
+   include it.
+
+Response before any replacement round: preserve the BLOCKED review, merge the
+reviewed governance fix, apply only the two rustfmt changes, force-track the
+cited sweep log with a checksum manifest, correct F03's prose and checksum,
+then prewarm and rerun the pair at one new exact commit. The frozen normalizer
+is unchanged.
