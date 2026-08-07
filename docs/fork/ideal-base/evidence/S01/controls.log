@@ -1,0 +1,20 @@
+path "/Users/jrudnik/labs/jcode/docs/fork/ideal-base/evidence/S01" does not contain a 'flake.nix', searching up
+warning: Git tree '/Users/jrudnik/labs/jcode' has uncommitted changes
+Using saved setting for 'extra-substituters = https://jerudnik-jcode.cachix.org' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = jerudnik-jcode.cachix.org-1:WL5DX0TS/0N/BIW6RDnFGKpkZX9eT2DwFJK+05cpIZQ=' from ~/.local/share/nix/trusted-settings.json.
+jcode dev shell — rust rustc 1.96.0 (ac68faa20 2026-05-25)
+specimen: /Users/jrudnik/labs/jcode/docs/fork/ideal-base/evidence/S01/specimen-f14.log
+specimen lines: 1119
+
+baseline H = 76deca504127bd3900f091b272c4bc0cbc2161c00153cb1747e4eb6d4ad24b7b
+
+PASS D1: planted one-char verdict diff moves H
+      rc=0 H=b0d847618473f070104b7438bdee3a2bc1574b0e4096c40563a01fb36b921071 (baseline 76deca504127bd39...) moved
+PASS D2: listed legitimate variation is erased, H holds
+      rc=0 H=76deca504127bd3900f091b272c4bc0cbc2161c00153cb1747e4eb6d4ad24b7b held
+PASS D3: acceptance: clean specimen normalizes, exit 0, no stderr
+      rc=0 stderr=''
+PASS D4: empty and short transcripts are refused, not hashed
+      empty rc=4, short rc=4 both refused
+
+controls: 4 run, 0 failed

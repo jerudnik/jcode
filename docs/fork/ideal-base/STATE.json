@@ -449,12 +449,20 @@
       "updated_at": "2026-08-04T03:47:53.527489Z"
     },
     "S01": {
-      "state": "pending",
+      "state": "implemented",
       "reviewed_commit": null,
       "published_commit": null,
-      "evidence": [],
-      "summary": null,
-      "updated_at": null
+      "evidence": [
+        "docs/fork/ideal-base/evidence/S01/README.md",
+        "docs/fork/ideal-base/evidence/S01/round-A.log",
+        "docs/fork/ideal-base/evidence/S01/round-B.log",
+        "docs/fork/ideal-base/evidence/S01/NORMALIZED_SHA256SUMS",
+        "docs/fork/ideal-base/evidence/S01/SHA256SUMS",
+        "docs/fork/ideal-base/evidence/S01/controls.log",
+        "docs/fork/ideal-base/evidence/S01/FINDINGS.md"
+      ],
+      "summary": "IMPLEMENTED at fixed source/runtime commit 356476265ad6164970d2753f24da4dce9bdc89d5; acceptance deferred to S02 independent review and S03 publication. Exact-HEAD prewarm completed, then the complete deterministic matrix passed twice: 18/18 steps, N_FAIL=0, 577 lines each, identical frozen-normalizer SHA-256 e7da251556fb96a0151be959d9eb3b42cdebc71e3c1340deb8d826da6e9f5bef, zero owned residue, and F14 evidence restored byte-identical both rounds. D1-D4 normalizer controls passed. Superseded setup pairs and their honest harness repairs (libtest ordering pin, round-label removal, exact-HEAD prewarm) remain recorded in FINDINGS.md; no normalizer rule was widened.",
+      "updated_at": "2026-08-07T07:47:00Z"
     },
     "S02": {
       "state": "pending",
