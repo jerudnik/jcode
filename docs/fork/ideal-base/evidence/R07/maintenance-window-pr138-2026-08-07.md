@@ -130,3 +130,17 @@ contexts, active effective rules, absent classic protection, empty bypass actors
 and merge-commit-only repository configuration. A fresh fetch also proves
 `github/main == 54b6f52fb07c042a86f90bcc7dec3d9fe918b9e8`, with ordered parents exactly
 the captured base and reviewed head.
+
+## Post-review harness hardening
+
+Security review on the follow-up evidence PR correctly found that the archived
+harness originally compiled the PR-head copy of `governance_compare.py` before
+checking its source hash against the trusted base copy. The executed PR #138 head
+was owner-authored, bound to an exact reviewed SHA, and the two sources were
+byte-identical, so the completed transaction was not compromised. The generic
+ordering was nevertheless unsafe for reuse with an untrusted head.
+
+`transcripts/window-pr138.py` now reads both comparator sources as raw inert
+bytes, logs their SHA-256 values, proves direct raw-byte equality, and only then
+decodes and compiles either copy. The transaction transcript remains unchanged so
+it continues to record the exact executed output.

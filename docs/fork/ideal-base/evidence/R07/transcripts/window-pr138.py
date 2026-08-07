@@ -106,26 +106,36 @@ def die(msg):
     raise SystemExit(f"ABORT: {msg}")
 
 
-def comparator_at(commit):
-    """Load sanitize/canonical from one exact commit without trusting the worktree."""
+def comparator_source_at(commit):
+    """Read one exact comparator source without executing commit-controlled code."""
     shown = subprocess.run(
         ["git", "show", f"{commit}:scripts/governance_compare.py"],
         cwd=REPOROOT,
         capture_output=True,
-        text=True,
     )
     if shown.returncode != 0:
-        die(f"cannot load comparator at {commit}: {shown.stderr.strip()}")
+        die(
+            f"cannot load comparator at {commit}: "
+            f"{shown.stderr.decode(errors='replace').strip()}"
+        )
+    return shown.stdout, hashlib.sha256(shown.stdout).hexdigest()
+
+
+def load_comparator(source_bytes, commit):
+    """Compile comparator source only after its trust relationship is proven."""
+    try:
+        source = source_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        die(f"comparator at {commit} is not valid UTF-8: {exc}")
     namespace = {
         "__name__": f"governance_compare_at_{commit[:12]}",
         "__file__": f"{commit}:scripts/governance_compare.py",
     }
-    exec(compile(shown.stdout, namespace["__file__"], "exec"), namespace)
+    exec(compile(source, namespace["__file__"], "exec"), namespace)
     for name in ("sanitize", "canonical"):
         if not callable(namespace.get(name)):
             die(f"comparator at {commit} does not define callable {name}()")
-    source_hash = hashlib.sha256(shown.stdout.encode()).hexdigest()
-    return namespace["sanitize"], namespace["canonical"], source_hash
+    return namespace["sanitize"], namespace["canonical"]
 
 
 tag = "  [DRY RUN]" if DRY else ""
@@ -213,14 +223,17 @@ if subprocess.run(
 print("[1] PR is structurally mergeable and reviewed head contains current main")
 
 # Bind restoration to the implementation already published at the captured base.
-# This PR does not change governance_compare.py, so the independently loaded head
-# implementation must be byte-identical before any write.
-sanitize, canonical, base_comparator_hash = comparator_at(expected_base)
-head_sanitize, head_canonical, head_comparator_hash = comparator_at(head)
+# Read both sources as inert raw bytes first. This PR does not change
+# governance_compare.py, so no PR-head code is decoded or compiled until byte
+# equality with the trusted base implementation has been proven.
+base_comparator_source, base_comparator_hash = comparator_source_at(expected_base)
+head_comparator_source, head_comparator_hash = comparator_source_at(head)
 print(f"[1] base comparator source SHA-256={base_comparator_hash}")
 print(f"[1] head comparator source SHA-256={head_comparator_hash}")
-if base_comparator_hash != head_comparator_hash:
+if base_comparator_source != head_comparator_source:
     die("PR #138 does not change governance_compare.py, but comparator sources differ")
+sanitize, canonical = load_comparator(base_comparator_source, expected_base)
+head_sanitize, head_canonical = load_comparator(head_comparator_source, head)
 
 runs = gh(f"repos/{REPO}/commits/{head}/check-runs?per_page=100")["check_runs"]
 concl = {}
