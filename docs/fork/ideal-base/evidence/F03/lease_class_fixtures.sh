@@ -130,20 +130,36 @@ for class in "${LEASE_CLASSES[@]}"; do
   sleep 18
   if ! kill -0 "$PID" 2>/dev/null; then
     fail "[$class] daemon exited while the lease was held"
+    tail -20 "$DIR/daemon.log"
     rm -rf "$DIR" "$HOMEDIR"; continue
   fi
   pass "[$class] daemon alive past idle timeout while leased"
 
   debug_cmd "$DIR" "$HOMEDIR" "shutdown:release_lease:$TOKEN" >/dev/null
-  # F03-I1: release starts a FULL new idle window (quiescence epoch). The
-  # 5s timeout means the daemon MUST still be alive strictly less than 5s
-  # after release; an immediate post-release exit would be an epoch bug.
-  sleep 4
-  if ! kill -0 "$PID" 2>/dev/null; then
-    fail "[$class] daemon exited within 4s of release (idle window not restarted)"
-    rm -rf "$DIR" "$HOMEDIR"; continue
+  # F03-I1: for drain-blocking classes, release starts a FULL new idle
+  # window (quiescence epoch, design 4.2). The 5s timeout means the daemon
+  # MUST still be alive strictly less than 5s after release; an immediate
+  # post-release exit would be an epoch bug.
+  #
+  # client-connection is the deliberate exception (contract amendment,
+  # S01-F6): design 4.1 C1 abandons connections rather than draining them,
+  # so drain_blocking_count() excludes ClientConnection (shutdown.rs) and
+  # the poller's idle epoch runs WHILE the lease is held. Only the atomic
+  # claim (which requires a completely empty table) keeps the daemon alive.
+  # The design therefore promises "no exit while held; exit 44 after
+  # release" - NOT a full post-release window. Asserting the full window
+  # here was a fixture bug that flaked ~1-in-10 on tick phase (S01-F6).
+  if [ "$class" != "client-connection" ]; then
+    sleep 4
+    if ! kill -0 "$PID" 2>/dev/null; then
+      fail "[$class] daemon exited within 4s of release (idle window not restarted)"
+      tail -20 "$DIR/daemon.log"
+      rm -rf "$DIR" "$HOMEDIR"; continue
+    fi
+    pass "[$class] alive 4s after release (full new idle window enforced)"
+  else
+    pass "[$class] post-release window not asserted (C1 abandon contract, design 4.1)"
   fi
-  pass "[$class] alive 4s after release (full new idle window enforced)"
   # Then the window (5s) + poll granularity (10s) + margin bounds the exit.
   wait_exit_var CODE "$PID" 40
   if [ -z "$CODE" ]; then
