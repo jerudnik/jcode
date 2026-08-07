@@ -1,50 +1,70 @@
-# Post-Ideal-Base Modernization
+# Modernization plan after ideal-base cleanup
 
 Recorded: 2026-08-07
 
-In plain terms: an audit found cleanup work (simpler CI, safer tests, clearer
-crate boundaries, smaller scripts). This directory holds that work as a list of
-52 tasks with dependencies, plus a script that checks the list and feeds it to
-the swarm scheduler. Three tasks stop and ask the user for permission before
-anything is published, merged, or released. Unfamiliar terms are defined in
-`../GLOSSARY.md`.
+An audit found cleanup work in CI, tests, crate APIs, scripts, security, and
+releases. This directory turns that work into 52 tasks with dependencies. A
+script checks the task list and prepares it for the swarm scheduler. Three tasks
+stop and ask the user for permission before any publish, merge, or release. The
+glossary at `../GLOSSARY.md` explains existing technical names that have no
+ordinary replacement.
 
-This directory converts the repository audit into an executable, restartable plan. It does **not** create a second scheduler or mutable program ledger.
+This plan is executable and can resume after an interruption. It does not add a
+second scheduler or a separate progress database.
 
-- `TASK_GRAPH.json` is the reviewed desired-state DAG.
-- `validate_graph.py` validates structure and projects the DAG into native swarm task-graph input.
-- The native swarm task graph owns live assignment, concurrency, progress, typed artifacts, retries, and gap injection.
-- Git commits carrying `Modernization-Node:` trailers provide restart hints. Phase joins also carry `Modernization-Barrier:` trailers.
+- `TASK_GRAPH.json` is the reviewed DAG. A DAG is a task list with no
+  dependency loops. Its dependencies set the order of work.
+- `validate_graph.py` checks the DAG and converts it to input for the built-in
+  swarm task graph.
+- The built-in swarm task graph assigns work, limits concurrency, tracks
+  progress, collects reports, retries failed work, and adds missing work.
+- Git commit trailers record completed tasks. A trailer is a `Key: value` line
+  at the end of a commit message. Phase joins also use
+  `Modernization-Barrier:` trailers to record that every task in a phase
+  finished.
 
-The plan contains 52 nodes and four phase barriers. Default worker concurrency is 6 and must never exceed 8. `waves` also reports the static ready-frontier width so a high concurrency setting cannot disguise a serial graph.
+The plan has 52 nodes and four barriers. A barrier is a point where every task
+from the previous phase must finish before the next phase starts. Worker
+concurrency starts at 6 and must never exceed 8. The `waves` command also shows
+how many tasks can run at the same time, so a high concurrency setting cannot
+hide a mostly serial graph.
 
 ## Outcome
 
-The target is a smaller, faster, more recoverable Jcode repository with:
+The work leaves Jcode smaller, faster, and easier to recover:
 
-- normal PR governance instead of an active completed-program railway;
-- one required PR gate and thin `pr`, `main`, `scheduled`, and `release` workflows;
-- no normal-test dependency on real `~/.jcode`, process-global environment mutation, or ambient reload discovery;
-- explicit crate surfaces instead of the root/TUI/app-core/base wildcard re-export spine;
-- SHA-pinned actions, gitleaks, Dependabot, one advisory ignore source, SBOM, and provenance;
-- one authoritative Nix-only fork release identity;
-- CI, coverage, performance, and release feedback loops that do not churn main;
-- at least 25 percent fewer script lines unless every retained exception is justified.
+- Use normal pull requests instead of active tools for a completed cleanup
+  program.
+- Require one `PR Gate` check and keep small `pr`, `main`, `scheduled`, and
+  `release` workflows.
+- Stop normal tests from using the real `~/.jcode`, changing the process-wide
+  environment, or finding reload targets from the surrounding machine.
+- Replace the root, TUI, app-core, and base wildcard re-export chain with clear
+  crate APIs.
+- Pin actions by SHA, add gitleaks and Dependabot, keep one advisory ignore
+  source, and produce a software bill of materials (SBOM) and a provenance
+  record that names the exact source revision.
+- Keep one official release identity for the independent fork, distributed only
+  through Nix.
+- Report CI, coverage, performance, and release results without committing
+  generated metrics to `main`.
+- Remove at least 25 percent of script lines unless the plan explains every
+  exception that remains.
 
-## Execution map
+## Task order
 
 ```mermaid
 flowchart TD
-  M[Design and drift revalidation] --> B0[Barrier B0]
-  B0 --> G[Governance and ideal-base retirement]
-  G --> H10{{Authorization: publish unlock}}
+  M[Check designs and current repository state] --> B0[Barrier B0]
+  B0 --> G[Retire completed governance tools]
+  G --> H10{{Ask permission to publish the first change}}
   H10 --> B1[Barrier B1]
-  B1 --> P[Pipeline, Nix, security]
-  B1 --> T[Test isolation and reload seams]
-  B1 --> C[Cleanup and docs]
-  B1 --> A[Architecture census]
-  P --> O[Observability and release preparation]
-  T --> A2[Dependency and re-export migration]
+  B1 --> P[Update CI, Nix, and security]
+  B1 --> T[Isolate tests and reload behavior]
+  B1 --> C[Clean files and documentation]
+  B1 --> A[Measure crate dependencies and APIs]
+  P --> O[Add metrics and prepare releases]
+  T --> A2[Change dependencies and re-exports]
   C --> O
   A --> A2
   P --> B2[Barrier B2]
@@ -52,20 +72,24 @@ flowchart TD
   C --> B2
   A2 --> B2
   O --> B2
-  B2 --> I[Local integration and final gates]
-  I --> H30{{Authorization: merge modernization}}
-  H30 --> V[Fresh-checkout live verification]
-  V --> H31{{Authorization: publish release}}
-  V --> S[Schedule 30-day SLO review]
-  H31 --> B3[Barrier B3 and closeout]
+  B2 --> I[Integrate locally and run final checks]
+  I --> H30{{Ask permission to merge the modernization}}
+  H30 --> V[Verify from a fresh checkout]
+  V --> H31{{Ask permission to publish the release}}
+  V --> S[Schedule the 30-day service-level objective or SLO review]
+  H31 --> B3[Barrier B3 and finish the work]
   S --> B3
 ```
 
-`TASK_GRAPH.json` is authoritative for exact dependencies. The diagram is intentionally coarse.
+`TASK_GRAPH.json` defines the exact dependencies. The diagram only shows the
+main flow.
 
-## Before execution
+## Before starting
 
-The audit that produced this graph was grounded on authoritative `github/main` at `3eec62045`. Execution must begin with `M00`, which rechecks every premise. The result that proves the plan wrong is material drift in authoritative main, live rulesets, workflow topology, completed ideal-base status, or baseline metrics. If found, stop and amend the graph before mutation.
+The audit used `github/main` at commit `3eec62045`. Start with `M00`, which
+checks every assumption again. Stop and update the graph if the official `main`
+branch, live GitHub rules, workflow layout, completed ideal-base work, or
+baseline measurements have changed enough to invalidate the plan.
 
 ```bash
 python3 docs/modernization/validate_graph.py validate
@@ -73,15 +97,26 @@ python3 docs/modernization/validate_graph.py waves
 python3 docs/modernization/validate_graph.py seed > /tmp/modernization-swarm-seed.json
 ```
 
-The JSON contains exact `task_graph` and `run_plan` argument objects. Projected node content includes acceptance, falsification, owned paths, mutexes, worker-profile hints, and manual-gate warnings, so a worker does not need hidden coordinator context.
+The generated JSON contains exact argument objects for `swarm task_graph` and
+`swarm run_plan`. Each task includes its acceptance checks, stop condition,
+owned paths, mutexes, worker hints, and permission warnings. Workers do not need
+extra instructions from the coordinator.
 
-`seed` contains the complete desired graph and is the low-intervention default. Native dependencies run it until an `H*` node reports blocked, then wake the coordinator for the required authorization. `next` is the restart and maximum-control projection: it emits only currently runnable nodes; when authorization and ordinary work are both ready, it emits the ordinary work first and leaves the gate for the next wave. Do not translate either projection into a shell-driven dispatcher.
+Use `seed` for a complete run with little coordinator input. Dependencies keep
+the work moving until an `H*` task stops for user permission, then the
+coordinator resumes it. Use `next` to resume with more control. It emits only
+tasks that can run now. If normal work and a permission task are both ready,
+`next` emits the normal work first and leaves the permission task for the next
+wave. Do not replace either command with a shell dispatcher.
 
-## Native swarm protocol
+## Swarm steps
 
-1. On a new run, generate `seed` and run `swarm task_graph` with the emitted `task_graph` object.
-2. Run `swarm run_plan` with the emitted `run_plan` object. Increase concurrency only for demonstrated disjoint work and never above 8.
-3. Workers must complete nodes with the typed artifact declared in `artifact_schema`:
+1. For a new run, generate `seed`. Pass its `task_graph` object to
+   `swarm task_graph`.
+2. Pass its `run_plan` object to `swarm run_plan`. Raise concurrency only when
+   measurements show that work does not overlap. Never raise it above 8.
+3. Finish every node with the typed artifact named in `artifact_schema`. A typed
+   artifact is the structured worker report with these required fields:
    - findings;
    - evidence;
    - edge cases considered;
@@ -89,21 +124,43 @@ The JSON contains exact `task_graph` and `run_plan` argument objects. Projected 
    - open questions;
    - confidence;
    - what was not checked.
-4. Any low-confidence result must be addressed with `swarm inject_gap` before a deep verification gate can close.
-5. Composite node `A25` must use `swarm expand_node` to create three to five disjoint hotspot children. Do not perform its broad write scope as one worker task.
-6. Failed verification creates one focused `fix` node depending on the failed implementation, followed by the same verification. Two failures of the same kind require a changed premise or approach, not another retry.
-7. At phase barriers, use `swarm await_members`, synthesize the reports, stop unneeded workers, and make a bounded barrier commit.
-8. A full run stops when an `H*` worker reports blocked. Obtain fresh user authorization in the originating session, then resume that node. When using `next`, a non-empty `authorization_nodes` array is an earlier stop: do not call `run_plan` until authorization is granted. The embedded worker warning is defense in depth.
+4. Address every low-confidence result with `swarm inject_gap` before a deep
+   verification task can finish.
+5. Use `swarm expand_node` on composite node `A25` to create three to five
+   separate hotspot tasks. Do not give its broad write scope to one worker.
+6. After failed verification, add one focused `fix` node that depends on the
+   failed implementation. Then run the same verification again. After two
+   failures of the same kind, change the assumption or method instead of trying
+   the same thing again.
+7. At each barrier, use `swarm await_members`, combine the worker reports, stop
+   workers that are no longer needed, and make one limited barrier commit.
+8. A complete run stops when an `H*` worker reports that it needs permission.
+   Ask the user in the original session, then resume that node. With `next`, a
+   nonempty `authorization_nodes` array means stop before `run_plan`. The warning
+   inside each worker task provides a second check.
 
-Routing follows `.jcode/swarm-prompt.md`, the repository's sole routing authority. Run `swarm list_models` before pinning a non-default model. The graph's `worker_profile` values are prompt and reporting hints, not model selectors: one `run_plan` invocation applies one `model` and `effort` to every worker it creates. Use a capable general route for the complete `seed`, or drive profile-homogeneous waves when route specialization is worth the extra coordination.
+`.jcode/swarm-prompt.md` sets all model routing. Run `swarm list_models` before
+choosing a model other than the default. Values in `worker_profile` guide prompts
+and reports, but they do not choose models. One `run_plan` call applies one model
+and effort level to every worker it creates. Use a capable general model for the
+complete `seed`, or run waves with the same worker profile when specialized
+routing is worth the extra coordination.
 
-Every projected node declares an execution shape. Normal reviewed leaves are `ATOMIC`: finish the bounded node once acceptance is proved or falsification triggers, and do not split it merely to consume the agent budget. Nodes marked `expandable` are `COMPOSITE` and must create the smallest sufficient disjoint child set. `M00` deliberately opens with three to four read-only drift checks; `A25` creates three to five disjoint hotspot children.
+Every generated node states how it runs. An `ATOMIC` node is one limited task:
+finish it after its acceptance checks pass, or stop when its stop condition
+occurs. Do not split it just to use more agents. A `COMPOSITE` node may expand
+into the smallest set of separate child tasks. `M00` starts with three or four
+read-only checks. `A25` creates three to five separate hotspot tasks.
 
-Concurrency is a ceiling, not a target. The static graph still contains necessary serial gates and architecture migrations. Use the `waves` summary to distinguish scheduler starvation from a narrow ready frontier, and widen dependencies only when ownership, acceptance, and dataflow remain honest.
+Concurrency is a limit, not a target. Some checks and architecture changes must
+run in order. Use `waves` to tell the difference between an idle scheduler and a
+small number of ready tasks. Change dependencies only when file ownership,
+acceptance checks, and the flow of results remain accurate.
 
-## Commit and resume protocol
+## Commit and resume steps
 
-Every completed implementation or barrier commit should carry trailers like:
+Every completed implementation or barrier commit should include trailers like
+these:
 
 ```text
 Modernization-Node: P20
@@ -111,115 +168,154 @@ Modernization-Node: P21
 Modernization-Barrier: B1
 ```
 
-If a completed node or barrier is deliberately reverted, record the newest state with:
+If a completed node or barrier is intentionally reverted, record the newest
+state with these trailers:
 
 ```text
 Modernization-Node-Reverted: P20
 Modernization-Barrier-Reverted: B1
 ```
 
-The projector processes commits newest-first, so the latest applicable completion or reversion trailer wins. A later reimplementation trailer can complete the node again; conflicting completion and reversion trailers in one commit are rejected.
+The script reads commits from newest to oldest. The newest completion or
+reversion trailer wins. A later implementation trailer can mark the node
+complete again. The validator rejects a commit that marks the same node or
+barrier both complete and reverted.
 
-A commit may contain multiple node trailers only at an explicit integration or barrier node. Normal leaf commits stay bounded to one node's owned paths.
+Only an integration or barrier node may put several node trailers in one commit.
+A normal leaf commit changes only that node's owned paths.
 
-Read durable hints and produce the next native task-graph seed with:
+Read the saved completion trailers and generate the next task list with:
 
 ```bash
 python3 docs/modernization/validate_graph.py status
 python3 docs/modernization/validate_graph.py next
 ```
 
-Use `--completed NODE_ID` only when recovering uncommitted-but-independently-verified work. The Git trailer is the durable record after committing.
+Use `--completed NODE_ID` only to recover work that has not been committed but
+has been verified on its own. After a commit, its Git trailer is the saved
+record.
 
-Read-only design and verification leaves may remain live-only inside a phase. Pass their ids with repeated `--completed` arguments while projecting the next wave, then include them with the phase's implementation and barrier trailers in the bounded barrier commit.
+Read-only design and verification leaves may stay uncommitted during a phase.
+Pass each ID with a separate `--completed` argument when generating the next
+wave. Include those IDs in the phase's implementation and barrier trailers when
+you make the limited barrier commit.
 
-The helper is intentionally read-only. It does not assign workers, mark nodes complete, mutate Git, query GitHub, or schedule work.
+The helper only reads state. It does not assign workers, complete nodes, change
+Git, query GitHub, or schedule work.
 
-## Ownership and concurrency
+## File ownership and concurrency
 
-`owned_paths` state the intended mutation boundary. `mutexes` state resource-level exclusion when path globs are broader or semantic ownership matters. The validator rejects same-mutex nodes unless dependencies order them.
+`owned_paths` lists the files a node may change. `mutexes` prevent two nodes from
+using the same shared resource when path patterns are broad or file ownership is
+not enough. The validator rejects nodes that share a mutex unless a dependency
+orders them.
 
-Rules:
+Follow these rules:
 
 - Only one active implementation node may own a path.
-- Other worktrees and user changes are never reset or overwritten.
-- In a shared worktree, a leaf stages only its declared paths and commits with its node trailer. `git add -A`, `git add .`, and `git commit -a` are forbidden.
-- If an index lock, hook, or uncertain glob makes shared-worktree execution unsafe, report blocked and serialize the node or respawn it in an isolated worktree. Do not push through the conflict.
-- Read-only nodes may run beside writers only when they do not inspect an unstable intermediate state.
-- Broad Cargo and Nix checks run at join nodes. Leaves run the smallest check that can falsify their change.
-- `A25` is the only intentionally expandable composite mutation node.
-- `I30` is the only full-repository integration owner and runs after all implementation verification joins. Its `"**"` ownership is the sole deliberate exception to narrow path ownership, and no other writer may run beside it.
+- Never reset or overwrite another worktree or the user's changes.
+- In a shared worktree, stage only the leaf's declared paths and commit with its
+  node trailer. Do not run `git add -A`, `git add .`, or `git commit -a`.
+- If an index lock, hook, or uncertain path pattern makes a shared worktree
+  unsafe, report that the node is blocked. Run it in order or start it in an
+  isolated worktree. Do not force past the conflict.
+- Run read-only nodes beside writers only when they do not inspect unfinished
+  changes.
+- Run broad Cargo and Nix checks at join nodes. At leaves, run the smallest check
+  that can prove the change wrong.
+- `A25` is the only composite node that may expand while changing files.
+- `I30` is the only node that owns the full repository. It runs after all
+  implementation verification joins. Its `"**"` ownership is the only planned
+  exception to narrow file ownership. No other writer may run beside it.
 
-The validator proves dependency closure, mutex ordering, exact-path collisions, and simple fixed-prefix `path/**` collisions. It does not solve arbitrary glob intersection, so broad or uncertain globs require human/coordinator ownership review before launch.
+The validator checks dependency closure, mutex order, exact path conflicts, and
+simple fixed-prefix `path/**` conflicts. A glob is a path pattern that can match
+more than one file. The validator cannot compare every possible glob. The
+coordinator must review broad or uncertain globs before starting work.
 
-## External-write gates
+## Tasks that need user permission
 
-The following nodes always stop for explicit user authorization:
+These nodes always stop and ask the user before changing an external system:
 
-| Node | External effect |
+| Node | External change |
 |---|---|
-| `H10` | Push and merge the governance-retirement unlock; mutate the live GitHub ruleset |
-| `H30` | Push the reviewed branch, open the modernization PR, atomically cut the live ruleset to a green `PR Gate`, and merge; restore prior rules if merge fails |
-| `H31` | Create the first authoritative fork tag and metadata-only GitHub Release |
+| `H10` | Push and merge the governance cleanup, then change the live GitHub rules |
+| `H30` | Push the reviewed branch, open the modernization PR, switch the live rules to a passing `PR Gate`, and merge; restore the old rules if the merge fails |
+| `H31` | Create the first official fork tag and a metadata-only GitHub Release |
 
-Do not infer authorization from this plan. The user must approve at execution time. If the live mutation cannot be performed atomically with a rollback path, restore the previous live state.
+This plan does not grant permission. The user must approve each change when the
+node runs. If a live change cannot happen as one operation with a way to restore
+the previous state, restore that previous state.
 
-The graph defaults the first authoritative fork release to `v1.0.0`. The operator may choose a fork-prefixed namespace before `H31`; if so, update version checks, changelog, documentation, and the release candidate consistently before tagging.
+The graph uses `v1.0.0` as the first official fork release by default. Before
+`H31`, the operator may choose a version name prefixed for the fork. If that
+happens, update version checks, the changelog, documentation, and the release
+candidate before creating the tag.
 
-## Validation strategy
+## How nodes are checked
 
-Each node includes explicit acceptance and falsification criteria. The falsification result is the stop condition.
+Every node has acceptance checks and a stop condition. Stop when the stop
+condition occurs.
 
-Core join gates:
+Main join checks:
 
-- `V10`: retirement and governance desired-state review;
-- `V20`: PR/main workflow routing, command parity, Nix revision behavior, and security fixtures;
-- `V21`: deterministic tests while ordinary Jcode sessions remain active;
-- `V22`: cleanup and documentation integrity;
-- `V23`: observability and release dry run;
-- `V24`: dependency graph, wildcard-export, compile-time, and API review;
-- `F30`: full local/Nix gate and clean install smoke;
-- `F31`: independent adversarial review of the exact integration commit;
-- `V30`: fresh-checkout verification after merge;
-- `V31`: tagged install and rollback verification.
+- `V10`: review the completed governance cleanup.
+- `V20`: check PR and `main` routing, matching local commands, Nix revision
+  behavior, and security test cases.
+- `V21`: run deterministic tests while ordinary Jcode sessions remain active.
+- `V22`: check cleanup work and documentation links.
+- `V23`: test metrics and rehearse the release without publishing.
+- `V24`: check dependencies, wildcard exports, compile time, and public APIs.
+- `F30`: run every local and Nix check, then test a clean install.
+- `F31`: independently review the exact integration commit and try to find
+  failures.
+- `V30`: verify the merged work from a fresh checkout.
+- `V31`: verify the tagged install and rollback.
 
-No automatic retry may hide a first failure. A surprising result is a finding about the setup or premise, not noise.
+Do not let an automatic retry hide the first failure. Treat a surprising result
+as evidence that the setup or an assumption may be wrong.
 
-## Baseline and targets
+## Starting measurements and targets
 
-The audit baseline recorded:
+The audit recorded:
 
 - 46 workspace crates and 45 crate manifests;
-- 4 production Rust files above 1,200 lines;
+- 4 production Rust files longer than 1,200 lines;
 - 22 wildcard public re-exports;
-- 11 workflows and 3 required contexts;
-- 64 shell scripts plus 63 Python scripts under `scripts/`;
-- roughly 24,684 script lines and 42,030 test lines;
-- mean runner-hours/day around 24.4 from a 22-run bounded sample;
-- post-merge docs cost around 18 runner-minutes;
-- no authoritative fork-era release tag, with historical v0 tags outside main ancestry.
+- 11 workflows and 3 required check names;
+- 64 shell scripts and 63 Python scripts under `scripts/`;
+- about 24,684 script lines and 42,030 test lines;
+- about 24.4 mean runner-hours per day from a limited sample of 22 runs;
+- about 18 runner-minutes for documentation changes after merge;
+- no official fork release tag, with old `v0` tags outside the history of
+  `main`.
 
 Targets:
 
-- one required PR context produced by `PR Gate`;
-- four primary workflows: PR, main, scheduled, and release;
-- zero normal-test writes to real `~/.jcode`;
-- deterministic lifecycle rounds with live ordinary sessions running;
-- docs-only executable derivation unchanged while exact revision remains in provenance;
-- no mutable GitHub Action references;
-- one cargo-audit ignore source;
-- at least 25 percent script-line reduction unless retained exceptions are documented;
-- no new production file above 1,200 lines;
-- no unexplained compile-time regression;
-- metadata-only GitHub Releases and Nix/Cachix as the sole binary channel;
-- 30-day SLO review scheduled after publication.
+- Require one PR result named `PR Gate`.
+- Keep four main workflows: PR, `main`, scheduled, and release.
+- Write nothing to the real `~/.jcode` during normal tests.
+- Pass repeated lifecycle tests while ordinary sessions are running.
+- Keep the Nix executable derivation, or build identity, unchanged for
+  documentation-only revisions, while provenance records the exact revision.
+- Use no GitHub Action reference that can change without review.
+- Keep one `cargo-audit` ignore source.
+- Remove at least 25 percent of script lines unless every exception is
+  documented.
+- Add no production file longer than 1,200 lines.
+- Cause no compile-time slowdown that the results do not explain.
+- Publish metadata-only GitHub Releases and use Nix and Cachix as the only binary
+  channel.
+- Schedule a 30-day SLO review after publication.
 
-## Closeout
+## Finish the work
 
 `B3` is complete only when:
 
-- the modernization PR and approved release are published and independently verified;
-- before/after metrics and remaining limitations are written here;
-- the 30-day review exists and performs no external write without fresh authorization;
-- owned workers, branches, and worktrees are cleaned up;
-- no stale live swarm task graph remains.
+- The modernization PR and approved release are published and independently
+  checked.
+- This file contains the before-and-after measurements and remaining limits.
+- The 30-day review exists and makes no external change without new user
+  permission.
+- All owned workers, branches, and worktrees are removed.
+- No old live swarm task graph remains.
