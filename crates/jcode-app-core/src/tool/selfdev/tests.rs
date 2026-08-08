@@ -1,6 +1,7 @@
 use super::*;
 use crate::bus::BackgroundTaskStatus;
 use std::ffi::OsStr;
+use std::process::Command;
 
 pub(super) fn lock_env() -> crate::storage::TestEnvLease {
     crate::storage::lock_test_env()
@@ -51,12 +52,37 @@ pub(super) fn create_test_context(
 
 pub(super) fn create_repo_fixture() -> tempfile::TempDir {
     let temp = tempfile::TempDir::new().expect("temp repo");
-    std::fs::create_dir_all(temp.path().join(".git")).expect("git dir");
+    std::fs::write(temp.path().join(".gitignore"), "target/\n").expect("gitignore");
     std::fs::write(
         temp.path().join("Cargo.toml"),
         "[package]\nname = \"jcode\"\nversion = \"0.1.0\"\n",
     )
     .expect("cargo toml");
+    Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git init");
+    Command::new("git")
+        .args(["config", "user.email", "jcode@example.com"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git config user.email");
+    Command::new("git")
+        .args(["config", "user.name", "Jcode Tests"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git config user.name");
+    Command::new("git")
+        .args(["add", ".gitignore", "Cargo.toml"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git add");
+    Command::new("git")
+        .args(["commit", "-q", "-m", "fixture"])
+        .current_dir(temp.path())
+        .status()
+        .expect("git commit");
     temp
 }
 
@@ -433,23 +459,57 @@ fn reload_repo_resolver_uses_working_dir_when_primary_detection_fails() {
 }
 
 #[test]
-fn reload_repo_fallback_synthesizes_dir_only_for_test_sessions() {
-    // Test sessions fake all repo-derived state downstream, so a missing repo
-    // (e.g. remote builders syncing sources without `.git`) must not fail.
-    let fallback = reload::reload_repo_dir_or_test_fallback(None, true)
-        .expect("test session must not require a discoverable repo");
-    assert!(fallback.starts_with(std::env::temp_dir()));
-
-    // Real sessions still hard-require repo discovery.
-    let err = reload::reload_repo_dir_or_test_fallback(None, false)
-        .expect_err("non-test session must require a repo");
-    assert!(err.to_string().contains("Could not find jcode repository"));
-
-    // A resolved repo always wins, regardless of session type.
+fn reload_environment_uses_working_dir_when_primary_detection_fails() {
     let repo = create_repo_fixture();
-    let resolved = reload::reload_repo_dir_or_test_fallback(Some(repo.path().to_path_buf()), true)
-        .expect("resolved repo should pass through");
-    assert_eq!(resolved, repo.path());
+    let nested = repo.path().join("crates").join("jcode-build-support");
+    std::fs::create_dir_all(&nested).expect("nested dir");
+
+    let resolved = reload::resolve_selfdev_reload_repo_dir_from(None, Some(&nested));
+    assert_eq!(resolved.as_deref(), Some(repo.path()));
+}
+
+#[tokio::test]
+async fn reload_environment_rejects_missing_repo_for_real_sessions() {
+    let _lock = lock_env();
+    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
+
+    let mut session = session::Session::create(None, Some("Missing repo".to_string()));
+    session.set_canary("self-dev");
+    session.save().expect("save session");
+
+    let tool = SelfDevTool::new();
+    let missing_repo = tempfile::TempDir::new().expect("missing repo dir");
+    let err = tool
+        .execute(
+            json!({"action": "reload"}),
+            create_test_context(&session.id, Some(missing_repo.path().to_path_buf())),
+        )
+        .await
+        .expect_err("reload should fail without a repo");
+    assert!(err.to_string().contains("Could not find jcode repository directory"));
+}
+
+#[tokio::test]
+async fn reload_environment_rejects_missing_binary_for_real_sessions() {
+    let _lock = lock_env();
+    let temp_home = tempfile::TempDir::new().expect("temp home");
+    let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
+    let repo = create_repo_fixture();
+
+    let mut session = session::Session::create(None, Some("Missing binary".to_string()));
+    session.set_canary("self-dev");
+    session.save().expect("save session");
+
+    let tool = SelfDevTool::new();
+    let err = tool
+        .execute(
+            json!({"action": "reload"}),
+            create_test_context(&session.id, Some(repo.path().to_path_buf())),
+        )
+        .await
+        .expect_err("reload should fail without a binary");
+    assert!(err.to_string().contains("No binary found at"));
 }
 
 #[tokio::test]
@@ -773,6 +833,22 @@ async fn build_reload_waits_for_build_then_reloads() {
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
     let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
     let repo = create_repo_fixture();
+    let source = test_source_state(repo.path());
+    let target_binary = repo.path().join("target").join("selfdev").join("jcode");
+    let _reload_env_guard = reload::override_reload_environment_for_tests(reload::ReloadEnvironment {
+        repo_dir: repo.path().to_path_buf(),
+        target_binary: target_binary.clone(),
+        version_before: jcode_build_meta::VERSION.to_string(),
+        version_after: source.version_label.clone(),
+        source: source.clone(),
+        runtime_identity: source.runtime_identity_projection("selfdev", target_binary),
+        wait_mode: reload::ReloadWaitMode::AcknowledgeOnly {
+            message: format!(
+                "Reload acknowledged for build {}. Server is restarting now.",
+                source.version_label
+            ),
+        },
+    });
 
     let mut session = session::Session::create(None, Some("Build+reload session".to_string()));
     session.is_canary = true;

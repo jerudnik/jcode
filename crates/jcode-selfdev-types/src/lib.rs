@@ -22,6 +22,27 @@ pub struct ReloadRecoveryDirective {
     pub continuation_message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReloadWaitMode {
+    WaitForHandoff {
+        socket_path: PathBuf,
+    },
+    AcknowledgeOnly {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReloadEnvironment {
+    pub repo_dir: PathBuf,
+    pub target_binary: PathBuf,
+    pub version_before: String,
+    pub version_after: String,
+    pub source: SourceState,
+    pub runtime_identity: RuntimeIdentityProjection,
+    pub wait_mode: ReloadWaitMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SelfDevBuildCommand {
     pub program: String,
