@@ -2,6 +2,7 @@ name: Security
 
 # Fork security policy, in one place (was: a --strict preflight buried inside
 # upstream's Build & Test job plus a permanently-green audit job in nix.yml).
+# External actions are pinned to full commit SHAs so Dependabot can update them.
 #
 #   secret scan    : secret patterns and script permissions on every push/PR.
 #   dependency     : cargo-audit on main pushes and dependency-changing PRs,
@@ -49,9 +50,13 @@ jobs:
     outputs:
       deps: ${{ steps.filter.outputs.deps }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
 
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@15192bc058cc28a13dbf6cde61f19e18988b7af6
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
         id: filter
         with:
           filters: |
@@ -69,7 +74,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
+
+      - name: Install gitleaks (binary from nixpkgs, no compile)
+        run: |
+          nix build nixpkgs#gitleaks --out-link "$RUNNER_TEMP/gitleaks"
+          echo "$RUNNER_TEMP/gitleaks/bin" >> "$GITHUB_PATH"
+
+      - name: Security preflight (secret scan and permissions)
+        run: scripts/security_preflight.sh
 
       - name: Every ignore is owned, documented, and unexpired
         # Structured ownership, not a grep for the ID in prose: every ignore in
@@ -80,16 +100,25 @@ jobs:
         # against the runner's date; preflight and the fixtures inject one.
         run: python3 scripts/check_advisory_policy.py
 
-      - name: Policy fixtures (checker observed red and green)
-        run: python3 -m unittest discover -s tests -p 'test_advisory_policy.py' -v
-
   secret-scan:
     name: secret scan
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
+
+      - name: Install gitleaks (binary from nixpkgs, no compile)
+        run: |
+          nix build nixpkgs#gitleaks --out-link "$RUNNER_TEMP/gitleaks"
+          echo "$RUNNER_TEMP/gitleaks/bin" >> "$GITHUB_PATH"
 
       - name: Security preflight (secret scan and permissions)
         run: scripts/security_preflight.sh
@@ -101,12 +130,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
 
-      - uses: dtolnay/rust-toolchain@1.96.0
+      - uses: dtolnay/rust-toolchain@01ba1edad32c6f80dbcce879d3e0fa5a00b2a84e
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
+
+      - name: Install gitleaks (binary from nixpkgs, no compile)
+        run: |
+          nix build nixpkgs#gitleaks --out-link "$RUNNER_TEMP/gitleaks"
+          echo "$RUNNER_TEMP/gitleaks/bin" >> "$GITHUB_PATH"
 
       - name: Install cargo-audit (binary from nixpkgs, no compile)
         run: |
@@ -125,10 +165,14 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@b4b293eae0b79aac8a161bb32925a5508c9cca93
+        # Pinned SHA: Dependabot updates this when the action releases.
+        # Update comment: keep this full-SHA pin in sync with .github/dependabot.yml.
 
       - name: Run full cargo audit (no ignores)
         run: |

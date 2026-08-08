@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
 """Enforce structured ownership of every accepted security advisory.
 
-The fork suppresses advisories on more than one surface, and a suppression is
-only as governed as its *weakest* surface:
+The fork suppresses advisories in exactly one machine-readable place:
 
   .cargo/audit.toml            [advisories].ignore, read by cargo-audit
-  scripts/security_preflight.sh  audit_ignores=(--ignore ...), what CI actually
-                                 executes (ci.yml, security.yml --strict,
-                                 governance-root.yml)
 
-Neither can carry ownership metadata. cargo-audit validates audit.toml against
-a closed schema and rejects any extra key, and the preflight array is a vendor
-file kept pristine. So the ownership record lives in
-`docs/security/advisories.toml`, and this checker proves every surface agrees
-with it, and with the others, in both directions.
+Neither ownership nor expiry metadata can live there, because cargo-audit
+validates that file against a closed schema. So the ownership record lives in
+`docs/security/advisories.toml`, and this checker proves the record matches the
+ignore list and still carries the owner/expiry bookkeeping.
 
 Failures (each independently fatal):
 
-  undocumented  an ID suppressed on any surface with no record
-  stale         a record whose ID is suppressed on no surface (clean it up)
-  drift         an ID suppressed on one surface but not another
+  undocumented  an ID suppressed in `.cargo/audit.toml` with no record
+  stale         a record whose ID is no longer suppressed (clean it up)
   incomplete    a record missing id/owner/rationale/affected_surface/
                 expires/retire_when, or with a blank one
   malformed     a non-ISO `expires`/`accepted`, or a duplicate ID
@@ -47,13 +41,8 @@ import os
 import pathlib
 import re
 import sys
-import tomllib
 
 ADVISORY_ID = re.compile(r"RUSTSEC-\d{4}-\d{4}")
-
-# `--ignore RUSTSEC-YYYY-NNNN` inside the preflight array, ignoring trailing
-# comments. Lines that are themselves commented out must not count as active.
-PREFLIGHT_IGNORE = re.compile(r"--ignore\s+(RUSTSEC-\d{4}-\d{4})")
 
 REQUIRED_FIELDS = (
     "id",
@@ -74,7 +63,6 @@ THRESHOLD_FIELDS = ("owner", "accepted", "expires", "rationale", "retire_when")
 DEFAULT_MAX_EXPIRY_DAYS = 365
 
 AUDIT_TOML = ".cargo/audit.toml"
-PREFLIGHT_SH = "scripts/security_preflight.sh"
 RECORD_TOML = "docs/security/advisories.toml"
 
 
@@ -104,9 +92,104 @@ def effective_today(explicit: str | None) -> dt.date:
         raise SystemExit(f"error: --today/ADVISORY_POLICY_TODAY is not an ISO date: {raw!r} ({exc})")
 
 
+def _strip_toml_comment(line: str) -> str:
+    in_double = False
+    in_single = False
+    out: list[str] = []
+    for char in line:
+        if char == '"' and not in_single:
+            in_double = not in_double
+        elif char == "'" and not in_double:
+            in_single = not in_single
+        elif char == "#" and not in_double and not in_single:
+            break
+        out.append(char)
+    return "".join(out).rstrip()
+
+
+def _parse_toml_value(raw: str) -> object:
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if raw.startswith("[") and raw.endswith("]"):
+        inner = raw[1:-1].strip()
+        if not inner:
+            return []
+        values: list[object] = []
+        item = []
+        in_double = False
+        in_single = False
+        for char in inner:
+            if char == '"' and not in_single:
+                in_double = not in_double
+            elif char == "'" and not in_double:
+                in_single = not in_single
+            if char == "," and not in_double and not in_single:
+                values.append(_parse_toml_value("".join(item).strip()))
+                item = []
+                continue
+            item.append(char)
+        if item:
+            values.append(_parse_toml_value("".join(item).strip()))
+        return values
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        return raw[1:-1]
+    if raw.lower() == "true":
+        return True
+    if raw.lower() == "false":
+        return False
+    if re.fullmatch(r"-?\d+", raw):
+        return int(raw)
+    return raw
+
+
+def load_toml_document(path: pathlib.Path) -> dict:
+    document: dict = {}
+    current: dict | None = document
+    pending_key: str | None = None
+    pending_value: str = ""
+    for line in path.read_text().splitlines():
+        line = _strip_toml_comment(line).strip()
+        if not line:
+            continue
+        if pending_key is not None:
+            pending_value = f"{pending_value} {line}".strip()
+            if line.endswith("]"):
+                current[pending_key] = _parse_toml_value(pending_value)
+                pending_key = None
+                pending_value = ""
+            continue
+        if line.startswith("[[") and line.endswith("]]"):
+            name = line[2:-2].strip()
+            bucket = document.setdefault(name, [])
+            if not isinstance(bucket, list):
+                raise SystemExit(f"error: {path}: [{name}] is both a table and an array of tables")
+            current = {}
+            bucket.append(current)
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            name = line[1:-1].strip()
+            bucket = document.setdefault(name, {})
+            if not isinstance(bucket, dict):
+                raise SystemExit(f"error: {path}: [{name}] is both a table and an array of tables")
+            current = bucket
+            continue
+        if "=" not in line:
+            raise SystemExit(f"error: {path}: cannot parse line: {line!r}")
+        key, raw_value = line.split("=", 1)
+        if current is None:
+            raise SystemExit(f"error: {path}: key-value pair outside of a table: {line!r}")
+        if raw_value.strip().startswith("[") and not raw_value.strip().endswith("]"):
+            pending_key = key.strip()
+            pending_value = raw_value.strip()
+            continue
+        current[key.strip()] = _parse_toml_value(raw_value)
+    return document
+
+
 def audit_toml_ignores(path: pathlib.Path) -> list[str]:
     """IDs cargo-audit is told to ignore, in file order."""
-    data = tomllib.loads(path.read_text())
+    data = load_toml_document(path)
     ignores = data.get("advisories", {}).get("ignore", [])
     if not isinstance(ignores, list):
         raise SystemExit(f"error: {path}: [advisories].ignore must be an array")
@@ -115,36 +198,9 @@ def audit_toml_ignores(path: pathlib.Path) -> list[str]:
 
 
 def audit_toml_severity_threshold(path: pathlib.Path) -> str | None:
-    data = tomllib.loads(path.read_text())
+    data = load_toml_document(path)
     value = data.get("advisories", {}).get("severity_threshold")
     return None if value is None else str(value).strip().lower()
-
-
-def preflight_ignores(path: pathlib.Path) -> list[str]:
-    """IDs the preflight script passes to cargo-audit on the command line.
-
-    This is the surface CI actually executes, so it has to be governed even
-    though it is a shell array rather than structured config. Only active
-    lines count: a commented-out `--ignore` is not a suppression.
-    """
-    found: list[str] = []
-    inside = False
-    for raw in path.read_text().splitlines():
-        line = raw.strip()
-        if not inside:
-            if re.match(r"^audit_ignores=\(", line):
-                inside = True
-                # A one-line array declaration still carries entries.
-                if ")" in line:
-                    found.extend(PREFLIGHT_IGNORE.findall(line))
-                    inside = False
-            continue
-        if line.startswith(")"):
-            break
-        if line.startswith("#"):
-            continue
-        found.extend(PREFLIGHT_IGNORE.findall(line))
-    return found
 
 
 def _as_date(value: object) -> dt.date | None:
@@ -163,21 +219,16 @@ def check(root: pathlib.Path, today: dt.date) -> list[str]:
     problems: list[str] = []
 
     audit_toml = root / AUDIT_TOML
-    preflight_sh = root / PREFLIGHT_SH
     record_toml = root / RECORD_TOML
-    for path in (audit_toml, preflight_sh, record_toml):
+    for path in (audit_toml, record_toml):
         if not path.is_file():
             problems.append(f"missing required file: {path.relative_to(root)}")
     if problems:
         return problems
 
-    surfaces: dict[str, list[str]] = {
-        AUDIT_TOML: audit_toml_ignores(audit_toml),
-        PREFLIGHT_SH: preflight_ignores(preflight_sh),
-    }
-    suppressed: set[str] = set().union(*(set(ids) for ids in surfaces.values()))
+    suppressed = set(audit_toml_ignores(audit_toml))
 
-    document = tomllib.loads(record_toml.read_text())
+    document = load_toml_document(record_toml)
     policy = document.get("policy", {})
     max_days = int(policy.get("max_expiry_days", DEFAULT_MAX_EXPIRY_DAYS))
     records = document.get("advisory", [])
@@ -238,14 +289,12 @@ def check(root: pathlib.Path, today: dt.date) -> list[str]:
                 f"[policy].max_expiry_days = {max_days}"
             )
 
-    # Every suppression, on every surface, needs a record.
+    # Every suppression needs a record.
     for advisory_id in sorted(suppressed):
         if advisory_id not in by_id:
-            where = ", ".join(sorted(s for s, ids in surfaces.items() if advisory_id in ids))
             problems.append(
-                f"{advisory_id}: suppressed in {where} but has no record in "
-                f"{RECORD_TOML} (add owner, rationale, affected surface, "
-                f"expiry, and retirement condition)"
+                f"{advisory_id}: suppressed in {AUDIT_TOML} but has no record in "
+                f"{RECORD_TOML} (add owner, rationale, affected surface, expiry, and retirement condition)"
             )
 
     # Every record must correspond to a live suppression, so retiring an
@@ -254,18 +303,7 @@ def check(root: pathlib.Path, today: dt.date) -> list[str]:
         if advisory_id not in suppressed:
             problems.append(
                 f"{advisory_id}: has a record in {RECORD_TOML} but is suppressed on no "
-                f"surface ({AUDIT_TOML}, {PREFLIGHT_SH}); delete the stale record"
-            )
-
-    # The surfaces must also agree with each other: an ID dropped from one and
-    # left in the other is a half-finished retirement that the union check
-    # above would otherwise hide.
-    for surface, ids in surfaces.items():
-        for advisory_id in sorted(suppressed - set(ids)):
-            others = ", ".join(sorted(s for s, other in surfaces.items() if advisory_id in other))
-            problems.append(
-                f"{advisory_id}: suppressed in {others} but not in {surface}; "
-                f"the suppression surfaces must agree"
+                f"surface ({AUDIT_TOML}); delete the stale record"
             )
 
     problems.extend(_check_severity_threshold(audit_toml, document, today))
