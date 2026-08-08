@@ -172,9 +172,6 @@
 
           jcode = pkgs.callPackage ./nix/package.nix {
             inherit craneLib version;
-            # Stamp the binary with the flake's source revision when available
-            # (a clean checkout). Dirty/path trees fall back to the package default.
-            gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or "nix";
           };
 
           sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";

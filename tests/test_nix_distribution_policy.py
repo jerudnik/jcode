@@ -257,6 +257,22 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         self.assertIn("builtins.pathExists ./docs/IOS_APP.md", flake)
         self.assertIn('if [ -n "$retiredPathViolations" ]', flake)
 
+    def test_package_identity_stays_separate_from_exact_provenance(self) -> None:
+        flake = (ROOT / "flake.nix").read_text()
+        package = (ROOT / "nix/package.nix").read_text()
+
+        self.assertIn("inherit craneLib version;", flake)
+        self.assertNotIn("gitHash = inputs.self.shortRev or inputs.self.dirtyShortRev or \"nix\";", flake)
+        self.assertNotIn("gitHash ?", package)
+        self.assertNotIn("gitDate ?", package)
+        self.assertNotIn("JCODE_BUILD_GIT_HASH", package)
+        self.assertNotIn("JCODE_BUILD_GIT_DATE", package)
+        self.assertIn("JCODE_BUILD_GIT_DIRTY", package)
+        self.assertIn('sourceFullRevision = inputs.self.rev or inputs.self.dirtyRev or "unknown";', flake)
+        self.assertIn("sourceDisplayRevision =", flake)
+        self.assertIn("jcode-provenance = pkgs.callPackage ./nix/provenance.nix", flake)
+        self.assertIn("packages.<system>.jcode", (ROOT / "docs/NIX.md").read_text())
+
     def test_runtime_update_commands_cannot_acquire_or_replace_jcode(self) -> None:
         update = (ROOT / "crates/jcode-app-core/src/update.rs").read_text()
         hot_exec = (ROOT / "src/cli/hot_exec.rs").read_text()

@@ -322,3 +322,10 @@ references are source-qualified and unique within the BOM. The optional
 CycloneDX serial number is deliberately omitted because this companion output is
 byte-for-byte reproducible; a random UUID would violate that contract and a nil
 UUID would falsely claim an instance identity.
+
+The executable package itself stays keyed to package inputs, not to the Git
+revision of the checkout that built it. That keeps documentation-only commits
+from changing `packages.<system>.jcode`, while the provenance companion still
+records the exact repository revision that produced the artifact. Downstream
+pins should target `packages.<system>.jcode`; provenance is the audit trail for
+the resulting store path, not a substitute executable.
