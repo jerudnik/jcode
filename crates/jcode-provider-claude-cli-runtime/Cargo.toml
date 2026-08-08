@@ -19,8 +19,8 @@ async-trait = "0.1"
 jcode-base = { path = "../jcode-base", default-features = false }
 jcode-message-types = { path = "../jcode-message-types" }
 jcode-provider-core = { path = "../jcode-provider-core" }
-chrono = { version = "0.4", features = ["serde"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["sync", "time", "rt", "process", "io-util"] }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt", "process", "io-util"] }
 tokio-stream = "0.1"

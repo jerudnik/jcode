@@ -6,13 +6,13 @@ publish = false
 
 [dependencies]
 anyhow = "1"
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 jcode-build-meta = { path = "../jcode-build-meta" }
 jcode-core = { path = "../jcode-core" }
 jcode-selfdev-types = { path = "../jcode-selfdev-types" }
 jcode-storage = { path = "../jcode-storage" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3"
 
 [dev-dependencies]

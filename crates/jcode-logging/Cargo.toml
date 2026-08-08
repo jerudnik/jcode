@@ -10,8 +10,8 @@ name = "jcode_logging"
 path = "src/lib.rs"
 
 [dependencies]
-chrono = { version = "0.4", features = ["serde"] }
-serde_json = { version = "1", features = ["raw_value"] }
-tokio = { version = "1", features = ["rt"] }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
 jcode-core = { path = "../jcode-core" }
 jcode-storage = { path = "../jcode-storage" }

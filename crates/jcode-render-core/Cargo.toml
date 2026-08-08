@@ -12,7 +12,7 @@ publish = false
 
 [dependencies]
 pulldown-cmark = "0.12"
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 unicode-width = "0.2"
 
 [dev-dependencies]

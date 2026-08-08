@@ -5,8 +5,8 @@ publish = false
 edition = "2024"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 anyhow = "1"
 bytes = "1"
 futures = "0.3"
@@ -14,8 +14,7 @@ jcode-core = { path = "../jcode-core" }
 jcode-storage = { path = "../jcode-storage" }
 jcode-logging = { path = "../jcode-logging" }
 jcode-message-types = { path = "../jcode-message-types" }
-reqwest = { version = "0.12", default-features = false, features = ["stream"] }
-
+reqwest = { workspace = true, default-features = false, features = ["stream"] }
 [dev-dependencies]
 # Only the ambient-root regression test needs this: it asserts the cache paths
 # do *not* resolve under the real home, which requires naming the real home.

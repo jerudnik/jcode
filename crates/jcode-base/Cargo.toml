@@ -21,17 +21,17 @@ tikv-jemalloc-ctl = { version = "0.6", optional = true }
 tikv-jemalloc-sys = { version = "0.6", optional = true }
 
 # Async runtime
-tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { workspace = true, features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 futures = "0.3"
 async-trait = "0.1"
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "blocking", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
+reqwest = { workspace = true, default-features = false, features = ["json", "stream", "blocking", "charset", "http2", "system-proxy", "rustls-tls", "rustls-tls-native-roots"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 serde_yaml = "0.9"
 toml = "0.8"
 serde_ignored = "0.1"
@@ -42,7 +42,7 @@ serde_ignored = "0.1"
 dirs = "5"               # home directory
 anyhow = "1"
 libc = "0.2"             # Unix system calls (flock)
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { workspace = true }
 regex = "1"
 urlencoding = "2"        # URL encoding for web search
 uuid = { version = "1", features = ["v4", "v5"] }
@@ -57,7 +57,7 @@ jcode-logging = { path = "../jcode-logging" }
 # OAuth
 base64 = "0.22"
 sha2 = "0.10"
-rand = "0.9.3"
+rand = { workspace = true }
 hex = "0.4"
 url = "2"
 open = "5"               # Open URLs in browser
@@ -141,8 +141,7 @@ embeddings = ["dep:jcode-embedding"]
 bedrock = ["jcode-provider-bedrock/aws-sdk"]
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
-
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
 [dev-dependencies]
 # Dev-only cycle (cargo permits dev-dependencies on dependents): base's
 # MultiProvider routing tests exercise the real OpenRouter/OpenAI-compatible
