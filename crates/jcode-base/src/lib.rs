@@ -6,8 +6,9 @@
 //! Splitting it out lets the two halves compile as separate rustc units so the
 //! largest compilation unit (and its peak memory) is roughly halved.
 //!
-//! `jcode-app-core` re-exports this crate via `pub use jcode_base::*`, so every
-//! existing `crate::<module>` path in the upper layers keeps resolving.
+//! `jcode-app-core` imports these modules explicitly so its internal `crate::`
+//! paths stay readable without exposing a wildcard passthrough at the public
+//! boundary.
 
 #![allow(
     unknown_lints,
