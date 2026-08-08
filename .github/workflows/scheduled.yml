@@ -1,0 +1,41 @@
+name: Scheduled
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: scheduled-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fork-ci:
+    name: Fork CI
+    uses: ./.github/workflows/fork-ci.yml
+    secrets: inherit
+    with:
+      broad: true
+
+  security:
+    name: Security
+    uses: ./.github/workflows/security.yml
+    secrets: inherit
+    with:
+      strict: true
+      weekly: true
+
+  nix:
+    name: Nix
+    uses: ./.github/workflows/nix.yml
+    secrets: inherit
+    with:
+      publish: false
+
+  smoke:
+    name: Smoke
+    uses: ./.github/workflows/freebsd-smoke.yml
+    secrets: inherit

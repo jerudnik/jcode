@@ -1,0 +1,25 @@
+name: Main
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: main-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish
+    uses: ./.github/workflows/nix.yml
+    secrets: inherit
+    with:
+      publish: true
+
+  smoke:
+    name: Smoke
+    uses: ./.github/workflows/freebsd-smoke.yml
+    secrets: inherit
