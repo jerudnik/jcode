@@ -53,7 +53,7 @@ fn decode_rgba(label: &str, bytes: &[u8]) -> image::RgbaImage {
 }
 
 #[test]
-#[ignore = "pixel-parity probe: run explicitly with --ignored --nocapture"]
+#[ignore = "pixel-parity probe: run explicitly with --ignored --nocapture | runbook: manual-benchmark"]
 fn layout_cache_hit_renders_pixel_identical_png_across_diagram_kinds_and_widths() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -51,7 +51,7 @@ fn probe_diagram(idx: usize, nonce: u128) -> String {
 }
 
 #[test]
-#[ignore = "memory probe: run explicitly with --ignored --nocapture"]
+#[ignore = "memory probe: run explicitly with --ignored --nocapture | runbook: manual-benchmark"]
 fn layout_cache_stays_bounded_under_50_distinct_renders() {
     const RENDERS: usize = 50;
     /// Documented worst case: 32 entries x ~75 KB (100-node cap) ~= 2.4 MB.

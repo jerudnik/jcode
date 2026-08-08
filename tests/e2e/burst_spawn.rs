@@ -651,7 +651,7 @@ async fn burst_attach_detach_reattach_restores_live_clients_cleanly() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "resource-heavy scale validation"]
+#[ignore = "resource-heavy scale validation | runbook: manual-benchmark"]
 async fn burst_spawn_resume_attach_scales_to_100_clients() -> Result<()> {
     run_burst_resume_attach_stress(100).await
 }

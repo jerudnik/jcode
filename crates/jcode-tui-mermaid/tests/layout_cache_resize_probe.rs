@@ -131,7 +131,7 @@ fn count_pngs(cache_dir: &Path, hash: u64) -> usize {
 }
 
 #[test]
-#[ignore = "wall-clock probe; run explicitly with --ignored --nocapture (release build recommended)"]
+#[ignore = "wall-clock probe; run explicitly with --ignored --nocapture (release build recommended) | runbook: manual-benchmark"]
 fn layout_cache_resize_speedup_probe() {
     // ---- Phase 0: warm process-global one-time costs (font DB scan) with a
     // throwaway diagram so they don't pollute the cold-render timing below.

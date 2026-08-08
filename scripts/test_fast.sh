@@ -8,8 +8,12 @@ run_cargo() {
   (cd "$repo_root" && "$cargo_exec" "$@")
 }
 
-echo "=== Fast test loop (lib + bins) ==="
-run_cargo test --lib --bins "$@"
+slow_log="$repo_root/target/nextest/ci/slow-tests.log"
+junit_xml="$repo_root/target/nextest/ci/junit.xml"
+mkdir -p "$(dirname "$slow_log")"
+
+echo "=== Fast test loop (nextest: lib + bins) ==="
+run_cargo nextest run --profile ci --workspace --lib --bins --status-level slow --final-status-level slow "$@" 2>&1 | tee "$slow_log"
 
 echo ""
 if [[ -x "$repo_root/target/release/jcode" ]]; then
@@ -21,4 +25,6 @@ else
   echo ""
 fi
 
-echo "For full coverage, run: scripts/test_e2e.sh"
+echo "For full coverage, see: scripts/test_full.sh"
+echo "JUnit report: ${junit_xml#$repo_root/}"
+echo "Slow-test log: ${slow_log#$repo_root/}"
