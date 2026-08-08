@@ -5,11 +5,11 @@ applyTo: "**"
 
 # Repository contract
 
-This independent hard fork and its `main` branch are authoritative. Read `docs/agent-workflows.md` before broad build, CI, release, swarm, or instruction work.
+This independent hard fork and its `main` branch are authoritative. Read `docs/agent-workflows.md` before broad build, CI, release, swarm, or instruction work. Normal integration happens through pull requests into `main`.
 
 ## Work safely
 
-- Before planning or changing Git, verify path, branch, HEAD, status, worktrees, ancestry, and authoritative remote; preserve other work.
+- Before planning or changing Git, verify path, branch, HEAD, status, worktrees, ancestry, and configured remotes; preserve other work.
 - After integration, verify remote SHA and delete owned merged branches/worktrees. Push, publish, tag, release, or act destructively only when requested.
 
 ## Sources of truth
