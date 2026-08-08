@@ -152,11 +152,13 @@ the builder.
 Current workflow authority:
 
 - `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
-- `.github/workflows/fork-ci.yml` is the fork's blocking Rust and quality gate. A `changes` router job detects modified paths via `dorny/paths-filter@v3` and gates expensive jobs (quality, macOS, Linux tests) on PRs. Push, schedule, and dispatch events run unconditionally. Branch protection requires only `Detect changes`; the conditional jobs are not required checks.
-- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces. Uses trigger-level `paths:` since it is not a required check.
+- `.github/workflows/fork-ci.yml` is the fork's blocking Rust and quality gate. A `changes` router job detects modified paths via `dorny/paths-filter@v3` and gates expensive jobs (quality, macOS, Linux tests) on PRs. Push, schedule, and dispatch events run unconditionally. The required-status-check names are sourced from `scripts/required-checks.json`; print them with `jq -r '.required_checks[].context' scripts/required-checks.json`.
+- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces. Uses trigger-level `paths:` since it is not a required check in `scripts/required-checks.json`.
 - `.github/workflows/security.yml` owns advisory security checks. Runs on every push/PR with no path filter because secret scanning must cover all files.
 - `.github/workflows/release.yml` owns release artifacts.
 - Inherited or dispatch-only workflows are not substitutes for the fork gates.
+
+`scripts/fork-health.sh --live` and `scripts/fork-health.sh --fixture <path>` compare the observed governance snapshot against `scripts/required-checks.json`, so the live rules and the documented names stay aligned without copying a static list into prose.
 
 ### CI optimization: future work
 

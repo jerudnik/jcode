@@ -110,8 +110,9 @@ rulesets are the only server-side protection.
 
 These are repository configuration, not files, so nothing in a clone reveals
 them. The live required-check names are mirrored only in
-`scripts/required-checks.json`, and `scripts/fork-health.sh` compares a live or
-fixture governance snapshot against that manifest and fails closed on any drift.
+`scripts/required-checks.json`; print them with `jq -r '.required_checks[].context' scripts/required-checks.json`.
+`scripts/fork-health.sh` compares a live or fixture governance snapshot against
+that manifest and fails closed on any drift.
 
 Governance and workflow changes now land through ordinary pull requests. When a
 ruleset, required check, or workflow name changes, update the manifest and the
@@ -139,17 +140,18 @@ Every workflow lives on `main` with everything else.
 | Workflow | Role | Trigger |
 |---|---|---|
 | `docs-impact.yml` | Advisory branch-wide DOX review packet derived from APM scopes | PR open/update/reopen/ready-for-review |
-| `fork-ci.yml` | The fork's real gate: quality + macOS build/test, advisory Linux tests | push/PR to `main`, weekly strict run |
-| `nix.yml` | Flake validation + maintained-system builds + Cachix binary publication | push/PR touching build inputs and `v*` tags |
-| `security.yml` | Secret scan + triaged cargo-audit gate; weekly full advisory report | push/PR touching deps, weekly |
+| `pr.yml` | Pull request classifier plus PR Gate entrypoint | PR to `main` |
+| `ci.yml` | Reusable PR Gate orchestrator: docs lint for docs-only PRs, otherwise fork, security, Nix, and smoke helpers | workflow_call from `pr.yml` |
+| `fork-ci.yml` | Reusable fork helper for quality + macOS build/test, advisory Linux tests | workflow_call from `ci.yml` and `scheduled.yml` |
+| `security.yml` | Reusable secret-scan + triaged cargo-audit helper; weekly full advisory report | workflow_call from `ci.yml` and `scheduled.yml` |
+| `nix.yml` | Reusable flake validation + maintained-system build helper, plus Cachix publication when requested | workflow_call from `ci.yml`, `main.yml`, and `scheduled.yml` |
+| `freebsd-smoke.yml` | Reusable FreeBSD smoke helper | workflow_call from `ci.yml`, `main.yml`, and `scheduled.yml` |
+| `main.yml` | Main-branch publish and smoke checks | push to `main` |
+| `scheduled.yml` | Weekly broad checks: fork, security, Nix, and smoke | weekly schedule, manual dispatch |
 | `fork-health.yml` | Rail invariant enforcement via `scripts/fork-health.sh` | daily, manual |
 | `governance-root.yml` | Governance-path audit gate: fails PRs that change protected governance files outside the recorded maintenance procedure (R07) | PR to `main` |
 | `nix-update.yml` | Weekly `flake.lock` bump PR against `main` | weekly, manual |
 | `release.yml` | Metadata-only GitHub release notes; rejects attached assets | tag push matching `v*` |
-| `ci.yml`, `freebsd-smoke.yml` | Inherited upstream workflows; dispatch-only or trigger-neutered | manual dispatch |
-
-The inherited upstream workflows are dispatch-only. They do not gate anything;
-`fork-ci.yml` does.
 
 ## Platforms
 

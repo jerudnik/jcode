@@ -19,6 +19,7 @@ Code-adjacent reference for maintaining the independent hard fork: branch topolo
 ## Local Contracts
 
 - Keep branch topology docs aligned with actual maintained branches, PR flow, and the expected-state manifest.
+- When documenting workflow gates or required checks, link to `scripts/required-checks.json` or generate the names from it. Do not copy a static list of required-check names into prose.
 - Do not create upstream-tracking machinery, patch-stack obligations, or patch-ledger requirements. Record current behavior and rationale next to the owning code, tests, architecture doc, or issue.
 - 4nix-facing packaging contracts belong in docs when they affect the `github:jerudnik/jcode/main` flake input.
 - Use direct, operational prose. Do not leave historical diary notes in durable docs.
