@@ -272,10 +272,6 @@ impl SelfDevTool {
     /// it asks the shared server to exec into the newest installed build (if one
     /// is strictly newer than the running process).
     pub(super) async fn do_reload_to_newer_build(&self, _ctx: &ToolContext) -> Result<ToolOutput> {
-        if SelfDevTool::is_test_session() {
-            return Ok(ToolOutput::new("Test mode: skipped reload-to-newer-build."));
-        }
-
         if !server::server_has_newer_binary() {
             return Ok(ToolOutput::new(
                 "Already running the newest installed jcode build; no reload needed.",

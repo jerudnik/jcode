@@ -449,16 +449,6 @@ async fn do_reload_returns_after_ack_in_direct_mode() {
 }
 
 #[test]
-fn reload_repo_resolver_uses_working_dir_when_primary_detection_fails() {
-    let repo = create_repo_fixture();
-    let nested = repo.path().join("crates").join("jcode-build-support");
-    std::fs::create_dir_all(&nested).expect("nested dir");
-
-    let resolved = reload::resolve_selfdev_reload_repo_dir_from(None, Some(&nested));
-    assert_eq!(resolved.as_deref(), Some(repo.path()));
-}
-
-#[test]
 fn reload_environment_uses_working_dir_when_primary_detection_fails() {
     let repo = create_repo_fixture();
     let nested = repo.path().join("crates").join("jcode-build-support");
@@ -623,8 +613,10 @@ async fn reload_in_non_selfdev_session_is_upgrade_in_place() {
     let _lock = lock_env();
     let temp_home = tempfile::TempDir::new().expect("temp home");
     let _home_guard = EnvVarGuard::set("JCODE_HOME", temp_home.path());
-    // Test mode short-circuits the actual server reload signal.
-    let _test_guard = EnvVarGuard::set("JCODE_TEST_SESSION", "1");
+    assert!(
+        !crate::server::server_has_newer_binary(),
+        "the empty test home should not advertise a newer server binary"
+    );
 
     let mut session = session::Session::create(None, Some("Normal Session".to_string()));
     session.save().expect("save session");
@@ -637,13 +629,19 @@ async fn reload_in_non_selfdev_session_is_upgrade_in_place() {
         .expect("reload should route to upgrade-in-place");
 
     // It must NOT be the old "only available inside a self-dev session" error;
-    // a regular session can reload into a newer installed build.
+    // a regular session can still take the strict newest-binary path.
     assert!(
         !output
             .output
             .contains("only available inside a self-dev session")
     );
-    assert!(output.output.contains("Test mode"));
+    assert!(
+        output
+            .output
+            .contains("Already running the newest installed jcode build; no reload needed."),
+        "unexpected output: {}",
+        output.output
+    );
 }
 
 #[tokio::test]
