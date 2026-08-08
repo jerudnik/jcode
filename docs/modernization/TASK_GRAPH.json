@@ -284,8 +284,7 @@
         "docs/fork/ideal-base/**",
         "scripts/ideal_base_*.py",
         "scripts/graph_page.py",
-        "scripts/status_page.py",
-        "tests/test_ideal_base_railway.py"
+        "scripts/status_page.py"
       ],
       "mutexes": [
         "ideal-base"

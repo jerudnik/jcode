@@ -110,7 +110,6 @@
       "scripts/required-checks.json",
       "scripts/fork-health.sh",
       "scripts/ideal_base_railway.py",
-      "tests/test_ideal_base_railway.py",
       "docs/fork/ideal-base/evidence/R07/github-governance.proposed.json",
       "scripts/ambient_roots_allowlist.txt",
       "scripts/check_agent_instructions.py",
