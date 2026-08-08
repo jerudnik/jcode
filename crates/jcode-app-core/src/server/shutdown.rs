@@ -609,6 +609,14 @@ fn record_forced_exit_marker(event: &str, reason: ExitReason) {
     let _ = std::fs::write(&path, payload.to_string());
 }
 
+fn clear_forced_exit_marker() {
+    let Ok(path) =
+        crate::storage::jcode_dir().map(|dir| dir.join("state").join("shutdown-watchdog.json"))
+    else {
+        return;
+    };
+    let _ = std::fs::remove_file(path);
+}
 /// Spawn a future on the current tokio runtime when available, else on a
 /// dedicated thread with a one-shot runtime (F02-I1: `begin` must not
 /// silently strand `Draining` when called off-runtime, e.g. future callers
@@ -948,6 +956,7 @@ impl ShutdownCoordinator {
         // owns.
         if self.watchdog_enabled {
             finalize_server_beacon(reason);
+            clear_forced_exit_marker();
         }
         // send_replace, not send: `watch::Sender::send` DROPS the value when
         // no receiver exists yet. A fast executor (empty table, quick

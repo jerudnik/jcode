@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY="" OPENAI_API_KEY="" GEMINI_API_KEY="" \
 
 JCODE_BIN="${JCODE_BIN:-}"
 if [[ -z "$JCODE_BIN" ]]; then
-    for candidate in "$REPO/target/selfdev/jcode" "${JCODE_HOME:-$HOME/.jcode}/current/jcode"; do
+    for candidate in "$REPO/target/selfdev/jcode" "$REPO/target/debug/jcode"; do
         [[ -x "$candidate" ]] && { JCODE_BIN="$candidate"; break; }
     done
 fi
@@ -57,13 +57,23 @@ for round in $(seq 1 "$ROUNDS"); do
     # F03 matrix: per-lease-class idle behavior, SIGTERM (exit 0 drain),
     # SIGKILL (crash) + successor boot over stale socket, residue checks.
     run_step "lease/exit/crash/restart matrix (F03)" \
-        bash docs/fork/ideal-base/evidence/F03/lease_class_fixtures.sh "$JCODE_BIN"
+        bash scripts/lease_class_fixtures.sh "$JCODE_BIN"
+
+    # -- real-home isolation ----------------------------------------------
+    # Fail loudly if a normal test touches the operator's real ~/.jcode.
+    run_step "real-home isolation gate" \
+        env \
+            JCODE_ISOLATION_PROBE_PKG=jcode-storage \
+            JCODE_ISOLATION_PROBE_FILTER='tests::home_isolation_tests::every_ambient_root_redirects_under_a_test_harness' \
+            bash scripts/check_real_home_isolation.sh
 
     # -- reload (in-process state machine incl. R04 classification) ------
     run_step "shutdown+reload coordinator suite (F02/F03/R04)" \
         "${CARGO[@]}" test -p jcode-app-core --lib shutdown
-    run_step "reload state/recovery suites (R01)" \
-        "${CARGO[@]}" test -p jcode-app-core --lib reload
+    run_step "reload state suite (R01)" \
+        "${CARGO[@]}" test -p jcode-app-core --lib server::reload_state
+    run_step "reload recovery suite (R01)" \
+        "${CARGO[@]}" test -p jcode-app-core --lib server::reload_recovery
 
     # -- cancel ----------------------------------------------------------
     # Turn/stream cancellation invariants (R12 fixtures) + interrupt paths.
