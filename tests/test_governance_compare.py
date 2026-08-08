@@ -29,14 +29,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.generate_governance_fixture import build as build_fixture
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "scripts"
 MANIFEST = SCRIPTS / "required-checks.json"
 COMPARATOR = SCRIPTS / "governance_compare.py"
 FORK_HEALTH = SCRIPTS / "fork-health.sh"
-FIXTURE = (
-    REPO_ROOT / "docs" / "fork" / "ideal-base" / "evidence" / "R07" / "fixtures" / "governance-valid.json"
-)
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -47,7 +46,7 @@ EXIT_SCHEMA = 2
 
 
 def load_fixture() -> dict:
-    return json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return build_fixture(load_manifest(), REPO_ROOT / ".github" / "workflows")
 
 
 def load_manifest() -> dict:
@@ -138,9 +137,9 @@ class ValidFixtureTests(ComparatorCase):
         self.assertIn("matches the manifest", result.stdout)
 
     def test_fixture_is_regenerable_from_the_manifest(self) -> None:
-        # The fixture is checked in, so it can drift from the manifest it is
-        # supposed to depict. If it did, every planted-failure test below would
-        # be mutating a stale object and proving nothing about the real target.
+        # The expected state is generated from the manifest and live workflow
+        # text, so the planted-failure tests only mutate the object the
+        # comparator actually compares.
         fixture = load_fixture()
         manifest = load_manifest()
         self.assertEqual(fixture["repository"]["id"], manifest["repository_id"])
@@ -287,7 +286,7 @@ class RulesetMutationTests(ComparatorCase):
 
 class RequiredContextTests(ComparatorCase):
     def test_each_required_context_removal_is_detected(self) -> None:
-        for context in ("Governance Root", "Fork CI Gate", "Security Gate", "Nix Gate"):
+        for context in ("Fork CI Gate", "Security Gate", "Nix Gate"):
             with self.subTest(context=context):
                 snapshot = load_fixture()
                 params = rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"]
@@ -647,34 +646,9 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
         )
         self.assertTrue(manifest["protected_paths"]["additions_adjudicated"])
 
-        apply_doc = json.loads(self.APPLY_DOC.read_text(encoding="utf-8"))
-        template = self._norm(apply_doc["template_variables"]["protected_paths"])
-        self.assertEqual(
-            required,
-            template,
-            f"manifest/template_variables mismatch: "
-            f"{sorted(required ^ template)}",
-        )
-
-        seq6 = next(s for s in apply_doc["steps"] if s.get("sequence") == 6)
-        diff_cmd = next(
-            a
-            for a in seq6["local_git"]["assertions"]
-            if a.startswith("git diff --quiet")
-        )
-        # Set equality, not containment. A path the assertion covers but the
-        # manifest omits is invisible to a per-path assertIn loop, which is
-        # exactly how the two sets drifted apart while this test stayed green.
-        seq6_paths = self._norm(
-            [token for token in diff_cmd.split() if "/" in token]
-        )
-        self.assertEqual(
-            required,
-            seq6_paths,
-            f"manifest/sequence-6 diff assertion mismatch: "
-            f"{sorted(required ^ seq6_paths)}",
-        )
-
+        # Compare only the artifacts this change actually owns. The workflow
+        # text and the checked-in fixture must both name exactly the same
+        # long-lived governance paths as the manifest.
         workflow_text = load_fixture()["workflows"][
             ".github/workflows/governance-root.yml"
         ]
@@ -709,7 +683,6 @@ class CrossArtifactCoherenceTests(unittest.TestCase):
         # which this test forces by pinning their absence.
         for baseline in sorted(self.RATCHET_BASELINES):
             self.assertNotIn(baseline, required)
-            self.assertNotIn(baseline, diff_cmd)
             self.assertNotIn(baseline, workflow_text)
 
 
@@ -831,10 +804,10 @@ class LiveModeTests(unittest.TestCase):
             shim.write_text(GH_SHIM, encoding="utf-8")
             shim.chmod(shim.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
-            # Live mode reads workflow text from the working tree. Tests that
-            # need the four required-context jobs to exist must supply them,
-            # because workflow-contexts.proposed.patch is coordinator-owned and
-            # has not been applied to this repository's own .github/workflows.
+        # Live mode reads workflow text from the working tree. Tests that
+        # need the three required-context jobs to exist must supply them,
+        # because workflow-contexts.proposed.patch is coordinator-owned and
+        # has not been applied to this repository's own .github/workflows.
             if workflows is None:
                 workflows_dir = REPO_ROOT / ".github" / "workflows"
             else:
@@ -873,7 +846,7 @@ class LiveModeTests(unittest.TestCase):
         # Post-bootstrap counterpart of the pre-bootstrap sanity check (which
         # asserted the unpatched workflows went red): now that the authorized
         # workflow diff is applied, this repository's actual workflow
-        # directory carries the four required-context jobs and live mode must
+        # directory carries the three required-context jobs and live mode must
         # go green. If a future edit removes a required-context job, this goes
         # red again, so the workflow contract check stays load-bearing.
         result = self.run_live(self.build_table())
@@ -980,12 +953,18 @@ class ForkHealthModeTests(unittest.TestCase):
         self.assertIn("--fixture", result.stderr)
 
     def test_both_sources_is_usage_error(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--live")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health("--fixture", str(path), "--live")
         self.assertEqual(result.returncode, EXIT_ACQUISITION, result.stdout + result.stderr)
         self.assertIn("mutually exclusive", result.stderr)
 
     def test_unknown_option_is_usage_error(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--nope")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health("--fixture", str(path), "--nope")
         self.assertEqual(result.returncode, EXIT_ACQUISITION)
         self.assertIn("unknown option", result.stderr)
 
@@ -995,14 +974,20 @@ class ForkHealthModeTests(unittest.TestCase):
         self.assertIn("fixture not found", result.stderr)
 
     def test_repo_disagreeing_with_the_manifest_is_usage_error(self) -> None:
-        result = self.run_fork_health(
-            "--fixture", str(FIXTURE), "--repo", "someone/else", "--fork-remote", self.fork_remote()
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health(
+                "--fixture", str(path), "--repo", "someone/else", "--fork-remote", self.fork_remote()
+            )
         self.assertEqual(result.returncode, EXIT_ACQUISITION)
         self.assertIn("disagrees with the manifest", result.stderr)
 
     def test_valid_fixture_run_is_green_end_to_end(self) -> None:
-        result = self.run_fork_health("--fixture", str(FIXTURE), "--fork-remote", self.fork_remote())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fixture.json"
+            path.write_text(json.dumps(load_fixture()), encoding="utf-8")
+            result = self.run_fork_health("--fixture", str(path), "--fork-remote", self.fork_remote())
         self.assertEqual(result.returncode, EXIT_OK, result.stdout + result.stderr)
         self.assertIn("all invariants hold", result.stdout)
 

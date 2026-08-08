@@ -12,7 +12,7 @@ Regenerate after changing the manifest or the required-context workflows:
     python3 scripts/generate_governance_fixture.py \
       --workflows-dir .github/workflows
 
-`--workflows-dir` must point at workflows that already carry the four
+`--workflows-dir` must point at workflows that already carry the three
 required-context jobs. Before `workflow-contexts.proposed.patch` lands, that is
 a scratch tree with the patch applied, not the repository's own directory.
 """
