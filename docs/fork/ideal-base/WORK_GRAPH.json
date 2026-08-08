@@ -113,7 +113,7 @@
           "docs/fork/ideal-base/evidence/W0.1/**"
         ],
         "acceptance_gates": [
-          "python3 scripts/ideal_base_railway.py check",
+          "archive checksum manifests are present",
           "git status --short",
           "git worktree list --porcelain",
           "sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
@@ -161,7 +161,7 @@
           "docs/fork/ideal-base/evidence/W0.3/**"
         ],
         "acceptance_gates": [
-          "python3 scripts/ideal_base_railway.py next --json",
+          "archive graph snapshot is readable",
           "Deep task graph accepts the projected runnable wave"
         ],
         "evidence": [
@@ -1269,7 +1269,6 @@
         "owned_paths": [
           "scripts/fork-health.sh",
           "scripts/required-checks.json",
-          "scripts/ideal_base_railway.py",
           "docs/fork/ideal-base/evidence/R07/**"
         ],
         "acceptance_gates": [
@@ -1616,8 +1615,7 @@
         "depends_on": [],
         "priority": 45,
         "owned_paths": [
-          "scripts/ideal_base_railway.py",
-          "docs/fork/ideal-base/evidence/D02/**"
+        "docs/fork/ideal-base/evidence/D02/**"
         ],
         "acceptance_gates": [
           "A control proves the gap exists before the fix: checkpointing a root to accepted while one of its children is pending must SUCCEED on the current checker and must FAIL once the guard lands. Removing the guard must make it succeed again.",
@@ -2036,7 +2034,7 @@
         "docs/fork/ideal-base/evidence/W0.1/**"
       ],
       "acceptance_gates": [
-        "python3 scripts/ideal_base_railway.py check",
+        "archive checksum manifests are present",
         "git status --short",
         "git worktree list --porcelain",
         "sha256sum docs/fork/recovery/ORCHESTRATOR_PROMPT.md"
@@ -2084,7 +2082,7 @@
         "docs/fork/ideal-base/evidence/W0.3/**"
       ],
       "acceptance_gates": [
-        "python3 scripts/ideal_base_railway.py next --json",
+        "archive graph snapshot is readable",
         "Deep task graph accepts the projected runnable wave"
       ],
       "evidence": [
@@ -3182,7 +3180,6 @@
         "owned_paths": [
           "scripts/fork-health.sh",
           "scripts/required-checks.json",
-          "scripts/ideal_base_railway.py",
           "docs/fork/ideal-base/evidence/R07/**"
         ],
       "acceptance_gates": [
@@ -3527,8 +3524,7 @@
       "depends_on": [],
       "priority": 45,
         "owned_paths": [
-          "scripts/ideal_base_railway.py",
-          "docs/fork/ideal-base/evidence/D02/**"
+        "docs/fork/ideal-base/evidence/D02/**"
         ],
       "acceptance_gates": [
         "A control proves the gap exists before the fix: checkpointing a root to accepted while one of its children is pending must SUCCEED on the current checker and must FAIL once the guard lands. Removing the guard must make it succeed again.",
