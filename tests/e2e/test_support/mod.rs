@@ -30,17 +30,31 @@ pub(crate) use tokio::time::timeout;
 pub(crate) use tokio_tungstenite::connect_async;
 pub(crate) use tokio_tungstenite::tungstenite::Message as WsMessage;
 pub(crate) use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use std::ops::Deref;
 
 static JCODE_HOME_LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
 
-pub(crate) fn short_runtime_dir(name: String) -> std::path::PathBuf {
-    #[cfg(unix)]
-    {
-        std::path::PathBuf::from("/tmp").join(name)
+pub(crate) struct ShortRuntimeDir {
+    _tempdir: tempfile::TempDir,
+}
+
+impl Deref for ShortRuntimeDir {
+    type Target = std::path::Path;
+
+    fn deref(&self) -> &Self::Target {
+        self._tempdir.path()
     }
-    #[cfg(not(unix))]
-    {
-        std::env::temp_dir().join(name)
+}
+
+impl ShortRuntimeDir {
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self._tempdir.path()
+    }
+}
+
+pub(crate) fn short_runtime_dir(name: String) -> ShortRuntimeDir {
+    ShortRuntimeDir {
+        _tempdir: jcode::storage::RuntimePaths::test_root(&name),
     }
 }
 
@@ -73,8 +87,7 @@ impl TestEnvGuard {
         let prev_test_session = std::env::var_os("JCODE_TEST_SESSION");
         let prev_debug_control = std::env::var_os("JCODE_DEBUG_CONTROL");
         let runtime_dir = temp_home.path().join("runtime");
-        std::fs::create_dir_all(&runtime_dir)?;
-
+    
         jcode::env::set_var("JCODE_HOME", temp_home.path());
         jcode::env::set_var("JCODE_RUNTIME_DIR", &runtime_dir);
         jcode::env::set_var("JCODE_TEST_SESSION", "1");
@@ -525,7 +538,6 @@ pub(crate) async fn run_unix_transport_scenario() -> Result<TransportScenarioRes
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
 
@@ -642,7 +654,6 @@ pub(crate) async fn run_websocket_transport_scenario() -> Result<TransportScenar
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let socket_path = runtime_dir.join("jcode.sock");
     let debug_socket_path = runtime_dir.join("jcode-debug.sock");
     let gateway_port = reserve_tcp_port()?;

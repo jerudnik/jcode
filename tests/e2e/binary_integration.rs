@@ -473,7 +473,6 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");
-    std::fs::create_dir_all(&runtime_dir)?;
     std::fs::create_dir_all(&home_dir)?;
     std::fs::create_dir_all(&install_dir)?;
 
@@ -596,7 +595,6 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");
-    std::fs::create_dir_all(&runtime_dir)?;
     std::fs::create_dir_all(&home_dir)?;
     std::fs::create_dir_all(&install_dir)?;
 
@@ -782,7 +780,6 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");
-    std::fs::create_dir_all(&runtime_dir)?;
     std::fs::create_dir_all(&home_dir)?;
     std::fs::create_dir_all(&install_dir)?;
 

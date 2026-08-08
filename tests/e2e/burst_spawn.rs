@@ -190,8 +190,8 @@ async fn run_burst_resume_attach_stress(burst_size: usize) -> Result<()> {
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let unique_suffix = runtime_dir
+        .path()
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("burst");
@@ -394,8 +394,8 @@ async fn burst_retry_takeover_without_local_history_keeps_existing_live_clients_
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let unique_suffix = runtime_dir
+        .path()
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("burst-live");
@@ -567,8 +567,8 @@ async fn burst_attach_detach_reattach_restores_live_clients_cleanly() -> Result<
             .unwrap()
             .as_nanos()
     ));
-    std::fs::create_dir_all(&runtime_dir)?;
     let unique_suffix = runtime_dir
+        .path()
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("burst-reattach");
