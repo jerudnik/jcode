@@ -7,15 +7,7 @@
   "github_actions_integration_id": 15368,
   "required_checks": [
     {
-      "context": "Fork CI Gate",
-      "integration_id": 15368
-    },
-    {
-      "context": "Security Gate",
-      "integration_id": 15368
-    },
-    {
-      "context": "Nix Gate",
+      "context": "PR Gate",
       "integration_id": 15368
     }
   ],
@@ -31,21 +23,15 @@
       "declares_protected_paths": true
     },
     {
-      "context": "Fork CI Gate",
-      "file": ".github/workflows/fork-ci.yml",
-      "job_id": "fork-ci-gate",
-      "if": "always() && github.event_name == 'pull_request'",
+      "context": "PR Gate",
+      "file": ".github/workflows/pr.yml",
+      "job_id": "pr-gate",
+      "if": null,
       "needs": [
-        "changes",
-        "governance-contract",
-        "quality",
-        "macos",
-        "linux-tests"
+        "classify"
       ],
       "routing": {
-        "quality": "rust || scripts",
-        "macos": "rust",
-        "linux-tests": "rust"
+        "docs_only": "docs/*, *.md, README.md, CONTRIBUTING.md, RELEASING.md"
       },
       "pull_request_paths_filter": "forbidden"
     },

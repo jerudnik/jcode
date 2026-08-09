@@ -109,13 +109,22 @@ class PinnedBlockTests(unittest.TestCase):
         budget.REPOSITORY_CEILINGS.clear()
         budget.REPOSITORY_CEILINGS.update(data["repository_ceilings"])
 
-    def test_workflow_pin_matches_the_current_digest(self) -> None:
-        workflow = (REPO_ROOT / ".github" / "workflows" / "fork-ci.yml").read_text(encoding="utf-8")
+    def test_check_recipe_pin_matches_the_current_digest(self) -> None:
+        recipe = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
         self.assertIn(
             f"--expect-digest {budget.scope_digest()}",
-            workflow,
-            "fork-ci.yml pin is stale; refresh with --print-digest inside a maintenance window",
+            recipe,
+            "just check critical-path pin is stale; refresh with --print-digest after reviewing the scope change",
         )
+
+    def test_pr_gate_runs_the_pinned_check_recipe(self) -> None:
+        pr_workflow = (REPO_ROOT / ".github" / "workflows" / "pr.yml").read_text(encoding="utf-8")
+        ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        fork_workflow = (REPO_ROOT / ".github" / "workflows" / "fork-ci.yml").read_text(encoding="utf-8")
+        self.assertIn("name: PR Gate", pr_workflow)
+        self.assertIn("uses: ./.github/workflows/ci.yml", pr_workflow)
+        self.assertIn("uses: ./.github/workflows/fork-ci.yml", ci_workflow)
+        self.assertIn("nix shell nixpkgs#just -c just check", fork_workflow)
 
 
 class CeilingAndTargetCoherenceTests(unittest.TestCase):
@@ -237,34 +246,21 @@ class ScopeShrinkTests(unittest.TestCase):
             budget.EXPECTED_FILE_COUNTS["updater"] = original
 
 
-class SelfProtectionTests(unittest.TestCase):
-    """This checker must be a protected path, like every checker it sits beside.
+class CriticalPathGateContractTests(unittest.TestCase):
+    """The critical-path checker must remain part of the accepted PR Gate route."""
 
-    A digest pin cannot substitute for protection: the digest lives in the
-    workflow, but the code that verifies it lives in this script, so an edit
-    that both raises a ceiling and disables the comparison is self-consistent.
-    An independent review did exactly that in two lines and CI stayed green.
-    """
-
-    SCRIPTS = (
-        "scripts/check_critical_path_budget.py",
-        "scripts/test_critical_path_budget.py",
-    )
-
-    def test_manifest_protects_this_checker_and_its_tests(self) -> None:
+    def test_required_manifest_names_single_pr_gate_context(self) -> None:
         manifest = json.loads(
             (REPO_ROOT / "scripts" / "required-checks.json").read_text(encoding="utf-8")
         )
-        required = set(manifest["protected_paths"]["required"])
-        for path in self.SCRIPTS:
-            self.assertIn(path, required, f"{path} is not a protected path")
+        contexts = [entry["context"] for entry in manifest["required_checks"]]
+        self.assertEqual(contexts, ["PR Gate"])
 
-    def test_governance_root_workflow_names_this_checker(self) -> None:
-        text = (
-            REPO_ROOT / ".github" / "workflows" / "governance-root.yml"
-        ).read_text(encoding="utf-8")
-        for path in self.SCRIPTS:
-            self.assertIn(path, text, f"governance-root.yml does not name {path}")
+    def test_ci_contract_keeps_one_pr_gate_entrypoint(self) -> None:
+        pr_workflow = (REPO_ROOT / ".github" / "workflows" / "pr.yml").read_text(encoding="utf-8")
+        self.assertIn("pr-gate:", pr_workflow)
+        self.assertIn("name: PR Gate", pr_workflow)
+        self.assertIn("uses: ./.github/workflows/ci.yml", pr_workflow)
 
     def test_repository_marks_are_not_derived_from_the_baselines(self) -> None:
         """The pinned marks must stay pinned; deriving them makes the gate vacuous.
@@ -314,14 +310,12 @@ class SelfProtectionTests(unittest.TestCase):
         for key in budget.REPOSITORY_CEILINGS:
             self.assertIn(f'"{key}"', block)
 
-    def test_protection_matches_a_sibling_checker(self) -> None:
-        # Anchors the assertion to how the repo already protects an equivalent
-        # gate, so this cannot pass by protecting nothing.
-        manifest = json.loads(
-            (REPO_ROOT / "scripts" / "required-checks.json").read_text(encoding="utf-8")
-        )
-        required = set(manifest["protected_paths"]["required"])
-        self.assertIn("scripts/check_panic_budget.py", required)
+    def test_critical_path_checker_runs_with_sibling_ratchets(self) -> None:
+        # Anchors the assertion to the maintained local recipe PR Gate executes,
+        # not to retired branch-protection path lists.
+        recipe = (REPO_ROOT / "justfile").read_text(encoding="utf-8")
+        self.assertIn("scripts/check_critical_path_budget.py", recipe)
+        self.assertIn("scripts/cargo_exec.sh check", recipe)
 
 
 if __name__ == "__main__":

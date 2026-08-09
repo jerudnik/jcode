@@ -4,6 +4,7 @@
 
 # Throttled check loop - type-checks + tests, skips codegen. Fast feedback.
 check:
+    python3 scripts/check_critical_path_budget.py --expect-digest 5ed12e310519a1258ddd0cf9b67674b8aa3198a863f1712771c36b10c5d052ed --report target/critical-path-budget.json
     scripts/cargo_exec.sh check --locked --workspace --all-targets --all-features
 
 # Fast test gate - compiles the workspace test graph without running it.

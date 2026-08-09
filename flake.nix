@@ -481,6 +481,7 @@
               pkgs.nixfmt
               pkgs.python3
               pkgs.ripgrep
+              pkgs.gitleaks
               pkgs.actionlint
               pkgs.git
               pkgs.just

@@ -105,10 +105,10 @@ impl RuntimePaths {
     }
 
     pub fn test_root(prefix: &str) -> tempfile::TempDir {
-        tempfile::Builder::new()
-            .prefix(prefix)
-            .tempdir()
-            .expect("create temporary jcode root")
+        match tempfile::Builder::new().prefix(prefix).tempdir() {
+            Ok(dir) => dir,
+            Err(_) => std::process::abort(),
+        }
     }
 }
 

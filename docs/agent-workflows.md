@@ -152,9 +152,11 @@ the builder.
 Current workflow authority:
 
 - `.github/workflows/docs-impact.yml` produces a non-blocking DOX review packet for the complete pull-request diff.
-- `.github/workflows/fork-ci.yml` is the fork's blocking Rust and quality gate. A `changes` router job detects modified paths via `dorny/paths-filter@v3` and gates expensive jobs (quality, macOS, Linux tests) on PRs. Push, schedule, and dispatch events run unconditionally. The required-status-check names are sourced from `scripts/required-checks.json`; print them with `jq -r '.required_checks[].context' scripts/required-checks.json`.
-- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces. Uses trigger-level `paths:` since it is not a required check in `scripts/required-checks.json`.
-- `.github/workflows/security.yml` owns advisory security checks. Runs on every push/PR with no path filter because secret scanning must cover all files.
+- `.github/workflows/pr.yml` exposes the single required PR result named `PR Gate`; print the maintained required name with `jq -r '.required_checks[].context' scripts/required-checks.json`.
+- `.github/workflows/ci.yml` is the reusable PR Gate orchestrator. It runs docs lint for docs-only PRs and otherwise calls the fork, security, Nix, and smoke helpers.
+- `.github/workflows/fork-ci.yml` is the fork Rust and quality helper. PR Gate reaches it for non-docs PRs, and scheduled or dispatch events may also call it.
+- `.github/workflows/nix.yml` validates and builds the supported Nix surfaces as a PR Gate helper, main-branch helper, and scheduled helper.
+- `.github/workflows/security.yml` owns secret scanning and the triaged dependency audit as a PR Gate helper and scheduled helper.
 - `.github/workflows/release.yml` owns release artifacts.
 - Inherited or dispatch-only workflows are not substitutes for the fork gates.
 

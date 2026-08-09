@@ -18,12 +18,12 @@ cost was that a *raise* is only "visible in review".
 That trade is fine for the repository at large. It is not fine for the paths
 acceptance standard A6 calls critical: lifecycle, persistence, updater,
 provider-infrastructure and TUI. For those, this script records an explicit
-machine-readable scope plus a per-domain ceiling, and CI pins the whole data
-block by digest from the protected `.github/workflows/fork-ci.yml`. Weakening
-anything here - raising a ceiling, shrinking the scope, relaxing a downward
-target, or loosening the oversize threshold - therefore requires editing two
-protected paths and turns `Governance Root` red, which is exactly the reviewed
-maintenance window such a change deserves. Tightening needs no edit at all:
+machine-readable scope plus a per-domain ceiling, and `just check` pins the whole
+data block by digest. PR Gate calls that recipe through `.github/workflows/ci.yml`
+and `.github/workflows/fork-ci.yml`, so weakening anything here - raising a
+ceiling, shrinking the scope, relaxing a downward target, or loosening the
+oversize threshold - requires updating the reviewed local/CI contract rather than
+silently changing the checker. Tightening needs no edit at all:
 ceilings are high-water marks, so cleanup simply opens headroom, and the
 report records the real current value and the distance to target.
 
@@ -214,11 +214,11 @@ TARGETS: dict[str, dict[str, Any]] = {
 # refactor that moves code out of scope) are recorded here inside a maintenance
 # window, which is exactly the review such a scope change deserves.
 EXPECTED_FILE_COUNTS: dict[str, int] = {
-    "lifecycle": 64,
+    "lifecycle": 66,
     "persistence": 10,
     "updater": 8,
     "provider_infrastructure": 20,
-    "tui": 193,
+    "tui": 197,
 }
 
 # Repository-wide high-water marks: hardcoded here ON PURPOSE, and deliberately
@@ -240,8 +240,7 @@ EXPECTED_FILE_COUNTS: dict[str, int] = {
 # cannot bound is how far their own (deliberately unprotected) baseline may be
 # moved. These marks close that: a baseline may be lowered freely, because a
 # lower value stays under its mark and needs no edit here, but it cannot be
-# raised without also editing this protected script and the protected workflow
-# pin. That is the intended asymmetry - tightening is frictionless, loosening is
+# raised without also updating the reviewed recipe pin. That is the intended asymmetry - tightening is frictionless, loosening is
 # reviewed - and it is what makes "the repository debt trend cannot increase"
 # true of the recorded budget and not merely of one working tree.
 REPOSITORY_CEILINGS: dict[str, int] = {

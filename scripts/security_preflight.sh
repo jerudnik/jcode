@@ -61,15 +61,13 @@ if find scripts -type f -perm -0002 -print -quit | grep -q .; then
 fi
 
 echo "[3/3] Dependency advisories (cargo-audit)"
-if command -v cargo >/dev/null 2>&1; then
-  cargo audit
-elif command -v cargo-audit >/dev/null 2>&1; then
-  cargo-audit
-elif cargo audit --version >/dev/null 2>&1; then
+if command -v cargo-audit >/dev/null 2>&1; then
+  cargo-audit audit
+elif command -v cargo >/dev/null 2>&1 && cargo audit --version >/dev/null 2>&1; then
   cargo audit
 else
   if [[ "$strict" -eq 1 ]]; then
-    die "cargo-audit is not installed (install with: cargo install cargo-audit --locked)"
+    die "cargo-audit is not installed (enter the Nix dev shell or install with: cargo install cargo-audit --locked)"
   fi
   echo "warning: cargo-audit not installed; skipping advisory check"
 fi

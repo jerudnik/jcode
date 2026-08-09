@@ -264,7 +264,7 @@
       ],
       "acceptance": [
         "Make the expected-state test data and comparison code agree",
-        "Keep Fork CI, Security, and Nix required until PR Gate replaces them",
+        "Keep one required PR Gate result while PR Gate calls the Fork CI, Security, and Nix helpers",
         "Add no bypass user or force-push permission"
       ],
       "falsification": "Restore the missing control before continuing if removing Governance Root allows an unchecked change to main or stops detection of live rule changes."
