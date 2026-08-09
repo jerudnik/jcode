@@ -24,12 +24,8 @@ pub struct ReloadRecoveryDirective {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReloadWaitMode {
-    WaitForHandoff {
-        socket_path: PathBuf,
-    },
-    AcknowledgeOnly {
-        message: String,
-    },
+    WaitForHandoff { socket_path: PathBuf },
+    AcknowledgeOnly { message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

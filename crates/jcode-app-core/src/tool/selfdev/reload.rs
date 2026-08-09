@@ -288,8 +288,8 @@ fn prepare_reload_environment(working_dir: Option<&std::path::Path>) -> Result<R
     let repo_dir = resolve_selfdev_reload_repo_dir(working_dir)
         .ok_or_else(|| anyhow::anyhow!("Could not find jcode repository directory"))?;
 
-    let target_binary = build::find_dev_binary(&repo_dir)
-        .unwrap_or_else(|| build::release_binary_path(&repo_dir));
+    let target_binary =
+        build::find_dev_binary(&repo_dir).unwrap_or_else(|| build::release_binary_path(&repo_dir));
     if !target_binary.exists() {
         return Err(anyhow::anyhow!(
             "No binary found at {}.\n\
@@ -302,10 +302,8 @@ fn prepare_reload_environment(working_dir: Option<&std::path::Path>) -> Result<R
     let published = build::publish_local_current_build_for_source(&repo_dir, &source)?;
     build::smoke_test_server_binary(&published.published_path)?;
 
-    let runtime_identity = source.runtime_identity_projection(
-        "selfdev",
-        build::resolve_binary_payload(&target_binary),
-    );
+    let runtime_identity = source
+        .runtime_identity_projection("selfdev", build::resolve_binary_payload(&target_binary));
 
     Ok(ReloadEnvironment {
         repo_dir,
@@ -382,33 +380,30 @@ impl SelfDevTool {
         ));
 
         match execution_mode {
-            ToolExecutionMode::Direct => {
-                match environment.wait_mode {
-                    ReloadWaitMode::WaitForHandoff { ref socket_path } => {
-                        match server::await_reload_handoff(socket_path, timeout).await {
-                            server::ReloadWaitStatus::Ready => Ok(ToolOutput::new(format!(
-                                "Reload completed successfully for build {}. Server reported ready.",
-                                ack.hash
-                            ))),
-                            server::ReloadWaitStatus::Failed(detail) => Err(anyhow::anyhow!(
-                                "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
-                                ack.hash,
-                                socket_path.display(),
-                                detail.unwrap_or_else(|| "unknown reload failure".to_string()),
-                                server::reload_state_summary(std::time::Duration::from_secs(60))
-                            )),
-                            server::ReloadWaitStatus::Idle | server::ReloadWaitStatus::Waiting { .. } => {
-                                Err(anyhow::anyhow!(
-                                    "Reload was acknowledged for build {}, but readiness could not be confirmed within {}s.",
-                                    ack.hash,
-                                    timeout.as_secs()
-                                ))
-                            }
-                        }
+            ToolExecutionMode::Direct => match environment.wait_mode {
+                ReloadWaitMode::WaitForHandoff { ref socket_path } => {
+                    match server::await_reload_handoff(socket_path, timeout).await {
+                        server::ReloadWaitStatus::Ready => Ok(ToolOutput::new(format!(
+                            "Reload completed successfully for build {}. Server reported ready.",
+                            ack.hash
+                        ))),
+                        server::ReloadWaitStatus::Failed(detail) => Err(anyhow::anyhow!(
+                            "Reload was acknowledged for build {}, but the replacement server failed before becoming ready on {}: {}; recent_state={}",
+                            ack.hash,
+                            socket_path.display(),
+                            detail.unwrap_or_else(|| "unknown reload failure".to_string()),
+                            server::reload_state_summary(std::time::Duration::from_secs(60))
+                        )),
+                        server::ReloadWaitStatus::Idle
+                        | server::ReloadWaitStatus::Waiting { .. } => Err(anyhow::anyhow!(
+                            "Reload was acknowledged for build {}, but readiness could not be confirmed within {}s.",
+                            ack.hash,
+                            timeout.as_secs()
+                        )),
                     }
-                    ReloadWaitMode::AcknowledgeOnly { message } => Ok(ToolOutput::new(message)),
                 }
-            }
+                ReloadWaitMode::AcknowledgeOnly { message } => Ok(ToolOutput::new(message)),
+            },
             ToolExecutionMode::AgentTurn => {
                 // In normal agent turns the reload will intentionally terminate this
                 // process shortly after the server acknowledges the request. Return a
