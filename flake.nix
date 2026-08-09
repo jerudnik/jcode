@@ -115,10 +115,13 @@
               ./.github/workflows/docs-impact.yml
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
+              ./.github/workflows/main.yml
               ./.github/workflows/security.yml
               ./.github/workflows/nix.yml
               ./.github/workflows/nix-update.yml
+              ./.github/workflows/pr.yml
               ./.github/workflows/release.yml
+              ./.github/workflows/scheduled.yml
               ./.github/workflows/governance-root.yml
             ];
           };
@@ -318,10 +321,13 @@
                     .github/workflows/docs-impact.yml \
                     .github/workflows/fork-ci.yml \
                     .github/workflows/fork-health.yml \
+                    .github/workflows/main.yml \
                     .github/workflows/security.yml \
                     .github/workflows/nix.yml \
                     .github/workflows/nix-update.yml \
+                    .github/workflows/pr.yml \
                     .github/workflows/release.yml \
+                    .github/workflows/scheduled.yml \
                     .github/workflows/governance-root.yml
                   touch "$out"
                 '';

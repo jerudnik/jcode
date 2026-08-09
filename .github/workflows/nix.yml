@@ -1,27 +1,59 @@
 name: Nix
 
 on:
+  push:
+    tags: ["v*"]
   workflow_call:
     inputs:
       publish:
-        description: Push the built package to Cachix from main.
+        description: Push the built package to Cachix from main or a release tag.
         required: false
         type: boolean
         default: false
+      rollback_ref:
+        description: Previous promoted main-ancestor ref used for release rollback testing.
+        required: false
+        type: string
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the built package to Cachix after validation.
+        required: false
+        type: boolean
+        default: false
+      rollback_ref:
+        description: Previous promoted main-ancestor ref used for release rollback testing.
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  nix:
-    name: Nix checks
+  validate:
+    name: Validate Nix and workflow policy
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
+      - name: Lint fork-owned workflows
+        run: |
+          nix shell nixpkgs#actionlint --command actionlint \
+            .github/workflows/docs-impact.yml \
+            .github/workflows/fork-ci.yml \
+            .github/workflows/fork-health.yml \
+            .github/workflows/main.yml \
+            .github/workflows/security.yml \
+            .github/workflows/nix.yml \
+            .github/workflows/nix-update.yml \
+            .github/workflows/pr.yml \
+            .github/workflows/release.yml \
+            .github/workflows/scheduled.yml \
+            .github/workflows/governance-root.yml
 
       - name: Run package recipe
         run: nix shell nixpkgs#just -c just package
@@ -32,17 +64,57 @@ jobs:
       - name: Enforce Nix distribution policy
         run: nix build .#checks.x86_64-linux.nix-distribution-policy --print-build-logs
 
+  build:
+    name: Build Nix package (${{ matrix.system }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        system: [x86_64-linux]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
       - name: Build package for publication
+        run: |
+          nix build .#packages.${{ matrix.system }}.jcode --print-build-logs --out-link result-${{ matrix.system }}
+          nix build .#packages.${{ matrix.system }}.jcode-deps --print-build-logs --out-link result-deps-${{ matrix.system }}
+
+  publish:
+    name: Require Cachix publication for release tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [validate, build]
+    if: ${{ inputs.publish || github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
+      - name: Build package for Cachix
         run: |
           nix build .#packages.x86_64-linux.jcode --print-build-logs --out-link result
           nix build .#packages.x86_64-linux.jcode-deps --print-build-logs --out-link result-deps
 
       - name: Publish to Cachix
-        if: ${{ inputs.publish }}
-        uses: cachix/cachix-action@v17
+        uses: cachix/cachix-action@1c64e3365467273d5948db68fb5404e3e5a85af1 # v17
         with:
           name: jerudnik-jcode
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           useDaemon: false
           pathsToPush: ./result ./result-deps
           cachixArgs: -j2
+
+  release-metadata:
+    name: Publish metadata-only GitHub release after Nix publication
+    needs: [validate, build]
+    if: ${{ github.event_name == 'push' }}
+    uses: ./.github/workflows/release.yml
+    with:
+      rollback_ref: ${{ inputs.rollback_ref || vars.JCODE_PREVIOUS_RELEASE_REF }}
+    permissions:
+      contents: write
