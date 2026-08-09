@@ -1,6 +1,9 @@
 name: Release metadata
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       release:
