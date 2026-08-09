@@ -11,6 +11,8 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 jobs:
   fork-ci:
@@ -39,3 +41,159 @@ jobs:
     name: Smoke
     uses: ./.github/workflows/freebsd-smoke.yml
     secrets: inherit
+
+  ci-metrics:
+    name: CI metrics summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Collect read-only CI metrics
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p target/scheduled-observability
+          python3 scripts/ci_metrics.py \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow-name "PR Gate" \
+            --summary-file target/scheduled-observability/ci-metrics.md \
+            --artifact-file target/scheduled-observability/ci-metrics.json
+          cat target/scheduled-observability/ci-metrics.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CI metrics artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scheduled-ci-metrics
+          path: |
+            target/scheduled-observability/ci-metrics.md
+            target/scheduled-observability/ci-metrics.json
+          if-no-files-found: error
+          retention-days: 14
+
+  coverage:
+    name: Coverage artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - name: Generate coverage report
+        run: scripts/coverage.sh
+
+      - name: Summarize coverage outputs
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo '## Coverage'
+            echo ''
+            if [ -s target/llvm-cov/lcov.info ]; then
+              echo '- LCOV artifact: target/llvm-cov/lcov.info'
+            else
+              echo '- LCOV artifact was not produced.'
+            fi
+            if [ -s target/nextest/ci/junit.xml ]; then
+              echo '- JUnit artifact: target/nextest/ci/junit.xml'
+            else
+              echo '- JUnit artifact was not produced.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scheduled-coverage
+          path: |
+            target/llvm-cov/lcov.info
+            target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  performance:
+    name: Performance artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - name: Install benchmark Python dependencies
+        run: python3 -m pip install --user pyte psutil
+
+      - name: Capture one-run benchmark artifacts
+        id: benchmarks
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          mkdir -p target/scheduled-observability
+          status=0
+
+          run_benchmark() {
+            local name=$1
+            shift
+            echo "::group::${name}"
+            if "$@"; then
+              echo "${name}: ok"
+            else
+              rc=$?
+              echo "${name}: failed with exit ${rc}" >&2
+              status=1
+            fi
+            echo "::endgroup::"
+          }
+
+          run_benchmark compile bash -c 'scripts/bench_compile.sh check --runs 1 --json > target/scheduled-observability/compile.json'
+          run_benchmark build-jcode scripts/dev_cargo.sh build --profile selfdev -p jcode --bin jcode --quiet
+
+          if [ -x target/selfdev/jcode ]; then
+            run_benchmark startup python3 scripts/bench_startup.py --runs 1 --json-out target/scheduled-observability/startup.json target/selfdev/jcode
+            run_benchmark visible-ready python3 scripts/bench_startup_visible_ready.py --runs 1 --json-out target/scheduled-observability/visible-ready.json target/selfdev/jcode
+            run_benchmark memory python3 scripts/bench_memory_cli.py --sessions 1 --tools jcode_memory_off --json-out target/scheduled-observability/memory.json
+          else
+            echo 'target/selfdev/jcode was not built, so startup, visible-ready, and memory benchmarks were skipped.' >&2
+            status=1
+          fi
+
+          exit "$status"
+
+      - name: Summarize performance outputs
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo '## Performance artifacts'
+            echo ''
+            for artifact in compile startup visible-ready memory; do
+              path="target/scheduled-observability/${artifact}.json"
+              if [ -s "$path" ]; then
+                echo "- ${artifact}: ${path}"
+              else
+                echo "- ${artifact}: not produced"
+              fi
+            done
+            echo ''
+            echo 'The performance job is nonblocking because same-host trends are useful, but cross-runner timing noise is not a stable pull-request gate.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scheduled-performance
+          path: target/scheduled-observability/*.json
+          if-no-files-found: warn
+          retention-days: 14
