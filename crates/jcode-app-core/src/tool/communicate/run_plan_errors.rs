@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum AssignErrorAction {
     /// No more runnable work or no eligible workers: stop assigning this loop
     /// and continue with in-flight work.
@@ -151,11 +152,11 @@ pub(super) const CREDENTIAL_FAILURE_WAVE_WINDOW_SECS: u64 = 60;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CredentialFailureWave {
     /// Failed worker sessions in the wave.
-    session_ids: Vec<String>,
+    pub(super) session_ids: Vec<String>,
     /// Representative failure detail (first observed).
-    sample_detail: String,
+    pub(super) sample_detail: String,
     /// Provider named by the failing workers, when known (e.g. "anthropic").
-    provider: Option<String>,
+    pub(super) provider: Option<String>,
 }
 
 /// Detect a credential-failure wave in a swarm member snapshot.

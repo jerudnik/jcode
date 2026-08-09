@@ -51,6 +51,14 @@ use input::{CommunicateInput, canonical_swarm_action, coerce_double_encoded_fiel
 use run_plan::*;
 use workers::*;
 
+#[cfg(test)]
+use run_plan_errors::{
+    AssignErrorAction, CapRecoveryStep, cap_recovery_step, classify_assign_error,
+    credential_login_fix_hint, detect_credential_failure_wave,
+    format_credential_failure_wave_error, format_run_plan_terminal_summary,
+    plan_terminal_node_count, run_plan_progress_snapshot,
+};
+
 fn fresh_spawn_request_nonce(ctx: &ToolContext) -> String {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

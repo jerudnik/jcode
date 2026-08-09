@@ -42,19 +42,19 @@ pub(super) fn resolve_run_plan_concurrency(
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct RunPlanUtilization {
     /// Highest number of simultaneously in-flight tasks observed.
-    peak_in_flight: usize,
+    pub(super) peak_in_flight: usize,
     /// Coordination loops observed.
-    loops: usize,
+    pub(super) loops: usize,
     /// Loops where open worker slots existed but the plan had nothing ready to
     /// dispatch into them (budget idle due to graph narrowness, not the cap).
-    starved_loops: usize,
+    pub(super) starved_loops: usize,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct RunPlanChurnGuard {
     consecutive_assignment_waves_without_completion: usize,
     churned_nodes: std::collections::BTreeSet<String>,
-    lost_workers: std::collections::BTreeSet<String>,
+    pub(super) lost_workers: std::collections::BTreeSet<String>,
 }
 
 impl RunPlanChurnGuard {
@@ -181,7 +181,7 @@ pub(super) fn task_id_from_output_path(path: &std::path::Path) -> Option<&str> {
 /// progress card and `bg status` stays meaningful. In inline (blocking) mode
 /// every method is a no-op.
 pub(super) struct RunPlanReporter {
-    task_id: Option<String>,
+    pub(super) task_id: Option<String>,
     output_path: Option<std::path::PathBuf>,
 }
 
@@ -206,7 +206,7 @@ impl RunPlanReporter {
         self.task_id.is_some()
     }
 
-    async fn log(&self, line: &str) {
+    pub(super) async fn log(&self, line: &str) {
         let Some(path) = &self.output_path else {
             return;
         };
@@ -221,7 +221,7 @@ impl RunPlanReporter {
         }
     }
 
-    async fn progress(&self, terminal: usize, total: usize, message: String) {
+    pub(super) async fn progress(&self, terminal: usize, total: usize, message: String) {
         let Some(task_id) = &self.task_id else {
             return;
         };
@@ -271,7 +271,7 @@ impl RunPlanReporter {
     /// trails it. Background completion previews take the first ~500 chars of
     /// the output file, so the terminal summary must come first for the
     /// agent's wake notification to be useful.
-    async fn finalize(&self, summary: &str) {
+    pub(super) async fn finalize(&self, summary: &str) {
         let Some(path) = &self.output_path else {
             return;
         };
