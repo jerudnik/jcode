@@ -17,5 +17,8 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Run release-check recipe
         run: nix shell nixpkgs#just -c just release-check

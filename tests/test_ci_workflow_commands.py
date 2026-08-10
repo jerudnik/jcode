@@ -57,7 +57,7 @@ class JustfileRecipeTests(unittest.TestCase):
     def test_package_recipe_uses_cargo_package(self) -> None:
         script = cwc.recipe_script("package")
         self.assertIn(
-            "scripts/cargo_exec.sh package --locked -p jcode --allow-dirty --no-verify",
+            "scripts/cargo_exec.sh package --locked -p jcode --allow-dirty --no-verify --list",
             script,
         )
 

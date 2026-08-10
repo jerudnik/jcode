@@ -15,6 +15,8 @@ test:
 # JCODE_CI_TARGET so the same recipe can emulate the macOS and Linux cargo
 # command lists without reading workflow YAML.
 full-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
     target="${JCODE_CI_TARGET:-$( (rustc -vV 2>/dev/null || true) | sed -n 's/^host: //p' )}"
     scripts/cargo_exec.sh build --locked --release --target "$target"
     "./target/$target/release/jcode" --version
@@ -26,12 +28,17 @@ full-test:
     scripts/cargo_exec.sh test --locked --target "$target" --test provider_matrix
     JCODE_E2E_REQUIRE_BINARY=1 JCODE_E2E_BINARY="$PWD/target/$target/release/jcode" scripts/cargo_exec.sh test --locked --target "$target" --test e2e
 
-# Package sanity check for the root crate.
+# Package sanity check for the root crate. --list verifies the manifest and
+# computes the file list without publishing; a full `cargo package` cannot
+# work here because the workspace path dependencies are never published to
+# crates.io.
 package:
-    scripts/cargo_exec.sh package --locked -p jcode --allow-dirty --no-verify
+    scripts/cargo_exec.sh package --locked -p jcode --allow-dirty --no-verify --list
 
 # Release build + launch smoke.
 release-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
     target="${JCODE_CI_TARGET:-$( (rustc -vV 2>/dev/null || true) | sed -n 's/^host: //p' )}"
     scripts/cargo_exec.sh build --locked --release --target "$target" --bin jcode
     "./target/$target/release/jcode" --version
