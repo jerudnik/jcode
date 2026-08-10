@@ -286,7 +286,7 @@ class RulesetMutationTests(ComparatorCase):
 
 class RequiredContextTests(ComparatorCase):
     def test_each_required_context_removal_is_detected(self) -> None:
-        for context in ("Fork CI Gate", "Security Gate", "Nix Gate"):
+        for context in ("Governance Root", "PR Gate"):
             with self.subTest(context=context):
                 snapshot = load_fixture()
                 params = rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"]
@@ -307,7 +307,7 @@ class RequiredContextTests(ComparatorCase):
         for entry in rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"][
             "required_status_checks"
         ]:
-            if entry["context"] == "Nix Gate":
+            if entry["context"] == "PR Gate":
                 entry["integration_id"] = None
         self.assert_rejected(snapshot, "spoofable")
 
@@ -316,7 +316,7 @@ class RequiredContextTests(ComparatorCase):
         for entry in rule(snapshot, "protect-fork-rails", "required_status_checks")["parameters"][
             "required_status_checks"
         ]:
-            if entry["context"] == "Fork CI Gate":
+            if entry["context"] == "Governance Root":
                 entry["integration_id"] = 99999
         self.assert_rejected(snapshot, "integration_id")
 
@@ -385,7 +385,7 @@ class RepositoryTests(ComparatorCase):
 
 class WorkflowContractTests(ComparatorCase):
     def test_duplicate_context_definition(self) -> None:
-        # Two jobs named "Nix Gate" in different workflows: branch protection
+        # Two jobs named "PR Gate" in different workflows: branch protection
         # matches by name, so the wrong one could satisfy the requirement, and
         # integration_id cannot separate them because both are the same app.
         snapshot = load_fixture()
@@ -396,7 +396,7 @@ class WorkflowContractTests(ComparatorCase):
             "    branches: [main]\n"
             "jobs:\n"
             "  decoy:\n"
-            "    name: Nix Gate\n"
+            "    name: PR Gate\n"
             "    runs-on: ubuntu-latest\n"
             "    steps:\n"
             "      - run: echo ok\n"
@@ -405,23 +405,22 @@ class WorkflowContractTests(ComparatorCase):
 
     def test_summary_dependency_removed(self) -> None:
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/fork-ci.yml"] = snapshot["workflows"][
-            ".github/workflows/fork-ci.yml"
-        ].replace(
-            "needs: [changes, governance-contract, quality, macos, linux-tests]",
-            "needs: [changes, governance-contract, quality, macos]",
+        workflow = snapshot["workflows"][".github/workflows/pr.yml"]
+        original = "needs: [classify, checks]"
+        # A no-op replace would make this test vacuous, so pin the anchor.
+        self.assertIn(original, workflow, "pr-gate needs: line moved; update this fixture mutation")
+        snapshot["workflows"][".github/workflows/pr.yml"] = workflow.replace(
+            original, "needs: [classify]"
         )
         self.assert_rejected(snapshot, "summary dependencies")
 
     def test_summary_dependency_added(self) -> None:
         snapshot = load_fixture()
-        workflow = snapshot["workflows"][".github/workflows/security.yml"]
-        original = "needs: [detect-dependency-changes, advisory-policy, secret-scan, dependency-audit]"
-        # A no-op replace would make this test vacuous, so pin the anchor.
-        self.assertIn(original, workflow, "security-gate needs: line moved; update this fixture mutation")
-        snapshot["workflows"][".github/workflows/security.yml"] = workflow.replace(
-            original,
-            original[:-1] + ", weekly-report]",
+        workflow = snapshot["workflows"][".github/workflows/pr.yml"]
+        original = "needs: [classify, checks]"
+        self.assertIn(original, workflow, "pr-gate needs: line moved; update this fixture mutation")
+        snapshot["workflows"][".github/workflows/pr.yml"] = workflow.replace(
+            original, "needs: [classify, checks, decoy]"
         )
         self.assert_rejected(snapshot, "summary dependencies")
 
@@ -430,28 +429,28 @@ class WorkflowContractTests(ComparatorCase):
         # waits for the dependency, but the gate script never reads its result,
         # making the gate green regardless of that job's conclusion.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/nix.yml"] = snapshot["workflows"][
-            ".github/workflows/nix.yml"
-        ].replace("${{ needs.build.result }}", "success")
-        self.assert_rejected(snapshot, "never reads", "needs.build.result")
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
+        ].replace("${{ needs.checks.result }}", "success")
+        self.assert_rejected(snapshot, "never reads", "needs.checks.result")
 
     def test_routing_drift_on_a_conditional_job(self) -> None:
+        # The manifest no longer routes any conditional job, so the planted
+        # failure is a manifest that routes a job the workflow does not define.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/fork-ci.yml"] = snapshot["workflows"][
-            ".github/workflows/fork-ci.yml"
-        ].replace(
-            "if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.scripts == 'true' || github.event_name != 'pull_request'",
-            "if: needs.changes.outputs.rust == 'true' || github.event_name != 'pull_request'",
-        )
-        self.assert_rejected(snapshot, "routed job 'quality'")
+        manifest = load_manifest()
+        for contract in manifest["workflow_contracts"]:
+            if contract["context"] == "PR Gate":
+                contract["routing"] = {"docs": "docs_only"}
+        self.assert_rejected(snapshot, "routes 'docs'", manifest=manifest)
 
     def test_workflow_level_pull_request_paths_filter(self) -> None:
         # The lockout case: a required context whose workflow is path-filtered
         # never runs on an unrelated PR, so that PR can never satisfy the
         # requirement and the branch becomes permanently unmergeable.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/nix.yml"] = snapshot["workflows"][
-            ".github/workflows/nix.yml"
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
         ].replace(
             "  pull_request:\n    branches: [main]\n",
             '  pull_request:\n    branches: [main]\n    paths:\n      - "flake.nix"\n',
@@ -468,21 +467,21 @@ class WorkflowContractTests(ComparatorCase):
 
     def test_required_context_job_renamed(self) -> None:
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/security.yml"] = snapshot["workflows"][
-            ".github/workflows/security.yml"
-        ].replace("    name: Security Gate", "    name: Security Summary")
-        self.assert_rejected(snapshot, "'Security Gate' has no job definition")
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
+        ].replace("    name: PR Gate", "    name: PR Summary")
+        self.assert_rejected(snapshot, "'PR Gate' has no job definition")
 
     def test_always_if_weakened(self) -> None:
         # `if: always()` is what makes the summary run when a dependency was
         # skipped. Without it the summary is skipped too, and a skipped required
         # context blocks forever rather than failing informatively.
         snapshot = load_fixture()
-        snapshot["workflows"][".github/workflows/fork-ci.yml"] = snapshot["workflows"][
-            ".github/workflows/fork-ci.yml"
+        snapshot["workflows"][".github/workflows/pr.yml"] = snapshot["workflows"][
+            ".github/workflows/pr.yml"
         ].replace(
-            "    if: always() && github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    env:\n      CHANGES_RESULT:",
-            "    if: github.event_name == 'pull_request'\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    env:\n      CHANGES_RESULT:",
+            "    if: always()\n",
+            "    if: github.event_name == 'pull_request'\n",
         )
         self.assert_rejected(snapshot, "`if:` is")
 

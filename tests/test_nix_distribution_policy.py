@@ -201,8 +201,11 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("metadata-only GitHub release", workflow)
         self.assertIn("must not contain binary assets", workflow)
-        self.assertIn("workflow_call", workflow)
-        self.assertNotIn("tags:", workflow)
+        # release.yml owns its own v* tag trigger. Chaining it from nix.yml
+        # via workflow_call forced a contents:write grant into the PR Gate call
+        # tree, which GitHub rejects at workflow load (startup_failure on every
+        # pull request). The two tag-triggered workflows run independently.
+        self.assertIn("tags:", workflow)
         for banned in (
             "actions/upload-artifact",
             "actions/download-artifact",
@@ -250,7 +253,9 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
         self.assertIn("Require Cachix publication for release tags", nix_workflow)
         self.assertIn("nix build .#packages.${{ matrix.system }}.jcode", nix_workflow)
         self.assertIn("needs: [validate, build]", nix_workflow)
-        self.assertIn("uses: ./.github/workflows/release.yml", nix_workflow)
+        # nix.yml must not call release.yml: that chain is what injected a
+        # contents:write requirement into the PR Gate call tree.
+        self.assertNotIn("uses: ./.github/workflows/release.yml", nix_workflow)
         self.assertNotIn("ios.yml", nix_workflow)
         self.assertIn("retiredPathViolations", flake)
         self.assertIn("builtins.pathExists ./ios", flake)

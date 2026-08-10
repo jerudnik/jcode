@@ -42,10 +42,27 @@ jobs:
 
           printf 'docs_only=%s\n' "$docs_only" >> "$GITHUB_OUTPUT"
 
-  pr-gate:
-    name: PR Gate
+  checks:
+    name: Checks
     needs: classify
     uses: ./.github/workflows/ci.yml
     secrets: inherit
     with:
       docs_only: ${{ needs.classify.outputs.docs_only == 'true' }}
+
+  pr-gate:
+    name: PR Gate
+    needs: [classify, checks]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLASSIFY_RESULT: ${{ needs.classify.result }}
+      CHECKS_RESULT: ${{ needs.checks.result }}
+    steps:
+      - name: Require the classifier and every routed check
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ "$CLASSIFY_RESULT" = success ] || { echo "::error::pull request classifier concluded '$CLASSIFY_RESULT'"; exit 1; }
+          [ "$CHECKS_RESULT" = success ] || { echo "::error::routed checks concluded '$CHECKS_RESULT'"; exit 1; }

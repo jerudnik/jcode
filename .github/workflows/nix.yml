@@ -109,12 +109,3 @@ jobs:
           pathsToPush: ./result ./result-deps
           cachixArgs: -j2
 
-  release-metadata:
-    name: Publish metadata-only GitHub release after Nix publication
-    needs: [validate, build]
-    if: ${{ github.event_name == 'push' }}
-    uses: ./.github/workflows/release.yml
-    with:
-      rollback_ref: ${{ inputs.rollback_ref || vars.JCODE_PREVIOUS_RELEASE_REF }}
-    permissions:
-      contents: write

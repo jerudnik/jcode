@@ -26,40 +26,10 @@
       "context": "PR Gate",
       "file": ".github/workflows/pr.yml",
       "job_id": "pr-gate",
-      "if": null,
+      "if": "always()",
       "needs": [
+        "checks",
         "classify"
-      ],
-      "routing": {
-        "docs_only": "docs/*, *.md, README.md, CONTRIBUTING.md, RELEASING.md"
-      },
-      "pull_request_paths_filter": "forbidden"
-    },
-    {
-      "context": "Security Gate",
-      "file": ".github/workflows/security.yml",
-      "job_id": "security-gate",
-      "if": "always() && github.event_name == 'pull_request'",
-      "needs": [
-        "detect-dependency-changes",
-        "advisory-policy",
-        "secret-scan",
-        "dependency-audit"
-      ],
-      "routing": {
-        "dependency-audit": "deps"
-      },
-      "pull_request_paths_filter": "forbidden"
-    },
-    {
-      "context": "Nix Gate",
-      "file": ".github/workflows/nix.yml",
-      "job_id": "nix-gate",
-      "if": "always() && github.event_name == 'pull_request'",
-      "needs": [
-        "validate",
-        "matrix",
-        "build"
       ],
       "routing": {},
       "pull_request_paths_filter": "forbidden"
@@ -140,15 +110,7 @@
                 "integration_id": 15368
               },
               {
-                "context": "Fork CI Gate",
-                "integration_id": 15368
-              },
-              {
-                "context": "Security Gate",
-                "integration_id": 15368
-              },
-              {
-                "context": "Nix Gate",
+                "context": "PR Gate",
                 "integration_id": 15368
               }
             ],
