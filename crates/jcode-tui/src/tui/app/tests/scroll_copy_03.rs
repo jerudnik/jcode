@@ -210,7 +210,9 @@ fn test_scroll_top_does_not_snap_to_bottom() {
 #[test]
 fn test_scroll_content_shifts() {
     let _render_lock = scroll_render_test_lock();
-    let (mut app, mut terminal) = create_scroll_test_app(80, 25, 1, 12);
+    // Enough padding that the content overflows the 25-row viewport even
+    // when the mermaid diagram collapses to a one-line placeholder.
+    let (mut app, mut terminal) = create_scroll_test_app(80, 25, 1, 24);
 
     // Render at bottom
     app.scroll_offset = 0;
