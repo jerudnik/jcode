@@ -2,33 +2,32 @@
 
 Last audited: 2026-07-27
 
-## Active authority
+## Retired reference
 
-The active engineering authority is the
-[`ideal-base/`](ideal-base/) control plane. It carries the accepted starting
-boundary forward from completed normalization and defines the graph-first path to
-an honest ideal durable TUI/CLI foundation.
+The `ideal-base/` subtree has been retired. This index remains only as a surviving
+fork reference and no longer names `ideal-base/README.md` or any `ideal-base/`
+file as active authority.
 
-Start here:
+If you need historical context, use the archived material under this directory and
+the boundary notes in [`archive/README.md`](archive/README.md). Do not treat the
+retired `ideal-base/` documents as a live starting point.
 
-- [`ideal-base/README.md`](ideal-base/README.md): authority order, archive boundary,
-  and operating entrypoint.
+Do not restore deleted rebuildable fixtures or retired execution scripts into
+`ideal-base/` to satisfy an old command. Active checks regenerate temporary
+fixtures outside the archive when they need fixture-mode input.
+
+Historical artifacts that remain relevant for provenance or audit trail are:
+
 - [`ideal-base/COORDINATOR_BOOTSTRAP.md`](ideal-base/COORDINATOR_BOOTSTRAP.md):
-  copy-paste prompt for a completely fresh coordinator session.
-- [`ideal-base/WORK_GRAPH.json`](ideal-base/WORK_GRAPH.json): machine-readable deep
-  graph with dependencies, ownership, gates, and evidence contracts.
-- [`ideal-base/STATE.json`](ideal-base/STATE.json): durable cross-session node
-  disposition.
-- [`ideal-base/ACCEPTANCE_STANDARD.md`](ideal-base/ACCEPTANCE_STANDARD.md): binary
-  exit gates and honest claim labels.
-- [`ideal-base/AUDIT_COVERAGE.md`](ideal-base/AUDIT_COVERAGE.md): all 25 audited
-  work items mapped to executable implementation and verification nodes.
-
-The accepted starting label is **core-runtime validated**. The current immutable
-runtime remains `8962bccb3-release`, selected by `current`, `stable`, and
-`shared-server` when the railway was created. Recovery refs, four stashes,
-rollback bundles, sealed evidence, and private archives remain preserved. Recheck
-all live facts with `scripts/ideal_base_railway.py` before mutation.
+  preserved bootstrap prompt for historical sessions.
+- [`ideal-base/WORK_GRAPH.json`](ideal-base/WORK_GRAPH.json): preserved graph
+  snapshot with dependencies, ownership, gates, and evidence contracts.
+- [`ideal-base/STATE.json`](ideal-base/STATE.json): preserved cross-session node
+  disposition snapshot.
+- [`ideal-base/ACCEPTANCE_STANDARD.md`](ideal-base/ACCEPTANCE_STANDARD.md):
+  preserved binary exit gates and claim labels.
+- [`ideal-base/AUDIT_COVERAGE.md`](ideal-base/AUDIT_COVERAGE.md): preserved audit
+  coverage map for the retired subtree.
 
 ## Hard-fork policy
 
@@ -46,9 +45,9 @@ evidence, hash citations, review history, and seam ledgers. See
 [`archive/README.md`](archive/README.md) for the boundary.
 
 Do not refresh their old counts, pending states, or dated labels in place. Critical
-starting facts and acceptance policy have been carried into `ideal-base/`.
-Historical files remain valid evidence for their recorded moment, not active task
-authority.
+starting facts and acceptance policy were recorded in `ideal-base/` before that
+subtree was retired. Historical files remain valid evidence for their recorded
+moment, not active task authority.
 
 The retained
 [`recovery/ORCHESTRATOR_PROMPT.md`](recovery/ORCHESTRATOR_PROMPT.md) is a protected

@@ -46,7 +46,7 @@ async fn textedit_quit() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_observe() {
     ok(json!({"action":"check_permissions"})).await;
     ok(json!({"action":"setup"})).await; // already granted -> reports ready quickly
@@ -62,7 +62,7 @@ async fn coverage_observe() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_input() {
     ok(json!({"action":"move","x":300,"y":300})).await;
     ok(json!({"action":"click","x":300,"y":300})).await;
@@ -77,7 +77,7 @@ async fn coverage_input() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_keyboard_into_textedit() {
     textedit_new().await;
     // type goes to focused app (TextEdit just activated)
@@ -88,7 +88,7 @@ async fn coverage_keyboard_into_textedit() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_ax() {
     textedit_new().await;
     ok(json!({"action":"ui","app":"TextEdit","depth":3})).await;
@@ -107,7 +107,7 @@ async fn coverage_ax() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_select_menu() {
     textedit_new().await;
     // Format menu exists in TextEdit; "Make Plain Text" or "Wrap to Page" toggles.
@@ -122,7 +122,7 @@ async fn coverage_select_menu() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_windows_apps() {
     textedit_new().await;
     ok(json!({"action":"list_apps"})).await;
@@ -145,7 +145,7 @@ async fn coverage_windows_apps() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_clipboard_scripting_system() {
     ok(json!({"action":"set_clipboard","text":"cov-clip"})).await;
     let c = ok(json!({"action":"get_clipboard"})).await;
@@ -166,7 +166,7 @@ async fn coverage_clipboard_scripting_system() {
 }
 
 #[tokio::test]
-#[ignore = "live"]
+#[ignore = "live macOS UI state | runbook: desktop-permission"]
 async fn coverage_destructive_quit_close() {
     textedit_new().await;
     ok(json!({"action":"close_window","app":"TextEdit"})).await;

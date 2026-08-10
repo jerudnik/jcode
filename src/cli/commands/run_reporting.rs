@@ -2,6 +2,12 @@ use anyhow::Result;
 use serde::Serialize;
 use std::io::Write;
 
+use super::{
+    RunAutoPokeFollowUp, build_run_auto_poke_follow_up_from_todos, run_command_auto_poke_enabled,
+    run_command_auto_poke_limit_reached, run_command_auto_poke_max_turns, run_todos,
+};
+
+#[derive(Debug, Serialize)]
 pub(super) struct RunCommandReport {
     pub(super) session_id: String,
     pub(super) provider: String,

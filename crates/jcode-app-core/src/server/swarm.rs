@@ -17,16 +17,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast as tokio_broadcast};
 
 mod broadcast;
 mod lifecycle;
 #[cfg(test)]
 mod tests;
 
-pub(super) use broadcast::*;
-pub(super) use lifecycle::*;
-pub(super) async fn remove_session_from_swarm(
+pub(in crate::server) use broadcast::*;
+pub(in crate::server) use lifecycle::*;
+pub(in crate::server) async fn remove_session_from_swarm(
     session_id: &str,
     swarm_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -249,7 +249,7 @@ pub(super) async fn remove_session_from_swarm(
 /// assignment. Unlike `detail` (transient status text), the label survives
 /// status churn so UIs can always answer "what was this agent for?". A later
 /// assignment overwrites the label: the member is now doing that task.
-pub(super) async fn set_member_task_label(
+pub(in crate::server) async fn set_member_task_label(
     session_id: &str,
     task_text: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -267,7 +267,7 @@ pub(super) async fn set_member_task_label(
 /// blank/garbage type is a no-op, so callers can pass the raw spawn arg. This
 /// is the observability half of the type feature; the behavioral nudge is
 /// applied separately to the worker's first message at spawn.
-pub(super) async fn set_member_subagent_type(
+pub(in crate::server) async fn set_member_subagent_type(
     session_id: &str,
     subagent_type: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -281,10 +281,10 @@ pub(super) async fn set_member_subagent_type(
     }
 }
 
-pub(super) async fn record_swarm_event(
+pub(in crate::server) async fn record_swarm_event(
     event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     event_counter: &Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    swarm_event_tx: &tokio_broadcast::Sender<SwarmEvent>,
     session_id: String,
     session_name: Option<String>,
     swarm_id: Option<String>,
@@ -307,13 +307,13 @@ pub(super) async fn record_swarm_event(
     }
 }
 
-pub(super) async fn record_swarm_event_for_session(
+pub(in crate::server) async fn record_swarm_event_for_session(
     session_id: &str,
     event: SwarmEventType,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     event_history: &Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>,
     event_counter: &Arc<std::sync::atomic::AtomicU64>,
-    swarm_event_tx: &broadcast::Sender<SwarmEvent>,
+    swarm_event_tx: &tokio_broadcast::Sender<SwarmEvent>,
 ) {
     let (session_name, swarm_id) = {
         let members = swarm_members.read().await;
@@ -340,7 +340,9 @@ pub(super) async fn record_swarm_event_for_session(
 /// (`stopped`/`cancelled`); everything else is `failed` with a truncated
 /// detail. Both turn-completion consumers must use this helper so the final
 /// label cannot depend on which consumer writes last.
-pub(super) fn terminal_status_for_turn_error(error: &anyhow::Error) -> (&'static str, String) {
+pub(in crate::server) fn terminal_status_for_turn_error(
+    error: &anyhow::Error,
+) -> (&'static str, String) {
     if crate::agent::Agent::error_is_turn_interruption(error) {
         ("stopped", "cancelled".to_string())
     } else {
@@ -352,7 +354,7 @@ pub(super) fn terminal_status_for_turn_error(error: &anyhow::Error) -> (&'static
     clippy::too_many_arguments,
     reason = "member status updates need swarm membership, broadcast state, and optional event history sinks"
 )]
-pub(super) async fn update_member_status(
+pub(in crate::server) async fn update_member_status(
     session_id: &str,
     status: &str,
     detail: Option<String>,
@@ -360,7 +362,7 @@ pub(super) async fn update_member_status(
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     event_history: Option<&Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>>,
     event_counter: Option<&Arc<std::sync::atomic::AtomicU64>>,
-    swarm_event_tx: Option<&broadcast::Sender<SwarmEvent>>,
+    swarm_event_tx: Option<&tokio_broadcast::Sender<SwarmEvent>>,
 ) {
     update_member_status_with_report(
         session_id,
@@ -380,7 +382,7 @@ pub(super) async fn update_member_status(
     clippy::too_many_arguments,
     reason = "member status updates need swarm membership, broadcast state, optional report text, and event history sinks"
 )]
-pub(super) async fn update_member_status_with_report(
+pub(in crate::server) async fn update_member_status_with_report(
     session_id: &str,
     status: &str,
     detail: Option<String>,
@@ -389,7 +391,7 @@ pub(super) async fn update_member_status_with_report(
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     event_history: Option<&Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>>,
     event_counter: Option<&Arc<std::sync::atomic::AtomicU64>>,
-    swarm_event_tx: Option<&broadcast::Sender<SwarmEvent>>,
+    swarm_event_tx: Option<&tokio_broadcast::Sender<SwarmEvent>>,
 ) {
     update_member_status_with_report_tldr(
         session_id,
@@ -410,7 +412,7 @@ pub(super) async fn update_member_status_with_report(
     clippy::too_many_arguments,
     reason = "member status updates need swarm membership, broadcast state, optional report text, and event history sinks"
 )]
-pub(super) async fn update_member_status_with_report_tldr(
+pub(in crate::server) async fn update_member_status_with_report_tldr(
     session_id: &str,
     status: &str,
     detail: Option<String>,
@@ -420,7 +422,7 @@ pub(super) async fn update_member_status_with_report_tldr(
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     event_history: Option<&Arc<RwLock<std::collections::VecDeque<SwarmEvent>>>>,
     event_counter: Option<&Arc<std::sync::atomic::AtomicU64>>,
-    swarm_event_tx: Option<&broadcast::Sender<SwarmEvent>>,
+    swarm_event_tx: Option<&tokio_broadcast::Sender<SwarmEvent>>,
 ) {
     let completion_report = normalize_completion_report(completion_report);
     let detail_present = detail.is_some();
@@ -588,7 +590,7 @@ pub(super) async fn update_member_status_with_report_tldr(
     }
 }
 
-pub(super) async fn run_swarm_task(
+pub(in crate::server) async fn run_swarm_task(
     agent: Arc<Mutex<Agent>>,
     description: &str,
     subagent_type: &str,
@@ -665,7 +667,10 @@ pub(super) async fn run_swarm_task(
     }
 }
 
-pub(super) async fn run_swarm_message(agent: Arc<Mutex<Agent>>, message: &str) -> Result<String> {
+pub(in crate::server) async fn run_swarm_message(
+    agent: Arc<Mutex<Agent>>,
+    message: &str,
+) -> Result<String> {
     let started = Instant::now();
     log_swarm_lifecycle(
         "message_start",

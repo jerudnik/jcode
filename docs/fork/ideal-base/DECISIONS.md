@@ -10,8 +10,9 @@ existing paths as frozen historical namespaces.
 
 **Reason:** the trees contain 600-plus evidence, review, and seam files with
 relative links, checksum manifests, and hash-cited records. Moving them creates
-integrity risk without improving execution. The active authority moves to
-`docs/fork/ideal-base/`.
+integrity risk without improving execution. Current source, tests,
+reproducible commands, Git state, and runtime evidence remain outside this
+retired tree; `docs/fork/ideal-base/` stays as retired historical record.
 
 **Reopen trigger:** an explicitly authorized archive migration with a complete
 link, checksum, and citation rewrite plan.

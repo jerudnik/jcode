@@ -39,7 +39,8 @@
 # ruleset bypass actors (see .github/workflows/fork-health.yml).
 #
 # Usage:
-#   scripts/fork-health.sh --fixture docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json
+#   python3 scripts/generate_governance_fixture.py --output target/fork-health/governance-valid.json
+#   scripts/fork-health.sh --fixture target/fork-health/governance-valid.json
 #   scripts/fork-health.sh --live [--repo jerudnik/jcode] [--fork-remote github]
 set -euo pipefail
 

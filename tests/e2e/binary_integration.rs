@@ -190,7 +190,7 @@ fn require_e2e_binary(test_name: &str) -> Option<std::path::PathBuf> {
 
 /// Test that the jcode binary can run independent with Claude provider
 #[tokio::test]
-#[ignore] // Requires Claude credentials
+#[ignore = "requires Claude credentials | runbook: credential-smoke"]
 async fn binary_integration_independent_claude() -> Result<()> {
     use std::process::Command;
     let _env = setup_test_env()?;
@@ -222,7 +222,7 @@ async fn binary_integration_independent_claude() -> Result<()> {
 
 /// Test that the jcode binary can run with OpenAI provider
 #[tokio::test]
-#[ignore] // Requires OpenAI/Codex credentials
+#[ignore = "requires OpenAI/Codex credentials | runbook: credential-smoke"]
 async fn binary_integration_openai_provider() -> Result<()> {
     use std::process::Command;
     let _env = setup_test_env()?;
@@ -293,9 +293,7 @@ async fn binary_integration_reload_handoff() -> Result<()> {
         return Ok(());
     };
 
-    let temp_root = tempfile::Builder::new()
-        .prefix("jcode-reload-e2e-")
-        .tempdir()?;
+    let temp_root = jcode::storage::RuntimePaths::test_root("jcode-reload-e2e-");
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");
@@ -467,9 +465,7 @@ async fn binary_integration_selfdev_reload_reconnects_quickly() -> Result<()> {
         return Ok(());
     };
 
-    let temp_root = tempfile::Builder::new()
-        .prefix("jcode-selfdev-reload-e2e-")
-        .tempdir()?;
+    let temp_root = jcode::storage::RuntimePaths::test_root("jcode-selfdev-reload-e2e-");
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");
@@ -589,9 +585,7 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
         return Ok(());
     };
 
-    let temp_root = tempfile::Builder::new()
-        .prefix("jcode-selfdev-client-reload-e2e-")
-        .tempdir()?;
+    let temp_root = jcode::storage::RuntimePaths::test_root("jcode-selfdev-client-reload-e2e-");
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");
@@ -761,7 +755,7 @@ async fn binary_integration_selfdev_client_reload_resumes_session() -> Result<()
 /// release candidate while the shared server also restarts.
 #[cfg(unix)]
 #[tokio::test]
-#[ignore]
+#[ignore = "needs both starter and release binaries | runbook: explicit-process-lifecycle"]
 async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Result<()> {
     let _env = setup_test_env()?;
 
@@ -774,9 +768,7 @@ async fn binary_integration_selfdev_full_reload_resumes_session_quickly() -> Res
         );
     }
 
-    let temp_root = tempfile::Builder::new()
-        .prefix("jcode-selfdev-full-reload-e2e-")
-        .tempdir()?;
+    let temp_root = jcode::storage::RuntimePaths::test_root("jcode-selfdev-full-reload-e2e-");
     let runtime_dir = temp_root.path().join("runtime");
     let home_dir = temp_root.path().join("home");
     let install_dir = temp_root.path().join("install");

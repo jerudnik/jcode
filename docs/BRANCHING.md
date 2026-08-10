@@ -122,7 +122,8 @@ window procedure for retired ideal-base rails.
 ## Audits
 
 ```sh
-scripts/fork-health.sh --fixture docs/fork/ideal-base/evidence/R07/fixtures/governance-valid.json   # offline
+python3 scripts/generate_governance_fixture.py --output target/fork-health/governance-valid.json
+scripts/fork-health.sh --fixture target/fork-health/governance-valid.json   # offline
 scripts/fork-health.sh --live                                                                      # compares live GitHub state
 ```
 

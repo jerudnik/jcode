@@ -203,7 +203,7 @@ fn member_with_parent(session_id: &str, parent: Option<&str>) -> SwarmMember {
     member
 }
 
-include!("swarm_tests/dead_pid.rs");
+include!("../swarm_tests/dead_pid.rs");
 
 #[test]
 fn swarm_depth_and_ancestry_follow_report_back_chain() {

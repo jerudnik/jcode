@@ -5,7 +5,7 @@ pub(super) fn paste_from_clipboard(app: &mut App) {
     spawn_clipboard_paste(app, ClipboardPasteKind::Smart);
 }
 
-fn is_clipboard_paste_shortcut(code: KeyCode, modifiers: KeyModifiers) -> bool {
+pub(super) fn is_clipboard_paste_shortcut(code: KeyCode, modifiers: KeyModifiers) -> bool {
     matches!(code, KeyCode::Char('v' | 'V'))
         && modifiers.intersects(
             KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::META,
@@ -110,7 +110,7 @@ fn image_content(media_type: String, base64_data: String) -> ClipboardPasteConte
 }
 
 fn download_image_url_content(url: &str) -> Option<ClipboardPasteContent> {
-    super::download_image_url(url)
+    crate::tui::app::helpers::download_image_url(url)
         .map(|(media_type, base64_data)| image_content(media_type, base64_data))
 }
 
@@ -118,7 +118,7 @@ fn read_clipboard_for_paste(kind: &ClipboardPasteKind) -> ClipboardPasteContent 
     read_clipboard_for_paste_with(
         kind,
         read_clipboard_text,
-        super::clipboard_image,
+        crate::tui::app::helpers::clipboard_image,
         download_image_url_content,
     )
 }
@@ -141,7 +141,7 @@ where
             // expose an empty text target, which previously short-circuited the
             // image path and produced a silent "0 char" paste.
             if let Some(text) = read_text().filter(|t| !t.trim().is_empty()) {
-                if let Some(url) = super::extract_image_url(&text)
+                if let Some(url) = crate::tui::app::helpers::extract_image_url(&text)
                     && let Some(content) = download_image_url(&url)
                 {
                     return content;
@@ -158,7 +158,7 @@ where
                 return image_content(media_type, base64_data);
             }
             if let Some(text) = read_text() {
-                if let Some(url) = super::extract_image_url(&text) {
+                if let Some(url) = crate::tui::app::helpers::extract_image_url(&text) {
                     return download_image_url(&url).unwrap_or_else(|| {
                         ClipboardPasteContent::Error("Failed to download image".to_string())
                     });
@@ -168,7 +168,10 @@ where
             ClipboardPasteContent::Empty
         }
         ClipboardPasteKind::ImageUrl { fallback_text } => {
-            let Some(url) = fallback_text.as_deref().and_then(super::extract_image_url) else {
+            let Some(url) = fallback_text
+                .as_deref()
+                .and_then(crate::tui::app::helpers::extract_image_url)
+            else {
                 return ClipboardPasteContent::Empty;
             };
             download_image_url(&url).unwrap_or_else(|| {
@@ -390,11 +393,12 @@ mod tests {
     }
 }
 
-pub(super) fn cut_input_line_to_clipboard(app: &mut App) -> bool {
-    cut_input_line_to_clipboard_with(app, super::copy_to_clipboard)
+pub(in crate::tui::app) fn cut_input_line_to_clipboard(app: &mut App) -> bool {
+    cut_input_line_to_clipboard_with(app, crate::tui::app::helpers::copy_to_clipboard)
 }
 
-pub(super) fn cut_input_line_to_clipboard_with<F>(app: &mut App, mut copy_text: F) -> bool
+#[cfg_attr(not(test), allow(dead_code))]
+pub(in crate::tui::app) fn cut_input_line_to_clipboard_with<F>(app: &mut App, mut copy_text: F) -> bool
 where
     F: FnMut(&str) -> bool,
 {
@@ -416,7 +420,7 @@ where
     true
 }
 
-pub(super) fn handle_paste(app: &mut App, text: String) {
+pub(in crate::tui::app) fn handle_paste(app: &mut App, text: String) {
     // Note: clipboard_image() is NOT checked here. Bracketed paste events from the
     // terminal always deliver text. Checking clipboard_image() here caused a bug where
     // text pastes were misidentified as images when the clipboard also had image data
@@ -460,7 +464,7 @@ pub(super) fn handle_paste(app: &mut App, text: String) {
             ),
         };
         app.set_status_notice(notice);
-    } else if let Some(url) = super::extract_image_url(&text) {
+    } else if let Some(url) = crate::tui::app::helpers::extract_image_url(&text) {
         crate::logging::info(&format!("Downloading image from pasted URL: {}", url));
         app.set_status_notice("Downloading image...");
         let session_id = active_clipboard_session_id(app);
@@ -506,7 +510,7 @@ fn dropped_image_files(text: &str) -> Option<Vec<(String, Vec<u8>)>> {
 /// the path as ordinary key events. Promote a complete image-path-only composer
 /// value before command/skill routing so an absolute `/...` path is never treated
 /// as a slash command.
-pub(super) fn promote_dropped_images(app: &mut App) -> bool {
+pub(in crate::tui::app) fn promote_dropped_images(app: &mut App) -> bool {
     let Some(images) = dropped_image_files(&app.input) else {
         return false;
     };
@@ -527,7 +531,7 @@ pub(super) fn promote_dropped_images(app: &mut App) -> bool {
     true
 }
 
-fn parse_dropped_paths(text: &str) -> Option<Vec<PathBuf>> {
+pub(super) fn parse_dropped_paths(text: &str) -> Option<Vec<PathBuf>> {
     let trimmed = text.trim();
     let literal_path = PathBuf::from(trimmed);
     if literal_path.is_file() {
@@ -595,7 +599,7 @@ fn image_media_type(path: &std::path::Path) -> Option<&'static str> {
     }
 }
 
-pub(super) fn handle_text_paste(app: &mut App, text: String) {
+pub(in crate::tui::app) fn handle_text_paste(app: &mut App, text: String) {
     crate::logging::info(&format!(
         "Text paste: {} chars, {} lines",
         text.len(),

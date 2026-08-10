@@ -1,7 +1,7 @@
 use super::*;
 
 impl App {
-    pub(super) fn insert_thought_line(&mut self, line: String) {
+    pub(in crate::tui::app) fn insert_thought_line(&mut self, line: String) {
         if self.thought_line_inserted || line.is_empty() {
             return;
         }
@@ -20,7 +20,7 @@ impl App {
 
     /// Begin a reasoning region. Reasoning renders as dim, italic text (no
     /// blockquote gutter, no header, no footer). Idempotent while open.
-    pub(super) fn open_reasoning_region(&mut self) {
+    pub(in crate::tui::app) fn open_reasoning_region(&mut self) {
         if self.reasoning_streaming {
             return;
         }
@@ -64,7 +64,7 @@ impl App {
     /// dim+italic markdown; the trailing partial line is rendered as a live tail
     /// that is re-emitted in place on each delta. The whole-line emphasis run is
     /// preserved (each line is its own `*…*`) so styling never breaks mid-line.
-    pub(super) fn append_reasoning_text(&mut self, text: &str) {
+    pub(in crate::tui::app) fn append_reasoning_text(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
@@ -95,7 +95,7 @@ impl App {
     /// Promote the live partial line to a committed line and end the region. The
     /// `_footer` argument is ignored (the "Thought for Xs" footer was removed);
     /// it is kept for call-site compatibility.
-    pub(super) fn close_reasoning_region(&mut self, _footer: Option<String>) {
+    pub(in crate::tui::app) fn close_reasoning_region(&mut self, _footer: Option<String>) {
         if !self.reasoning_streaming {
             return;
         }
@@ -134,7 +134,7 @@ impl App {
 
     /// True when the active reasoning-display mode is `current` (live-only,
     /// ephemeral reasoning).
-    pub(super) fn reasoning_current_mode(&self) -> bool {
+    pub(in crate::tui::app) fn reasoning_current_mode(&self) -> bool {
         matches!(
             crate::config::config().display.reasoning_display(),
             crate::config::ReasoningDisplayMode::Current
@@ -147,7 +147,7 @@ impl App {
     /// (content below it can only be appended, never inserted above), so the
     /// thought stays readable and anchored until the next user prompt removes
     /// the turn's traces.
-    pub(super) fn anchor_current_reasoning_block(&mut self) {
+    pub(in crate::tui::app) fn anchor_current_reasoning_block(&mut self) {
         let block_start = self
             .reasoning_block_start
             .take()
@@ -193,7 +193,7 @@ impl App {
     /// ephemeral across turns: the trace never moves while on screen, it is
     /// simply gone the next time the user acts (a moment when the transcript
     /// reflows anyway).
-    pub(super) fn clear_turn_reasoning_traces(&mut self) {
+    pub(in crate::tui::app) fn clear_turn_reasoning_traces(&mut self) {
         if self.turn_reasoning_traces.is_empty() {
             return;
         }
@@ -212,7 +212,7 @@ impl App {
     /// scroll out of view instead of accumulating across a long agentic turn.
     /// Skipped entirely while the user has scrolled up (their reading position
     /// must not shift).
-    pub(super) fn gc_offscreen_reasoning_traces(&mut self) -> bool {
+    pub(in crate::tui::app) fn gc_offscreen_reasoning_traces(&mut self) -> bool {
         // Only the traces *before* the most recent one are stale.
         if self.turn_reasoning_traces.len() < 2 {
             return false;
@@ -276,7 +276,7 @@ impl App {
         removed
     }
 
-    pub(super) fn append_streaming_text(&mut self, text: &str) {
+    pub(in crate::tui::app) fn append_streaming_text(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
@@ -302,7 +302,7 @@ impl App {
     /// streaming view, preserving arrival order across answer text, reasoning
     /// text, and reasoning-region boundaries. Returns true when anything
     /// visible changed.
-    pub(super) fn apply_stream_ops(
+    pub(in crate::tui::app) fn apply_stream_ops(
         &mut self,
         ops: Vec<crate::tui::stream_buffer::StreamOp>,
     ) -> bool {
@@ -342,7 +342,7 @@ impl App {
     /// once the assistant commits a message or runs a tool. Strip any
     /// reasoning-marked lines (identified by [`REASONING_SENTINEL`]) from text
     /// about to be committed to the transcript. Other modes pass through.
-    pub(super) fn collapse_reasoning_for_commit(&self, content: String) -> String {
+    pub(in crate::tui::app) fn collapse_reasoning_for_commit(&self, content: String) -> String {
         if !matches!(
             crate::config::config().display.reasoning_display(),
             crate::config::ReasoningDisplayMode::Current
@@ -352,12 +352,12 @@ impl App {
         strip_reasoning_lines(&content)
     }
 
-    pub(super) fn replace_streaming_text(&mut self, text: String) {
+    pub(in crate::tui::app) fn replace_streaming_text(&mut self, text: String) {
         self.streaming.streaming_text = text;
         self.refresh_split_view_if_needed();
     }
 
-    pub(super) fn clear_streaming_render_state(&mut self) {
+    pub(in crate::tui::app) fn clear_streaming_render_state(&mut self) {
         self.streaming.streaming_text.clear();
         self.stream_message_ended = false;
         self.reasoning_streaming = false;
@@ -373,7 +373,7 @@ impl App {
     /// Reset provider-reported usage that belongs to a transcript being fully
     /// discarded. Render-only resets intentionally preserve these counters,
     /// so full session clears must call this separately.
-    pub(super) fn clear_live_usage_state(&mut self) {
+    pub(in crate::tui::app) fn clear_live_usage_state(&mut self) {
         self.streaming.streaming_input_tokens = 0;
         self.streaming.streaming_output_tokens = 0;
         self.streaming.streaming_cache_read_tokens = None;
@@ -392,7 +392,7 @@ impl App {
     /// fault interrupted the response mid-stream and the request is being
     /// replayed from the top, so everything from the aborted attempt must
     /// disappear or the replay would render duplicated output.
-    pub(super) fn rollback_streaming_attempt(&mut self) {
+    pub(in crate::tui::app) fn rollback_streaming_attempt(&mut self) {
         self.stream_buffer.clear();
         self.clear_streaming_render_state();
         self.streaming_tool_calls.clear();
@@ -423,7 +423,7 @@ impl App {
         self.attempt_committed_assistant_messages = 0;
     }
 
-    pub(super) fn take_streaming_text(&mut self) -> String {
+    pub(in crate::tui::app) fn take_streaming_text(&mut self) -> String {
         let content = std::mem::take(&mut self.streaming.streaming_text);
         self.stream_message_ended = false;
         self.reasoning_streaming = false;
@@ -436,7 +436,7 @@ impl App {
         content
     }
 
-    pub(super) fn commit_pending_streaming_assistant_message(&mut self) -> bool {
+    pub(in crate::tui::app) fn commit_pending_streaming_assistant_message(&mut self) -> bool {
         let ops = self.stream_buffer.flush();
         self.apply_stream_ops(ops);
         // A commit is a hard message boundary: end any still-open reasoning
@@ -476,7 +476,7 @@ impl App {
         true
     }
 
-    pub(super) fn accumulate_streaming_output_tokens(
+    pub(in crate::tui::app) fn accumulate_streaming_output_tokens(
         &mut self,
         output_tokens: u64,
         call_output_tokens_seen: &mut u64,

@@ -1,7 +1,10 @@
 use super::*;
 
 impl App {
-    pub(super) fn update_copy_badge_key_event(&mut self, event: crossterm::event::KeyEvent) {
+    pub(in crate::tui::app) fn update_copy_badge_key_event(
+        &mut self,
+        event: crossterm::event::KeyEvent,
+    ) {
         use crossterm::event::{KeyCode, KeyEventKind, ModifierKeyCode};
 
         self.prune_copy_badge_ui();
@@ -56,12 +59,12 @@ impl App {
         }
     }
 
-    pub(super) fn record_copy_badge_key_press(&mut self, key: char) {
+    pub(in crate::tui::app) fn record_copy_badge_key_press(&mut self, key: char) {
         let expiry = std::time::Instant::now() + std::time::Duration::from_millis(240);
         self.copy_badge_ui.key_active = Some((key, expiry));
     }
 
-    pub(super) fn record_copy_badge_feedback(&mut self, key: char, success: bool) {
+    pub(in crate::tui::app) fn record_copy_badge_feedback(&mut self, key: char, success: bool) {
         self.copy_badge_ui.copied_feedback = Some(crate::tui::app::CopyBadgeFeedback {
             key,
             success,
@@ -69,7 +72,7 @@ impl App {
         });
     }
 
-    pub(super) fn prune_copy_badge_ui(&mut self) {
+    pub(in crate::tui::app) fn prune_copy_badge_ui(&mut self) {
         let now = std::time::Instant::now();
         if self
             .copy_badge_ui

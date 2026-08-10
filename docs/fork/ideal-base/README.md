@@ -21,3 +21,8 @@ or private recovery references.
 This tree is historical. It does not contain current dashboards, execution tools,
 or live workflow instructions. Anything rebuildable from the active repository
 has been left out of the archive where possible.
+
+The `evidence/` index and node evidence are retained for audit trail. Missing
+rebuildable fixtures, including old governance fixture files, stay retired rather
+than being restored into this tree; regenerate them into `target/` or another
+temporary path when an active check needs one.

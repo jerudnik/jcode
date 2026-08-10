@@ -24,10 +24,14 @@ mod copy_badge;
 mod streaming;
 mod submission;
 
-use clipboard::{
-    expand_paste_placeholders, handle_paste, is_clipboard_paste_shortcut, paste_from_clipboard,
-    promote_dropped_images,
+pub(in crate::tui::app) use clipboard::{
+    cut_input_line_to_clipboard, handle_text_paste, promote_dropped_images,
 };
+/// Re-exported for the input tests, which drive the cut path with an injected
+/// clipboard sink; the production path uses [`cut_input_line_to_clipboard`].
+#[cfg(test)]
+pub(in crate::tui::app) use clipboard::cut_input_line_to_clipboard_with;
+use clipboard::{handle_paste, is_clipboard_paste_shortcut, paste_from_clipboard};
 
 /// Remove reasoning-marked lines from committed transcript text. Reasoning lines
 /// are wrapped in emphasis containing the invisible [`REASONING_SENTINEL`]

@@ -21,22 +21,19 @@
 pub use jcode_base::{
     auth, background, browser, bus, cache_invalidation, cache_tracker, client_input, compaction,
     config, copilot_usage, dictation, embedding_backend, env, gateway, generated_image, gmail,
-    goal, hooks, id,
-    import, live_tests, logging, login_qr, mcp, memory, memory_agent, memory_graph,
-    memory_judge_metrics, memory_log, memory_rerank, memory_types, message, mobile_server,
-    model_pricing, plan, platform, power_inhibit, process_memory, process_title, prompt,
-    protocol, provider, provider_activity, provider_catalog, registry, runtime_memory_log, safety,
-    secret_input, session, session_list_cache, session_metrics, side_panel, sidecar, skill,
-    soft_interrupt_store, sponsors, stdin_detect, storage, subscription_api,
-    subscription_catalog, surface_workspace, telegram, telemetry, terminal_launch, todo,
-    transport, usage, util,
+    goal, hooks, id, import, live_tests, logging, login_qr, mcp, memory, memory_agent,
+    memory_graph, memory_judge_metrics, memory_log, memory_rerank, memory_types, message,
+    mobile_server, model_pricing, plan, platform, power_inhibit, process_memory, process_title,
+    prompt, protocol, provider, provider_activity, provider_catalog, registry, runtime_memory_log,
+    safety, secret_input, session, session_list_cache, session_metrics, side_panel, sidecar, skill,
+    soft_interrupt_store, sponsors, stdin_detect, storage, subscription_api, subscription_catalog,
+    surface_workspace, telegram, telemetry, terminal_launch, todo, transport, usage, util,
 };
 
 #[cfg(feature = "embeddings")]
 pub use jcode_base::embedding;
 #[cfg(not(feature = "embeddings"))]
 pub use jcode_base::embedding_stub as embedding;
-
 
 // Upper layer (server / tool / agent and supporting leaves).
 pub mod agent;

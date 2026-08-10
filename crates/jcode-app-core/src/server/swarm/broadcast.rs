@@ -69,7 +69,7 @@ async fn broadcast_swarm_status_now(
     }
 }
 
-pub(super) async fn broadcast_swarm_status(
+pub(in crate::server) async fn broadcast_swarm_status(
     swarm_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
@@ -97,7 +97,7 @@ pub(super) async fn broadcast_swarm_status(
                 .cloned()
                 .collect()
         };
-        super::control_log_sync::sync_swarm_control_log_members(swarm_id, &members);
+        crate::server::control_log_sync::sync_swarm_control_log_members(swarm_id, &members);
     }
 
     let session_ids: Vec<String> = {
@@ -171,7 +171,7 @@ pub(super) async fn broadcast_swarm_status(
 ///
 /// Plan snapshots are sent to explicit plan participants. If a plan has no
 /// participants yet, fall back to all current swarm members.
-pub(super) async fn broadcast_swarm_plan(
+pub(in crate::server) async fn broadcast_swarm_plan(
     swarm_id: &str,
     reason: Option<String>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
@@ -189,7 +189,7 @@ pub(super) async fn broadcast_swarm_plan(
     .await;
 }
 
-pub(super) async fn broadcast_swarm_plan_with_previous(
+pub(in crate::server) async fn broadcast_swarm_plan_with_previous(
     swarm_id: &str,
     reason: Option<String>,
     previous_items: Option<&[PlanItem]>,
@@ -279,7 +279,7 @@ pub(super) async fn broadcast_swarm_plan_with_previous(
 /// refresh). Unlike [`broadcast_swarm_plan`] this does not fan out to all
 /// participants: reconnecting clients would otherwise show no plan graph
 /// until the next plan mutation happens to broadcast.
-pub(super) async fn send_swarm_plan_to_session(
+pub(in crate::server) async fn send_swarm_plan_to_session(
     session_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,
@@ -325,7 +325,7 @@ pub(super) async fn send_swarm_plan_to_session(
     }
 }
 
-pub(super) async fn rename_plan_participant(
+pub(in crate::server) async fn rename_plan_participant(
     swarm_id: &str,
     old_session_id: &str,
     new_session_id: &str,
@@ -344,7 +344,7 @@ pub(super) async fn rename_plan_participant(
     }
 }
 
-pub(super) async fn remove_plan_participant(
+pub(in crate::server) async fn remove_plan_participant(
     swarm_id: &str,
     session_id: &str,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,

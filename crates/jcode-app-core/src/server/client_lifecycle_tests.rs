@@ -322,10 +322,15 @@ async fn deferred_cancel_reset_does_not_erase_newer_cancel() {
 
 impl IsolatedRuntimeDir {
     fn new() -> Self {
-        let temp = tempfile::TempDir::new().expect("runtime dir");
+        let temp = crate::storage::RuntimePaths::test_root("jcode-runtime-lifecycle-");
         let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
         crate::env::set_var("JCODE_RUNTIME_DIR", temp.path());
         crate::server::clear_reload_marker();
+        assert_eq!(
+            crate::storage::RuntimePaths::current().runtime_dir(),
+            temp.path().to_path_buf(),
+            "runtime isolation must resolve through RuntimePaths"
+        );
         Self {
             _prev_runtime: prev_runtime,
             _temp: temp,
@@ -335,13 +340,24 @@ impl IsolatedRuntimeDir {
 
 impl IsolatedReloadRecoveryEnv {
     fn new() -> Self {
-        let home = tempfile::TempDir::new().expect("jcode home");
-        let runtime = tempfile::TempDir::new().expect("runtime dir");
+        let home = crate::storage::RuntimePaths::test_root("jcode-reload-recovery-home-");
+        let runtime = crate::storage::RuntimePaths::test_root("jcode-reload-recovery-runtime-");
         let prev_home = std::env::var_os("JCODE_HOME");
         let prev_runtime = std::env::var_os("JCODE_RUNTIME_DIR");
         crate::env::set_var("JCODE_HOME", home.path());
         crate::env::set_var("JCODE_RUNTIME_DIR", runtime.path());
         crate::server::clear_reload_marker();
+        let current = crate::storage::RuntimePaths::current();
+        assert_eq!(
+            current.jcode_dir().as_deref(),
+            Some(home.path()),
+            "reload recovery tests must resolve home through RuntimePaths"
+        );
+        assert_eq!(
+            current.runtime_dir(),
+            runtime.path().to_path_buf(),
+            "reload recovery tests must resolve runtime through RuntimePaths"
+        );
         Self {
             prev_home,
             prev_runtime,

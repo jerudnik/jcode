@@ -17,6 +17,7 @@ pub(crate) use jcode::tool::Registry;
 pub(crate) use std::ffi::OsString;
 pub(crate) use std::io::Read;
 pub(crate) use std::net::TcpListener as StdTcpListener;
+use std::ops::Deref;
 #[cfg(unix)]
 use std::os::fd::FromRawFd;
 #[cfg(unix)]
@@ -30,7 +31,6 @@ pub(crate) use tokio::time::timeout;
 pub(crate) use tokio_tungstenite::connect_async;
 pub(crate) use tokio_tungstenite::tungstenite::Message as WsMessage;
 pub(crate) use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use std::ops::Deref;
 
 static JCODE_HOME_LOCK: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
 
@@ -87,7 +87,7 @@ impl TestEnvGuard {
         let prev_test_session = std::env::var_os("JCODE_TEST_SESSION");
         let prev_debug_control = std::env::var_os("JCODE_DEBUG_CONTROL");
         let runtime_dir = temp_home.path().join("runtime");
-    
+
         jcode::env::set_var("JCODE_HOME", temp_home.path());
         jcode::env::set_var("JCODE_RUNTIME_DIR", &runtime_dir);
         jcode::env::set_var("JCODE_TEST_SESSION", "1");

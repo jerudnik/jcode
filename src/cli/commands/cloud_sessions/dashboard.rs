@@ -1,39 +1,36 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 
-use crate::tui;
-
 use super::{
-    CloudSessionsConfig, append_common_jade_args, build_jade_sessions_args_with_config,
-    cloud_sessions_helper_env, config_or_default_user_id, expand_home_path,
-    load_cloud_sessions_config, resolve_jade_sessions_helper,
+    append_common_jade_args, cloud_sessions_helper_env, config_or_default_user_id,
+    expand_home_path, load_cloud_sessions_config, resolve_jade_sessions_helper,
 };
 
 pub(super) struct CloudSessionsDashboardRequest {
-    limit: usize,
+    pub(super) limit: usize,
     pub(super) output: Option<String>,
     pub(super) open: bool,
     pub(super) with_view: bool,
-    user_id: String,
-    profile: Option<String>,
-    region: Option<String>,
-    helper: Option<String>,
+    pub(super) user_id: String,
+    pub(super) profile: Option<String>,
+    pub(super) region: Option<String>,
+    pub(super) helper: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct CloudSessionListItem {
+pub(in crate::cli) struct CloudSessionListItem {
     #[serde(default)]
-    session_id: Option<String>,
+    pub(in crate::cli) session_id: Option<String>,
     #[serde(default)]
-    title: Option<String>,
+    pub(super) title: Option<String>,
     #[serde(default)]
-    short_name: Option<String>,
+    pub(super) short_name: Option<String>,
     #[serde(default)]
-    message_count: Option<serde_json::Value>,
+    pub(super) message_count: Option<serde_json::Value>,
     #[serde(default)]
-    uploaded_at: Option<String>,
+    pub(super) uploaded_at: Option<String>,
 }
 
 fn fetch_cloud_session_list_json(
@@ -82,7 +79,7 @@ fn fetch_cloud_session_list_json(
 /// The Jade helper prints a top-level JSON array, but we also accept an object
 /// wrapper keyed by `items` or `sessions` so the dashboard keeps working if the
 /// helper's output shape changes.
-fn parse_cloud_session_list_json(raw: &str) -> Result<Vec<CloudSessionListItem>> {
+pub(in crate::cli) fn parse_cloud_session_list_json(raw: &str) -> Result<Vec<CloudSessionListItem>> {
     let value: serde_json::Value = serde_json::from_str(raw)
         .map_err(|err| anyhow::anyhow!("failed to parse Jade list JSON: {err}"))?;
     let array = match value {
@@ -141,7 +138,7 @@ fn message_count_label(value: Option<&serde_json::Value>) -> String {
     }
 }
 
-fn render_cloud_sessions_dashboard_html(
+pub(in crate::cli) fn render_cloud_sessions_dashboard_html(
     user_id: &str,
     items: &[CloudSessionListItem],
     view_links: &std::collections::BTreeMap<String, String>,
@@ -287,7 +284,7 @@ pub(super) fn run_cloud_sessions_dashboard(request: CloudSessionsDashboardReques
 }
 
 /// Directory that holds per-session viewer HTML files for a dashboard.
-fn dashboard_views_dir(dashboard_path: &Path) -> PathBuf {
+pub(in crate::cli) fn dashboard_views_dir(dashboard_path: &Path) -> PathBuf {
     let stem = dashboard_path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -297,7 +294,7 @@ fn dashboard_views_dir(dashboard_path: &Path) -> PathBuf {
 }
 
 /// Make a filesystem-safe filename component from a session id.
-fn sanitize_filename(value: &str) -> String {
+pub(in crate::cli) fn sanitize_filename(value: &str) -> String {
     value
         .chars()
         .map(|c| {
@@ -312,7 +309,7 @@ fn sanitize_filename(value: &str) -> String {
 
 /// Build a link from the dashboard file to a viewer file, preferring a relative
 /// path when both share a parent directory so the dashboard is portable.
-fn relative_link(dashboard_path: &Path, view_file: &Path) -> Option<String> {
+pub(in crate::cli) fn relative_link(dashboard_path: &Path, view_file: &Path) -> Option<String> {
     let base = dashboard_path.parent()?;
     let rel = view_file.strip_prefix(base).ok()?;
     Some(rel.to_string_lossy().replace('\\', "/"))
@@ -361,18 +358,4 @@ fn generate_cloud_session_view_html(
         );
     }
     Ok(())
-}
-
-fn configured_label(value: Option<&str>) -> &str {
-    value
-        .filter(|value| !value.is_empty())
-        .unwrap_or("not configured")
-}
-
-fn config_or_default_user_id(user_id: String, config: &CloudSessionsConfig) -> String {
-    if user_id == "dev" {
-        config.user_id.clone().unwrap_or(user_id)
-    } else {
-        user_id
-    }
 }

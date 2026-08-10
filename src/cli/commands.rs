@@ -48,6 +48,17 @@ pub enum AmbientSubcommand {
 mod cloud_sessions;
 mod run_reporting;
 
+#[cfg(test)]
+pub(super) use cloud_sessions::{
+    CloudSessionListItem, CloudSessionsSyncRequest, CloudSessionsSyncState,
+    build_jade_sessions_args, build_jade_sessions_args_with_config, cloud_sessions_config_path,
+    cloud_sessions_helper_env, cloud_sessions_sync_state_path, collect_sync_candidates,
+    dashboard_views_dir, is_syncable_session_stem, load_cloud_sessions_config,
+    load_cloud_sessions_sync_state, parse_cloud_session_list_json, relative_link,
+    render_cloud_sessions_dashboard_html, resolve_jade_sessions_helper, run_cloud_sessions_configure,
+    run_cloud_sessions_sync, save_cloud_sessions_sync_state, sanitize_filename,
+};
+
 pub use cloud_sessions::{CloudSessionsSubcommand, CloudSubcommand, run_cloud_command};
 use run_reporting::{RunCommandReport, run_single_message_command_ndjson};
 
@@ -674,7 +685,6 @@ struct ModelListRouteReport {
     available: bool,
 }
 
-#[derive(Debug, Serialize)]
 pub fn run_auth_status_command(emit_json: bool) -> Result<()> {
     report_info::run_auth_status_command(emit_json)
 }
@@ -1093,7 +1103,7 @@ pub async fn run_single_message_command(
     Ok(())
 }
 
-fn run_command_auto_poke_enabled() -> bool {
+pub(super) fn run_command_auto_poke_enabled() -> bool {
     std::env::var("JCODE_RUN_AUTO_POKE")
         .ok()
         .map(|value| {
@@ -1188,14 +1198,17 @@ async fn wait_for_cold_cache_mcp_tools(registry: &crate::tool::Registry) {
     }
 }
 
-fn run_command_auto_poke_max_turns() -> Option<usize> {
+pub(super) fn run_command_auto_poke_max_turns() -> Option<usize> {
     std::env::var("JCODE_RUN_AUTO_POKE_MAX_TURNS")
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|value| *value > 0)
 }
 
-fn run_command_auto_poke_limit_reached(turns_completed: usize, max_turns: Option<usize>) -> bool {
+pub(super) fn run_command_auto_poke_limit_reached(
+    turns_completed: usize,
+    max_turns: Option<usize>,
+) -> bool {
     max_turns
         .map(|max_turns| turns_completed >= max_turns)
         .unwrap_or(false)
@@ -1203,16 +1216,16 @@ fn run_command_auto_poke_limit_reached(turns_completed: usize, max_turns: Option
 
 const RUN_TODO_CONFIDENCE_THRESHOLD: u8 = 90;
 
-enum RunAutoPokeFollowUp {
+pub(super) enum RunAutoPokeFollowUp {
     Incomplete { count: usize, message: String },
     ConfidenceSummary { total_todos: usize, message: String },
 }
 
-fn run_todos(session_id: &str) -> Vec<crate::todo::TodoItem> {
+pub(super) fn run_todos(session_id: &str) -> Vec<crate::todo::TodoItem> {
     crate::todo::load_todos(session_id).unwrap_or_default()
 }
 
-fn build_run_auto_poke_follow_up_from_todos(
+pub(super) fn build_run_auto_poke_follow_up_from_todos(
     todos: &[crate::todo::TodoItem],
 ) -> Option<RunAutoPokeFollowUp> {
     let incomplete: Vec<_> = todos

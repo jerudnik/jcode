@@ -1,6 +1,6 @@
 use super::*;
 
-fn status_age_secs(last_status_change: Instant) -> u64 {
+pub(in crate::server) fn status_age_secs(last_status_change: Instant) -> u64 {
     last_status_change.elapsed().as_secs()
 }
 
@@ -10,7 +10,7 @@ fn status_age_secs(last_status_change: Instant) -> u64 {
 /// spawn-depth limit and no per-node fan-out limit: the spawn tree may nest and
 /// fan out freely until the swarm reaches this many live members, at which point
 /// further spawns are refused.
-pub(super) use jcode_swarm_core::MAX_SWARM_MEMBERS;
+pub(in crate::server) use jcode_swarm_core::MAX_SWARM_MEMBERS;
 
 /// Walk the `report_back_to_session_id` chain upward from `session_id`,
 /// returning the list of ancestor session ids (parent first, root last).
@@ -19,7 +19,7 @@ pub(super) use jcode_swarm_core::MAX_SWARM_MEMBERS;
 /// spawned by `P` reports back to `P`. Walking that chain reconstructs the spawn
 /// tree without persisting a separate parent field. Cycles (which should never
 /// happen) are guarded against with a visited set.
-pub(super) fn swarm_ancestors(
+pub(in crate::server) fn swarm_ancestors(
     members: &HashMap<String, SwarmMember>,
     session_id: &str,
 ) -> Vec<String> {
@@ -47,7 +47,10 @@ pub(super) fn swarm_ancestors(
 /// does not consult depth. Kept (behind `cfg(test)`) because the spawn-tree tests
 /// assert ancestor-chain depth directly.
 #[cfg(test)]
-pub(super) fn swarm_spawn_depth(members: &HashMap<String, SwarmMember>, session_id: &str) -> u32 {
+pub(in crate::server) fn swarm_spawn_depth(
+    members: &HashMap<String, SwarmMember>,
+    session_id: &str,
+) -> u32 {
     swarm_ancestors(members, session_id).len() as u32
 }
 
@@ -55,7 +58,7 @@ pub(super) fn swarm_spawn_depth(members: &HashMap<String, SwarmMember>, session_
 /// against a swarm's members. Shared by the DM path and the assignment path so
 /// friendly names behave identically everywhere (F5 in the orchestration
 /// hardening audit: the assign path used to accept session IDs only).
-pub(super) enum SwarmTargetResolution {
+pub(in crate::server) enum SwarmTargetResolution {
     /// Unique resolution to a session ID.
     Session(String),
     /// The target matched no session ID and no friendly name.
@@ -68,7 +71,7 @@ pub(super) enum SwarmTargetResolution {
 /// Resolve `target` as an exact session ID first, then as a friendly name,
 /// considering only members whose session ID is in `candidate_session_ids`.
 /// Pure lookup: callers decide how to phrase Unknown/Ambiguous errors.
-pub(super) fn resolve_swarm_target(
+pub(in crate::server) fn resolve_swarm_target(
     target: &str,
     candidate_session_ids: &[String],
     members: &HashMap<String, SwarmMember>,
@@ -102,7 +105,7 @@ pub(super) fn resolve_swarm_target(
 
 /// Format the standard "ambiguous friendly name" error detail from
 /// [`SwarmTargetResolution::Ambiguous`] matches.
-pub(super) fn format_ambiguous_target_matches(matches: &[(String, String)]) -> String {
+pub(in crate::server) fn format_ambiguous_target_matches(matches: &[(String, String)]) -> String {
     matches
         .iter()
         .map(|(session_id, friendly_name)| format!("{} [{}]", friendly_name, session_id))
@@ -113,7 +116,7 @@ pub(super) fn format_ambiguous_target_matches(matches: &[(String, String)]) -> S
 /// True when `ancestor` is `session_id` itself or any transitive spawner of it.
 /// Used to decide whether a requester may manage (stop/control) a target: an
 /// agent owns its entire spawned subtree.
-pub(super) fn swarm_is_self_or_ancestor(
+pub(in crate::server) fn swarm_is_self_or_ancestor(
     members: &HashMap<String, SwarmMember>,
     ancestor: &str,
     session_id: &str,
@@ -134,19 +137,19 @@ const DEFAULT_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS: u64 = 5;
 const DEFAULT_SWARM_TERMINAL_MEMBER_RETENTION_SECS: u64 = 24 * 60 * 60;
 const DEFAULT_SWARM_TERMINAL_MEMBER_GC_INTERVAL_SECS: u64 = 60;
 #[derive(Default, Clone, Copy)]
-struct PendingSwarmStatusBroadcast {
-    scheduled: bool,
-    dirty: bool,
+pub(in crate::server) struct PendingSwarmStatusBroadcast {
+    pub(in crate::server) scheduled: bool,
+    pub(in crate::server) dirty: bool,
 }
 
-fn pending_swarm_status_broadcasts()
+pub(in crate::server) fn pending_swarm_status_broadcasts()
 -> &'static StdMutex<HashMap<String, PendingSwarmStatusBroadcast>> {
     static PENDING: OnceLock<StdMutex<HashMap<String, PendingSwarmStatusBroadcast>>> =
         OnceLock::new();
     PENDING.get_or_init(|| StdMutex::new(HashMap::new()))
 }
 
-fn swarm_status_debounce_member_threshold() -> usize {
+pub(in crate::server) fn swarm_status_debounce_member_threshold() -> usize {
     static CACHED: OnceLock<AtomicUsize> = OnceLock::new();
     CACHED
         .get_or_init(|| {
@@ -160,7 +163,7 @@ fn swarm_status_debounce_member_threshold() -> usize {
         .load(Ordering::Relaxed)
 }
 
-fn swarm_status_debounce_ms() -> u64 {
+pub(in crate::server) fn swarm_status_debounce_ms() -> u64 {
     static CACHED: OnceLock<AtomicU64> = OnceLock::new();
     CACHED
         .get_or_init(|| {
@@ -182,14 +185,14 @@ fn configured_positive_u64(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-pub(super) fn now_unix_ms() -> u64 {
+pub(in crate::server) fn now_unix_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
 }
 
-fn log_swarm_lifecycle(phase: &str, fields: Vec<(&str, String)>) {
+pub(in crate::server) fn log_swarm_lifecycle(phase: &str, fields: Vec<(&str, String)>) {
     crate::logging::event_info(
         "SWARM_LIFECYCLE",
         Vec::from([("phase", phase.to_string())])
@@ -199,28 +202,28 @@ fn log_swarm_lifecycle(phase: &str, fields: Vec<(&str, String)>) {
     );
 }
 
-pub(super) fn swarm_task_heartbeat_interval() -> Duration {
+pub(in crate::server) fn swarm_task_heartbeat_interval() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_TASK_HEARTBEAT_SECS",
         DEFAULT_SWARM_TASK_HEARTBEAT_SECS,
     ))
 }
 
-pub(super) fn swarm_task_stale_after() -> Duration {
+pub(in crate::server) fn swarm_task_stale_after() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_TASK_STALE_AFTER_SECS",
         DEFAULT_SWARM_TASK_STALE_AFTER_SECS,
     ))
 }
 
-pub(super) fn swarm_task_sweep_interval() -> Duration {
+pub(in crate::server) fn swarm_task_sweep_interval() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_TASK_SWEEP_INTERVAL_SECS",
         DEFAULT_SWARM_TASK_SWEEP_INTERVAL_SECS,
     ))
 }
 
-fn swarm_dead_pid_sweep_interval() -> Duration {
+pub(in crate::server) fn swarm_dead_pid_sweep_interval() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS",
         DEFAULT_SWARM_DEAD_PID_SWEEP_INTERVAL_SECS,
@@ -232,7 +235,7 @@ fn last_dead_pid_sweep_ms() -> &'static AtomicU64 {
     LAST_SWEEP_MS.get_or_init(|| AtomicU64::new(0))
 }
 
-fn claim_dead_pid_sweep(now_ms: u64, interval: Duration) -> bool {
+pub(in crate::server) fn claim_dead_pid_sweep(now_ms: u64, interval: Duration) -> bool {
     let interval_ms = interval.as_millis() as u64;
     let last = last_dead_pid_sweep_ms().load(Ordering::Relaxed);
     if now_ms.saturating_sub(last) < interval_ms {
@@ -247,7 +250,7 @@ fn claim_dead_pid_sweep(now_ms: u64, interval: Duration) -> bool {
 /// sessions into swarm member state. This is intentionally cheap and opportunistic:
 /// it runs at most once per interval from daemon-side swarm status traffic, so
 /// dead visible workers stop looking alive even when nobody opens the picker.
-pub(super) async fn sweep_dead_pid_swarm_members(
+pub(in crate::server) async fn sweep_dead_pid_swarm_members(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     _swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
 ) -> Vec<String> {
@@ -315,7 +318,7 @@ pub(super) async fn sweep_dead_pid_swarm_members(
 /// How long terminal members remain visible in the active swarm listing. This
 /// keeps completion reports available for inspection without allowing durable
 /// history to grow forever.
-pub(super) fn swarm_terminal_member_retention() -> Duration {
+pub(in crate::server) fn swarm_terminal_member_retention() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_TERMINAL_MEMBER_RETENTION_SECS",
         DEFAULT_SWARM_TERMINAL_MEMBER_RETENTION_SECS,
@@ -324,7 +327,7 @@ pub(super) fn swarm_terminal_member_retention() -> Duration {
 
 /// How often the live server removes terminal members whose retention window
 /// has elapsed. Startup loading performs the same pruning synchronously.
-pub(super) fn swarm_terminal_member_gc_interval() -> Duration {
+pub(in crate::server) fn swarm_terminal_member_gc_interval() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_TERMINAL_MEMBER_GC_INTERVAL_SECS",
         DEFAULT_SWARM_TERMINAL_MEMBER_GC_INTERVAL_SECS,
@@ -334,18 +337,18 @@ pub(super) fn swarm_terminal_member_gc_interval() -> Duration {
 /// Terminal members are historical records, not live agents. They remain
 /// visible temporarily for reports and diagnostics but must not consume the
 /// runaway-prevention spawn budget.
-pub(super) fn member_status_is_terminal(status: &str) -> bool {
+pub(in crate::server) fn member_status_is_terminal(status: &str) -> bool {
     matches!(
         status,
         "completed" | "done" | "failed" | "stopped" | "crashed" | "closed" | "disconnected"
     )
 }
 
-pub(super) fn member_consumes_swarm_capacity(member: &SwarmMember) -> bool {
+pub(in crate::server) fn member_consumes_swarm_capacity(member: &SwarmMember) -> bool {
     !member_status_is_terminal(&member.status)
 }
 
-pub(super) fn expired_terminal_member_ids(
+pub(in crate::server) fn expired_terminal_member_ids(
     members: &HashMap<String, SwarmMember>,
     retention: Duration,
 ) -> Vec<String> {
@@ -360,13 +363,13 @@ pub(super) fn expired_terminal_member_ids(
 /// Lifecycle statuses that mean a member can no longer drive an assignment:
 /// the session's agent loop is gone, so no heartbeat or turn end will ever
 /// arrive for tasks it holds.
-pub(super) fn member_status_is_dead(status: &str) -> bool {
+pub(in crate::server) fn member_status_is_dead(status: &str) -> bool {
     crate::swarm_verbs::member_status_is_dead(status)
 }
 
 /// Outcome of salvaging one dead member's plan assignments.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(super) struct DeadMemberSalvage {
+pub(in crate::server) struct DeadMemberSalvage {
     /// Tasks released back to `queued` for automatic re-dispatch.
     pub requeued_task_ids: Vec<String>,
     /// Tasks marked `failed` because the automatic reclaim cap was reached.
@@ -374,7 +377,7 @@ pub(super) struct DeadMemberSalvage {
 }
 
 impl DeadMemberSalvage {
-    pub(super) fn is_empty(&self) -> bool {
+    pub(in crate::server) fn is_empty(&self) -> bool {
         self.requeued_task_ids.is_empty() && self.failed_task_ids.is_empty()
     }
 
@@ -467,7 +470,7 @@ fn salvage_plan_assignments_of(plan: &mut VersionedPlan, session_id: &str) -> De
 /// broadcast the plan change, and notify the swarm coordinator so the death is
 /// visible instead of silent. No-ops (and skips all I/O) when the member held
 /// no non-terminal assignments.
-pub(super) async fn salvage_assignments_of_dead_member(
+pub(in crate::server) async fn salvage_assignments_of_dead_member(
     session_id: &str,
     swarm_id: &str,
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
@@ -565,7 +568,7 @@ async fn notify_coordinator_of_salvage(
 /// (fails it) when its assignee is no longer a live swarm member. Generous
 /// relative to `swarm_task_stale_after` so a slow-but-alive worker whose
 /// member record briefly disappears (reload) is not raced.
-pub(super) fn swarm_task_reap_after() -> Duration {
+pub(in crate::server) fn swarm_task_reap_after() -> Duration {
     Duration::from_secs(configured_positive_u64(
         "JCODE_SWARM_TASK_REAP_AFTER_SECS",
         DEFAULT_SWARM_TASK_REAP_AFTER_SECS,
@@ -576,7 +579,7 @@ pub(super) fn swarm_task_reap_after() -> Duration {
     clippy::too_many_arguments,
     reason = "task progress touch updates durable progress plus swarm persistence and coordinator-facing state in one helper"
 )]
-pub(super) async fn touch_swarm_task_progress(
+pub(in crate::server) async fn touch_swarm_task_progress(
     swarm_id: &str,
     task_id: &str,
     assigned_session_id: Option<&str>,
@@ -635,7 +638,7 @@ pub(super) async fn touch_swarm_task_progress(
     revived
 }
 
-pub(super) async fn refresh_swarm_task_staleness(
+pub(in crate::server) async fn refresh_swarm_task_staleness(
     swarm_members: &Arc<RwLock<HashMap<String, SwarmMember>>>,
     swarms_by_id: &Arc<RwLock<HashMap<String, HashSet<String>>>>,
     swarm_plans: &Arc<RwLock<HashMap<String, VersionedPlan>>>,

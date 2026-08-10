@@ -5,6 +5,22 @@ pub(super) async fn handle_manage_action(
     ctx: ToolContext,
 ) -> Result<ToolOutput> {
     match params.action.as_str() {
+        "list" => {
+            let request = Request::CommList {
+                id: REQUEST_ID,
+                session_id: ctx.session_id.clone(),
+            };
+
+            match send_request(request).await {
+                Ok(ServerEvent::CommMembers { members, .. }) => Ok(format_members(&ctx, &members)),
+                Ok(response) => {
+                    ensure_success(&response)?;
+                    Ok(ToolOutput::new("No agents found."))
+                }
+                Err(e) => Err(anyhow::anyhow!("Failed to list agents: {}", e)),
+            }
+        }
+
         "stop" => {
             let target = params
                 .target_session

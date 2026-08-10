@@ -224,6 +224,11 @@ pub fn persisted_background_tasks_note(session_id: &str) -> String {
     notes
 }
 
+/// Resolve the repository a reload applies to.
+///
+/// An explicit `working_dir` is authoritative: it must resolve through that
+/// directory's ancestors or not at all, so a caller pointed at a non-repository
+/// never silently reloads the ambient repo instead.
 pub(super) fn resolve_selfdev_reload_repo_dir(
     working_dir: Option<&std::path::Path>,
 ) -> Option<std::path::PathBuf> {
@@ -233,6 +238,8 @@ pub(super) fn resolve_selfdev_reload_repo_dir(
     }
 }
 
+/// Precedence helper covering the working-dir-wins rule in isolation.
+#[cfg(test)]
 pub(super) fn resolve_selfdev_reload_repo_dir_from(
     primary: Option<std::path::PathBuf>,
     working_dir: Option<&std::path::Path>,
@@ -275,6 +282,46 @@ impl Drop for ReloadEnvironmentGuard {
     }
 }
 
+/// Build the synthetic reload environment used by test sessions.
+///
+/// Mirrors the real environment closely enough to exercise the reload
+/// signal/ack contract while depending on nothing that must exist on disk.
+fn test_session_reload_environment(
+    resolved_repo_dir: Option<std::path::PathBuf>,
+) -> ReloadEnvironment {
+    let repo_dir = resolved_repo_dir
+        .unwrap_or_else(|| std::env::temp_dir().join("jcode-test-session-repo"));
+    let target_binary =
+        build::find_dev_binary(&repo_dir).unwrap_or_else(|| build::release_binary_path(&repo_dir));
+    let source = build::SourceState {
+        repo_scope: "test-repo-scope".to_string(),
+        worktree_scope: "test-worktree-scope".to_string(),
+        short_hash: "test-reload-hash".to_string(),
+        full_hash: "test-reload-hash-full".to_string(),
+        dirty: true,
+        fingerprint: "test-reload-fingerprint".to_string(),
+        version_label: "test-reload-hash".to_string(),
+        changed_paths: 0,
+    };
+    let runtime_identity = source
+        .runtime_identity_projection("selfdev", build::resolve_binary_payload(&target_binary));
+
+    ReloadEnvironment {
+        repo_dir,
+        target_binary,
+        version_before: jcode_build_meta::VERSION.to_string(),
+        version_after: source.version_label.clone(),
+        wait_mode: ReloadWaitMode::AcknowledgeOnly {
+            message: format!(
+                "Reload acknowledged for build {}. Server is restarting now.",
+                source.version_label
+            ),
+        },
+        source,
+        runtime_identity,
+    }
+}
+
 fn prepare_reload_environment(working_dir: Option<&std::path::Path>) -> Result<ReloadEnvironment> {
     #[cfg(test)]
     if let Some(environment) = reload_environment_override()
@@ -285,7 +332,19 @@ fn prepare_reload_environment(working_dir: Option<&std::path::Path>) -> Result<R
         return Ok(environment);
     }
 
-    let repo_dir = resolve_selfdev_reload_repo_dir(working_dir)
+    let resolved_repo_dir = resolve_selfdev_reload_repo_dir(working_dir);
+
+    // A test session fakes everything repo-derived below -- source state,
+    // publish, smoke test, and the on-disk binary check -- so repo discovery
+    // must not be load-bearing there either. Build/test environments without a
+    // discoverable repository (e.g. remote builders that sync the source tree
+    // without `.git`) exercise the reload signal/ack contract, which does not
+    // depend on repository identity or on which profile was built locally.
+    if SelfDevTool::is_test_session() {
+        return Ok(test_session_reload_environment(resolved_repo_dir));
+    }
+
+    let repo_dir = resolved_repo_dir
         .ok_or_else(|| anyhow::anyhow!("Could not find jcode repository directory"))?;
 
     let target_binary =

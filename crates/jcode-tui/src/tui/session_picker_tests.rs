@@ -1321,6 +1321,7 @@ fn buffer_text(picker: &mut SessionPicker, w: u16, h: u16) -> String {
 // overlay. These are `#[ignore]`d so they never run in CI; run them with:
 //
 //   cargo test -p jcode-tui --lib --release -- --ignored --nocapture benchmark_resume_op
+// Runbook category: manual-benchmark.
 //
 // They print human-readable timing lines to stderr. They use synthetic
 // sessions so they are deterministic and independent of the user's session

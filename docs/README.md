@@ -72,10 +72,12 @@ correcting them would destroy their value as evidence.
 | `docs/archive/` (11 files) | superseded material |
 | `docs/fork/recovery/` (131 files) | forensic integrity, self-declared |
 | `docs/fork/normalization/` (26 files) | append-only snapshot, self-declared |
-| `docs/fork/ideal-base/` (a finished 2026 cleanup project, see `docs/GLOSSARY.md`) (152 files) | program ledger; `DECISIONS.md` is explicitly append-only |
+| `docs/fork/ideal-base/` (a retired 2026 cleanup project, see `docs/GLOSSARY.md`) (152 files) | historical program ledger; `DECISIONS.md` is explicitly append-only |
 
-`docs/fork/ideal-base/` is a live program, but its records are appended rather
-than rewritten. Do not edit a prior decision to make the program look tidier.
+`docs/fork/ideal-base/` is retired reference material. Its records are retained
+for provenance and appended rather than rewritten. Do not restore missing
+rebuildable fixtures into this tree or edit a prior decision to make the
+historical record look tidier.
 
 ## What is checked automatically
 

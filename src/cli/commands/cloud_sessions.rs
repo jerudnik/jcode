@@ -1,11 +1,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
-
-use crate::tui;
 
 pub enum CloudSubcommand {
     Sessions(CloudSessionsSubcommand),
@@ -93,12 +90,12 @@ pub enum CloudSessionsSubcommand {
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct CloudSessionsConfig {
-    api_base: Option<String>,
-    api_token: Option<String>,
-    api_token_id: Option<String>,
-    helper: Option<String>,
-    user_id: Option<String>,
+pub(in crate::cli) struct CloudSessionsConfig {
+    pub(super) api_base: Option<String>,
+    pub(super) api_token: Option<String>,
+    pub(super) api_token_id: Option<String>,
+    pub(super) helper: Option<String>,
+    pub(super) user_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -213,11 +210,11 @@ fn run_cloud_sessions_helper_command(action: CloudSessionsSubcommand) -> Result<
     Ok(())
 }
 
-fn cloud_sessions_config_path() -> Result<PathBuf> {
+pub(in crate::cli) fn cloud_sessions_config_path() -> Result<PathBuf> {
     Ok(crate::storage::jcode_dir()?.join("cloud_sessions.json"))
 }
 
-fn load_cloud_sessions_config() -> Result<Option<CloudSessionsConfig>> {
+pub(in crate::cli) fn load_cloud_sessions_config() -> Result<Option<CloudSessionsConfig>> {
     let path = cloud_sessions_config_path()?;
     if !path.exists() {
         return Ok(None);
@@ -254,7 +251,7 @@ fn save_cloud_sessions_config(config: &CloudSessionsConfig) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn run_cloud_sessions_configure(
+pub(in crate::cli) fn run_cloud_sessions_configure(
     api_base: Option<String>,
     api_token: Option<String>,
     api_token_env: Option<String>,
@@ -367,38 +364,52 @@ fn run_cloud_sessions_status(json: bool) -> Result<()> {
     Ok(())
 }
 
+fn configured_label(value: Option<&str>) -> &str {
+    value
+        .filter(|value| !value.is_empty())
+        .unwrap_or("not configured")
+}
+
+fn config_or_default_user_id(user_id: String, config: &CloudSessionsConfig) -> String {
+    if user_id == "dev" {
+        config.user_id.clone().unwrap_or(user_id)
+    } else {
+        user_id
+    }
+}
+
 fn non_empty(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
-struct CloudSessionsSyncRequest {
-    sessions_dir: Option<String>,
-    since_days: Option<u64>,
-    all: bool,
-    max: usize,
-    min_interval_mins: Option<u64>,
-    raw: bool,
-    dry_run: bool,
-    force: bool,
-    json: bool,
-    user_id: String,
-    profile: Option<String>,
-    region: Option<String>,
-    helper: Option<String>,
+pub(in crate::cli) struct CloudSessionsSyncRequest {
+    pub(super) sessions_dir: Option<String>,
+    pub(super) since_days: Option<u64>,
+    pub(super) all: bool,
+    pub(super) max: usize,
+    pub(super) min_interval_mins: Option<u64>,
+    pub(super) raw: bool,
+    pub(super) dry_run: bool,
+    pub(super) force: bool,
+    pub(super) json: bool,
+    pub(super) user_id: String,
+    pub(super) profile: Option<String>,
+    pub(super) region: Option<String>,
+    pub(super) helper: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
-struct CloudSessionsSyncState {
+pub(in crate::cli) struct CloudSessionsSyncState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    last_sync_at: Option<String>,
+    pub(super) last_sync_at: Option<String>,
     #[serde(default)]
-    sessions: std::collections::BTreeMap<String, CloudSessionsSyncRecord>,
+    pub(super) sessions: std::collections::BTreeMap<String, CloudSessionsSyncRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CloudSessionsSyncRecord {
+pub(super) struct CloudSessionsSyncRecord {
     sha256: String,
     size: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,18 +440,18 @@ struct CloudSessionsSyncReport {
     entries: Vec<CloudSessionsSyncEntry>,
 }
 
-struct SyncCandidate {
-    session_id: String,
-    path: PathBuf,
-    size: u64,
-    modified_unix: Option<i64>,
+pub(in crate::cli) struct SyncCandidate {
+    pub(in crate::cli) session_id: String,
+    pub(in crate::cli) path: PathBuf,
+    pub(in crate::cli) size: u64,
+    pub(in crate::cli) modified_unix: Option<i64>,
 }
 
-fn cloud_sessions_sync_state_path() -> Result<PathBuf> {
+pub(in crate::cli) fn cloud_sessions_sync_state_path() -> Result<PathBuf> {
     Ok(crate::storage::jcode_dir()?.join("cloud_sessions_sync.json"))
 }
 
-fn load_cloud_sessions_sync_state() -> Result<CloudSessionsSyncState> {
+pub(in crate::cli) fn load_cloud_sessions_sync_state() -> Result<CloudSessionsSyncState> {
     let path = cloud_sessions_sync_state_path()?;
     if !path.exists() {
         return Ok(CloudSessionsSyncState::default());
@@ -451,7 +462,7 @@ fn load_cloud_sessions_sync_state() -> Result<CloudSessionsSyncState> {
         .map_err(|err| anyhow::anyhow!("failed to parse {}: {err}", path.display()))
 }
 
-fn save_cloud_sessions_sync_state(state: &CloudSessionsSyncState) -> Result<PathBuf> {
+pub(in crate::cli) fn save_cloud_sessions_sync_state(state: &CloudSessionsSyncState) -> Result<PathBuf> {
     let path = cloud_sessions_sync_state_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -497,7 +508,7 @@ fn expand_home_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-fn is_syncable_session_stem(stem: &str) -> bool {
+pub(in crate::cli) fn is_syncable_session_stem(stem: &str) -> bool {
     (stem.starts_with("session_") || stem.starts_with("imported_")) && !stem.ends_with(".journal")
 }
 
@@ -511,7 +522,7 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-fn collect_sync_candidates(dir: &Path) -> Result<Vec<SyncCandidate>> {
+pub(in crate::cli) fn collect_sync_candidates(dir: &Path) -> Result<Vec<SyncCandidate>> {
     let mut candidates = Vec::new();
     if !dir.exists() {
         anyhow::bail!("sessions directory not found: {}", dir.display());
@@ -589,7 +600,7 @@ fn run_jade_upload(
     Ok(())
 }
 
-fn run_cloud_sessions_sync(request: CloudSessionsSyncRequest) -> Result<()> {
+pub(in crate::cli) fn run_cloud_sessions_sync(request: CloudSessionsSyncRequest) -> Result<()> {
     let config = load_cloud_sessions_config()?.unwrap_or_default();
     let helper_override = request.helper.clone().or_else(|| config.helper.clone());
     let user_id = config_or_default_user_id(request.user_id.clone(), &config);
@@ -780,10 +791,16 @@ fn run_cloud_sessions_sync(request: CloudSessionsSyncRequest) -> Result<()> {
     Ok(())
 }
 
-mod dashboard;
+#[cfg(test)]
+pub(in crate::cli) use dashboard::{
+    CloudSessionListItem, dashboard_views_dir, parse_cloud_session_list_json, relative_link,
+    render_cloud_sessions_dashboard_html, sanitize_filename,
+};
+
+pub(super) mod dashboard;
 
 use dashboard::{CloudSessionsDashboardRequest, run_cloud_sessions_dashboard};
-fn cloud_sessions_helper_env(config: &CloudSessionsConfig) -> Vec<(&'static str, String)> {
+pub(in crate::cli) fn cloud_sessions_helper_env(config: &CloudSessionsConfig) -> Vec<(&'static str, String)> {
     let mut env = Vec::new();
     if let Some(api_base) = non_empty(config.api_base.clone()) {
         env.push(("JADE_API_BASE", api_base));
@@ -827,11 +844,11 @@ fn append_common_jade_args(
 }
 
 #[cfg(test)]
-fn build_jade_sessions_args(action: CloudSessionsSubcommand) -> Vec<String> {
+pub(in crate::cli) fn build_jade_sessions_args(action: CloudSessionsSubcommand) -> Vec<String> {
     build_jade_sessions_args_with_config(action, &CloudSessionsConfig::default())
 }
 
-fn build_jade_sessions_args_with_config(
+pub(in crate::cli) fn build_jade_sessions_args_with_config(
     action: CloudSessionsSubcommand,
     config: &CloudSessionsConfig,
 ) -> Vec<String> {
@@ -954,7 +971,7 @@ fn build_jade_sessions_args_with_config(
     }
 }
 
-fn resolve_jade_sessions_helper(override_path: Option<&str>) -> Result<PathBuf> {
+pub(in crate::cli) fn resolve_jade_sessions_helper(override_path: Option<&str>) -> Result<PathBuf> {
     if let Some(path) = override_path.map(str::trim).filter(|path| !path.is_empty()) {
         return Ok(PathBuf::from(path));
     }

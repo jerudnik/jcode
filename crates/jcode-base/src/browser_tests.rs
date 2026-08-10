@@ -102,7 +102,7 @@ fn test_should_prompt_extension_install_only_before_setup_complete() {
 fn setup_complete_requires_native_host_binary() {
     let _guard = crate::storage::lock_test_env();
     let prev_home = std::env::var_os("JCODE_HOME");
-    let temp = tempfile::TempDir::new().expect("create temp dir");
+    let temp = crate::storage::RuntimePaths::test_root("jcode-browser-home-");
     crate::env::set_var("JCODE_HOME", temp.path());
 
     std::fs::create_dir_all(browser_dir()).expect("create browser dir");
@@ -161,7 +161,7 @@ fn ensure_browser_session_fails_fast_when_session_process_exits_immediately() {
     use std::time::{Duration, Instant};
 
     let _guard = crate::storage::lock_test_env();
-    let temp = tempfile::TempDir::new().expect("create temp dir");
+    let temp = crate::storage::RuntimePaths::test_root("jcode-browser-session-");
     let _home = TestEnvVarGuard::set("JCODE_HOME", temp.path());
     let runtime_dir = temp.path().join("runtime");
     std::fs::create_dir_all(&runtime_dir).expect("create runtime dir");
@@ -196,7 +196,7 @@ fn ensure_browser_session_does_not_pass_unsupported_bind_window_flag() {
 
     let _guard = crate::storage::lock_test_env();
     let prev_home = std::env::var_os("JCODE_HOME");
-    let temp = tempfile::TempDir::new().expect("create temp dir");
+    let temp = crate::storage::RuntimePaths::test_root("jcode-browser-session-");
     crate::env::set_var("JCODE_HOME", temp.path());
 
     let browser_dir = temp.path().join("browser");

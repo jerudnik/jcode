@@ -1,7 +1,8 @@
+use super::clipboard::parse_dropped_paths;
 use super::*;
 
 impl App {
-    pub(super) fn submit_input(&mut self) {
+    pub(in crate::tui::app) fn submit_input(&mut self) {
         promote_dropped_images(self);
         if self.activate_picker_from_preview() {
             return;
@@ -52,15 +53,15 @@ impl App {
             || commands::handle_log_command(self, trimmed)
             || commands::handle_diff_command(self, trimmed)
             || commands::handle_model_status_command(self, trimmed)
-            || super::debug::handle_debug_command(self, trimmed)
-            || super::model_context::handle_model_command(self, trimmed)
-            || super::commands::handle_usage_command(self, trimmed)
-            || super::productivity::handle_productivity_command(self, trimmed)
-            || super::commands::handle_feedback_command(self, trimmed)
-            || super::support::handle_support_command(self, trimmed)
-            || super::state_ui::handle_info_command(self, trimmed)
-            || super::auth::handle_auth_command(self, trimmed)
-            || super::tui_lifecycle_runtime::handle_dev_command(self, trimmed);
+            || crate::tui::app::debug::handle_debug_command(self, trimmed)
+            || crate::tui::app::model_context::handle_model_command(self, trimmed)
+            || crate::tui::app::commands::handle_usage_command(self, trimmed)
+            || crate::tui::app::productivity::handle_productivity_command(self, trimmed)
+            || crate::tui::app::commands::handle_feedback_command(self, trimmed)
+            || crate::tui::app::support::handle_support_command(self, trimmed)
+            || crate::tui::app::state_ui::handle_info_command(self, trimmed)
+            || crate::tui::app::auth::handle_auth_command(self, trimmed)
+            || crate::tui::app::tui_lifecycle_runtime::handle_dev_command(self, trimmed);
         if handled {
             if trimmed.starts_with('/') {
                 crate::telemetry::record_command_family(trimmed);
@@ -268,18 +269,18 @@ impl App {
     /// Split out of `process_queued_messages` so this is reachable from tests:
     /// that function needs a live terminal, so a refresh inlined there could be
     /// deleted without any test noticing.
-    pub(super) fn take_queued_messages_for_dispatch(&mut self) -> Vec<String> {
+    pub(in crate::tui::app) fn take_queued_messages_for_dispatch(&mut self) -> Vec<String> {
         std::mem::take(&mut self.queued_messages)
             .into_iter()
             .filter_map(|message| {
-                super::commands::refresh_poke_message_for_dispatch(self, &message)
+                crate::tui::app::commands::refresh_poke_message_for_dispatch(self, &message)
             })
             .collect()
     }
 
     /// Process all queued messages (combined into a single request)
     /// Loops until queue is empty (in case more messages are queued during processing)
-    pub(super) async fn process_queued_messages(
+    pub(in crate::tui::app) async fn process_queued_messages(
         &mut self,
         terminal: &mut DefaultTerminal,
         event_stream: &mut EventStream,
@@ -290,10 +291,14 @@ impl App {
             let queued_messages = self.take_queued_messages_for_dispatch();
             let hidden_reminders = std::mem::take(&mut self.hidden_queued_system_messages);
             let (messages, reminder, display_system_messages) =
-                super::helpers::partition_queued_messages(queued_messages, hidden_reminders);
+                crate::tui::app::helpers::partition_queued_messages(
+                    queued_messages,
+                    hidden_reminders,
+                );
             let combined = messages.join("\n\n");
             let has_combined = !combined.is_empty();
-            let preserve_visible_turn = super::commands::queued_messages_are_only_pokes(&messages);
+            let preserve_visible_turn =
+                crate::tui::app::commands::queued_messages_are_only_pokes(&messages);
 
             self.commit_pending_streaming_assistant_message();
 
@@ -302,7 +307,7 @@ impl App {
             }
 
             for msg in &messages {
-                if !super::commands::is_poke_message(msg) {
+                if !crate::tui::app::commands::is_poke_message(msg) {
                     self.push_display_message(DisplayMessage::user(msg.clone()));
                 }
             }
@@ -387,7 +392,7 @@ impl App {
         }
     }
 
-    pub(super) fn flush_pending_session_save(&mut self) {
+    pub(in crate::tui::app) fn flush_pending_session_save(&mut self) {
         if !self.session_save_pending {
             return;
         }
