@@ -20,6 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install Nix
+        uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
