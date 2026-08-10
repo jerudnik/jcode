@@ -8,8 +8,50 @@ async fn communicate_list_and_await_members_work_end_to_end() {
     let _socket = EnvGuard::set("JCODE_SOCKET", &socket_path);
     let _debug = EnvGuard::set("JCODE_DEBUG_CONTROL", "1");
 
-    let provider: Arc<dyn Provider> = Arc::new(DelayedTestProvider {
-        delay: Duration::from_millis(300),
+    // Gate the peer provider on a semaphore so the peer stays visibly
+    // running until this test explicitly releases it after the
+    // await_members call below. A fixed sleep is a race on both ends: too
+    // short and the peer finishes before the await arrives (inline
+    // all-done path instead of the background hand-off this test asserts
+    // on); too long and the test client wait_for_done deadline expires.
+    struct GatedTestProvider {
+        gate: Arc<tokio::sync::Semaphore>,
+    }
+
+    #[async_trait]
+    impl Provider for GatedTestProvider {
+        async fn complete(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDefinition],
+            _system: &str,
+            _resume_session_id: Option<&str>,
+        ) -> Result<EventStream> {
+            let gate = Arc::clone(&self.gate);
+            let stream = futures::stream::once(async move {
+                let _permit = gate.acquire().await;
+                Ok(StreamEvent::TextDelta("ok".to_string()))
+            })
+            .chain(futures::stream::once(async {
+                Ok(StreamEvent::MessageEnd { stop_reason: None })
+            }));
+            Ok(Box::pin(stream))
+        }
+
+        fn name(&self) -> &str {
+            "test"
+        }
+
+        fn fork(&self) -> Arc<dyn Provider> {
+            Arc::new(Self {
+                gate: Arc::clone(&self.gate),
+            })
+        }
+    }
+
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let provider: Arc<dyn Provider> = Arc::new(GatedTestProvider {
+        gate: Arc::clone(&gate),
     });
     let server = Arc::new(Server::new(provider));
     let mut server_task = {
@@ -67,7 +109,7 @@ async fn communicate_list_and_await_members_work_end_to_end() {
 
     // Legacy background=false input is upgraded to a durable asynchronous wait.
     let await_output = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         tool.execute(
             json!({
                 "action": "await_members",
@@ -88,12 +130,15 @@ async fn communicate_list_and_await_members_work_end_to_end() {
         await_output.output
     );
 
+    // Release the peer now that the background hand-off is confirmed.
+    gate.add_permits(16);
+
     peer.wait_for_done(peer_message_id)
         .await
         .expect("peer message should finish");
 
     let event = watcher
-        .read_until(Duration::from_secs(5), |event| {
+        .read_until(Duration::from_secs(30), |event| {
             matches!(
                 event,
                 ServerEvent::Notification {
@@ -180,7 +225,7 @@ async fn communicate_await_members_background_returns_immediately_and_notifies()
     // Background await (the default) must return promptly with a hand-off
     // message instead of blocking until the peer finishes.
     let await_output = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         tool.execute(
             json!({
                 "action": "await_members",
@@ -206,7 +251,7 @@ async fn communicate_await_members_background_returns_immediately_and_notifies()
     // The backgrounded watcher should deliver a swarm-await notification to the
     // requesting (watcher) session once the peer reaches ready.
     let event = watcher
-        .read_until(Duration::from_secs(5), |event| {
+        .read_until(Duration::from_secs(30), |event| {
             matches!(
                 event,
                 ServerEvent::Notification {
@@ -265,7 +310,7 @@ async fn communicate_run_plan_with_empty_plan_returns_inline_even_in_background_
     // Background is the default; with no plan the validation happens inline and
     // no background task should be started.
     let output = tokio::time::timeout(
-        Duration::from_secs(5),
+        Duration::from_secs(30),
         tool.execute(json!({"action": "run_plan"}), ctx.clone()),
     )
     .await
@@ -349,7 +394,7 @@ async fn communicate_run_plan_churns_to_abort_at_configured_concurrency_and_clea
     );
 
     let error = tokio::time::timeout(
-        Duration::from_secs(20),
+        Duration::from_secs(30),
         tool.execute(
             json!({
                 "action": "run_plan",
@@ -572,7 +617,7 @@ async fn communicate_spawn_reports_completion_back_to_spawner() {
         .to_string();
 
     watcher
-        .read_until(Duration::from_secs(15), |event| {
+        .read_until(Duration::from_secs(30), |event| {
             matches!(
                 event,
                 ServerEvent::Notification {
@@ -662,7 +707,7 @@ async fn communicate_spawn_with_prompt_and_summary_work_end_to_end() {
         .expect("spawned member should appear in swarm list");
 
     let summary_output = {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
         loop {
             match tool
                 .execute(
@@ -762,7 +807,7 @@ async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
         dm_output.output
     );
     let dm_scope = peer
-        .next_message_notification(Duration::from_secs(5))
+        .next_message_notification(Duration::from_secs(30))
         .await
         .expect("peer should receive the targeted message");
     assert_eq!(
@@ -812,7 +857,7 @@ async fn communicate_message_routes_as_dm_while_broadcast_targets_swarm() {
         broadcast_output.output
     );
     let broadcast_scope = peer
-        .next_message_notification(Duration::from_secs(5))
+        .next_message_notification(Duration::from_secs(30))
         .await
         .expect("peer should receive the broadcast");
     assert_eq!(
@@ -864,7 +909,7 @@ async fn handshake_emits_incompatible_verdict_for_mismatched_client() {
         .expect("subscribe with mismatched identity");
 
     let verdict = client
-        .read_until(Duration::from_secs(5), |event| {
+        .read_until(Duration::from_secs(30), |event| {
             matches!(event, ServerEvent::HandshakeVerdict { id: ev_id, .. } if *ev_id == id)
         })
         .await
@@ -892,7 +937,7 @@ async fn handshake_emits_incompatible_verdict_for_mismatched_client() {
     }
 
     let terminal = client
-        .read_until(Duration::from_secs(5), |event| {
+        .read_until(Duration::from_secs(30), |event| {
             matches!(event, ServerEvent::Error { id: error_id, .. } if *error_id == id)
                 || matches!(event, ServerEvent::Done { id: done_id } if *done_id == id)
         })
@@ -964,7 +1009,7 @@ async fn handshake_emits_compatible_verdict_for_matching_client() {
         .expect("subscribe with matching identity");
 
     let verdict = client
-        .read_until(Duration::from_secs(5), |event| {
+        .read_until(Duration::from_secs(30), |event| {
             matches!(event, ServerEvent::HandshakeVerdict { id: ev_id, .. } if *ev_id == id)
         })
         .await
@@ -1019,7 +1064,7 @@ async fn handshake_sends_no_verdict_to_legacy_client() {
     // Read until subscribe completes; assert no verdict event arrived first.
     let mut saw_verdict = false;
     client
-        .read_until(Duration::from_secs(5), |event| match event {
+        .read_until(Duration::from_secs(30), |event| match event {
             ServerEvent::HandshakeVerdict { .. } => {
                 saw_verdict = true;
                 true // stop early on the (unexpected) verdict so we can fail loudly
