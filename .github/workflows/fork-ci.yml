@@ -16,7 +16,10 @@ jobs:
   rust:
     name: Rust checks
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # full-test rebuilds release for the explicit host target and runs the
+    # whole suite; 45 minutes gets cancelled mid-run on a cold cache. The old
+    # Linux test job allowed 90.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
 
