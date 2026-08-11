@@ -6,10 +6,15 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import sys
 import tomllib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from check_workflow_permissions import WorkflowPermissionChecker
+from check_reusable_workflow_calls import ReusableWorkflowCallChecker
 
 RETIRED_PATHS = (
     "ios",
@@ -77,12 +82,12 @@ SKIPPED_DIRECTORIES = frozenset(
 # zero files, which is the exact failure mode F30-FIX-1 was filed for.
 MIN_SCANNED_ACTIVE_DOCS = 60
 
-# F30-FIX-3: workflows inherited from upstream are kept byte-close to the fork
-# point and are dispatch-only, so they are deliberately not linted. Every other
-# workflow is fork-owned and must be. Listing the exemptions rather than the
-# covered set means a newly added workflow is linted by default; the previous
-# hardcoded lint list silently omitted governance-root.yml for three weeks.
-UNLINTED_UPSTREAM_WORKFLOWS = frozenset({"ci.yml", "freebsd-smoke.yml"})
+# F30-FIX-3: freebsd-smoke.yml remains an upstream, manual-only compatibility
+# check, so it is deliberately not linted. Every other workflow is fork-owned
+# and must be. Listing the exemption rather than the covered set means a newly
+# added workflow is linted by default; the previous hardcoded lint list silently
+# omitted governance-root.yml for three weeks.
+UNLINTED_UPSTREAM_WORKFLOWS = frozenset({"freebsd-smoke.yml"})
 
 # F30-FIX-2: the substring list missed the AUR, curl-pipe, and PowerShell-pipe
 # install idioms entirely. These are regexes rather than substrings because the
@@ -176,6 +181,12 @@ FORBIDDEN_ACTIVE_DOC_TEXT = (
 
 
 class NixOnlyDistributionPolicy(unittest.TestCase):
+    def test_reusable_workflow_calls_follow_github_policy(self) -> None:
+        ReusableWorkflowCallChecker(ROOT).check()
+
+    def test_reusable_workflow_permissions_never_elevate(self) -> None:
+        self.assertEqual([], WorkflowPermissionChecker(ROOT).check())
+
     def test_retired_paths_are_absent(self) -> None:
         for relative in RETIRED_PATHS:
             with self.subTest(path=relative):
@@ -390,6 +401,27 @@ class NixOnlyDistributionPolicy(unittest.TestCase):
                     f"exempt workflow {name} no longer exists; drop it from "
                     "UNLINTED_UPSTREAM_WORKFLOWS instead of leaving a dead exemption",
                 )
+
+    def test_actionlint_ci_uses_the_flake_locked_compatibility_package(self) -> None:
+        nix_workflow = (ROOT / ".github/workflows/nix.yml").read_text()
+        flake = (ROOT / "flake.nix").read_text()
+
+        self.assertIn("nix run .#actionlint --", nix_workflow)
+        self.assertNotIn("nix run nixpkgs#actionlint", nix_workflow)
+        self.assertIn("inherit actionlint jcode;", flake)
+        self.assertIn("nativeBuildInputs = [ actionlint ];", flake)
+
+    def test_actionlint_compatibility_patch_is_narrow_and_fail_closed(self) -> None:
+        flake = (ROOT / "flake.nix").read_text()
+
+        self.assertEqual(2, flake.count("--replace-fail"))
+        self.assertEqual(1, flake.count('\\t"code-quality":        {"read", "write", "none"}'))
+        self.assertEqual(1, flake.count('\\t"vulnerability-alerts": {"read", "none"}'))
+        self.assertIn("models: read", flake)
+        self.assertIn("repository-projects: write", flake)
+        self.assertIn("code-quality: admin", flake)
+        self.assertIn("vulnerability-alerts: write", flake)
+        self.assertIn("future-scope: read", flake)
 
     def test_distribution_doc_scan_is_not_vacuous(self) -> None:
         """A gate that scans nothing reports OK. Make that state fail RED."""

@@ -41,8 +41,12 @@ jobs:
         uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31 cachix/install-nix-action@v31
 
       - name: Lint fork-owned workflows
+        # Uses the flake-locked .#actionlint compatibility package so CI and
+        # the flake workflow-syntax check agree on parser behavior.
+        # freebsd-smoke.yml remains the sole upstream exemption.
         run: |
-          nix shell nixpkgs#actionlint --command actionlint \
+          nix run .#actionlint -- \
+            .github/workflows/ci.yml \
             .github/workflows/docs-impact.yml \
             .github/workflows/fork-ci.yml \
             .github/workflows/fork-health.yml \
@@ -54,6 +58,11 @@ jobs:
             .github/workflows/release.yml \
             .github/workflows/scheduled.yml \
             .github/workflows/governance-root.yml
+
+          python3 scripts/check_reusable_workflow_calls.py .
+          python3 tests/test_reusable_workflow_calls.py
+          python3 scripts/check_workflow_permissions.py .
+          python3 -m unittest tests.test_workflow_permissions
 
       - name: Run package recipe
         run: nix shell nixpkgs#just -c just package

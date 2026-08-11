@@ -1,0 +1,8 @@
+on: push
+permissions:
+  contents: read
+jobs:
+  call:
+    permissions:
+      contents: read
+    uses: octo-org/central/.github/workflows/build.yml@0123456789abcdef0123456789abcdef01234567

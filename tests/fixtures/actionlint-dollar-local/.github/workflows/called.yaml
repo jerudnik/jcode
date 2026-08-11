@@ -1,0 +1,26 @@
+name: Dollar-local callee
+
+on:
+  workflow_call:
+    inputs:
+      required-input:
+        required: true
+        type: string
+    secrets:
+      required-secret:
+        required: true
+    outputs:
+      result:
+        value: ${{ jobs.build.outputs.result }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.result.outputs.value }}
+    steps:
+      - id: result
+        run: echo "value=${{ inputs.required-input }}" >> "$GITHUB_OUTPUT"

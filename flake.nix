@@ -92,6 +92,8 @@
               ./Cargo.lock
               ./scripts/clean_target.sh
               ./scripts/check_agent_instructions.py
+              ./scripts/check_reusable_workflow_calls.py
+              ./scripts/check_workflow_permissions.py
               ./scripts/dev_cargo.sh
               ./scripts/docs_impact_advisory.py
               ./scripts/preflight.sh
@@ -101,6 +103,11 @@
               ./scripts/test_docs_impact_advisory.py
               ./scripts/test_fast.sh
               ./scripts/test_incremental_policy.sh
+              ./scripts/governance_compare.py
+              ./tests/test_reusable_workflow_calls.py
+              ./tests/test_workflow_permissions.py
+              ./tests/fixtures/actionlint-dollar-local
+              ./tests/fixtures/workflow_permissions
               ./.apm/instructions
               ./.jcode/preferred-tools.md
               ./.jcode/prompt-overlay.md
@@ -112,6 +119,7 @@
               ./docs/SWARM_TASK_GRAPH.md
               ./CONTRIBUTING.md
               ./RELEASING.md
+              ./.github/workflows/ci.yml
               ./.github/workflows/docs-impact.yml
               ./.github/workflows/fork-ci.yml
               ./.github/workflows/fork-health.yml
@@ -123,6 +131,9 @@
               ./.github/workflows/release.yml
               ./.github/workflows/scheduled.yml
               ./.github/workflows/governance-root.yml
+              # Not linted (sole upstream exemption), but ci.yml calls it, so
+              # the reusable-call policy check needs it present.
+              ./.github/workflows/freebsd-smoke.yml
             ];
           };
 
@@ -198,13 +209,32 @@
               ;
             sbom = jcode-sbom;
           };
+
+          # Keep actionlint 1.7.12 aligned with GitHub.com's documented
+          # permissions and same-repository reusable-workflow syntax. Patch its
+          # parser and tables rather than filtering diagnostics so local
+          # metadata checks, unknown scopes, and invalid access levels remain
+          # fail closed.
+          actionlint = pkgs.actionlint.overrideAttrs (old: {
+            patches = (old.patches or [ ]) ++ [ ./nix/actionlint-dollar-local-workflows.patch ];
+            postPatch = (old.postPatch or "") + ''
+              substituteInPlace rule_permissions.go \
+                --replace-fail \
+                  $'\t"checks":              {"read", "write", "none"},' \
+                  $'\t"checks":              {"read", "write", "none"},\n\t"code-quality":        {"read", "write", "none"},'
+              substituteInPlace rule_permissions.go \
+                --replace-fail \
+                  $'\t"statuses":            {"read", "write", "none"},' \
+                  $'\t"statuses":            {"read", "write", "none"},\n\t"vulnerability-alerts": {"read", "none"},'
+            '';
+          });
         in
         {
           _module.args.pkgs = pkgs;
 
           packages = {
             default = jcode;
-            inherit jcode;
+            inherit actionlint jcode;
 
             # The ~900-crate dependency layer, exposed so CI can publish it to
             # Cachix. `nix/package.nix` deliberately keeps per-commit build
@@ -313,11 +343,12 @@
               pkgs.runCommand "jcode-workflow-syntax-check"
                 {
                   src = checkSrc;
-                  nativeBuildInputs = [ pkgs.actionlint ];
+                  nativeBuildInputs = [ actionlint ];
                 }
                 ''
                   cd "$src"
                   actionlint \
+                    .github/workflows/ci.yml \
                     .github/workflows/docs-impact.yml \
                     .github/workflows/fork-ci.yml \
                     .github/workflows/fork-health.yml \
@@ -329,6 +360,106 @@
                     .github/workflows/release.yml \
                     .github/workflows/scheduled.yml \
                     .github/workflows/governance-root.yml
+
+                  ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py .
+                  ${pkgs.python3}/bin/python3 tests/test_reusable_workflow_calls.py
+                  ${pkgs.python3}/bin/python3 scripts/check_workflow_permissions.py .
+                  ${pkgs.python3}/bin/python3 -m unittest tests.test_workflow_permissions
+
+                  dollar_fixture="$TMPDIR/actionlint-dollar-local-valid"
+                  cp -R "$src/tests/fixtures/actionlint-dollar-local" "$dollar_fixture"
+                  chmod -R u+w "$dollar_fixture"
+                  mkdir "$dollar_fixture/.git"
+                  (
+                    cd "$dollar_fixture"
+                    actionlint .github/workflows/caller.yml .github/workflows/called.yaml
+                  )
+                  ${pkgs.python3}/bin/python3 scripts/check_reusable_workflow_calls.py "$dollar_fixture"
+                  ${pkgs.python3}/bin/python3 scripts/check_workflow_permissions.py "$dollar_fixture"
+
+                  fixture_dir="$TMPDIR/actionlint-permissions"
+                  mkdir -p "$fixture_dir"
+                  cat > "$fixture_dir/supported.yml" <<'EOF'
+                  name: Supported permissions
+                  on: push
+                  permissions:
+                    code-quality: write
+                    vulnerability-alerts: read
+                    models: read
+                    repository-projects: write
+                  jobs:
+                    valid:
+                      runs-on: ubuntu-latest
+                      steps:
+                        - run: 'true'
+                  EOF
+                  actionlint "$fixture_dir/supported.yml"
+
+                  assert_rejected() {
+                    fixture="$1"
+                    expected="$2"
+                    output="$fixture_dir/actionlint.out"
+                    if actionlint "$fixture" > "$output" 2>&1; then
+                      echo "actionlint unexpectedly accepted $fixture" >&2
+                      exit 1
+                    fi
+                    grep -F "$expected" "$output"
+                  }
+
+                  dollar_negative="$TMPDIR/actionlint-dollar-local"
+                  cp -R "$dollar_fixture" "$dollar_negative"
+                  chmod -R u+w "$dollar_negative"
+
+                  sed '/    with:/,+1d' \
+                    "$dollar_fixture/.github/workflows/caller.yml" \
+                    > "$dollar_negative/.github/workflows/missing-input.yml"
+                  (
+                    cd "$dollar_negative"
+                    assert_rejected .github/workflows/missing-input.yml \
+                      'input "required-input" is required by "$/.github/workflows/called.yaml" reusable workflow'
+                  )
+
+                  sed '/    secrets:/,+1d' \
+                    "$dollar_fixture/.github/workflows/caller.yml" \
+                    > "$dollar_negative/.github/workflows/missing-secret.yml"
+                  (
+                    cd "$dollar_negative"
+                    assert_rejected .github/workflows/missing-secret.yml \
+                      'secret "required-secret" is required by "$/.github/workflows/called.yaml" reusable workflow'
+                  )
+
+                  sed 's/needs.call.outputs.result/needs.call.outputs.unknown/' \
+                    "$dollar_fixture/.github/workflows/caller.yml" \
+                    > "$dollar_negative/.github/workflows/unknown-output.yml"
+                  (
+                    cd "$dollar_negative"
+                    assert_rejected .github/workflows/unknown-output.yml \
+                      'property "unknown" is not defined in object type'
+                  )
+
+                  sed 's|called.yaml|called.yaml@main|' \
+                    "$dollar_fixture/.github/workflows/caller.yml" \
+                    > "$dollar_negative/.github/workflows/local-ref.yml"
+                  (
+                    cd "$dollar_negative"
+                    assert_rejected .github/workflows/local-ref.yml \
+                      'reusable workflow call "$/.github/workflows/called.yaml@main"'
+                  )
+
+                  sed 's/code-quality: write/code-quality: admin/' \
+                    "$fixture_dir/supported.yml" > "$fixture_dir/invalid-access.yml"
+                  assert_rejected "$fixture_dir/invalid-access.yml" \
+                    '"admin" is invalid as permission of scope "code-quality"'
+
+                  sed 's/vulnerability-alerts: read/vulnerability-alerts: write/' \
+                    "$fixture_dir/supported.yml" > "$fixture_dir/invalid-read-only-access.yml"
+                  assert_rejected "$fixture_dir/invalid-read-only-access.yml" \
+                    '"write" is invalid as permission of scope "vulnerability-alerts"'
+
+                  sed 's/code-quality: write/future-scope: read/' \
+                    "$fixture_dir/supported.yml" > "$fixture_dir/unknown-scope.yml"
+                  assert_rejected "$fixture_dir/unknown-scope.yml" \
+                    'unknown permission scope "future-scope"'
                   touch "$out"
                 '';
 

@@ -1,0 +1,20 @@
+name: Dollar-local caller
+
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  call:
+    uses: $/.github/workflows/called.yaml
+    with:
+      required-input: fixture
+    secrets:
+      required-secret: ${{ secrets.REQUIRED_SECRET }}
+
+  consume:
+    needs: call
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ needs.call.outputs.result }}"

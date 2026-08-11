@@ -1,0 +1,9 @@
+on: push
+permissions:
+  contents: read
+jobs:
+  call:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/callee.yml
+    secrets: inherit
