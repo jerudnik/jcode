@@ -2132,54 +2132,84 @@ fn observed_pin_yields_to_explicit_user_routing_order() {
 }
 
 #[test]
-fn test_kimi_coding_header_detection_matches_endpoint_and_model() {
-    assert!(should_send_kimi_coding_agent_headers(
-        "https://api.kimi.com/coding/v1",
-        None,
+fn test_coding_agent_header_detection_is_scoped_to_known_endpoints() {
+    assert!(is_kimi_coding_api_base("https://api.kimi.com/coding/v1"));
+    assert!(is_coding_agent_api_base(
+        "https://coding.dashscope.aliyuncs.com/v1"
     ));
-    assert!(should_send_kimi_coding_agent_headers(
-        "https://coding.dashscope.aliyuncs.com/v1",
-        None,
+    assert!(is_coding_agent_api_base(
+        "https://coding-intl.dashscope.aliyuncs.com/v1"
     ));
-    assert!(should_send_kimi_coding_agent_headers(
-        "https://coding-intl.dashscope.aliyuncs.com/v1",
-        None,
+    assert!(is_coding_agent_api_base(
+        "https://api.z.ai/api/coding/paas/v4"
     ));
-    assert!(should_send_kimi_coding_agent_headers(
-        "https://api.z.ai/api/coding/paas/v4",
-        None,
-    ));
-    assert!(should_send_kimi_coding_agent_headers(
-        "https://example.com/v1",
-        Some("kimi-for-coding"),
-    ));
-    assert!(should_send_kimi_coding_agent_headers(
-        "https://openrouter.ai/api/v1",
-        Some("moonshotai/kimi-k2.5"),
-    ));
-    assert!(!should_send_kimi_coding_agent_headers(
-        "https://api.openrouter.ai/api/v1",
-        Some("anthropic/claude-sonnet-4"),
-    ));
+    assert!(!is_coding_agent_api_base("https://example.com/v1"));
+    assert!(!is_coding_agent_api_base("https://openrouter.ai/api/v1"));
 }
 
-#[test]
-fn test_openrouter_kimi_chat_request_includes_compat_user_agent() {
-    let request = apply_kimi_coding_agent_headers(
-        Client::new().post("https://openrouter.ai/api/v1/chat/completions"),
-        "https://openrouter.ai/api/v1",
-        Some("moonshotai/kimi-k2.5"),
+#[tokio::test]
+async fn kimi_api_key_request_uses_bearer_auth_and_jcode_user_agent() {
+    let auth = ProviderAuth::AuthorizationBearer {
+        token: "sk-kimi-test".to_string(),
+        label: "KIMI_API_KEY".to_string(),
+    };
+    let request = apply_coding_agent_headers(
+        auth.apply(Client::new().post("https://api.kimi.com/coding/v1/chat/completions"))
+            .await
+            .expect("apply auth"),
+        "https://api.kimi.com/coding/v1",
+        &auth,
     )
+    .expect("apply Kimi headers")
     .build()
     .expect("build request");
+    assert_eq!(
+        request
+            .headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("Bearer sk-kimi-test")
+    );
     assert!(
         request
             .headers()
             .get("User-Agent")
             .and_then(|value| value.to_str().ok())
-            == Some(KIMI_CODING_USER_AGENT),
-        "Kimi OpenRouter chat request should include compatibility User-Agent"
+            .is_some_and(|value| value.starts_with("Jcode/")),
+        "Kimi API-key requests should identify jcode truthfully"
     );
+}
+
+#[test]
+fn kimi_oauth_unauthorized_refreshes_exactly_once() {
+    let oauth = ProviderAuth::KimiOAuth {
+        label: "Kimi OAuth".to_string(),
+    };
+    let api_key = ProviderAuth::AuthorizationBearer {
+        token: "sk-kimi-test".to_string(),
+        label: "KIMI_API_KEY".to_string(),
+    };
+
+    assert!(should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &oauth,
+        false,
+    ));
+    assert!(!should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &oauth,
+        true,
+    ));
+    assert!(!should_refresh_after_unauthorized(
+        reqwest::StatusCode::FORBIDDEN,
+        &oauth,
+        false,
+    ));
+    assert!(!should_refresh_after_unauthorized(
+        reqwest::StatusCode::UNAUTHORIZED,
+        &api_key,
+        false,
+    ));
 }
 
 #[test]

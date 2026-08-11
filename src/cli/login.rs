@@ -103,6 +103,14 @@ enum PendingScriptableLogin {
         verification_uri: String,
         interval: u64,
     },
+    Kimi {
+        device_code: String,
+        user_code: String,
+        verification_uri: String,
+        verification_uri_complete: String,
+        expires_in: Option<u64>,
+        interval: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +128,7 @@ impl PendingScriptableLogin {
             Self::Antigravity { .. } => "antigravity",
             Self::Google { .. } => "google",
             Self::Copilot { .. } => "copilot",
+            Self::Kimi { .. } => "kimi",
         }
     }
 
@@ -294,6 +303,14 @@ pub async fn run_login_provider(
                 login_bedrock_flow().map(|_| LoginFlowOutcome::Completed)
             }
             LoginProviderTarget::Azure => login_azure_flow().map(|_| LoginFlowOutcome::Completed),
+            LoginProviderTarget::OpenAiCompatible(profile)
+                if profile.id == crate::provider_catalog::KIMI_PROFILE.id
+                    && options.openai_compatible_api_key.is_none() =>
+            {
+                login_kimi_flow(options.no_browser)
+                    .await
+                    .map(|_| LoginFlowOutcome::Completed)
+            }
             LoginProviderTarget::OpenAiCompatible(profile) => {
                 login_openai_compatible_flow(&profile, &options)
                     .map(|_| LoginFlowOutcome::Completed)
@@ -646,6 +663,26 @@ fn login_openrouter_flow() -> Result<()> {
     Ok(())
 }
 
+async fn login_kimi_flow(no_browser: bool) -> Result<()> {
+    eprintln!("Logging in to Kimi Code with your browser...");
+    let device = auth::kimi::request_device_authorization().await?;
+    eprintln!("Verification URL: {}", device.verification_uri_complete);
+    eprintln!("User code: {}", device.user_code);
+    if maybe_open_browser(&device.verification_uri_complete, no_browser) {
+        eprintln!("Opened the verification URL in your browser.");
+    } else {
+        eprintln!("Open the verification URL above to continue.");
+    }
+    eprintln!("Waiting for Kimi authorization...");
+    let tokens = auth::kimi::poll_for_tokens(&device).await?;
+    auth::kimi::save_tokens(&tokens)?;
+    auth::kimi::set_auth_mode(Some(auth::kimi::KimiAuthMode::OAuth))?;
+    eprintln!("Successfully logged in to Kimi Code!");
+    eprintln!("Tokens saved to {}", auth::kimi::tokens_path()?.display());
+    crate::telemetry::record_auth_success("kimi", "oauth_device_code");
+    Ok(())
+}
+
 fn login_bedrock_flow() -> Result<()> {
     eprintln!("Setting up AWS Bedrock...");
     eprintln!(
@@ -889,6 +926,9 @@ fn login_openai_compatible_flow(
             None,
         )?;
         save_named_api_key(&resolved.env_file, &resolved.api_key_env, &key)?;
+        if profile.id == crate::provider_catalog::KIMI_PROFILE.id {
+            auth::kimi::set_auth_mode(Some(auth::kimi::KimiAuthMode::ApiKey))?;
+        }
         eprintln!("\nSuccessfully saved {} API key!", resolved.display_name);
         "api_key"
     } else {

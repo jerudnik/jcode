@@ -17,6 +17,11 @@ pub(super) fn auto_scriptable_flow_reason(
             | LoginProviderTarget::Antigravity
             | LoginProviderTarget::Google
             | LoginProviderTarget::Copilot
+    ) || matches!(
+        provider.target,
+        LoginProviderTarget::OpenAiCompatible(profile)
+            if profile.id == crate::provider_catalog::KIMI_PROFILE.id
+                && options.openai_compatible_api_key.is_none()
     );
     if !supports_scriptable {
         return None;
@@ -196,9 +201,30 @@ pub(super) async fn start_scriptable_login(
                 current_time_ms() + (device_resp.expires_in as i64 * 1000),
             )
         }
+        LoginProviderTarget::OpenAiCompatible(profile)
+            if profile.id == crate::provider_catalog::KIMI_PROFILE.id =>
+        {
+            let device = auth::kimi::request_device_authorization().await?;
+            let expires_at_ms =
+                current_time_ms() + (device.expires_in.unwrap_or(600) as i64 * 1000);
+            (
+                PendingScriptableLogin::Kimi {
+                    device_code: device.device_code,
+                    user_code: device.user_code.clone(),
+                    verification_uri: device.verification_uri,
+                    verification_uri_complete: device.verification_uri_complete.clone(),
+                    expires_in: device.expires_in,
+                    interval: device.interval,
+                },
+                device.verification_uri_complete,
+                "complete",
+                Some(device.user_code),
+                expires_at_ms,
+            )
+        }
         _ => {
             anyhow::bail!(
-                "`--print-auth-url` is currently supported for: claude, openai, gemini, antigravity, google, copilot."
+                "`--print-auth-url` is currently supported for: claude, openai, gemini, antigravity, google, copilot, kimi."
             )
         }
     };
@@ -270,8 +296,21 @@ pub(super) async fn complete_scriptable_login(
             }
             complete_scriptable_copilot_login(provider.id, options).await
         }
+        LoginProviderTarget::OpenAiCompatible(profile)
+            if profile.id == crate::provider_catalog::KIMI_PROFILE.id =>
+        {
+            if input.is_some() {
+                anyhow::bail!(
+                    "Kimi completion uses `--complete` and does not accept --callback-url or --auth-code."
+                )
+            }
+            if !options.complete {
+                anyhow::bail!("Kimi completion requires `--complete`.")
+            }
+            complete_scriptable_kimi_login(provider.id, options).await
+        }
         _ => anyhow::bail!(
-            "Scriptable completion is currently supported for: claude, openai, gemini, antigravity, google, copilot."
+            "Scriptable completion is currently supported for: claude, openai, gemini, antigravity, google, copilot, kimi."
         ),
     }
 }
@@ -575,6 +614,52 @@ pub(super) async fn complete_scriptable_copilot_login(
     if !options.json {
         eprintln!("✓ Authenticated as {} via GitHub Copilot", username);
         eprintln!("Saved at {}", auth::copilot::saved_hosts_path().display());
+    }
+    Ok(LoginFlowOutcome::Completed)
+}
+
+pub(super) async fn complete_scriptable_kimi_login(
+    provider_id: &str,
+    options: &LoginOptions,
+) -> Result<LoginFlowOutcome> {
+    let pending_path = pending_login_path("kimi")?;
+    let PendingScriptableLogin::Kimi {
+        device_code,
+        user_code,
+        verification_uri,
+        verification_uri_complete,
+        expires_in,
+        interval,
+    } = load_pending_login(&pending_path, "kimi")?
+    else {
+        anyhow::bail!("Pending Kimi login state is invalid.");
+    };
+    let device = auth::kimi::DeviceAuthorization {
+        device_code,
+        user_code,
+        verification_uri,
+        verification_uri_complete,
+        expires_in,
+        interval,
+    };
+    let tokens = auth::kimi::poll_for_tokens(&device).await?;
+    auth::kimi::save_tokens(&tokens)?;
+    auth::kimi::set_auth_mode(Some(auth::kimi::KimiAuthMode::OAuth))?;
+    clear_pending_login(&pending_path);
+    crate::telemetry::record_auth_success(provider_id, "oauth_device_code");
+    emit_scriptable_auth_success(
+        options.json,
+        ScriptableAuthSuccess {
+            status: "authenticated",
+            provider: provider_id.to_string(),
+            account_label: None,
+            credentials_path: Some(auth::kimi::tokens_path()?.display().to_string()),
+            email: None,
+        },
+    )?;
+    if !options.json {
+        eprintln!("Successfully logged in to Kimi Code!");
+        eprintln!("Tokens saved to {}", auth::kimi::tokens_path()?.display());
     }
     Ok(LoginFlowOutcome::Completed)
 }

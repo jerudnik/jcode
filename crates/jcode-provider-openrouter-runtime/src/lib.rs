@@ -59,8 +59,8 @@ const DEFAULT_API_BASE: &str = "https://openrouter.ai/api/v1";
 const DEFAULT_API_KEY_NAME: &str = "OPENROUTER_API_KEY";
 const DEFAULT_ENV_FILE: &str = "openrouter.env";
 const OPENROUTER_TRANSPORT_STATE_ENV: &str = "JCODE_OPENROUTER_TRANSPORT_STATE";
-const KIMI_CODING_USER_AGENT: &str = "claude-cli/1.0.0";
-const KIMI_CODING_X_APP: &str = "cli";
+const CODING_AGENT_USER_AGENT: &str = "claude-cli/1.0.0";
+const CODING_AGENT_X_APP: &str = "cli";
 
 /// Default model (Claude Sonnet via OpenRouter)
 const DEFAULT_MODEL: &str = "anthropic/claude-sonnet-4";
@@ -441,20 +441,26 @@ fn is_kimi_model_name(model: &str) -> bool {
     model.to_ascii_lowercase().contains("kimi")
 }
 
-fn should_send_kimi_coding_agent_headers(api_base: &str, model: Option<&str>) -> bool {
-    is_coding_agent_api_base(api_base) || model.map(is_kimi_model_name).unwrap_or(false)
-}
-
-fn apply_kimi_coding_agent_headers(
+fn apply_coding_agent_headers(
     req: reqwest::RequestBuilder,
     api_base: &str,
-    model: Option<&str>,
-) -> reqwest::RequestBuilder {
-    if should_send_kimi_coding_agent_headers(api_base, model) {
-        req.header("User-Agent", KIMI_CODING_USER_AGENT)
-            .header("x-app", KIMI_CODING_X_APP)
+    auth: &ProviderAuth,
+) -> Result<reqwest::RequestBuilder> {
+    if is_kimi_coding_api_base(api_base) {
+        if auth.is_kimi_oauth() {
+            jcode_base::auth::kimi::apply_identity_headers(req)
+        } else {
+            Ok(req.header(
+                reqwest::header::USER_AGENT,
+                jcode_base::auth::kimi::user_agent(),
+            ))
+        }
+    } else if is_coding_agent_api_base(api_base) {
+        Ok(req
+            .header("User-Agent", CODING_AGENT_USER_AGENT)
+            .header("x-app", CODING_AGENT_X_APP))
     } else {
-        req
+        Ok(req)
     }
 }
 
@@ -472,6 +478,9 @@ enum ProviderAuth {
     AzureEntra {
         label: String,
     },
+    KimiOAuth {
+        label: String,
+    },
     None {
         label: String,
     },
@@ -479,17 +488,39 @@ enum ProviderAuth {
 
 impl ProviderAuth {
     async fn apply(&self, req: reqwest::RequestBuilder) -> Result<reqwest::RequestBuilder> {
+        self.apply_with_observed_token(req)
+            .await
+            .map(|(request, _)| request)
+    }
+
+    async fn apply_with_observed_token(
+        &self,
+        req: reqwest::RequestBuilder,
+    ) -> Result<(reqwest::RequestBuilder, Option<String>)> {
         match self {
-            Self::AuthorizationBearer { token, .. } => Ok(req.bearer_auth(token)),
+            Self::AuthorizationBearer { token, .. } => Ok((req.bearer_auth(token), None)),
             Self::HeaderValue {
                 header_name, value, ..
-            } => Ok(req.header(header_name, value)),
+            } => Ok((req.header(header_name, value), None)),
             Self::AzureEntra { .. } => {
                 let token = jcode_base::auth::azure::get_bearer_token().await?;
-                Ok(req.bearer_auth(token))
+                Ok((req.bearer_auth(token), None))
             }
-            Self::None { .. } => Ok(req),
+            Self::KimiOAuth { .. } => {
+                let token = jcode_base::auth::kimi::access_token().await?;
+                Ok((req.bearer_auth(&token), Some(token)))
+            }
+            Self::None { .. } => Ok((req, None)),
         }
+    }
+
+    async fn refresh_after_unauthorized(&self, rejected_token: Option<&str>) -> Result<bool> {
+        let Self::KimiOAuth { .. } = self else {
+            return Ok(false);
+        };
+        let rejected_token = rejected_token.context("Kimi OAuth request token was not tracked")?;
+        jcode_base::auth::kimi::refresh_after_unauthorized(rejected_token).await?;
+        Ok(true)
     }
 
     fn label(&self) -> &str {
@@ -497,9 +528,22 @@ impl ProviderAuth {
             Self::AuthorizationBearer { label, .. } => label,
             Self::HeaderValue { label, .. } => label,
             Self::AzureEntra { label } => label,
+            Self::KimiOAuth { label } => label,
             Self::None { label } => label,
         }
     }
+
+    fn is_kimi_oauth(&self) -> bool {
+        matches!(self, Self::KimiOAuth { .. })
+    }
+}
+
+fn should_refresh_after_unauthorized(
+    status: reqwest::StatusCode,
+    auth: &ProviderAuth,
+    already_retried: bool,
+) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED && auth.is_kimi_oauth() && !already_retried
 }
 
 fn add_cache_breakpoint(messages: &mut [Message]) -> bool {
@@ -551,8 +595,10 @@ async fn fetch_models_from_api(
     cache_namespace: Option<String>,
 ) -> Result<Vec<ModelInfo>> {
     let url = jcode_base::provider_catalog::openai_compatible_models_url(&api_base);
-    let response =
-        apply_kimi_coding_agent_headers(auth.apply(client.get(&url)).await?, &api_base, None)
+    let mut retried_after_unauthorized = false;
+    let response = loop {
+        let (request, observed_token) = auth.apply_with_observed_token(client.get(&url)).await?;
+        let response = apply_coding_agent_headers(request, &api_base, &auth)?
             .timeout(METADATA_REQUEST_TIMEOUT)
             .send()
             .await
@@ -563,6 +609,16 @@ async fn fetch_models_from_api(
                     auth.label()
                 )
             })?;
+        if should_refresh_after_unauthorized(response.status(), &auth, retried_after_unauthorized)
+            && auth
+                .refresh_after_unauthorized(observed_token.as_deref())
+                .await?
+        {
+            retried_after_unauthorized = true;
+            continue;
+        }
+        break response;
+    };
 
     if !response.status().is_success() {
         let status = response.status();
@@ -809,7 +865,17 @@ pub fn maybe_schedule_openai_compatible_profile_catalog_refresh(
         return false;
     };
     let credential_source = ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved);
-    let auth = if let Some(key) = load_api_key(&credential_source) {
+    let auth = if resolved.id == jcode_base::provider_catalog::KIMI_PROFILE.id
+        && matches!(
+            jcode_base::auth::kimi::selected_auth_mode(),
+            Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
+        )
+        && jcode_base::auth::kimi::has_oauth_tokens()
+    {
+        ProviderAuth::KimiOAuth {
+            label: "Kimi OAuth".to_string(),
+        }
+    } else if let Some(key) = load_api_key(&credential_source) {
         ProviderAuth::AuthorizationBearer {
             token: key,
             label: resolved.api_key_env.clone(),
@@ -1564,7 +1630,7 @@ impl OpenRouterProvider {
         let supports_provider_features = provider_features_enabled(&api_base);
         let supports_model_catalog = model_catalog_enabled();
         let send_openrouter_headers = supports_provider_features;
-        let auth = Self::resolve_auth(credential_source.as_ref())?;
+        let auth = Self::resolve_auth(catalog_profile.as_ref(), credential_source.as_ref())?;
         let profile_id = std::env::var("JCODE_OPENROUTER_CACHE_NAMESPACE")
             .ok()
             .map(|value| value.trim().to_ascii_lowercase())
@@ -1703,25 +1769,52 @@ impl OpenRouterProvider {
             )
         })?;
         let credential_source = ApiKeyCredentialSource::from_resolved_catalog_profile(&resolved);
-        let auth = match load_api_key(&credential_source) {
-            Some(token) => ProviderAuth::AuthorizationBearer {
-                token,
-                label: resolved.api_key_env.clone(),
-            },
-            None if !resolved.requires_api_key => ProviderAuth::None {
-                label: "local endpoint (no auth)".to_string(),
-            },
-            None => {
-                let path = jcode_base::storage::app_config_dir()
-                    .map(|dir| dir.join(&resolved.env_file).display().to_string())
-                    .unwrap_or_else(|_| resolved.env_file.clone());
-                anyhow::bail!(
-                    "{} credentials not available. {} not found in environment or {}. Run `jcode login --provider {}` first.",
-                    resolved.display_name,
-                    resolved.api_key_env,
-                    path,
-                    resolved.id,
-                );
+        let auth = if resolved.id == jcode_base::provider_catalog::KIMI_PROFILE.id {
+            match jcode_base::auth::kimi::selected_auth_mode() {
+                Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
+                    if jcode_base::auth::kimi::has_oauth_tokens() =>
+                {
+                    ProviderAuth::KimiOAuth {
+                        label: "Kimi OAuth".to_string(),
+                    }
+                }
+                Some(jcode_base::auth::kimi::KimiAuthMode::ApiKey) => {
+                    let token = load_api_key(&credential_source).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Kimi API-key mode is selected, but {} is not configured. Run `jcode login --provider kimi --api-key <key>` or `/login kimi`.",
+                            resolved.api_key_env
+                        )
+                    })?;
+                    ProviderAuth::AuthorizationBearer {
+                        token,
+                        label: resolved.api_key_env.clone(),
+                    }
+                }
+                _ => anyhow::bail!(
+                    "Kimi credentials are not available. Run `jcode login --provider kimi` or `/login kimi`."
+                ),
+            }
+        } else {
+            match load_api_key(&credential_source) {
+                Some(token) => ProviderAuth::AuthorizationBearer {
+                    token,
+                    label: resolved.api_key_env.clone(),
+                },
+                None if !resolved.requires_api_key => ProviderAuth::None {
+                    label: "local endpoint (no auth)".to_string(),
+                },
+                None => {
+                    let path = jcode_base::storage::app_config_dir()
+                        .map(|dir| dir.join(&resolved.env_file).display().to_string())
+                        .unwrap_or_else(|_| resolved.env_file.clone());
+                    anyhow::bail!(
+                        "{} credentials not available. {} not found in environment or {}. Run `jcode login --provider {}` first.",
+                        resolved.display_name,
+                        resolved.api_key_env,
+                        path,
+                        resolved.id,
+                    );
+                }
             }
         };
 
@@ -2409,13 +2502,22 @@ impl OpenRouterProvider {
         }
         let profile =
             activated_openai_compatible_profile().or_else(autodetected_openai_compatible_profile);
+        if profile
+            .as_ref()
+            .is_some_and(|profile| profile.id == jcode_base::provider_catalog::KIMI_PROFILE.id)
+        {
+            return jcode_base::auth::kimi::is_configured();
+        }
         let source = profile
             .as_ref()
             .map(ApiKeyCredentialSource::from_resolved_catalog_profile);
         Self::get_api_key(source.as_ref()).is_some()
     }
 
-    fn resolve_auth(credential_source: Option<&ApiKeyCredentialSource>) -> Result<ProviderAuth> {
+    fn resolve_auth(
+        profile: Option<&jcode_base::provider_catalog::ResolvedOpenAiCompatibleProfile>,
+        credential_source: Option<&ApiKeyCredentialSource>,
+    ) -> Result<ProviderAuth> {
         if let Some(provider) = configured_dynamic_bearer_provider() {
             return match provider.as_str() {
                 "azure" => {
@@ -2434,6 +2536,26 @@ impl OpenRouterProvider {
                     other
                 ),
             };
+        }
+
+        if profile
+            .is_some_and(|profile| profile.id == jcode_base::provider_catalog::KIMI_PROFILE.id)
+        {
+            match jcode_base::auth::kimi::selected_auth_mode() {
+                Some(jcode_base::auth::kimi::KimiAuthMode::OAuth)
+                    if jcode_base::auth::kimi::has_oauth_tokens() =>
+                {
+                    return Ok(ProviderAuth::KimiOAuth {
+                        label: "Kimi OAuth".to_string(),
+                    });
+                }
+                Some(jcode_base::auth::kimi::KimiAuthMode::OAuth) => {
+                    anyhow::bail!(
+                        "Kimi OAuth is selected but no valid credentials are stored. Run `jcode login --provider kimi` or `/login kimi`."
+                    );
+                }
+                Some(jcode_base::auth::kimi::KimiAuthMode::ApiKey) | None => {}
+            }
         }
 
         if configured_allow_no_auth() {
